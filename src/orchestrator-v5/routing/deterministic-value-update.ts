@@ -41,6 +41,10 @@
  *   - No candidate qualifies → `{ matched: false }` (LLM falls through).
  */
 
+import {
+  CURRENCY_SYMBOL_SOURCE,
+  NUMERIC_SUFFIX_SOURCE,
+} from '../context/cqe/rules.js';
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
@@ -67,6 +71,62 @@ const EDIT_VERB_PATTERN =
  */
 const DEICTIC_REFERENCE_PATTERN =
   /\b(?:(?:that|this) (?:factor|node|one)|(?:the (?:selected|highlighted|chosen)) (?:factor|node|one))\b/i;
+
+/**
+ * V5 Golden Journey row 7 — strict "from <numeric> to <numeric>" anchor.
+ *
+ * History (PR #192 reviewer iteration log):
+ *   - Round 1: `/\bfrom\b[^.]*?\bto\b/i`. Failed on "from Q1 to Q2 by
+ *     £20k and headcount by 3" — anchors not bound to numeric tokens.
+ *   - Round 2: tightened suffix locally to `(?:k|m|bn?)?`. Failed on
+ *     "from £1b to £2b" — bare-`b` accepted locally but rejected by
+ *     CQE, so CQE emitted bare `1, 2` and the branch silently set the
+ *     factor to `£2`.
+ *   - Round 3: tightened currency locally as `[£$€¥]?`. Failed on
+ *     "from ¥1 to ¥2" — `¥` accepted locally but rejected by CQE
+ *     (`CURRENCY_SYMBOL = £|\$|€`). Same drift class as the suffix bug.
+ *   - Round 4 (current): the anchor reuses BOTH CQE source strings
+ *     verbatim — `CURRENCY_SYMBOL_SOURCE` for the optional prefix and
+ *     `NUMERIC_SUFFIX_SOURCE` for the optional multiplier. The two
+ *     grammars cannot drift again because there is no second copy.
+ *     Adding a new currency symbol or suffix word to CQE propagates
+ *     into routing automatically.
+ *
+ * The pattern requires DIGITS (optionally preceded by a CQE-recognised
+ * currency symbol and optionally followed by the CQE-canonical suffix
+ * grammar) immediately at BOTH anchors. Two side-by-side guarantees:
+ *   1. POSITION: the regex match proves the two anchors carry numeric
+ *      tokens with a CQE-recognised shape.
+ *   2. VALUE: CQE document-order trust — `nonNullQuantities[0]` is the
+ *      from-value, `nonNullQuantities[1]` is the to-value. Per AC.2
+ *      commentary, `raw_text` is post-normalised so an indexOf-based
+ *      re-locate is unreliable; the strict 2-quantity gate prevents
+ *      CQE-vs-regex count drift.
+ *
+ * Scope reminder: real CQE already MERGES well-formed "from <X> to <Y>"
+ * into ONE quantity with `operator='set'`, value=Y. This branch only
+ * fires when CQE did NOT merge — i.e. edge cases CQE didn't recognise
+ * (unsupported suffix, unsupported currency, malformed input). The
+ * branch is therefore an end-of-pipeline safety net for those exact
+ * cases, not the common path.
+ *
+ * Negative cases the AC.2 conservative skip still catches without
+ * change: range ("between X and Y"), disjunction ("by X or Y"), 3+
+ * quantities, any from/to where either side is non-numeric in
+ * CQE-recognised shape.
+ */
+const FROM_TO_NUMERIC_ANCHOR_PATTERN = new RegExp(
+  String.raw`\bfrom\s+(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    NUMERIC_SUFFIX_SOURCE +
+    String.raw`)?\b[^.]*?\bto\s+(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    NUMERIC_SUFFIX_SOURCE +
+    String.raw`)?\b`,
+  'i',
+);
 
 // Case-insensitive substring matches; some are anchored on word boundary
 // so "fastest" doesn't trigger `\btest\b` and "iframe" doesn't trigger
@@ -119,6 +179,20 @@ export interface ValueUpdateCandidate {
   readonly labelMatchIndex?: number | null;
 }
 
+/**
+ * Optional telemetry tag for quantity-attribution paths. Added for the
+ * V5 row-7 "from X to Y" fix — when a 2-quantity message carries a
+ * literal `from <...> to <...>` anchor, the second quantity is the
+ * user's intended target value and the dispatch is tagged so routing
+ * logs can distinguish this branch from the single-quantity path.
+ *
+ * Kept on the dispatch result (not on `candidate.source`) because
+ * `source` describes how the candidate LABEL was resolved — extending
+ * that union would conflate label-match telemetry with
+ * quantity-attribution telemetry. The two concerns are independent.
+ */
+export type QuantityAttribution = 'from_to';
+
 export type ValueUpdateDispatch =
   | { readonly matched: false; readonly skip_reason: SkipReason }
   | {
@@ -126,6 +200,7 @@ export type ValueUpdateDispatch =
       readonly dispatch: 'clarify';
       readonly candidates: readonly ValueUpdateCandidate[];
       readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
     }
   /**
    * V5 D1 golden-path closure (A3.1): unambiguous match on exactly ONE
@@ -149,6 +224,7 @@ export type ValueUpdateDispatch =
       readonly dispatch: 'set_factor_value';
       readonly candidate: ValueUpdateCandidate;
       readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
     };
 
 export type SkipReason =
@@ -306,27 +382,42 @@ export function tryDeterministicValueUpdate(
     return { matched: false, skip_reason: 'no_candidate_match' };
   }
 
-  // AC.2 — multi-quantity ambiguity guard. Plan-locked rule: silently
-  // applying the wrong quantity is worse than asking the user. The
-  // single-quantity case is unchanged (uses the provisional `quantity`
-  // from the gate above).
+  // AC.2 — multi-quantity ambiguity guard, with a narrow "from X to Y"
+  // exception (V5 row-7 fix). Plan-locked rule: silently applying the
+  // wrong quantity is worse than asking the user. The single-quantity
+  // case is unchanged.
   //
-  // Implementation note (workstream 2026-05-20 stop condition): CQE's
-  // `raw_text` is post-normalised (commas stripped from numerals, P12
-  // pattern captures the whole leading phrase, etc.) so proximity
+  // From/to exception: when the original message contains a literal
+  // `from <...> to <...>` anchor AND CQE extracted exactly 2 non-null
+  // quantities, the second quantity (the "to" value) is the user's
+  // intended final value. Operator is forced to `set` regardless of the
+  // sentence verb — "increase from £80,000 to £100,000" means SET to
+  // £100,000, not +£100,000. Range ("between X and Y"), disjunction
+  // ("by X or Y") and 3+ quantity messages keep the conservative skip
+  // because they do NOT carry the from/to anchor.
+  //
+  // CQE document-order trust: parsedQuantities preserves CQE extraction
+  // order, which mirrors document order. The from/to anchor presence is
+  // the safety gate; we do not re-locate quantities via raw_text indexOf
+  // because raw_text is post-normalised (see AC.2 commentary below).
+  //
+  // Conservative-fallback note for >2 or non-from/to multi-quantity:
+  // CQE's `raw_text` is post-normalised (commas stripped from numerals,
+  // P12 pattern captures the whole leading phrase, etc.) so proximity
   // attribution by `indexOf(raw_text)` is unreliable in practice. We
   // therefore take the conservative path the plan documents as the
-  // fallback: when >1 non-null quantity is extracted, return
-  // `ambiguous_quantity` and let normal LLM routing produce a
-  // clarification. Layer A.2 (validator parity) is the safety net for
-  // anything the LLM later proposes.
-  //
-  // Future Layer B refinement (out of scope here, pending plan
-  // amendment): expose stable per-quantity spans from CQE so
-  // proximity-based attribution can run. The `labelMatchIndex` field
-  // on `ValueUpdateCandidate` is added in this PR so the future
-  // refinement does not need a downstream contract change.
-  if (nonNullQuantities.length > 1) {
+  // fallback: return `ambiguous_quantity` and let normal LLM routing
+  // produce a clarification. Layer A.2 (validator parity) is the safety
+  // net for anything the LLM later proposes.
+  let attribution: QuantityAttribution | undefined = undefined;
+  if (nonNullQuantities.length === 2 && FROM_TO_NUMERIC_ANCHOR_PATTERN.test(message)) {
+    quantity = {
+      ...nonNullQuantities[1]!,
+      operator: 'set',
+      direction: 'set',
+    };
+    attribution = 'from_to';
+  } else if (nonNullQuantities.length > 1) {
     return { matched: false, skip_reason: 'ambiguous_quantity' };
   }
 
@@ -341,6 +432,7 @@ export function tryDeterministicValueUpdate(
       dispatch: 'set_factor_value',
       candidate: substringMatches[0],
       quantity,
+      ...(attribution ? { attribution } : {}),
     };
   }
 
@@ -360,6 +452,7 @@ export function tryDeterministicValueUpdate(
         dispatch: 'set_factor_value',
         candidate: narrowed[0]!,
         quantity,
+        ...(attribution ? { attribution } : {}),
       };
     }
   }
@@ -367,6 +460,7 @@ export function tryDeterministicValueUpdate(
   return {
     matched: true,
     dispatch: 'clarify',
+    ...(attribution ? { attribution } : {}),
     candidates: matched,
     quantity,
   };
@@ -410,12 +504,14 @@ export type DeicticDispatch =
         | 'no_factor_selected'
         | 'multiple_factors_selected';
       readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
     }
   | {
       readonly matched: true;
       readonly dispatch: 'set_factor_value';
       readonly candidate: ValueUpdateCandidate;
       readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
     };
 
 /**
@@ -448,20 +544,33 @@ export function tryDeicticValueUpdate(
       return { matched: false, skip_reason: 'hypothetical_gate' };
     }
   }
-  // AC.2 — same conservative quantity policy as the main detector:
-  // when >1 non-null quantities are extracted, skip the deterministic
-  // deictic path with `ambiguous_quantity` rather than picking the
-  // first non-null. CQE `raw_text` is post-normalised so proximity
-  // attribution against the deictic phrase ("that factor") is
-  // unreliable; the LLM clarifies more safely.
+  // AC.2 — same conservative quantity policy as the main detector,
+  // with the same narrow "from X to Y" exception (V5 row-7 fix): when
+  // exactly 2 non-null quantities are extracted AND the original
+  // message carries a literal `from <...> to <...>` anchor, the second
+  // quantity is the user's intended target value and operator is forced
+  // to 'set'. Range / disjunction / 3+ quantities keep the conservative
+  // `ambiguous_quantity` skip because they do not carry the anchor.
+  // CQE `raw_text` is post-normalised so we do not re-locate
+  // quantities via indexOf — anchor presence is the safety gate.
   const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
   if (nonNullQuantities.length === 0) {
     return { matched: false, skip_reason: 'no_quantity' };
   }
-  if (nonNullQuantities.length > 1) {
+  let quantity: QuantityExtractionResult;
+  let attribution: QuantityAttribution | undefined = undefined;
+  if (nonNullQuantities.length === 2 && FROM_TO_NUMERIC_ANCHOR_PATTERN.test(message)) {
+    quantity = {
+      ...nonNullQuantities[1]!,
+      operator: 'set',
+      direction: 'set',
+    };
+    attribution = 'from_to';
+  } else if (nonNullQuantities.length > 1) {
     return { matched: false, skip_reason: 'ambiguous_quantity' };
+  } else {
+    quantity = nonNullQuantities[0]!;
   }
-  const quantity = nonNullQuantities[0]!;
   if (graphLookup === undefined) {
     return { matched: false, skip_reason: 'no_graph' };
   }
@@ -471,6 +580,7 @@ export function tryDeicticValueUpdate(
       dispatch: 'clarify_deictic',
       reason: 'no_factor_selected',
       quantity,
+      ...(attribution ? { attribution } : {}),
     };
   }
   if (selectedFactorIds.length > 1) {
@@ -479,6 +589,7 @@ export function tryDeicticValueUpdate(
       dispatch: 'clarify_deictic',
       reason: 'multiple_factors_selected',
       quantity,
+      ...(attribution ? { attribution } : {}),
     };
   }
   const id = selectedFactorIds[0]!;
@@ -491,6 +602,7 @@ export function tryDeicticValueUpdate(
       dispatch: 'clarify_deictic',
       reason: 'no_factor_selected',
       quantity,
+      ...(attribution ? { attribution } : {}),
     };
   }
   return {
@@ -498,6 +610,7 @@ export function tryDeicticValueUpdate(
     dispatch: 'set_factor_value',
     candidate: { id, label, score: 1, source: 'substring', labelMatchIndex: null },
     quantity,
+    ...(attribution ? { attribution } : {}),
   };
 }
 

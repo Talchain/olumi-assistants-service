@@ -28,7 +28,14 @@ const DIRECTION_UP_VERB = String.raw`increas(?:e|ing|es|ed)|rais(?:e|ing|es|ed)|
 const DIRECTION_DOWN_VERB = String.raw`reduc(?:e|ing|es|ed)|cut(?:ting|s)?|lower(?:ing|s|ed)?|decreas(?:e|ing|es|ed)|drop(?:ping|s|ped)?|bring(?:ing|s)?(?:\s+(?:down|it\s+down))?`;
 const DIRECTION_SET_VERB = String.raw`set(?:ting|s)?|change(?:s|d)?|changing|updat(?:e|ing|es|ed)|mak(?:e|ing|es)|made`;
 const DIRECTION_VERB = `(?:${DIRECTION_UP_VERB}|${DIRECTION_DOWN_VERB}|${DIRECTION_SET_VERB})`;
-const CURRENCY_SYMBOL = String.raw`£|\$|€`;
+// Exported as `CURRENCY_SYMBOL_SOURCE` so consumers outside CQE (e.g.
+// the V5 routing `FROM_TO_NUMERIC_ANCHOR_PATTERN`) can share the exact
+// same grammar without re-implementing it. PR #192 review feedback
+// (round 4, 2026-05-22) identified a ¥ accept bug in the local copy of
+// this grammar — same drift class as the bare-`b` suffix bug closed in
+// round 3. Sharing the source eliminates this class of bug.
+export const CURRENCY_SYMBOL_SOURCE = String.raw`£|\$|€`;
+const CURRENCY_SYMBOL = CURRENCY_SYMBOL_SOURCE;
 const CURRENCY_CODE = String.raw`GBP|USD|EUR`;
 const CURRENCY_COLLOQUIAL = String.raw`grand|quid`;
 const TIME_UNIT = String.raw`months?|weeks?|days?|years?|hours?|minutes?`;
@@ -36,7 +43,17 @@ const METRIC_UNIT = String.raw`kg|km|miles?`;
 // Suffix tokens MUST be followed by a non-letter (word boundary via
 // negative lookahead). Otherwise "4 months" would parse the "m" in
 // "months" as a million suffix.
-const SUFFIX = String.raw`(?:k|m|bn|million|billion|thousand)(?![a-z])`;
+//
+// Exported as `NUMERIC_SUFFIX_SOURCE` so consumers outside CQE (e.g.
+// the V5 routing `FROM_TO_NUMERIC_ANCHOR_PATTERN`) can share the exact
+// same grammar without re-implementing it. PR #192 review feedback
+// (2026-05-22) identified a bare-`b` accept bug caused by a divergent
+// suffix pattern (`bn?`) that accepted "1b" / "2b" while CQE rejected
+// them — the deterministic branch then attributed CQE's bare-number
+// extraction as the target, silently mis-mutating the graph. Sharing
+// the source string eliminates that drift class.
+export const NUMERIC_SUFFIX_SOURCE = String.raw`(?:k|m|bn|million|billion|thousand)(?![a-z])`;
+const SUFFIX = NUMERIC_SUFFIX_SOURCE;
 
 // UNIT token for patterns that accept a trailing unit.
 const UNIT = `(?:%|pp|percentage\\s+points?|${TIME_UNIT}|${METRIC_UNIT}|${CURRENCY_SYMBOL}|${CURRENCY_CODE}|${CURRENCY_COLLOQUIAL})`;

@@ -101,6 +101,11 @@ const SKIP_REASONS = new Set<string | null>([
   'ambiguous_quantity',
 ]);
 
+// Locked enum for the V5 row-7 from/to attribution field (PR #192 follow-up).
+// Distinct from `candidate.source` (label-match concern) — this field is
+// the quantity-attribution path the dispatch took.
+const ATTRIBUTION_VALUES = new Set<string | null>([null, 'from_to']);
+
 type CapturedEvent = { event: string; data: Record<string, unknown> };
 let events: CapturedEvent[] = [];
 
@@ -138,6 +143,10 @@ function assertEnumShape(payload: Record<string, unknown>): void {
   // 2. Pre-existing fields still enum-only (regression guard)
   expect(SKIP_REASONS.has(payload.skip_reason as string | null)).toBe(true);
   expect(DOWNGRADE_REASONS.has(payload.downgrade_reason as string | null)).toBe(true);
+  // Row-7 from/to attribution field — locked to {null, 'from_to'} so a
+  // future change can't widen the union silently. New values require an
+  // explicit addition here AND a plan amendment.
+  expect(ATTRIBUTION_VALUES.has(payload.attribution as string | null)).toBe(true);
 
   // 3. No prose — for every NEW field, the value must NOT look like a
   //    sentence. Three heuristics:

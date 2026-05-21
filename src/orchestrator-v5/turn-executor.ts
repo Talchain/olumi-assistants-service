@@ -2359,12 +2359,19 @@ export async function runTurnExecutor(
       if (deicticDispatch.matched && deicticDispatch.dispatch === 'set_factor_value') {
         // Promote to the Path A shape so the rest of the lifecycle
         // (registry guard, synthesised RoutingToolCallResult, etc.)
-        // reuses the existing branch with no duplication.
+        // reuses the existing branch with no duplication. The optional
+        // `attribution` tag (PR #192 reviewer feedback) carries through
+        // so V5DeterministicValueUpdate telemetry distinguishes
+        // from/to dispatches on the deictic path the same way it does
+        // on the label path.
         deterministicValueUpdate = {
           matched: true,
           dispatch: 'set_factor_value',
           candidate: deicticDispatch.candidate,
           quantity: deicticDispatch.quantity,
+          ...(deicticDispatch.attribution
+            ? { attribution: deicticDispatch.attribution }
+            : {}),
         };
       }
       // V5 D1 golden-path closure (A3.1): the original (pre-guard)
@@ -2576,11 +2583,20 @@ export async function runTurnExecutor(
           // The `downgrade_reason` is recorded for the telemetry emit
           // below so dashboards see why the dispatch flipped.
           downgradeReason = !isFactor ? 'non_factor_kind' : 'handler_not_executable';
+          // Preserve any from/to attribution tag across the downgrade
+          // so the V5DeterministicValueUpdate telemetry still records
+          // that this candidate originated from the from/to branch,
+          // even after the kind/registry guard demoted it to clarify.
+          // The outer guard at the top of this block already narrowed
+          // `deterministicValueUpdate.dispatch === 'set_factor_value'`,
+          // so `.attribution` is directly accessible on this variant.
+          const carriedAttribution = deterministicValueUpdate.attribution;
           deterministicValueUpdate = {
             matched: true,
             dispatch: 'clarify',
             candidates: [candidate],
             quantity: deterministicValueUpdate.quantity,
+            ...(carriedAttribution ? { attribution: carriedAttribution } : {}),
           };
         }
       }
@@ -2611,6 +2627,16 @@ export async function runTurnExecutor(
         // diagnostics can distinguish exact-label hits from fuzzy hits
         // without inferring from `score`.
         candidate_sources: telemetryCandidates.map((c) => c.source),
+        // Quantity-attribution tag — 'from_to' when the dispatch
+        // originated from the row-7 from/to branch, null otherwise.
+        // Distinct from candidate.source (label-match concern); kept
+        // separate so dashboards can filter rows independently.
+        attribution:
+          deterministicValueUpdate.matched &&
+          (deterministicValueUpdate.dispatch === 'set_factor_value' ||
+            deterministicValueUpdate.dispatch === 'clarify')
+            ? deterministicValueUpdate.attribution ?? null
+            : null,
         skip_reason: deterministicValueUpdate.matched
           ? null
           : deterministicValueUpdate.skip_reason,
@@ -2682,6 +2708,13 @@ export async function runTurnExecutor(
           candidate_count: 0,
           top_score: null,
           candidate_sources: [],
+          // Row-7 from/to attribution carries here too so the
+          // V5DeterministicValueUpdate schema is consistent across
+          // every emit site (PR #192 reviewer feedback round 3).
+          // The clarify_deictic path can carry attribution when the
+          // user's deictic message included a from/to anchor but the
+          // selection narrowing failed.
+          attribution: deicticDispatch.attribution ?? null,
           skip_reason: null,
           deictic_reason: deicticDispatch.reason,
           selected_factor_count: selectedFactorIds.length,
