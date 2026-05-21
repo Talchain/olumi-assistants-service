@@ -683,6 +683,7 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
   const mutationPairs: ReadonlyArray<readonly [string, string]> = [
     ['What drove this result, change the cost factor to 0.7?', 'what drove + set-to-numeric'],
     ['Why is this option ahead — set risk to 0.5?', 'why is X ahead + set-to-numeric'],
+    ['Why is Option A leading? Set risk to 0.5.', 'why is X leading + set-to-numeric'],
     ['What would need to change? Set Pricing to 0.7.', 'what would need to change + numeric edit'],
     ['What drove the result then add a new option for staffing?', 'what drove + add-new'],
   ];
@@ -701,11 +702,16 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
     });
   }
 
-  // Freshness gate regression — each new pattern must still fall through
-  // `not_fresh` so the stale-rerun guard upstream owns those turns.
+  // Freshness gate regression — each newly-owned pattern must still fall
+  // through `not_fresh` so the stale-rerun guard upstream owns those turns.
+  // "Why is Option A leading?" is included because the analytical-intent
+  // classifier broadening (this workstream) makes the stale-rerun guard
+  // and no-analysis guard responsible for that phrasing when the advice
+  // gate falls through.
   const newPatternMessages = [
     'What drove this result?',
     'Why is this option ahead?',
+    'Why is Option A leading?',
     'What would need to change for another option to look better?',
   ];
   for (const message of newPatternMessages) {

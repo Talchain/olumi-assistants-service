@@ -194,16 +194,17 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'what_drove', pattern: /\bwhat\s+made\s+(?:this|that|the\s+(?:result|analysis|outcome))\b/i },
   { cls: 'what_drove', pattern: /\bwhat[''']?s\s+driving\b/i },
   { cls: 'what_drove', pattern: /\bwhich\s+(?:factor|driver)s?\s+(?:drove|drive|pushed)\b/i },
-  // Why is X ahead / in front — present-state reason questions about
-  // the current ranking. The "why did" patterns above match past-tense
-  // forms ("why did this win"); this matches the present-state form
-  // ("why is this option ahead?"). Deliberately narrow: only "ahead"
-  // and "in front" plus close phrasings ("the leader", "the favourite",
-  // "on top"). Broader synonyms like "winning" / "leading" stay outside
-  // this predicate so existing explain_results integration tests that
-  // use those words continue to drive Sonnet routing unchanged. Adding
-  // more synonyms is a follow-up that should land alongside test updates.
-  { cls: 'what_drove', pattern: /\bwhy\s+is\b[^.?!\n]{1,40}\b(?:ahead|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i },
+  // Why is X ahead / leading / in front — present-state reason questions
+  // about the current ranking. The "why did" patterns above match past-
+  // tense forms ("why did this win"); this matches the present-state form
+  // ("why is this option ahead?", "why is Option A leading?"). "leading"
+  // joins the predicate alongside the narrower set so the sibling guards
+  // (stale-rerun, no-analysis, edit_graph no-op recovery) all classify
+  // the brief's canonical phrasing consistently. Surviving call sites
+  // that use "Why is the leading option winning?" are either handler-
+  // direct (no classifier routing) or scenarios that are themselves
+  // analytical-intent turns the sibling guards should now own.
+  { cls: 'what_drove', pattern: /\bwhy\s+is\b[^.?!\n]{1,40}\b(?:ahead|leading|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i },
 
   // ── explain (broadest, evaluated last) ───────────────────────────
   { cls: 'explain', pattern: /\bexplain\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i },

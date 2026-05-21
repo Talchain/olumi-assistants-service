@@ -285,11 +285,12 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
   // "why is <X> ahead / leading / in front / on top / the leader / the favourite"
   // The brief lists "Why is Option A leading?" as a target phrase the
   // advice gate must own, so "leading" sits in the predicate alongside
-  // PR #187's narrower set. Surviving "leading" call sites at this
-  // PR's open are either handler-direct (no advice-gate routing) or
-  // runTurnExecutor paths without a fresh `run_analysis` fact — both
-  // unaffected because the advice gate still rejects them on
-  // `freshness !== 'fresh'` before any pattern match.
+  // the narrower set. The companion change in `analytical-intent.ts`
+  // broadens the shared `what_drove` classifier predicate the same way,
+  // so the sibling guards (stale-rerun, no-analysis, advice-gate
+  // data-unavailable fallback) all classify "leading" phrasings
+  // consistently — no more LLM-router fall-through for the brief's
+  // canonical questions in any freshness state.
   {
     advice_class: 'explain_results_free_text',
     pattern: /\bwhy\s+is\b[^.?!\n]{1,40}\b(?:ahead|leading|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i,
