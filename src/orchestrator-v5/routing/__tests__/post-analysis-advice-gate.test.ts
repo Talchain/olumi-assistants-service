@@ -1515,7 +1515,8 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     ['Adjust the edge from Cost to Risk and tell me what we should validate further.', 'edge edit + validate further'],
     ['Add a new constraint on budget — how do we build confidence?', 'add + entity, then confidence'],
     ['Remove the cost factor. What evidence should we gather?', 'remove + entity, then gather'],
-  ] as const)('mutation precedence over validation: %s', (message) => {
+  ] as const)('mutation precedence over validation: %s', (message, _label) => {
+    void _label; // it.each passes both tuple elements; only `message` is asserted.
     const out = tryPostAnalysisAdviceGate({
       message,
       analysis: FIXTURE_ANALYSIS,
