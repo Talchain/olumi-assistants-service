@@ -553,7 +553,7 @@ describe('Fix A — deictic from/to attribution', () => {
     expect(result.skip_reason).toBe('ambiguous_quantity');
   });
 
-  it('deictic from/to but no selection → clarify_deictic (no silent updates)', () => {
+  it('deictic from/to but no selection → clarify_deictic (no silent updates), attribution=from_to carried for telemetry', () => {
     const result = tryDeicticValueUpdate(
       'increase that factor from £80,000 to £100,000',
       [
@@ -567,5 +567,12 @@ describe('Fix A — deictic from/to attribution', () => {
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.dispatch).toBe('clarify_deictic');
+    if (result.dispatch !== 'clarify_deictic') return;
+    // Attribution must travel onto the clarify_deictic dispatch so the
+    // V5DeterministicValueUpdate telemetry emit at turn-executor.ts:2701
+    // records that this clarify originated from a from/to branch — even
+    // though the user-facing dispatch is clarify rather than
+    // set_factor_value. Pins the round-3 reviewer follow-up.
+    expect(result.attribution).toBe('from_to');
   });
 });
