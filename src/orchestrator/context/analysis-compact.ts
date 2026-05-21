@@ -143,12 +143,19 @@ function deriveWinner(options: OptionSummary[]): AnalysisResponseSummary['winner
  * on first option → 'unknown'.
  */
 const ROBUSTNESS_MAP: Record<string, string> = {
-  low: 'fragile', medium: 'moderate', high: 'stable', very_high: 'highly_stable',
+  very_low: 'fragile', low: 'fragile', medium: 'moderate', high: 'stable', very_high: 'highly_stable',
   fragile: 'fragile', moderate: 'moderate', stable: 'stable', highly_stable: 'highly_stable',
 };
 
 function mapRobustnessToCanonical(raw: string): string {
-  return ROBUSTNESS_MAP[raw.toLowerCase().trim()] ?? 'moderate';
+  const normalised = raw.toLowerCase().trim();
+  const mapped = ROBUSTNESS_MAP[normalised];
+  if (mapped) return mapped;
+  // Unknown band — return 'unknown' (NOT the previous silent 'moderate'
+  // fallback) so the projection layer collapses to null and downstream
+  // composers omit the band sentence rather than asserting a false one.
+  log.warn({ raw_robustness_band: normalised }, 'compactAnalysis: unknown robustness band — mapped to unknown');
+  return 'unknown';
 }
 
 function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {

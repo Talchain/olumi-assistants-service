@@ -163,11 +163,50 @@ describe("compactAnalysis", () => {
     expect(summary!.robustness_level).toBe("fragile");
   });
 
-  it("returns 'moderate' robustness_level when nothing available (canonical default)", () => {
+  it("returns 'unknown' robustness_level when nothing available (no silent moderate fallback)", () => {
     const response = makeResponse();
     const summary = compactAnalysis(response);
-    // deriveRobustnessLevel returns "unknown", mapRobustnessToCanonical maps unknown → "moderate"
-    expect(summary!.robustness_level).toBe("moderate");
+    // deriveRobustnessLevel returns "unknown"; mapRobustnessToCanonical now
+    // preserves "unknown" rather than silently coercing to "moderate", so
+    // downstream projectAnalysis can collapse it to null and composers
+    // omit the robustness sentence rather than asserting a false band.
+    expect(summary!.robustness_level).toBe("unknown");
+  });
+
+  it("maps raw 'very_low' robustness.level to canonical 'fragile'", () => {
+    const response = makeResponse({
+      robustness: { level: "very_low" },
+    });
+    const summary = compactAnalysis(response);
+    // Aligns with ISL_ROBUSTNESS_MAP in deterministic/turn-context.ts.
+    expect(summary!.robustness_level).toBe("fragile");
+  });
+
+  it("maps unrecognised raw robustness values to 'unknown' (not 'moderate')", () => {
+    const response = makeResponse({
+      robustness: { level: "bogus_band" } as { level: string },
+    });
+    const summary = compactAnalysis(response);
+    expect(summary!.robustness_level).toBe("unknown");
+  });
+
+  it("preserves all known canonical robustness mappings", () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["low", "fragile"],
+      ["medium", "moderate"],
+      ["high", "stable"],
+      ["very_high", "highly_stable"],
+      ["fragile", "fragile"],
+      ["moderate", "moderate"],
+      ["stable", "stable"],
+      ["highly_stable", "highly_stable"],
+    ];
+    for (const [raw, expected] of cases) {
+      const summary = compactAnalysis(
+        makeResponse({ robustness: { level: raw } }),
+      );
+      expect(summary!.robustness_level).toBe(expected);
+    }
   });
 
   it("counts fragile edges deduplicated by edge_id", () => {

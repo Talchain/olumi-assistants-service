@@ -163,6 +163,7 @@ import {
   type FreshnessDerivation,
 } from './context/freshness.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
+import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { deriveRecentChangesEvidence } from './context/recent-changes.js';
 import type { TurnOutcome } from './turn-outcome.js';
 import {
@@ -3065,6 +3066,15 @@ export async function runTurnExecutor(
           // Returns null when no enrichment is available; the gate
           // falls back to its projection-only behaviour.
           decisionReview: pickLatestDecisionReview(context.prior_facts),
+          // Raw robustness signals (`enrichment.robustness.level`,
+          // `enrichment.robustness.near_tie.is_tie`) from the SAME fact
+          // the freshness/projection layer selected. Lets the post-
+          // analysis composer prefer the raw fragile/near-tie signal
+          // over a canonicalised band that may have already been
+          // coerced. Null when no run_analysis fact / no robustness
+          // signal is available — composer falls back to margin_pp +
+          // projected robustness_band.
+          rawRobustness: pickLatestRawRobustness(context.prior_facts),
         });
         emit(TelemetryEvents.V5PostAnalysisAdviceGate, {
           request_id: requestId,

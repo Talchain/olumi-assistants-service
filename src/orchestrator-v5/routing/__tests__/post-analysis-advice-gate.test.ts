@@ -1527,3 +1527,358 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     if (!out.matched) expect(out.reason).toBe('mutation_signal');
   });
 });
+
+// =========================================================================
+// Near-tie + raw-robustness handling for post-analysis copy.
+//
+// Regression for the reported P0/P1 case: a ~0.05pp lead was described as
+// "meaningful rather than marginal" with "moderate" robustness. The
+// composer must:
+//   - treat |margin_pp| <= 1.0 as effectively tied,
+//   - honour `enrichment.robustness.near_tie.is_tie === true` as a strong
+//     override even when margin > 1.0pp,
+//   - prefer raw `enrichment.robustness.level ∈ {very_low,low,fragile}`
+//     over a coerced projected band,
+//   - suppress moderate/stable wording in those cases,
+//   - keep all existing wording for non-near-tie, non-fragile inputs.
+//
+// Sibling-composer audit (recorded here so future drift is caught):
+//   - composeAdvice: margin sentence is neutral ("It sits ahead of … by …").
+//     LEFT UNCHANGED. Locked below.
+//   - composeMeaning: margin sentence is neutral. LEFT UNCHANGED. Locked.
+//   - composeImprovement: had a stability claim ("smaller adjustments may
+//     not move the picture much"). PATCHED: gated behind !near-tie / !raw-fragile.
+//   - composeWhatWouldFlip: had a stability claim ("smaller changes are
+//     unlikely to flip the outcome on their own") and a margin-asking-to-
+//     close sentence. PATCHED: both gated; near-tie reframe added.
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
+  // Forbidden strength-claim strings on a near-tie / raw-fragile path. The
+  // composer MUST NOT emit any of these when isNearTie or isRawFragile.
+  const FORBIDDEN_STRENGTH_PHRASES: readonly RegExp[] = [
+    /meaningful rather than marginal/i,
+    /\bmeaningful lead\b/i,
+    /\bstrongly favours\b/i,
+    /\brobustness band is moderate\b/i,
+    /\brobustness band is currently moderate\b/i,
+    /\brobustness band is stable\b/i,
+    /\brobustness band is currently stable\b/i,
+    /smaller adjustments may not move the picture much/i,
+    /smaller changes are unlikely to flip the outcome/i,
+  ];
+
+  // No internal jargon in user-facing copy on any path.
+  const FORBIDDEN_INTERNAL_TERMS: readonly RegExp[] = [
+    /\bschema\b/i,
+    /\bhandler\b/i,
+    /\btool\b/i,
+    /\bgraph hash\b/i,
+    /\bnode\s*id\b/i,
+    // UUID-like: 8-4-4-4-12 hex
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+  ];
+
+  function assertNoForbidden(
+    text: string,
+    forbidden: readonly RegExp[],
+  ): void {
+    for (const re of forbidden) {
+      expect(text).not.toMatch(re);
+    }
+  }
+
+  // ── 1. Reported case: leading=48.475%, runner_up=48.425%, margin≈0.05pp ─
+  it('reported near-tie case (margin ≈ 0.05pp) → effectively-tied copy, no strength claim', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Can you explain these analysis results to me?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'Hire One Tech Lead', probability: 0.48475 },
+        runner_up: { label: 'Hire Two Developers', probability: 0.48425 },
+        margin_pp: 0.05,
+        robustness_band: 'moderate',
+        top_drivers: [
+          { factor_label: 'Delivery risk', sensitivity_value: 0.45 },
+        ],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('explain_results_free_text');
+      const text = out.assistant_text;
+      expect(text).toMatch(/effectively tied/i);
+      expect(text).toContain('Hire One Tech Lead');
+      expect(text).toContain('Hire Two Developers');
+      expect(text).toMatch(/less than one percentage point/i);
+      assertNoForbidden(text, FORBIDDEN_STRENGTH_PHRASES);
+      assertNoForbidden(text, FORBIDDEN_INTERNAL_TERMS);
+    }
+  });
+
+  // ── 2. Exact threshold: margin_pp = 1.0 → near-tie (inclusive) ─────────
+  it('exact threshold margin_pp = 1.0 → treated as near-tie', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'Option A', probability: 0.505 },
+        runner_up: { label: 'Option B', probability: 0.495 },
+        margin_pp: 1.0,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.3 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toMatch(/effectively tied/i);
+      assertNoForbidden(out.assistant_text, FORBIDDEN_STRENGTH_PHRASES);
+    }
+  });
+
+  // ── 3. Just over threshold: margin_pp = 1.1 → existing wording preserved ─
+  it('margin_pp = 1.1 → existing strength wording preserved (NOT a near-tie)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'Option A', probability: 0.5055 },
+        runner_up: { label: 'Option B', probability: 0.4945 },
+        margin_pp: 1.1,
+        robustness_band: 'stable',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.3 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('meaningful rather than marginal');
+      expect(out.assistant_text).not.toMatch(/effectively tied/i);
+    }
+  });
+
+  // ── 4. Wide lead: existing happy-path wording preserved verbatim ───────
+  it('wide lead (margin_pp = 24) → existing strength wording preserved', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.62 },
+        runner_up: { label: 'B', probability: 0.38 },
+        margin_pp: 24,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('meaningful rather than marginal');
+      expect(out.assistant_text).toContain('The robustness band is moderate');
+    }
+  });
+
+  // ── 5. Robustness conflict: projection says moderate, raw says very_low ─
+  it('robustness conflict — projection=moderate, raw.level=very_low → fragile copy', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.55 },
+        runner_up: { label: 'B', probability: 0.45 },
+        margin_pp: 10, // wide enough NOT to trigger near-tie on its own
+        robustness_band: 'moderate', // misleadingly confident projection
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+      rawRobustness: { level: 'very_low', near_tie_is_tie: false },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const text = out.assistant_text;
+      expect(text).toMatch(/picture appears fragile/i);
+      expect(text).not.toContain('The robustness band is moderate');
+      expect(text).not.toContain('The robustness band is stable');
+    }
+  });
+
+  // ── 6. Strong override: raw near_tie.is_tie=true overrides wide margin ─
+  it('raw near_tie.is_tie=true overrides margin > 1.0pp → near-tie copy', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'Hire One Tech Lead', probability: 0.515 },
+        runner_up: { label: 'Hire Two Developers', probability: 0.485 },
+        margin_pp: 3.0, // would normally NOT be a near-tie
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+      rawRobustness: { level: null, near_tie_is_tie: true },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toMatch(/effectively tied/i);
+      expect(out.assistant_text).not.toContain('meaningful rather than marginal');
+    }
+  });
+
+  // ── 7. Sibling composer: composeImprovement on near-tie suppresses claim ─
+  it('composeImprovement on near-tie → no "smaller adjustments may not move" claim', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'How can we improve the outcome?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('improvement');
+      expect(out.assistant_text).not.toMatch(/smaller adjustments may not move the picture much/i);
+      expect(out.assistant_text).toMatch(/picture appears fragile/i);
+    }
+  });
+
+  // ── 8. Sibling composer: composeWhatWouldFlip on near-tie reframes lead ─
+  it('composeWhatWouldFlip on near-tie → reframes lead + drops stability claim', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What would flip this?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const text = out.assistant_text;
+      expect(text).toMatch(/effectively tied/i);
+      expect(text).toMatch(/outcome could flip with small changes/i);
+      expect(text).not.toMatch(/smaller changes are unlikely to flip the outcome/i);
+      expect(text).not.toMatch(/the lead of .* would need to close/i);
+    }
+  });
+
+  // ── 9. Sibling lock-in: composeAdvice stays NEUTRAL on near-tie ────────
+  it('composeAdvice on near-tie: no strength claim added (neutral margin sentence preserved)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we do?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // composeAdvice does NOT assert lead-strength; ensure no false certainty
+      // creeps in if a future edit adds one without the threshold guard.
+      assertNoForbidden(out.assistant_text, FORBIDDEN_STRENGTH_PHRASES);
+    }
+  });
+
+  // ── 10. Sibling lock-in: composeMeaning stays NEUTRAL on near-tie ──────
+  it('composeMeaning on near-tie: no strength claim added (neutral margin sentence preserved)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What does this mean?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      assertNoForbidden(out.assistant_text, FORBIDDEN_STRENGTH_PHRASES);
+    }
+  });
+
+  // ── 11. British English on near-tie copy ───────────────────────────────
+  it('near-tie copy uses British English ("favours") and no Americanisms ("favors")', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // The near-tie path does not include the "favours" opener, but if the
+      // composer ever emits any "favour"-family word it must be the British
+      // spelling. Verify no US spellings leak.
+      expect(out.assistant_text).not.toMatch(/\bfavor(s|ed|ing|able)?\b/);
+      expect(out.assistant_text).not.toMatch(/\bbehavior\b/);
+      expect(out.assistant_text).not.toMatch(/\borganization\b/);
+    }
+  });
+
+  // ── 12. No internal jargon / UUIDs ever leak into near-tie copy ────────
+  it('near-tie copy contains no internal jargon or UUID-like substrings', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      assertNoForbidden(out.assistant_text, FORBIDDEN_INTERNAL_TERMS);
+    }
+  });
+
+  // ── 13. Deterministic invariants preserved on near-tie path ────────────
+  it('near-tie path keeps llm_calls_used=0 / direct_answer / explain_results_free_text class', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Can you explain these analysis results to me?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('explain_results_free_text');
+      // Suggested action: same chip set as the non-near-tie path
+      // (what_would_flip chip) — chip ownership not affected by near-tie.
+      expect(out.suggested_actions.length).toBe(1);
+      expect(out.suggested_actions[0]?.action_type).toBe('what_would_flip');
+    }
+  });
+});
