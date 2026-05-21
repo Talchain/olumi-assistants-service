@@ -214,6 +214,62 @@ describe('advice-gate — composeEvidenceGap validation-aware lead', () => {
     }
   });
 
+  it('skips a blank-endpoint fragile edge even when top driver is renderable', () => {
+    // Round-2 P1: composer-side renderability filter. Previously the
+    // validation-aware lead picked `fragile_edges[0]` blindly; a blank
+    // `from_label` would emit `validating the link from "" to "B"`.
+    // The composer now routes fragile-edge picks through
+    // `renderableFragileEdges`, so the malformed sentence cannot reach
+    // assistant text — only the valid top-driver lead remains.
+    const analysis: AdviceGateAnalysis = {
+      ...FIXTURE_ANALYSIS,
+      fragile_edges: [{ from_label: '', to_label: 'Successful launch' }],
+    };
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Top-driver lead is present.
+      expect(out.assistant_text).toContain(
+        'The most useful place to gather evidence is Delivery risk',
+      );
+      // Fragile-edge sentence is SUPPRESSED (no malformed quotes).
+      expect(out.assistant_text).not.toContain('worth validating the link');
+      expect(out.assistant_text).not.toMatch(/link from\s*""\s*to/);
+      expect(out.assistant_text).not.toMatch(/link from "[^"]+" to ""/);
+    }
+  });
+
+  it('picks the first RENDERABLE fragile edge when [0] is blank but [1] is valid', () => {
+    // Renderability filter must scan the whole array, not bail on [0].
+    // A degraded leading entry must not mask a downstream renderable one.
+    const analysis: AdviceGateAnalysis = {
+      ...FIXTURE_ANALYSIS,
+      fragile_edges: [
+        { from_label: '   ', to_label: 'Outcome A' }, // blank-shaped
+        { from_label: 'Cost overrun risk', to_label: 'Outcome B' }, // valid
+      ],
+    };
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('worth validating the link');
+      expect(out.assistant_text).toContain(
+        '"Cost overrun risk" to "Outcome B"',
+      );
+      // The blank entry's endpoint label must NOT appear in prose.
+      expect(out.assistant_text).not.toMatch(/"\s+"/);
+      expect(out.assistant_text).not.toContain('"Outcome A"');
+    }
+  });
+
   it('does not duplicate top-driver naming when both lead and fall-through would fire', () => {
     // Regression guard: the lead emits "is Delivery risk" exactly once.
     // If a future refactor dropped the early `return` and let the

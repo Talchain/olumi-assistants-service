@@ -325,6 +325,59 @@ describe('tryPostAnalysisAdviceGate — data-availability fallback', () => {
     }
   });
 
+  it('evidence_gap gap-list skips blank-endpoint fragile edges even when readiness is present', () => {
+    // Round-2 P1: composer-side renderability filter. With valid
+    // readiness data AND a degraded `fragile_edges[0]` (blank endpoint),
+    // the gap-list previously emitted `the link from "" to "..." is
+    // fragile, ...`. The filter now drops the blank entry; the
+    // readiness gaps remain.
+    const out = tryPostAnalysisAdviceGate({
+      message: "What's missing?",
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        fragile_edges: [{ from_label: '   ', to_label: 'Successful launch' }],
+      },
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      // No malformed fragile-edge bullet.
+      expect(out.assistant_text).not.toMatch(/link from\s*""\s*to/);
+      expect(out.assistant_text).not.toContain('"   " to');
+      // Either the readiness summary or a top-driver fall-through must
+      // be present — the response must remain grounded.
+      const grounded =
+        out.assistant_text.includes('biggest open gap') ||
+        out.assistant_text.includes('strongest sensitivity is on');
+      expect(grounded).toBe(true);
+    }
+  });
+
+  it('evidence_gap gap-list iterates only renderable fragile edges (blank [0], valid [1])', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: "What's missing?",
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        fragile_edges: [
+          { from_label: '', to_label: 'Successful launch' },
+          { from_label: 'Cost overrun risk', to_label: 'Successful launch' },
+        ],
+      },
+      analysisReady: null,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Renderable edge appears; the blank-from-label entry does not.
+      expect(out.assistant_text).toContain(
+        '"Cost overrun risk" to "Successful launch"',
+      );
+      expect(out.assistant_text).not.toMatch(/link from\s*""\s*to/);
+    }
+  });
+
   it('evidence_gap with whitespace-only top driver AND no other signal → data_unavailable_for_class', () => {
     // Renderability gate: a non-empty `top_drivers` array whose only
     // entry has a whitespace `factor_label` is NOT a renderable signal.

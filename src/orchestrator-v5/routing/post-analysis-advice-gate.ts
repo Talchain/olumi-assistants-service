@@ -659,17 +659,46 @@ function hasRenderableTopDriver(analysis: AdviceGateAnalysis): boolean {
 }
 
 /**
- * True when `fragile_edges[0]` exists AND BOTH endpoint labels are
- * non-empty trimmed strings. Both endpoints are interpolated into
- * prose (`"the link from <from> to <to>"`); a blank label on either
- * side would emit a malformed sentence. Treats renderable fragile
- * edges as a first-class grounding signal for `evidence_gap` —
- * sufficient on its own, even without readiness data or top drivers.
+ * Per-edge renderability check. Both endpoint labels are interpolated
+ * into prose (`"the link from <from> to <to>"`); a blank label on
+ * either side would emit a malformed sentence. Used by both the
+ * availability gate and the composer to filter blank-labelled edges
+ * out before any emission.
+ */
+function isRenderableFragileEdge(
+  edge: AdviceGateAnalysisFragileEdge,
+): boolean {
+  return hasNonEmptyLabel(edge.from_label) && hasNonEmptyLabel(edge.to_label);
+}
+
+/**
+ * True when ANY entry in `fragile_edges` has both endpoint labels
+ * renderable. `.some()` over the array (not just `[0]`) so a degraded
+ * `[0]` with a blank endpoint doesn't fail-closed when a later entry
+ * could still ground the composer. Treats renderable fragile edges as
+ * a first-class grounding signal for `evidence_gap` — sufficient on
+ * its own, even without readiness data or top drivers.
  */
 function hasRenderableFragileEdge(analysis: AdviceGateAnalysis): boolean {
-  const edge = analysis.fragile_edges?.[0];
-  if (edge === undefined) return false;
-  return hasNonEmptyLabel(edge.from_label) && hasNonEmptyLabel(edge.to_label);
+  return analysis.fragile_edges?.some(isRenderableFragileEdge) ?? false;
+}
+
+/**
+ * Filtered view of `fragile_edges` keeping only entries whose endpoint
+ * labels are renderable. The composer iterates this list instead of
+ * the raw array so blank-labelled edges can never reach assistant
+ * text — even when the gate has already passed via another signal
+ * (readiness or top driver) and the edge would otherwise leak through
+ * a fall-through branch.
+ *
+ * Returns a frozen empty array when the source array is absent or all
+ * entries are unrenderable; callers can use `.length` to drive
+ * presence checks safely.
+ */
+function renderableFragileEdges(
+  analysis: AdviceGateAnalysis,
+): readonly AdviceGateAnalysisFragileEdge[] {
+  return analysis.fragile_edges?.filter(isRenderableFragileEdge) ?? [];
 }
 
 function evaluateAvailability(
@@ -1040,7 +1069,12 @@ function composeEvidenceGap(
   if (VALIDATION_FLAVOUR_RE.test(message)) {
     const parts: string[] = [];
     const topDriverLabel = analysis.top_drivers[0]?.factor_label;
-    const fragileEdge = analysis.fragile_edges?.[0];
+    // Use the FIRST renderable fragile edge — not `[0]` blindly — so a
+    // degraded `[0]` with a blank endpoint can't reach the wire while
+    // a later renderable entry is silently skipped. Returns undefined
+    // when none of the entries is renderable, in which case the
+    // fragile-edge sentence is omitted from the lead.
+    const fragileEdge = renderableFragileEdges(analysis)[0];
     if (topDriverLabel && topDriverLabel.trim().length > 0) {
       parts.push(
         `The most useful place to gather evidence is ${topDriverLabel}. That's where new data would change the analysis the most.`,
@@ -1063,8 +1097,13 @@ function composeEvidenceGap(
       gaps.push(item.description);
     }
   }
-  if (analysis.fragile_edges && analysis.fragile_edges.length > 0) {
-    for (const edge of analysis.fragile_edges.slice(0, 2)) {
+  // Iterate over the renderability-filtered view so blank-labelled
+  // edges can't leak into the gap list. Bare `fragile_edges.slice(0, 2)`
+  // would emit `the link from "" to "B" is fragile...` if `[0]` had a
+  // missing label and the gate had passed via another signal.
+  const renderableEdges = renderableFragileEdges(analysis);
+  if (renderableEdges.length > 0) {
+    for (const edge of renderableEdges.slice(0, 2)) {
       gaps.push(
         `the link from "${edge.from_label}" to "${edge.to_label}" is fragile, so the analysis is sensitive to its true strength`,
       );
