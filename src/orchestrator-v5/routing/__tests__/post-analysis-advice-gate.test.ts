@@ -1336,4 +1336,193 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
       expect(out.suggested_actions).toHaveLength(0);
     }
   });
+
+  // -----------------------------------------------------------------
+  // Renderability hardening (ported from PR #189). The composer's
+  // projection-only fall-through interpolates labels directly into
+  // prose; malformed labels (empty / whitespace-only / blank
+  // endpoint) would otherwise emit "sensitivity is on   " or
+  // `link from "" to "B"`. These tests pin the renderability filter.
+  // -----------------------------------------------------------------
+
+  it('renderability — whitespace-only top_driver factor_label + no other signal → data_unavailable_for_class (no malformed prose)', () => {
+    // The gate's evidence_gap predicate now uses `hasRenderableTopDriver`
+    // (non-empty trimmed label) instead of bare `top_drivers.length > 0`,
+    // so a whitespace-only label can't satisfy the gate and then make
+    // the gap-list fall-through emit "sensitivity is on   ".
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        top_drivers: [{ factor_label: '   ', sensitivity_value: 0.45 }],
+        fragile_edges: [],
+      },
+      analysisReady: null,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) {
+      expect(out.reason).toBe('data_unavailable_for_class');
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.missing_inputs).toContain('analysis_ready_or_top_drivers');
+    }
+  });
+
+  it('renderability — gap-list skips blank-endpoint fragile edges when readiness is present', () => {
+    // With valid readiness data AND a degraded `fragile_edges[0]`
+    // (blank endpoint), the gap-list previously emitted
+    // `the link from "" to "..." is fragile, ...`. The composer now
+    // filters fragile edges through `renderableFragileEdges` so the
+    // blank entry is dropped; readiness gaps remain.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        fragile_edges: [{ from_label: '   ', to_label: 'Successful launch' }],
+      },
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).not.toMatch(/link from\s*""\s*to/);
+      expect(out.assistant_text).not.toContain('"   " to');
+      expect(out.assistant_text).not.toMatch(/link from "\s*" to /);
+    }
+  });
+
+  it('renderability — gap-list iterates only renderable fragile edges (blank [0], valid [1])', () => {
+    // Gate matches via top_drivers (FIXTURE has them); the gap-list
+    // adds the renderable fragile-edge bullet. Blank-endpoint [0]
+    // must be filtered out by `renderableFragileEdges`, with the
+    // valid [1] surfacing instead.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        fragile_edges: [
+          { from_label: '', to_label: 'Successful launch' },
+          { from_label: 'Cost overrun risk', to_label: 'Successful launch' },
+        ],
+      },
+      analysisReady: null,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('"Cost overrun risk" to "Successful launch"');
+      expect(out.assistant_text).not.toMatch(/link from\s*""\s*to/);
+    }
+  });
+
+  it('renderability — top-driver fallback is gated on renderable label (whitespace label suppresses the bullet)', () => {
+    // top_drivers[0] is whitespace, readiness is present (so the gate
+    // matches via readiness). The gap-list's top-driver fallback used
+    // to use `analysis.top_drivers.length > 0` blindly and would emit
+    // "sensitivity is on   ". Now gated on `hasRenderableTopDriver`.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        top_drivers: [{ factor_label: '   ', sensitivity_value: 0.45 }],
+        fragile_edges: [],
+      },
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Whitespace label MUST NOT appear in prose.
+      expect(out.assistant_text).not.toMatch(/sensitivity is on\s*[.,\n]/);
+      expect(out.assistant_text).not.toMatch(/sensitivity is on\s+\s/);
+    }
+  });
+
+  // -----------------------------------------------------------------
+  // Chip-click routing (ported from PR #189). The prompt chip emitted
+  // by chip-generator.ts after a successful run_analysis has no
+  // `action_type`; on click, DGAI submits the chip's `message` as the
+  // next turn's user text. That message MUST route to `evidence_gap`
+  // through the deterministic, synchronous, no-LLM path.
+  // -----------------------------------------------------------------
+
+  it('chip-click routing — exact PR #190 chip message routes to evidence_gap (deterministic, no LLM)', () => {
+    // Hard-coded mirror of the message string in
+    // src/orchestrator-v5/compose/chip-generator.ts post-run_analysis
+    // branch. A regression that changes the chip copy surfaces here
+    // as a clean assertion miss rather than passing silently.
+    const CHIP_MESSAGE =
+      'What should we validate or research to build confidence in this decision?';
+    const out = tryPostAnalysisAdviceGate({
+      message: CHIP_MESSAGE,
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: SAMPLE_DECISION_REVIEW,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      // With enrichment, the validation-aware lead is the
+      // decision_review-grounded opener.
+      expect(out.assistant_text).toContain('To build confidence in this analysis');
+    }
+  });
+
+  it('chip-click routing — gate is structurally synchronous (no Promise)', () => {
+    // Defence-in-depth for the deterministic chip-click path. A Promise
+    // here would indicate the gate became async and would break the
+    // 0-LLM-call guarantee for chip clicks.
+    const CHIP_MESSAGE =
+      'What should we validate or research to build confidence in this decision?';
+    const result = tryPostAnalysisAdviceGate({
+      message: CHIP_MESSAGE,
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: SAMPLE_DECISION_REVIEW,
+    });
+    expect(result).not.toHaveProperty('then');
+  });
+
+  it('chip-click routing — stale freshness suppresses the gate (chip should not have been emitted)', () => {
+    // The chip itself is gated on a CURRENT-turn successful
+    // run_analysis fact. If a stale follow-up turn somehow replays the
+    // chip text, the gate must still suppress so the user sees the
+    // stale-rerun path instead of a stale coaching answer.
+    const CHIP_MESSAGE =
+      'What should we validate or research to build confidence in this decision?';
+    const out = tryPostAnalysisAdviceGate({
+      message: CHIP_MESSAGE,
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'stale',
+      decisionReview: SAMPLE_DECISION_REVIEW,
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) expect(out.reason).toBe('not_fresh');
+  });
+
+  // -----------------------------------------------------------------
+  // Mutation-precedence over validation phrasings (ported from PR #189).
+  // Additional bare-verb cases ensure the mutation pattern still wins
+  // when validation vocabulary is wrapped around a real edit.
+  // -----------------------------------------------------------------
+
+  it.each([
+    ['Set marketing spend to 50000. What should we validate?', 'set + to + numeric, then validate'],
+    ['Change delivery risk to 0.7 — what assumptions should we test?', 'change + to + numeric, then test assumptions'],
+    ['Adjust the edge from Cost to Risk and tell me what we should validate further.', 'edge edit + validate further'],
+    ['Add a new constraint on budget — how do we build confidence?', 'add + entity, then confidence'],
+    ['Remove the cost factor. What evidence should we gather?', 'remove + entity, then gather'],
+  ] as const)('mutation precedence over validation: %s', (message) => {
+    const out = tryPostAnalysisAdviceGate({
+      message,
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) expect(out.reason).toBe('mutation_signal');
+  });
 });

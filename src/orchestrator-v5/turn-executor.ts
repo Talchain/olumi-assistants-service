@@ -160,9 +160,9 @@ import {
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
-  isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { deriveRecentChangesEvidence } from './context/recent-changes.js';
 import type { TurnOutcome } from './turn-outcome.js';
 import {
@@ -3055,13 +3055,15 @@ export async function runTurnExecutor(
           // edit. `freshness` is populated by the analysis-freshness
           // derivation earlier in the turn.
           freshness: freshness?.freshness,
-          // V5 coaching: thread the latest successful run_analysis fact's
-          // decision_review enrichment so evidence_gap can answer
-          // validation/research questions grounded in
-          // evidence_enhancements + key_assumptions. Helper walks
-          // prior_facts in reverse for the most recent successful fact;
-          // returns null when no enrichment is available (advice gate
-          // falls back to its existing projection-only behaviour).
+          // V5 coaching: thread the latest successful run_analysis
+          // fact's `decision_review` enrichment so `evidence_gap` can
+          // answer validation/research questions grounded in
+          // `evidence_enhancements` + `key_assumptions`. The helper
+          // delegates to `selectRunAnalysisFact` — the SAME canonical
+          // selector freshness/projection use — so every layer is
+          // aligned on the same single fact (no stale pre-edit drift).
+          // Returns null when no enrichment is available; the gate
+          // falls back to its projection-only behaviour.
           decisionReview: pickLatestDecisionReview(context.prior_facts),
         });
         emit(TelemetryEvents.V5PostAnalysisAdviceGate, {
@@ -5272,33 +5274,6 @@ export async function runTurnExecutor(
 // -----------------------------------------------------------------------
 // Small pure helpers
 // -----------------------------------------------------------------------
-
-/**
- * V5 coaching — return the verbatim `decision_review` enrichment record
- * from the most recent successful `run_analysis` fact in prior_facts, or
- * `null` when none is available. Threaded into the post-analysis advice
- * gate so `evidence_gap` can synthesise validation/research advice from
- * `evidence_enhancements[].specific_action` and `key_assumptions` —
- * grounded coaching content already produced by the decision-review
- * enricher on every fresh analysis. Returns `null` (never throws) when
- * the enrichment is missing or malformed; the gate's existing
- * projection-only fallback handles the absent case.
- */
-function pickLatestDecisionReview(
-  priorFacts: readonly HandlerFact[],
-): Record<string, unknown> | null {
-  for (let i = priorFacts.length - 1; i >= 0; i--) {
-    const fact = priorFacts[i];
-    if (fact == null || !isSuccessfulRunAnalysisFact(fact)) continue;
-    if (fact.fact_type !== 'run_analysis') continue;
-    const enrichment = fact.result.enrichment;
-    if (enrichment == null || typeof enrichment !== 'object') return null;
-    const dr = (enrichment as Record<string, unknown>)['decision_review'];
-    if (dr == null || typeof dr !== 'object' || Array.isArray(dr)) return null;
-    return dr as Record<string, unknown>;
-  }
-  return null;
-}
 
 /**
  * Set enrichment.decision_review to `null` on the first run_analysis fact

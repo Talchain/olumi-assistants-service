@@ -999,6 +999,24 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
   });
 
+  it('CODEX BLOCKER FIX — suppresses validation chip when current-turn fact has no enrichment, EVEN IF priorFacts is usable', () => {
+    // Chip honesty contract: current-turn handler facts are authoritative.
+    // If the current run_analysis fact has no usable
+    // decision_review.evidence_enhancements[].specific_action, the chip
+    // must be suppressed. We must NOT fall back to older priorFacts to
+    // emit the chip — doing so would point the user at stale pre-edit
+    // evidence right after a soft-failed enricher on this turn.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFact()], // no enrichment on current turn
+      priorFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)], // older usable
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toHaveLength(2);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
   it('suppresses validation chip on malformed enrichment shapes (defensive parsing)', () => {
     const chips = generateChips({
       stage: 'analyse',

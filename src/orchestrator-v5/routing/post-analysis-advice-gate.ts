@@ -650,6 +650,50 @@ function hasNonEmptyLabel(s: string | undefined | null): boolean {
   return typeof s === 'string' && s.trim().length > 0;
 }
 
+/**
+ * True when `top_drivers[0]` exists AND its `factor_label` is a
+ * non-empty trimmed string. Bare `top_drivers.length > 0` is
+ * insufficient: the gap-list fall-through interpolates the label
+ * directly ("the strongest sensitivity is on `<label>`"), so a
+ * whitespace-only label would emit `"sensitivity is on   "`.
+ *
+ * Used by the gap-list fall-through inside `composeEvidenceGap` and
+ * by the per-class availability check so the renderability gate is
+ * uniform across the file.
+ */
+function hasRenderableTopDriver(analysis: AdviceGateAnalysis): boolean {
+  return hasNonEmptyLabel(analysis.top_drivers[0]?.factor_label);
+}
+
+/**
+ * Per-edge renderability check. Both endpoint labels are interpolated
+ * into prose (`"the link from <from> to <to>"`); a blank label on
+ * either side would emit a malformed sentence.
+ */
+function isRenderableFragileEdge(
+  edge: AdviceGateAnalysisFragileEdge,
+): boolean {
+  return hasNonEmptyLabel(edge.from_label) && hasNonEmptyLabel(edge.to_label);
+}
+
+/**
+ * Filtered view of `fragile_edges` keeping only entries whose endpoint
+ * labels are renderable. The composer iterates this list instead of
+ * the raw array so blank-labelled edges can never reach assistant text
+ * — even when the gate has passed via another signal (readiness or
+ * top driver) and a degraded `fragile_edges[0]` would otherwise leak
+ * through the slice-based loop.
+ *
+ * Returns an empty array when the source array is absent or all
+ * entries are unrenderable; callers can use `.length` for presence
+ * checks safely.
+ */
+function renderableFragileEdges(
+  analysis: AdviceGateAnalysis,
+): readonly AdviceGateAnalysisFragileEdge[] {
+  return analysis.fragile_edges?.filter(isRenderableFragileEdge) ?? [];
+}
+
 function evaluateAvailability(
   cls: AdviceClass,
   analysis: AdviceGateAnalysis,
@@ -681,11 +725,18 @@ function evaluateAvailability(
   if (reqs.needs_analysis_ready && !hasSufficientReadinessData(analysisReady)) {
     missing.push('analysis_ready');
   }
-  // evidence_gap accepts either readiness data OR top_drivers — fail only
-  // when BOTH are missing.
+  // evidence_gap accepts either readiness data OR a renderable top
+  // driver — fail only when BOTH are missing. The driver check uses
+  // `hasRenderableTopDriver` (non-empty trimmed `factor_label`) so a
+  // whitespace-only label can't satisfy the gate and then make the
+  // gap-list fall-through emit "sensitivity is on   ". Matches the
+  // existing renderability contract for `needs_top_driver` classes
+  // above. Predicate semantics unchanged ('analysis_ready_or_top_drivers'
+  // key retained) — this is a strictly defensive tightening on what
+  // counts as "top driver available".
   if (cls === 'evidence_gap') {
     const haveReadiness = hasSufficientReadinessData(analysisReady);
-    const haveDrivers = analysis.top_drivers.length > 0;
+    const haveDrivers = hasRenderableTopDriver(analysis);
     if (!haveReadiness && !haveDrivers) {
       missing.push('analysis_ready_or_top_drivers');
     }
@@ -991,16 +1042,24 @@ function composeEvidenceGap(
       gaps.push(item.description);
     }
   }
-  if (analysis.fragile_edges && analysis.fragile_edges.length > 0) {
-    for (const edge of analysis.fragile_edges.slice(0, 2)) {
+  // Iterate over the renderability-filtered view so blank-labelled
+  // edges can't leak into the gap list. Bare `fragile_edges.slice(0, 2)`
+  // would emit `the link from "" to "B" is fragile...` if `[0]` had a
+  // missing label and the gate had passed via another signal.
+  const filteredEdges = renderableFragileEdges(analysis);
+  if (filteredEdges.length > 0) {
+    for (const edge of filteredEdges.slice(0, 2)) {
       gaps.push(
         `the link from "${edge.from_label}" to "${edge.to_label}" is fragile, so the analysis is sensitive to its true strength`,
       );
     }
   }
-  if (gaps.length === 0 && analysis.top_drivers.length > 0) {
+  if (gaps.length === 0 && hasRenderableTopDriver(analysis)) {
     // Fallback: name the top driver as the place evidence matters most.
-    const top = analysis.top_drivers[0].factor_label;
+    // Gated on `hasRenderableTopDriver` (non-empty trimmed label) so a
+    // bare `length > 0` can't emit "sensitivity is on   " when the
+    // label is whitespace-only.
+    const top = analysis.top_drivers[0]!.factor_label;
     gaps.push(
       `the strongest sensitivity is on ${top}, so that's where more evidence would change the analysis the most`,
     );
