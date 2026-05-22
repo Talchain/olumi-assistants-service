@@ -208,12 +208,16 @@ describe("compactAnalysis", () => {
     }
   });
 
-  it("unrecognised robustness warn payload is bounded (no raw value, prefix capped at 16 chars)", async () => {
+  it("unrecognised robustness warn payload is bounded by category, not raw-derived", async () => {
+    // Cardinality contract: the warn payload must group cleanly in
+    // dashboards no matter how many distinct vendor strings reach this
+    // branch. We assert by both presence (stable category fields) AND
+    // absence (no raw-derived fields). If a future change adds back a
+    // raw value, raw prefix, or exact length, one of these assertions
+    // fails.
     const telemetry = await import("../../../../src/utils/telemetry.js");
     const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
     try {
-      // Long, vendor-specific free-text string. Without bounding, this
-      // would index a distinct dashboard entry per turn.
       const longValue = "extremely_unstable_with_long_qualifier_string";
       compactAnalysis(
         makeResponse({ robustness: { level: longValue } as { level: string } }),
@@ -224,18 +228,34 @@ describe("compactAnalysis", () => {
       expect(robustnessWarn).toBeDefined();
       const payload = robustnessWarn?.[0] as Record<string, unknown> | undefined;
       expect(payload).toBeDefined();
-      // Stable reason enum is the primary group-by field — never the raw value.
+      // Stable category fields only.
       expect(payload?.reason).toBe("unrecognised_robustness_band");
-      // No `raw_robustness_band` (the previous unbounded field name).
+      // length_bucket is a bounded enum ('short' / 'medium' / 'long').
+      expect(["short", "medium", "long"]).toContain(payload?.length_bucket);
+      // Raw-derived fields MUST be absent.
       expect("raw_robustness_band" in (payload ?? {})).toBe(false);
-      // Bounded diagnostic: prefix capped at 16 chars, plus the full length
-      // (number, low cardinality) so the offending vocabulary class is still
-      // recognisable in dashboards.
-      const prefix = payload?.value_prefix;
-      expect(typeof prefix).toBe("string");
-      expect((prefix as string).length).toBeLessThanOrEqual(16);
-      expect(longValue.startsWith(prefix as string)).toBe(true);
-      expect(payload?.value_length).toBe(longValue.length);
+      expect("value_prefix" in (payload ?? {})).toBe(false);
+      expect("value_length" in (payload ?? {})).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("length_bucket groups by category, not exact length (multiple strings → same bucket)", async () => {
+    // Two distinct long vendor strings must yield the SAME length_bucket;
+    // otherwise the bucket is acting as a raw-derived proxy.
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      compactAnalysis(makeResponse({ robustness: { level: "extremely_unstable_long_variant_one" } as { level: string } }));
+      compactAnalysis(makeResponse({ robustness: { level: "extremely_unstable_long_variant_two" } as { level: string } }));
+      const warns = warnSpy.mock.calls.filter((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(warns).toHaveLength(2);
+      const buckets = warns.map((c) => (c[0] as Record<string, unknown>).length_bucket);
+      // Same category (`long`) for two distinct strings of similar length.
+      expect(buckets[0]).toBe(buckets[1]);
     } finally {
       warnSpy.mockRestore();
     }

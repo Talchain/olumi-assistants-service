@@ -1,24 +1,27 @@
 /**
- * Contract integration test: prove that `pickLatestRawRobustness(prior_facts)`
- * composes correctly with `tryPostAnalysisAdviceGate` so the raw fragile /
- * near-tie signals override a conflicting projected `robustness_band`.
+ * Two layers covering the rawRobustness override path:
  *
- * Why this exists alongside the per-helper unit tests
- * ---------------------------------------------------
- * The unit tests prove each helper does the right thing in isolation. They
- * do NOT prove the turn-executor call site is still threading the helper's
- * output into the gate input. A future refactor that drops the
- * `rawRobustness: pickLatestRawRobustness(context.prior_facts)` line in
- * `turn-executor.ts` would leave the unit tests passing while silently
- * regressing the override path in production. This test exercises the
- * helper → gate pipeline as a single contract so the override-on-conflict
- * behaviour survives any future refactor of the threading.
+ *   1. Helper → gate contract: prove `pickLatestRawRobustness(prior_facts)`
+ *      composes correctly with `tryPostAnalysisAdviceGate` so the raw
+ *      fragile / near-tie signals override a conflicting projected band.
+ *      These tests call the helpers directly — they do NOT prove the
+ *      turn-executor call site still threads the helper's output into
+ *      the gate input.
  *
- * Scope: helpers + gate composition only. Full `runTurnExecutor` integration
- * (Anthropic/PLoT mocks, request lifecycle, telemetry emission) is covered
- * by the dedicated turn-executor suites; reproducing that scaffolding here
- * would be disproportionate to the contract under test.
+ *   2. Turn-executor call-site wiring: a separate `describe` reads the
+ *      source of `turn-executor.ts` and asserts the literal wiring
+ *      expression is present. Fails immediately if the
+ *      `rawRobustness: pickLatestRawRobustness(context.prior_facts)`
+ *      line is removed — exactly the silent regression the contract
+ *      tests above cannot catch. A full `runTurnExecutor` mock harness
+ *      would be disproportionate to the wiring under test; the source-
+ *      level assertion is the lightest test that fails for the specific
+ *      refactor we care about.
  */
+
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -132,10 +135,11 @@ describe('raw-robustness → gate integration (contract)', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       const text = out.assistant_text;
-      // Raw override drives the decision → generic "flagged as a near-tie"
-      // wording (numerically true even when margin is wider than 1pp).
+      // Raw override drives the decision → generic "the analysis treats
+      // them as a near-tie" wording (numerically true even when margin
+      // is wider than 1pp).
       expect(text).toMatch(/effectively tied/i);
-      expect(text).toMatch(/flagged as a near[- ]tie/i);
+      expect(text).toMatch(/the analysis treats .+ as a near[- ]tie/i);
       // Margin-based phrasing would be FALSE here (actual margin is 3pp).
       expect(text).not.toMatch(/one percentage point or less/i);
       expect(text).not.toContain('meaningful rather than marginal');
@@ -203,5 +207,54 @@ describe('raw-robustness → gate integration (contract)', () => {
       expect(out.assistant_text).toContain('meaningful rather than marginal');
       expect(out.assistant_text).toContain('The robustness band is stable');
     }
+  });
+});
+
+// =========================================================================
+// Turn-executor call-site wiring assertion.
+//
+// The contract tests above do NOT catch a regression where someone
+// removes the `rawRobustness: pickLatestRawRobustness(context.prior_facts)`
+// line from `turn-executor.ts`. This source-level assertion does. It is
+// deliberately literal — a future formatting change that splits the
+// expression across lines or renames the parameter would also break it,
+// at which point the maintainer must either restore the literal form or
+// update this assertion (a one-line, deliberate change, never silent).
+// =========================================================================
+describe('turn-executor call-site — rawRobustness wiring', () => {
+  it('threads pickLatestRawRobustness(context.prior_facts) into the gate input', async () => {
+    // __dirname-equivalent for ESM. Resolve to the worktree's
+    // turn-executor.ts regardless of where vitest is invoked from.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const turnExecutorPath = path.resolve(here, '../../turn-executor.ts');
+    const source = await readFile(turnExecutorPath, 'utf8');
+
+    // Per-line, comment-stripped scan so a commented-out wiring line
+    // never satisfies the assertion. We match against ACTIVE source
+    // lines only — line-leading `//` comments are filtered out.
+    const activeLines = source
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => !line.startsWith('//'));
+
+    // The import must be present — otherwise the wiring expression below
+    // would not even compile, but pinning it here makes the dependency
+    // explicit at the test layer.
+    const importLine = activeLines.find((line) =>
+      /import\s*\{\s*pickLatestRawRobustness\s*\}\s*from\s*['"]\.\/coaching\/pick-raw-robustness\.js['"]/.test(line),
+    );
+    expect(importLine, 'pickLatestRawRobustness import missing from turn-executor.ts').toBeDefined();
+
+    // The literal wiring expression on a non-comment line. If any of
+    // these tokens is changed (key renamed, helper renamed, argument
+    // swapped, or the line commented out), this assertion fails —
+    // making the change deliberate.
+    const wiringLine = activeLines.find((line) =>
+      /rawRobustness\s*:\s*pickLatestRawRobustness\s*\(\s*context\.prior_facts\s*\)/.test(line),
+    );
+    expect(
+      wiringLine,
+      'rawRobustness: pickLatestRawRobustness(context.prior_facts) wiring missing from turn-executor.ts',
+    ).toBeDefined();
   });
 });

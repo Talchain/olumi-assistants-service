@@ -1268,7 +1268,7 @@ function composeExplainResults(
   // (true at the inclusive 1.0pp threshold) is only emitted when the
   // projected margin drove the decision. When the raw `near_tie.is_tie`
   // override drove it (margin may be wider, null, or absent), copy stays
-  // generic — "flagged as a near-tie" — so we never claim a sub-1pp gap
+  // generic — "the analysis treats them as a near-tie" — so we never claim a sub-1pp gap
   // we cannot back from the projection.
   const tieReason = nearTieReason(analysis, rawRobustness);
   const nearTie = tieReason !== null;
@@ -1283,7 +1283,7 @@ function composeExplainResults(
     sentences.push(
       tieReason === 'margin'
         ? `The result is effectively tied: ${leadingLabel} and ${runnerLabel} are separated by one percentage point or less.`
-        : `The result is effectively tied: ${leadingLabel} and ${runnerLabel} are flagged as a near-tie.`,
+        : `The result is effectively tied: the analysis treats ${leadingLabel} and ${runnerLabel} as a near-tie.`,
     );
   } else {
     sentences.push(

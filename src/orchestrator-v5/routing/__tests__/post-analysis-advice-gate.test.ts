@@ -1727,10 +1727,10 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
       const text = out.assistant_text;
       expect(text).toMatch(/effectively tied/i);
       // Raw-override branch: copy MUST NOT claim a sub-1pp gap when the
-      // actual margin is 3pp. Generic "flagged as a near-tie" wording is
-      // numerically true on this branch; the margin-based phrasing
-      // ("one percentage point or less") is NOT.
-      expect(text).toMatch(/flagged as a near[- ]tie/i);
+      // actual margin is 3pp. Generic "the analysis treats them as a
+      // near-tie" wording is numerically true on this branch; the
+      // margin-based phrasing ("one percentage point or less") is NOT.
+      expect(text).toMatch(/the analysis treats .+ as a near[- ]tie/i);
       expect(text).not.toMatch(/one percentage point or less/i);
       expect(text).not.toMatch(/less than one percentage point/i);
       expect(text).not.toContain('meaningful rather than marginal');
@@ -1778,7 +1778,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     if (out.matched) {
       const text = out.assistant_text;
       expect(text).toMatch(/effectively tied/i);
-      expect(text).toMatch(/flagged as a near[- ]tie/i);
+      expect(text).toMatch(/the analysis treats .+ as a near[- ]tie/i);
       expect(text).not.toMatch(/percentage point/i);
     }
   });

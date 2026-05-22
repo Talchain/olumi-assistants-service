@@ -152,10 +152,18 @@ const ROBUSTNESS_MAP: Record<string, string> = {
   unknown: 'unknown',
 };
 
-/** Maximum characters of an unrecognised robustness value to include in the
- *  diagnostic warn line. Bounded so a future vendor that emits free-text
- *  strings cannot blow out log cardinality on the unrecognised-band path. */
-const UNKNOWN_BAND_VALUE_PREFIX_LIMIT = 16;
+/**
+ * Coarse length bucket for the unrecognised-robustness warning. Three
+ * buckets keep aggregate cardinality strictly bounded regardless of how
+ * many distinct vendor strings reach this branch. Boundaries are
+ * deliberately wide; we never want this telemetry to grow as the
+ * upstream vocabulary expands. Aligned to "category, not exact length".
+ */
+function lengthBucket(n: number): 'short' | 'medium' | 'long' {
+  if (n <= 8) return 'short';
+  if (n <= 32) return 'medium';
+  return 'long';
+}
 
 function mapRobustnessToCanonical(raw: string): string {
   const normalised = raw.toLowerCase().trim();
@@ -167,16 +175,16 @@ function mapRobustnessToCanonical(raw: string): string {
   // Warn here so genuinely novel vendor values surface in telemetry; the
   // deliberate 'unknown' passthrough above never reaches this branch.
   //
-  // Cardinality discipline: emit a stable `reason` enum plus a bounded
-  // prefix + length, NEVER the raw value verbatim. If upstream vocab
-  // grows or a vendor emits free-text, this keeps the warning aggregate
-  // tractable in dashboards (the bounded prefix is enough to recognise
-  // the offending vocabulary class without indexing every distinct value).
+  // Cardinality discipline: emit a stable `reason` enum and a coarse
+  // length bucket — NEVER the raw value (or any prefix of it) and NEVER
+  // an exact length. If upstream vocab grows or a vendor emits free-text,
+  // dashboards group by `reason` × `length_bucket` and the unique-value
+  // count stays small. To investigate which vendor string is triggering
+  // the warn, reach for raw upstream logs, not CEE telemetry.
   log.warn(
     {
       reason: 'unrecognised_robustness_band',
-      value_prefix: normalised.slice(0, UNKNOWN_BAND_VALUE_PREFIX_LIMIT),
-      value_length: normalised.length,
+      length_bucket: lengthBucket(normalised.length),
     },
     'compactAnalysis: unrecognised robustness band — mapped to unknown',
   );
