@@ -110,8 +110,13 @@ import {
   GraphStateIngressSchema,
   type GraphStateIngress,
 } from '../orchestrator-v5/boundary/request-extensions.js';
-import { loadPersistedGraphStrict } from '../orchestrator-v5/build-turn-context.js';
+import { buildTurnContext, loadPersistedGraphStrict } from '../orchestrator-v5/build-turn-context.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
+import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
+import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
+import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js';
+import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
+import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
 import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
 
 // ───────────────────────────────────────────────────────────────────
@@ -472,6 +477,56 @@ function sendEditGraphRecovery(
     assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
     stage,
   }), { graph: null });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// V5 edit lifecycle recovery v1 — freshness derivation for pre-LLM
+// intercepts. The pure-clarification path needs to know whether a
+// prior `run_analysis` fact is still 'fresh' against the current
+// graph, so the clarification copy can restate that the previous
+// analysis is still current. The derivation here mirrors the
+// TurnExecutor's routing-time path (lines ~715–751) but runs only
+// on the two intercept branches — when neither intercept fires,
+// `dispatchEditGraph` does its own derivation and this helper is
+// not called.
+//
+// Returns:
+//   - `true`  → a successful run_analysis fact exists AND its
+//               `graph_hash_at_run` matches the current graph hash
+//               (freshness verdict 'fresh').
+//   - `false` → no successful fact, or its hash diverged (verdict
+//               'stale' / 'none' / 'unknown').
+//   - `null`  → derivation failed entirely (session-store error,
+//               graph parse failed). Treat as "don't restate".
+//
+// Errors are swallowed (caller treats `null` as `false` for copy
+// purposes) — a clarification with no freshness sentence is still
+// a correct response.
+// ────────────────────────────────────────────────────────────────────
+async function tryDerivePriorAnalysisFresh(
+  ingress: import('@talchain/schemas/boundary').MessageTurnPayload,
+  requestId: string,
+  graphState: import('../orchestrator-v5/boundary/request-extensions.js').GraphStateIngress,
+): Promise<boolean | null> {
+  try {
+    const turnContext = await buildTurnContext(ingress, requestId);
+    const currentGraphHash = computeAnalysisAffectingGraphHash(graphState);
+    const derivation = deriveAnalysisFreshness(
+      turnContext.prior_facts,
+      currentGraphHash,
+    );
+    return derivation.freshness === 'fresh';
+  } catch (err) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 edit intercept — prior_analysis_is_fresh derivation failed; clarification will omit freshness sentence',
+    );
+    return null;
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1001,6 +1056,84 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const effectiveGraphState = resolvedGraphState ?? extensions.graphState;
     const isEditGraphShape = effectiveGraphState != null && editIntentDetected;
     if (isEditGraphShape) {
+      // ────────────────────────────────────────────────────────────────
+      // V5 edit lifecycle recovery v1 — pre-LLM intercepts (PR feat/
+      // v5-edit-lifecycle-recovery-v1, branched from origin/staging
+      // 2026-05-22). Two narrow guards that short-circuit BEFORE the
+      // expensive V4 `dispatchEditGraph` LLM call:
+      //
+      //   1. chip-simplify-intercept — exact-text match against the
+      //      legacy V4 "Simplify the change" facilitator chip prompt
+      //      (edit-graph.ts:2096, :2198). Closes the closed-loop the
+      //      lifecycle investigation diagnosed.
+      //
+      //   2. vague-edit-guard — narrow predicate over messages that
+      //      have cleared the route-v2 edit gates but carry no factor /
+      //      edge / option anchor, no numeric value, no add/remove
+      //      construct, no mutation signal, and aren't analytical
+      //      questions. Sends them to deterministic clarification
+      //      rather than a 6–35s LLM call that will produce empty
+      //      operations.
+      //
+      // On either match, the freshness derivation runs lazily — it is
+      // a Supabase round-trip (~50ms typical), but the path it serves
+      // is replacing a 6–35s LLM call so the net latency is decisively
+      // better. Derivation failures are non-fatal: the freshness
+      // sentence is omitted but the clarification still returns.
+      //
+      // Intercepts MUST run before `dispatchEditGraph`, NOT inside
+      // it, because the dispatcher loads turn context, parses graph,
+      // and builds the V4 envelope before its own pre-LLM A4 add-risk
+      // classifier — work we want to skip for these branches.
+      // ────────────────────────────────────────────────────────────────
+      const chipSimplify = tryChipSimplifyIntercept(ingress.message);
+      if (chipSimplify.matched) {
+        const priorAnalysisIsFresh = await tryDerivePriorAnalysisFresh(
+          ingress,
+          requestId,
+          effectiveGraphState,
+        );
+        emit(TelemetryEvents.V5InterceptedChipClarify, {
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+          source: chipSimplify.source,
+          prior_analysis_is_fresh: priorAnalysisIsFresh,
+        });
+        const response = composeEditClarifyResponse({
+          reason: 'chip_simplify',
+          stage: ingress.stage,
+          nodes: effectiveGraphState.nodes,
+          priorAnalysisIsFresh: priorAnalysisIsFresh === true,
+        });
+        return sendFinalised200(reply, requestId, 'edit_graph', response, {
+          graph: null,
+        });
+      }
+
+      const vague = tryVagueEditGuard(ingress.message, effectiveGraphState.nodes);
+      if (vague.matched) {
+        const priorAnalysisIsFresh = await tryDerivePriorAnalysisFresh(
+          ingress,
+          requestId,
+          effectiveGraphState,
+        );
+        const response = composeEditClarifyResponse({
+          reason: 'vague_edit',
+          stage: ingress.stage,
+          nodes: effectiveGraphState.nodes,
+          priorAnalysisIsFresh: priorAnalysisIsFresh === true,
+        });
+        emit(TelemetryEvents.V5InterceptedVagueEdit, {
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+          prior_analysis_is_fresh: priorAnalysisIsFresh,
+          chips_emitted: response.suggested_actions.length,
+        });
+        return sendFinalised200(reply, requestId, 'edit_graph', response, {
+          graph: null,
+        });
+      }
+
       // V4 cordon: dispatchEditGraph delegates to the V4 graph-edit pipeline
       // for free-form edit intents that do not match a typed V5 mutation
       // handler (set_factor_value, add_constraint, adjust_edge_strength).

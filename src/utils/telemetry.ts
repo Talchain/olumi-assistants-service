@@ -863,6 +863,34 @@ export const TelemetryEvents = {
   // vague_edit / ambiguous).
   V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
 
+  // V5 edit lifecycle recovery v1 — pre-LLM intercept for the legacy
+  // V4 "Simplify the change" facilitator chip (edit-graph.ts:2096,
+  // :2198). The chip submits the free-text prompt "Try a simpler
+  // version of this change.", which on its own would match
+  // EDIT_GRAPH_POSITIVE_REGEX (via "change") and re-enter the V4
+  // edit_graph LLM — typically producing another empty-operations
+  // no-op. This event fires when route-v2's chip-simplify-intercept
+  // short-circuits that loop with deterministic clarification copy,
+  // BEFORE the LLM call. Payload:
+  //   - source: 'exact_text' (only leg shipped in this PR; future
+  //     metadata leg will add 'chip_metadata').
+  //   - prior_analysis_is_fresh: boolean | null — whether a fresh
+  //     run_analysis fact was found for the scenario (null when the
+  //     freshness derivation was unavailable).
+  V5InterceptedChipClarify: "v5.edit_graph.intercepted_chip_clarify",
+
+  // V5 edit lifecycle recovery v1 — pre-LLM narrow vague-edit guard.
+  // Fires when route-v2's vague-edit-guard short-circuits a free-text
+  // edit message that cleared the existing route-v2 gates but is too
+  // underspecified to spend an LLM call on (no numeric, no factor /
+  // edge / option anchor, no add/remove construct, no mutation
+  // signal, not a question). Payload:
+  //   - prior_analysis_is_fresh: boolean | null — same shape as the
+  //     chip-clarify event above.
+  //   - chips_emitted: number — how many graph-derived chips the
+  //     clarify composer attached (0 means cancel-only).
+  V5InterceptedVagueEdit: "v5.edit_graph.intercepted_vague_edit",
+
   // V5 product-state continuity (foamy-bee tranche) — emitted by the
   // deterministic state-query guard. Closes the named misroute class
   // where "what update did you make?" routes to legacy edit_graph and

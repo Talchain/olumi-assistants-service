@@ -74,6 +74,7 @@ import {
   type EditRejectionReason,
 } from "../../orchestrator-v5/handlers/edit-rejection-text.js";
 import { enforceRepairVocabularyDenylist } from "../shared/repair-vocabulary-denylist.js";
+import { buildNoOpRecoveryChips } from "./edit-graph-noop-chips.js";
 
 // ============================================================================
 // Types
@@ -1851,6 +1852,19 @@ export async function handleEditGraph(
       // gives the user an obvious next action.
       const assistantText = NO_OP_FALLBACK_TEXT;
 
+      // V5 edit lifecycle recovery v1 — deterministic chips for the
+      // no-op branch. Source: validator referential errors only (the
+      // only available anchor that maps cleanly back to a graph node
+      // ID). PLoT errors carry a free-text reason string with no
+      // structured factor/edge anchor, so a no-op preceded ONLY by a
+      // PLoT failure produces zero chips — the "no safe anchor → no
+      // chips" contract. Strictly additive: existing telemetry,
+      // assistant_text, blocks, and graph fields are unchanged.
+      const recoveryChips = buildNoOpRecoveryChips({
+        referentialErrors: lastValidationResult?.referentialErrors,
+        nodes: context.graph.nodes,
+      });
+
       log.info(
         {
           request_id: requestId,
@@ -1861,6 +1875,7 @@ export async function handleEditGraph(
           coaching_dropped: !!llmResult.coaching?.summary,
           preceded_by_plot_rejection: !!lastPlotErrors,
           preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
+          deterministic_chips_emitted: recoveryChips.length,
         },
         "edit_graph returned empty operations (no-op)",
       );
@@ -1876,6 +1891,7 @@ export async function handleEditGraph(
         latencyMs,
         appliedGraph: null,
         wasRejected: false,
+        ...(recoveryChips.length > 0 ? { suggestedActions: [...recoveryChips] } : {}),
         diagnostics: diagnostics(),
       };
     }
