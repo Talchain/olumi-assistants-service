@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { compactAnalysis } from "../../../../src/orchestrator/context/analysis-compact.js";
 import type { V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 
@@ -163,11 +163,138 @@ describe("compactAnalysis", () => {
     expect(summary!.robustness_level).toBe("fragile");
   });
 
-  it("returns 'moderate' robustness_level when nothing available (canonical default)", () => {
+  it("returns 'unknown' robustness_level when nothing available (no silent moderate fallback)", () => {
     const response = makeResponse();
     const summary = compactAnalysis(response);
-    // deriveRobustnessLevel returns "unknown", mapRobustnessToCanonical maps unknown → "moderate"
-    expect(summary!.robustness_level).toBe("moderate");
+    // deriveRobustnessLevel returns "unknown"; mapRobustnessToCanonical now
+    // preserves "unknown" rather than silently coercing to "moderate", so
+    // downstream projectAnalysis can collapse it to null and composers
+    // omit the robustness sentence rather than asserting a false band.
+    expect(summary!.robustness_level).toBe("unknown");
+  });
+
+  it("deliberate 'unknown' passes through silently — no warning on the no-signal path", async () => {
+    // The "no robustness signal at all" path is expected and should NOT
+    // emit a low-level warning every analysis turn (which would flood
+    // telemetry). Only genuinely novel vendor strings should warn.
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      const summary = compactAnalysis(makeResponse());
+      expect(summary!.robustness_level).toBe("unknown");
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(robustnessWarn).toBeUndefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("unrecognised vendor robustness string emits a warning (not silenced)", async () => {
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      const summary = compactAnalysis(
+        makeResponse({ robustness: { level: "shaky" } as { level: string } }),
+      );
+      expect(summary!.robustness_level).toBe("unknown");
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(robustnessWarn).toBeDefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("unrecognised robustness warn payload is bounded by category, not raw-derived", async () => {
+    // Cardinality contract: the warn payload must group cleanly in
+    // dashboards no matter how many distinct vendor strings reach this
+    // branch. We assert by both presence (stable category fields) AND
+    // absence (no raw-derived fields). If a future change adds back a
+    // raw value, raw prefix, or exact length, one of these assertions
+    // fails.
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      const longValue = "extremely_unstable_with_long_qualifier_string";
+      compactAnalysis(
+        makeResponse({ robustness: { level: longValue } as { level: string } }),
+      );
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(robustnessWarn).toBeDefined();
+      const payload = robustnessWarn?.[0] as Record<string, unknown> | undefined;
+      expect(payload).toBeDefined();
+      // Stable category fields only.
+      expect(payload?.reason).toBe("unrecognised_robustness_band");
+      // length_bucket is a bounded enum ('short' / 'medium' / 'long').
+      expect(["short", "medium", "long"]).toContain(payload?.length_bucket);
+      // Raw-derived fields MUST be absent.
+      expect("raw_robustness_band" in (payload ?? {})).toBe(false);
+      expect("value_prefix" in (payload ?? {})).toBe(false);
+      expect("value_length" in (payload ?? {})).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("length_bucket groups by category, not exact length (multiple strings → same bucket)", async () => {
+    // Two distinct long vendor strings must yield the SAME length_bucket;
+    // otherwise the bucket is acting as a raw-derived proxy.
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      compactAnalysis(makeResponse({ robustness: { level: "extremely_unstable_long_variant_one" } as { level: string } }));
+      compactAnalysis(makeResponse({ robustness: { level: "extremely_unstable_long_variant_two" } as { level: string } }));
+      const warns = warnSpy.mock.calls.filter((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(warns).toHaveLength(2);
+      const buckets = warns.map((c) => (c[0] as Record<string, unknown>).length_bucket);
+      // Same category (`long`) for two distinct strings of similar length.
+      expect(buckets[0]).toBe(buckets[1]);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("maps raw 'very_low' robustness.level to canonical 'fragile'", () => {
+    const response = makeResponse({
+      robustness: { level: "very_low" },
+    });
+    const summary = compactAnalysis(response);
+    // Aligns with ISL_ROBUSTNESS_MAP in deterministic/turn-context.ts.
+    expect(summary!.robustness_level).toBe("fragile");
+  });
+
+  it("maps unrecognised raw robustness values to 'unknown' (not 'moderate')", () => {
+    const response = makeResponse({
+      robustness: { level: "bogus_band" } as { level: string },
+    });
+    const summary = compactAnalysis(response);
+    expect(summary!.robustness_level).toBe("unknown");
+  });
+
+  it("preserves all known canonical robustness mappings", () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["low", "fragile"],
+      ["medium", "moderate"],
+      ["high", "stable"],
+      ["very_high", "highly_stable"],
+      ["fragile", "fragile"],
+      ["moderate", "moderate"],
+      ["stable", "stable"],
+      ["highly_stable", "highly_stable"],
+    ];
+    for (const [raw, expected] of cases) {
+      const summary = compactAnalysis(
+        makeResponse({ robustness: { level: raw } }),
+      );
+      expect(summary!.robustness_level).toBe(expected);
+    }
   });
 
   it("counts fragile edges deduplicated by edge_id", () => {

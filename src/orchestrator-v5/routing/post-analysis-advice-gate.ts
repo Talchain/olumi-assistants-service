@@ -58,8 +58,78 @@ import {
 } from '../format/format-analysis-value.js';
 import { formatSensitivityDirection } from '../format/sensitivity-phrases.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
+
+/**
+ * Near-tie threshold (percentage points, inclusive). When the projected
+ * margin between the leading option and the runner-up is at or under this
+ * value, user-facing post-analysis copy MUST avoid strength claims
+ * ("meaningful rather than marginal", "strongly favours", stability
+ * assertions) and describe the result as effectively tied. Chosen at
+ * 1.0pp deliberately: tight enough to avoid false confidence, wide enough
+ * to read as honest user-facing wording. NOT reused from the deterministic
+ * `CLOSE_CALL_THRESHOLD = 0.05` (5pp) constant in `turn-context.ts` —
+ * that signal is internal and far too wide for user-facing copy.
+ */
+const NEAR_TIE_PP_THRESHOLD = 1.0;
+
+/**
+ * Raw robustness levels that MUST suppress moderate/stable user-facing
+ * copy. Read defensively from the run_analysis fact's
+ * `enrichment.robustness.level` (when available) so the composer can
+ * prefer the raw signal over a canonicalised projection band that may
+ * have already been coerced by a lossy mapping.
+ */
+const RAW_FRAGILE_LEVELS: ReadonlySet<string> = new Set([
+  'very_low',
+  'low',
+  'fragile',
+]);
+
+function isNearTie(
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+): boolean {
+  // Strong override: explicit raw near_tie.is_tie flag (when upstream emits it).
+  if (rawRobustness?.near_tie_is_tie === true) return true;
+  const margin = analysis.margin_pp;
+  if (typeof margin !== 'number' || !Number.isFinite(margin)) return false;
+  return Math.abs(margin) <= NEAR_TIE_PP_THRESHOLD;
+}
+
+/**
+ * Discriminate why a near-tie verdict was reached so the composer can
+ * pick copy that is numerically true on every branch. `'margin'` => the
+ * projected `margin_pp` triggered the verdict (and is finite + ≤ 1.0pp);
+ * `'override'` => the raw `near_tie.is_tie` flag drove the decision (the
+ * margin may be wider, null, or absent).
+ */
+function nearTieReason(
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+): 'margin' | 'override' | null {
+  if (!isNearTie(analysis, rawRobustness)) return null;
+  // Margin is the authoritative signal when it exists and is inside the
+  // band. Raw override wins when there is no usable margin.
+  const margin = analysis.margin_pp;
+  if (
+    typeof margin === 'number'
+    && Number.isFinite(margin)
+    && Math.abs(margin) <= NEAR_TIE_PP_THRESHOLD
+  ) {
+    return 'margin';
+  }
+  return 'override';
+}
+
+function isRawFragile(
+  rawRobustness: RawRobustnessSignals | null | undefined,
+): boolean {
+  const level = rawRobustness?.level;
+  return typeof level === 'string' && RAW_FRAGILE_LEVELS.has(level);
+}
 
 export interface AdviceGateAnalysisOption {
   readonly label: string;
@@ -145,6 +215,18 @@ export interface AdviceGateInput {
    * behaviour.
    */
   readonly decisionReview?: Record<string, unknown> | null | undefined;
+  /**
+   * Raw robustness signals (`enrichment.robustness.level`,
+   * `enrichment.robustness.near_tie.is_tie`) from the latest successful
+   * run_analysis fact. Threaded by the turn-executor via
+   * `pickLatestRawRobustness` — the same canonical selector as
+   * `pickLatestDecisionReview`. Optional: composers fall back to the
+   * projected `analysis.robustness_band` and `analysis.margin_pp` when
+   * absent. When present, near-tie / fragile detection prefers the raw
+   * signal so canonicalisation losses (e.g. `very_low → unknown → null`)
+   * cannot silently swap fragile copy for confident copy.
+   */
+  readonly rawRobustness?: RawRobustnessSignals | null | undefined;
 }
 
 export type AdviceGateUnmatchedReason =
@@ -835,6 +917,7 @@ export function tryPostAnalysisAdviceGate(
     analysis,
     analysisReady: input.analysisReady ?? undefined,
     decisionReview: input.decisionReview ?? undefined,
+    rawRobustness: input.rawRobustness ?? undefined,
   });
 
   return {
@@ -884,6 +967,7 @@ interface ComposeInput {
   readonly analysis: AdviceGateAnalysis;
   readonly analysisReady: AnalysisReadyPayload | undefined;
   readonly decisionReview: Record<string, unknown> | undefined;
+  readonly rawRobustness: RawRobustnessSignals | null | undefined;
 }
 
 function composeForClass(cls: AdviceClass, input: ComposeInput): string {
@@ -893,7 +977,12 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
     case 'update_advice':
       return composeAdvice(input.leadingLabel, input.topDriverLabel, input.analysis);
     case 'improvement':
-      return composeImprovement(input.leadingLabel, input.topDriverLabel, input.analysis);
+      return composeImprovement(
+        input.leadingLabel,
+        input.topDriverLabel,
+        input.analysis,
+        input.rawRobustness,
+      );
     case 'meaning':
       return composeMeaning(input.leadingLabel, input.topDriverLabel, input.analysis);
     case 'readiness':
@@ -904,11 +993,13 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
       return composeExplainResults(
         input.leadingLabel,
         input.analysis,
+        input.rawRobustness,
       );
     case 'what_would_flip_free_text':
       return composeWhatWouldFlip(
         input.leadingLabel,
         input.analysis,
+        input.rawRobustness,
       );
   }
 }
@@ -969,12 +1060,22 @@ function composeImprovement(
   leadingLabel: string,
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
 ): string {
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
-  const robustness = analysis.robustness_band
-    ? ` The robustness band is ${analysis.robustness_band}, so smaller adjustments may not move the picture much.`
-    : '';
+  // Suppress the "smaller adjustments may not move the picture much"
+  // stability claim when the result is a near-tie or raw robustness is
+  // fragile — on such results, smaller adjustments WOULD move the
+  // picture, and the original copy reads as misleading confidence.
+  const nearTie = isNearTie(analysis, rawRobustness);
+  const rawFragile = isRawFragile(rawRobustness);
+  const robustness =
+    nearTie || rawFragile
+      ? ' The picture appears fragile, so even small adjustments could shift it.'
+      : analysis.robustness_band
+        ? ` The robustness band is ${analysis.robustness_band}, so smaller adjustments may not move the picture much.`
+        : '';
   if (topDriverLabel) {
     return `${opener} To improve confidence here, the most useful thing to examine is ${topDriverLabel}, because it has the most influence on the result.${robustness}`;
   }
@@ -1149,69 +1250,132 @@ function isNonEmptyString(value: unknown): value is string {
 function composeExplainResults(
   leadingLabel: string,
   analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
 ): string {
   // Driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
   // margin, robustness and per-driver sensitivity are all optional and
   // degrade gracefully (composer omits the surrounding clause when
   // missing). Numerics are pass-through only — F.6 invariant.
+  //
+  // Near-tie + fragile handling: when |margin_pp| <= 1.0 OR raw
+  // near_tie.is_tie is true, we MUST suppress the "meaningful rather than
+  // marginal" assertion and the moderate/stable robustness claim. Same
+  // when raw robustness.level is in {very_low, low, fragile} — the
+  // projection may have already canonicalised that to a band the
+  // composer would otherwise read as confident copy.
+  //
+  // Numeric correctness: the "one percentage point or less" phrasing
+  // (true at the inclusive 1.0pp threshold) is only emitted when the
+  // projected margin drove the decision. When the raw `near_tie.is_tie`
+  // override drove it (margin may be wider, null, or absent), copy stays
+  // generic — "the analysis treats them as a near-tie" — so we never claim a sub-1pp gap
+  // we cannot back from the projection.
+  const tieReason = nearTieReason(analysis, rawRobustness);
+  const nearTie = tieReason !== null;
+  const rawFragile = isRawFragile(rawRobustness);
   const driverA = analysis.top_drivers[0];
   const driverB = analysis.top_drivers[1];
   const runnerLabel = analysis.runner_up?.label;
   const margin = marginPpString(analysis.margin_pp);
   const sentences: string[] = [];
-  sentences.push(
-    `Based on this model, the analysis currently favours ${leadingLabel}${probabilityFragment(analysis.leading_option?.probability)}.`,
-  );
-  if (runnerLabel && margin) {
+
+  if (nearTie && runnerLabel) {
     sentences.push(
-      `That sits ahead of ${runnerLabel} by ${margin}, so the lead is meaningful rather than marginal.`,
+      tieReason === 'margin'
+        ? `The result is effectively tied: ${leadingLabel} and ${runnerLabel} are separated by one percentage point or less.`
+        : `The result is effectively tied: the analysis treats ${leadingLabel} and ${runnerLabel} as a near-tie.`,
     );
-  } else if (runnerLabel) {
+  } else {
     sentences.push(
-      `${runnerLabel} sits in second place${probabilityFragment(analysis.runner_up?.probability)}.`,
+      `Based on this model, the analysis currently favours ${leadingLabel}${probabilityFragment(analysis.leading_option?.probability)}.`,
     );
+    if (runnerLabel && margin) {
+      sentences.push(
+        `That sits ahead of ${runnerLabel} by ${margin}, so the lead is meaningful rather than marginal.`,
+      );
+    } else if (runnerLabel) {
+      sentences.push(
+        `${runnerLabel} sits in second place${probabilityFragment(analysis.runner_up?.probability)}.`,
+      );
+    }
   }
+
   if (driverA && driverB) {
     sentences.push(
-      `The result appears to be driven by ${driverA.factor_label}${driverDirectionFragment(driverA)}, and ${driverB.factor_label}${driverDirectionFragment(driverB)}.`,
+      nearTie
+        ? `The order could shift with movement on ${driverA.factor_label}${driverDirectionFragment(driverA)}, or on ${driverB.factor_label}${driverDirectionFragment(driverB)}.`
+        : `The result appears to be driven by ${driverA.factor_label}${driverDirectionFragment(driverA)}, and ${driverB.factor_label}${driverDirectionFragment(driverB)}.`,
     );
   } else if (driverA) {
     sentences.push(
-      `The result appears to be driven by ${driverA.factor_label}${driverDirectionFragment(driverA)}.`,
+      nearTie
+        ? `The order could shift with movement on ${driverA.factor_label}${driverDirectionFragment(driverA)}.`
+        : `The result appears to be driven by ${driverA.factor_label}${driverDirectionFragment(driverA)}.`,
     );
   }
-  if (analysis.robustness_band) {
+
+  // Robustness sentence: prefer the raw fragile signal over the projected
+  // band; suppress confident stability copy on near-tie / raw-fragile.
+  if (nearTie || rawFragile) {
+    sentences.push(
+      'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
+    );
+  } else if (analysis.robustness_band) {
     sentences.push(
       `The robustness band is ${analysis.robustness_band}, so this view should hold under reasonable variation.`,
     );
   }
-  sentences.push('Small changes to the strongest factor can shift the picture.');
+
+  // Closing nudge: skip on the fragile / near-tie path — the fragile-aware
+  // sentence above already conveys "small changes matter" without the
+  // milder duplicate. On the confident path the existing closing sentence
+  // remains as the gentle factor-focus nudge.
+  if (!nearTie && !rawFragile) {
+    sentences.push('Small changes to the strongest factor can shift the picture.');
+  }
   return sentences.join(' ');
 }
 
 function composeWhatWouldFlip(
   leadingLabel: string,
   analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
 ): string {
   // Top driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
   // margin, robustness and per-driver sensitivity are optional and
   // degrade gracefully. Numerics pass-through only — F.6 invariant.
+  //
+  // Near-tie + fragile handling: on a near-tie / raw-fragile result,
+  // suppress "smaller changes are unlikely to flip the outcome on their
+  // own" (a stability claim) and reframe the lead sentence so the user
+  // is not told a near-zero gap "would need to close". The reframe copy
+  // is generic ("effectively tied … could flip with small changes") so
+  // it is numerically true regardless of whether margin or raw override
+  // drove the verdict.
+  const nearTie = isNearTie(analysis, rawRobustness);
+  const rawFragile = isRawFragile(rawRobustness);
   const driverA = analysis.top_drivers[0];
   const driverB = analysis.top_drivers[1];
   const runnerLabel = analysis.runner_up?.label;
   const margin = marginPpString(analysis.margin_pp);
   const sentences: string[] = [];
-  sentences.push(
-    `Based on this model, ${leadingLabel} currently appears to be the favoured option${probabilityFragment(analysis.leading_option?.probability)}.`,
-  );
-  if (runnerLabel && margin) {
+  if (nearTie && runnerLabel) {
     sentences.push(
-      `For ${runnerLabel} to overtake it, the lead of ${margin} would need to close.`,
+      `${leadingLabel} and ${runnerLabel} are effectively tied, so the outcome could flip with small changes.`,
     );
-  } else if (runnerLabel) {
+  } else {
     sentences.push(
-      `${runnerLabel} is the most likely contender to overtake it.`,
+      `Based on this model, ${leadingLabel} currently appears to be the favoured option${probabilityFragment(analysis.leading_option?.probability)}.`,
     );
+    if (runnerLabel && margin) {
+      sentences.push(
+        `For ${runnerLabel} to overtake it, the lead of ${margin} would need to close.`,
+      );
+    } else if (runnerLabel) {
+      sentences.push(
+        `${runnerLabel} is the most likely contender to overtake it.`,
+      );
+    }
   }
   if (driverA && driverB) {
     // 2-driver branch: name both as the highest-leverage levers; the per-
@@ -1238,7 +1402,11 @@ function composeWhatWouldFlip(
       `The factor most likely to flip the analysis is ${driverA.factor_label}${driverDirectionFragment(driverA)}.`,
     );
   }
-  if (analysis.robustness_band) {
+  if (nearTie || rawFragile) {
+    sentences.push(
+      'The picture appears fragile, so even small adjustments could flip the leading option.',
+    );
+  } else if (analysis.robustness_band) {
     sentences.push(
       `The robustness band is currently ${analysis.robustness_band}, so smaller changes are unlikely to flip the outcome on their own.`,
     );

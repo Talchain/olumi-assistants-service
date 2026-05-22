@@ -143,12 +143,52 @@ function deriveWinner(options: OptionSummary[]): AnalysisResponseSummary['winner
  * on first option → 'unknown'.
  */
 const ROBUSTNESS_MAP: Record<string, string> = {
-  low: 'fragile', medium: 'moderate', high: 'stable', very_high: 'highly_stable',
+  very_low: 'fragile', low: 'fragile', medium: 'moderate', high: 'stable', very_high: 'highly_stable',
   fragile: 'fragile', moderate: 'moderate', stable: 'stable', highly_stable: 'highly_stable',
+  // Explicit 'unknown' passthrough — silences the unknown-band warning on
+  // the deliberate "no robustness signal at all" path (deriveRobustnessLevel
+  // returns the literal 'unknown' when nothing is reachable). projectAnalysis
+  // collapses 'unknown' to null so composers omit the band sentence.
+  unknown: 'unknown',
 };
 
+/**
+ * Coarse length bucket for the unrecognised-robustness warning. Three
+ * buckets keep aggregate cardinality strictly bounded regardless of how
+ * many distinct vendor strings reach this branch. Boundaries are
+ * deliberately wide; we never want this telemetry to grow as the
+ * upstream vocabulary expands. Aligned to "category, not exact length".
+ */
+function lengthBucket(n: number): 'short' | 'medium' | 'long' {
+  if (n <= 8) return 'short';
+  if (n <= 32) return 'medium';
+  return 'long';
+}
+
 function mapRobustnessToCanonical(raw: string): string {
-  return ROBUSTNESS_MAP[raw.toLowerCase().trim()] ?? 'moderate';
+  const normalised = raw.toLowerCase().trim();
+  const mapped = ROBUSTNESS_MAP[normalised];
+  if (mapped) return mapped;
+  // Unrecognised band — return 'unknown' (NOT the previous silent 'moderate'
+  // fallback) so the projection layer collapses to null and downstream
+  // composers omit the band sentence rather than asserting a false one.
+  // Warn here so genuinely novel vendor values surface in telemetry; the
+  // deliberate 'unknown' passthrough above never reaches this branch.
+  //
+  // Cardinality discipline: emit a stable `reason` enum and a coarse
+  // length bucket — NEVER the raw value (or any prefix of it) and NEVER
+  // an exact length. If upstream vocab grows or a vendor emits free-text,
+  // dashboards group by `reason` × `length_bucket` and the unique-value
+  // count stays small. To investigate which vendor string is triggering
+  // the warn, reach for raw upstream logs, not CEE telemetry.
+  log.warn(
+    {
+      reason: 'unrecognised_robustness_band',
+      length_bucket: lengthBucket(normalised.length),
+    },
+    'compactAnalysis: unrecognised robustness band — mapped to unknown',
+  );
+  return 'unknown';
 }
 
 function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {
