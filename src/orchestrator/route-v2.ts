@@ -115,6 +115,8 @@ import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
 import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js';
+import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
+import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
 import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
 import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
 import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
@@ -981,8 +983,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // is `direct_answer` (no `'recovery'` literal exists in
     // ConversationTurnClassSchema; introducing one would break ingress
     // validation across the boundary).
+    // V5 edit lifecycle recovery v1 — analytical-question guard. The
+    // existing `EDIT_GRAPH_NEGATIVE_REGEX` catches `what would` but
+    // not `what could` / `what might` / `how could the outcome
+    // change`, so analytical questions about the model's outcome
+    // currently slip through and dispatch to edit_graph. This guard
+    // closes that hole BEFORE editIntentDetected fires. The guard
+    // delegates to `classifyAnalyticalIntent` (the canonical
+    // analytical taxonomy) and adds the narrow modal-cousin
+    // variants. See src/orchestrator-v5/routing/analytical-question-guard.ts
+    // for the predicate and its scope contract.
+    const analyticalQuestionDetected = isAnalyticalQuestion(ingress.message);
+    const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const editIntentDetected =
-      EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message) &&
+      positiveEditRegexHit &&
       !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message) &&
       // P0 fix (2026-05): suppress dispatch when the message is a clear
       // value/factor update (`set X to Y`, `increase X by N`, etc.). These
@@ -992,7 +1006,21 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // structural edits like "update the model to include market
       // dynamics", kind changes like "set goal to be a factor", and A4
       // requests like "Add team dynamics as a risk").
-      !isValueUpdatePhrasing(ingress.message);
+      !isValueUpdatePhrasing(ingress.message) &&
+      // V5 edit lifecycle recovery v1 — analytical-question suppression.
+      !analyticalQuestionDetected;
+    // Emit a structural-only signal when the analytical guard
+    // suppressed dispatch on a message that WOULD otherwise have
+    // matched edit intent. Skipping the emit when the positive regex
+    // didn't fire keeps the event signal-to-noise high — a non-edit-
+    // shaped analytical message wasn't going to dispatch anyway.
+    if (analyticalQuestionDetected && positiveEditRegexHit) {
+      emit(TelemetryEvents.V5EditGraphAnalyticalQuestionSuppressed, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        intent_class: classifyAnalyticalIntent(ingress.message),
+      });
+    }
     let resolvedGraphState: GraphStateIngress | null = null;
     if (editIntentDetected) {
       if (extensions.graphState != null) {

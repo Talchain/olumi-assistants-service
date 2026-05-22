@@ -891,6 +891,21 @@ export const TelemetryEvents = {
   //     clarify composer attached (0 means cancel-only).
   V5InterceptedVagueEdit: "v5.edit_graph.intercepted_vague_edit",
 
+  // V5 edit lifecycle recovery v1 — pre-edit analytical-question
+  // guard. Fires when route-v2 detected an edit verb in the message
+  // (EDIT_GRAPH_POSITIVE_REGEX matched) AND the analytical-question
+  // guard suppressed `editIntentDetected` because the message is a
+  // hypothetical / analytical question about the outcome
+  // (e.g. "What could change the outcome?"). The turn then falls
+  // through to TurnExecutor where the post-analysis advice gate /
+  // `what_would_flip` handler owns the response. Payload is
+  // structural only:
+  //   - intent_class: AnalyticalIntentClass | null — null when the
+  //     match came from this guard's additional patterns rather
+  //     than `classifyAnalyticalIntent`.
+  V5EditGraphAnalyticalQuestionSuppressed:
+    "v5.edit_graph.analytical_question_suppressed",
+
   // V5 product-state continuity (foamy-bee tranche) — emitted by the
   // deterministic state-query guard. Closes the named misroute class
   // where "what update did you make?" routes to legacy edit_graph and

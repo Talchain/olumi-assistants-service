@@ -254,15 +254,58 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
     expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_vague_edit');
   });
 
-  // Test #6 — analytical questions MUST NOT be intercepted by the
-  // new vague-edit guard. The pre-existing route-v2
-  // `EDIT_GRAPH_NEGATIVE_REGEX` only catches "what would" (not "what
-  // could"), so this message currently still reaches
-  // `dispatchEditGraph` via the legacy path — a pre-existing gap NOT
-  // in scope for this PR. The contract this test pins is the one
-  // this PR owns: the new vague-edit-guard correctly identified it
-  // as a question_shape and declined.
-  it('"What could change the outcome?" → vague-edit guard declines (question_shape)', async () => {
+  // Test #6 — analytical questions MUST NOT be routed to edit_graph.
+  // With the analytical-question guard wired into the
+  // `editIntentDetected` predicate, "What could change the outcome?"
+  // no longer reaches `dispatchEditGraph`; the turn falls through to
+  // TurnExecutor where the post-analysis advice gate /
+  // `what_would_flip` handler owns the response. Telemetry signal
+  // `v5.edit_graph.analytical_question_suppressed` fires.
+  it('"What could change the outcome?" → analytical-question guard suppresses dispatch', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: 'What could change the outcome?' }),
+    });
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_chip_clarify');
+    expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_vague_edit');
+    const suppressed = findEvent('v5.edit_graph.analytical_question_suppressed');
+    expect(suppressed).toBeDefined();
+  });
+
+  // Test #6b — additional analytical variants must also be suppressed.
+  // Pin the wider grammar this PR ships, not just one literal phrase.
+  it.each([
+    'What could change the outcome?',
+    'What would change the outcome?',
+    'What might shift the result?',
+    'What would move the result?',
+    'What would need to change for another option to win?',
+    'How could another option win?',
+    'How could the outcome change?',
+  ])('analytical variant "%s" → dispatch NOT called', async (message) => {
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message,
+        turn_id: '11111111-1111-4111-8111-1111111111aa',
+      }),
+    });
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  // Test #6c — concrete edits remain unaffected by the new guard.
+  // Regression assertion that the analytical-question suppression
+  // does NOT block real value-edit instructions; PR #192 path stays
+  // untouched.
+  it.each([
+    'Change Hiring and Salary Cost to £100,000.',
+    'Change Hiring and Salary Cost from £80,000 to £100,000.',
+    'Set Technical Leadership Capacity to 1.',
+    'Add a risk for coordination overhead.',
+  ])('concrete edit "%s" → analytical guard does NOT suppress (no analytical telemetry)', async (message) => {
     dispatchEditGraphMock.mockResolvedValueOnce({
       response: {
         response_version: 2 as const,
@@ -277,10 +320,39 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
     await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: payload({ message: 'What could change the outcome?' }),
+      payload: payload({
+        message,
+        turn_id: '11111111-1111-4111-8111-1111111111bb',
+      }),
     });
+    expect(emittedNames()).not.toContain('v5.edit_graph.analytical_question_suppressed');
+  });
+
+  // Test #4 from the user's enumerated list — what_would_flip chip
+  // metadata. When the UI sends a chip-click with
+  // `chip.action_type === 'what_would_flip'`, route-v2 dispatches it
+  // via `dispatchDeterministicChipClick` BEFORE editIntentDetected is
+  // computed. Neither the new analytical guard nor the chip-simplify
+  // intercept run on this path — the chip-click branch owns the
+  // response. Pin this here so a future refactor of dispatch order
+  // doesn't silently regress the chip-click contract.
+  it('what_would_flip chip-click → routes through chip-click branch, not edit_graph', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'What would change the outcome?',
+        source: 'chip_click',
+        chip: { action_type: 'what_would_flip' },
+        turn_id: '11111111-1111-4111-8111-1111111111cc',
+      }),
+    });
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
     expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_chip_clarify');
     expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_vague_edit');
+    // The analytical guard MAY have fired before the chip-click
+    // branch claimed the turn — we don't assert that either way to
+    // keep this test focused on the chip-click contract.
   });
 
   // Test #14 — telemetry must distinguish the three lifecycle outcomes.
