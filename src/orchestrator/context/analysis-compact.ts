@@ -145,15 +145,22 @@ function deriveWinner(options: OptionSummary[]): AnalysisResponseSummary['winner
 const ROBUSTNESS_MAP: Record<string, string> = {
   very_low: 'fragile', low: 'fragile', medium: 'moderate', high: 'stable', very_high: 'highly_stable',
   fragile: 'fragile', moderate: 'moderate', stable: 'stable', highly_stable: 'highly_stable',
+  // Explicit 'unknown' passthrough — silences the unknown-band warning on
+  // the deliberate "no robustness signal at all" path (deriveRobustnessLevel
+  // returns the literal 'unknown' when nothing is reachable). projectAnalysis
+  // collapses 'unknown' to null so composers omit the band sentence.
+  unknown: 'unknown',
 };
 
 function mapRobustnessToCanonical(raw: string): string {
   const normalised = raw.toLowerCase().trim();
   const mapped = ROBUSTNESS_MAP[normalised];
   if (mapped) return mapped;
-  // Unknown band — return 'unknown' (NOT the previous silent 'moderate'
+  // Unrecognised band — return 'unknown' (NOT the previous silent 'moderate'
   // fallback) so the projection layer collapses to null and downstream
   // composers omit the band sentence rather than asserting a false one.
+  // Warn here so genuinely novel vendor values surface in telemetry; the
+  // deliberate 'unknown' passthrough above never reaches this branch.
   log.warn({ raw_robustness_band: normalised }, 'compactAnalysis: unknown robustness band — mapped to unknown');
   return 'unknown';
 }

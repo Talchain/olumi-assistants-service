@@ -1858,6 +1858,77 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     }
   });
 
+  // ── 12b. Exact perfect tie: margin_pp = 0 ──────────────────────────────
+  it('exact perfect tie (margin_pp = 0) → near-tie copy', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5 },
+        runner_up: { label: 'B', probability: 0.5 },
+        margin_pp: 0,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.3 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toMatch(/effectively tied/i);
+      expect(out.assistant_text).not.toContain('meaningful rather than marginal');
+    }
+  });
+
+  // ── 12c. Raw fragile without near-tie still suppresses stability claim ─
+  it('composeWhatWouldFlip raw-fragile only (margin > 1pp, level=fragile) → fragile copy, no stability claim', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What would flip this?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.55 },
+        runner_up: { label: 'B', probability: 0.45 },
+        margin_pp: 10, // wide enough NOT to be a near-tie
+        robustness_band: 'moderate', // misleadingly confident projection
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+      rawRobustness: { level: 'fragile', near_tie_is_tie: false },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const text = out.assistant_text;
+      // Raw-fragile branch keeps the existing lead-framing (NOT near-tie
+      // reframe) because margin > 1pp, but MUST suppress the stability
+      // claim and emit fragile-aware robustness copy.
+      expect(text).toMatch(/picture appears fragile/i);
+      expect(text).not.toMatch(/smaller changes are unlikely to flip the outcome/i);
+      expect(text).not.toContain('The robustness band is currently moderate');
+    }
+  });
+
+  // ── 12d. Near-tie path drops the duplicate "Small changes…" closing line ─
+  it('near-tie path omits redundant closing "Small changes to the strongest factor can shift the picture."', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // The fragile-aware sentence already conveys "small changes matter";
+      // the original closing line would duplicate it on this path.
+      expect(out.assistant_text).not.toMatch(/Small changes to the strongest factor can shift the picture\./);
+      // Non-near-tie path still includes it — locked by the wide-lead test above.
+    }
+  });
+
   // ── 13. Deterministic invariants preserved on near-tie path ────────────
   it('near-tie path keeps llm_calls_used=0 / direct_answer / explain_results_free_text class', () => {
     const out = tryPostAnalysisAdviceGate({

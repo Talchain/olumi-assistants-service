@@ -1291,7 +1291,13 @@ function composeExplainResults(
     );
   }
 
-  sentences.push('Small changes to the strongest factor can shift the picture.');
+  // Closing nudge: skip on the fragile / near-tie path — the fragile-aware
+  // sentence above already conveys "small changes matter" without the
+  // milder duplicate. On the confident path the existing closing sentence
+  // remains as the gentle factor-focus nudge.
+  if (!nearTie && !rawFragile) {
+    sentences.push('Small changes to the strongest factor can shift the picture.');
+  }
   return sentences.join(' ');
 }
 

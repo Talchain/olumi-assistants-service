@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { compactAnalysis } from "../../../../src/orchestrator/context/analysis-compact.js";
 import type { V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 
@@ -171,6 +171,41 @@ describe("compactAnalysis", () => {
     // downstream projectAnalysis can collapse it to null and composers
     // omit the robustness sentence rather than asserting a false band.
     expect(summary!.robustness_level).toBe("unknown");
+  });
+
+  it("deliberate 'unknown' passes through silently — no warning on the no-signal path", async () => {
+    // The "no robustness signal at all" path is expected and should NOT
+    // emit a low-level warning every analysis turn (which would flood
+    // telemetry). Only genuinely novel vendor strings should warn.
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      const summary = compactAnalysis(makeResponse());
+      expect(summary!.robustness_level).toBe("unknown");
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unknown robustness band"),
+      );
+      expect(robustnessWarn).toBeUndefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("unrecognised vendor robustness string emits a warning (not silenced)", async () => {
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      const summary = compactAnalysis(
+        makeResponse({ robustness: { level: "shaky" } as { level: string } }),
+      );
+      expect(summary!.robustness_level).toBe("unknown");
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unknown robustness band"),
+      );
+      expect(robustnessWarn).toBeDefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("maps raw 'very_low' robustness.level to canonical 'fragile'", () => {
