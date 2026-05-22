@@ -183,7 +183,7 @@ describe("compactAnalysis", () => {
       const summary = compactAnalysis(makeResponse());
       expect(summary!.robustness_level).toBe("unknown");
       const robustnessWarn = warnSpy.mock.calls.find((c) =>
-        typeof c[1] === "string" && c[1].includes("unknown robustness band"),
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
       );
       expect(robustnessWarn).toBeUndefined();
     } finally {
@@ -200,9 +200,42 @@ describe("compactAnalysis", () => {
       );
       expect(summary!.robustness_level).toBe("unknown");
       const robustnessWarn = warnSpy.mock.calls.find((c) =>
-        typeof c[1] === "string" && c[1].includes("unknown robustness band"),
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
       );
       expect(robustnessWarn).toBeDefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("unrecognised robustness warn payload is bounded (no raw value, prefix capped at 16 chars)", async () => {
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      // Long, vendor-specific free-text string. Without bounding, this
+      // would index a distinct dashboard entry per turn.
+      const longValue = "extremely_unstable_with_long_qualifier_string";
+      compactAnalysis(
+        makeResponse({ robustness: { level: longValue } as { level: string } }),
+      );
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(robustnessWarn).toBeDefined();
+      const payload = robustnessWarn?.[0] as Record<string, unknown> | undefined;
+      expect(payload).toBeDefined();
+      // Stable reason enum is the primary group-by field — never the raw value.
+      expect(payload?.reason).toBe("unrecognised_robustness_band");
+      // No `raw_robustness_band` (the previous unbounded field name).
+      expect("raw_robustness_band" in (payload ?? {})).toBe(false);
+      // Bounded diagnostic: prefix capped at 16 chars, plus the full length
+      // (number, low cardinality) so the offending vocabulary class is still
+      // recognisable in dashboards.
+      const prefix = payload?.value_prefix;
+      expect(typeof prefix).toBe("string");
+      expect((prefix as string).length).toBeLessThanOrEqual(16);
+      expect(longValue.startsWith(prefix as string)).toBe(true);
+      expect(payload?.value_length).toBe(longValue.length);
     } finally {
       warnSpy.mockRestore();
     }

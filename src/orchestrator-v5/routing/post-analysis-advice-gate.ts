@@ -99,6 +99,31 @@ function isNearTie(
   return Math.abs(margin) <= NEAR_TIE_PP_THRESHOLD;
 }
 
+/**
+ * Discriminate why a near-tie verdict was reached so the composer can
+ * pick copy that is numerically true on every branch. `'margin'` => the
+ * projected `margin_pp` triggered the verdict (and is finite + ≤ 1.0pp);
+ * `'override'` => the raw `near_tie.is_tie` flag drove the decision (the
+ * margin may be wider, null, or absent).
+ */
+function nearTieReason(
+  analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+): 'margin' | 'override' | null {
+  if (!isNearTie(analysis, rawRobustness)) return null;
+  // Margin is the authoritative signal when it exists and is inside the
+  // band. Raw override wins when there is no usable margin.
+  const margin = analysis.margin_pp;
+  if (
+    typeof margin === 'number'
+    && Number.isFinite(margin)
+    && Math.abs(margin) <= NEAR_TIE_PP_THRESHOLD
+  ) {
+    return 'margin';
+  }
+  return 'override';
+}
+
 function isRawFragile(
   rawRobustness: RawRobustnessSignals | null | undefined,
 ): boolean {
@@ -1238,7 +1263,15 @@ function composeExplainResults(
   // when raw robustness.level is in {very_low, low, fragile} — the
   // projection may have already canonicalised that to a band the
   // composer would otherwise read as confident copy.
-  const nearTie = isNearTie(analysis, rawRobustness);
+  //
+  // Numeric correctness: the "one percentage point or less" phrasing
+  // (true at the inclusive 1.0pp threshold) is only emitted when the
+  // projected margin drove the decision. When the raw `near_tie.is_tie`
+  // override drove it (margin may be wider, null, or absent), copy stays
+  // generic — "flagged as a near-tie" — so we never claim a sub-1pp gap
+  // we cannot back from the projection.
+  const tieReason = nearTieReason(analysis, rawRobustness);
+  const nearTie = tieReason !== null;
   const rawFragile = isRawFragile(rawRobustness);
   const driverA = analysis.top_drivers[0];
   const driverB = analysis.top_drivers[1];
@@ -1248,7 +1281,9 @@ function composeExplainResults(
 
   if (nearTie && runnerLabel) {
     sentences.push(
-      `The result is effectively tied: ${leadingLabel} and ${runnerLabel} are separated by less than one percentage point.`,
+      tieReason === 'margin'
+        ? `The result is effectively tied: ${leadingLabel} and ${runnerLabel} are separated by one percentage point or less.`
+        : `The result is effectively tied: ${leadingLabel} and ${runnerLabel} are flagged as a near-tie.`,
     );
   } else {
     sentences.push(
@@ -1313,7 +1348,10 @@ function composeWhatWouldFlip(
   // Near-tie + fragile handling: on a near-tie / raw-fragile result,
   // suppress "smaller changes are unlikely to flip the outcome on their
   // own" (a stability claim) and reframe the lead sentence so the user
-  // is not told a near-zero gap "would need to close".
+  // is not told a near-zero gap "would need to close". The reframe copy
+  // is generic ("effectively tied … could flip with small changes") so
+  // it is numerically true regardless of whether margin or raw override
+  // drove the verdict.
   const nearTie = isNearTie(analysis, rawRobustness);
   const rawFragile = isRawFragile(rawRobustness);
   const driverA = analysis.top_drivers[0];

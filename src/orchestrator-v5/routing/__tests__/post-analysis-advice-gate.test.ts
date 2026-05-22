@@ -1610,7 +1610,11 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
       expect(text).toMatch(/effectively tied/i);
       expect(text).toContain('Hire One Tech Lead');
       expect(text).toContain('Hire Two Developers');
-      expect(text).toMatch(/less than one percentage point/i);
+      // Margin-based near-tie → copy must say "one percentage point or
+      // less" (numerically true at the inclusive 1.0pp threshold), NOT
+      // "less than one percentage point" (which would be false at 1.0pp).
+      expect(text).toMatch(/one percentage point or less/i);
+      expect(text).not.toMatch(/less than one percentage point/i);
       assertNoForbidden(text, FORBIDDEN_STRENGTH_PHRASES);
       assertNoForbidden(text, FORBIDDEN_INTERNAL_TERMS);
     }
@@ -1720,8 +1724,62 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toMatch(/effectively tied/i);
-      expect(out.assistant_text).not.toContain('meaningful rather than marginal');
+      const text = out.assistant_text;
+      expect(text).toMatch(/effectively tied/i);
+      // Raw-override branch: copy MUST NOT claim a sub-1pp gap when the
+      // actual margin is 3pp. Generic "flagged as a near-tie" wording is
+      // numerically true on this branch; the margin-based phrasing
+      // ("one percentage point or less") is NOT.
+      expect(text).toMatch(/flagged as a near[- ]tie/i);
+      expect(text).not.toMatch(/one percentage point or less/i);
+      expect(text).not.toMatch(/less than one percentage point/i);
+      expect(text).not.toContain('meaningful rather than marginal');
+    }
+  });
+
+  // ── 6b. Margin-based exact boundary: 1.0pp → "one percentage point or less" ─
+  it('margin_pp = 1.0 → margin-based near-tie copy says "one percentage point or less" (true at boundary)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.505 },
+        runner_up: { label: 'B', probability: 0.495 },
+        margin_pp: 1.0,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.3 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toMatch(/one percentage point or less/i);
+      // "less than one percentage point" would be FALSE at exact 1.0pp.
+      expect(out.assistant_text).not.toMatch(/less than one percentage point/i);
+    }
+  });
+
+  // ── 6c. Raw override + null margin: generic copy, no numeric claim ─────
+  it('raw near_tie.is_tie=true with null margin_pp → generic copy, no numeric claim', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5 },
+        runner_up: { label: 'B', probability: 0.5 },
+        margin_pp: null, // no projected margin
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+      rawRobustness: { level: null, near_tie_is_tie: true },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const text = out.assistant_text;
+      expect(text).toMatch(/effectively tied/i);
+      expect(text).toMatch(/flagged as a near[- ]tie/i);
+      expect(text).not.toMatch(/percentage point/i);
     }
   });
 
@@ -1810,6 +1868,76 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       assertNoForbidden(out.assistant_text, FORBIDDEN_STRENGTH_PHRASES);
+    }
+  });
+
+  // ── 10b. Sibling pin: composeAdvice at the reported 0.05pp case ────────
+  //
+  // Policy choice (codified here, not re-litigated): composeAdvice answers
+  // "what should we do?" — the user is asking for advice, not for the
+  // strength of the lead. The opener ("currently favours X") + neutral
+  // margin sentence ("It sits ahead of Y by 0.1 percentage points") is
+  // technically true at 0.05pp and softer than the explain-results
+  // composer's previous "meaningful rather than marginal" assertion.
+  // We deliberately keep the existing copy and only assert it stays
+  // free of stronger strength claims. If product later decides advice
+  // copy should also reframe on near-tie, this test makes that change
+  // intentional.
+  it('composeAdvice at reported 0.05pp: existing copy preserved, no escalation to strength claims', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we do?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'Hire One Tech Lead', probability: 0.48475 },
+        runner_up: { label: 'Hire Two Developers', probability: 0.48425 },
+        margin_pp: 0.05,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('advice');
+      const text = out.assistant_text;
+      // Existing opener + neutral margin sentence preserved.
+      expect(text).toContain('currently favours Hire One Tech Lead');
+      expect(text).toMatch(/It sits ahead of Hire Two Developers/);
+      // No escalation to strong-claim copy.
+      assertNoForbidden(text, FORBIDDEN_STRENGTH_PHRASES);
+      assertNoForbidden(text, FORBIDDEN_INTERNAL_TERMS);
+    }
+  });
+
+  // ── 10c. Sibling pin: composeMeaning at the reported 0.05pp case ───────
+  //
+  // Same policy as 10b: "What does this mean?" gets the existing softer
+  // wording. If product later decides meaning copy should reframe on
+  // near-tie, this test makes that change intentional.
+  it('composeMeaning at reported 0.05pp: existing copy preserved, no escalation to strength claims', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What does this mean?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'Hire One Tech Lead', probability: 0.48475 },
+        runner_up: { label: 'Hire Two Developers', probability: 0.48425 },
+        margin_pp: 0.05,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('meaning');
+      const text = out.assistant_text;
+      // Existing softer opener preserved.
+      expect(text).toContain('currently favours Hire One Tech Lead');
+      // Neutral margin sentence preserved.
+      expect(text).toMatch(/It sits ahead of Hire Two Developers/);
+      // No escalation to strong-claim copy.
+      assertNoForbidden(text, FORBIDDEN_STRENGTH_PHRASES);
+      assertNoForbidden(text, FORBIDDEN_INTERNAL_TERMS);
     }
   });
 

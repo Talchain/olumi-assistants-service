@@ -6,11 +6,13 @@
  * -----------------------------
  * Mirrors `pickLatestDecisionReview` so every grounding layer (freshness,
  * projection, decision_review, raw robustness) reads from the same fact.
- * Reading from any other walk risks surfacing pre-edit signals after a
- * graph edit; the canonical selector already filters to the newest
- * successful run_analysis fact whose graph hash matches the live graph
- * (the gate also requires freshness === 'fresh', so this helper is only
- * read on a confirmed fresh path).
+ * The canonical `selectRunAnalysisFact` selects the NEWEST successful
+ * run_analysis fact in `prior_facts` — it does NOT itself filter by
+ * graph hash. Graph-hash-vs-live-graph matching is proved separately by
+ * the freshness derivation, and the advice gate already short-circuits
+ * to `not_fresh` unless `freshness === 'fresh'`. Pinning every layer
+ * onto the same selector closes the drift class where one layer reads a
+ * newer fact and another reads an older one.
  *
  * Why only `level` + `near_tie.is_tie`
  * ------------------------------------

@@ -152,6 +152,11 @@ const ROBUSTNESS_MAP: Record<string, string> = {
   unknown: 'unknown',
 };
 
+/** Maximum characters of an unrecognised robustness value to include in the
+ *  diagnostic warn line. Bounded so a future vendor that emits free-text
+ *  strings cannot blow out log cardinality on the unrecognised-band path. */
+const UNKNOWN_BAND_VALUE_PREFIX_LIMIT = 16;
+
 function mapRobustnessToCanonical(raw: string): string {
   const normalised = raw.toLowerCase().trim();
   const mapped = ROBUSTNESS_MAP[normalised];
@@ -161,7 +166,20 @@ function mapRobustnessToCanonical(raw: string): string {
   // composers omit the band sentence rather than asserting a false one.
   // Warn here so genuinely novel vendor values surface in telemetry; the
   // deliberate 'unknown' passthrough above never reaches this branch.
-  log.warn({ raw_robustness_band: normalised }, 'compactAnalysis: unknown robustness band — mapped to unknown');
+  //
+  // Cardinality discipline: emit a stable `reason` enum plus a bounded
+  // prefix + length, NEVER the raw value verbatim. If upstream vocab
+  // grows or a vendor emits free-text, this keeps the warning aggregate
+  // tractable in dashboards (the bounded prefix is enough to recognise
+  // the offending vocabulary class without indexing every distinct value).
+  log.warn(
+    {
+      reason: 'unrecognised_robustness_band',
+      value_prefix: normalised.slice(0, UNKNOWN_BAND_VALUE_PREFIX_LIMIT),
+      value_length: normalised.length,
+    },
+    'compactAnalysis: unrecognised robustness band — mapped to unknown',
+  );
   return 'unknown';
 }
 
