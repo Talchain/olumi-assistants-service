@@ -2,13 +2,25 @@
  * V5 edit lifecycle recovery v1 — narrow vague-edit guard.
  *
  * Sits in route-v2.ts immediately after the chip-simplify intercept and
- * BEFORE `dispatchEditGraph`. Suppresses the V4 `edit_graph` LLM call
- * for messages that have already cleared the route-v2 edit gates
- * (`EDIT_GRAPH_POSITIVE_REGEX` matched, `EDIT_GRAPH_NEGATIVE_REGEX`
- * did not, `isValueUpdatePhrasing` is false) but are too underspecified
- * for the LLM to do anything useful with — no numeric value, no factor
- * / edge / option label anchor, no add/remove/insert/create construct,
- * no mutation-signal regex hit.
+ * BEFORE `editIntentDetected` is computed (which means BEFORE
+ * `dispatchEditGraph`). Suppresses both the V4 `edit_graph` LLM call
+ * AND a Sonnet round-trip for messages that are vague improvement
+ * requests — no numeric value, no factor / edge / option label
+ * anchor, no add/remove/insert/create construct, no mutation-signal
+ * regex hit.
+ *
+ * The guard MUST include its OWN positive shape check
+ * (VAGUE_EDIT_VERB_PATTERN) because it runs early — before the
+ * route's edit-positive regex narrows the candidate set. Without
+ * that shape gate the guard would over-claim conversational
+ * messages like "Hello" or "Tell me a joke" (which satisfy every
+ * other check by being non-mutating, non-numeric, etc.). The shape
+ * gate keeps the guard scoped to messages that look like an
+ * improvement instruction or vague-target edit — even when the
+ * verb itself (`make`, `improve`, `try`) is not in route-v2's
+ * `EDIT_GRAPH_POSITIVE_REGEX`. This is what catches the brief's
+ * explicit examples "Make the model better" and "Try something
+ * different" which would otherwise fall through to TurnExecutor.
  *
  * The diagnostic from the 2026-05-22 V5 edit-lifecycle investigation
  * found that this class of message either returns empty operations
@@ -71,6 +83,7 @@ export interface VagueEditGuardNode {
 
 export type VagueEditGuardUnmatchedReason =
   | 'empty_message'
+  | 'no_vague_edit_shape'
   | 'question_shape'
   | 'mutation_signal_present'
   | 'value_update_phrasing_present'
@@ -81,6 +94,36 @@ export type VagueEditGuardUnmatchedReason =
 export type VagueEditGuardResult =
   | { readonly matched: true }
   | { readonly matched: false; readonly reason: VagueEditGuardUnmatchedReason };
+
+/**
+ * Positive shape gate. The guard runs BEFORE
+ * `EDIT_GRAPH_POSITIVE_REGEX` narrows the candidate set, so without
+ * this check it would over-claim any non-edit non-question message
+ * (e.g. "Hello", "Tell me a joke"). Match an improvement / vague-
+ * target edit verb OR a comparative modifier — either is enough to
+ * say "this message LOOKS like a vague edit request". The verb list
+ * is wider than route-v2's edit-positive regex on purpose: it
+ * includes `make`, `improve`, `simplify`, `try`, `polish`, etc. so
+ * the brief's required examples ("Make the model better", "Try
+ * something different") match here even though they miss the
+ * narrower route-level regex.
+ *
+ * Structural verbs (`add`, `remove`, `insert`, `create`, `delete`,
+ * `drop`) are intentionally EXCLUDED here — they're handled by the
+ * downstream structural-keyword check, which short-circuits the
+ * guard with `structural_keyword_present` so the V4 add-risk
+ * classifier and existing structural-edit paths keep ownership.
+ */
+const VAGUE_EDIT_VERB_PATTERN =
+  /\b(?:make|improve|simplify|change|adjust|edit|modify|update|tweak|fix|polish|refine|revise|amend|tune|try|alter|rework|redo|clean(?:\s+up)?|sort(?:\s+out)?)\b/i;
+
+/**
+ * Comparative modifier — also a vague-edit shape signal. Catches
+ * "make it cleaner", "needs different framing", etc. when the verb
+ * is elsewhere or implied.
+ */
+const VAGUE_EDIT_MODIFIER_PATTERN =
+  /\b(?:better|different|cleaner|simpler|nicer|clearer|tidier|smoother|sharper|prettier)\b/i;
 
 /**
  * Numeric / quantitative token guard. Matches digits, currency symbols,
@@ -144,6 +187,15 @@ export function tryVagueEditGuard(
   }
 
   const trimmed = message.trim();
+
+  // Positive shape gate — must fire first so the predicate is not
+  // satisfied by every non-edit non-question message.
+  if (
+    !VAGUE_EDIT_VERB_PATTERN.test(trimmed)
+    && !VAGUE_EDIT_MODIFIER_PATTERN.test(trimmed)
+  ) {
+    return { matched: false, reason: 'no_vague_edit_shape' };
+  }
 
   if (trimmed.endsWith('?') || QUESTION_LEAD_PATTERN.test(trimmed)) {
     return { matched: false, reason: 'question_shape' };

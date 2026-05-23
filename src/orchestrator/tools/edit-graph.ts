@@ -1879,6 +1879,22 @@ export async function handleEditGraph(
         },
         "edit_graph returned empty operations (no-op)",
       );
+      // V5 edit lifecycle recovery v1 — also emit the event-based
+      // `edit_graph.no_operations` telemetry on the V5 dispatch path
+      // (the V4 pipeline emits it at phase4-tools/index.ts:203, but
+      // the V5 dispatcher never reaches that code path so this
+      // event was previously V4-only). Dashboards counting no-op
+      // edit_graph rates need the V5 number too.
+      emit(TelemetryEvents.EditGraphNoOperations, {
+        request_id: requestId,
+        scenario_id: context.scenario_id,
+        attempt,
+        warnings_dropped: llmResult.warnings.length > 0,
+        coaching_dropped: !!llmResult.coaching?.summary,
+        preceded_by_plot_rejection: !!lastPlotErrors,
+        preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
+        deterministic_chips_emitted: recoveryChips.length,
+      });
       validationOutcome = 'no_operations';
       setViolationCodes([]);
       recoveryPathChosen = 'none';

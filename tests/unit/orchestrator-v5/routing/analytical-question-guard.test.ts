@@ -36,6 +36,16 @@ describe('isAnalyticalQuestion', () => {
       'How could the outcome change?',
       'How might the ranking shift?',
       'How would the result move?',
+      'How could the outcome move?', // user-enumerated phrase (explicit)
+
+      // PR #194 review correction — "What should I/we ..." advice
+      // questions. Without this pattern, "What should I change?" hits
+      // EDIT_GRAPH_POSITIVE_REGEX via `change` and routes to edit_graph.
+      'What should I change?',
+      'What should we update?',
+      'What should I do?',
+      'What should I tweak?',
+      'What should we adjust?',
     ];
     for (const msg of positives) {
       it(`intercepts "${msg}"`, () => {

@@ -208,6 +208,54 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
     expect(body.suggested_actions.length).toBeGreaterThan(0);
   });
 
+  // Test #3b — PR #194 review correction. The brief listed these
+  // examples as required intercepts; the prior wiring required
+  // `EDIT_GRAPH_POSITIVE_REGEX` to fire first (which misses `make`,
+  // `improve`, `try`), so these phrases used to fall through to
+  // TurnExecutor instead of deterministic clarification. The fix:
+  // run the vague-edit guard BEFORE editIntentDetected and add a
+  // positive shape gate to the guard so it doesn't over-claim
+  // conversational messages.
+  it.each([
+    'Make the model better',
+    'Try something different',
+    'Improve this',
+  ])('vague improvement "%s" → intercepted (review-required example)', async (message) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message,
+        turn_id: '11111111-1111-4111-8111-1111111111d0',
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(emittedNames()).toContain('v5.edit_graph.intercepted_vague_edit');
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('The model is unchanged so far.');
+  });
+
+  // Test #3c — conversational messages MUST NOT be intercepted as
+  // vague edits. Pins the new positive shape gate added in the
+  // PR #194 review correction.
+  it.each(['Hello', 'Tell me a joke', 'Thanks', 'Goodbye'])(
+    'conversational "%s" → neither vague nor chip intercept fires',
+    async (message) => {
+      await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({
+          message,
+          turn_id: '11111111-1111-4111-8111-1111111111d1',
+        }),
+      });
+      expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_chip_clarify');
+      expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_vague_edit');
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    },
+  );
+
   // Test #4 — concrete value edits MUST keep their existing route.
   // Route-v2 suppresses `dispatchEditGraph` via `isValueUpdatePhrasing`
   // (pre-existing PR #192 gate) and falls through to TurnExecutor; the
@@ -276,6 +324,8 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
 
   // Test #6b — additional analytical variants must also be suppressed.
   // Pin the wider grammar this PR ships, not just one literal phrase.
+  // Includes the exact "How could the outcome move?" phrasing
+  // (previously only adjacent variants were asserted).
   it.each([
     'What could change the outcome?',
     'What would change the outcome?',
@@ -284,6 +334,9 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
     'What would need to change for another option to win?',
     'How could another option win?',
     'How could the outcome change?',
+    'How could the outcome move?', // PR #194 review correction — exact phrase
+    'What should I change?', // PR #194 review correction — advice question
+    'What should we update?', // PR #194 review correction — advice question
   ])('analytical variant "%s" → dispatch NOT called', async (message) => {
     await app.inject({
       method: 'POST',
@@ -294,6 +347,25 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
       }),
     });
     expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  // Test #6d — PR #194 review correction. The
+  // `analytical_question_suppressed` telemetry MUST NOT fire when
+  // `EDIT_GRAPH_NEGATIVE_REGEX` would already have suppressed the
+  // message on its own (e.g. "what would..." is in the negative
+  // regex). Previously the emit fired on any positive-regex +
+  // analytical hit, overstating the new guard's contribution.
+  it('"What would change the outcome?" → analytical_question_suppressed does NOT fire (negative regex already suppresses)', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'What would change the outcome?',
+        turn_id: '11111111-1111-4111-8111-1111111111d2',
+      }),
+    });
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(emittedNames()).not.toContain('v5.edit_graph.analytical_question_suppressed');
   });
 
   // Test #6c — concrete edits remain unaffected by the new guard.
@@ -385,5 +457,65 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
     const bNames = emittedNames();
     expect(bNames).toContain('v5.edit_graph.intercepted_vague_edit');
     expect(bNames).not.toContain('v5.edit_graph.intercepted_chip_clarify');
+  });
+
+  // PR #194 review correction — prior fresh analysis copy.
+  // When the request carries an analysisState whose
+  // `meta.graph_hash_at_run` matches the request graph's
+  // `computeAnalysisAffectingGraphHash`, the clarification appends
+  // "Your last analysis is still current." Pure derivation — no
+  // session-store / Supabase read on the intercept path.
+  it('vague intercept + analysisState matching graph_hash_at_run → appends "Your last analysis is still current."', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import(
+      '../../../src/orchestrator-v5/context/graph-hash.js'
+    );
+    const liveHash = computeAnalysisAffectingGraphHash(GRAPH_STATE as never);
+    expect(liveHash).toBeTruthy();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        ...payload({
+          message: 'Make this better',
+          turn_id: '11111111-1111-4111-8111-1111111111e0',
+        }),
+        analysis_state: {
+          analysis_status: 'success',
+          meta: {
+            graph_hash_at_run: liveHash,
+            seed_used: 0,
+            n_samples: 0,
+            response_hash: '',
+          },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    const intercept = findEvent('v5.edit_graph.intercepted_vague_edit');
+    expect(intercept).toBeDefined();
+    expect(intercept!.prior_analysis_is_fresh).toBe(true);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('Your last analysis is still current.');
+  });
+
+  // PR #194 review correction — when analysisState is absent OR its
+  // graph_hash_at_run does not match the request graph, the
+  // freshness sentence MUST be omitted (honesty contract — never
+  // restate a freshness we cannot prove from the request).
+  it('vague intercept + no analysisState → omits freshness sentence', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'Make this better',
+        turn_id: '11111111-1111-4111-8111-1111111111e1',
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    const intercept = findEvent('v5.edit_graph.intercepted_vague_edit');
+    expect(intercept!.prior_analysis_is_fresh).toBe(false);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).not.toContain('still current');
   });
 });

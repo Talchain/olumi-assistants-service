@@ -83,6 +83,15 @@ const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
     String.raw`\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?${ANALYTICAL_OUTCOME_NOUNS}\s+(?:change|shift|move|flip|differ|reverse)\b`,
     'i',
   ),
+  // "What should I/we (change|update|edit|adjust|modify|fix|tweak|improve
+  //  |simplify|do)" — advice-seeking question, NOT an edit instruction.
+  // Without this pattern, "What should I change?" hits
+  // EDIT_GRAPH_POSITIVE_REGEX (via `change`), clears the negative
+  // regex (`what should` is not in it), and dispatches to edit_graph.
+  // Concrete value-edit clarifications like "What should I set X to?"
+  // are deflected upstream by `isValueUpdatePhrasing` (because of the
+  // `set X to <value>` shape), so this pattern is safe.
+  /\bwhat\s+should\s+(?:i|we)\s+(?:change|update|edit|adjust|modify|fix|tweak|improve|simplify|do)\b/i,
 ];
 
 /**

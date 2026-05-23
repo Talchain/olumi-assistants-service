@@ -13,12 +13,20 @@ const SAMPLE_GRAPH_NODES: readonly VagueEditGuardNode[] = Object.freeze([
 describe('tryVagueEditGuard', () => {
   describe('intercepts (matched: true)', () => {
     const positives = [
+      // Brief's explicit required examples (PR #194 review)
+      'Make the model better',
+      'Try something different',
+      'Improve this',
+
+      // Other vague edit shapes
       'Simplify the change', // legacy chip label variant
       'Change this',
       'Edit it to be cleaner',
       'Adjust this somehow',
       'Tweak this for me',
       'Update the thing', // verb + non-anchor object, no value
+      'Polish this up',
+      'Refine the wording',
     ];
     for (const msg of positives) {
       it(`intercepts "${msg}"`, () => {
@@ -58,11 +66,15 @@ describe('tryVagueEditGuard', () => {
         const result = tryVagueEditGuard(msg, SAMPLE_GRAPH_NODES);
         expect(result.matched).toBe(false);
         if (!result.matched) {
-          // Structural keywords must be caught BEFORE the
-          // graph-label / numeric / mutation-signal checks so the
-          // reason is precise and dashboards can split structural vs.
-          // analytic skips.
+          // Structural verbs (add / remove / insert / create /
+          // delete / drop) are intentionally NOT in the vague-edit
+          // verb list, so the new positive shape gate (PR #194
+          // review correction) is the first check that fails. The
+          // legacy `structural_keyword_present` reason is still
+          // accepted for messages that DO carry a vague-edit shape
+          // and ALSO a structural keyword.
           expect([
+            'no_vague_edit_shape',
             'structural_keyword_present',
             'mutation_signal_present',
           ]).toContain(result.reason);
@@ -120,6 +132,34 @@ describe('tryVagueEditGuard', () => {
       it(`does NOT intercept "${msg}"`, () => {
         const result = tryVagueEditGuard(msg, SAMPLE_GRAPH_NODES);
         expect(result.matched).toBe(false);
+      });
+    }
+  });
+
+  describe('positive shape gate rejects non-edit conversational messages', () => {
+    // PR #194 review correction. The guard now runs BEFORE
+    // EDIT_GRAPH_POSITIVE_REGEX narrows the candidate set, so it
+    // MUST include its own positive shape check (vague-edit verb
+    // or comparative modifier). Without that gate, the guard would
+    // over-claim every non-edit non-question message.
+    const conversational = [
+      'Hello',
+      'Goodbye',
+      'Tell me a joke',
+      'Thanks',
+      'OK',
+      'Got it',
+      'Sounds good',
+      'Sure',
+      'Cool',
+    ];
+    for (const msg of conversational) {
+      it(`does NOT intercept "${msg}"`, () => {
+        const result = tryVagueEditGuard(msg, SAMPLE_GRAPH_NODES);
+        expect(result.matched).toBe(false);
+        if (!result.matched) {
+          expect(result.reason).toBe('no_vague_edit_shape');
+        }
       });
     }
   });
