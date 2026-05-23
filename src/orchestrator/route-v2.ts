@@ -488,12 +488,14 @@ function sendEditGraphRecovery(
 // keep cheap. The replacement reads only fields already on the
 // request: `extensions.analysisState.meta.graph_hash_at_run` and the
 // current graph state. Verdict:
-//   - `true`  → analysisState carries `analysis_status: 'success'`
+//   - `true`  → analysisState carries an `analysis_status` in the
+//               `SUCCESSFUL_ANALYSIS_STATUSES` allowlist
+//               (`completed` | `computed` | `complete` | `success`)
 //               AND a `graph_hash_at_run` that equals
 //               `computeAnalysisAffectingGraphHash(graphState)`.
 //   - `false` → cannot verify from the request alone (no
-//               analysisState, missing hash, status not success,
-//               hash diverged, or empty graph).
+//               analysisState, missing hash, status not in the
+//               successful allowlist, hash diverged, or empty graph).
 //
 // "Cannot verify" is the right semantic here — when the request
 // doesn't prove freshness, the clarification omits the freshness

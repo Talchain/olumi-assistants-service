@@ -874,9 +874,13 @@ export const TelemetryEvents = {
   // BEFORE the LLM call. Payload:
   //   - source: 'exact_text' (only leg shipped in this PR; future
   //     metadata leg will add 'chip_metadata').
-  //   - prior_analysis_is_fresh: boolean | null — whether a fresh
-  //     run_analysis fact was found for the scenario (null when the
-  //     freshness derivation was unavailable).
+  //   - prior_analysis_is_fresh: boolean — whether the request's
+  //     `analysisState` carries a successful `analysis_status` AND a
+  //     `graph_hash_at_run` matching the current graph hash. Always
+  //     boolean; the previous async DB-backed derivation that could
+  //     also return `null` on session-store failure was replaced
+  //     (PR #194 review-1) with a pure request-local helper that
+  //     returns `false` when it cannot verify.
   V5InterceptedChipClarify: "v5.edit_graph.intercepted_chip_clarify",
 
   // V5 edit lifecycle recovery v1 — pre-LLM narrow vague-edit guard.
@@ -885,8 +889,9 @@ export const TelemetryEvents = {
   // underspecified to spend an LLM call on (no numeric, no factor /
   // edge / option anchor, no add/remove construct, no mutation
   // signal, not a question). Payload:
-  //   - prior_analysis_is_fresh: boolean | null — same shape as the
-  //     chip-clarify event above.
+  //   - prior_analysis_is_fresh: boolean — same shape as the
+  //     chip-clarify event above (always boolean since PR #194
+  //     review-1; see V5InterceptedChipClarify for the rationale).
   //   - chips_emitted: number — how many graph-derived chips the
   //     clarify composer attached (0 means cancel-only).
   V5InterceptedVagueEdit: "v5.edit_graph.intercepted_vague_edit",
