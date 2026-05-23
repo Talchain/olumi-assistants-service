@@ -863,6 +863,54 @@ export const TelemetryEvents = {
   // vague_edit / ambiguous).
   V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
 
+  // V5 edit lifecycle recovery v1 — pre-LLM intercept for the legacy
+  // V4 "Simplify the change" facilitator chip (edit-graph.ts:2096,
+  // :2198). The chip submits the free-text prompt "Try a simpler
+  // version of this change.", which on its own would match
+  // EDIT_GRAPH_POSITIVE_REGEX (via "change") and re-enter the V4
+  // edit_graph LLM — typically producing another empty-operations
+  // no-op. This event fires when route-v2's chip-simplify-intercept
+  // short-circuits that loop with deterministic clarification copy,
+  // BEFORE the LLM call. Payload:
+  //   - source: 'exact_text' (only leg shipped in this PR; future
+  //     metadata leg will add 'chip_metadata').
+  //   - prior_analysis_is_fresh: boolean — whether the request's
+  //     `analysisState` carries a successful `analysis_status` AND a
+  //     `graph_hash_at_run` matching the current graph hash. Always
+  //     boolean; the previous async DB-backed derivation that could
+  //     also return `null` on session-store failure was replaced
+  //     (PR #194 review-1) with a pure request-local helper that
+  //     returns `false` when it cannot verify.
+  V5InterceptedChipClarify: "v5.edit_graph.intercepted_chip_clarify",
+
+  // V5 edit lifecycle recovery v1 — pre-LLM narrow vague-edit guard.
+  // Fires when route-v2's vague-edit-guard short-circuits a free-text
+  // edit message that cleared the existing route-v2 gates but is too
+  // underspecified to spend an LLM call on (no numeric, no factor /
+  // edge / option anchor, no add/remove construct, no mutation
+  // signal, not a question). Payload:
+  //   - prior_analysis_is_fresh: boolean — same shape as the
+  //     chip-clarify event above (always boolean since PR #194
+  //     review-1; see V5InterceptedChipClarify for the rationale).
+  //   - chips_emitted: number — how many graph-derived chips the
+  //     clarify composer attached (0 means cancel-only).
+  V5InterceptedVagueEdit: "v5.edit_graph.intercepted_vague_edit",
+
+  // V5 edit lifecycle recovery v1 — pre-edit analytical-question
+  // guard. Fires when route-v2 detected an edit verb in the message
+  // (EDIT_GRAPH_POSITIVE_REGEX matched) AND the analytical-question
+  // guard suppressed `editIntentDetected` because the message is a
+  // hypothetical / analytical question about the outcome
+  // (e.g. "What could change the outcome?"). The turn then falls
+  // through to TurnExecutor where the post-analysis advice gate /
+  // `what_would_flip` handler owns the response. Payload is
+  // structural only:
+  //   - intent_class: AnalyticalIntentClass | null — null when the
+  //     match came from this guard's additional patterns rather
+  //     than `classifyAnalyticalIntent`.
+  V5EditGraphAnalyticalQuestionSuppressed:
+    "v5.edit_graph.analytical_question_suppressed",
+
   // V5 product-state continuity (foamy-bee tranche) — emitted by the
   // deterministic state-query guard. Closes the named misroute class
   // where "what update did you make?" routes to legacy edit_graph and

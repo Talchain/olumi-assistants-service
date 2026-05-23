@@ -112,6 +112,12 @@ import {
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import { loadPersistedGraphStrict } from '../orchestrator-v5/build-turn-context.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
+import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
+import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
+import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
+import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
+import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
+import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
 import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
 
 // ───────────────────────────────────────────────────────────────────
@@ -472,6 +478,68 @@ function sendEditGraphRecovery(
     assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
     stage,
   }), { graph: null });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// V5 edit lifecycle recovery v1 — pure freshness derivation for the
+// pre-LLM intercepts. PR #194 review correction: the prior version
+// of this helper called `buildTurnContext`, which reads facts from
+// Supabase — a DB round-trip on a path the brief explicitly asked to
+// keep cheap. The replacement reads only fields already on the
+// request: `extensions.analysisState.meta.graph_hash_at_run` and the
+// current graph state. Verdict:
+//   - `true`  → analysisState carries an `analysis_status` in the
+//               `SUCCESSFUL_ANALYSIS_STATUSES` allowlist
+//               (`completed` | `computed` | `complete` | `success`)
+//               AND a `graph_hash_at_run` that equals
+//               `computeAnalysisAffectingGraphHash(graphState)`.
+//   - `false` → cannot verify from the request alone (no
+//               analysisState, missing hash, status not in the
+//               successful allowlist, hash diverged, or empty graph).
+//
+// "Cannot verify" is the right semantic here — when the request
+// doesn't prove freshness, the clarification omits the freshness
+// sentence rather than restating something we can't ground. This is
+// strictly more honest than the previous DB-backed derivation,
+// which would have returned `true` for some scenarios the
+// stateless caller can't see.
+// ────────────────────────────────────────────────────────────────────
+// Canonical successful-analysis statuses on the wire. Mirrors the
+// allowlist in `src/orchestrator/analysis-state.ts`
+// (`isAnalysisExplainable`), which checks
+// `'completed' | 'computed' | 'complete'`. `'success'` is included
+// for forward-compat with any future producer that uses it. PR #194
+// review-2 correction — the previous narrower check (`'success'`
+// only) silently omitted the freshness sentence on every real
+// production envelope.
+const SUCCESSFUL_ANALYSIS_STATUSES: ReadonlySet<string> = new Set([
+  'completed',
+  'computed',
+  'complete',
+  'success',
+]);
+
+function isPriorAnalysisFreshFromRequest(
+  graphState: import('../orchestrator-v5/boundary/request-extensions.js').GraphStateIngress | null | undefined,
+  analysisState: import('../orchestrator-v5/boundary/request-extensions.js').AnalysisStateIngress | null | undefined,
+): boolean {
+  if (!graphState || !analysisState) return false;
+  const status = (analysisState as { analysis_status?: unknown }).analysis_status;
+  if (typeof status !== 'string' || !SUCCESSFUL_ANALYSIS_STATUSES.has(status)) return false;
+  // graph_hash_at_run may live under `meta` (canonical V2 envelope shape)
+  // or at the top level (some legacy / passthrough variants). Read both.
+  const meta = (analysisState as { meta?: unknown }).meta;
+  let graphHashAtRun: unknown =
+    meta && typeof meta === 'object'
+      ? (meta as { graph_hash_at_run?: unknown }).graph_hash_at_run
+      : undefined;
+  if (typeof graphHashAtRun !== 'string') {
+    graphHashAtRun = (analysisState as { graph_hash_at_run?: unknown }).graph_hash_at_run;
+  }
+  if (typeof graphHashAtRun !== 'string' || graphHashAtRun.length === 0) return false;
+  const currentHash = computeAnalysisAffectingGraphHash(graphState);
+  if (typeof currentHash !== 'string' || currentHash.length === 0) return false;
+  return currentHash === graphHashAtRun;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -926,9 +994,87 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // is `direct_answer` (no `'recovery'` literal exists in
     // ConversationTurnClassSchema; introducing one would break ingress
     // validation across the boundary).
+    // ────────────────────────────────────────────────────────────────
+    // V5 edit lifecycle recovery v1 — pre-LLM intercepts (PR #194 +
+    // review-correction commit). Run BEFORE `editIntentDetected` is
+    // computed, so they catch:
+    //
+    //   1. The legacy "Simplify the change" chip prompt (exact text)
+    //      — chip-text closes a loop even when the chip-side
+    //      `action_type` was lost.
+    //   2. Vague-improvement messages WITHOUT an edit-positive verb
+    //      ("Make the model better", "Try something different",
+    //      "Improve this") — these would otherwise miss
+    //      `EDIT_GRAPH_POSITIVE_REGEX` and fall through to
+    //      TurnExecutor, costing a Sonnet round-trip on a UX the
+    //      brief asked to handle deterministically.
+    //
+    // Freshness derivation is pure — it reads only
+    // `extensions.analysisState.meta.graph_hash_at_run` (already on
+    // the request payload) and compares against the request's graph
+    // hash. NO Supabase round-trip. PR #194 review correction.
+    // ────────────────────────────────────────────────────────────────
+    const priorAnalysisIsFresh = isPriorAnalysisFreshFromRequest(
+      extensions.graphState,
+      extensions.analysisState,
+    );
+    const interceptNodes = extensions.graphState?.nodes ?? null;
+
+    const chipSimplify = tryChipSimplifyIntercept(ingress.message);
+    if (chipSimplify.matched) {
+      emit(TelemetryEvents.V5InterceptedChipClarify, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        source: chipSimplify.source,
+        prior_analysis_is_fresh: priorAnalysisIsFresh,
+      });
+      const response = composeEditClarifyResponse({
+        reason: 'chip_simplify',
+        stage: ingress.stage,
+        nodes: interceptNodes,
+        priorAnalysisIsFresh,
+      });
+      return sendFinalised200(reply, requestId, 'edit_graph', response, {
+        graph: null,
+      });
+    }
+
+    const vague = tryVagueEditGuard(ingress.message, interceptNodes);
+    if (vague.matched) {
+      const response = composeEditClarifyResponse({
+        reason: 'vague_edit',
+        stage: ingress.stage,
+        nodes: interceptNodes,
+        priorAnalysisIsFresh,
+      });
+      emit(TelemetryEvents.V5InterceptedVagueEdit, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        prior_analysis_is_fresh: priorAnalysisIsFresh,
+        chips_emitted: response.suggested_actions.length,
+      });
+      return sendFinalised200(reply, requestId, 'edit_graph', response, {
+        graph: null,
+      });
+    }
+
+    // V5 edit lifecycle recovery v1 — analytical-question guard. The
+    // existing `EDIT_GRAPH_NEGATIVE_REGEX` catches `what would` but
+    // not `what could` / `what might` / `how could the outcome
+    // change`, so analytical questions about the model's outcome
+    // currently slip through and dispatch to edit_graph. This guard
+    // closes that hole BEFORE editIntentDetected fires. The guard
+    // delegates to `classifyAnalyticalIntent` (the canonical
+    // analytical taxonomy) and adds the narrow modal-cousin
+    // variants. See src/orchestrator-v5/routing/analytical-question-guard.ts
+    // for the predicate and its scope contract.
+    const analyticalQuestionDetected = isAnalyticalQuestion(ingress.message);
+    const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
+    const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
+    const valueUpdatePhrasingHit = isValueUpdatePhrasing(ingress.message);
     const editIntentDetected =
-      EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message) &&
-      !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message) &&
+      positiveEditRegexHit &&
+      !negativeEditRegexHit &&
       // P0 fix (2026-05): suppress dispatch when the message is a clear
       // value/factor update (`set X to Y`, `increase X by N`, etc.). These
       // belong on the deterministic D1 / Sonnet tool-use path, not the
@@ -937,7 +1083,28 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // structural edits like "update the model to include market
       // dynamics", kind changes like "set goal to be a factor", and A4
       // requests like "Add team dynamics as a risk").
-      !isValueUpdatePhrasing(ingress.message);
+      !valueUpdatePhrasingHit &&
+      // V5 edit lifecycle recovery v1 — analytical-question suppression.
+      !analyticalQuestionDetected;
+    // Emit ONLY when the analytical-question guard is THE deciding
+    // factor — i.e. the message WOULD have dispatched to edit_graph
+    // had the guard not fired. The earlier loose condition (emit on
+    // any positive-regex + analytical match) overstated the guard's
+    // contribution because `EDIT_GRAPH_NEGATIVE_REGEX` and
+    // `isValueUpdatePhrasing` already suppress some of those
+    // messages. PR #194 review correction.
+    if (
+      analyticalQuestionDetected
+      && positiveEditRegexHit
+      && !negativeEditRegexHit
+      && !valueUpdatePhrasingHit
+    ) {
+      emit(TelemetryEvents.V5EditGraphAnalyticalQuestionSuppressed, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        intent_class: classifyAnalyticalIntent(ingress.message),
+      });
+    }
     let resolvedGraphState: GraphStateIngress | null = null;
     if (editIntentDetected) {
       if (extensions.graphState != null) {
@@ -1001,6 +1168,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const effectiveGraphState = resolvedGraphState ?? extensions.graphState;
     const isEditGraphShape = effectiveGraphState != null && editIntentDetected;
     if (isEditGraphShape) {
+      // V5 edit lifecycle recovery v1 — chip-simplify and vague-edit
+      // intercepts have already run BEFORE editIntentDetected (see
+      // the block above). If we reach this point, neither matched
+      // and we proceed with the V4 edit-graph dispatch.
+      //
       // V4 cordon: dispatchEditGraph delegates to the V4 graph-edit pipeline
       // for free-form edit intents that do not match a typed V5 mutation
       // handler (set_factor_value, add_constraint, adjust_edge_strength).
