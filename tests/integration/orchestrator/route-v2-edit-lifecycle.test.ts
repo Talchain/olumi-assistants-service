@@ -262,6 +262,54 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
   // intercepting benign retry / acknowledgement / option-
   // exploration traffic. The phrase-based grammar fixes verb+object
   // together — `try` alone is not enough, neither is `better`.
+  // Test #6d — PR #194 review-3 correction. Advice-seeking value-edit
+  // questions ("What should I set X to?", "What should I increase
+  // by?") must route to TurnExecutor / post-analysis advice, NOT
+  // edit_graph. Verified by direct execution that
+  // `isValueUpdatePhrasing` returns FALSE for these shapes (the
+  // missing space-separated value after `to`/`by`), so without the
+  // analytical pattern they slip through.
+  it.each([
+    'What should I set Hiring and Salary Cost to?',
+    'What should I increase Revenue by?',
+    'What should I lower cost to?',
+    'What should we set?',
+    'What should I increase?',
+    'What should we lower?',
+  ])('advice-seeking value question "%s" → dispatch NOT called; analytical suppression fires', async (message) => {
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message,
+        turn_id: '11111111-1111-4111-8111-1111111111d3',
+      }),
+    });
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(findEvent('v5.edit_graph.analytical_question_suppressed')).toBeDefined();
+  });
+
+  // Test #6e — concrete value edit with a value MUST still deflect via
+  // `isValueUpdatePhrasing` (PR #192 path), NOT trigger the new
+  // analytical telemetry (which only fires when the analytical guard
+  // is THE deciding factor). Regression guard for the tighter
+  // `analytical_question_suppressed` emit condition.
+  it('"What should I set X to 100?" → value-update gate deflects; analytical telemetry NOT emitted', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'What should I set Hiring and Salary Cost to 100?',
+        turn_id: '11111111-1111-4111-8111-1111111111d4',
+      }),
+    });
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    // The tighter emit condition (PR #194 review-1) requires
+    // `!valueUpdate`. With value-update true, this telemetry MUST
+    // NOT fire even though the analytical guard would have matched.
+    expect(emittedNames()).not.toContain('v5.edit_graph.analytical_question_suppressed');
+  });
+
   it.each([
     'Sounds better',
     'That is better',

@@ -27,6 +27,16 @@ describe('tryVagueEditGuard', () => {
       'Update the thing', // verb + non-anchor object, no value
       'Polish this up',
       'Refine the wording',
+
+      // PR #194 review-3 correction — "try another/new <modifier>
+      // <approach>" family. Previously matched the phrase-shape gate
+      // but was wrongly rejected by STRUCTURAL_KEYWORD_PATTERN (which
+      // had bare `another` / `new` determiners). After tightening
+      // that pattern to structural VERBS only, these intercept.
+      'Try another fresh approach',
+      'Try a new approach',
+      'Try another simpler way',
+      'Try a fresh take',
     ];
     for (const msg of positives) {
       it(`intercepts "${msg}"`, () => {

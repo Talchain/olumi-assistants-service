@@ -46,6 +46,22 @@ describe('isAnalyticalQuestion', () => {
       'What should I do?',
       'What should I tweak?',
       'What should we adjust?',
+
+      // PR #194 review-3 correction — advice-seeking value-edit
+      // questions. Verified by direct execution that
+      // `isValueUpdatePhrasing` returns FALSE for "...set X to?"
+      // shapes (no space-separated value after `to`/`by`), so
+      // without these in the analytical alternation they would
+      // route to edit_graph despite being clear advice questions.
+      'What should I set Hiring and Salary Cost to?',
+      'What should I increase Revenue by?',
+      'What should I lower cost to?',
+      'What should we set?',
+      'What should I increase?',
+      'What should we lower?',
+      'What should we reduce?',
+      'What should I raise?',
+      'What should we decrease?',
     ];
     for (const msg of positives) {
       it(`intercepts "${msg}"`, () => {

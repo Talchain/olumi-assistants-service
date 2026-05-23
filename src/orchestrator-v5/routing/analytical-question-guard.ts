@@ -83,15 +83,28 @@ const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
     String.raw`\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?${ANALYTICAL_OUTCOME_NOUNS}\s+(?:change|shift|move|flip|differ|reverse)\b`,
     'i',
   ),
-  // "What should I/we (change|update|edit|adjust|modify|fix|tweak|improve
-  //  |simplify|do)" — advice-seeking question, NOT an edit instruction.
-  // Without this pattern, "What should I change?" hits
+  // "What should I/we VERB" — advice-seeking question, NOT an edit
+  // instruction. Without this pattern, "What should I change?" hits
   // EDIT_GRAPH_POSITIVE_REGEX (via `change`), clears the negative
   // regex (`what should` is not in it), and dispatches to edit_graph.
-  // Concrete value-edit clarifications like "What should I set X to?"
-  // are deflected upstream by `isValueUpdatePhrasing` (because of the
-  // `set X to <value>` shape), so this pattern is safe.
-  /\bwhat\s+should\s+(?:i|we)\s+(?:change|update|edit|adjust|modify|fix|tweak|improve|simplify|do)\b/i,
+  //
+  // PR #194 review-3 correction — the alternation now includes the
+  // value-edit verbs (set / increase / decrease / raise / lower /
+  // reduce / bump). The prior pattern only had structural-edit verbs,
+  // so phrases like "What should I set X to?" or "What should I
+  // increase Revenue by?" without a concrete value slipped through
+  // (verified by direct execution: `isValueUpdatePhrasing` requires
+  // a non-whitespace token after `to\s+` / `by\s+` — "to?" / "by?"
+  // fail it because there's no space between the preposition and
+  // the punctuation).
+  //
+  // Concrete value-edit clarifications WITH a value
+  // ("What should I set X to 100?") are deflected upstream by
+  // `isValueUpdatePhrasing`. The tighter
+  // `analytical_question_suppressed` emit condition
+  // (`!valueUpdate`) ensures this analytical pattern doesn't double-
+  // count those cases in telemetry.
+  /\bwhat\s+should\s+(?:i|we)\s+(?:change|update|edit|adjust|modify|fix|tweak|improve|simplify|do|set|increase|decrease|raise|lower|reduce|bump)\b/i,
 ];
 
 /**

@@ -175,9 +175,20 @@ const NUMERIC_TOKEN_PATTERN =
  * should reach edit_graph LLM (which knows how to ask for the missing
  * driver via the add-risk classifier or fall through to clarification
  * naturally). Excluding these keeps the guard surgical.
+ *
+ * PR #194 review-3 correction — bare `new` / `another` determiners
+ * REMOVED. They're not structural mutation signals on their own;
+ * they're just English articles. With them in this pattern, the
+ * vague phrase `try a new approach` / `try another fresh approach`
+ * matched the phrase-shape gate, then got rejected here as
+ * `structural_keyword_present` — a contradiction between the table
+ * and the downstream check. The structural signal lives in the
+ * VERB (`add` / `insert` / `create` / `remove` / `delete` / `drop`),
+ * so the determiner-only check was redundant and produced false
+ * negatives on legitimate vague edits.
  */
 const STRUCTURAL_KEYWORD_PATTERN =
-  /\b(?:add|insert|create|remove|delete|drop|new|another)\b/i;
+  /\b(?:add|insert|create|remove|delete|drop)\b/i;
 
 /**
  * Question-shape detector. We don't want to intercept analytical or
