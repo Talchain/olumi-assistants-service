@@ -502,13 +502,28 @@ function sendEditGraphRecovery(
 // which would have returned `true` for some scenarios the
 // stateless caller can't see.
 // ────────────────────────────────────────────────────────────────────
+// Canonical successful-analysis statuses on the wire. Mirrors the
+// allowlist in `src/orchestrator/analysis-state.ts`
+// (`isAnalysisExplainable`), which checks
+// `'completed' | 'computed' | 'complete'`. `'success'` is included
+// for forward-compat with any future producer that uses it. PR #194
+// review-2 correction — the previous narrower check (`'success'`
+// only) silently omitted the freshness sentence on every real
+// production envelope.
+const SUCCESSFUL_ANALYSIS_STATUSES: ReadonlySet<string> = new Set([
+  'completed',
+  'computed',
+  'complete',
+  'success',
+]);
+
 function isPriorAnalysisFreshFromRequest(
   graphState: import('../orchestrator-v5/boundary/request-extensions.js').GraphStateIngress | null | undefined,
   analysisState: import('../orchestrator-v5/boundary/request-extensions.js').AnalysisStateIngress | null | undefined,
 ): boolean {
   if (!graphState || !analysisState) return false;
   const status = (analysisState as { analysis_status?: unknown }).analysis_status;
-  if (status !== 'success') return false;
+  if (typeof status !== 'string' || !SUCCESSFUL_ANALYSIS_STATUSES.has(status)) return false;
   // graph_hash_at_run may live under `meta` (canonical V2 envelope shape)
   // or at the top level (some legacy / passthrough variants). Read both.
   const meta = (analysisState as { meta?: unknown }).meta;

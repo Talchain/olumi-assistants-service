@@ -96,34 +96,63 @@ export type VagueEditGuardResult =
   | { readonly matched: false; readonly reason: VagueEditGuardUnmatchedReason };
 
 /**
- * Positive shape gate. The guard runs BEFORE
- * `EDIT_GRAPH_POSITIVE_REGEX` narrows the candidate set, so without
- * this check it would over-claim any non-edit non-question message
- * (e.g. "Hello", "Tell me a joke"). Match an improvement / vague-
- * target edit verb OR a comparative modifier — either is enough to
- * say "this message LOOKS like a vague edit request". The verb list
- * is wider than route-v2's edit-positive regex on purpose: it
- * includes `make`, `improve`, `simplify`, `try`, `polish`, etc. so
- * the brief's required examples ("Make the model better", "Try
- * something different") match here even though they miss the
- * narrower route-level regex.
+ * Positive shape gate — phrase-based grammar (PR #194 review-2
+ * correction). The previous gate matched any vague-edit verb OR any
+ * comparative modifier anywhere in the message, which produced
+ * false positives on benign follow-ups like "Sounds better", "Try
+ * again", "Try Option B", "Different". Codex review flagged these
+ * as silent-routing regressions.
+ *
+ * Switch to a table of COMPLETE phrases. Each pattern fixes BOTH
+ * the verb and the object together — `try` alone is not enough; it
+ * must be `try something different` / `try a simpler version`.
+ * `better` / `different` alone are not enough; the verb side must
+ * be `make (the model|this|it) better`.
  *
  * Structural verbs (`add`, `remove`, `insert`, `create`, `delete`,
- * `drop`) are intentionally EXCLUDED here — they're handled by the
- * downstream structural-keyword check, which short-circuits the
- * guard with `structural_keyword_present` so the V4 add-risk
- * classifier and existing structural-edit paths keep ownership.
+ * `drop`) are intentionally absent from this table — they're
+ * handled by the downstream structural-keyword check (which
+ * short-circuits with `structural_keyword_present` for messages
+ * that DO carry a vague-edit shape and also a structural keyword
+ * elsewhere). The V4 add-risk classifier and existing structural-
+ * edit paths keep ownership of those messages.
+ *
+ * Adding a new family: extend this table only — do not relax the
+ * grammar to single-verb or single-modifier matching.
  */
-const VAGUE_EDIT_VERB_PATTERN =
-  /\b(?:make|improve|simplify|change|adjust|edit|modify|update|tweak|fix|polish|refine|revise|amend|tune|try|alter|rework|redo|clean(?:\s+up)?|sort(?:\s+out)?)\b/i;
+const VAGUE_EDIT_PHRASE_PATTERNS: readonly RegExp[] = [
+  // "make (the model|this|it|things|stuff) (better|different|cleaner|simpler|nicer|clearer|...)"
+  /\bmake\s+(?:the\s+(?:model|graph|setup|thing|whole\s+thing)|this|it|things?|stuff)\s+(?:better|different|cleaner|simpler|nicer|clearer|tidier|smoother|sharper|prettier)\b/i,
+  // "try (something|anything) (different|else|simpler|cleaner|another|new|fresh|...)"
+  /\btry\s+(?:something|anything)\s+(?:different|else|simpler|cleaner|nicer|smoother|another|new|fresh)\b/i,
+  // "try a (simpler|different|cleaner|new|fresh) (version|approach|way|take|angle)"
+  /\btry\s+(?:a|another)\s+(?:simpler|different|cleaner|nicer|new|fresh)\s+(?:version|approach|way|take|angle)\b/i,
+  // "improve (this|it|the (model|graph|setup|thing|analysis|whole thing|wording|copy))"
+  /\bimprove\s+(?:this|it|the\s+(?:model|graph|setup|thing|analysis|whole\s+thing|wording|copy))\b/i,
+  // "simplify (this|it|the (change|model|graph|setup|approach|edit|update|modification|adjustment|wording|whole thing)|things|everything|stuff)"
+  /\bsimplify\s+(?:this|it|the\s+(?:change|model|graph|setup|thing|approach|edit|update|modification|adjustment|wording|whole\s+thing)|things?|everything|stuff)\b/i,
+  // "(change|edit|adjust|tweak|modify|update|alter|amend|tune|fix|polish|refine|revise|rework|redo) (this|it|that|the (thing|stuff|model|graph|setup|whole thing|wording|copy|approach))"
+  /\b(?:change|edit|adjust|tweak|modify|update|alter|amend|tune|fix|polish|refine|revise|rework|redo)\s+(?:this|it|that|the\s+(?:thing|stuff|model|graph|setup|whole\s+thing|wording|copy|approach))\b/i,
+  // "(clean up|sort out) (this|it|the (model|graph|setup|thing|whole thing|wording|approach))"
+  /\b(?:clean\s+up|sort\s+out)\s+(?:this|it|the\s+(?:model|graph|setup|thing|whole\s+thing|wording|approach))\b/i,
+];
 
 /**
- * Comparative modifier — also a vague-edit shape signal. Catches
- * "make it cleaner", "needs different framing", etc. when the verb
- * is elsewhere or implied.
+ * Pure predicate. Returns `true` when the message matches ONE of
+ * the complete vague-edit phrase patterns above. Test-only export
+ * so calibration suites can assert against the patterns directly
+ * without going through `tryVagueEditGuard`'s other checks.
  */
-const VAGUE_EDIT_MODIFIER_PATTERN =
-  /\b(?:better|different|cleaner|simpler|nicer|clearer|tidier|smoother|sharper|prettier)\b/i;
+export function __testOnlyMatchesVagueEditShape(message: string): boolean {
+  return matchesVagueEditShape(message);
+}
+
+function matchesVagueEditShape(message: string): boolean {
+  for (const re of VAGUE_EDIT_PHRASE_PATTERNS) {
+    if (re.test(message)) return true;
+  }
+  return false;
+}
 
 /**
  * Numeric / quantitative token guard. Matches digits, currency symbols,
@@ -189,11 +218,10 @@ export function tryVagueEditGuard(
   const trimmed = message.trim();
 
   // Positive shape gate — must fire first so the predicate is not
-  // satisfied by every non-edit non-question message.
-  if (
-    !VAGUE_EDIT_VERB_PATTERN.test(trimmed)
-    && !VAGUE_EDIT_MODIFIER_PATTERN.test(trimmed)
-  ) {
+  // satisfied by every non-edit non-question message. Phrase-based
+  // (table of complete `verb + object` phrases) per PR #194 review-2
+  // correction.
+  if (!matchesVagueEditShape(trimmed)) {
     return { matched: false, reason: 'no_vague_edit_shape' };
   }
 

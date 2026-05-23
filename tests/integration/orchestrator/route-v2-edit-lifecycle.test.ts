@@ -237,7 +237,7 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
   });
 
   // Test #3c — conversational messages MUST NOT be intercepted as
-  // vague edits. Pins the new positive shape gate added in the
+  // vague edits. Pins the positive phrase-gate added in the
   // PR #194 review correction.
   it.each(['Hello', 'Tell me a joke', 'Thanks', 'Goodbye'])(
     'conversational "%s" → neither vague nor chip intercept fires',
@@ -255,6 +255,38 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
       expect(dispatchEditGraphMock).not.toHaveBeenCalled();
     },
   );
+
+  // Test #3d — PR #194 review-2 correction. Reviewer-flagged false
+  // positives the broad-token shape gate produced: `try` and
+  // standalone modifiers `better`/`different` matched anywhere,
+  // intercepting benign retry / acknowledgement / option-
+  // exploration traffic. The phrase-based grammar fixes verb+object
+  // together — `try` alone is not enough, neither is `better`.
+  it.each([
+    'Sounds better',
+    'That is better',
+    'Try again',
+    'Try running analysis again',
+    'Try Option B',
+    'Maybe different',
+    'Different',
+  ])('reviewer false-positive "%s" → no intercept (review-2 regression guard)', async (message) => {
+    // Some of these don't match EDIT_GRAPH_POSITIVE_REGEX either,
+    // so they wouldn't have reached `dispatchEditGraph` even
+    // before this fix; the assertion the user cares about is that
+    // the vague-edit intercept doesn't fire and steer them into
+    // deterministic clarification.
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message,
+        turn_id: '11111111-1111-4111-8111-1111111111d2',
+      }),
+    });
+    expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_vague_edit');
+    expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_chip_clarify');
+  });
 
   // Test #4 — concrete value edits MUST keep their existing route.
   // Route-v2 suppresses `dispatchEditGraph` via `isValueUpdatePhrasing`
@@ -462,42 +494,86 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
   // PR #194 review correction — prior fresh analysis copy.
   // When the request carries an analysisState whose
   // `meta.graph_hash_at_run` matches the request graph's
-  // `computeAnalysisAffectingGraphHash`, the clarification appends
-  // "Your last analysis is still current." Pure derivation — no
-  // session-store / Supabase read on the intercept path.
-  it('vague intercept + analysisState matching graph_hash_at_run → appends "Your last analysis is still current."', async () => {
-    const { computeAnalysisAffectingGraphHash } = await import(
-      '../../../src/orchestrator-v5/context/graph-hash.js'
-    );
-    const liveHash = computeAnalysisAffectingGraphHash(GRAPH_STATE as never);
-    expect(liveHash).toBeTruthy();
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: {
-        ...payload({
-          message: 'Make this better',
-          turn_id: '11111111-1111-4111-8111-1111111111e0',
-        }),
-        analysis_state: {
-          analysis_status: 'success',
-          meta: {
-            graph_hash_at_run: liveHash,
-            seed_used: 0,
-            n_samples: 0,
-            response_hash: '',
+  // `computeAnalysisAffectingGraphHash` AND the status is one of
+  // the canonical successful statuses (completed / computed /
+  // complete / success), the clarification appends "Your last
+  // analysis is still current." Pure derivation — no session-store
+  // / Supabase read on the intercept path.
+  //
+  // PR #194 review-2 correction — covers all four canonical
+  // statuses (was previously 'success' only, which is rare on the
+  // production wire; the codebase uses 'completed' / 'computed' /
+  // 'complete' — see analysis-state.ts:187).
+  it.each(['completed', 'computed', 'complete', 'success'])(
+    'vague intercept + analysisState (status=%s, hash matches) → appends "Your last analysis is still current."',
+    async (status) => {
+      const { computeAnalysisAffectingGraphHash } = await import(
+        '../../../src/orchestrator-v5/context/graph-hash.js'
+      );
+      const liveHash = computeAnalysisAffectingGraphHash(GRAPH_STATE as never);
+      expect(liveHash).toBeTruthy();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          ...payload({
+            message: 'Make this better',
+            turn_id: '11111111-1111-4111-8111-1111111111e0',
+          }),
+          analysis_state: {
+            analysis_status: status,
+            meta: {
+              graph_hash_at_run: liveHash,
+              seed_used: 0,
+              n_samples: 0,
+              response_hash: '',
+            },
           },
         },
-      },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
-    const intercept = findEvent('v5.edit_graph.intercepted_vague_edit');
-    expect(intercept).toBeDefined();
-    expect(intercept!.prior_analysis_is_fresh).toBe(true);
-    const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('Your last analysis is still current.');
-  });
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      const intercept = findEvent('v5.edit_graph.intercepted_vague_edit');
+      expect(intercept).toBeDefined();
+      expect(intercept!.prior_analysis_is_fresh).toBe(true);
+      const body = JSON.parse(res.body);
+      expect(body.assistant_text).toContain('Your last analysis is still current.');
+    },
+  );
+
+  // PR #194 review-2 correction — non-canonical / failed statuses
+  // MUST NOT trigger the freshness copy, even when the hash
+  // matches. Honesty contract: only restate freshness for an
+  // analysis the request itself proves is successful.
+  it.each(['partial', 'failed', 'pending', 'unknown', ''])(
+    'vague intercept + analysisState (status=%s, hash matches) → freshness sentence OMITTED',
+    async (status) => {
+      const { computeAnalysisAffectingGraphHash } = await import(
+        '../../../src/orchestrator-v5/context/graph-hash.js'
+      );
+      const liveHash = computeAnalysisAffectingGraphHash(GRAPH_STATE as never);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          ...payload({
+            message: 'Make this better',
+            turn_id: '11111111-1111-4111-8111-1111111111e2',
+          }),
+          analysis_state: {
+            analysis_status: status,
+            meta: { graph_hash_at_run: liveHash },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const intercept = findEvent('v5.edit_graph.intercepted_vague_edit');
+      expect(intercept).toBeDefined();
+      expect(intercept!.prior_analysis_is_fresh).toBe(false);
+      const body = JSON.parse(res.body);
+      expect(body.assistant_text).not.toContain('still current');
+    },
+  );
 
   // PR #194 review correction — when analysisState is absent OR its
   // graph_hash_at_run does not match the request graph, the

@@ -101,22 +101,46 @@ describe('tryVagueEditGuard', () => {
   });
 
   describe('lets through messages anchored to a graph label', () => {
-    it('does NOT intercept when the message names a factor label', () => {
+    // With the PR #194 review-2 phrase grammar, most label-anchored
+    // edits fail the shape gate FIRST (their verb+object phrase
+    // isn't in the table). The label-anchor check therefore only
+    // fires on messages that DO match a vague-edit phrase AND
+    // happen to also name a graph label — the test cases below
+    // pin that backstop path explicitly.
+    it('does NOT intercept when a shape-matching message also names a factor label', () => {
+      // "change this Hiring and Salary Cost" → shape pattern hits
+      // "change this", label check then fires on "Hiring and
+      // Salary Cost".
       const result = tryVagueEditGuard(
-        'Update the Hiring and Salary Cost a bit',
+        'change this Hiring and Salary Cost',
         SAMPLE_GRAPH_NODES,
       );
       expect(result.matched).toBe(false);
       if (!result.matched) expect(result.reason).toBe('graph_label_present');
     });
 
-    it('does NOT intercept when the message names an option label', () => {
+    it('does NOT intercept when a shape-matching message also names an option label', () => {
+      // "improve this Option A — Hire now" → shape pattern hits
+      // "improve this", label check fires on the canonical option
+      // label.
       const result = tryVagueEditGuard(
-        'Modify Option A — Hire now',
+        'improve this Option A — Hire now',
         SAMPLE_GRAPH_NODES,
       );
       expect(result.matched).toBe(false);
       if (!result.matched) expect(result.reason).toBe('graph_label_present');
+    });
+
+    it('label-less labels (the canonical label is NOT a substring of the message) → falls through to other checks', () => {
+      // "Update the Hiring and Salary Cost a bit" has the label as
+      // a substring but no vague-edit phrase shape — the shape
+      // gate fires first.
+      const result = tryVagueEditGuard(
+        'Update the Hiring and Salary Cost a bit',
+        SAMPLE_GRAPH_NODES,
+      );
+      expect(result.matched).toBe(false);
+      if (!result.matched) expect(result.reason).toBe('no_vague_edit_shape');
     });
   });
 
@@ -139,8 +163,8 @@ describe('tryVagueEditGuard', () => {
   describe('positive shape gate rejects non-edit conversational messages', () => {
     // PR #194 review correction. The guard now runs BEFORE
     // EDIT_GRAPH_POSITIVE_REGEX narrows the candidate set, so it
-    // MUST include its own positive shape check (vague-edit verb
-    // or comparative modifier). Without that gate, the guard would
+    // MUST include its own positive shape check (table of complete
+    // vague-edit phrases). Without that gate, the guard would
     // over-claim every non-edit non-question message.
     const conversational = [
       'Hello',
@@ -154,6 +178,39 @@ describe('tryVagueEditGuard', () => {
       'Cool',
     ];
     for (const msg of conversational) {
+      it(`does NOT intercept "${msg}"`, () => {
+        const result = tryVagueEditGuard(msg, SAMPLE_GRAPH_NODES);
+        expect(result.matched).toBe(false);
+        if (!result.matched) {
+          expect(result.reason).toBe('no_vague_edit_shape');
+        }
+      });
+    }
+  });
+
+  describe('phrase-grammar narrowness — review-2 false-positive regression', () => {
+    // PR #194 review-2 correction. The prior gate matched any
+    // vague-edit verb OR any comparative modifier anywhere in the
+    // message, producing false positives on benign follow-ups:
+    //   "Sounds better", "Try again", "Try Option B", "Different", …
+    // The phrase-based grammar fixes BOTH verb and object together
+    // so `try` alone is not enough — it must be `try something
+    // different` / `try a simpler version`. `better` alone is not
+    // enough — it must be `make X better`.
+    const reviewerFalsePositives = [
+      'Sounds better',
+      'That is better',
+      'Try again',
+      'Try running analysis again',
+      'Try Option B',
+      'Maybe different',
+      'Different',
+      'Better',
+      'Something cleaner',
+      'Make it work', // 'make it' present but no comparative
+      'Make sense', // no edit shape at all
+    ];
+    for (const msg of reviewerFalsePositives) {
       it(`does NOT intercept "${msg}"`, () => {
         const result = tryVagueEditGuard(msg, SAMPLE_GRAPH_NODES);
         expect(result.matched).toBe(false);
