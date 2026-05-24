@@ -207,8 +207,23 @@ async function buildFreshFragileContext(opts: {
   readonly margin_pp: number;
   readonly leading_prob: number;
   readonly runner_prob: number;
-  /** `null` = omit raw enrichment.robustness entirely. */
+  /**
+   * `null` = omit raw `enrichment.robustness` entirely. When set, the
+   * `pickLatestRawRobustness` selector will surface
+   * `{ level, near_tie_is_tie: false }` and the composer's raw-fragile
+   * branch becomes reachable.
+   */
   readonly raw_robustness_level: string | null;
+  /**
+   * `null` = omit `enrichment.robustness_synthesis` entirely. When set,
+   * `compactAnalysis.deriveRobustnessLevel` reads this first and
+   * `ROBUSTNESS_MAP` canonicalises (`'low'` / `'very_low'` →
+   * `'fragile'`). Pass this WITHOUT `raw_robustness_level` to exercise
+   * the projected-fragile branch in isolation — proving the composer
+   * honours the canonical band even when the raw enrichment block is
+   * absent (older facts compatibility).
+   */
+  readonly synthesis_overall_assessment?: string | null;
 }): Promise<typeof DEFAULT_TURN_CONTEXT> {
   // Compute the analysis-affecting graph hash so the prior fact's
   // graph_hash_at_run can match → freshness 'fresh' → composer runs.
@@ -243,6 +258,14 @@ async function buildFreshFragileContext(opts: {
   };
   if (opts.raw_robustness_level !== null) {
     enrichment.robustness = { level: opts.raw_robustness_level };
+  }
+  if (
+    opts.synthesis_overall_assessment !== undefined
+    && opts.synthesis_overall_assessment !== null
+  ) {
+    enrichment.robustness_synthesis = {
+      overall_assessment: opts.synthesis_overall_assessment,
+    };
   }
 
   const priorRunAnalysisFact = {
@@ -334,17 +357,22 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     expect(text).toContain('Freelance Consultant + Moderate Ad Spend');
   });
 
-  it('canonical fragile band with raw enrichment.robustness OMITTED: still triggers fragility-aware copy (older facts compatibility)', async () => {
-    // Older run_analysis facts may not have the raw enrichment.robustness
-    // block — the canonical band derived by compactAnalysis is still
-    // present and is itself the upstream's verdict. The composer's
-    // projected-fragile branch must honour it.
+  it('canonical fragile band derived from robustness_synthesis (raw enrichment.robustness omitted): deterministically triggers fragility-aware copy', async () => {
+    // Round-2 review: the previous version of this test omitted both the
+    // raw robustness block AND the synthesis, so the canonical band was
+    // not guaranteed to be 'fragile' — making the assertion conditional.
+    // `compactAnalysis.deriveRobustnessLevel` reads
+    // `robustness_synthesis.overall_assessment` first; `ROBUSTNESS_MAP`
+    // maps `'low'` → `'fragile'`. Setting synthesis without the raw
+    // block deterministically exercises the projected-fragile branch:
+    // raw signals are absent, but `projection.robustness_band === 'fragile'`.
     buildTurnContextMock.mockResolvedValueOnce(
       await buildFreshFragileContext({
         leading_prob: 0.49,
         runner_prob: 0.433,
         margin_pp: 5.7,
         raw_robustness_level: null,
+        synthesis_overall_assessment: 'low',
       }),
     );
 
@@ -359,19 +387,14 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     }
 
     const text = commitedAssistantText();
+    // Hard regression: the buggy sentence must never reach the user.
     expect(text).not.toMatch(/smaller changes are unlikely to flip/i);
-    // Without raw signals the composer falls back to the canonical band
-    // projection. compactAnalysis is the source of `robustness_band` —
-    // if it doesn't surface 'fragile' for this enrichment shape, the
-    // composer's projected-fragile guard will not fire and the closing
-    // sentence will be omitted entirely. Either outcome is acceptable
-    // honesty; the contract is: never emit the buggy sentence.
-    if (/picture appears fragile/i.test(text)) {
-      expect(text.toLowerCase()).toMatch(
-        /small adjustments to the strongest drivers/,
-      );
-    } else {
-      expect(text).not.toMatch(/^The robustness band/m);
-    }
+    // Deterministic positive: canonical 'fragile' band alone must trigger
+    // the fragility-aware closing sentence (composer's projectedFragile
+    // branch).
+    expect(text.toLowerCase()).toMatch(/picture appears fragile/);
+    expect(text.toLowerCase()).toMatch(
+      /small adjustments to the strongest drivers/,
+    );
   });
 });

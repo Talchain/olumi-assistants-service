@@ -395,17 +395,36 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     expect(text).not.toMatch(/^The robustness band/m);
   });
 
-  it('stable band + NaN margin: omits the closing stability sentence (defensive Number.isFinite guard)', () => {
+  it('stable band + NaN margin: omits the closing stability sentence and falls back to the neutral runner-up sentence', () => {
     const text = composeWhatWouldFlipFallback(
       {
         ...FRAGILE_6PP,
-        margin_pp: Number.NaN as unknown as number,
+        margin_pp: Number.NaN,
         robustness_band: 'stable',
       },
       { level: 'high', near_tie_is_tie: false },
     );
     expect(text).not.toMatch(/less likely to flip/i);
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
+    // Runner-up sentence must use the neutral "most likely contender"
+    // fallback when margin is non-finite — never "lead of Not available
+    // would need to close" (the bug improvement 1 fixed).
+    expect(text).not.toMatch(/lead of .* would need to close/i);
+    expect(text).toMatch(/most likely contender to overtake/i);
+  });
+
+  it('Infinity margin: same neutral runner-up fallback, no broken numeric copy', () => {
+    const text = composeWhatWouldFlipFallback(
+      {
+        ...FRAGILE_6PP,
+        margin_pp: Number.POSITIVE_INFINITY,
+        robustness_band: 'stable',
+      },
+      { level: 'high', near_tie_is_tie: false },
+    );
+    expect(text).not.toMatch(/lead of .* would need to close/i);
+    expect(text).not.toMatch(/Not available/i);
+    expect(text).toMatch(/most likely contender to overtake/i);
   });
 
   it('unknown projected band with no raw signal: omits closing robustness sentence', () => {

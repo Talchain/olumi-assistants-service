@@ -230,10 +230,16 @@ export function composeWhatWouldFlipFallback(
     sentences.push(
       `${leading.label} and ${projection.runner_up.label} are effectively tied, so the outcome could shift with small changes.`,
     );
-  } else if (projection.runner_up && projection.margin_pp !== null) {
+  } else if (projection.runner_up && hasFiniteMargin) {
+    // Reuse the finite-margin guard: a `!== null` check was previously
+    // insufficient because `NaN !== null` and `Infinity !== null` both
+    // slip past, and `formatPercentagePoints(NaN)` renders as
+    // "Not available" — producing "the lead of Not available would
+    // need to close". Falling back to the neutral contender sentence
+    // when the margin is non-finite avoids the broken copy.
     sentences.push(
       `For ${projection.runner_up.label} to overtake it, the lead of ${formatPercentagePoints(
-        projection.margin_pp,
+        projection.margin_pp as number,
       )} would need to close.`,
     );
   } else if (projection.runner_up) {
