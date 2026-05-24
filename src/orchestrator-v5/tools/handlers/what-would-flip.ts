@@ -92,11 +92,21 @@ export function createWhatWouldFlipHandler(): HandlerFn {
     // when valid; otherwise compose a deterministic fallback from the
     // analysis projection (margins, top drivers, robustness). The
     // turn-executor forces suppress_orientation for explanation handlers.
+    //
+    // `invocation.rawRobustness` is forwarded so the fallback composer
+    // can suppress the "smaller changes are unlikely" sentence on
+    // raw-fragile or near-tie results (PR #193 SSOT). It is populated
+    // on the chip-click path by `dispatchChipClickNoopExplanation`;
+    // routed-path callers may omit it (undefined → composer treats as
+    // "no raw signal" and falls back to projected-band copy).
     const explanation = invocation.explanation;
     const sonnetValid = !!(explanation && explanation.answer_text_valid);
     const rawText = sonnetValid
       ? explanation!.answer_text
-      : composeWhatWouldFlipFallback(invocation.analysisProjection);
+      : composeWhatWouldFlipFallback(
+          invocation.analysisProjection,
+          invocation.rawRobustness ?? null,
+        );
 
     // V5 state-trust: CEE no longer prefixes assistant_text with the
     // staleness caveat. See explain-results.ts for the rationale; same

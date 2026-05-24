@@ -236,6 +236,19 @@ export interface HandlerInvocation {
    * that read it must fall back gracefully on undefined.
    */
   readonly analysisFreshness?: FreshnessDerivation;
+  /**
+   * Raw `enrichment.robustness` signals (`level`, `near_tie_is_tie`)
+   * selected by `pickLatestRawRobustness` off the same `run_analysis`
+   * fact the freshness/projection layer chose. Threaded into the
+   * `what_would_flip` deterministic fallback composer so chip-click
+   * copy reuses the PR #193 robustness-honesty SSOT and suppresses the
+   * "smaller changes are unlikely" sentence on raw-fragile or near-tie
+   * results. Optional so non-explanation handlers and existing test
+   * fixtures stay unaffected; `null` is the explicit "no raw signals
+   * available" form (no successful run_analysis fact or no robustness
+   * block in the envelope).
+   */
+  readonly rawRobustness?: import('../coaching/pick-raw-robustness.js').RawRobustnessSignals | null;
 }
 
 /**

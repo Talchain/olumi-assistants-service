@@ -58,77 +58,33 @@ import {
 } from '../format/format-analysis-value.js';
 import { formatSensitivityDirection } from '../format/sensitivity-phrases.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
-import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
+import {
+  isNearTieByMargin,
+  isRawFragile,
+  nearTieReasonByMargin,
+  type RawRobustnessSignals,
+} from '../coaching/robustness-honesty.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
 /**
- * Near-tie threshold (percentage points, inclusive). When the projected
- * margin between the leading option and the runner-up is at or under this
- * value, user-facing post-analysis copy MUST avoid strength claims
- * ("meaningful rather than marginal", "strongly favours", stability
- * assertions) and describe the result as effectively tied. Chosen at
- * 1.0pp deliberately: tight enough to avoid false confidence, wide enough
- * to read as honest user-facing wording. NOT reused from the deterministic
- * `CLOSE_CALL_THRESHOLD = 0.05` (5pp) constant in `turn-context.ts` —
- * that signal is internal and far too wide for user-facing copy.
+ * Thin advice-gate wrappers around the shared margin-based helpers in
+ * `coaching/robustness-honesty.ts`. Kept in this file so the existing
+ * `AdviceGateAnalysis`-typed callsites below stay unchanged and the
+ * single source of truth for the threshold/labels lives in one place.
  */
-const NEAR_TIE_PP_THRESHOLD = 1.0;
-
-/**
- * Raw robustness levels that MUST suppress moderate/stable user-facing
- * copy. Read defensively from the run_analysis fact's
- * `enrichment.robustness.level` (when available) so the composer can
- * prefer the raw signal over a canonicalised projection band that may
- * have already been coerced by a lossy mapping.
- */
-const RAW_FRAGILE_LEVELS: ReadonlySet<string> = new Set([
-  'very_low',
-  'low',
-  'fragile',
-]);
-
 function isNearTie(
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
 ): boolean {
-  // Strong override: explicit raw near_tie.is_tie flag (when upstream emits it).
-  if (rawRobustness?.near_tie_is_tie === true) return true;
-  const margin = analysis.margin_pp;
-  if (typeof margin !== 'number' || !Number.isFinite(margin)) return false;
-  return Math.abs(margin) <= NEAR_TIE_PP_THRESHOLD;
+  return isNearTieByMargin(analysis.margin_pp, rawRobustness);
 }
 
-/**
- * Discriminate why a near-tie verdict was reached so the composer can
- * pick copy that is numerically true on every branch. `'margin'` => the
- * projected `margin_pp` triggered the verdict (and is finite + ≤ 1.0pp);
- * `'override'` => the raw `near_tie.is_tie` flag drove the decision (the
- * margin may be wider, null, or absent).
- */
 function nearTieReason(
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
 ): 'margin' | 'override' | null {
-  if (!isNearTie(analysis, rawRobustness)) return null;
-  // Margin is the authoritative signal when it exists and is inside the
-  // band. Raw override wins when there is no usable margin.
-  const margin = analysis.margin_pp;
-  if (
-    typeof margin === 'number'
-    && Number.isFinite(margin)
-    && Math.abs(margin) <= NEAR_TIE_PP_THRESHOLD
-  ) {
-    return 'margin';
-  }
-  return 'override';
-}
-
-function isRawFragile(
-  rawRobustness: RawRobustnessSignals | null | undefined,
-): boolean {
-  const level = rawRobustness?.level;
-  return typeof level === 'string' && RAW_FRAGILE_LEVELS.has(level);
+  return nearTieReasonByMargin(analysis.margin_pp, rawRobustness);
 }
 
 export interface AdviceGateAnalysisOption {

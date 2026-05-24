@@ -84,6 +84,10 @@ import {
 } from '../tools/registry.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
+import {
+  pickLatestRawRobustness,
+  type RawRobustnessSignals,
+} from '../coaching/pick-raw-robustness.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
   HandlerInvocationFailedError,
@@ -747,6 +751,11 @@ async function dispatchChipClickNoopExplanation(
         analysisReady: projectionInputs.analysisReady,
         analysisProjection: projectionInputs.analysisProjection,
         analysisFreshness: projectionInputs.analysisFreshness,
+        // Raw robustness signals so the what_would_flip fallback composer
+        // can suppress the "smaller changes are unlikely" sentence on
+        // raw-fragile or near-tie results — same SSOT used by the
+        // free-text post-analysis advice gate.
+        rawRobustness: projectionInputs.rawRobustness,
       });
     } catch (err) {
       if (err instanceof HandlerInvocationFailedError) {
@@ -920,6 +929,13 @@ interface ProjectionInputs {
     | undefined;
   readonly analysisFreshness: FreshnessDerivation;
   readonly graph: GraphV3T | null;
+  // Raw `enrichment.robustness` signals selected off the SAME run_analysis
+  // fact as `analysisProjection`. Reused by the `what_would_flip` fallback
+  // composer so chip-click copy stays as honest as the free-text advice
+  // gate when robustness is raw-fragile or the result is a near-tie.
+  // `null` when no successful run_analysis fact is present (the precondition
+  // bypasses the composer entirely in that case).
+  readonly rawRobustness: RawRobustnessSignals | null;
 }
 
 /**
@@ -1024,5 +1040,11 @@ function buildProjectionInputs(
   }
   const analysisFreshness = deriveAnalysisFreshness(context.prior_facts, currentGraphHash);
 
-  return { analysisReady, analysisProjection, analysisFreshness, graph };
+  // Step 4: raw robustness signals from the SAME run_analysis fact the
+  // freshness/projection layer selected. Reused by the what_would_flip
+  // composer so chip-click copy honours raw-fragile + near-tie overrides
+  // the projection band may have flattened.
+  const rawRobustness = pickLatestRawRobustness(context.prior_facts);
+
+  return { analysisReady, analysisProjection, analysisFreshness, graph, rawRobustness };
 }
