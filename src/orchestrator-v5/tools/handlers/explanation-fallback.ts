@@ -33,8 +33,37 @@ import {
 } from '../../format/format-analysis-value.js';
 import { bandFromMagnitude } from '../../format/influence-bands.js';
 import { formatSensitivityDirection } from '../../format/sensitivity-phrases.js';
+import {
+  isNearTieByMargin,
+  isRawFragile,
+  type RawRobustnessSignals,
+} from '../../coaching/robustness-honesty.js';
 
 export { formatSensitivityDirection };
+
+/**
+ * Canonical robustness bands considered "stable" enough that the softened
+ * "smaller changes are less likely to flip the outcome" sentence reads as
+ * honest, provided the result is not also a near-tie. Mirrors the
+ * canonical labels produced by `mapRobustnessToCanonical` in
+ * `analysis-compact.ts`. The chip-click path receives the same canonical
+ * band via the projection summary, so a Set is enough — no extra mapping
+ * needed here. `'moderate'` is deliberately excluded so moderate-band
+ * results get balanced copy that does not overclaim stability.
+ */
+const STABLE_ROBUSTNESS_BANDS: ReadonlySet<string> = new Set([
+  'stable',
+  'highly_stable',
+]);
+
+/**
+ * Canonical `'fragile'` band — when the projection already canonicalises
+ * the upstream verdict to fragile, treat that as a fragility signal even
+ * when raw `enrichment.robustness` is unavailable (older facts, dropped
+ * envelope). Kept as a tiny named constant so the equality check below
+ * reads intentionally rather than as a magic string.
+ */
+const CANONICAL_FRAGILE_BAND = 'fragile';
 
 function formatDriver(d: AnalysisProjectionDriver): string {
   return d.factor_label;
@@ -127,9 +156,42 @@ export function composeExplainResultsFallback(
  * `what_would_flip` happy-path fallback — analysis exists, answer_text
  * was unusable. Cite margins, top drivers, and robustness; gesture at
  * "what could change the outcome" without inventing scenarios.
+ *
+ * Robustness honesty (PR #193 SSOT reuse): when `rawRobustness` is
+ * available the composer prefers the raw signal over the projected band
+ * because canonicalisation can flatten a `very_low`/`low` raw level into
+ * a moderate-sounding label. The chip-click path threads the raw signal
+ * through (`dispatchChipClickNoopExplanation` → handler → here); routed
+ * callers may pass `null` and the composer falls back to projected-band
+ * copy, gated on `STABLE_ROBUSTNESS_BANDS`.
+ *
+ * Copy ladder for the closing robustness sentence (post round-1 review):
+ *   - **Fragile signal** (raw fragile OR canonical `'fragile'` band) →
+ *     "the picture appears fragile, so even small adjustments to the
+ *     strongest drivers could shift which option leads". This is the
+ *     only branch that names *fragility* — invoking the robustness band
+ *     itself.
+ *   - **Near-tie WITHOUT a fragile signal** (raw band is stable/highly
+ *     stable/moderate/unknown/null AND not raw-fragile) → "the result is
+ *     sensitive to small movements in the strongest drivers". Closeness
+ *     framing only; never implies the robustness band is fragile when it
+ *     is not.
+ *   - **Stable / highly stable AND not near-tie AND finite margin** →
+ *     softened "smaller changes are less likely to flip" (dropping
+ *     "unlikely" to avoid overclaim; gated on `Number.isFinite(margin_pp)`
+ *     so we never claim stability when the margin itself is unknown).
+ *   - **Everything else** (moderate, unknown, null band; stable band
+ *     with null margin) → omit the closing robustness sentence entirely.
+ *
+ * The "ahead of by Npp, so the lead is meaningful" framing is reused
+ * from the explain-results fallback; here we keep neutral "the lead of
+ * Npp would need to close" wording. We additionally swap that to the
+ * effectively-tied phrasing when `isNearTieByMargin` fires, so we never
+ * say "the lead would need to close" about a near-zero gap.
  */
 export function composeWhatWouldFlipFallback(
   projection: AnalysisProjectionSummary | undefined,
+  rawRobustness?: RawRobustnessSignals | null,
 ): string {
   if (!projection || !projection.leading_option) {
     return 'The analysis has finished, but the sensitivity picture could not be summarised from the available data. Would you like to run the analysis again?';
@@ -137,6 +199,24 @@ export function composeWhatWouldFlipFallback(
 
   const leading = projection.leading_option;
   const sentences: string[] = [];
+  const raw = rawRobustness ?? null;
+  const nearTie = isNearTieByMargin(projection.margin_pp, raw);
+  const rawFragile = isRawFragile(raw);
+  // Treat the canonical `'fragile'` band as fragility evidence even when
+  // raw signals are absent — older run_analysis facts may not carry the
+  // raw `enrichment.robustness` block, but a canonicalised `'fragile'`
+  // band is itself the upstream's verdict.
+  const projectedFragile = projection.robustness_band === CANONICAL_FRAGILE_BAND;
+  const fragileSignal = rawFragile || projectedFragile;
+  // Margin must be finite for any quantitative-leaning closing sentence
+  // (stable-band stability claim, runner-up "would need to close" reframe).
+  // `null` / NaN / Infinity → omit so we never anchor copy on a phantom lead.
+  // Holding the narrowed value (not a parallel boolean) lets call sites
+  // use TypeScript's `!== null` narrowing — no `as number` cast needed.
+  const finiteMargin: number | null =
+    typeof projection.margin_pp === 'number' && Number.isFinite(projection.margin_pp)
+      ? projection.margin_pp
+      : null;
 
   // Staleness caveat is no longer composed here — see the parallel note in
   // composeExplainResultsFallback. The handler's applyStalenessPrefix
@@ -147,10 +227,24 @@ export function composeWhatWouldFlipFallback(
     `${leading.label} is currently performing best, with a probability of ${formatProbability(leading.probability)}.`,
   );
 
-  if (projection.runner_up && projection.margin_pp !== null) {
+  if (nearTie && projection.runner_up) {
+    // Near-tie: never describe a near-zero gap as "the lead would need to
+    // close". Mirror the free-text composer's effectively-tied phrasing so
+    // the two paths read the same when the truth is the same.
+    sentences.push(
+      `${leading.label} and ${projection.runner_up.label} are effectively tied, so the outcome could shift with small changes.`,
+    );
+  } else if (projection.runner_up && finiteMargin !== null) {
+    // Reuse the finite-margin guard: a `!== null` check on `margin_pp`
+    // was previously insufficient because `NaN !== null` and
+    // `Infinity !== null` both slip past, and `formatPercentagePoints(NaN)`
+    // renders as "Not available" — producing "the lead of Not available
+    // would need to close". `finiteMargin` is the narrowed value (only
+    // ever a finite number when non-null), so TypeScript narrows
+    // cleanly here without a cast.
     sentences.push(
       `For ${projection.runner_up.label} to overtake it, the lead of ${formatPercentagePoints(
-        projection.margin_pp,
+        finiteMargin,
       )} would need to close.`,
     );
   } else if (projection.runner_up) {
@@ -175,11 +269,33 @@ export function composeWhatWouldFlipFallback(
     }
   }
 
-  if (projection.robustness_band) {
+  if (fragileSignal) {
+    // Fragility claim — only when there is an actual fragile signal
+    // (raw level very_low/low/fragile, or canonical band already
+    // 'fragile'). Naming fragility here is honest because the
+    // robustness band itself is fragile.
     sentences.push(
-      `The robustness band is currently ${projection.robustness_band}, so smaller changes are unlikely to flip the outcome on their own.`,
+      'The picture appears fragile, so even small adjustments to the strongest drivers could shift which option leads.',
+    );
+  } else if (nearTie) {
+    // Near-tie WITHOUT a fragile signal — say the result is close /
+    // sensitive without invoking the robustness band. Avoids the
+    // overclaim where a stable + near-tie result was previously told
+    // "the picture appears fragile" (the band is stable).
+    sentences.push(
+      'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.',
+    );
+  } else if (
+    finiteMargin !== null
+    && projection.robustness_band !== null
+    && STABLE_ROBUSTNESS_BANDS.has(projection.robustness_band)
+  ) {
+    sentences.push(
+      `The robustness band is currently ${projection.robustness_band}, so smaller changes are less likely to flip the outcome on their own.`,
     );
   }
+  // Moderate, unknown, or null band, or stable with non-finite margin →
+  // omit the closing robustness sentence so we never overclaim.
 
   sentences.push('Which of those would you like to explore changing?');
 
