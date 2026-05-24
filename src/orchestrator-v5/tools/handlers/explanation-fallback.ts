@@ -211,8 +211,12 @@ export function composeWhatWouldFlipFallback(
   // Margin must be finite for any quantitative-leaning closing sentence
   // (stable-band stability claim, runner-up "would need to close" reframe).
   // `null` / NaN / Infinity → omit so we never anchor copy on a phantom lead.
-  const hasFiniteMargin =
-    typeof projection.margin_pp === 'number' && Number.isFinite(projection.margin_pp);
+  // Holding the narrowed value (not a parallel boolean) lets call sites
+  // use TypeScript's `!== null` narrowing — no `as number` cast needed.
+  const finiteMargin: number | null =
+    typeof projection.margin_pp === 'number' && Number.isFinite(projection.margin_pp)
+      ? projection.margin_pp
+      : null;
 
   // Staleness caveat is no longer composed here — see the parallel note in
   // composeExplainResultsFallback. The handler's applyStalenessPrefix
@@ -230,16 +234,17 @@ export function composeWhatWouldFlipFallback(
     sentences.push(
       `${leading.label} and ${projection.runner_up.label} are effectively tied, so the outcome could shift with small changes.`,
     );
-  } else if (projection.runner_up && hasFiniteMargin) {
-    // Reuse the finite-margin guard: a `!== null` check was previously
-    // insufficient because `NaN !== null` and `Infinity !== null` both
-    // slip past, and `formatPercentagePoints(NaN)` renders as
-    // "Not available" — producing "the lead of Not available would
-    // need to close". Falling back to the neutral contender sentence
-    // when the margin is non-finite avoids the broken copy.
+  } else if (projection.runner_up && finiteMargin !== null) {
+    // Reuse the finite-margin guard: a `!== null` check on `margin_pp`
+    // was previously insufficient because `NaN !== null` and
+    // `Infinity !== null` both slip past, and `formatPercentagePoints(NaN)`
+    // renders as "Not available" — producing "the lead of Not available
+    // would need to close". `finiteMargin` is the narrowed value (only
+    // ever a finite number when non-null), so TypeScript narrows
+    // cleanly here without a cast.
     sentences.push(
       `For ${projection.runner_up.label} to overtake it, the lead of ${formatPercentagePoints(
-        projection.margin_pp as number,
+        finiteMargin,
       )} would need to close.`,
     );
   } else if (projection.runner_up) {
@@ -281,7 +286,7 @@ export function composeWhatWouldFlipFallback(
       'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.',
     );
   } else if (
-    hasFiniteMargin
+    finiteMargin !== null
     && projection.robustness_band !== null
     && STABLE_ROBUSTNESS_BANDS.has(projection.robustness_band)
   ) {
