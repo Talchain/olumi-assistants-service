@@ -243,7 +243,11 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     expect(text.toLowerCase()).toMatch(/fragile|small (adjustments|changes)/);
   });
 
-  it('stable band + near-tie margin (0.5pp): no "clear/strong lead", no "smaller changes are unlikely", uses effectively-tied reframe', () => {
+  it('stable band + near-tie margin (0.5pp): no "clear/strong lead", no "smaller changes are unlikely", uses closeness reframe WITHOUT claiming fragility', () => {
+    // Round-1 review: previously the composer said "the picture appears
+    // fragile" even when the raw band was stable. That overclaims
+    // fragility. Stable + near-tie should describe closeness only —
+    // never invoke the robustness band.
     const text = composeWhatWouldFlipFallback(
       {
         ...FRAGILE_6PP,
@@ -256,9 +260,12 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     expect(text).not.toMatch(CLEAR_OR_STRONG_LEAD);
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
     expect(text.toLowerCase()).toMatch(/effectively tied/);
+    // Closeness sentence is emitted; fragility claim is NOT.
+    expect(text.toLowerCase()).toMatch(/result is sensitive to small movements/);
+    expect(text).not.toMatch(/picture appears fragile/i);
   });
 
-  it('raw near_tie.is_tie=true overrides a wider projected margin and a stable band', () => {
+  it('raw near_tie.is_tie=true on a stable band: closeness copy wins, no fragility claim', () => {
     const text = composeWhatWouldFlipFallback(
       {
         ...FRAGILE_6PP,
@@ -268,7 +275,28 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
       RAW_NEAR_TIE_OVERRIDE,
     );
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
-    expect(text.toLowerCase()).toMatch(/effectively tied|fragile/);
+    // Override-driven near-tie path → closeness reframe at runner-up
+    // sentence; stable band + override is NOT a fragile signal, so the
+    // closing sentence must NOT claim fragility.
+    expect(text.toLowerCase()).toMatch(/effectively tied/);
+    expect(text.toLowerCase()).toMatch(/result is sensitive to small movements/);
+    expect(text).not.toMatch(/picture appears fragile/i);
+  });
+
+  it('raw near_tie.is_tie=true on a fragile raw level: BOTH near-tie reframe and fragility claim hold', () => {
+    // Sanity: when the raw signal is itself fragile (not just the override),
+    // the fragility claim is honest and the closing sentence still uses it.
+    const text = composeWhatWouldFlipFallback(
+      {
+        ...FRAGILE_6PP,
+        margin_pp: 10,
+        robustness_band: 'moderate',
+      },
+      { level: 'fragile', near_tie_is_tie: true },
+    );
+    expect(text).not.toMatch(UNLIKELY_TO_FLIP);
+    expect(text.toLowerCase()).toMatch(/effectively tied/);
+    expect(text.toLowerCase()).toMatch(/picture appears fragile/);
   });
 
   it('raw level=very_low overrides a projected moderate/stable band → fragility copy wins', () => {
@@ -344,6 +372,40 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
     expect(text).not.toMatch(/^The robustness band/m);
     expect(text).not.toMatch(/picture appears fragile/i);
+  });
+
+  it('stable band + null margin: omits the closing stability sentence (no quantitative anchor for the lead)', () => {
+    // Round-1 review: stability copy was previously emitted whenever the
+    // band was stable and not near-tie — even when margin_pp was null. A
+    // missing margin means we have no quantitative anchor for the lead's
+    // size, so claiming "smaller changes are less likely to flip" is
+    // unsupported. Omit instead.
+    const text = composeWhatWouldFlipFallback(
+      {
+        ...FRAGILE_6PP,
+        margin_pp: null,
+        robustness_band: 'stable',
+        runner_up: null,
+      },
+      { level: 'high', near_tie_is_tie: false },
+    );
+    expectNaturalProse(text);
+    expect(text).not.toMatch(/less likely to flip/i);
+    expect(text).not.toMatch(UNLIKELY_TO_FLIP);
+    expect(text).not.toMatch(/^The robustness band/m);
+  });
+
+  it('stable band + NaN margin: omits the closing stability sentence (defensive Number.isFinite guard)', () => {
+    const text = composeWhatWouldFlipFallback(
+      {
+        ...FRAGILE_6PP,
+        margin_pp: Number.NaN as unknown as number,
+        robustness_band: 'stable',
+      },
+      { level: 'high', near_tie_is_tie: false },
+    );
+    expect(text).not.toMatch(/less likely to flip/i);
+    expect(text).not.toMatch(UNLIKELY_TO_FLIP);
   });
 
   it('unknown projected band with no raw signal: omits closing robustness sentence', () => {

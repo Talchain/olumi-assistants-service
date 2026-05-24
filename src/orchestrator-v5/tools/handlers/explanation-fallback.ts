@@ -165,15 +165,23 @@ export function composeExplainResultsFallback(
  * callers may pass `null` and the composer falls back to projected-band
  * copy, gated on `STABLE_ROBUSTNESS_BANDS`.
  *
- * Copy ladder for the closing robustness sentence:
- *   - near-tie OR raw-fragile → "the picture appears fragile, so even
- *     small adjustments could flip the leading option" (mirrors the
- *     free-text advice gate's wording for cross-path parity).
- *   - stable / highly stable AND not near-tie → keep the existing
- *     "smaller changes are unlikely to flip" sentence (the only case
- *     where that claim is honest).
- *   - everything else (moderate, unknown, null) → omit the closing
- *     robustness sentence so we never overclaim.
+ * Copy ladder for the closing robustness sentence (post round-1 review):
+ *   - **Fragile signal** (raw fragile OR canonical `'fragile'` band) →
+ *     "the picture appears fragile, so even small adjustments to the
+ *     strongest drivers could shift which option leads". This is the
+ *     only branch that names *fragility* — invoking the robustness band
+ *     itself.
+ *   - **Near-tie WITHOUT a fragile signal** (raw band is stable/highly
+ *     stable/moderate/unknown/null AND not raw-fragile) → "the result is
+ *     sensitive to small movements in the strongest drivers". Closeness
+ *     framing only; never implies the robustness band is fragile when it
+ *     is not.
+ *   - **Stable / highly stable AND not near-tie AND finite margin** →
+ *     softened "smaller changes are less likely to flip" (dropping
+ *     "unlikely" to avoid overclaim; gated on `Number.isFinite(margin_pp)`
+ *     so we never claim stability when the margin itself is unknown).
+ *   - **Everything else** (moderate, unknown, null band; stable band
+ *     with null margin) → omit the closing robustness sentence entirely.
  *
  * The "ahead of by Npp, so the lead is meaningful" framing is reused
  * from the explain-results fallback; here we keep neutral "the lead of
@@ -199,7 +207,12 @@ export function composeWhatWouldFlipFallback(
   // raw `enrichment.robustness` block, but a canonicalised `'fragile'`
   // band is itself the upstream's verdict.
   const projectedFragile = projection.robustness_band === CANONICAL_FRAGILE_BAND;
-  const fragileOrNearTie = nearTie || rawFragile || projectedFragile;
+  const fragileSignal = rawFragile || projectedFragile;
+  // Margin must be finite for any quantitative-leaning closing sentence
+  // (stable-band stability claim, runner-up "would need to close" reframe).
+  // `null` / NaN / Infinity → omit so we never anchor copy on a phantom lead.
+  const hasFiniteMargin =
+    typeof projection.margin_pp === 'number' && Number.isFinite(projection.margin_pp);
 
   // Staleness caveat is no longer composed here — see the parallel note in
   // composeExplainResultsFallback. The handler's applyStalenessPrefix
@@ -245,19 +258,33 @@ export function composeWhatWouldFlipFallback(
     }
   }
 
-  if (fragileOrNearTie) {
+  if (fragileSignal) {
+    // Fragility claim — only when there is an actual fragile signal
+    // (raw level very_low/low/fragile, or canonical band already
+    // 'fragile'). Naming fragility here is honest because the
+    // robustness band itself is fragile.
     sentences.push(
       'The picture appears fragile, so even small adjustments to the strongest drivers could shift which option leads.',
     );
+  } else if (nearTie) {
+    // Near-tie WITHOUT a fragile signal — say the result is close /
+    // sensitive without invoking the robustness band. Avoids the
+    // overclaim where a stable + near-tie result was previously told
+    // "the picture appears fragile" (the band is stable).
+    sentences.push(
+      'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.',
+    );
   } else if (
-    projection.robustness_band !== null
+    hasFiniteMargin
+    && projection.robustness_band !== null
     && STABLE_ROBUSTNESS_BANDS.has(projection.robustness_band)
   ) {
     sentences.push(
       `The robustness band is currently ${projection.robustness_band}, so smaller changes are less likely to flip the outcome on their own.`,
     );
   }
-  // Moderate, unknown, or null band → omit the closing robustness sentence.
+  // Moderate, unknown, or null band, or stable with non-finite margin →
+  // omit the closing robustness sentence so we never overclaim.
 
   sentences.push('Which of those would you like to explore changing?');
 
