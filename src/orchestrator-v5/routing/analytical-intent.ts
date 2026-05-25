@@ -217,6 +217,21 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'explain', pattern: /\bexplain\s+(?:this|that|what[''']?s\s+going\s+on|what\s+happened|the\s+(?:reasoning|logic))\b/i },
   { cls: 'explain', pattern: /\bsummarise\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i },
   { cls: 'explain', pattern: /\bsummarize\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i },
+  // V5 post-analysis contract v1 — imperative change-advice family.
+  // Mirrors the patterns added to `post-analysis-advice-gate.ts` so the
+  // stale-rerun-guard, no-analysis-guard, and edit_graph no-op recovery
+  // surfaces fire on the same phrases the fresh-path advice gate owns.
+  // Class is `explain` only to satisfy the analytical-intent precondition
+  // of the sibling guards (which use class-blind static copy); the
+  // fresh-path advice gate owns the actual `update_advice`/`advice`
+  // class differentiation for telemetry.
+  { cls: 'explain', pattern: /\btell\s+me\s+what\s+(?:to|i\s+(?:should|need\s+to|can|could|might))\s+(?:change|update|adjust|fix|improve|edit)\b/i },
+  { cls: 'explain', pattern: /\bshow\s+me\s+what\s+(?:to|i\s+should)\s+(?:change|update|adjust|fix|improve|edit)\b/i },
+  { cls: 'explain', pattern: /\bwhat\s+do\s+(?:i|we)\s+(?:change|update|adjust|fix|edit)\b/i },
+  { cls: 'explain', pattern: /\bwhat\s+needs\s+(?:to\s+(?:change|be\s+(?:changed|updated|adjusted|fixed))|changing|updating|adjusting)\b/i },
+  { cls: 'explain', pattern: /\bhelp\s+me\s+(?:figure\s+out|decide|work\s+out)\s+what\s+to\s+(?:change|update|adjust|fix|improve|edit)\b/i },
+  { cls: 'explain', pattern: /\bgive\s+me\s+(?:something|a\s+starting\s+point|a\s+place\s+to\s+start)\s+to\s+(?:change|update|adjust|fix|improve)\b/i },
+  { cls: 'explain', pattern: /\bwhat[’']?s\s+worth\s+(?:changing|updating|adjusting|fixing|improving|editing)\b/i },
 ];
 
 /**

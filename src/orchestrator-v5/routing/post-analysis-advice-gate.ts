@@ -530,6 +530,22 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     advice_class: 'update_advice',
     pattern: /\bhow\s+do\s+you\s+recommend\s+(?:we|i|us)\s+update\b/i,
   },
+  // V5 post-analysis contract v1 — imperative change-advice. Closes the
+  // "Tell me what to change" gap where the message falls through to the
+  // broad routing LLM and risks an `edit_graph` misroute. Verb-object
+  // anchored on the right; never bare `\btell\s+me\b` (which would
+  // match off-topic chat). Mutation precedence (MUTATION_SIGNAL_PATTERNS
+  // above) still rejects "Tell me what to change Pricing to £100" before
+  // classification, so concrete edits route to the value-update gate.
+  {
+    advice_class: 'update_advice',
+    pattern: /\btell\s+me\s+what\s+(?:to|i\s+(?:should|need\s+to|can|could|might))\s+(?:change|update|adjust|fix|improve|edit)\b/i,
+  },
+  // "show me what to change" / "show me what i should update"
+  {
+    advice_class: 'update_advice',
+    pattern: /\bshow\s+me\s+what\s+(?:to|i\s+should)\s+(?:change|update|adjust|fix|improve|edit)\b/i,
+  },
 
   // ── next_step ────────────────────────────────────────────────────
   // "next step(s)" / "what's the next step"
@@ -588,6 +604,38 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
   {
     advice_class: 'advice',
     pattern: /\bcan\s+you\s+(?:recommend|suggest|advise|help\s+me\s+think)\b/i,
+  },
+  // V5 post-analysis contract v1 — bare-interrogative change-advice
+  // shapes. Same family as the imperative update_advice patterns above;
+  // labeled `advice` because these are generic "what do I do?" framings
+  // without explicit update context.
+  // "what do I change?" / "what do we adjust?"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat\s+do\s+(?:i|we)\s+(?:change|update|adjust|fix|edit)\b/i,
+  },
+  // "what needs to change" / "what needs changing" / "what needs to be updated"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat\s+needs\s+(?:to\s+(?:change|be\s+(?:changed|updated|adjusted|fixed))|changing|updating|adjusting)\b/i,
+  },
+  // "help me figure out what to change" / "help me decide what to update".
+  // Verbs (figure out / decide / work out) are distinct from the
+  // `meaning` class's "help me (interpret|understand|make sense of|read)"
+  // earlier in the array, so no cross-class collision.
+  {
+    advice_class: 'advice',
+    pattern: /\bhelp\s+me\s+(?:figure\s+out|decide|work\s+out)\s+what\s+to\s+(?:change|update|adjust|fix|improve|edit)\b/i,
+  },
+  // "give me something to change" / "give me a starting point to update"
+  {
+    advice_class: 'advice',
+    pattern: /\bgive\s+me\s+(?:something|a\s+starting\s+point|a\s+place\s+to\s+start)\s+to\s+(?:change|update|adjust|fix|improve)\b/i,
+  },
+  // "what's worth changing" / "what is worth updating"
+  {
+    advice_class: 'advice',
+    pattern: /\bwhat['’]?s\s+worth\s+(?:changing|updating|adjusting|fixing|improving|editing)\b/i,
   },
 ];
 
