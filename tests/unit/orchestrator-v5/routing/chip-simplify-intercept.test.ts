@@ -66,6 +66,7 @@ describe('tryChipSimplifyIntercept', () => {
   });
 
   describe('future metadata leg (deferred — PR1 ships exact-text only)', () => {
+    // TODO: ISSUE-197 — extend tryChipSimplifyIntercept once Action.source_chip_id schema lands.
     it.skip('matches when boundary `Action` carries chip-source metadata', () => {
       // Breadcrumb for the follow-up workstream. When the boundary
       // `Action` schema gains a chip-source metadata field
