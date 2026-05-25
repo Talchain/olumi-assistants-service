@@ -408,6 +408,29 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     advice_class: 'what_would_flip_free_text',
     pattern: /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i,
   },
+  // V5 post-analysis contract v1 (review round-2 finding) — `could/might`
+  // modal cousins. These previously lived ONLY in
+  // analytical-question-guard.ts ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS
+  // (which covers the V4 route-v2 edit-dispatch path); the V5 advice gate
+  // anchored every flip-pattern on `what would`, so phrases like
+  // "What could change the outcome?" or "What might shift the result?"
+  // were falling through here to the broad routing LLM. Mirrored shape
+  // with the matching INTENT_PATTERNS.what_would_flip + WHAT_WOULD_FLIP_STRIP_PATTERNS
+  // entries in analytical-intent.ts so fresh-gate matching, stale-rerun-guard
+  // matching, and the mutation-precedence strip-and-recheck all stay
+  // symmetric.
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+could\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
+  },
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+(?:might|could)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i,
+  },
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bhow\s+(?:could|might|can)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i,
+  },
 
   // ── evidence_gap ─────────────────────────────────────────────────
   // "what's missing" / "what is missing" — broader than the readiness

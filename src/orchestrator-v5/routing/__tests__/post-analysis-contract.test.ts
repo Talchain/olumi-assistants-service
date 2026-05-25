@@ -451,3 +451,120 @@ describe('Issue #195 — stale-rerun-guard full subsumption proof', () => {
     if (!out.matched) expect(out.reason).toBe('mutation_signal');
   });
 });
+
+// =========================================================================
+// Review round-2 — `could/might` modal cousins of `what would change…`
+//
+// Pre-fix gap (PR #200 round-1 missed it): `classifyAnalyticalIntent` only
+// matched `what would …`, while `analytical-question-guard.ts` had a
+// separate `\bwhat\s+could\s+change\s+…` pattern. Result: stale + typed
+// "What could change the outcome?" returned no_analytical_signal from
+// stale-rerun-guard and fell through to the V5 broad routing LLM. V4
+// route-v2 caught it because it delegates to isAnalyticalQuestion which
+// runs both the classifier AND the guard's additional patterns; V5
+// turn-executor's guards only consult classifyAnalyticalIntent.
+//
+// Fix: lift the could/might/how modal cousins into the classifier and
+// the post-analysis-advice-gate `what_would_flip_free_text` class, plus
+// extend WHAT_WOULD_FLIP_STRIP_PATTERNS so the strip-and-recheck
+// mutation-precedence exception stays symmetric.
+// =========================================================================
+describe('Review round-2 — could/might modal cousins of what would change', () => {
+  const modalCousins: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'What could change the outcome?', label: 'what could change the outcome' },
+    { message: 'What could change the result?', label: 'what could change the result' },
+    { message: 'What could change the ranking?', label: 'what could change the ranking' },
+    { message: 'What could change the leading option?', label: 'what could change the leading option' },
+    { message: 'What might shift the outcome?', label: 'what might shift the outcome' },
+    { message: 'What could shift the result?', label: 'what could shift the result' },
+    { message: 'What might tip the balance?', label: 'what might tip the balance' },
+    { message: 'What might change the outcome?', label: 'what might change the outcome' },
+    { message: 'How could the outcome change?', label: 'how could the outcome change' },
+    { message: 'How might the result shift?', label: 'how might the result shift' },
+    { message: 'How can the ranking flip?', label: 'how can the ranking flip' },
+  ];
+
+  // ── Fresh path: post-analysis-advice-gate must match what_would_flip_free_text
+  for (const { message, label } of modalCousins) {
+    it(`fresh + ${label} → advice gate matches what_would_flip_free_text`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
+        // PR #173/#178 contract: what_would_flip_free_text emits no chip
+        expect(out.suggested_actions).toHaveLength(0);
+      }
+    });
+  }
+
+  // ── Classifier: classifyAnalyticalIntent must return what_would_flip
+  for (const { message, label } of modalCousins) {
+    it(`classifyAnalyticalIntent returns what_would_flip: ${label}`, () => {
+      expect(classifyAnalyticalIntent(message)).toBe('what_would_flip');
+    });
+  }
+
+  // ── Stale path: stale-rerun-guard must match + emit rerun + run_analysis chip
+  for (const { message, label } of modalCousins) {
+    it(`stale + ${label} → stale-rerun-guard matches with rerun copy + run_analysis chip`, () => {
+      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.intent_class).toBe('what_would_flip');
+        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
+        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
+      }
+    });
+  }
+
+  // ── Mutation precedence stays intact: "What could change Pricing to 100" mutates
+  it('"What could change Pricing to 100" → mutation precedence wins (advice gate rejects)', () => {
+    const message = 'What could change Pricing to 100';
+    expect(hasMutationSignal(message)).toBe(true);
+    const out = tryPostAnalysisAdviceGate({
+      message,
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) expect(out.reason).toBe('mutation_signal');
+  });
+
+  it('"What could change Pricing to 100" on stale also yields mutation_signal', () => {
+    const out = tryStaleRerunGuard({
+      message: 'What could change Pricing to 100',
+      freshness: 'stale',
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) expect(out.reason).toBe('mutation_signal');
+  });
+
+  // ── False-positive guards: outcome-noun anchor must hold
+  const offTopic: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'What could change about Apple?', label: 'change-about (not outcome noun)' },
+    { message: 'What could change my mind?', label: 'change-my-mind (not outcome noun)' },
+    { message: 'How could I change pricing?', label: 'how-could-I (not outcome-noun subject)' },
+    { message: 'Could you change the pricing?', label: 'could-you (not what/how lead)' },
+  ];
+  for (const { message, label } of offTopic) {
+    it(`does NOT match new what_would_flip patterns: ${label}`, () => {
+      const c = classifyAnalyticalIntent(message);
+      // Either no analytical class, or a different class — but never
+      // what_would_flip from the new modal-cousin patterns.
+      if (c !== null) expect(c).not.toBe('what_would_flip');
+    });
+  }
+
+  // ── analytical-question-guard inheritance via classifier delegation
+  it('isAnalyticalQuestion inherits new patterns via classifyAnalyticalIntent delegation', () => {
+    for (const { message } of modalCousins) {
+      expect(isAnalyticalQuestion(message)).toBe(true);
+    }
+  });
+});
