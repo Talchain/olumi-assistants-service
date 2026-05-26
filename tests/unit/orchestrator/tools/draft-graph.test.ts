@@ -166,9 +166,17 @@ describe("handleDraftGraph", () => {
   });
 
   it("throws OrchestratorError on pipeline non-200 (4xx → not recoverable)", async () => {
+    // Updated to production CEE body shape: `code` is the category field.
+    // Legacy tolerance for `body.error` is covered by Test 1b separately.
     mockRunUnifiedPipeline.mockResolvedValueOnce({
       statusCode: 422,
-      body: { error: "Brief too short" },
+      body: {
+        schema: "cee.error.v1",
+        code: "CEE_LLM_VALIDATION_FAILED",
+        message: "Brief too short",
+        retryable: false,
+        source: "cee",
+      },
     });
 
     try {
@@ -179,14 +187,23 @@ describe("handleDraftGraph", () => {
       expect(orchestratorError).toBeDefined();
       expect(orchestratorError.code).toBe("TOOL_EXECUTION_FAILED");
       expect(orchestratorError.recoverable).toBe(false);
-      expect(orchestratorError.message).toContain("Brief too short");
+      // Message now derived from CEE body.code (primary) with body.message
+      // tolerance. Asserting on the category code keeps the test stable
+      // across cosmetic message changes.
+      expect(orchestratorError.message).toContain("CEE_LLM_VALIDATION_FAILED");
     }
   });
 
   it("throws OrchestratorError on pipeline non-200 (5xx → recoverable)", async () => {
     mockRunUnifiedPipeline.mockResolvedValueOnce({
       statusCode: 500,
-      body: { error: "Internal server error" },
+      body: {
+        schema: "cee.error.v1",
+        code: "CEE_INTERNAL_ERROR",
+        message: "Internal pipeline error",
+        retryable: false,
+        source: "cee",
+      },
     });
 
     try {
@@ -204,15 +221,29 @@ describe("handleDraftGraph", () => {
   // Edit 1: route-v2-typed-envelope workstream — handleDraftGraph attaches
   // structured pipeline metadata to the thrown Error so route-v2.ts can map
   // it to a typed wire envelope instead of opaque draft_graph_pipeline_threw.
+  //
+  // Wire-shape contract: real CEE error bodies (from buildCeeErrorResponse
+  // in src/cee/validation/pipeline.ts) carry the category in `body.code`,
+  // NOT `body.error`. Earlier review (Codex) caught a bug where this code
+  // read `body.error` and matched only test-shape mocks. The tests below
+  // use the production shape (`code`) and a dedicated legacy-tolerance
+  // test pins the fallback to `body.error` for any vestigial paths.
+  //
   // The metadata is purely additive — callers that ignore it (V4 surfaces)
   // are unaffected.
   // ──────────────────────────────────────────────────────────────────
 
-  it("attaches pipelineStatusCode / pipelineErrorCode / pipelineRecovery on 400 schema failure (Test 1)", async () => {
+  it("attaches pipelineStatusCode / pipelineErrorCode / pipelineRecovery on 400 schema failure — production body.code shape (Test 1)", async () => {
     mockRunUnifiedPipeline.mockResolvedValueOnce({
       statusCode: 400,
       body: {
-        error: "CEE_LLM_VALIDATION_FAILED",
+        // Production shape — buildCeeErrorResponse emits `code`, not `error`.
+        schema: "cee.error.v1",
+        code: "CEE_LLM_VALIDATION_FAILED",
+        message: "LLM produced a response that does not match the expected graph schema",
+        retryable: false,
+        source: "cee",
+        request_id: "test-md1",
         recovery: {
           suggestion: "Provide a clearer, more specific decision brief.",
           hints: [
@@ -243,11 +274,16 @@ describe("handleDraftGraph", () => {
     }
   });
 
-  it("attaches pipelineStatusCode / pipelineErrorCode on 504 timeout (Test 2)", async () => {
+  it("attaches pipelineStatusCode / pipelineErrorCode on 504 timeout — production body.code shape (Test 2)", async () => {
     mockRunUnifiedPipeline.mockResolvedValueOnce({
       statusCode: 504,
       body: {
-        error: "CEE_TIMEOUT",
+        schema: "cee.error.v1",
+        code: "CEE_TIMEOUT",
+        message: "LLM provider did not respond within timeout",
+        retryable: true,
+        source: "cee",
+        request_id: "test-md2",
       },
     });
 
@@ -266,11 +302,16 @@ describe("handleDraftGraph", () => {
     }
   });
 
-  it("attaches pipelineStatusCode / pipelineErrorCode on 500 catch-all (Test 3)", async () => {
+  it("attaches pipelineStatusCode / pipelineErrorCode on 500 catch-all — production body.code shape (Test 3)", async () => {
     mockRunUnifiedPipeline.mockResolvedValueOnce({
       statusCode: 500,
       body: {
-        error: "CEE_INTERNAL_ERROR",
+        schema: "cee.error.v1",
+        code: "CEE_INTERNAL_ERROR",
+        message: "Internal pipeline error",
+        retryable: false,
+        source: "cee",
+        request_id: "test-md3",
       },
     });
 
@@ -286,6 +327,56 @@ describe("handleDraftGraph", () => {
       expect(meta.pipelineStatusCode).toBe(500);
       expect(meta.pipelineErrorCode).toBe("CEE_INTERNAL_ERROR");
       expect(meta.pipelineRecovery).toBeNull();
+    }
+  });
+
+  // Wire-shape contract regression — pins the field name to `code`.
+  // If buildCeeErrorResponse ever renames the field, this test fails LOUDLY
+  // rather than the metadata silently going null and route-v2 falling back
+  // to opaque draft_graph_pipeline_threw.
+  it("reads pipelineErrorCode from body.code (production shape) (Test 1a — wire-shape contract)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: { code: "CEE_GRAPH_INVALID" }, // Minimal production shape — only `code`.
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1a");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineErrorCode?: string | null };
+      expect(meta.pipelineErrorCode).toBe("CEE_GRAPH_INVALID");
+    }
+  });
+
+  // Legacy-tolerance regression — if any older or sibling pipeline path
+  // emits `body.error` instead of `body.code` (e.g. the `error: code` shape
+  // in src/orchestrator/moe-spike/call-specialist.ts), the read should
+  // still pick up the category for diagnostics.
+  it("falls back to body.error when body.code is absent (Test 1b — legacy tolerance)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: { error: "CEE_LEGACY_SHAPE_CODE" },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1b");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineErrorCode?: string | null };
+      expect(meta.pipelineErrorCode).toBe("CEE_LEGACY_SHAPE_CODE");
+    }
+  });
+
+  it("prefers body.code over body.error when both are present (Test 1c — precedence)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: { code: "CEE_LLM_VALIDATION_FAILED", error: "WRONG_LEGACY_VALUE" },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1c");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineErrorCode?: string | null };
+      expect(meta.pipelineErrorCode).toBe("CEE_LLM_VALIDATION_FAILED");
     }
   });
 

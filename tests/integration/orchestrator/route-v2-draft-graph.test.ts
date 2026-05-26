@@ -362,6 +362,8 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.retryable).toBe(false);
     // Recovery hints survive the boundary so the UI can render a useful prompt.
     expect(body.details.recovery).toEqual(recovery);
+    // Raw CEE code surfaced in details for dashboard splitting (post-review-fix R2).
+    expect(body.details.pipeline_error_code).toBe('CEE_LLM_VALIDATION_FAILED');
   });
 
   it('typed mapping: 504 CEE_TIMEOUT → timeout reason + retryable=true (Test 5)', async () => {
@@ -392,6 +394,8 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.retryable).toBe(true);
     // No recovery hints → field absent rather than null.
     expect(body.details.recovery).toBeUndefined();
+    // Raw CEE code in details (post-review-fix R2).
+    expect(body.details.pipeline_error_code).toBe('CEE_TIMEOUT');
   });
 
   it('typed mapping: 502 CEE_LLM_UPSTREAM_ERROR → upstream reason + retryable=true (Test 6)', async () => {
@@ -420,11 +424,100 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.details.reason).toBe('draft_graph_cee_llm_upstream_error');
     expect(body.details.retryable).toBe(true);
     expect(body.retryable).toBe(true);
+    // Raw CEE code in details (post-review-fix R2).
+    expect(body.details.pipeline_error_code).toBe('CEE_LLM_UPSTREAM_ERROR');
+  });
+
+  it('typed mapping: 400 CEE_GRAPH_INVALID → graph-invalid reason + retryable=false (Test 6c)', async () => {
+    const err = Object.assign(new Error('CEE_GRAPH_INVALID'), {
+      pipelineStatusCode: 400,
+      pipelineErrorCode: 'CEE_GRAPH_INVALID',
+      pipelineRecovery: {
+        suggestion: 'Add more detail to your decision brief before drafting a model.',
+        hints: ['State the specific decision', 'List 2-3 options', 'Describe success'],
+      },
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111e6c',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.details.reason).toBe('draft_graph_cee_graph_invalid');
+    expect(body.details.retryable).toBe(false);
+    expect(body.details.pipeline_error_code).toBe('CEE_GRAPH_INVALID');
+    expect(body.details.recovery).toBeDefined();
+  });
+
+  it('typed mapping: 400 CEE_VALIDATION_FAILED → generic validation reason + retryable=false (Test 6d)', async () => {
+    const err = Object.assign(new Error('CEE_VALIDATION_FAILED'), {
+      pipelineStatusCode: 400,
+      pipelineErrorCode: 'CEE_VALIDATION_FAILED',
+      pipelineRecovery: null,
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111e6d',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.details.reason).toBe('draft_graph_cee_validation_failed');
+    expect(body.details.retryable).toBe(false);
+    expect(body.details.pipeline_error_code).toBe('CEE_VALIDATION_FAILED');
+  });
+
+  it('typed mapping: 503 CEE_SERVICE_UNAVAILABLE → service-unavailable reason + retryable=true (Test 6e)', async () => {
+    const err = Object.assign(new Error('CEE_SERVICE_UNAVAILABLE'), {
+      pipelineStatusCode: 503,
+      pipelineErrorCode: 'CEE_SERVICE_UNAVAILABLE',
+      pipelineRecovery: null,
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111e6e',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.details.reason).toBe('draft_graph_cee_service_unavailable');
+    expect(body.details.retryable).toBe(true);
+    expect(body.details.pipeline_error_code).toBe('CEE_SERVICE_UNAVAILABLE');
   });
 
   it('typed mapping: unknown pipelineErrorCode falls back to status-family reason (Test 6b)', async () => {
+    // Use a non-conflicting status (503 conflicts with CEE_SERVICE_UNAVAILABLE
+    // mapping above). 599 is reserved/non-standard and safe for "unknown".
     const err = Object.assign(new Error('CEE_UNKNOWN_FUTURE_CODE'), {
-      pipelineStatusCode: 503,
+      pipelineStatusCode: 599,
       pipelineErrorCode: 'CEE_UNKNOWN_FUTURE_CODE',
       pipelineRecovery: null,
     });
@@ -445,8 +538,12 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
     // Unknown code: surface status family in reason, retryable=true for 5xx.
-    expect(body.details.reason).toBe('draft_graph_pipeline_status_503');
+    expect(body.details.reason).toBe('draft_graph_pipeline_status_599');
     expect(body.details.retryable).toBe(true);
+    // Raw unknown code preserved in details so dashboards can still split
+    // by code even when the reason falls back to status family
+    // (post-review-fix R2 — addresses reviewer note about diagnostics).
+    expect(body.details.pipeline_error_code).toBe('CEE_UNKNOWN_FUTURE_CODE');
   });
 
   // ──────────────────────────────────────────────────────────────────
