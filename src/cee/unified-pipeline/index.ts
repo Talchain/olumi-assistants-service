@@ -238,7 +238,10 @@ function buildRawOutputResponse(ctx: StageContext): UnifiedPipelineResult {
  * Stage 2 is not enumerated by existing tests, so we cannot assert safe
  * degrade for any class without that proof. Adding entries here requires
  * a paired test fixture proving the Stage 4 backstop holds for that
- * class — see `tests/unit/cee/unified-pipeline/normalise-wrap.test.ts`.
+ * class — the contract suite lives in
+ * `tests/unit/cee.unified-pipeline.graceful-degradation.test.ts`
+ * (`describe("isKnownSafeNormaliseError allowlist")` + the "Stage 2
+ * throws ..." pipeline-level cases).
  *
  * The default path (typed-fail) is the conservative choice — a typed
  * recoverable error is strictly better than a silently-damaged graph

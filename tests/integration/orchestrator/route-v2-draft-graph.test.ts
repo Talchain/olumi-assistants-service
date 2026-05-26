@@ -527,6 +527,44 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.details.pipeline_error_code).toBe('CEE_SERVICE_UNAVAILABLE');
   });
 
+  it('typed mapping: partial metadata (statusCode present, errorCode null) falls back to legacy reason (Test 6f — audit-fix A4)', async () => {
+    // The catch block's typed-mapping branch requires BOTH pipelineStatusCode
+    // AND pipelineErrorCode to be non-null. When body.code was a non-string
+    // (e.g. handleDraftGraph received a body with code: null or code: 42),
+    // extractCode() returns null and the route falls back to the legacy
+    // draft_graph_pipeline_threw reason — proving the partial-metadata
+    // branch is wired correctly.
+    const err = Object.assign(new Error('CEE_PARTIAL_METADATA'), {
+      pipelineStatusCode: 500,
+      pipelineErrorCode: null, // <-- null, not undefined
+      pipelineRecovery: null,
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111e6f',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    // Falls back to the legacy reason — the typed-mapping branch only fires
+    // when BOTH statusCode AND errorCode are present.
+    expect(body.details.reason).toBe('draft_graph_pipeline_threw');
+    expect(body.details.retryable).toBe(true);
+    // Partial metadata means no diagnostic field on the wire.
+    expect(body.details.pipeline_error_code).toBeUndefined();
+    expect(body.details.recovery).toBeUndefined();
+  });
+
   it('typed mapping: unknown pipelineErrorCode falls back to status-family reason (Test 6b)', async () => {
     // Use a non-conflicting status (503 conflicts with CEE_SERVICE_UNAVAILABLE
     // mapping above). 599 is reserved/non-standard and safe for "unknown".

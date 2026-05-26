@@ -380,6 +380,71 @@ describe("handleDraftGraph", () => {
     }
   });
 
+  // Audit-fix A5: defensive null/non-object body handling. The body is typed
+  // `unknown`; if a future pipeline path returns a malformed response,
+  // extraction must NOT crash. It should fall through to the legacy plain-
+  // Error envelope (pipelineErrorCode=null forces route-v2's legacy fallback).
+
+  it("null body → no crash; pipelineErrorCode=null (Test 1d — defensive)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 500,
+      body: null as unknown as Record<string, unknown>,
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1d");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineStatusCode?: number; pipelineErrorCode?: string | null };
+      expect(meta.pipelineStatusCode).toBe(500);
+      expect(meta.pipelineErrorCode).toBeNull();
+    }
+  });
+
+  it("undefined body → no crash; pipelineErrorCode=null (Test 1e — defensive)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 500,
+      body: undefined as unknown as Record<string, unknown>,
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1e");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineStatusCode?: number; pipelineErrorCode?: string | null };
+      expect(meta.pipelineStatusCode).toBe(500);
+      expect(meta.pipelineErrorCode).toBeNull();
+    }
+  });
+
+  it("non-conformant body.code (lowercase, control chars, non-string) → pipelineErrorCode=null (Test 1f — regex guard, audit-fix A1/6)", async () => {
+    // The CEE code pattern requires uppercase-leading PascalCase-style:
+    // ^[A-Z][A-Z0-9_]{1,63}$. Anything outside that — lowercase, control
+    // characters, numeric, etc. — is discarded so it never lands in logs or
+    // on the wire.
+    const malformedCodes: unknown[] = [
+      "cee_lowercase",                   // lowercase first char
+      "CEE_FOO\nINJECTED",               // newline injection
+      "CEE FOO",                          // whitespace
+      "CEE_FOO!",                         // punctuation
+      42,                                 // non-string
+      null,                               // null
+      "",                                 // empty
+      "A".repeat(100),                    // over 64 chars
+    ];
+    for (const badCode of malformedCodes) {
+      mockRunUnifiedPipeline.mockResolvedValueOnce({
+        statusCode: 400,
+        body: { code: badCode },
+      });
+      try {
+        await handleDraftGraph("Test brief", mockRequest, "turn-md1f");
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        const meta = err as { pipelineErrorCode?: string | null };
+        expect(meta.pipelineErrorCode).toBeNull();
+      }
+    }
+  });
+
   it("block provenance references the turn ID", async () => {
     mockRunUnifiedPipeline.mockResolvedValueOnce(
       makePipelineSuccess({

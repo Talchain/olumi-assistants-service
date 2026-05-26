@@ -514,7 +514,14 @@ describe('V5 draft_graph persistence integration', () => {
       expect(appendMock).not.toHaveBeenCalled();
     });
 
-    it('typed 504 timeout throw → no commit, metadata preserved', async () => {
+    it('typed 504 timeout throw with pipelineRecovery=null → no commit, null-recovery survives re-throw', async () => {
+      // Distinct from sub-test 1 above (which carries populated recovery):
+      // this pins the "metadata without recovery hints" branch — proves the
+      // dispatcher's outer catch re-throws without coercing the null field.
+      // Audit-fix A3: sub-test 1 covered the populated-recovery path; this
+      // sub-test covers the null-recovery path explicitly so both branches
+      // of `pipelineRecovery ?? null` in handleDraftGraph and the
+      // recovery-attach in route-v2 are exercised.
       const typedErr = Object.assign(new Error('CEE_TIMEOUT'), {
         pipelineStatusCode: 504,
         pipelineErrorCode: 'CEE_TIMEOUT',
@@ -523,16 +530,29 @@ describe('V5 draft_graph persistence integration', () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockRejectedValueOnce(typedErr);
 
-      await expect(
-        dispatchDraftGraph({
+      let caught: unknown;
+      try {
+        await dispatchDraftGraph({
           payload: makePayload(TURN_ID_1),
           requestId: 'req-scenario-6-timeout',
           request: STUB_REQUEST,
-        }),
-      ).rejects.toMatchObject({
-        pipelineStatusCode: 504,
-        pipelineErrorCode: 'CEE_TIMEOUT',
-      });
+        });
+      } catch (err) {
+        caught = err;
+      }
+
+      // Explicit field assertion (not just toMatchObject which permits extra
+      // fields) — proves recovery=null survives intact, not deleted nor
+      // replaced with undefined.
+      expect(caught).toBeDefined();
+      const meta = caught as {
+        pipelineStatusCode?: number;
+        pipelineErrorCode?: string;
+        pipelineRecovery?: unknown;
+      };
+      expect(meta.pipelineStatusCode).toBe(504);
+      expect(meta.pipelineErrorCode).toBe('CEE_TIMEOUT');
+      expect(meta.pipelineRecovery).toBeNull();
 
       expect(appendMock).not.toHaveBeenCalled();
     });
