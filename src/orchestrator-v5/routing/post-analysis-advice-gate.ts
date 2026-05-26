@@ -398,6 +398,18 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     advice_class: 'what_would_flip_free_text',
     pattern: /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i,
   },
+  // V5 post-analysis contract v1 (review round-4) — mirror of the
+  // classifier's "how (another) option (win|look better|come ahead)"
+  // pattern. Pre-round-4, this lived ONLY in `INTENT_PATTERNS`, so the
+  // fresh path missed it here and routed via fresh-followup-guard's
+  // catch-net (which delegates to the classifier) — same deterministic
+  // outcome but with thinner recap copy instead of the richer
+  // what_would_flip_free_text composer. Mirroring restores symmetry
+  // between fresh and stale paths.
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i,
+  },
   // "what would/does/might need/have to change/happen/move/shift/differ"
   // New: mirrors a `WHAT_WOULD_FLIP_STRIP_PATTERNS` entry in
   // analytical-intent.ts so the advice gate's mutation-precedence

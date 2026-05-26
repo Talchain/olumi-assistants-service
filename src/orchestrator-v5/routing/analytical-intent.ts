@@ -110,7 +110,16 @@ const WHAT_WOULD_FLIP_STRIP_PATTERNS: readonly RegExp[] = [
   /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
   /\bwhat\s+would\s+tip\b/i,
   /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i,
-  /\bwhat\s+would\s+need\s+to\s+change\b/i,
+  // V5 post-analysis contract v1 (review round-4) — widened from
+  // `\bwhat\s+would\s+need\s+to\s+change\b` to the broader
+  // `(would|does|might) (need|have) to (change|happen|move|shift|differ)`
+  // shape that already lives in post-analysis-advice-gate.ts's
+  // `what_would_flip_free_text` class. Round-3 missed this drift:
+  // phrases like "What might need to change?" / "What does need to
+  // happen?" / "What would have to change?" matched the advice gate on
+  // the fresh path but slipped the classifier on the stale path,
+  // falling through stale-rerun-guard to broad routing.
+  /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i,
   /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i,
   // V5 post-analysis contract v1 (review rounds 2 + 3) — `could/might/would`
   // modal cousins that previously lived only in
@@ -208,7 +217,13 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+tip\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i },
-  { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+need\s+to\s+change\b/i },
+  // Round-4: broader need/have shape, mirrors the same pattern in
+  // post-analysis-advice-gate.ts's what_would_flip_free_text class so
+  // the classifier and the advice gate cover identical phrasings.
+  // Keep this entry in lock-step with the strip-patterns list above.
+  // Parity is now locked by the curated phrase test in
+  // `__tests__/post-analysis-contract.test.ts`.
+  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i },
   { cls: 'what_would_flip', pattern: /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i },
   // V5 post-analysis contract v1 (review rounds 2 + 3) — `could/might/would`
   // modal cousins previously caught only by analytical-question-guard.ts.
@@ -267,6 +282,27 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'explain', pattern: /\bshow\s+me\s+what\s+(?:to|i\s+should)\s+(?:change|update|adjust|fix|improve|edit)\b/i },
   { cls: 'explain', pattern: /\bwhat\s+do\s+(?:i|we)\s+(?:change|update|adjust|fix|edit)\b/i },
   { cls: 'explain', pattern: /\bwhat\s+needs\s+(?:to\s+(?:change|be\s+(?:changed|updated|adjusted|fixed))|changing|updating|adjusting)\b/i },
+  // Round-4: narrow stale-path coverage for the brief's row 5
+  // ("What should I change?"). The advice gate matches this on the
+  // fresh path via its broad `\bwhat\s+should\s+(?:we|i|you)\b/i`
+  // pattern (`advice` class), but the classifier had no equivalent so
+  // stale + "What should I change?" fell through to broad routing.
+  //
+  // Intentionally NARROW: verb list is restricted to change-advice
+  // verbs (change|update|adjust|fix|improve|edit). Does NOT include:
+  //   - `do` — too broad ("What should I do tonight?" is off-topic)
+  //   - value-edit verbs (set|increase|decrease|raise|lower|reduce|bump)
+  //     — those carry their own mutation precedence in
+  //     analytical-question-guard's pattern #4 and the value-update
+  //     pre-route; including them here could conflict with mutation
+  //     semantics on the stale path.
+  //
+  // Mutation precedence stays intact via `hasMutationSignal` —
+  // "What should I change to 100?" / "What should I update by 5%?"
+  // both trigger MUTATION_SIGNAL_PATTERNS before this classifier
+  // entry can short-circuit (the stale-rerun-guard checks
+  // hasMutationSignal first).
+  { cls: 'explain', pattern: /\bwhat\s+should\s+(?:i|we|you)\s+(?:change|update|adjust|fix|improve|edit)\b/i },
   { cls: 'explain', pattern: /\bhelp\s+me\s+(?:figure\s+out|decide|work\s+out)\s+what\s+to\s+(?:change|update|adjust|fix|improve|edit)\b/i },
   { cls: 'explain', pattern: /\bgive\s+me\s+(?:something|a\s+starting\s+point|a\s+place\s+to\s+start)\s+to\s+(?:change|update|adjust|fix|improve)\b/i },
   { cls: 'explain', pattern: /\bwhat[’']?s\s+worth\s+(?:changing|updating|adjusting|fixing|improving|editing)\b/i },

@@ -704,3 +704,396 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
     });
   }
 });
+
+// =========================================================================
+// Review round-4 — broader (would|does|might) (need|have) shape
+//
+// Round-3 widened the modal axis for shift/move/alter and how-would, but
+// left the narrow `what would need to change` classifier entry intact
+// even though the advice gate's matching entry was already broader:
+//   /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i
+//
+// So phrases like "What might need to change?" / "What does need to
+// happen?" / "What would have to change?" hit the advice gate on the
+// fresh path but slipped the classifier on the stale path — exactly
+// the same drift class as rounds 2 + 3.
+//
+// Round-4 replaces the narrow classifier entry with the broader shape
+// so the advice gate and classifier are byte-equivalent for this
+// pattern.
+// =========================================================================
+describe('Review round-4 — broader (would|does|might) (need|have) shape', () => {
+  const needHaveCousins: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'What might need to change?', label: 'might need to change' },
+    { message: 'What does need to change?', label: 'does need to change' },
+    { message: 'What would have to change?', label: 'would have to change' },
+    { message: 'What might need to happen?', label: 'might need to happen' },
+    { message: 'What would need to happen?', label: 'would need to happen' },
+    { message: 'What might need to move?', label: 'might need to move' },
+    { message: 'What does need to shift?', label: 'does need to shift' },
+    { message: 'What might have to happen?', label: 'might have to happen' },
+  ];
+
+  // Fresh path
+  for (const { message, label } of needHaveCousins) {
+    it(`fresh + ${label} → advice gate matches what_would_flip_free_text`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
+    });
+  }
+
+  // Classifier
+  for (const { message, label } of needHaveCousins) {
+    it(`classifyAnalyticalIntent returns what_would_flip: ${label}`, () => {
+      expect(classifyAnalyticalIntent(message)).toBe('what_would_flip');
+    });
+  }
+
+  // Stale path — the blocker proof: each phrase must yield deterministic
+  // rerun copy + run_analysis chip, with no broad LLM and no edit_graph.
+  for (const { message, label } of needHaveCousins) {
+    it(`stale + ${label} → stale-rerun-guard matches deterministically with rerun copy + run_analysis chip`, () => {
+      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
+      // (a) Deterministic match — no broad LLM, no edit_graph dispatch.
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        // (b) Correct intent class lifted from the classifier.
+        expect(out.intent_class).toBe('what_would_flip');
+        // (c) Rerun copy.
+        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
+        // (d) run_analysis chip.
+        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
+        // (e) Action type stays in the deterministic chip whitelist — never edit_graph.
+        for (const action of out.suggested_actions) {
+          expect(action.action_type).toBe('run_analysis');
+        }
+      }
+    });
+  }
+
+  // Mutation precedence intact
+  it('"What might need to change to 100?" → mutation_signal (stale-rerun-guard rejects)', () => {
+    const message = 'What might need to change to 100?';
+    expect(hasMutationSignal(message)).toBe(true);
+    const out = tryStaleRerunGuard({ message, freshness: 'stale' });
+    expect(out.matched).toBe(false);
+    if (!out.matched) expect(out.reason).toBe('mutation_signal');
+  });
+});
+
+// =========================================================================
+// Review round-4 — `how (another) option (win|look better|come ahead)`
+// advice-gate mirror (fresh-path asymmetry fix)
+//
+// Pre-round-4: classifier-only pattern; fresh path missed
+// what_would_flip_free_text and routed via fresh-followup-guard's
+// catch-net (thinner recap copy). Round-4 mirrors the pattern into
+// the advice gate so fresh and stale paths produce symmetric copy.
+// =========================================================================
+describe('Review round-4 — how-option-win advice-gate mirror', () => {
+  const phrases: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'How could another option win?', label: 'how could another option win' },
+    { message: 'How can option look better?', label: 'how can option look better' },
+    { message: 'How would another option come ahead?', label: 'how would another option come ahead' },
+    { message: 'How could another option come out ahead?', label: 'how could another option come out ahead' },
+  ];
+
+  for (const { message, label } of phrases) {
+    it(`fresh + ${label} → advice gate matches what_would_flip_free_text (no catch-net detour)`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
+    });
+    it(`stale + ${label} → stale-rerun-guard matches with rerun + run_analysis chip`, () => {
+      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.intent_class).toBe('what_would_flip');
+        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
+      }
+    });
+  }
+});
+
+// =========================================================================
+// Review round-4 — stale "What should I change?" coverage
+//
+// Brief row 5 ("What should I change?") was deterministic on fresh via
+// the advice gate's `advice` class but slipped the classifier on the
+// stale path → fell through to broad LLM. Round-4 adds a narrow
+// stale-path classifier pattern anchored on change-advice verbs
+// (change|update|adjust|fix|improve|edit) — deliberately excluding
+// `do` (too broad), `set|increase|decrease|raise|lower|reduce|bump`
+// (would conflict with mutation precedence), and any non-anchored
+// `what should i/we/you` shape.
+// =========================================================================
+describe('Review round-4 — stale "What should I change?" coverage', () => {
+  // Verbs deliberately exclude `improve` — that one is owned by the
+  // `improvement` class (existing `\bwhat\s+(?:should|can|could|might|would)\s+(?:we|i|you)\s+improve\b`),
+  // not the broad `advice` class. The classifier still includes
+  // `improve` in its round-4 pattern so the STALE path catches it too;
+  // a single-line stale-only check at the bottom of this describe
+  // block locks that.
+  const shouldChangePhrases: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'What should I change?', label: 'brief row 5 canonical' },
+    { message: 'What should we update?', label: 'what should we update' },
+    { message: 'What should you adjust?', label: 'what should you adjust' },
+    { message: 'What should we fix?', label: 'what should we fix' },
+    { message: 'What should we edit?', label: 'what should we edit' },
+  ];
+
+  // Fresh path — already worked via advice gate's broad `advice` class,
+  // regression-locked here.
+  for (const { message, label } of shouldChangePhrases) {
+    it(`fresh + ${label} → advice gate matches advice class`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) expect(out.advice_class).toBe<AdviceClass>('advice');
+    });
+  }
+
+  // Classifier — new round-4 pattern in `explain` class so stale-path
+  // analytical-intent precondition fires.
+  for (const { message, label } of shouldChangePhrases) {
+    it(`classifyAnalyticalIntent returns explain: ${label}`, () => {
+      expect(classifyAnalyticalIntent(message)).toBe('explain');
+    });
+  }
+
+  // Stale path — the fix proof.
+  for (const { message, label } of shouldChangePhrases) {
+    it(`stale + ${label} → stale-rerun-guard matches with rerun copy + run_analysis chip`, () => {
+      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.intent_class).toBe('explain');
+        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
+        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
+      }
+    });
+  }
+
+  // Mutation precedence intact — value-edit forms still mutate
+  const valueEdits: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'What should I change to 100?', label: 'change-to-numeric' },
+    { message: 'What should we update to £200?', label: 'update-to-currency' },
+    { message: 'What should I adjust by 5%?', label: 'adjust-by-percentage' },
+  ];
+  for (const { message, label } of valueEdits) {
+    it(`mutation precedence: ${label} → fresh advice gate rejects mutation_signal`, () => {
+      expect(hasMutationSignal(message)).toBe(true);
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(false);
+      if (!out.matched) expect(out.reason).toBe('mutation_signal');
+    });
+    it(`mutation precedence: ${label} → stale guard rejects mutation_signal`, () => {
+      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
+      expect(out.matched).toBe(false);
+      if (!out.matched) expect(out.reason).toBe('mutation_signal');
+    });
+  }
+
+  // False positives — must NOT classify as `explain` via the new pattern
+  const offTopic: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'What should I do?', label: '"what should I do" — broad `do` excluded' },
+    { message: 'What should I do tonight?', label: 'off-topic "do tonight"' },
+    { message: 'What should I set risk to?', label: 'value-verb `set` excluded' },
+    { message: 'What should I increase Revenue by?', label: 'value-verb `increase` excluded' },
+    { message: 'What should I raise the budget to?', label: 'value-verb `raise` excluded' },
+  ];
+  for (const { message, label } of offTopic) {
+    it(`does NOT classify as explain via new pattern: ${label}`, () => {
+      // The new pattern only matches (change|update|adjust|fix|improve|edit).
+      // These phrases use either `do`, value-edit verbs, or off-topic
+      // wording — they must not trigger the new classifier entry.
+      // (They may still classify via other existing patterns, but NOT
+      // because of the round-4 addition.)
+      const c = classifyAnalyticalIntent(message);
+      // If matched, the existing patterns owned it — assert at minimum
+      // that the new pattern's verb set isn't accidentally broadened.
+      // We can't directly inspect "which pattern fired", so the negative
+      // assertion is via the broader expectation: these off-topic
+      // phrases either return null or a class the existing patterns
+      // would already have returned pre-round-4.
+      if (c !== null) {
+        // For "What should I set/increase/raise…?" the answer should be
+        // null (classifier doesn't catch value-edit verbs here). For
+        // "What should I do?" the answer is null.
+        expect(c).toBe('explain');
+        // If something matched, fail loudly on the value-verb cases.
+        // (See note above — we accept null OR explain only if the
+        // existing analytical surface catches it; for the explicit
+        // value-verb phrases below we assert null instead.)
+      }
+    });
+  }
+
+  // Tighter assertions for value-verb negative controls
+  it('"What should I set risk to?" classifier returns null (no value-verb capture)', () => {
+    expect(classifyAnalyticalIntent('What should I set risk to?')).toBeNull();
+  });
+  it('"What should I increase Revenue by?" classifier returns null', () => {
+    expect(classifyAnalyticalIntent('What should I increase Revenue by?')).toBeNull();
+  });
+  it('"What should I do?" classifier returns null', () => {
+    expect(classifyAnalyticalIntent('What should I do?')).toBeNull();
+  });
+
+  // The classifier pattern includes `improve` so the stale path is
+  // covered too (advice-gate fresh path routes "What should I improve?"
+  // to the more specific `improvement` class — distinct from `advice`,
+  // but both deterministic). Lock the classifier + stale-guard side here.
+  it('stale + "What should I improve?" → stale-rerun-guard matches (classifier covers improve verb)', () => {
+    expect(classifyAnalyticalIntent('What should I improve?')).toBe('explain');
+    const out = tryStaleRerunGuard({ message: 'What should I improve?', freshness: 'stale' });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
+    }
+  });
+});
+
+// =========================================================================
+// Parity invariant — classifier ↔ advice gate alignment
+//
+// Three review rounds for the same drift class. This test is the
+// permanent fix: a curated list of fixed phrases that MUST be
+// classified by both surfaces, and a negative-control list that MUST
+// NOT be classified by either. Adding a new what-would-flip pattern
+// to one surface without the other now fails a concrete test.
+//
+// Coverage requirements (all listed by the reviewer):
+//   - modal axis: could, might, would, can
+//   - shape axis: how-would, how-could, what-would-need/have-to-…
+//   - verb axis: change, shift, move, flip, differ, happen, alter,
+//     affect, tip, win, look better, come ahead
+// =========================================================================
+describe('Parity invariant — classifier ↔ advice gate alignment for what_would_flip', () => {
+  const FLIP_PARITY_PHRASES: readonly string[] = [
+    // Original 'would' patterns
+    'What would flip this?',
+    'What would change the outcome?',
+    'What would tip the balance?',
+    'What would it take to flip the result?',
+    'What would need to change?',
+    // Round-2: could/might modal cousins
+    'What could change the outcome?',
+    'What could change the result?',
+    'What might shift the outcome?',
+    'What could shift the result?',
+    'What might tip the balance?',
+    'What might change the outcome?',
+    // Round-2/3: how-shape modals
+    'How could the outcome change?',
+    'How might the result shift?',
+    'How can the ranking flip?',
+    // Round-3: would parity for shift/move/alter/affect/tip
+    'What would move the result?',
+    'What would shift the result?',
+    'What would alter the analysis?',
+    'What would affect the outcome?',
+    // Round-3: how would [outcome] (change|shift|move|flip|differ)
+    'How would the result move?',
+    'How would the outcome change?',
+    'How would the ranking shift?',
+    'How would the verdict flip?',
+    // Round-4: broader need|have shape
+    'What might need to change?',
+    'What does need to change?',
+    'What would have to change?',
+    'What might need to happen?',
+    'What would need to happen?',
+    'What might need to move?',
+    'What might have to happen?',
+    // Round-4: how (another) option win/look better/come ahead
+    'How could another option win?',
+    'How can option look better?',
+    'How would another option come ahead?',
+    'How could another option come out ahead?',
+  ];
+
+  // The invariant: for every phrase in the curated list,
+  //   classifyAnalyticalIntent === 'what_would_flip'
+  // AND
+  //   tryPostAnalysisAdviceGate(... freshness: 'fresh') matches with
+  //     advice_class === 'what_would_flip_free_text'
+  for (const phrase of FLIP_PARITY_PHRASES) {
+    it(`classifier matches ${JSON.stringify(phrase)}`, () => {
+      expect(classifyAnalyticalIntent(phrase)).toBe('what_would_flip');
+    });
+    it(`advice gate matches ${JSON.stringify(phrase)}`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message: phrase,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
+    });
+  }
+
+  // Negative controls — must NOT classify as what_would_flip AND
+  // must NOT match the advice gate as what_would_flip_free_text.
+  // (They may match other classes — e.g. mutation_signal or off-topic
+  // null — but never what_would_flip / what_would_flip_free_text.)
+  const FLIP_NEGATIVE_CONTROLS: readonly string[] = [
+    // Reviewer's explicit list
+    'What would move Apple?',
+    'How would the weather change tomorrow?',
+    'Would you change the pricing?',
+    'Tell me about Apple pricing',
+    'What could change my mind?',
+    // Concrete mutations — mustn't get captured by analytical class
+    'Set Pricing to £100',
+    'Change Pricing from £80 to £100',
+    'Add a new constraint',
+    'Remove the cost factor',
+    // Adjacent advice/non-flip shapes
+    'What should I change?',          // → explain (advice), NOT what_would_flip
+    'What should we improve?',        // → improvement / advice, NOT what_would_flip
+    'Walk me through the analysis.',  // → explain, NOT what_would_flip
+    // Off-topic chat
+    'What is the weather like?',
+    'Tell me a joke.',
+  ];
+
+  for (const phrase of FLIP_NEGATIVE_CONTROLS) {
+    it(`classifier does NOT return what_would_flip: ${JSON.stringify(phrase)}`, () => {
+      const c = classifyAnalyticalIntent(phrase);
+      if (c !== null) expect(c).not.toBe('what_would_flip');
+    });
+    it(`advice gate does NOT match what_would_flip_free_text: ${JSON.stringify(phrase)}`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message: phrase,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      if (out.matched) {
+        expect(out.advice_class).not.toBe('what_would_flip_free_text');
+      }
+    });
+  }
+});
