@@ -299,11 +299,131 @@ describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () 
     expect(Array.isArray(body.details.recovery.hints)).toBe(true);
     expect(body.details.recovery.hints.length).toBeGreaterThan(0);
 
+    // OPTIONS_IDENTICAL bypass diagnostics survive end-to-end (PR #202
+    // round-2 review fix — these fields were previously dropped by
+    // handleDraftGraph because it didn't read body.details). Each is a
+    // member of the PIPELINE_DETAILS_ALLOWLIST in
+    // src/orchestrator/tools/draft-graph.ts.
+    expect(body.details.violation_code).toBe('OPTIONS_IDENTICAL');
+    expect(body.details.identical_option_ids).toEqual(['opt_49', 'opt_99', 'opt_status_quo']);
+    expect(body.details.intervention_signature).toBe('fac_price:0.5000');
+    expect(body.details.repair_skip_reason).toBe('options_identical_unrepairable_by_llm');
+
+    // No partial graph commit — dispatchDraftGraph's outer catch re-throws
+    // BEFORE the commit/append step. This is the persistence-safety
+    // invariant for the OPTIONS_IDENTICAL bypass path.
+    expect(appendMock).not.toHaveBeenCalled();
+
     // Wire body validates against the BoundaryError contract.
     expect(() => BoundaryErrorSchema.parse(body)).not.toThrow();
 
     // The pipeline was actually called (confirms we did NOT short-circuit
     // somewhere before the unified-pipeline boundary).
     expect(runUnifiedPipelineMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('OPTIONS_IDENTICAL bypass with empty/missing context → empty identical_option_ids on wire', async () => {
+    // Defensive case: the bypass helper handles missing validator
+    // `context` (validator omitted it) by emitting an empty
+    // identical_option_ids array. The allowlist + propagation chain must
+    // surface that intent intact — not drop the field, not invent values.
+    runUnifiedPipelineMock.mockResolvedValueOnce({
+      statusCode: 400,
+      body: {
+        schema: 'cee.error.v1',
+        code: 'CEE_GRAPH_INVALID',
+        message: 'Options need at least one distinct value to compare',
+        retryable: false,
+        source: 'cee',
+        request_id: 'pipeline-internal-id',
+        reason: 'options_identical_unrepairable_by_llm',
+        recovery: {
+          suggestion: 'Your options need at least one distinct value to compare.',
+          hints: ['Give each option a unique value.'],
+        },
+        details: {
+          violation_code: 'OPTIONS_IDENTICAL',
+          identical_option_ids: [],
+          repair_skip_reason: 'options_identical_unrepairable_by_llm',
+          // intervention_signature deliberately omitted (validator
+          // didn't supply it).
+        },
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '33333333-3333-4333-8333-3333fc010004',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+
+    expect(body.details.violation_code).toBe('OPTIONS_IDENTICAL');
+    // Empty array is preserved — does NOT get coerced to undefined or
+    // dropped from the wire.
+    expect(body.details.identical_option_ids).toEqual([]);
+    // Field absent from upstream stays absent on wire (not invented).
+    expect(body.details.intervention_signature).toBeUndefined();
+    expect(body.details.repair_skip_reason).toBe('options_identical_unrepairable_by_llm');
+
+    expect(appendMock).not.toHaveBeenCalled();
+  });
+
+  it('non-allowlisted fields in pipeline body.details are NOT propagated to the wire', async () => {
+    // Defence-in-depth: handleDraftGraph's PIPELINE_DETAILS_ALLOWLIST
+    // filters out any field that isn't explicitly approved for the wire
+    // (protects against future CEE error sites adding fields that
+    // contain user input echoes, stack traces, or other unsafe content).
+    runUnifiedPipelineMock.mockResolvedValueOnce({
+      statusCode: 400,
+      body: {
+        schema: 'cee.error.v1',
+        code: 'CEE_GRAPH_INVALID',
+        message: 'Test',
+        retryable: false,
+        source: 'cee',
+        request_id: 'pipeline-internal-id',
+        details: {
+          violation_code: 'OPTIONS_IDENTICAL', // allowlisted
+          identical_option_ids: ['opt_a'],     // allowlisted
+          // The following are NOT in the allowlist and must be dropped:
+          stack_trace: 'Error at ... (sensitive internal path)',
+          internal_factor_ids: ['fac_internal_x'],
+          user_input_echo: 'something the user typed',
+        },
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '33333333-3333-4333-8333-3333fc010005',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+
+    const body = JSON.parse(res.body);
+    expect(body.details.violation_code).toBe('OPTIONS_IDENTICAL');
+    expect(body.details.identical_option_ids).toEqual(['opt_a']);
+    // Non-allowlisted fields must be absent from the wire.
+    expect(body.details.stack_trace).toBeUndefined();
+    expect(body.details.internal_factor_ids).toBeUndefined();
+    expect(body.details.user_input_echo).toBeUndefined();
   });
 });

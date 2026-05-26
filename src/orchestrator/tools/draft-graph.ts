@@ -235,12 +235,40 @@ export async function handleDraftGraph(
       pipelineRecoveryRaw && typeof pipelineRecoveryRaw === 'object'
         ? (pipelineRecoveryRaw as Record<string, unknown>)
         : null;
+    // Pipeline-side `body.details` may carry diagnostic fields the route
+    // boundary needs to surface on the wire (e.g. OPTIONS_IDENTICAL bypass
+    // attaches `violation_code`, `identical_option_ids`,
+    // `intervention_signature`, `repair_skip_reason`). We allowlist
+    // explicitly rather than passing the whole `details` blob through:
+    // future CEE error sites may add fields that contain user input
+    // echoes, raw exception text, or other unsafe content. Each new field
+    // must be added to the allowlist intentionally with a justification.
+    const PIPELINE_DETAILS_ALLOWLIST = new Set<string>([
+      'violation_code',          // CEE-side validation code (e.g. OPTIONS_IDENTICAL)
+      'identical_option_ids',    // OPTIONS_IDENTICAL bypass diagnostic
+      'intervention_signature',  // OPTIONS_IDENTICAL bypass diagnostic
+      'repair_skip_reason',      // OPTIONS_IDENTICAL bypass diagnostic
+    ]);
+    const rawDetails = (body as { details?: unknown }).details;
+    const pipelineDetails: Record<string, unknown> | null =
+      rawDetails && typeof rawDetails === 'object' && !Array.isArray(rawDetails)
+        ? (() => {
+            const filtered: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(rawDetails as Record<string, unknown>)) {
+              if (PIPELINE_DETAILS_ALLOWLIST.has(key)) {
+                filtered[key] = value;
+              }
+            }
+            return Object.keys(filtered).length > 0 ? filtered : null;
+          })()
+        : null;
     const failureError = Object.assign(new Error(message), {
       orchestratorError: err,
       toolLLMTelemetry: failureTelemetry,
       pipelineStatusCode: pipelineResult.statusCode,
       pipelineErrorCode,
       pipelineRecovery,
+      pipelineDetails,
     });
     throw failureError;
   }

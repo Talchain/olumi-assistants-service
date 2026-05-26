@@ -995,6 +995,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           readonly pipelineStatusCode?: number;
           readonly pipelineErrorCode?: string | null;
           readonly pipelineRecovery?: Record<string, unknown> | null;
+          readonly pipelineDetails?: Record<string, unknown> | null;
         };
         const pipelineStatusCode =
           typeof meta.pipelineStatusCode === 'number' ? meta.pipelineStatusCode : null;
@@ -1003,6 +1004,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         const pipelineRecovery =
           meta.pipelineRecovery && typeof meta.pipelineRecovery === 'object'
             ? meta.pipelineRecovery
+            : null;
+        // Allowlisted diagnostic fields from the CEE pipeline body's
+        // `details` (carried by handleDraftGraph per its
+        // PIPELINE_DETAILS_ALLOWLIST). Examples for OPTIONS_IDENTICAL
+        // bypass: violation_code, identical_option_ids,
+        // intervention_signature, repair_skip_reason. Filtering happens
+        // upstream in handleDraftGraph so this site can trust the shape;
+        // the typeof check is defence-in-depth.
+        const pipelineDetails =
+          meta.pipelineDetails && typeof meta.pipelineDetails === 'object'
+            ? meta.pipelineDetails
             : null;
         log.error(
           {
@@ -1016,13 +1028,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         const { reason, retryable } = pipelineStatusCode != null && pipelineErrorCode != null
           ? mapDraftGraphPipelineReason(pipelineStatusCode, pipelineErrorCode)
           : { reason: 'draft_graph_pipeline_threw', retryable: true };
-        // Build postStageExtras additively: recovery (when present) AND the
-        // raw CEE category code (when present) so dashboards can split
-        // failures even when `reason` falls back to `pipeline_status_${n}`.
-        // The legacy plain-Error fallback path attaches neither — `details`
-        // carries only `retryable` + `reason` + `stage`, bit-for-bit
-        // identical to the pre-fix shape.
+        // Build postStageExtras additively: recovery (when present), the
+        // raw CEE category code (when present), AND any allowlisted
+        // diagnostic fields from the pipeline body's details. Order
+        // matters — pipelineDetails is merged FIRST so the explicit
+        // top-level fields (recovery, pipeline_error_code) cannot be
+        // shadowed by future allowlist additions of the same name.
+        // The legacy plain-Error fallback path attaches none of these —
+        // `details` carries only `retryable` + `reason` + `stage`,
+        // bit-for-bit identical to the pre-fix shape.
         const postStageExtras: Record<string, unknown> = {};
+        if (pipelineDetails) Object.assign(postStageExtras, pipelineDetails);
         if (pipelineRecovery) postStageExtras.recovery = pipelineRecovery;
         if (pipelineErrorCode) postStageExtras.pipeline_error_code = pipelineErrorCode;
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
@@ -1034,10 +1050,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           ...(Object.keys(postStageExtras).length > 0 ? { postStageExtras } : {}),
         });
         // HTTP 500 preserved: keep DGAI's status-code semantics unchanged.
-        // Wire body carries the typed reason in `details.reason`, recovery
-        // hints in `details.recovery`, and the raw CEE code in
-        // `details.pipeline_error_code` so the UI can branch on category
-        // and dashboards can split by code.
+        // Wire body carries (each at top level of `details`):
+        //   - `reason` (typed reason)
+        //   - `recovery` (hints, when present)
+        //   - `pipeline_error_code` (raw CEE code, when present)
+        //   - any allowlisted diagnostic fields flattened from the
+        //     pipeline body's `details` — e.g. for OPTIONS_IDENTICAL bypass:
+        //     `identical_option_ids`, `violation_code`,
+        //     `intervention_signature`, `repair_skip_reason`.
         return reply.code(500).send(boundaryError);
       }
     }
