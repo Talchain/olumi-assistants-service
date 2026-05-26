@@ -20,14 +20,22 @@
  *
  * The fix layers ONTO `classifyAnalyticalIntent` rather than
  * duplicating its regex grammar (PR #192 round-4 lesson: shared
- * grammar must be imported, never re-stated). The classifier already
- * catches `what would change the outcome` / `what would flip` /
- * `what would tip` / `what would need to change` / `how could option
- * X win`. This guard adds the narrow remaining cousins:
- *   - `what could change` (modal cousin of `what would change`)
- *   - `what (might|could|would) (shift|move|alter|affect|tip) the
- *     outcome / result / ranking / ...`
- *   - `how (could|might|can|would) the outcome (change|shift|move|...)`
+ * grammar must be imported, never re-stated).
+ *
+ * History note: rounds 1–3 of PR #200 progressively lifted what-would-
+ * flip grammar into the classifier — first the existing `what would
+ * change [outcome]` / `what would flip` / `what would tip` / `what
+ * would need to change` set, then the `could/might` modal cousins
+ * (round-2), then `would` parity for the `shift|move|alter|affect|tip`
+ * verbs and the `how would [outcome] (change|...)` shape (round-3).
+ * As of round-3, the first three patterns in
+ * ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS below are now ALSO covered by
+ * the shared classifier via isAnalyticalQuestion's delegation. They are
+ * kept here as harmless defence-in-depth (zero runtime cost; one less
+ * place to forget if the classifier is ever narrowed in future). The
+ * fourth pattern (`what should I/we VERB`) remains uniquely owned by
+ * this guard because it routes to the `advice`/`update_advice` class
+ * via the post-analysis advice gate, not via `classifyAnalyticalIntent`.
  *
  * Privacy / safety contract:
  *  - Pure function. No I/O, no telemetry, no side effects.
@@ -58,27 +66,39 @@ import { classifyAnalyticalIntent } from './analytical-intent.js';
 const ANALYTICAL_OUTCOME_NOUNS = String.raw`(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)`;
 
 /**
- * Patterns specific to this guard — analytical-question shapes that
- * `classifyAnalyticalIntent` does NOT yet match. Keep narrow:
- * outcome-noun anchored on the right side, modal/interrogative
- * anchored on the left side. False positives here would block
- * legitimate edits, so when in doubt the pattern should NOT match.
+ * Patterns historically specific to this guard. As of PR #200 round-3,
+ * the first three entries are now redundantly covered by
+ * `classifyAnalyticalIntent` (via this guard's delegation to it on
+ * line 134 below); they are retained as harmless defence-in-depth.
+ * The fourth entry (`what should I/we VERB`) remains uniquely owned
+ * by this guard — the post-analysis advice gate routes it via the
+ * `advice`/`update_advice` class rather than via the analytical-intent
+ * classifier, so the classifier delegation does not catch it here.
+ *
+ * Keep narrow: outcome-noun anchored on the right side,
+ * modal/interrogative anchored on the left side. False positives here
+ * would block legitimate edits, so when in doubt the pattern should
+ * NOT match.
  */
 const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
   // "What could change the outcome / result / ranking / ..."
+  // (Defence-in-depth; covered by classifier's what_would_flip class
+  // since round-2.)
   new RegExp(
     String.raw`\bwhat\s+could\s+change\s+(?:the\s+)?${ANALYTICAL_OUTCOME_NOUNS}\b`,
     'i',
   ),
   // "What (might|could|would) (shift|move|alter|affect|tip|change) (the )? outcome|result|..."
-  // (we include `change` here on the modal axis — the classifier only
-  // has `what would change`, so `what might change` / `what could
-  // change` slip through without this entry.)
+  // (Defence-in-depth; covered by classifier's what_would_flip class
+  // since round-3 — the `would` parity that previously lived only
+  // here is now in analytical-intent.ts.)
   new RegExp(
     String.raw`\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?${ANALYTICAL_OUTCOME_NOUNS}\b`,
     'i',
   ),
   // "How (could|might|can|would) the outcome (change|shift|move|flip|differ)"
+  // (Defence-in-depth; covered by classifier's what_would_flip class
+  // since round-3.)
   new RegExp(
     String.raw`\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?${ANALYTICAL_OUTCOME_NOUNS}\s+(?:change|shift|move|flip|differ|reverse)\b`,
     'i',

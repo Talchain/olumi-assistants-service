@@ -110,8 +110,40 @@ const WHAT_WOULD_FLIP_STRIP_PATTERNS: readonly RegExp[] = [
   /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
   /\bwhat\s+would\s+tip\b/i,
   /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i,
-  /\bwhat\s+would\s+need\s+to\s+change\b/i,
+  // V5 post-analysis contract v1 (review round-4) — widened from
+  // `\bwhat\s+would\s+need\s+to\s+change\b` to the broader
+  // `(would|does|might) (need|have) to (change|happen|move|shift|differ)`
+  // shape that already lives in post-analysis-advice-gate.ts's
+  // `what_would_flip_free_text` class. Round-3 missed this drift:
+  // phrases like "What might need to change?" / "What does need to
+  // happen?" / "What would have to change?" matched the advice gate on
+  // the fresh path but slipped the classifier on the stale path,
+  // falling through stale-rerun-guard to broad routing.
+  /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i,
   /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i,
+  // V5 post-analysis contract v1 (review rounds 2 + 3) — `could/might/would`
+  // modal cousins that previously lived only in
+  // analytical-question-guard.ts ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS,
+  // so the stale-rerun-guard / no-analysis-guard / V5 routeWithToolUse
+  // path missed them while V4 route-v2 caught them. Lifted into the SSOT
+  // here so every guard inherits them via classifyAnalyticalIntent.
+  //
+  // Round-3 widening: every alternation includes `would` alongside
+  // `could/might`. The original `would change [outcome]` narrow pattern
+  // above is preserved (first-match returns the same class) but the new
+  // patterns also cover the broader noun set (results/outcomes/balance/
+  // verdict/winners) and the alternate verbs (shift|move|alter|affect|tip)
+  // and the `how would [outcome] (change|shift|...)` shape that no
+  // existing pattern caught.
+  //
+  // Keep in sync with the matching `cls: 'what_would_flip'` entries
+  // below; the strip-and-recheck logic in `hasIndependentMutationSignal`
+  // depends on this list covering every flip-shape pattern so a phrase
+  // like "what could change the outcome — change pricing to 100" still
+  // exposes the standalone mutation after the flip span is stripped.
+  /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
+  /\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i,
+  /\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i,
 ];
 
 /**
@@ -185,8 +217,29 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+tip\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i },
-  { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+need\s+to\s+change\b/i },
+  // Round-4: broader need/have shape, mirrors the same pattern in
+  // post-analysis-advice-gate.ts's what_would_flip_free_text class so
+  // the classifier and the advice gate cover identical phrasings.
+  // Keep this entry in lock-step with the strip-patterns list above.
+  // Parity is now locked by the curated phrase test in
+  // `__tests__/post-analysis-contract.test.ts`.
+  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i },
   { cls: 'what_would_flip', pattern: /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i },
+  // V5 post-analysis contract v1 (review rounds 2 + 3) — `could/might/would`
+  // modal cousins previously caught only by analytical-question-guard.ts.
+  // Stale-rerun-guard / no-analysis-guard / V5 routeWithToolUse delegate
+  // to classifyAnalyticalIntent, so phrases like "What could change the
+  // outcome?", "What would move the result?", "What might shift the
+  // analysis?", or "How would the outcome change?" used to fall through
+  // to the broad LLM on the stale path (V4 route-v2 caught them via
+  // analytical-question-guard, V5 did not). Round-3 widening includes
+  // `would` in every modal alternation so the SSOT genuinely covers the
+  // full grammar in analytical-question-guard.ts. Mirrored shape with
+  // WHAT_WOULD_FLIP_STRIP_PATTERNS above so mutation precedence stays
+  // symmetric.
+  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i },
+  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i },
+  { cls: 'what_would_flip', pattern: /\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i },
 
   // ── what_drove ───────────────────────────────────────────────────
   { cls: 'what_drove', pattern: /\bwhat\s+drove\b/i },
@@ -217,6 +270,42 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'explain', pattern: /\bexplain\s+(?:this|that|what[''']?s\s+going\s+on|what\s+happened|the\s+(?:reasoning|logic))\b/i },
   { cls: 'explain', pattern: /\bsummarise\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i },
   { cls: 'explain', pattern: /\bsummarize\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i },
+  // V5 post-analysis contract v1 — imperative change-advice family.
+  // Mirrors the patterns added to `post-analysis-advice-gate.ts` so the
+  // stale-rerun-guard, no-analysis-guard, and edit_graph no-op recovery
+  // surfaces fire on the same phrases the fresh-path advice gate owns.
+  // Class is `explain` only to satisfy the analytical-intent precondition
+  // of the sibling guards (which use class-blind static copy); the
+  // fresh-path advice gate owns the actual `update_advice`/`advice`
+  // class differentiation for telemetry.
+  { cls: 'explain', pattern: /\btell\s+me\s+what\s+(?:to|i\s+(?:should|need\s+to|can|could|might))\s+(?:change|update|adjust|fix|improve|edit)\b/i },
+  { cls: 'explain', pattern: /\bshow\s+me\s+what\s+(?:to|i\s+should)\s+(?:change|update|adjust|fix|improve|edit)\b/i },
+  { cls: 'explain', pattern: /\bwhat\s+do\s+(?:i|we)\s+(?:change|update|adjust|fix|edit)\b/i },
+  { cls: 'explain', pattern: /\bwhat\s+needs\s+(?:to\s+(?:change|be\s+(?:changed|updated|adjusted|fixed))|changing|updating|adjusting)\b/i },
+  // Round-4: narrow stale-path coverage for the brief's row 5
+  // ("What should I change?"). The advice gate matches this on the
+  // fresh path via its broad `\bwhat\s+should\s+(?:we|i|you)\b/i`
+  // pattern (`advice` class), but the classifier had no equivalent so
+  // stale + "What should I change?" fell through to broad routing.
+  //
+  // Intentionally NARROW: verb list is restricted to change-advice
+  // verbs (change|update|adjust|fix|improve|edit). Does NOT include:
+  //   - `do` — too broad ("What should I do tonight?" is off-topic)
+  //   - value-edit verbs (set|increase|decrease|raise|lower|reduce|bump)
+  //     — those carry their own mutation precedence in
+  //     analytical-question-guard's pattern #4 and the value-update
+  //     pre-route; including them here could conflict with mutation
+  //     semantics on the stale path.
+  //
+  // Mutation precedence stays intact via `hasMutationSignal` —
+  // "What should I change to 100?" / "What should I update by 5%?"
+  // both trigger MUTATION_SIGNAL_PATTERNS before this classifier
+  // entry can short-circuit (the stale-rerun-guard checks
+  // hasMutationSignal first).
+  { cls: 'explain', pattern: /\bwhat\s+should\s+(?:i|we|you)\s+(?:change|update|adjust|fix|improve|edit)\b/i },
+  { cls: 'explain', pattern: /\bhelp\s+me\s+(?:figure\s+out|decide|work\s+out)\s+what\s+to\s+(?:change|update|adjust|fix|improve|edit)\b/i },
+  { cls: 'explain', pattern: /\bgive\s+me\s+(?:something|a\s+starting\s+point|a\s+place\s+to\s+start)\s+to\s+(?:change|update|adjust|fix|improve)\b/i },
+  { cls: 'explain', pattern: /\bwhat[’']?s\s+worth\s+(?:changing|updating|adjusting|fixing|improving|editing)\b/i },
 ];
 
 /**
