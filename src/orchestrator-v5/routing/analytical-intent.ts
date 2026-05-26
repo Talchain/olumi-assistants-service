@@ -112,20 +112,29 @@ const WHAT_WOULD_FLIP_STRIP_PATTERNS: readonly RegExp[] = [
   /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i,
   /\bwhat\s+would\s+need\s+to\s+change\b/i,
   /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i,
-  // V5 post-analysis contract v1 (review round-2 finding) — `could/might`
+  // V5 post-analysis contract v1 (review rounds 2 + 3) — `could/might/would`
   // modal cousins that previously lived only in
   // analytical-question-guard.ts ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS,
   // so the stale-rerun-guard / no-analysis-guard / V5 routeWithToolUse
   // path missed them while V4 route-v2 caught them. Lifted into the SSOT
   // here so every guard inherits them via classifyAnalyticalIntent.
+  //
+  // Round-3 widening: every alternation includes `would` alongside
+  // `could/might`. The original `would change [outcome]` narrow pattern
+  // above is preserved (first-match returns the same class) but the new
+  // patterns also cover the broader noun set (results/outcomes/balance/
+  // verdict/winners) and the alternate verbs (shift|move|alter|affect|tip)
+  // and the `how would [outcome] (change|shift|...)` shape that no
+  // existing pattern caught.
+  //
   // Keep in sync with the matching `cls: 'what_would_flip'` entries
   // below; the strip-and-recheck logic in `hasIndependentMutationSignal`
   // depends on this list covering every flip-shape pattern so a phrase
   // like "what could change the outcome — change pricing to 100" still
   // exposes the standalone mutation after the flip span is stripped.
-  /\bwhat\s+could\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
-  /\bwhat\s+(?:might|could)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i,
-  /\bhow\s+(?:could|might|can)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i,
+  /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
+  /\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i,
+  /\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i,
 ];
 
 /**
@@ -201,17 +210,21 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+need\s+to\s+change\b/i },
   { cls: 'what_would_flip', pattern: /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i },
-  // V5 post-analysis contract v1 (review round-2 finding) — `could/might`
+  // V5 post-analysis contract v1 (review rounds 2 + 3) — `could/might/would`
   // modal cousins previously caught only by analytical-question-guard.ts.
   // Stale-rerun-guard / no-analysis-guard / V5 routeWithToolUse delegate
   // to classifyAnalyticalIntent, so phrases like "What could change the
-  // outcome?" or "What might shift the result?" used to fall through to
-  // the broad LLM on the stale path (V4 route-v2 caught them, V5 did
-  // not). Mirrored shape with WHAT_WOULD_FLIP_STRIP_PATTERNS above so
-  // mutation precedence stays symmetric.
-  { cls: 'what_would_flip', pattern: /\bwhat\s+could\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i },
-  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:might|could)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i },
-  { cls: 'what_would_flip', pattern: /\bhow\s+(?:could|might|can)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i },
+  // outcome?", "What would move the result?", "What might shift the
+  // analysis?", or "How would the outcome change?" used to fall through
+  // to the broad LLM on the stale path (V4 route-v2 caught them via
+  // analytical-question-guard, V5 did not). Round-3 widening includes
+  // `would` in every modal alternation so the SSOT genuinely covers the
+  // full grammar in analytical-question-guard.ts. Mirrored shape with
+  // WHAT_WOULD_FLIP_STRIP_PATTERNS above so mutation precedence stays
+  // symmetric.
+  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i },
+  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i },
+  { cls: 'what_would_flip', pattern: /\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i },
 
   // ── what_drove ───────────────────────────────────────────────────
   { cls: 'what_drove', pattern: /\bwhat\s+drove\b/i },

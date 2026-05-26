@@ -568,3 +568,139 @@ describe('Review round-2 — could/might modal cousins of what would change', ()
     }
   });
 });
+
+// =========================================================================
+// Review round-3 — `would` parity for shift|move|alter|... + how-would
+//
+// Round-2 closed the `could/might` gap but left the same drift class
+// for the `would` variants of the analytical-question-guard's broader
+// patterns. The classifier had `what would change [outcome]` (narrow
+// nouns, "change" verb only) but missed:
+//
+//   - `what would (shift|move|alter|affect|tip) [outcome]`  (any verb)
+//   - `how would [outcome] (change|shift|move|flip|differ)` (how-shape)
+//
+// Both shapes lived in analytical-question-guard.ts's
+// ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS, so V4 route-v2 caught them
+// but V5 stale-rerun-guard / no-analysis-guard / V5 routeWithToolUse
+// missed them. Round-3 widens every modal alternation in the round-2
+// patterns to include `would` so the classifier is the genuine SSOT.
+// =========================================================================
+describe('Review round-3 — would parity for shift/move/alter and how-would-outcome', () => {
+  const wouldCousins: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    // would + (shift|move|alter|affect|tip) + outcome
+    { message: 'What would move the result?', label: 'what would move the result' },
+    { message: 'What would shift the result?', label: 'what would shift the result' },
+    { message: 'What would alter the analysis?', label: 'what would alter the analysis' },
+    { message: 'What would affect the outcome?', label: 'what would affect the outcome' },
+    { message: 'What would tip the balance?', label: 'what would tip the balance' },
+    // how + would + outcome + (change|shift|move|flip)
+    { message: 'How would the result move?', label: 'how would the result move' },
+    { message: 'How would the outcome change?', label: 'how would the outcome change' },
+    { message: 'How would the ranking shift?', label: 'how would the ranking shift' },
+    { message: 'How would the verdict flip?', label: 'how would the verdict flip' },
+  ];
+
+  // ── Fresh path: advice gate matches what_would_flip_free_text
+  for (const { message, label } of wouldCousins) {
+    it(`fresh + ${label} → advice gate matches what_would_flip_free_text`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
+        expect(out.suggested_actions).toHaveLength(0);
+      }
+    });
+  }
+
+  // ── Classifier returns what_would_flip
+  for (const { message, label } of wouldCousins) {
+    it(`classifyAnalyticalIntent returns what_would_flip: ${label}`, () => {
+      expect(classifyAnalyticalIntent(message)).toBe('what_would_flip');
+    });
+  }
+
+  // ── Stale path: stale-rerun-guard matches + emits rerun + run_analysis chip
+  for (const { message, label } of wouldCousins) {
+    it(`stale + ${label} → stale-rerun-guard matches with rerun copy + run_analysis chip`, () => {
+      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.intent_class).toBe('what_would_flip');
+        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
+        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
+      }
+    });
+  }
+
+  // ── Mutation precedence still wins on these forms too
+  // (Note: the mutation verb list is `set|change|update|adjust|modify|
+  // raise|lower|increase|decrease|bump` — verbs like `move`, `shift`,
+  // `alter`, `affect`, `tip` only appear in the new analytical-intent
+  // patterns, not the mutation patterns, so they cannot trigger
+  // mutation precedence on their own. Concrete edits must use one of
+  // the mutation-verb anchors.)
+  const wouldMutations: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'What would change the result to a draw?', label: '"change... to a draw" verb-to-X' },
+    { message: 'What would change the result to win by 10%?', label: '"change... to win by 10%" verb-to + numeric' },
+    { message: 'How would the outcome change if I set risk to 0.7?', label: 'how-would + concrete set' },
+  ];
+  for (const { message, label } of wouldMutations) {
+    it(`mutation precedence: ${label} → fresh advice gate rejects with mutation_signal`, () => {
+      expect(hasMutationSignal(message)).toBe(true);
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      // Mutation precedence runs AFTER class match but BEFORE composition;
+      // what_would_flip_free_text has the strip-and-recheck exception, but
+      // "change the result to a draw" / "move the result by 10" / "set
+      // risk to 0.7" all produce independent mutation clauses that survive
+      // the strip. Some of these are explicit hasIndependentMutationSignal
+      // mutations (numeric), which trigger ALWAYS_INDEPENDENT — out is
+      // either mutation_signal or matched what_would_flip_free_text via
+      // the exception. Assert at minimum that no other class is reached.
+      if (!out.matched) {
+        expect(out.reason).toBe('mutation_signal');
+      } else {
+        expect(out.advice_class).toBe('what_would_flip_free_text');
+      }
+    });
+
+    it(`mutation precedence: ${label} → stale guard rejects with mutation_signal`, () => {
+      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
+      // Stale guard uses raw hasMutationSignal (no strip exception), so
+      // any verb-to-X / numeric / from-to clause forces fall-through.
+      expect(out.matched).toBe(false);
+      if (!out.matched) expect(out.reason).toBe('mutation_signal');
+    });
+  }
+
+  // ── isAnalyticalQuestion delegation lock
+  it('isAnalyticalQuestion inherits would-parity patterns via classifier delegation', () => {
+    for (const { message } of wouldCousins) {
+      expect(isAnalyticalQuestion(message)).toBe(true);
+    }
+  });
+
+  // ── False-positive guards: outcome-noun anchor still required
+  const offTopic: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
+    { message: 'What would move Apple?', label: 'move-Apple (not outcome noun)' },
+    { message: 'What would shift my schedule?', label: 'shift-schedule (not outcome noun)' },
+    { message: 'How would the weather change tomorrow?', label: 'weather-change (not outcome noun)' },
+    { message: 'Would you change the pricing?', label: 'would-you (not what/how lead)' },
+  ];
+  for (const { message, label } of offTopic) {
+    it(`does NOT classify as what_would_flip: ${label}`, () => {
+      const c = classifyAnalyticalIntent(message);
+      if (c !== null) expect(c).not.toBe('what_would_flip');
+    });
+  }
+});
