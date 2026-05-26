@@ -193,9 +193,21 @@ export async function handleDraftGraph(
     };
     // Preserve tool telemetry even on failure so _diagnostic_trace captures the error
     const failureTelemetry = extractToolLLMTelemetry(body);
+    // Carry pipeline category metadata onto the throw so route-v2.ts can emit a
+    // typed wire envelope instead of opaque draft_graph_pipeline_threw. See
+    // route-v2.ts catch block in dispatchDraftGraph; the legacy fallback path
+    // (plain Error with no pipelineStatusCode) preserves existing wire shape.
+    const pipelineRecoveryRaw = (body as { recovery?: unknown }).recovery;
+    const pipelineRecovery =
+      pipelineRecoveryRaw && typeof pipelineRecoveryRaw === 'object'
+        ? (pipelineRecoveryRaw as Record<string, unknown>)
+        : null;
     const failureError = Object.assign(new Error(message), {
       orchestratorError: err,
       toolLLMTelemetry: failureTelemetry,
+      pipelineStatusCode: pipelineResult.statusCode,
+      pipelineErrorCode: typeof body?.error === 'string' ? body.error : null,
+      pipelineRecovery,
     });
     throw failureError;
   }

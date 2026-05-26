@@ -420,4 +420,101 @@ describe("@regression B6: graceful degradation for nonsensical briefs", () => {
     expect(result.statusCode).toBe(500);
     expect((result.body as any).code).toBe("CEE_INTERNAL_ERROR");
   });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Edit 3: Stage 2 (Normalise) typed-fail-by-default wrap.
+  //
+  // Previously Stage 2 was unguarded — a TypeError/ZodError from
+  // reconcileStructuralTruth or normaliseRiskCoefficients would surface as
+  // opaque CEE_INTERNAL_ERROR (500). The wrap routes unknown error classes
+  // via an anthropic_response_invalid_schema-prefixed re-throw, which the
+  // outer mapPipelineError catch handles as CEE_LLM_VALIDATION_FAILED.
+  // Safe-degrade allowlist is initially empty — see Test 7b.
+  // ──────────────────────────────────────────────────────────────────
+
+  it("Stage 2 throws TypeError → typed CEE_LLM_VALIDATION_FAILED, NOT 500 (Test 7a)", async () => {
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      ctx.graph = {
+        nodes: [{ id: "goal_1", kind: "goal", label: "G" }],
+        edges: [],
+        version: "1.2",
+      };
+    });
+    (runStageNormalise as any).mockImplementation(async () => {
+      // Simulates malformed LLM graph causing TypeError inside
+      // reconcileStructuralTruth or normaliseRiskCoefficients.
+      throw new TypeError("Cannot read properties of undefined (reading 'kind')");
+    });
+
+    const result = await runUnifiedPipeline(
+      { brief: "Should we charge $49 or $99 per month?" } as any,
+      {},
+      mockRequest,
+      baseOpts,
+    );
+
+    // Was opaque CEE_INTERNAL_ERROR (500) before the wrap — now a typed
+    // recoverable failure that the route boundary can surface as
+    // draft_graph_cee_llm_validation_failed.
+    expect(result.statusCode).not.toBe(500);
+    expect(result.statusCode).toBe(400);
+    expect((result.body as any).code).toBe("CEE_LLM_VALIDATION_FAILED");
+    // No graph leaks downstream when normalise typed-fails.
+    expect((result.body as any).graph).toBeUndefined();
+  });
+
+  it("Stage 2 throws ZodError-shaped Error → typed CEE_LLM_VALIDATION_FAILED (Test 7a-zod)", async () => {
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      ctx.graph = {
+        nodes: [{ id: "goal_1", kind: "goal", label: "G" }],
+        edges: [],
+        version: "1.2",
+      };
+    });
+    (runStageNormalise as any).mockImplementation(async () => {
+      const err = new Error("ZodError: edge.strength.mean must be number, got string");
+      err.name = "ZodError";
+      throw err;
+    });
+
+    const result = await runUnifiedPipeline(
+      { brief: "Test brief" } as any,
+      {},
+      mockRequest,
+      baseOpts,
+    );
+
+    expect(result.statusCode).toBe(400);
+    expect((result.body as any).code).toBe("CEE_LLM_VALIDATION_FAILED");
+  });
+});
+
+// Test 7b: isKnownSafeNormaliseError allowlist is empty at initial ship.
+// This test exists to force future allowlist additions to update the test —
+// any time an entry is added to isKnownSafeNormaliseError, this assertion
+// must be amended with a paired regression proving Stage 4 backstop.
+describe("isKnownSafeNormaliseError allowlist", () => {
+  it("returns false for all candidate error classes (initial empty allowlist) (Test 7b)", async () => {
+    const { isKnownSafeNormaliseError } = await import(
+      "../../src/cee/unified-pipeline/index.js"
+    );
+
+    // Candidate classes the wrap might encounter — all must be denied
+    // until explicitly proven safe to degrade.
+    const candidates: unknown[] = [
+      new TypeError("Cannot read properties of undefined"),
+      Object.assign(new Error("ZodError: …"), { name: "ZodError" }),
+      new RangeError("out of range"),
+      new Error("plain error"),
+      new Error("edge_count_invariant_violated"),
+      null,
+      undefined,
+      "string error",
+      { message: "object pretending to be error" },
+    ];
+
+    for (const candidate of candidates) {
+      expect(isKnownSafeNormaliseError(candidate)).toBe(false);
+    }
+  });
 });

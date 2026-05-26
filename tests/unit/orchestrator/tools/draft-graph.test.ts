@@ -200,6 +200,95 @@ describe("handleDraftGraph", () => {
     }
   });
 
+  // ──────────────────────────────────────────────────────────────────
+  // Edit 1: route-v2-typed-envelope workstream — handleDraftGraph attaches
+  // structured pipeline metadata to the thrown Error so route-v2.ts can map
+  // it to a typed wire envelope instead of opaque draft_graph_pipeline_threw.
+  // The metadata is purely additive — callers that ignore it (V4 surfaces)
+  // are unaffected.
+  // ──────────────────────────────────────────────────────────────────
+
+  it("attaches pipelineStatusCode / pipelineErrorCode / pipelineRecovery on 400 schema failure (Test 1)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: {
+        error: "CEE_LLM_VALIDATION_FAILED",
+        recovery: {
+          suggestion: "Provide a clearer, more specific decision brief.",
+          hints: [
+            "State the specific decision you are trying to make",
+            "List 2-3 concrete options you are considering",
+            "Describe what success looks like",
+          ],
+        },
+      },
+    });
+
+    try {
+      await handleDraftGraph("ambiguous brief", mockRequest, "turn-md1");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as {
+        pipelineStatusCode?: number;
+        pipelineErrorCode?: string | null;
+        pipelineRecovery?: Record<string, unknown> | null;
+      };
+      expect(meta.pipelineStatusCode).toBe(400);
+      expect(meta.pipelineErrorCode).toBe("CEE_LLM_VALIDATION_FAILED");
+      expect(meta.pipelineRecovery).toBeDefined();
+      expect(meta.pipelineRecovery).not.toBeNull();
+      expect((meta.pipelineRecovery as { suggestion?: unknown }).suggestion).toBe(
+        "Provide a clearer, more specific decision brief.",
+      );
+    }
+  });
+
+  it("attaches pipelineStatusCode / pipelineErrorCode on 504 timeout (Test 2)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 504,
+      body: {
+        error: "CEE_TIMEOUT",
+      },
+    });
+
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md2");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as {
+        pipelineStatusCode?: number;
+        pipelineErrorCode?: string | null;
+        pipelineRecovery?: Record<string, unknown> | null;
+      };
+      expect(meta.pipelineStatusCode).toBe(504);
+      expect(meta.pipelineErrorCode).toBe("CEE_TIMEOUT");
+      expect(meta.pipelineRecovery).toBeNull();
+    }
+  });
+
+  it("attaches pipelineStatusCode / pipelineErrorCode on 500 catch-all (Test 3)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 500,
+      body: {
+        error: "CEE_INTERNAL_ERROR",
+      },
+    });
+
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md3");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as {
+        pipelineStatusCode?: number;
+        pipelineErrorCode?: string | null;
+        pipelineRecovery?: Record<string, unknown> | null;
+      };
+      expect(meta.pipelineStatusCode).toBe(500);
+      expect(meta.pipelineErrorCode).toBe("CEE_INTERNAL_ERROR");
+      expect(meta.pipelineRecovery).toBeNull();
+    }
+  });
+
   it("block provenance references the turn ID", async () => {
     mockRunUnifiedPipeline.mockResolvedValueOnce(
       makePipelineSuccess({

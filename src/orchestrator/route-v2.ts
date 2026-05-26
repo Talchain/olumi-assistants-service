@@ -430,6 +430,52 @@ export function buildCommitFailureBoundaryError(params: {
   };
 }
 
+/**
+ * Map the V4 unified-pipeline's category metadata (statusCode + body.error)
+ * to a typed `details.reason` + retryable signal for the draft_graph
+ * BoundaryError. Strategy B: HTTP status stays at 500; only the wire body's
+ * typed reason and retryability change so DGAI can branch on
+ * `details.reason` without a status-code contract change.
+ *
+ * Plain-Error throws with no `pipelineStatusCode` metadata bypass this helper
+ * and produce the legacy `draft_graph_pipeline_threw` reason directly (see
+ * the catch block in dispatchDraftGraph).
+ *
+ * Category source: `mapPipelineError` in src/cee/unified-pipeline/index.ts.
+ */
+export function mapDraftGraphPipelineReason(
+  pipelineStatusCode: number,
+  pipelineErrorCode: string,
+): { reason: string; retryable: boolean } {
+  // Pipeline-side `body.error` codes from buildCeeErrorResponse — the only
+  // ones we expect from runUnifiedPipeline's mapPipelineError sites.
+  // Anything outside this set falls back to the catch-all internal reason
+  // while preserving the typed code in the response details for diagnostics.
+  switch (pipelineErrorCode) {
+    case 'CEE_LLM_VALIDATION_FAILED':
+      // Client-actionable: brief was too vague or LLM output didn't validate.
+      // Not retryable without changing the input.
+      return { reason: 'draft_graph_cee_llm_validation_failed', retryable: false };
+    case 'CEE_TIMEOUT':
+      return { reason: 'draft_graph_cee_timeout', retryable: true };
+    case 'CEE_LLM_UPSTREAM_ERROR':
+      return { reason: 'draft_graph_cee_llm_upstream_error', retryable: true };
+    case 'CEE_RATE_LIMIT':
+      return { reason: 'draft_graph_cee_rate_limit', retryable: true };
+    case 'CEE_INTERNAL_ERROR':
+      // Pipeline catch-all — likely a true internal bug. Retryable so the user
+      // isn't blocked, but logs should flag it for investigation.
+      return { reason: 'draft_graph_cee_internal_error', retryable: true };
+    default:
+      // Unknown pipeline error code: surface the status family without
+      // inventing a category. Retryable for 5xx; non-retryable for 4xx.
+      return {
+        reason: `draft_graph_pipeline_status_${pipelineStatusCode}`,
+        retryable: pipelineStatusCode >= 500,
+      };
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Edit_graph typed-recovery helper (V5 Phase 2.5 Defect A Part 1)
 // ────────────────────────────────────────────────────────────────────
@@ -918,23 +964,49 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // The unified pipeline threw — surface a typed BoundaryError. The
         // dispatcher already logged the details; re-log here with the
         // route-level correlation context.
+        //
+        // Strategy: preserve HTTP 500 (no DGAI status-code contract change)
+        // and enrich `details.reason` + `details.recovery` from the typed
+        // pipeline metadata when handleDraftGraph attached it
+        // (`pipelineStatusCode` / `pipelineErrorCode` / `pipelineRecovery`).
+        // Plain Error throws with no metadata fall through to the legacy
+        // wire shape bit-for-bit: `INTERNAL_ERROR / draft_graph_pipeline_threw`.
+        const meta = err as {
+          readonly pipelineStatusCode?: number;
+          readonly pipelineErrorCode?: string | null;
+          readonly pipelineRecovery?: Record<string, unknown> | null;
+        };
+        const pipelineStatusCode =
+          typeof meta.pipelineStatusCode === 'number' ? meta.pipelineStatusCode : null;
+        const pipelineErrorCode =
+          typeof meta.pipelineErrorCode === 'string' ? meta.pipelineErrorCode : null;
+        const pipelineRecovery =
+          meta.pipelineRecovery && typeof meta.pipelineRecovery === 'object'
+            ? meta.pipelineRecovery
+            : null;
         log.error(
           {
             request_id: requestId,
             err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            pipeline_status_code: pipelineStatusCode,
+            pipeline_error_code: pipelineErrorCode,
           },
           'V5 draft_graph pipeline threw — returning 500 BoundaryError',
         );
-        // Wire body carries only stable, typed fields. Raw exception text
-        // stays in server logs (above).
+        const { reason, retryable } = pipelineStatusCode != null && pipelineErrorCode != null
+          ? mapDraftGraphPipelineReason(pipelineStatusCode, pipelineErrorCode)
+          : { reason: 'draft_graph_pipeline_threw', retryable: true };
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'draft_graph_pipeline',
-          reason: 'draft_graph_pipeline_threw',
-          retryable: true,
+          reason,
+          retryable,
           requestId,
           stage: ingress.stage,
+          ...(pipelineRecovery ? { postStageExtras: { recovery: pipelineRecovery } } : {}),
         });
-        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
+        // HTTP 500 preserved: keep DGAI's status-code semantics unchanged.
+        // Wire body carries the typed reason in `details.reason` and recovery
+        // hints in `details.recovery` so the UI can surface a useful prompt.
         return reply.code(500).send(boundaryError);
       }
     }

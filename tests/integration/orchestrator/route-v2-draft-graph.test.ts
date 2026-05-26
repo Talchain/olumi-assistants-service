@@ -318,6 +318,270 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.details.reason).toBe('draft_graph_pipeline_threw');
   });
 
+  // ──────────────────────────────────────────────────────────────────
+  // Edit 2: route-v2-typed-envelope workstream — when handleDraftGraph
+  // attaches pipeline metadata to the thrown Error, the route maps
+  // pipelineErrorCode → typed `details.reason` and category-appropriate
+  // `details.retryable`. HTTP status stays at 500 to honour the
+  // "no DGAI status-code contract change" constraint. Strategy B.
+  // The legacy plain-Error fallback above (Test 7) must continue to
+  // produce the exact existing wire shape — that's pinned bit-for-bit.
+  // ──────────────────────────────────────────────────────────────────
+
+  it('typed mapping: 400 CEE_LLM_VALIDATION_FAILED → typed reason + recovery hints (Test 4)', async () => {
+    const recovery = {
+      suggestion: 'Provide a clearer, more specific decision brief.',
+      hints: ['List 2-3 concrete options', 'Describe what success looks like'],
+    };
+    const err = Object.assign(new Error('CEE_LLM_VALIDATION_FAILED'), {
+      pipelineStatusCode: 400,
+      pipelineErrorCode: 'CEE_LLM_VALIDATION_FAILED',
+      pipelineRecovery: recovery,
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111e04',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    // HTTP 500 preserved (Strategy B): no DGAI status-code change.
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('draft_graph_cee_llm_validation_failed');
+    // Validation failures are NOT retryable — the input must change.
+    expect(body.details.retryable).toBe(false);
+    expect(body.retryable).toBe(false);
+    // Recovery hints survive the boundary so the UI can render a useful prompt.
+    expect(body.details.recovery).toEqual(recovery);
+  });
+
+  it('typed mapping: 504 CEE_TIMEOUT → timeout reason + retryable=true (Test 5)', async () => {
+    const err = Object.assign(new Error('CEE_TIMEOUT'), {
+      pipelineStatusCode: 504,
+      pipelineErrorCode: 'CEE_TIMEOUT',
+      pipelineRecovery: null,
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111e05',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('draft_graph_cee_timeout');
+    expect(body.details.retryable).toBe(true);
+    expect(body.retryable).toBe(true);
+    // No recovery hints → field absent rather than null.
+    expect(body.details.recovery).toBeUndefined();
+  });
+
+  it('typed mapping: 502 CEE_LLM_UPSTREAM_ERROR → upstream reason + retryable=true (Test 6)', async () => {
+    const err = Object.assign(new Error('CEE_LLM_UPSTREAM_ERROR'), {
+      pipelineStatusCode: 502,
+      pipelineErrorCode: 'CEE_LLM_UPSTREAM_ERROR',
+      pipelineRecovery: null,
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111e06',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('draft_graph_cee_llm_upstream_error');
+    expect(body.details.retryable).toBe(true);
+    expect(body.retryable).toBe(true);
+  });
+
+  it('typed mapping: unknown pipelineErrorCode falls back to status-family reason (Test 6b)', async () => {
+    const err = Object.assign(new Error('CEE_UNKNOWN_FUTURE_CODE'), {
+      pipelineStatusCode: 503,
+      pipelineErrorCode: 'CEE_UNKNOWN_FUTURE_CODE',
+      pipelineRecovery: null,
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111e6b',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    // Unknown code: surface status family in reason, retryable=true for 5xx.
+    expect(body.details.reason).toBe('draft_graph_pipeline_status_503');
+    expect(body.details.retryable).toBe(true);
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Test 8b — load-bearing regression: the user-reported failing
+  // pricing brief no longer produces opaque draft_graph_pipeline_threw.
+  //
+  // This test simulates the V4 pipeline rejecting the LLM output with
+  // anthropic_response_invalid_schema (the hypothesised throw class for
+  // the $/factor-add brief shape). Without the Edit 1+2 fix, the wire
+  // envelope was INTERNAL_ERROR / draft_graph_pipeline_threw with no
+  // recovery hints — opaque, not user-actionable. After the fix, the
+  // wire envelope carries a typed CEE category code in details.reason
+  // and recovery hints in details.recovery so the UI can prompt the
+  // user to refine the brief.
+  //
+  // It is acceptable for the test scenario to be either (a) successful
+  // graph generation OR (b) a typed recoverable failure. The
+  // unacceptable outcome is opaque draft_graph_pipeline_threw with
+  // the default fallback reason.
+  // ──────────────────────────────────────────────────────────────────
+
+  describe('Regression: failing $49/$99 + Add Pricing as numeric factor brief (Test 8b)', () => {
+    const FAILING_BRIEF =
+      'Should we charge $49 or $99 per month for our B2B SaaS product to maximise revenue? Add Pricing as a numeric factor.';
+
+    it('LLM schema reject → typed CEE category + recovery, NOT opaque draft_graph_pipeline_threw', async () => {
+      // Simulates the post-Edit-1 path: handleDraftGraph throws with metadata
+      // when the V4 pipeline returns 400 CEE_LLM_VALIDATION_FAILED.
+      const typedErr = Object.assign(new Error('CEE_LLM_VALIDATION_FAILED'), {
+        pipelineStatusCode: 400,
+        pipelineErrorCode: 'CEE_LLM_VALIDATION_FAILED',
+        pipelineRecovery: {
+          suggestion: 'Provide a clearer, more specific decision brief.',
+          hints: [
+            'State the specific decision you are trying to make',
+            'List 2-3 concrete options you are considering',
+            'Describe what success looks like',
+          ],
+        },
+      });
+      dispatchDraftGraphMock.mockRejectedValueOnce(typedErr);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'message',
+          turn_id: '11111111-1111-4111-8111-1111111108b1',
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          message: FAILING_BRIEF,
+          turn_class: 'frame',
+          source: 'composer',
+        },
+      });
+      const body = JSON.parse(res.body);
+      // Load-bearing assertion: the opaque envelope is gone.
+      expect(body.details.reason).not.toBe('draft_graph_pipeline_threw');
+      // Replaced with a typed CEE category code + recovery hints.
+      expect(body.details.reason).toBe('draft_graph_cee_llm_validation_failed');
+      expect(body.details.recovery).toBeDefined();
+      expect((body.details.recovery as { hints?: unknown[] }).hints).toBeInstanceOf(Array);
+      expect(body.details.retryable).toBe(false);
+    });
+
+    it('successful generation path also valid (acceptable outcome): brief still routes to dispatch', async () => {
+      dispatchDraftGraphMock.mockResolvedValueOnce(makeDraftGraphMockResult());
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'message',
+          turn_id: '11111111-1111-4111-8111-1111111108b2',
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          message: FAILING_BRIEF,
+          turn_class: 'frame',
+          source: 'composer',
+        },
+      });
+      expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+      // Brief regex matches "Should" and trailing "?" — must dispatch.
+      expect(res.statusCode).toBe(200);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Tests 9 + 10 — passing brief regression locks. The hiring brief and
+  // pricing-without-$ brief were both verified-passing in the diagnosis
+  // and must continue to dispatch successfully after the Edit 1+2+3
+  // changes. Mocked dispatch confirms the regex still triggers; the
+  // actual LLM/pipeline behaviour is covered by upstream tests.
+  // ──────────────────────────────────────────────────────────────────
+
+  describe('Regression: verified-passing briefs still dispatch (Tests 9 + 10)', () => {
+    it('hiring brief "Should we hire a tech lead or two developers..." → dispatch + 200 (Test 9)', async () => {
+      dispatchDraftGraphMock.mockResolvedValueOnce(makeDraftGraphMockResult());
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'message',
+          turn_id: '11111111-1111-4111-8111-111111111909',
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          message:
+            'Should we hire a tech lead or two developers to improve delivery speed?',
+          turn_class: 'frame',
+          source: 'composer',
+        },
+      });
+      expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('pricing brief without $ "Should we set pricing at 49 or 99..." → dispatch + 200 (Test 10)', async () => {
+      dispatchDraftGraphMock.mockResolvedValueOnce(makeDraftGraphMockResult());
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'message',
+          turn_id: '11111111-1111-4111-8111-111111111a10',
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          message:
+            'Should we set pricing at 49 per month or 99 per month for our B2B SaaS product to maximise revenue?',
+          turn_class: 'frame',
+          source: 'composer',
+        },
+      });
+      expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+      expect(res.statusCode).toBe(200);
+    });
+  });
+
   // ------------------------------------------------------------------
   // Regression: phrasings that might trip the heuristic trigger
   // ------------------------------------------------------------------
