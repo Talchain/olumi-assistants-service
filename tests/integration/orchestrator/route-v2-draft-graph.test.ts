@@ -16,6 +16,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../../../src/schemas/assist.js';
+import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
 
 // -------- Mocks --------
 const dispatchDraftGraphMock = vi.fn();
@@ -316,6 +317,13 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     const body = JSON.parse(res.body);
     expect(body.error).toBe('INTERNAL_ERROR');
     expect(body.details.reason).toBe('draft_graph_pipeline_threw');
+    // Legacy fallback path: pipeline_error_code and recovery MUST be absent
+    // — preserves pre-fix wire shape bit-for-bit for callers that haven't
+    // migrated to the typed-throw contract.
+    expect(body.details.pipeline_error_code).toBeUndefined();
+    expect(body.details.recovery).toBeUndefined();
+    // BoundaryError schema still validates with the legacy shape.
+    expect(() => BoundaryErrorSchema.parse(body)).not.toThrow();
   });
 
   // ──────────────────────────────────────────────────────────────────
@@ -364,6 +372,12 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.details.recovery).toEqual(recovery);
     // Raw CEE code surfaced in details for dashboard splitting (post-review-fix R2).
     expect(body.details.pipeline_error_code).toBe('CEE_LLM_VALIDATION_FAILED');
+    // Wire body must still validate against the BoundaryError contract — the
+    // new pipeline_error_code + recovery fields live inside details, which
+    // is `.passthrough()` in BoundaryErrorSchema, so adding them is
+    // schema-safe. Explicit assertion locks the contract: if the schema
+    // ever tightens `details`, this test catches the drift.
+    expect(() => BoundaryErrorSchema.parse(body)).not.toThrow();
   });
 
   it('typed mapping: 504 CEE_TIMEOUT → timeout reason + retryable=true (Test 5)', async () => {
