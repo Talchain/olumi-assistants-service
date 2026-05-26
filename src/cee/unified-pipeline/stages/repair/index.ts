@@ -6,9 +6,13 @@
  *
  * ORDERING INVARIANT — do not reorder substeps (except 1/1b swap below)
  *
- * 1.  Deterministic sweep     — resolves mechanical violations, unreachable factors, status quo
- * 1b. Orchestrator validation — optional LLM-backed validation (gated), runs AFTER sweep
- * 2.  PLoT validation         — external validation + LLM repair (only if Bucket C remains)
+ * 1.  Deterministic sweep        — resolves mechanical violations, unreachable factors, status quo
+ * 1.5 Options-identical bypass   — fail-fast gate for OPTIONS_IDENTICAL: skips LLM repair and emits
+ *                                  a clarification-shaped CEE_GRAPH_INVALID so the user is not
+ *                                  blocked behind a ~30s repair-then-fail loop. Other Bucket C
+ *                                  codes still route through LLM repair (substep 2).
+ * 1b. Orchestrator validation    — optional LLM-backed validation (gated), runs AFTER sweep
+ * 2.  PLoT validation            — external validation + LLM repair (only if Bucket C remains)
  * 3. Edge ID stabilisation    — deterministic IDs BEFORE goal merge
  * 4. Goal merge               — enforceSingleGoal, captures nodeRenames
  * 5. Compound goals           — generates constraint nodes/edges
@@ -45,6 +49,7 @@ import { log } from "../../../../utils/telemetry.js";
 
 import { runOrchestratorValidation } from "./orchestrator-validation.js";
 import { runDeterministicSweep } from "./deterministic-sweep.js";
+import { runOptionsIdenticalBypass } from "./options-identical-bypass.js";
 import { runPlotValidation } from "./plot-validation.js";
 import { runEdgeStabilisation } from "./edge-stabilisation.js";
 import { runGoalMerge } from "./goal-merge.js";
@@ -69,6 +74,17 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   // Runs FIRST so mechanical fixes (NaN, sign, status quo wiring) are applied
   // before orchestrator validation can 422 on issues the sweep can resolve.
   await runDeterministicSweep(ctx);
+
+  // Substep 1.5: Pre-LLM-repair fail-fast gate for OPTIONS_IDENTICAL.
+  // Bypasses the ~30s LLM repair call when the deterministic sweep leaves
+  // an OPTIONS_IDENTICAL violation — `repair_graph` has repeatedly failed
+  // to fix this class in staging, producing a user-hostile 86s "draft +
+  // repair-then-fail" loop. Emits a fail-fast CEE_GRAPH_INVALID with a
+  // clarification-shaped recovery payload. Other Bucket C codes continue
+  // to route through LLM repair. See options-identical-bypass.ts.
+  if (runOptionsIdenticalBypass(ctx)) {
+    return;
+  }
 
   // Substep 1b: Orchestrator validation (gated by config.cee.orchestratorValidationEnabled)
   await runOrchestratorValidation(ctx);

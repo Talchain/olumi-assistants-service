@@ -91,6 +91,13 @@ export const TelemetryEvents = {
   CeeOptionsSucceeded: "cee.options.succeeded",
   CeeOptionsFailed: "cee.options.failed",
 
+  // Stage 4 pre-LLM-repair fail-fast gate for OPTIONS_IDENTICAL. Emitted by
+  // src/cee/unified-pipeline/stages/repair/index.ts when the deterministic
+  // sweep leaves an OPTIONS_IDENTICAL violation — that class has repeatedly
+  // failed `repair_graph` revalidation, so we bypass the LLM call and emit
+  // a fail-fast clarification-shaped CEE_GRAPH_INVALID instead.
+  CeeOptionsIdenticalBypass: "cee.options_identical.pre_repair_bypass",
+
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
   CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",

@@ -2053,10 +2053,17 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
 
   // Step 9: Write to ctx
   ctx.deterministicRepairs = allRepairs;
+  // Preserve validator-specific `context` field (e.g. OPTIONS_IDENTICAL →
+  // { optionIds, signature }) so the pre-LLM-repair fail-fast gate in
+  // stages/repair/index.ts can surface diagnostic data (identical option
+  // IDs) without re-running the validator.
   ctx.remainingViolations = remainingErrors.map((v) => ({
     code: v.code,
     path: v.path,
     message: v.message,
+    ...((v as { context?: Record<string, unknown> }).context
+      ? { context: (v as { context?: Record<string, unknown> }).context }
+      : {}),
   }));
   ctx.llmRepairNeeded = llmRepairNeeded;
 
