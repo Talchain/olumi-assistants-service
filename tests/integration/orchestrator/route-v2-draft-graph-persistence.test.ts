@@ -455,4 +455,106 @@ describe('V5 draft_graph persistence integration', () => {
       expect(callOrder).not.toContain('readRecent');
     });
   });
+
+  // ── Scenario 6 — pipeline throws with typed metadata: NO commit attempted ───
+  //
+  // When handleDraftGraph throws (any throw, not just plain Error), the
+  // dispatcher's outer catch re-throws BEFORE the inner commit block runs.
+  // No row appended to scenarios.turn; no graph written to scenarios.graph.
+  // This is the load-bearing "no partial-graph persistence" contract that
+  // the Edit 3 normalise typed-fail path AND the legacy plain-Error path
+  // both must honour.
+  //
+  // The throw metadata (pipelineStatusCode etc., from Edit 1) survives the
+  // re-throw so the route boundary can emit a typed wire envelope.
+  describe('Scenario 6 — pipeline throws with typed metadata: no commit, metadata preserved (Tests 7c + 11)', () => {
+    it('typed pipeline throw → outer catch re-throws, append NOT called', async () => {
+      const typedErr = Object.assign(new Error('CEE_LLM_VALIDATION_FAILED'), {
+        pipelineStatusCode: 400,
+        pipelineErrorCode: 'CEE_LLM_VALIDATION_FAILED',
+        pipelineRecovery: {
+          suggestion: 'Provide a clearer brief.',
+          hints: ['List 2-3 options'],
+        },
+      });
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockRejectedValueOnce(typedErr);
+
+      await expect(
+        dispatchDraftGraph({
+          payload: makePayload(TURN_ID_1),
+          requestId: 'req-scenario-6-typed',
+          request: STUB_REQUEST,
+        }),
+      ).rejects.toMatchObject({
+        message: 'CEE_LLM_VALIDATION_FAILED',
+        pipelineStatusCode: 400,
+        pipelineErrorCode: 'CEE_LLM_VALIDATION_FAILED',
+      });
+
+      // The whole point: no partial graph persisted on a pipeline throw.
+      expect(appendMock).not.toHaveBeenCalled();
+    });
+
+    it('legacy plain-Error throw → outer catch re-throws, append NOT called', async () => {
+      // The pre-Edit-1 behaviour: handleDraftGraph throws a plain Error.
+      // Route-v2 falls back to the legacy draft_graph_pipeline_threw envelope.
+      // No commit attempted — must remain true.
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockRejectedValueOnce(new Error('pipeline exploded'));
+
+      await expect(
+        dispatchDraftGraph({
+          payload: makePayload(TURN_ID_1),
+          requestId: 'req-scenario-6-legacy',
+          request: STUB_REQUEST,
+        }),
+      ).rejects.toThrow('pipeline exploded');
+
+      expect(appendMock).not.toHaveBeenCalled();
+    });
+
+    it('typed 504 timeout throw with pipelineRecovery=null → no commit, null-recovery survives re-throw', async () => {
+      // Distinct from sub-test 1 above (which carries populated recovery):
+      // this pins the "metadata without recovery hints" branch — proves the
+      // dispatcher's outer catch re-throws without coercing the null field.
+      // Audit-fix A3: sub-test 1 covered the populated-recovery path; this
+      // sub-test covers the null-recovery path explicitly so both branches
+      // of `pipelineRecovery ?? null` in handleDraftGraph and the
+      // recovery-attach in route-v2 are exercised.
+      const typedErr = Object.assign(new Error('CEE_TIMEOUT'), {
+        pipelineStatusCode: 504,
+        pipelineErrorCode: 'CEE_TIMEOUT',
+        pipelineRecovery: null,
+      });
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockRejectedValueOnce(typedErr);
+
+      let caught: unknown;
+      try {
+        await dispatchDraftGraph({
+          payload: makePayload(TURN_ID_1),
+          requestId: 'req-scenario-6-timeout',
+          request: STUB_REQUEST,
+        });
+      } catch (err) {
+        caught = err;
+      }
+
+      // Explicit field assertion (not just toMatchObject which permits extra
+      // fields) — proves recovery=null survives intact, not deleted nor
+      // replaced with undefined.
+      expect(caught).toBeDefined();
+      const meta = caught as {
+        pipelineStatusCode?: number;
+        pipelineErrorCode?: string;
+        pipelineRecovery?: unknown;
+      };
+      expect(meta.pipelineStatusCode).toBe(504);
+      expect(meta.pipelineErrorCode).toBe('CEE_TIMEOUT');
+      expect(meta.pipelineRecovery).toBeNull();
+
+      expect(appendMock).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -182,8 +182,40 @@ export async function handleDraftGraph(
 
   // Check for pipeline error responses (non-200 status)
   if (pipelineResult.statusCode !== 200) {
-    const body = pipelineResult.body as Record<string, unknown>;
-    const message = (body?.error as string) || `Pipeline returned status ${pipelineResult.statusCode}`;
+    // Defensive: `pipelineResult.body` is typed `unknown` and could be null /
+    // undefined / a non-object if a future pipeline path returns a malformed
+    // response. Coerce to an empty record so the subsequent extraction is
+    // crash-free; that path falls through to the legacy plain-Error envelope
+    // because `pipelineErrorCode` ends up null.
+    const rawBody = pipelineResult.body;
+    const body: Record<string, unknown> =
+      rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)
+        ? (rawBody as Record<string, unknown>)
+        : {};
+    // Real CEE error bodies built by `buildCeeErrorResponse` carry the
+    // category in `body.code` (see src/cee/validation/pipeline.ts:366).
+    // Earlier revisions of this file read `body.error`, which is never
+    // populated on the pipeline response — leaving `pipelineErrorCode`
+    // null and forcing route-v2's legacy fallback. We now read `code`
+    // as the primary field with `error` retained for legacy tolerance.
+    //
+    // The pattern guard (^CEE_[A-Z_]{1,62}$) filters out any non-conformant
+    // upstream value before it lands in logs / wire response — known-good
+    // producers go through buildCeeErrorResponse with a fixed enum, so
+    // anything outside this shape is suspicious and worth discarding.
+    const CEE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,63}$/;
+    const extractCode = (raw: unknown): string | null =>
+      typeof raw === 'string' && CEE_CODE_PATTERN.test(raw) ? raw : null;
+    const pipelineErrorCode: string | null =
+      extractCode(body.code) ?? extractCode(body.error);
+    // Surface the category code in the OrchestratorError message when
+    // available so server logs are diagnosable. Falls back to the
+    // pipeline's own user-facing `message` field, then to a status-only
+    // string of last resort.
+    const message =
+      pipelineErrorCode ??
+      (typeof body?.message === 'string' ? (body.message as string) : null) ??
+      `Pipeline returned status ${pipelineResult.statusCode}`;
     const err: OrchestratorError = {
       code: 'TOOL_EXECUTION_FAILED',
       message: `Draft graph failed: ${message}`,
@@ -193,9 +225,22 @@ export async function handleDraftGraph(
     };
     // Preserve tool telemetry even on failure so _diagnostic_trace captures the error
     const failureTelemetry = extractToolLLMTelemetry(body);
+    // Carry pipeline category metadata onto the throw so route-v2.ts can emit
+    // a typed wire envelope instead of opaque draft_graph_pipeline_threw. See
+    // route-v2.ts catch block in dispatchDraftGraph; the legacy fallback path
+    // (plain Error with no pipelineStatusCode) preserves the existing wire
+    // shape bit-for-bit.
+    const pipelineRecoveryRaw = (body as { recovery?: unknown }).recovery;
+    const pipelineRecovery =
+      pipelineRecoveryRaw && typeof pipelineRecoveryRaw === 'object'
+        ? (pipelineRecoveryRaw as Record<string, unknown>)
+        : null;
     const failureError = Object.assign(new Error(message), {
       orchestratorError: err,
       toolLLMTelemetry: failureTelemetry,
+      pipelineStatusCode: pipelineResult.statusCode,
+      pipelineErrorCode,
+      pipelineRecovery,
     });
     throw failureError;
   }

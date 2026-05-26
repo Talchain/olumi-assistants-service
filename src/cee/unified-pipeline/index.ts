@@ -228,6 +228,32 @@ function buildRawOutputResponse(ctx: StageContext): UnifiedPipelineResult {
   };
 }
 
+/**
+ * Decision rule for whether a Stage 2 (Normalise) exception is safe to
+ * degrade-and-continue. ONLY error classes whose recovery is explicitly
+ * backstopped by Stage 4 (Repair) post-conditions belong here.
+ *
+ * Initial allowlist: EMPTY. Stage 4 covers CATEGORY_MISMATCH and
+ * SIGN_MISMATCH structurally, but the throw shape that exposes them via
+ * Stage 2 is not enumerated by existing tests, so we cannot assert safe
+ * degrade for any class without that proof. Adding entries here requires
+ * a paired test fixture proving the Stage 4 backstop holds for that
+ * class — the contract suite lives in
+ * `tests/unit/cee.unified-pipeline.graceful-degradation.test.ts`
+ * (`describe("isKnownSafeNormaliseError allowlist")` + the "Stage 2
+ * throws ..." pipeline-level cases).
+ *
+ * The default path (typed-fail) is the conservative choice — a typed
+ * recoverable error is strictly better than a silently-damaged graph
+ * reaching Stage 3+.
+ */
+export function isKnownSafeNormaliseError(_err: unknown): boolean {
+  // Allowlist intentionally empty for the initial typed-fail-by-default
+  // ship. Each addition must be paired with a regression test proving the
+  // Stage 4 backstop covers the error class.
+  return false;
+}
+
 function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineResult {
   const err = error instanceof Error ? error : new Error(String(error));
 
@@ -489,8 +515,47 @@ export async function runUnifiedPipeline(
     ctx.stageSnapshots = { stage_1_parse: captureStageSnapshot(ctx) };
 
     // Stage 2: Normalise — STRP + risk coefficients
+    //
+    // Typed-fail-by-default wrap. Stage 2 was previously unguarded, so any
+    // unwrapped TypeError/ZodError from reconcileStructuralTruth or
+    // normaliseRiskCoefficients would surface as opaque CEE_INTERNAL_ERROR
+    // (500) and the route boundary would collapse it to
+    // draft_graph_pipeline_threw. The wrap routes unknown error classes to
+    // mapPipelineError via an anthropic_response_invalid_schema-prefixed
+    // throw (matches the isLlmSchemaOrEmptyError regex → 400
+    // CEE_LLM_VALIDATION_FAILED). The safe-degrade allowlist is initially
+    // empty — Stage 4 backstop coverage must be proven per-class before
+    // adding entries (see isKnownSafeNormaliseError below).
     const t2 = stageStart();
-    await runStageNormalise(ctx);
+    try {
+      await runStageNormalise(ctx);
+    } catch (normErr: any) {
+      const errMessage: string = typeof normErr?.message === 'string' ? normErr.message : 'unknown';
+      if (isKnownSafeNormaliseError(normErr)) {
+        log.warn({
+          event: "pipeline.soft_gate_degraded",
+          stage: "normalise",
+          error: errMessage,
+          request_id: ctx.requestId,
+        }, "Stage 2 (Normalise) threw a known-safe error — continuing with raw LLM graph");
+        ctx.pipelineOutcome.warnings.push({
+          stage: 'normalise',
+          error: errMessage,
+          degraded: true,
+        });
+      } else {
+        // Unknown class → surface as a typed pipeline error so the route
+        // boundary can emit a recoverable category, not opaque 500.
+        log.error({
+          event: "cee.normalise.crashed",
+          request_id: ctx.requestId,
+          error: errMessage,
+          stack: normErr?.stack,
+        }, "Stage 2 (Normalise) crashed — surfacing as typed pipeline error");
+        timings.normalise_ms = stageElapsed(t2);
+        throw new Error(`anthropic_response_invalid_schema: normalise stage threw on LLM graph — ${errMessage}`);
+      }
+    }
     timings.normalise_ms = stageElapsed(t2);
 
     // Stage 3: Enrich — Factor enrichment (ONCE)
