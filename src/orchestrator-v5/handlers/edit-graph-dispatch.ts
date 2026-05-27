@@ -99,6 +99,7 @@ type NoOpRecoveryBranch =
   | 'analytical_none'
   | 'vague_edit'
   | 'explore_factor'
+  | 'explore_factor_stale'
   | 'ambiguous';
 
 interface NoOpRecoveryDecision {
@@ -160,6 +161,11 @@ const NO_OP_EXPLORE_FACTOR_TEXT =
   + 'explore this. I can walk you through the analysis, look at '
   + 'what could change the outcome, or run a pre-mortem.';
 
+const NO_OP_EXPLORE_FACTOR_STALE_TEXT =
+  "I haven't changed the model. The analysis is based on an earlier "
+  + 'version of the graph. Re-run analysis to explore this against '
+  + 'the latest result.';
+
 const EXPLAIN_RESULTS_CHIP: BoundaryAction = Object.freeze({
   id: 'chip_action_explain_results',
   label: 'Walk me through the analysis',
@@ -213,25 +219,47 @@ const RUN_PRE_MORTEM_CHIP: BoundaryAction = Object.freeze({
 });
 
 /**
- * Case-insensitive substring check: does `message` contain any of
- * `nodes`'s labels? Labels shorter than 3 characters are skipped
- * (single-letter labels would false-positive on common words).
- * Pure helper local to the `explore_factor` branch — does NOT
- * mirror the upstream intercept's exact-equality match; here we
- * want a looser safety net because the V4 LLM has already failed
- * and the user deserves a non-empty recovery.
+ * Escape regex metacharacters in a literal label string so it can be
+ * embedded inside a `\b…\b` pattern safely. Labels are user-authored
+ * and may contain `.()*+?[]{}^$|\` etc.
+ */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Case-insensitive WORD-BOUNDARY check: does `message` contain any of
+ * `nodes`'s labels as a complete-word match?
+ *
+ * Word-boundary (\b…\b) prevents the previous substring-match
+ * regression where a 4-character label like "Cost" would
+ * false-positive on a no-op message containing "costs" or
+ * "costliness". The safety net is still looser than the upstream
+ * intercept's exact-equality match — the message can include
+ * surrounding text — but the matched span must be a whole label,
+ * not an embedded substring.
+ *
+ * Labels shorter than 3 characters are skipped (single- and
+ * two-letter labels would false-positive on common words even with
+ * word boundaries).
+ *
+ * Note: `\b` is ASCII-aware in JS regex. Labels containing only
+ * Unicode-letter boundaries (e.g. CJK) would not gain protection
+ * from the word-boundary anchors, but their substring match would
+ * also be exact-by-shape in practice. The current English-only
+ * label corpus is fully covered.
  */
 function messageContainsKnownLabel(
   message: string,
   nodes: readonly { readonly label: string }[] | null | undefined,
 ): boolean {
   if (!nodes || nodes.length === 0) return false;
-  const lower = message.toLowerCase();
   for (const node of nodes) {
     if (typeof node.label !== 'string') continue;
     const label = node.label.trim();
     if (label.length < 3) continue;
-    if (lower.includes(label.toLowerCase())) return true;
+    const pattern = new RegExp(`\\b${escapeRegex(label)}\\b`, 'i');
+    if (pattern.test(message)) return true;
   }
   return false;
 }
@@ -301,7 +329,9 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
     };
   }
 
-  // Safety-net branch — `explore_factor`. Fires when:
+  // Safety-net branches — `explore_factor` / `explore_factor_stale`.
+  //
+  // Fires when:
   //   - no analytical intent matched (handled above),
   //   - no mutation signal (the user did not supply a value),
   //   - no vague-edit phrasing (handled above),
@@ -313,25 +343,50 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
   // dispatches into the V4 LLM and no-ops with a message that mentions
   // a known label (e.g. a chip with an unusual submit shape, or a
   // user typing a factor name plus a stray word), we turn the dead
-  // end into three useful exploration affordances rather than
-  // surfacing the bland deterministic fallback with no chips.
+  // end into a useful affordance rather than surfacing the bland
+  // deterministic fallback with no chips.
   //
-  // Copy + chips are identical in intent to the upstream intercept
-  // composer (`compose/post-analysis-label-intercept.ts` —
-  // co-evolved). They are duplicated rather than imported to keep
-  // this module's no-circular-dependency contract intact.
+  // Freshness handling mirrors the analytical branches above:
+  //   - 'fresh' → three exploration chips (explain / what-would-flip /
+  //               pre-mortem). The analysis is current; explore freely.
+  //   - 'stale' → single re-run chip. The current analysis no longer
+  //               reflects the graph; offering exploration chips would
+  //               silently feed the user stale-context UX. Code+chip
+  //               mirror the existing `analytical_stale` branch.
+  //   - 'unknown' / 'none' → defer to ambiguous. With an unverifiable
+  //               freshness verdict the safest thing is to preserve
+  //               the V4 handler's existing copy rather than risk a
+  //               stale exploration nudge.
+  //
+  // Copy + chips are duplicated rather than imported from
+  // `compose/post-analysis-label-intercept.ts` to keep this module's
+  // no-circular-dependency contract intact.
   if (
     !mutationSignal
     && hasRunAnalysisFact
     && messageContainsKnownLabel(input.message, input.nodes ?? null)
   ) {
-    return {
-      branch: 'explore_factor',
-      intent_class: intentClass,
-      has_run_analysis_fact: true,
-      assistantText: NO_OP_EXPLORE_FACTOR_TEXT,
-      suggestedActions: [EXPLAIN_RESULTS_CHIP, WHAT_WOULD_FLIP_CHIP, RUN_PRE_MORTEM_CHIP],
-    };
+    if (input.freshness === 'fresh') {
+      return {
+        branch: 'explore_factor',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_EXPLORE_FACTOR_TEXT,
+        suggestedActions: [EXPLAIN_RESULTS_CHIP, WHAT_WOULD_FLIP_CHIP, RUN_PRE_MORTEM_CHIP],
+      };
+    }
+    if (input.freshness === 'stale') {
+      return {
+        branch: 'explore_factor_stale',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_EXPLORE_FACTOR_STALE_TEXT,
+        suggestedActions: [RERUN_ANALYSIS_CHIP],
+      };
+    }
+    // freshness === 'unknown' | 'none' — fall through to the ambiguous
+    // branch below. We have a fact but cannot prove freshness; offering
+    // analysis-exploration chips would risk a silent stale-context UX.
   }
 
   // Everything else (analytical intent + mutation signal, or no

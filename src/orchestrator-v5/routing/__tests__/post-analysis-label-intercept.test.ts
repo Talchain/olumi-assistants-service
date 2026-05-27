@@ -137,6 +137,25 @@ describe('tryPostAnalysisLabelIntercept — Predicate A (bare label)', () => {
     expect(result).toEqual({ matched: false, reason: 'no_label_match' });
   });
 
+  // Round-2 reviewer's medium finding — documented expected
+  // behaviour for "What could change Existing Team Size?".
+  // The intercept REJECTS (contains the explicit edit verb
+  // "change"); the downstream no-op recovery's
+  // explore_factor safety net catches it after V4 no-op.
+  it('REGRESSION: "What could change Existing Team Size?" — intercept rejects on edit verb', () => {
+    const result = tryPostAnalysisLabelIntercept(
+      'What could change Existing Team Size?',
+      NODES,
+      true,
+    );
+    // Pinned: this phrase reaches edit_graph by design (the
+    // intercept is intentionally narrow). The recovery layer
+    // covers the downstream behaviour — see
+    // tests/unit/orchestrator-v5/handlers/edit-graph-no-op-recovery.test.ts
+    // 'explore_factor / explore_factor_stale' suite.
+    expect(result).toEqual({ matched: false, reason: 'explicit_edit_verb_present' });
+  });
+
   it('does NOT match labels shorter than 3 characters (guard against stray keystrokes)', () => {
     const result = tryPostAnalysisLabelIntercept('AB', [SHORT_LABEL_NODE], true);
     expect(result).toEqual({ matched: false, reason: 'no_label_match' });

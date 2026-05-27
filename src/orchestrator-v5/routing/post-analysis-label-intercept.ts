@@ -84,8 +84,7 @@ export type LabelInterceptUnmatchedReason =
   | 'mutation_signal_present'
   | 'analytical_intent_present'
   | 'explicit_edit_verb_present'
-  | 'no_label_match'
-  | 'legacy_pattern_has_value_after_dash';
+  | 'no_label_match';
 
 export type PostAnalysisLabelInterceptResult =
   | {

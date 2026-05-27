@@ -124,21 +124,19 @@ describe('decideNoOpRecovery', () => {
     }
   });
 
-  describe('explore_factor (safety-net for label-shaped no-op messages)', () => {
+  describe('explore_factor / explore_factor_stale (safety-net for label-shaped no-op messages)', () => {
     const NODES = [
       { label: 'Existing Team Size' },
       { label: 'Launch Now' },
+      // Short label used in the word-boundary regression tests below.
+      { label: 'Cost' },
     ];
 
-    it('fires when message contains a known label, no mutation, with prior analysis fact', () => {
-      // Exact symptom of the staging failure: a chip-click submit
-      // message slipped past the upstream intercept (e.g. an unusual
-      // dash variant, or a future chip with a different prefix) and
-      // reached V4 LLM, which no-opped. The safety net recovers it.
+    it('FRESH: fires when message contains a known label, no mutation, with fresh prior analysis fact', () => {
       const result = decideNoOpRecovery({
         message: 'Explore Existing Team Size',
         priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
-        freshness: 'unknown',
+        freshness: 'fresh',
         graphReady: true,
         nodes: NODES,
       });
@@ -151,10 +149,7 @@ describe('decideNoOpRecovery', () => {
       expect(types).toEqual(['explain_results', 'what_would_flip', null]);
     });
 
-    it('matches substring (label embedded inside a longer message)', () => {
-      // "Tell me about Launch Now if you can" — contains "Launch Now"
-      // as a substring. No mutation signal. With a run_analysis fact,
-      // the safety net should fire.
+    it('FRESH: matches word-bounded label embedded inside a longer message', () => {
       const result = decideNoOpRecovery({
         message: 'Tell me about Launch Now if you can.',
         priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
@@ -165,7 +160,44 @@ describe('decideNoOpRecovery', () => {
       expect(result.branch).toBe('explore_factor');
     });
 
-    it('does NOT fire without a prior analysis fact (falls through to ambiguous)', () => {
+    // Stale-aware copy was the round-2 reviewer's blocking finding —
+    // pre-fix, the safety net offered "walk me through the analysis"
+    // / "what could change the outcome" chips even when the prior
+    // analysis no longer reflected the graph. The stale variant
+    // forces a re-run before any exploration.
+    it('STALE: fires explore_factor_stale with the re-run chip; NO exploration chips', () => {
+      const result = decideNoOpRecovery({
+        message: 'Explore Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'stale',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor_stale');
+      expect(result.has_run_analysis_fact).toBe(true);
+      expect(result.assistantText).not.toBeNull();
+      expect(result.assistantText).toContain('earlier version');
+      expect(result.suggestedActions).toHaveLength(1);
+      expect(result.suggestedActions[0]?.action_type).toBe('run_analysis');
+      // Critically, NONE of the exploration chips appear (no
+      // explain_results / what_would_flip).
+      const types = result.suggestedActions.map((a) => a.action_type ?? null);
+      expect(types).not.toContain('explain_results');
+      expect(types).not.toContain('what_would_flip');
+    });
+
+    it('UNKNOWN: defers to ambiguous (cannot verify freshness, do not nudge)', () => {
+      const result = decideNoOpRecovery({
+        message: 'Explore Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'unknown',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('NONE freshness with no prior fact: defers to ambiguous', () => {
       const result = decideNoOpRecovery({
         message: 'Existing Team Size',
         priorFacts: [],
@@ -177,9 +209,6 @@ describe('decideNoOpRecovery', () => {
     });
 
     it('does NOT fire when message contains a mutation signal (real edit)', () => {
-      // "Set Existing Team Size to 8" carries a mutation signal;
-      // the safety net defers so the V4 LLM's existing copy
-      // survives (covered by the ambiguous branch).
       const result = decideNoOpRecovery({
         message: 'Set Existing Team Size to 8.',
         priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
@@ -190,11 +219,7 @@ describe('decideNoOpRecovery', () => {
       expect(result.branch).toBe('ambiguous');
     });
 
-    it('does NOT fire when no nodes are supplied (existing tests use this implicit default)', () => {
-      // This is exactly the shape of the existing ambiguous tests at
-      // line 128-154 — they pass no `nodes` field. The safety net
-      // must remain inert in that case so existing behaviour is
-      // preserved.
+    it('does NOT fire when no nodes are supplied', () => {
       const result = decideNoOpRecovery({
         message: 'Change pricing factor',
         priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
@@ -216,9 +241,6 @@ describe('decideNoOpRecovery', () => {
     });
 
     it('analytical intent + fresh fact precedence: analytical_fresh wins over explore_factor', () => {
-      // The analytical branches run first. A message that both
-      // looks analytical AND contains a known label should match
-      // analytical_fresh, not explore_factor.
       const result = decideNoOpRecovery({
         message: 'Walk me through the analysis. Existing Team Size matters.',
         priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
@@ -229,21 +251,82 @@ describe('decideNoOpRecovery', () => {
       expect(result.branch).toBe('analytical_fresh');
     });
 
-    it('passes egress forbidden-phrase + success-claim guards', async () => {
-      const { findForbiddenPhraseHit, findSuccessClaimHit } = await import(
-        '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js'
-      );
+    // Word-boundary regression — the pre-fix substring match would
+    // false-positive on "costs"/"costliness" matching the "Cost"
+    // label. The new \b…\b pattern requires whole-word matches.
+    it('WORD-BOUNDARY: 4-char label "Cost" does NOT match "costs" (substring false-positive guard)', () => {
       const result = decideNoOpRecovery({
-        message: 'Existing Team Size',
+        message: 'These costs are getting out of hand',
         priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
         freshness: 'fresh',
         graphReady: true,
         nodes: NODES,
       });
-      expect(result.assistantText).not.toBeNull();
-      const text = result.assistantText ?? '';
-      expect(findForbiddenPhraseHit(text)).toBeNull();
-      expect(findSuccessClaimHit(text)).toBeNull();
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('WORD-BOUNDARY: 4-char label "Cost" does NOT match "costliness"', () => {
+      const result = decideNoOpRecovery({
+        message: 'Worried about costliness',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('WORD-BOUNDARY: 4-char label "Cost" DOES match standalone "cost" with surrounding punctuation', () => {
+      const result = decideNoOpRecovery({
+        message: 'Explore the Cost!',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor');
+    });
+
+    it('passes egress forbidden-phrase + success-claim guards (fresh + stale variants)', async () => {
+      const { findForbiddenPhraseHit, findSuccessClaimHit } = await import(
+        '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js'
+      );
+      for (const freshness of ['fresh', 'stale'] as const) {
+        const result = decideNoOpRecovery({
+          message: 'Existing Team Size',
+          priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+          freshness,
+          graphReady: true,
+          nodes: NODES,
+        });
+        expect(result.assistantText, freshness).not.toBeNull();
+        const text = result.assistantText ?? '';
+        expect(findForbiddenPhraseHit(text), freshness).toBeNull();
+        expect(findSuccessClaimHit(text), freshness).toBeNull();
+      }
+    });
+
+    // Round-2 reviewer's medium finding — the analytical-with-label
+    // phrase "What could change Existing Team Size?" is the
+    // documented high-risk case. Trace:
+    //   1. Upstream intercept's Predicate A rejects (contains
+    //      "change" → explicit_edit_verb_present).
+    //   2. Predicate B rejects (no trailing dash).
+    //   3. edit_graph dispatches and the V4 LLM no-ops.
+    //   4. THIS branch catches it (label present, no mutation
+    //      signal, fresh prior analysis) → three exploration chips.
+    // Documenting expected behaviour here so a future regression
+    // surfaces as a test failure rather than a UX surprise.
+    it('REGRESSION: "What could change Existing Team Size?" (no-op recovery catches it via explore_factor)', () => {
+      const result = decideNoOpRecovery({
+        message: 'What could change Existing Team Size?',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor');
+      expect(result.suggestedActions).toHaveLength(3);
     });
   });
 
