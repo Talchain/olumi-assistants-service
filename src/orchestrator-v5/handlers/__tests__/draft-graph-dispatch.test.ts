@@ -1147,4 +1147,89 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
     const payload = calls[0][1] as Record<string, unknown>;
     expect(payload.assumption_source).toBe('strengthen_item_detail');
   });
+
+  it('positive E2E: realistic CEE-style coachingSummary passes the gate and lands verbatim in assistant_text', async () => {
+    // Shape mirrors the CEE pipeline's `coaching.summary` output: one
+    // or two prose sentences that frame the decision, surface a
+    // trade-off, then nudge toward analysis. No premature
+    // recommendation, no internal IDs, no em-dashes, no schema terms.
+    // The decision-language register reflects what Sonnet/Anthropic
+    // generates in staging captures (see
+    // tests/fixtures/cross-service/draft-graph.coaching-populated
+    // .staging.json) once the next-step nudge is preserved.
+    const realisticSummary =
+      "This decision weighs faster Mid-Market Customer Acquisition against higher Cash Runway Risk across the three routes you're considering. One key assumption worth checking is whether the acquisition team can absorb the integration overhead a Series A path introduces. Try running the analysis next to see how the routes compare under stress and which assumptions matter most before you commit.";
+
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: realisticSummary,
+      strengthenItems: [
+        {
+          id: 'strengthen_001',
+          label: 'Stress synergy estimate',
+          detail: 'the synergy assumption sits as a point value rather than a range',
+          action_type: 'add_constraint',
+          bias_category: 'anchoring',
+        },
+      ],
+      coachingBiasSignals: [
+        { type: 'narrow_framing', detail: 'the brief frames the decision as a binary go/no-go' },
+      ],
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as unknown as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-realistic-summary-e2e',
+      request: STUB_REQUEST,
+    });
+
+    // 1. The whole assistant_text is the summary, byte-for-byte. No
+    //    deterministic five-sentence opener was prepended, no trailing
+    //    text was appended, no characters were rewritten.
+    expect(result.response.assistant_text).toBe(realisticSummary);
+
+    // 2. The three-chip set is still emitted (chip generation is
+    //    independent of which assistant_text source fired).
+    expect(result.response.suggested_actions).toHaveLength(3);
+    expect(result.response.suggested_actions[0].id).toBe('chip_action_run_analysis');
+    expect(result.response.suggested_actions[1].id).toBe('chip_prompt_review_model');
+    expect(result.response.suggested_actions[2].id).toBe('chip_prompt_assumptions');
+
+    // 3. stage_indicator advances to 'analyse' as on the normal
+    //    success path — the summary replacement does not change the
+    //    persistence-driven stage signal.
+    expect(result.response.stage_indicator).toBe('analyse');
+
+    // 4. Source-selection telemetry reports the coaching_summary path,
+    //    pass=true, and the counts of the other sources that were
+    //    available but not used.
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.assumption_source).toBe('coaching_summary');
+    expect(payload.coaching_summary_present).toBe(true);
+    expect(payload.coaching_summary_passed_gate).toBe(true);
+    expect(payload.fallback_reason).toBeNull();
+    expect(payload.strengthen_items_count).toBe(1);
+    expect(payload.coaching_bias_signals_count).toBe(1);
+
+    // 5. assistant_text contains the legitimate user-facing labels
+    //    from the summary verbatim (no sanitiser rewrite).
+    expect(result.response.assistant_text).toContain('Mid-Market Customer Acquisition');
+    expect(result.response.assistant_text).toContain('Cash Runway Risk');
+    expect(result.response.assistant_text).toContain('Series A path');
+
+    // 6. No banned phrases survived — the gate did its job by
+    //    accepting only summaries free of premature recommendation
+    //    and internal-id leaks.
+    expect(result.response.assistant_text.toLowerCase()).not.toMatch(/\brecommend/);
+    expect(result.response.assistant_text.toLowerCase()).not.toMatch(/\bwinner\b/);
+    expect(result.response.assistant_text.toLowerCase()).not.toMatch(/\bbest option\b/);
+    expect(result.response.assistant_text).not.toMatch(/[—–]/);
+    expect(result.response.assistant_text).not.toMatch(/\b(?:fac|opt|out|risk|goal|dec|node)_[a-z0-9]+/i);
+  });
 });
