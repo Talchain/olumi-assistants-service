@@ -1,3 +1,5 @@
+import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+
 /**
  * Pure deterministic copy-quality gate for post-draft coaching strings.
  *
@@ -34,17 +36,33 @@ const RESPONSE_MAX_CHARS = 800;
  * Internal-id prefix tokens that should never reach a user.
  *
  * Aligned with the central detector at
- * {@link ../../orchestrator/shared/entity-id-pattern.ts:25} so the copy
- * gate, the egress sanitiser, and the patch-summary path all share the
- * same prefix taxonomy. Detection is anchored to a word boundary so
- * legitimate user-chosen snake-case labels whose prefix is NOT in this
- * list — e.g. `go_to_market`, `b2b_partnership` — survive unchanged.
+ * {@link ../../orchestrator/shared/entity-id-pattern.ts:25}: same
+ * prefix list, same `[_:-]` separator class.
  *
- * The separator class `[_:-]` matches the central detector exactly:
- * `factor_id`, `factor:id`, `factor-id` all leak.
+ * Detection is two-stage:
+ *   1. This regex finds *candidate* prefix-shaped tokens (broad
+ *      over-match — also catches English compounds like
+ *      `risk_adjusted`, `out_of_scope`, `option_value`,
+ *      `constraint_based`, `factor_analysis`).
+ *   2. {@link isSlugShapedEntityId} (imported from the central
+ *      output-safety helper) confirms each candidate against the
+ *      slug-shape heuristic: digit anywhere → ID, `fac`/`opt` short
+ *      prefix → ID, multi-segment with first segment ≥ 4 chars → ID;
+ *      single-segment suffix or short-connector first segment →
+ *      English compound, NOT an ID.
+ *
+ * Result: a sentence like "consider the risk_adjusted return" passes
+ * the gate cleanly; a sentence containing `factor_delivery_cost` or
+ * `option_launch_now` is rejected as expected.
+ *
+ * Global flag is required for `matchAll`. `node_*` is intentionally
+ * omitted to match the central detector — `node` has no
+ * unambiguous-leak prose collisions worth a hard ban here, and the
+ * existing `node_id` / `nodeid` schema-term substrings still catch
+ * the canonical leak shape inside FORBIDDEN_SCHEMA_TERMS below.
  */
-const INTERNAL_ID_PREFIX_REGEX =
-  /\b(?:fac|opt|goal|dec|out|risk|con|node|factor|option|decision|outcome|constraint)[_:-][a-z0-9][a-z0-9_:-]*/i;
+const INTERNAL_ID_CANDIDATE_REGEX =
+  /\b(?:fac|opt|goal|dec|out|risk|con|factor|option|decision|outcome|constraint)[_:-][a-z0-9_:-]+/gi;
 
 /**
  * Named schema / service / debug terms. These are concrete phrases the
@@ -217,7 +235,7 @@ function checkShared(text: string): GateResult | null {
   const trimmed = text.trim();
   if (trimmed.length === 0) return reject('empty');
   if (EM_DASH_REGEX.test(trimmed)) return reject('em_dash');
-  if (INTERNAL_ID_PREFIX_REGEX.test(trimmed)) return reject('internal_id');
+  if (hasConfirmedInternalId(trimmed)) return reject('internal_id');
   if (GRAPH_SHAPE_REGEX.test(trimmed)) return reject('graph_shape');
   const lower = trimmed.toLowerCase();
   for (const term of FORBIDDEN_SCHEMA_TERMS) {
@@ -225,6 +243,20 @@ function checkShared(text: string): GateResult | null {
   }
   if (PREMATURE_RECOMMENDATION_REGEX.test(trimmed)) return reject('premature_recommendation');
   return null;
+}
+
+/**
+ * Two-stage internal-id detection: broad regex finds candidates, then
+ * the central {@link isSlugShapedEntityId} heuristic confirms each
+ * candidate is slug-shaped (real ID) rather than an English compound
+ * (`risk_adjusted`, `out_of_scope`, `option_value`, `constraint_based`,
+ * `factor_analysis`). Returns true on the first confirmed leak.
+ */
+function hasConfirmedInternalId(text: string): boolean {
+  for (const match of text.matchAll(INTERNAL_ID_CANDIDATE_REGEX)) {
+    if (isSlugShapedEntityId(match[0])) return true;
+  }
+  return false;
 }
 
 /**

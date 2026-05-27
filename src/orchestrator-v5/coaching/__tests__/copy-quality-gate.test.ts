@@ -276,6 +276,70 @@ describe('gateAssumptionFragment', () => {
       'premature_recommendation',
     );
   });
+
+  // ───── Round-4: legitimate prefix-shaped domain compounds (per
+  //               reviewer false-positive concern).
+  //
+  // The two-stage internal-id detection (broad candidate regex +
+  // isSlugShapedEntityId confirmation) should NOT reject English
+  // compounds that happen to start with a slug prefix. These are
+  // commonly used domain terms — finance ("risk-adjusted"), scoping
+  // ("out-of-scope"), economics ("option value"), planning
+  // ("constraint-based"), statistics ("factor analysis").
+  it('accepts a fragment containing risk_adjusted (legitimate finance compound)', () => {
+    accepts(
+      gateAssumptionFragment,
+      'consider the risk_adjusted return profile across the routes before you commit',
+    );
+  });
+
+  it('accepts a fragment containing out_of_scope (legitimate scoping phrase)', () => {
+    accepts(
+      gateAssumptionFragment,
+      'the partner-only routes are out_of_scope for this phase of the rollout',
+    );
+  });
+
+  it('accepts a fragment containing option_value (legitimate economics term)', () => {
+    accepts(
+      gateAssumptionFragment,
+      'the option_value of waiting is non-trivial given current market timing',
+    );
+  });
+
+  it('accepts a fragment containing constraint_based (legitimate planning compound)', () => {
+    accepts(
+      gateAssumptionFragment,
+      'constraint_based planning may surface hidden trade-offs the brief omits',
+    );
+  });
+
+  it('accepts a fragment containing factor_analysis (legitimate statistics compound)', () => {
+    accepts(
+      gateAssumptionFragment,
+      'a factor_analysis on the driver set might highlight overlooked dependencies',
+    );
+  });
+
+  it('still rejects IDs with digits (option_42)', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'option_42 is now the leading route in the comparison view across both teams',
+      'internal_id',
+    );
+  });
+
+  it('still rejects multi-segment IDs even when the prefix is ambiguous (decision_launch_now)', () => {
+    // Multi-segment, first segment 'launch' length 6 ≥ 4 → confirmed ID
+    // (the existing `decision_launch_path` test catches the same shape;
+    // this variant pins that the heuristic depends on segment count
+    // and length, not on the specific suffix word).
+    rejectsWith(
+      gateAssumptionFragment,
+      'decision_launch_now has not been validated against the latest brief edits yet',
+      'internal_id',
+    );
+  });
 });
 
 describe('gateFullResponse', () => {
@@ -342,6 +406,17 @@ describe('gateFullResponse', () => {
   it('accepts a response containing a legitimate user-facing snake-case label', () => {
     const text =
       "I've built a decision model for the launch. The routes compare go_to_market and b2b_partnership against the in-house build option, with capacity risk to consider as a key assumption. Next, run the analysis to see how the options compare.";
+    accepts(gateFullResponse, text);
+  });
+
+  it('accepts a response containing prefix-shaped domain compounds (risk_adjusted, option_value)', () => {
+    // Both `risk_adjusted` (prefix=risk, single-segment suffix) and
+    // `option_value` (prefix=option, single-segment suffix) are
+    // English compounds. The two-stage gate uses
+    // `isSlugShapedEntityId` to filter these out so legitimate
+    // finance / economics vocabulary survives.
+    const text =
+      "I've built a decision model. The routes weigh option_value against risk_adjusted return, so one assumption worth checking is whether the longer time horizon is appropriate. Try running the analysis next to see how the options compare.";
     accepts(gateFullResponse, text);
   });
 
