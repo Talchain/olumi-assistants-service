@@ -413,36 +413,51 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // {option}" chip, NOT a generic 500.
         //
         // The check is narrow: only PLoT 422s carrying a structured
-        // V2RunError with an `analysis_status` of "preflight_validation_failed"
-        // (or a critique matching the missing-intervention message). Any
-        // other PLoT error falls through to the existing `plot_error`
-        // path unchanged — see required behaviour rule #8.
+        // V2RunError with a preflight signal (analysis_status
+        // === "preflight_validation_failed" OR status_reason includes
+        // "preflight validation") AND a critique matching the
+        // missing-intervention message. Any other PLoT error falls
+        // through to the existing `plot_error` path unchanged — see
+        // required behaviour rule #8. (Detailed predicates below.)
         const v2Err = runError.v2RunError;
         if (runError.status === 422 && v2Err) {
-          const firstCritiqueMsg =
-            typeof v2Err.critiques?.[0]?.message === 'string'
-              ? (v2Err.critiques![0]!.message as string)
-              : null;
+          // Scan ALL critique messages (not just the first) — PLoT critique
+          // ordering is not contract-guaranteed; the missing-intervention
+          // message may appear at any position in a multi-critique 422
+          // (round-3 review finding). The first matching critique drives
+          // option-label extraction.
+          const critiqueMessages: string[] = Array.isArray(v2Err.critiques)
+            ? v2Err.critiques
+                .map((c) => (typeof c?.message === 'string' ? c.message : null))
+                .filter((m): m is string => m !== null)
+            : [];
           const statusReason =
             typeof v2Err.status_reason === 'string' ? v2Err.status_reason : null;
           const analysisStatus =
             typeof v2Err.analysis_status === 'string' ? v2Err.analysis_status : null;
           // Pattern match: the preflight rejects an option for missing
-          // interventions. Conservative match — three signals AND'd so
-          // we don't accidentally absorb other PLoT 422 shapes.
+          // interventions. Two gates AND'd: preflight signal (via
+          // analysis_status OR status_reason) AND missing-intervention
+          // wording present in at least one critique. Conservative — we
+          // don't absorb other PLoT 422 shapes.
           const isPreflight =
             analysisStatus === 'preflight_validation_failed' ||
             (statusReason ?? '').toLowerCase().includes('preflight validation');
-          const isMissingIntervention =
-            (firstCritiqueMsg ?? '').toLowerCase().includes('does not specify what it changes') ||
-            (firstCritiqueMsg ?? '').toLowerCase().includes('must define at least one intervention');
+          const missingInterventionCritique = critiqueMessages.find((m) => {
+            const lower = m.toLowerCase();
+            return (
+              lower.includes('does not specify what it changes') ||
+              lower.includes('must define at least one intervention')
+            );
+          });
+          const isMissingIntervention = missingInterventionCritique !== undefined;
           if (isPreflight && isMissingIntervention) {
-            // Extract the option label from the critique. PLoT emits
-            // single-quoted labels in the message: "Option 'Foo Bar' does
-            // not specify ...". Match conservatively; if extraction fails,
-            // surface as the generic options_not_configured (no label
-            // branch in the composer handles that cleanly).
-            const labelMatch = (firstCritiqueMsg ?? '').match(/Option '([^']+)'/);
+            // Extract the option label from the matching critique. PLoT
+            // emits single-quoted labels in the message: "Option 'Foo Bar'
+            // does not specify ...". Match conservatively; if extraction
+            // fails, surface as the generic options_not_configured (no
+            // label branch in the composer handles that cleanly).
+            const labelMatch = missingInterventionCritique.match(/Option '([^']+)'/);
             const extractedLabel =
               labelMatch && labelMatch[1] && labelMatch[1].trim().length > 0
                 ? labelMatch[1].trim()

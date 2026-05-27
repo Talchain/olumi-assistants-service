@@ -338,6 +338,48 @@ describe('run_analysis — PLoT preflight-intervention 422 recoverable path', ()
     expect(caught!.details.plot_preflight_recovery).toBeUndefined();
   });
 
+  // ── Round-3 review finding: critique ordering ───────────────────────
+  it('Test 1c: missing-intervention critique at position N (not first) → still recoverable + correct option label extracted', async () => {
+    // PLoT critique ordering is not contract-guaranteed. If a multi-critique
+    // 422 places the missing-intervention message at position 1 (not 0),
+    // the recovery must still fire AND extract the option label from the
+    // matching critique (not from critique[0]).
+    const v2Err: V2RunError = {
+      analysis_status: 'preflight_validation_failed',
+      status_reason: 'Preflight validation failed',
+      critiques: [
+        // Position 0: unrelated preflight critique (e.g. about a factor).
+        { message: 'Factor coefficient out of expected range for fac_price' },
+        // Position 1: the missing-intervention critique that matters.
+        {
+          message: "Option 'Premium Tier with Enterprise Features' does not specify what it changes. Each option must define at least one intervention.",
+        },
+        // Position 2: another unrelated critique.
+        { message: 'Goal threshold appears unset' },
+      ],
+    };
+    const err = new PLoTError('PLoT run analysis blocked', 422, 'run', 50);
+    err.v2RunError = v2Err;
+
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClientRejecting(() => err),
+      scenarioReader: makeScenarioReader(),
+    });
+
+    let caught: HandlerInvocationFailedError | null = null;
+    try {
+      await handler(makeInvocation());
+    } catch (e) {
+      caught = e as HandlerInvocationFailedError;
+    }
+    expect(caught).not.toBeNull();
+    expect(caught!.cause_kind).toBe('options_not_configured');
+    // CRITICAL: the label comes from critique[1] (the matching one),
+    // not critique[0]. Round-3 review test pin.
+    expect(caught!.details.first_option_label).toBe('Premium Tier with Enterprise Features');
+    expect(caught!.details.plot_preflight_recovery).toBe(true);
+  });
+
   it('Test 5b: PLoT 422 WITHOUT v2RunError → still cause_kind=plot_error (defensive)', async () => {
     // A 422 with no parseable V2RunError body (the plot-client did not
     // attach .v2RunError) must NOT be re-classified. The recovery path
