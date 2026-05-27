@@ -1,5 +1,5 @@
 /**
- * Deterministic post-draft coaching narrative — gated hybrid composer.
+ * Deterministic post-draft coaching narrative — gated sectioned composer.
  *
  * Builds the `assistant_text` for a successful draft_graph turn from
  * already-available response data — the persisted graph plus the
@@ -14,17 +14,31 @@
  *      verbatim as the entire assistant_text. No deterministic opener
  *      is prepended — the summary stands alone or it does not run.
  *
- *   2. Five-sentence hybrid. When the summary is missing or rejected,
- *      a deterministic five-sentence narrative is assembled:
- *        1. Confirm the model was built (names the goal where available).
- *        2. Summarise the main options.
- *        3. Frame the key trade-off in plain decision language.
- *        4. Name one assumption worth checking. Source picked through a
- *           strict priority chain (strengthen.detail → strengthen.label
- *           → bias_finding.explanation → coaching_bias_signal.detail →
- *           uncertainty_driver → fixed-generic), each candidate passing
- *           a deterministic copy-quality gate before being adopted.
- *        5. Point the user at running the analysis.
+ *   2. Sectioned narrative. When the summary is missing or rejected,
+ *      the builder assembles up to four blocks separated by blank
+ *      lines so the UI can render short paragraphs and bullets:
+ *
+ *        Block 1 — Confirm sentence
+ *          Names the goal where available, otherwise a short generic
+ *          confirmation.
+ *
+ *        Block 2 — `Options compared` section
+ *          One bullet per named option (up to 4); for 5+ the first
+ *          three are bulleted and a closing `Other variants are on
+ *          the canvas.` bullet covers the rest. For a single-option
+ *          model the block degrades to an inline sentence.
+ *
+ *        Block 3 — `What the model is weighing` section
+ *          One bullet for the main trade-off, one for an assumption
+ *          worth checking. Assumption source priority chain:
+ *          strengthen.detail → strengthen.label → bias_finding.
+ *          explanation → coaching_bias_signal.detail → uncertainty
+ *          driver → fixed-generic. Each candidate passes a copy-
+ *          quality gate before being adopted. The block is omitted
+ *          entirely when no factor / risk / assumption survives.
+ *
+ *        Block 4 — Run-analysis nudge
+ *          A short call-to-action.
  *
  * Style invariants enforced by construction and by the gate:
  *   - British English ("summarise", "favour", "behaviour").
@@ -34,14 +48,19 @@
  *   - No raw counts as the lead value.
  *   - No recommendation / winner / best-option language — the analysis
  *     has not run yet.
- *   - Under 140 words. Trailing sentences are dropped when over budget.
+ *   - No markdown formatting — section labels are plain text on their
+ *     own line, bullets use `• ` (U+2022). The wire field is a plain
+ *     string; the UI renders newlines as visual line breaks.
+ *   - Under 140 words. Sections are dropped (weighing first, then
+ *     options) when over budget. Confirm and next-step never drop.
  *
  * The builder is defensive: every field is treated as best-effort, and
  * a graceful single-line fallback covers the case where the graph is
  * null or has no usable structure. The function returns a
  * {@link PostDraftNarrativeResult} with both the rendered `text` and a
- * lightweight `telemetry` payload describing which source filled
- * sentence 4. The caller emits the telemetry — this module never logs.
+ * lightweight `telemetry` payload describing which source filled the
+ * assumption bullet. The caller emits the telemetry — this module
+ * never logs.
  */
 
 import type { GraphV3T } from '../../orchestrator/types.js';
@@ -280,14 +299,11 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const factors = collectLabels(nodes, 'factor');
   const risks = collectLabels(nodes, 'risk');
 
-  const sentences: string[] = [];
-  sentences.push(buildConfirmSentence(goalLabel));
+  const confirmSentence = buildConfirmSentence(goalLabel);
 
-  const optionSentence = buildOptionsSentence(options);
-  if (optionSentence) sentences.push(optionSentence);
+  const optionsBlock = buildOptionsBlock(options);
 
-  const tradeOffSentence = buildTradeOffSentence(factors, risks);
-  if (tradeOffSentence) sentences.push(tradeOffSentence);
+  const tradeOffBullet = buildTradeOffBullet(factors, risks);
 
   const assumption = pickAssumption({
     nodes,
@@ -295,14 +311,23 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     strengthenItems,
     coachingBiasSignals,
   });
-  if (assumption.text) sentences.push(assumption.text);
+  const assumptionBullet = assumption.text ? toAssumptionBullet(assumption.text) : null;
 
-  sentences.push(
-    'Next, run the analysis to see how the options compare and what could shift the outcome.',
-  );
+  const weighingBlock = renderBulletSection('What the model is weighing', [
+    ...(tradeOffBullet ? [tradeOffBullet] : []),
+    ...(assumptionBullet ? [assumptionBullet] : []),
+  ]);
+
+  const nextStep =
+    'Next, run the analysis to see how the options compare and what could shift the outcome.';
 
   return {
-    text: enforceWordBudget(sentences),
+    text: assembleSectionedNarrative({
+      confirm: confirmSentence,
+      optionsBlock,
+      weighingBlock,
+      nextStep,
+    }),
     telemetry: {
       assumption_source: assumption.source,
       coaching_summary_present: coachingSummaryPresent,
@@ -326,7 +351,15 @@ function buildConfirmSentence(goalLabel: string | null): string {
   return `I've built a first decision model for "${safe}".`;
 }
 
-function buildOptionsSentence(options: readonly string[]): string | null {
+/**
+ * Returns either `null` (no options) or a rendered "Options compared"
+ * section. For 1 option we keep a single inline confirmation line (no
+ * bullets); for 2+ options we render `Options compared\n• …` with one
+ * bullet per option. For 5+ we list the first three and add a closing
+ * `• Other variants are on the canvas.` bullet so the reader sees the
+ * spread without enumerating every variant.
+ */
+function buildOptionsBlock(options: readonly string[]): string | null {
   if (options.length === 0) return null;
   const trimmed = options.map((label) => truncate(label, MAX_LABEL_CHARS));
 
@@ -334,34 +367,66 @@ function buildOptionsSentence(options: readonly string[]): string | null {
     return `The model so far includes one route: ${trimmed[0]}.`;
   }
   if (trimmed.length <= MAX_NAMED_OPTIONS) {
-    const word = numberWord(trimmed.length);
-    return `I'm comparing ${word} routes: ${formatList(trimmed)}.`;
+    return renderBulletSection('Options compared', trimmed);
   }
-  // 5+ options — summarise the leading three.
-  const headline = formatList(trimmed.slice(0, MAX_LISTED_WHEN_OVER));
-  return `The main routes include ${headline}, with further variants on the canvas.`;
+  // 5+ options — name the first three, signal that more exist on canvas.
+  const named = trimmed.slice(0, MAX_LISTED_WHEN_OVER);
+  return renderBulletSection('Options compared', [
+    ...named,
+    'Other variants are on the canvas.',
+  ]);
 }
 
-function buildTradeOffSentence(
+/**
+ * Return a single bullet-ready trade-off fragment (no leading bullet
+ * glyph; no trailing full stop — the renderer adds those). Returns null
+ * when no factor/risk material is available, so the caller can omit the
+ * bullet without leaving an empty section.
+ */
+function buildTradeOffBullet(
   factors: readonly string[],
   risks: readonly string[],
 ): string | null {
   const trimmedFactors = factors.map((l) => truncate(l, MAX_LABEL_CHARS));
   if (trimmedFactors.length >= 2) {
-    return `The main trade-off centres on ${trimmedFactors[0]} balanced against ${trimmedFactors[1]}.`;
+    return `Main trade-off: ${trimmedFactors[0]} balanced against ${trimmedFactors[1]}`;
   }
   if (trimmedFactors.length === 1 && risks.length >= 1) {
     const risk = truncate(risks[0], MAX_LABEL_CHARS);
-    return `The main trade-off weighs ${trimmedFactors[0]} against the risk of ${risk}.`;
+    return `Main trade-off: ${trimmedFactors[0]} against the risk of ${risk}`;
   }
   if (trimmedFactors.length === 1) {
-    return `A key consideration is ${trimmedFactors[0]}.`;
+    return `Key consideration: ${trimmedFactors[0]}`;
   }
   if (risks.length >= 1) {
     const risk = truncate(risks[0], MAX_LABEL_CHARS);
-    return `A key consideration is the risk of ${risk}.`;
+    return `Key consideration: the risk of ${risk}`;
   }
   return null;
+}
+
+/**
+ * Convert the assumption text returned by {@link pickAssumption} into a
+ * weighing-section bullet. The picker emits sentences like
+ * `"One assumption worth checking: …."` (with trailing period). For a
+ * bullet we strip the trailing period and lift the lead-in `One` →
+ * `Assumption to check:` so the section reads as a label, not a
+ * complete sentence.
+ *
+ * For the fixed-generic fallback `"One assumption worth checking is
+ * whether…"`, the same lead-in stripping yields `Assumption to check:
+ * whether…` — no period, parallel structure with the trade-off bullet.
+ */
+function toAssumptionBullet(assumptionSentence: string): string {
+  const trimmed = assumptionSentence.trim().replace(/\.$/, '');
+  // `One assumption worth checking: <fragment>` (priority-1..4 sources)
+  const colonForm = trimmed.match(/^One assumption worth checking:\s*(.+)$/i);
+  if (colonForm) return `Assumption to check: ${colonForm[1].trim()}`;
+  // `One assumption worth checking is whether <fragment>` (fixed-generic)
+  const isForm = trimmed.match(/^One assumption worth checking is\s+(.+)$/i);
+  if (isForm) return `Assumption to check: ${isForm[1].trim()}`;
+  // Defensive: keep the text as-is if neither form matches.
+  return trimmed;
 }
 
 interface AssumptionPick {
@@ -586,24 +651,6 @@ function truncate(label: string, max: number): string {
   return lastSpace > Math.floor(max / 2) ? cut.slice(0, lastSpace).trim() : cut.trim();
 }
 
-function formatList(items: readonly string[]): string {
-  if (items.length === 0) return '';
-  if (items.length === 1) return items[0];
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  const last = items[items.length - 1];
-  const rest = items.slice(0, -1).join(', ');
-  return `${rest} and ${last}`;
-}
-
-function numberWord(n: number): string {
-  switch (n) {
-    case 2: return 'two';
-    case 3: return 'three';
-    case 4: return 'four';
-    default: return String(n);
-  }
-}
-
 function cleanLeadIn(s: string): string {
   // Strip leading bullet / dash glyph the pipeline may have left in
   // place, then strip ALL trailing sentence-end punctuation
@@ -638,22 +685,55 @@ function countWords(text: string): number {
 }
 
 /**
- * Join sentences and, if over the 140-word ceiling, drop the
- * assumption sentence first (penultimate) and then the trade-off
- * sentence. The confirmation, options summary, and the "run the
- * analysis" guide are load-bearing and always kept.
+ * Render a section as `Label\n• item\n• item …`. Returns an empty
+ * string when no bullets are supplied so the caller can drop the
+ * section without leaving an orphan label.
  */
-function enforceWordBudget(initial: string[]): string {
-  const sentences = [...initial];
-  // Indexes from front: 0=confirm, 1=options, 2=tradeoff, 3=assumption, 4=next
-  // Drop order: assumption (3), then trade-off (2). Never drop 0, 1 or 4.
-  const dropOrder = [3, 2];
-  let joined = sentences.join(' ');
-  for (const idx of dropOrder) {
-    if (countWords(joined) <= MAX_WORDS) break;
-    if (idx >= sentences.length) continue;
-    sentences.splice(idx, 1);
-    joined = sentences.join(' ');
-  }
-  return joined;
+function renderBulletSection(label: string, bullets: readonly string[]): string {
+  if (bullets.length === 0) return '';
+  return `${label}\n${bullets.map((b) => `• ${b}`).join('\n')}`;
+}
+
+interface SectionedNarrativeInput {
+  readonly confirm: string;
+  readonly optionsBlock: string | null;
+  readonly weighingBlock: string;
+  readonly nextStep: string;
+}
+
+/**
+ * Assemble the four block slots into the final sectioned narrative,
+ * separating blocks with `\n\n`. Enforce the 140-word ceiling by
+ * dropping blocks in this order: weighing first, then options. The
+ * confirm sentence and the next-step nudge are load-bearing and
+ * always survive.
+ *
+ * The options block is structurally important (the demo reader scans
+ * it first), so it is dropped only as a last resort. The weighing
+ * block holds the trade-off + assumption bullets — informative but
+ * not load-bearing for the first-glance comprehension.
+ */
+function assembleSectionedNarrative(input: SectionedNarrativeInput): string {
+  const tryAssemble = (
+    includeWeighing: boolean,
+    includeOptions: boolean,
+  ): string => {
+    const blocks: string[] = [input.confirm];
+    if (includeOptions && input.optionsBlock !== null) {
+      blocks.push(input.optionsBlock);
+    }
+    if (includeWeighing && input.weighingBlock.length > 0) {
+      blocks.push(input.weighingBlock);
+    }
+    blocks.push(input.nextStep);
+    return blocks.join('\n\n');
+  };
+
+  let text = tryAssemble(true, true);
+  if (countWords(text) <= MAX_WORDS) return text;
+
+  text = tryAssemble(false, true);
+  if (countWords(text) <= MAX_WORDS) return text;
+
+  return tryAssemble(false, false);
 }

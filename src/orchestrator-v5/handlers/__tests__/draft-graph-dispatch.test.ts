@@ -263,10 +263,10 @@ describe('dispatchDraftGraph', () => {
 
       const text = result.response.assistant_text;
       expect(text).toContain('"Maximise revenue"');
-      expect(text).toContain('two routes');
+      expect(text).toContain('Options compared');
       expect(text).toContain('Launch now');
       expect(text).toContain('Delay');
-      expect(text).toMatch(/trade-off|consideration/);
+      expect(text).toMatch(/Main trade-off|Key consideration/);
       expect(text).toContain('Market size');
       expect(text).toContain('Cost');
       expect(text).toContain('run the analysis');
@@ -328,7 +328,7 @@ describe('dispatchDraftGraph', () => {
       expect(text).toContain("I've built a first decision model from your brief");
       expect(text).toContain('Plan A');
       expect(text).toContain('Plan B');
-      expect(text).toContain('two routes');
+      expect(text).toContain('Options compared');
       // No goal quote — there is no goal node to name.
       expect(text).not.toContain('"');
       expect(text).not.toContain('nodes');

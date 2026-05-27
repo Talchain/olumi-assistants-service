@@ -800,6 +800,10 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
       expect(out.assistant_text).toMatch(/moderately weakens the lead/);
       expect(out.assistant_text).toContain('The robustness band is moderate');
+      // Readability sectioning: closing nudge lives in its own labelled
+      // block on the confident path.
+      expect(out.assistant_text).toContain('What to check next');
+      expect(out.assistant_text).toMatch(/^• Small changes to the strongest factor can shift the picture\.$/m);
     }
   });
 
@@ -818,6 +822,10 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
       expect(out.assistant_text).toMatch(/moderately weakens the lead/);
       expect(out.assistant_text).toContain('The robustness band is currently moderate');
+      // Readability sectioning: try-and-rerun nudge lives in its own
+      // labelled block.
+      expect(out.assistant_text).toContain('What to check next');
+      expect(out.assistant_text).toMatch(/^• Try changing its value or strength and re-running/m);
     }
   });
 
@@ -833,6 +841,10 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toContain('with a probability of 62%');
       expect(out.assistant_text).toContain('It sits ahead of Hire one senior engineer overseas by 24 percentage points');
       expect(out.assistant_text).toMatch(/reflects (?:your current setup|the model you've built so far)/);
+      // Readability sectioning: the meta-statement is its own paragraph.
+      // No `What to check next` block — meaning is interpretive.
+      expect(out.assistant_text).not.toContain('What to check next');
+      expect(out.assistant_text).toMatch(/\n\nThe result reflects/);
     }
   });
 
@@ -848,6 +860,10 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toContain('with a probability of 62%');
       expect(out.assistant_text).toContain('It sits ahead of Hire one senior engineer overseas by 24 percentage points');
       expect(out.assistant_text).toContain('The biggest thing to examine next is Delivery risk');
+      // Readability sectioning: the next-step sentence is a bullet
+      // under its own labelled block.
+      expect(out.assistant_text).toContain('What to check next');
+      expect(out.assistant_text).toMatch(/^• The biggest thing to examine next is Delivery risk/m);
     }
   });
 
@@ -862,6 +878,11 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toContain('To improve confidence');
       expect(out.assistant_text).toContain('Delivery risk');
       expect(out.assistant_text).toContain('The robustness band is moderate');
+      // Readability sectioning: "To improve confidence here, the most
+      // useful thing to examine is X" is now a bullet under its own
+      // labelled block. The robustness sentence stays in the lead.
+      expect(out.assistant_text).toContain('What to check next');
+      expect(out.assistant_text).toMatch(/^• To improve confidence here/m);
     }
   });
 
