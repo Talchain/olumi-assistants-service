@@ -554,7 +554,7 @@ describe("runAutoBaselineDedup", () => {
     };
     const ctx = makeCtx(graph);
     const report = runAutoBaselineDedup(ctx);
-    expect(report.dropped_option_ids.sort()).toEqual(["opt_a1_baseline", "opt_a2_baseline"]);
+    expect([...report.dropped_option_ids].sort()).toEqual(["opt_a1_baseline", "opt_a2_baseline"]);
     expect(report.groups_evaluated).toBe(2);
   });
 });
