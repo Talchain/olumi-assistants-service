@@ -7,12 +7,29 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.13.0.tgz`
+### `talchain-schemas-0.13.1.tgz`
 
-**Purpose:** pre-publish consumption of `@talchain/schemas` v0.13.0.
-v0.13.0 adds the four V5 Phase 3 block types per Analysis tab data
-contract v1.3 (`Docs/v5/v5-analysis-tab-data-contract-v1_3.md`),
-plus the shared schemas they depend on. Additions:
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.13.1.
+
+v0.13.1 (additive patch) adds two optional booleans to
+`MessageTurnPayloadSchema`:
+
+- `generate_model?: boolean`
+- `explicit_generate?: boolean`
+
+These flags signal that the user has explicitly asked CEE to generate
+the decision model now; CEE may use them to short-circuit the LLM
+tool-use router and dispatch the V5 `draft_graph` handler
+deterministically when the scenario has no graph (or zero nodes). Both
+fields default to `undefined`; older clients are unaffected, and the
+schema remains `.strict()` — only these two specific keys are now
+permitted in addition to the existing fields. No discriminated-union
+refinement uses the new fields; they are advisory.
+
+v0.13.0 (still in 0.13.1) adds the four V5 Phase 3 block types per
+Analysis tab data contract v1.3
+(`Docs/v5/v5-analysis-tab-data-contract-v1_3.md`), plus the shared
+schemas they depend on. Additions:
 
 - `ReviewCardBlockSchema` (emitted by the `decision_review` enricher
   after `run_analysis`; hero-eligible; eight `card_kind` values).
@@ -55,7 +72,7 @@ Source lives at `~/Documents/GitHub/olumi-schemas/` on `main`
 `feat/phase-3a-block-types`); built via `npm run build && npm pack`
 from source. Not yet published to a private registry.
 
-**Checksum verification:** `vendor/talchain-schemas-0.13.0.tgz.sha256`
+**Checksum verification:** `vendor/talchain-schemas-0.13.1.tgz.sha256`
 holds the canonical sha256 hash. The pre-push hook
 (`scripts/validate-tarball-sha.sh`) verifies the tarball bytes against
 this manifest on every push.

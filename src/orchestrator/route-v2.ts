@@ -950,12 +950,60 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //     per the matrix. False positives would mis-invoke the pipeline
     //     on a conversational message, so we err on the side of NOT
     //     dispatching.
+    // ────────────────────────────────────────────────────────────────────
+    // EXPLICIT deterministic draft_graph pre-route (workstream v5-#57)
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // When the request body carries `generate_model === true` or
+    // `explicit_generate === true` AND the scenario has no graph (or
+    // zero nodes), dispatch the V5 draft_graph handler deterministically
+    // — bypass `routeWithToolUse` entirely. The two booleans are
+    // aliases (schema v0.13.1, additive) and CEE treats them as
+    // equivalent.
+    //
+    // This trigger is INTENTIONALLY narrower than the heuristic
+    // `isDraftGraphShape` below:
+    //   - No stage constraint (frame OR analyse OR decide OR review).
+    //   - No min-brief-length / regex check on the message.
+    //   - The flag is the explicit user signal; we trust it.
+    //
+    // Precondition: NO graph yet (graphState null), OR graph exists
+    // with zero nodes. If a non-empty graph exists, the flag is
+    // ignored (advisory contract — see schema v0.13.1 changelog).
+    // Falling through to the existing branches is the safe default
+    // for that case; a user who already has a graph and clicks
+    // "Generate model" is almost certainly hitting a UI bug, not
+    // expressing intent to overwrite.
+    //
+    // The dispatch reuses the EXACT block below — same dispatchDraftGraph
+    // call, same commit guard, same typed-error mapping — so the two
+    // trigger conditions converge on a single code path. Telemetry
+    // distinguishes the entry point via `v5.draft_graph.explicit_generate_dispatch`.
+    const explicitGenerateRequested =
+      ingress.kind === 'message' &&
+      (ingress.generate_model === true || ingress.explicit_generate === true);
+    const graphHasZeroNodes =
+      extensions.graphState == null ||
+      (extensions.graphState.nodes?.length ?? 0) === 0;
+    const isExplicitGenerate = explicitGenerateRequested && graphHasZeroNodes;
+    if (isExplicitGenerate) {
+      emit(TelemetryEvents.V5ExplicitGenerateDispatch, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        stage: ingress.stage,
+        generate_model: ingress.generate_model ?? null,
+        explicit_generate: ingress.explicit_generate ?? null,
+        graph_present: extensions.graphState != null,
+        graph_node_count: extensions.graphState?.nodes?.length ?? 0,
+      });
+    }
+
     const isDraftGraphShape =
       ingress.stage === 'frame' &&
       extensions.graphState == null &&
       ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
       DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
-    if (isDraftGraphShape) {
+    if (isExplicitGenerate || isDraftGraphShape) {
       // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
       // pipeline. V5 has no deterministic draft_graph handler yet. See
       // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.

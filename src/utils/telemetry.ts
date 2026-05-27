@@ -125,6 +125,19 @@ export const TelemetryEvents = {
   // prompt. See src/orchestrator/route-v2.ts (frame_no_brief_guard).
   V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
 
+  // Explicit deterministic draft_graph pre-route. Emitted when the
+  // request body carries `generate_model === true` or
+  // `explicit_generate === true` AND the scenario has no graph (or
+  // zero nodes). The pre-route dispatches the V5 draft_graph handler
+  // directly, bypassing `routeWithToolUse`. Fields:
+  //   - scenario_id, request_id, stage
+  //   - generate_model (boolean | null), explicit_generate (boolean | null)
+  //   - graph_node_count (number) — 0 in either trigger case
+  //   - graph_present (boolean) — false when graphState is null;
+  //     true when graphState exists with 0 nodes.
+  // See src/orchestrator/route-v2.ts (explicit_generate_dispatch).
+  V5ExplicitGenerateDispatch: "v5.draft_graph.explicit_generate_dispatch",
+
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
   CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",
