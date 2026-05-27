@@ -235,12 +235,52 @@ export async function handleDraftGraph(
       pipelineRecoveryRaw && typeof pipelineRecoveryRaw === 'object'
         ? (pipelineRecoveryRaw as Record<string, unknown>)
         : null;
+    // Pipeline-side `body.details` may carry diagnostic fields the route
+    // boundary needs to surface on the wire (e.g. OPTIONS_IDENTICAL bypass
+    // attaches `violation_code`, `identical_option_ids`,
+    // `intervention_signature`, `repair_skip_reason`). We allowlist
+    // explicitly rather than passing the whole `details` blob through:
+    // future CEE error sites may add fields that contain user input
+    // echoes, raw exception text, or other unsafe content. Each new field
+    // must be added to the allowlist intentionally with a justification.
+    //
+    // All allowlisted fields are DIAGNOSTIC — intended for dashboards,
+    // logs, and DGAI debug surfaces. They are NOT user-facing copy. The
+    // user-facing payload is `recovery.suggestion` + `recovery.hints`
+    // (extracted via `pipelineRecovery` below). In particular:
+    //   - `identical_option_ids` carries internal graph node IDs (e.g.
+    //     "opt_49", "opt_status_quo"), not display labels.
+    //   - `intervention_signature` carries internal factor-id:value
+    //     fingerprints — useful for operators correlating dashboards
+    //     but never appropriate as user text.
+    // DGAI should render `recovery.suggestion` for the user and treat
+    // these diagnostic fields as opaque dashboard data.
+    const PIPELINE_DETAILS_ALLOWLIST = new Set<string>([
+      'violation_code',          // CEE-side validation code (e.g. OPTIONS_IDENTICAL)
+      'identical_option_ids',    // OPTIONS_IDENTICAL bypass diagnostic — internal graph IDs
+      'intervention_signature',  // OPTIONS_IDENTICAL bypass diagnostic — internal factor:value fingerprint
+      'repair_skip_reason',      // OPTIONS_IDENTICAL bypass diagnostic
+    ]);
+    const rawDetails = (body as { details?: unknown }).details;
+    const pipelineDetails: Record<string, unknown> | null =
+      rawDetails && typeof rawDetails === 'object' && !Array.isArray(rawDetails)
+        ? (() => {
+            const filtered: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(rawDetails as Record<string, unknown>)) {
+              if (PIPELINE_DETAILS_ALLOWLIST.has(key)) {
+                filtered[key] = value;
+              }
+            }
+            return Object.keys(filtered).length > 0 ? filtered : null;
+          })()
+        : null;
     const failureError = Object.assign(new Error(message), {
       orchestratorError: err,
       toolLLMTelemetry: failureTelemetry,
       pipelineStatusCode: pipelineResult.statusCode,
       pipelineErrorCode,
       pipelineRecovery,
+      pipelineDetails,
     });
     throw failureError;
   }

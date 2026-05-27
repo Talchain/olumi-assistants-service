@@ -135,7 +135,17 @@ export interface StageContext {
 
   // ── Stage 4 Substep 1b (Deterministic sweep) outputs ─────────────────
   deterministicRepairs?: Array<{ code: string; path: string; action: string }>;
-  remainingViolations?: Array<{ code: string; path?: string; message?: string }>;
+  // `context` carries validator-specific structured detail when available
+  // (e.g. OPTIONS_IDENTICAL → { optionIds, signature }). Optional and
+  // additive — existing consumers that destructure {code,path,message} are
+  // unaffected. Consumed by the pre-LLM-repair fail-fast gate in
+  // stages/repair/index.ts for OPTIONS_IDENTICAL.
+  remainingViolations?: Array<{
+    code: string;
+    path?: string;
+    message?: string;
+    context?: Record<string, unknown>;
+  }>;
   llmRepairNeeded?: boolean;
   llmRepairBriefIncluded?: boolean;
   detectedEdgeFormat?: EdgeFormat;

@@ -380,6 +380,129 @@ describe("handleDraftGraph", () => {
     }
   });
 
+  // PR #202 review-fix R1: handleDraftGraph propagates body.details via
+  // PIPELINE_DETAILS_ALLOWLIST. Tests 1g-1k cover the allowlist + null/
+  // missing handling. The previous OPTIONS_IDENTICAL diagnostics
+  // (identical_option_ids, violation_code, etc.) were dropped because
+  // handleDraftGraph didn't read body.details at all.
+
+  it("extracts allowlisted body.details fields into pipelineDetails (Test 1g — propagation)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: {
+        code: "CEE_GRAPH_INVALID",
+        details: {
+          violation_code: "OPTIONS_IDENTICAL",
+          identical_option_ids: ["opt_a", "opt_b", "opt_c"],
+          intervention_signature: "fac_price:0.5000",
+          repair_skip_reason: "options_identical_unrepairable_by_llm",
+        },
+      },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1g");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineDetails?: Record<string, unknown> | null };
+      expect(meta.pipelineDetails).toBeDefined();
+      expect(meta.pipelineDetails).not.toBeNull();
+      expect(meta.pipelineDetails!.violation_code).toBe("OPTIONS_IDENTICAL");
+      expect(meta.pipelineDetails!.identical_option_ids).toEqual(["opt_a", "opt_b", "opt_c"]);
+      expect(meta.pipelineDetails!.intervention_signature).toBe("fac_price:0.5000");
+      expect(meta.pipelineDetails!.repair_skip_reason).toBe("options_identical_unrepairable_by_llm");
+    }
+  });
+
+  it("filters non-allowlisted fields from body.details (Test 1h — sanitization)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: {
+        code: "CEE_GRAPH_INVALID",
+        details: {
+          violation_code: "OPTIONS_IDENTICAL",        // allowlisted
+          identical_option_ids: ["opt_a"],            // allowlisted
+          stack_trace: "Error at ...",                // NOT allowlisted
+          internal_path: "/etc/passwd",               // NOT allowlisted
+          user_input_echo: "raw user input",          // NOT allowlisted
+        },
+      },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1h");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineDetails?: Record<string, unknown> | null };
+      expect(meta.pipelineDetails).not.toBeNull();
+      const details = meta.pipelineDetails!;
+      // Allowlisted survive
+      expect(details.violation_code).toBe("OPTIONS_IDENTICAL");
+      expect(details.identical_option_ids).toEqual(["opt_a"]);
+      // Non-allowlisted dropped
+      expect(details.stack_trace).toBeUndefined();
+      expect(details.internal_path).toBeUndefined();
+      expect(details.user_input_echo).toBeUndefined();
+    }
+  });
+
+  it("pipelineDetails is null when body.details is absent (Test 1i — no-noise)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: { code: "CEE_LLM_VALIDATION_FAILED" }, // no `details`
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1i");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineDetails?: Record<string, unknown> | null };
+      expect(meta.pipelineDetails).toBeNull();
+    }
+  });
+
+  it("pipelineDetails is null when body.details has only non-allowlisted fields (Test 1j — empty-after-filter)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: {
+        code: "CEE_GRAPH_INVALID",
+        details: {
+          stack_trace: "Error at ...",
+          internal_path: "/etc/passwd",
+        },
+      },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1j");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineDetails?: Record<string, unknown> | null };
+      // Empty filtered result collapses to null — keeps the wire body
+      // free of empty objects.
+      expect(meta.pipelineDetails).toBeNull();
+    }
+  });
+
+  it("pipelineDetails is null when body.details is not an object (Test 1k — defensive)", async () => {
+    const malformed: unknown[] = [
+      "string-instead-of-object",
+      42,
+      null,
+      ["array-instead-of-object"],
+      undefined,
+    ];
+    for (const bad of malformed) {
+      mockRunUnifiedPipeline.mockResolvedValueOnce({
+        statusCode: 400,
+        body: { code: "CEE_GRAPH_INVALID", details: bad },
+      });
+      try {
+        await handleDraftGraph("Test brief", mockRequest, "turn-md1k");
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        const meta = err as { pipelineDetails?: Record<string, unknown> | null };
+        expect(meta.pipelineDetails).toBeNull();
+      }
+    }
+  });
+
   // Audit-fix A5: defensive null/non-object body handling. The body is typed
   // `unknown`; if a future pipeline path returns a malformed response,
   // extraction must NOT crash. It should fall through to the legacy plain-
