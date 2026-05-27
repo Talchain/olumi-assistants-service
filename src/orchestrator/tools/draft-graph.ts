@@ -243,10 +243,22 @@ export async function handleDraftGraph(
     // future CEE error sites may add fields that contain user input
     // echoes, raw exception text, or other unsafe content. Each new field
     // must be added to the allowlist intentionally with a justification.
+    //
+    // All allowlisted fields are DIAGNOSTIC — intended for dashboards,
+    // logs, and DGAI debug surfaces. They are NOT user-facing copy. The
+    // user-facing payload is `recovery.suggestion` + `recovery.hints`
+    // (extracted via `pipelineRecovery` below). In particular:
+    //   - `identical_option_ids` carries internal graph node IDs (e.g.
+    //     "opt_49", "opt_status_quo"), not display labels.
+    //   - `intervention_signature` carries internal factor-id:value
+    //     fingerprints — useful for operators correlating dashboards
+    //     but never appropriate as user text.
+    // DGAI should render `recovery.suggestion` for the user and treat
+    // these diagnostic fields as opaque dashboard data.
     const PIPELINE_DETAILS_ALLOWLIST = new Set<string>([
       'violation_code',          // CEE-side validation code (e.g. OPTIONS_IDENTICAL)
-      'identical_option_ids',    // OPTIONS_IDENTICAL bypass diagnostic
-      'intervention_signature',  // OPTIONS_IDENTICAL bypass diagnostic
+      'identical_option_ids',    // OPTIONS_IDENTICAL bypass diagnostic — internal graph IDs
+      'intervention_signature',  // OPTIONS_IDENTICAL bypass diagnostic — internal factor:value fingerprint
       'repair_skip_reason',      // OPTIONS_IDENTICAL bypass diagnostic
     ]);
     const rawDetails = (body as { details?: unknown }).details;
