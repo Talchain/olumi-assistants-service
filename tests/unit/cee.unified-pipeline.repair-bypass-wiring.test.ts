@@ -227,3 +227,170 @@ describe("runStageRepair — OPTIONS_IDENTICAL bypass wiring", () => {
     expect(runOrchestratorValidationMock).toHaveBeenCalledTimes(1);
   });
 });
+
+// PR #203 round-2 review test #1: prove auto-baseline dedup occurs
+// BEFORE the deterministic sweep AND prevents the PR #202 OPTIONS_IDENTICAL
+// bypass for the auto-baseline-only case (not for other Bucket C codes
+// or non-baseline duplicates).
+//
+// This test does NOT mock runAutoBaselineDedup — it lets the real
+// function run against a controlled graph. The deterministic sweep mock
+// observes the post-dedup graph and reports what OPTIONS_IDENTICAL it
+// would detect.
+describe("runStageRepair — auto-baseline dedup ordering (PR #203)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("explicit-baseline duplicate → dedup mutates ctx.graph before sweep; sweep sees clean graph; PR #202 bypass does NOT fire", async () => {
+    // Sweep mock records what graph it saw. It also reports
+    // remainingViolations as empty (because the dedup already cleaned
+    // the auto-baseline duplicate before sweep ran).
+    let nodesSeenBySweep: number | null = null;
+    let optionsSeenBySweep: number | null = null;
+    runDeterministicSweepMock.mockImplementation(async (ctx: StageContext) => {
+      const nodes = (ctx.graph as { nodes?: Array<{ kind?: string }> } | undefined)?.nodes ?? [];
+      nodesSeenBySweep = nodes.length;
+      optionsSeenBySweep = nodes.filter((n) => n.kind === "option").length;
+      ctx.remainingViolations = []; // No OPTIONS_IDENTICAL after dedup.
+      ctx.llmRepairNeeded = false;
+    });
+
+    const ctx = {
+      requestId: "req-dedup-wiring",
+      graph: {
+        nodes: [
+          { id: "dec", kind: "decision" },
+          {
+            id: "opt_explicit",
+            kind: "option",
+            label: "Explicit option",
+            data: { interventions: { fac_x: 0.5 } },
+          },
+          {
+            id: "opt_status_quo",
+            kind: "option",
+            label: "Status Quo",
+            // EXPLICIT is_baseline=true: dedup will fire.
+            data: { is_baseline: true, interventions: { fac_x: 0.5 } },
+          },
+        ],
+        edges: [
+          { from: "dec", to: "opt_explicit" },
+          { from: "dec", to: "opt_status_quo" },
+        ],
+        version: "1.2",
+      },
+      pipelineOutcome: makeOutcome(),
+      remainingViolations: undefined,
+    } as unknown as StageContext;
+
+    await runStageRepair(ctx);
+
+    // The dedup ran (substep 0.9). The sweep saw the post-dedup graph:
+    // one fewer option node, one fewer edge.
+    expect(optionsSeenBySweep).toBe(1);
+    expect(nodesSeenBySweep).toBe(2); // decision + 1 option (status quo dropped)
+
+    // The PR #202 bypass did NOT fire (no OPTIONS_IDENTICAL detected
+    // after dedup, no earlyReturn set).
+    expect(ctx.earlyReturn).toBeUndefined();
+    // Downstream substeps proceed normally — graph is valid.
+    expect(runPlotValidationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("heuristic-only duplicate (no explicit flag) → dedup declines; PR #202 bypass STILL fires for OPTIONS_IDENTICAL", async () => {
+    // The duplicate is heuristic-only (label "Status Quo" but no
+    // is_baseline=true). Dedup must NOT delete it. The sweep should
+    // still see both options, raise OPTIONS_IDENTICAL, and the
+    // PR #202 bypass should fire.
+    let optionsSeenBySweep: number | null = null;
+    runDeterministicSweepMock.mockImplementation(async (ctx: StageContext) => {
+      const nodes = (ctx.graph as { nodes?: Array<{ kind?: string }> } | undefined)?.nodes ?? [];
+      optionsSeenBySweep = nodes.filter((n) => n.kind === "option").length;
+      ctx.remainingViolations = [
+        {
+          code: "OPTIONS_IDENTICAL",
+          context: { optionIds: ["opt_a", "opt_heuristic"], signature: "fac_x:0.5000" },
+        },
+      ];
+      ctx.llmRepairNeeded = true;
+    });
+
+    const ctx = {
+      requestId: "req-dedup-heuristic",
+      graph: {
+        nodes: [
+          { id: "dec", kind: "decision" },
+          {
+            id: "opt_a",
+            kind: "option",
+            label: "Active option",
+            data: { interventions: { fac_x: 0.5 } },
+          },
+          {
+            id: "opt_heuristic",
+            kind: "option",
+            label: "Status Quo", // heuristic match, NO explicit flag
+            data: { interventions: { fac_x: 0.5 } },
+          },
+        ],
+        edges: [],
+        version: "1.2",
+      },
+      pipelineOutcome: makeOutcome(),
+      remainingViolations: undefined,
+    } as unknown as StageContext;
+
+    await runStageRepair(ctx);
+
+    // Both options preserved (dedup did NOT delete the heuristic-only
+    // baseline-shaped option).
+    expect(optionsSeenBySweep).toBe(2);
+
+    // The PR #202 bypass DID fire because OPTIONS_IDENTICAL survived.
+    expect(ctx.earlyReturn).toBeDefined();
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+
+    // The LLM repair (PLoT validation substep) was NOT invoked — the
+    // PR #202 bypass returned earlyReturn before plot-validation.
+    expect(runPlotValidationMock).not.toHaveBeenCalled();
+  });
+
+  it("no duplicate signatures → dedup is a no-op; normal pipeline flow", async () => {
+    let optionsSeenBySweep: number | null = null;
+    runDeterministicSweepMock.mockImplementation(async (ctx: StageContext) => {
+      const nodes = (ctx.graph as { nodes?: Array<{ kind?: string }> } | undefined)?.nodes ?? [];
+      optionsSeenBySweep = nodes.filter((n) => n.kind === "option").length;
+      ctx.remainingViolations = [];
+      ctx.llmRepairNeeded = false;
+    });
+
+    const ctx = {
+      requestId: "req-no-dedup",
+      graph: {
+        nodes: [
+          { id: "dec", kind: "decision" },
+          { id: "opt_a", kind: "option", data: { interventions: { fac_x: 0.5 } } },
+          { id: "opt_b", kind: "option", data: { interventions: { fac_x: 0.7 } } },
+          {
+            id: "opt_status_quo",
+            kind: "option",
+            data: { is_baseline: true, interventions: { fac_x: 0 } }, // distinct
+          },
+        ],
+        edges: [],
+        version: "1.2",
+      },
+      pipelineOutcome: makeOutcome(),
+      remainingViolations: undefined,
+    } as unknown as StageContext;
+
+    await runStageRepair(ctx);
+
+    // All 3 options preserved — no duplicates exist.
+    expect(optionsSeenBySweep).toBe(3);
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(runPlotValidationMock).toHaveBeenCalledTimes(1);
+  });
+});

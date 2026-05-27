@@ -175,6 +175,7 @@ type V5ExitPath =
   | 'chip_click'
   | 'draft_graph'
   | 'edit_graph'
+  | 'frame_no_brief_guard'
   | 'turn_executor';
 
 /**
@@ -1348,6 +1349,75 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Frame-stage no-brief guard — deterministic fallback for messages
+    // that arrive at frame stage with no graph yet but do not look like a
+    // fresh decision brief. Without this gate, such messages fall through
+    // to TurnExecutor's broad routing LLM which (a) costs an extra Sonnet
+    // call and (b) often hits max_tokens and emits the generic
+    // "I couldn't complete that turn cleanly" fallback — a known
+    // user-hostile UX when the user is retrying after a failed
+    // draft_graph or sending a follow-up clarification.
+    //
+    // The previous (draft_graph) dispatch already filtered for the
+    // brief-shaped messages; chip_click and system_event branches handled
+    // those above. What reaches here at stage=frame + no graph is
+    // necessarily a non-brief, non-chip user message. Guide them back to
+    // the frame-stage flow deterministically with no LLM call.
+    //
+    // Pricing-brief retry scenario from staging:
+    //   Turn 1: pricing brief → CEE_GRAPH_INVALID (no graph persisted)
+    //   Turn 2: user replies "no status quo, just three options"
+    //     - stage=frame, no graphState (Turn 1 failed → nothing persisted)
+    //     - message does NOT match DRAFT_GRAPH_DECISION_BRIEF_REGEX
+    //     - WAS falling through to runTurnExecutor → Sonnet max_tokens
+    //       → "I couldn't complete that turn cleanly" generic fallback
+    //     - NOW caught here, emits a deterministic framing prompt.
+    // ────────────────────────────────────────────────────────────────────
+    const isFrameNoBriefShape =
+      ingress.stage === 'frame' &&
+      extensions.graphState == null &&
+      !isDraftGraphShape;
+    if (isFrameNoBriefShape) {
+      log.info(
+        {
+          event: 'v5.frame_stage_no_brief_guard',
+          request_id: requestId,
+          message_length: ingress.message.length,
+          had_chip: ingress.chip != null,
+        },
+        'Frame-stage no-brief guard fired — emitting deterministic framing prompt instead of broad TurnExecutor LLM',
+      );
+      emit(TelemetryEvents.V5FrameStageNoBriefGuard, {
+        request_id: requestId,
+        message_length: ingress.message.length,
+        had_chip: ingress.chip != null,
+      });
+      // Deterministic copy: short, directly corrective for retry cases,
+      // with concrete examples matching the brief regex's positive
+      // verbs. Does NOT echo the user's input (no PII leak risk).
+      // Stays in frame stage so the UI remains on the graph-creation
+      // path; suggested_actions / analysis_ready intentionally empty
+      // (no analysis to surface pre-graph). Round-2 review tightening:
+      // shorter than the original draft.
+      const assistantText =
+        "I need a single decision question to start. " +
+        "For example: “Should we hire a tech lead or two developers?” or " +
+        "“Whether to launch in Q3 or hold for Q4?” " +
+        "Include the options you're comparing.";
+      const guardResponse: import('@talchain/schemas/boundary').OlumiResponse = {
+        response_version: 2,
+        assistant_text: assistantText,
+        blocks: [],
+        suggested_actions: [],
+        insights: [],
+        stage_indicator: 'frame',
+      } as import('@talchain/schemas/boundary').OlumiResponse;
+      return sendFinalised200(reply, requestId, 'frame_no_brief_guard', guardResponse, {
+        graph: null,
+      });
     }
 
     // TurnExecutor returns a well-formed OlumiResponse envelope on every
