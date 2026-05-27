@@ -98,6 +98,22 @@ export const TelemetryEvents = {
   // a fail-fast clarification-shaped CEE_GRAPH_INVALID instead.
   CeeOptionsIdenticalBypass: "cee.options_identical.pre_repair_bypass",
 
+  // Stage 4 Substep 0.9 — deterministic auto-baseline dedup. Fires when
+  // the LLM-injected status-quo option duplicates an explicit option's
+  // intervention signature; drops the baseline so OPTIONS_IDENTICAL
+  // never gets raised for this known LLM-artefact case. See
+  // src/cee/unified-pipeline/stages/repair/auto-baseline-dedup.ts.
+  CeeAutoBaselineDedupApplied: "cee.auto_baseline_dedup.applied",
+
+  // V5 route-v2 frame-stage no-brief guard. Fires when a frame-stage
+  // message arrives with no graph yet but does NOT match the
+  // draft_graph trigger regex — typically a retry after a failed
+  // draft_graph, or a user reply that isn't a fresh decision brief.
+  // Replaces the "I couldn't complete that turn cleanly" generic
+  // TurnExecutor max_tokens fallback with a deterministic framing
+  // prompt. See src/orchestrator/route-v2.ts (frame_no_brief_guard).
+  V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
+
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
   CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",
