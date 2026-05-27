@@ -1136,6 +1136,31 @@ export const TelemetryEvents = {
   //            narration_length }.
   DraftNarrationCountSuppressed: "v5.draft_narration.count_suppressed",
 
+  // V5 post-draft coaching gated-hybrid composer — which source filled
+  // the sentence-4 assumption (or replaced the whole response). Emitted
+  // by the draft_graph dispatcher after buildPostDraftNarrative runs on
+  // the success path. Category/count only — never logs raw user or
+  // coaching text. Payload:
+  // { request_id, scenario_id,
+  //   assumption_source: 'coaching_summary' | 'strengthen_item_detail'
+  //                    | 'strengthen_item_label' | 'bias_finding'
+  //                    | 'coaching_bias_signal' | 'uncertainty_driver'
+  //                    | 'deterministic_fallback',
+  //   coaching_summary_present: boolean,
+  //   coaching_summary_passed_gate: boolean,
+  //   coaching_summary_reject_reason: GateRejectReason | null,
+  //   fallback_reason: 'gate_rejected' | 'no_candidate' | null,
+  //   strengthen_items_count: number,
+  //   bias_findings_count: number,
+  //   coaching_bias_signals_count: number }.
+  //
+  // GateRejectReason values: 'empty' | 'too_short' | 'too_long' |
+  //   'em_dash' | 'internal_id' | 'schema_term' | 'graph_shape' |
+  //   'premature_recommendation' | 'question_shaped' |
+  //   'trailing_punctuation' | 'awkward_grammar' | 'markdown' |
+  //   'no_decision_framing' | 'no_tradeoff_or_gap' | 'no_next_step'.
+  V5PostDraftCoachingSourceSelected: "v5.post_draft_coaching.source_selected",
+
   // V5 Phase 2 workstream A — post-analysis coaching wrapper fired.
   // Emitted when an analyse-stage direct_answer with a fresh
   // run_analysis fact yields ≥1 review-card-derived chip and a

@@ -32,11 +32,20 @@ vi.mock('../../commit.js', () => ({
   computeRequestHash: vi.fn().mockReturnValue('sha256:testhash'),
 }));
 
+vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();
+  return {
+    ...actual,
+    emit: vi.fn(),
+  };
+});
+
 // ── imports after mocks ───────────────────────────────────────────────────────
 
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import { Stage } from '@talchain/schemas/boundary';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -62,6 +71,12 @@ const MINIMAL_GRAPH = {
   edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
 };
 
+// Cast to the DraftGraphResult['analysisReady'] shape rather than
+// `as const`: the latter forces every literal field to readonly, which
+// fails to assign through `makeDraftResult(_, analysisReady)`. The
+// cast preserves type-level validation against the schema while
+// allowing the fixture to flow through helper signatures expecting a
+// mutable AnalysisReadyPayload.
 const MINIMAL_ANALYSIS_READY = {
   status: 'ready',
   options: [
@@ -69,7 +84,7 @@ const MINIMAL_ANALYSIS_READY = {
     { option_id: 'opt_delay',      label: 'Delay 6mo',  status: 'ready', interventions: { fac_revenue: 0.3 } },
   ],
   goal_node_id: 'goal_revenue',
-} as const;
+} as unknown as NonNullable<DraftGraphResult['analysisReady']>;
 
 function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH, analysisReady?: DraftGraphResult['analysisReady']) {
   return {
@@ -214,15 +229,17 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      // brief brief-display-safe-analysis A2: never include node/edge counts.
-      // Graph has no option/factor/risk nodes → fallback template.
-      expect(result.response.assistant_text).toBe('Your decision model is ready to explore.');
+      // Decision-coach narrative: no options/factors → just confirms the
+      // goal and points the user at running analysis. No node/edge wording.
+      expect(result.response.assistant_text).toContain("I've built a first decision model");
+      expect(result.response.assistant_text).toContain('"B"');
+      expect(result.response.assistant_text).toContain('run the analysis');
       expect(result.response.assistant_text).not.toContain('nodes');
       expect(result.response.assistant_text).not.toContain('edges');
     });
 
-    // brief brief-display-safe-analysis A2 — draft narration template tiers.
-    it('decision-language fallback names the goal and lists option/factor/risk counts when all present', async () => {
+    // Decision-coach narrative — populated case (goal + options + factors + risk).
+    it('coaching narrative names the goal and summarises options and factors when all present', async () => {
       const graph = {
         nodes: [
           { id: 'g1', kind: 'goal', label: 'Maximise revenue' },
@@ -244,14 +261,20 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe(
-        'Your decision model for "Maximise revenue" is ready, with 2 options, 2 factors, and 1 risk to consider.',
-      );
-      expect(result.response.assistant_text).not.toContain('nodes');
-      expect(result.response.assistant_text).not.toContain('edges');
+      const text = result.response.assistant_text;
+      expect(text).toContain('"Maximise revenue"');
+      expect(text).toContain('two routes');
+      expect(text).toContain('Launch now');
+      expect(text).toContain('Delay');
+      expect(text).toMatch(/trade-off|consideration/);
+      expect(text).toContain('Market size');
+      expect(text).toContain('Cost');
+      expect(text).toContain('run the analysis');
+      expect(text).not.toContain('nodes');
+      expect(text).not.toContain('edges');
     });
 
-    it('decision-language fallback omits the risks clause when riskCount is 0', async () => {
+    it('coaching narrative omits any risk wording when riskCount is 0', async () => {
       const graph = {
         nodes: [
           { id: 'g1', kind: 'goal', label: 'Improve uptime' },
@@ -270,13 +293,18 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe(
-        'Your decision model for "Improve uptime" is ready, with 1 option and 1 factor to explore.',
-      );
-      expect(result.response.assistant_text).not.toContain('risks');
+      const text = result.response.assistant_text;
+      expect(text).toContain('"Improve uptime"');
+      expect(text).toContain('Migrate');
+      expect(text).toContain('one route');
+      expect(text).toContain('Latency');
+      expect(text).toContain('run the analysis');
+      // Risk wording must not leak when no risk nodes exist.
+      expect(text).not.toContain('risks');
+      expect(text).not.toContain('risk of');
     });
 
-    it('decision-language fallback drops the goal clause when no goal node is present', async () => {
+    it('coaching narrative uses the goalless lead when no goal node is present', async () => {
       const graph = {
         nodes: [
           { id: 'o1', kind: 'option', label: 'Plan A' },
@@ -296,18 +324,21 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe(
-        'Your decision model is ready with 2 options, 1 factor, and 1 risk to explore.',
-      );
-      expect(result.response.assistant_text).not.toContain('"');
-      expect(result.response.assistant_text).not.toContain('nodes');
+      const text = result.response.assistant_text;
+      expect(text).toContain("I've built a first decision model from your brief");
+      expect(text).toContain('Plan A');
+      expect(text).toContain('Plan B');
+      expect(text).toContain('two routes');
+      // No goal quote — there is no goal node to name.
+      expect(text).not.toContain('"');
+      expect(text).not.toContain('nodes');
     });
 
-    // brief brief-display-safe-analysis A2 — narration guard rejects ANY
-    // node/edge-count wording, even when the counts match. Users don't
-    // think in graph terms; the deterministic fallback always wins on
-    // that surface.
-    it('decision-language fallback replaces narration when counts match but wording is graph-shaped', async () => {
+    // The handler narration (`assistantText` from V4) is no longer surfaced
+    // to users at all. The deterministic coaching narrative is always shipped
+    // on success, regardless of what (potentially graph-shaped) wording the
+    // handler returned.
+    it('coaching narrative is shipped even when handler narration is graph-shaped', async () => {
       const graph = {
         nodes: [
           { id: 'g1', kind: 'goal', label: 'Win Q3' },
@@ -331,11 +362,15 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe(
-        'Your decision model for "Win Q3" is ready, with 1 option and 1 factor to explore.',
-      );
-      expect(result.response.assistant_text).not.toContain('nodes');
-      expect(result.response.assistant_text).not.toContain('edges');
+      const text = result.response.assistant_text;
+      expect(text).toContain('"Win Q3"');
+      expect(text).toContain('Plan A');
+      expect(text).toContain('Budget');
+      expect(text).toContain('run the analysis');
+      // The handler narration is now discarded — graph-shaped wording must
+      // never reach the user from the success path.
+      expect(text).not.toContain('nodes');
+      expect(text).not.toContain('edges');
     });
   });
 
@@ -822,7 +857,7 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     vi.clearAllMocks();
   });
 
-  it('emits an executable Run analysis chip when analysis_ready.status === "ready"', async () => {
+  it('emits the three-chip post-draft coaching set when analysis_ready.status === "ready"', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
@@ -835,12 +870,30 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
       request: STUB_REQUEST,
     });
 
-    expect(result.response.suggested_actions).toHaveLength(1);
+    expect(result.response.suggested_actions).toHaveLength(3);
+    // Run analysis stays the primary action chip with the existing
+    // handler-dispatchable action_type. Order matters — the UI surfaces the
+    // first chip as primary.
     expect(result.response.suggested_actions[0]).toMatchObject({
       id: 'chip_action_run_analysis',
       action_type: 'run_analysis',
       label: 'Run analysis',
     });
+    // Review model — conversational chip, no action_type. Clicking sends
+    // its `message` back through the turn-executor as a user message.
+    expect(result.response.suggested_actions[1]).toMatchObject({
+      id: 'chip_prompt_review_model',
+      label: 'Review model',
+    });
+    expect(result.response.suggested_actions[1].action_type).toBeUndefined();
+    expect(typeof result.response.suggested_actions[1].message).toBe('string');
+    // What assumptions matter most? — second conversational chip.
+    expect(result.response.suggested_actions[2]).toMatchObject({
+      id: 'chip_prompt_assumptions',
+      label: 'What assumptions matter most?',
+    });
+    expect(result.response.suggested_actions[2].action_type).toBeUndefined();
+    expect(typeof result.response.suggested_actions[2].message).toBe('string');
   });
 
   it('emits a conversational setup chip when analysis_ready is absent', async () => {
@@ -926,5 +979,366 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
         expect(parsed.success).toBe(true);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 post-draft coaching — gated-hybrid composer wiring
+// ---------------------------------------------------------------------------
+//
+// These tests exercise the dispatch boundary: the new fields on
+// DraftGraphResult (strengthenItems, coachingSummary, coachingBiasSignals)
+// are passed to buildPostDraftNarrative, and the source-selection
+// telemetry event fires on the success path.
+
+describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+  });
+
+  const CLEAN_SUMMARY =
+    'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare under stress.';
+
+  it('uses coachingSummary verbatim as assistant_text when it passes the full-response gate', async () => {
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: CLEAN_SUMMARY,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-pass',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).toBe(CLEAN_SUMMARY);
+  });
+
+  it('falls back to the five-sentence builder when coachingSummary fails the gate (premature recommendation)', async () => {
+    const badSummary =
+      "I've built a model. We recommend hiring a tech lead first given the timeline pressure. The options weigh delivery speed against risk. Next, run the analysis to validate the assumptions.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-reject',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('we recommend hiring');
+    expect(result.response.assistant_text).toMatch(/run the analysis/);
+  });
+
+  it('emits V5PostDraftCoachingSourceSelected telemetry with the right payload on the coachingSummary path', async () => {
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: CLEAN_SUMMARY,
+      strengthenItems: [{ id: 's', label: 'L', detail: 'd', action_type: 'x' }],
+      coachingBiasSignals: [{ type: 't', detail: 'whatever' }],
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as unknown as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-telemetry-summary',
+      request: STUB_REQUEST,
+    });
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.request_id).toBe('req-telemetry-summary');
+    expect(payload.scenario_id).toBe(SCENARIO_ID);
+    expect(payload.assumption_source).toBe('coaching_summary');
+    expect(payload.coaching_summary_present).toBe(true);
+    expect(payload.coaching_summary_passed_gate).toBe(true);
+    expect(payload.fallback_reason).toBeNull();
+    expect(payload.strengthen_items_count).toBe(1);
+    expect(payload.coaching_bias_signals_count).toBe(1);
+  });
+
+  it('emits V5PostDraftCoachingSourceSelected telemetry with deterministic_fallback when no coaching sources are present', async () => {
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: null,
+      strengthenItems: [],
+      coachingBiasSignals: null,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-telemetry-fallback',
+      request: STUB_REQUEST,
+    });
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.assumption_source).toBe('deterministic_fallback');
+    expect(payload.coaching_summary_present).toBe(false);
+    expect(payload.coaching_summary_passed_gate).toBe(false);
+    expect(payload.fallback_reason).toBe('no_candidate');
+    expect(payload.strengthen_items_count).toBe(0);
+    expect(payload.coaching_bias_signals_count).toBe(0);
+  });
+
+  it('does NOT emit V5PostDraftCoachingSourceSelected when graph persistence fails', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockRejectedValue(new Error('StateCommitFailedError'));
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-telemetry-nopersist',
+      request: STUB_REQUEST,
+    });
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('uses strengthenItems[0].detail as assistant_text sentence 4 when summary is absent and detail passes the gate', async () => {
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: null,
+      strengthenItems: [
+        {
+          id: 's1',
+          label: 'Stress synergy estimate',
+          detail: 'the synergy assumption sits as a point value and warrants a 10 to 30M range',
+          action_type: 'add_constraint',
+        },
+      ],
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-strengthen-detail',
+      request: STUB_REQUEST,
+    });
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.assumption_source).toBe('strengthen_item_detail');
+  });
+
+  // ───── Round-3 reviewer regression tests (negative dispatch-level)
+  it('dispatch rejects coachingSummary containing graph-shape language ("nodes" / "edges") and falls back', async () => {
+    const badSummary =
+      "I've built a decision model with seven nodes and eight edges. The options weigh delivery against quality risk. Next, run the analysis to compare the routes.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-nodes',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('seven nodes');
+    expect(result.response.assistant_text).not.toContain('eight edges');
+    expect(result.response.assistant_text).not.toMatch(/\bnodes?\b/i);
+    expect(result.response.assistant_text).not.toMatch(/\bedges?\b/i);
+    // Deterministic five-sentence path fired.
+    expect(result.response.assistant_text).toMatch(/run the analysis/);
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.coaching_summary_passed_gate).toBe(false);
+    expect(payload.coaching_summary_reject_reason).toBe('graph_shape');
+  });
+
+  it('dispatch rejects coachingSummary with "best route" premature recommendation and falls back', async () => {
+    const badSummary =
+      "I've built a decision model. The best route here is to hire a tech lead before scaling. The options weigh cost against risk. Next, run the analysis to compare the routes.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-best-route',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text.toLowerCase()).not.toContain('best route');
+    expect(result.response.assistant_text).toMatch(/run the analysis/);
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.coaching_summary_reject_reason).toBe('premature_recommendation');
+  });
+
+  it('dispatch rejects coachingSummary with "you should choose" instruction and falls back', async () => {
+    const badSummary =
+      "I've built a decision model for the launch. You should choose the partnership route given the cost profile and the risk in the comparison. Next, run the analysis to confirm.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-should-choose',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text.toLowerCase()).not.toContain('you should choose');
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.coaching_summary_reject_reason).toBe('premature_recommendation');
+  });
+
+  it('dispatch rejects coachingSummary with markdown bullets and falls back', async () => {
+    const badSummary =
+      "I've built a decision model. The options weigh against risk:\n- Hire a tech lead\n- Hire two developers\nNext, run the analysis to compare them under stress.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-markdown',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('- Hire');
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.coaching_summary_reject_reason).toBe('markdown');
+  });
+
+  it('positive E2E: realistic CEE-style coachingSummary passes the gate and lands verbatim in assistant_text', async () => {
+    // Shape mirrors the CEE pipeline's `coaching.summary` output: one
+    // or two prose sentences that frame the decision, surface a
+    // trade-off, then nudge toward analysis. No premature
+    // recommendation, no internal IDs, no em-dashes, no schema terms.
+    // The decision-language register reflects what Sonnet/Anthropic
+    // generates in staging captures (see
+    // tests/fixtures/cross-service/draft-graph.coaching-populated
+    // .staging.json) once the next-step nudge is preserved.
+    const realisticSummary =
+      "This decision weighs faster Mid-Market Customer Acquisition against higher Cash Runway Risk across the three routes you're considering. One key assumption worth checking is whether the acquisition team can absorb the integration overhead a Series A path introduces. Try running the analysis next to see how the routes compare under stress and which assumptions matter most before you commit.";
+
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: realisticSummary,
+      strengthenItems: [
+        {
+          id: 'strengthen_001',
+          label: 'Stress synergy estimate',
+          detail: 'the synergy assumption sits as a point value rather than a range',
+          action_type: 'add_constraint',
+          bias_category: 'anchoring',
+        },
+      ],
+      coachingBiasSignals: [
+        { type: 'narrow_framing', detail: 'the brief frames the decision as a binary go/no-go' },
+      ],
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as unknown as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-realistic-summary-e2e',
+      request: STUB_REQUEST,
+    });
+
+    // 1. The whole assistant_text is the summary, byte-for-byte. No
+    //    deterministic five-sentence opener was prepended, no trailing
+    //    text was appended, no characters were rewritten.
+    expect(result.response.assistant_text).toBe(realisticSummary);
+
+    // 2. The three-chip set is still emitted (chip generation is
+    //    independent of which assistant_text source fired).
+    expect(result.response.suggested_actions).toHaveLength(3);
+    expect(result.response.suggested_actions[0].id).toBe('chip_action_run_analysis');
+    expect(result.response.suggested_actions[1].id).toBe('chip_prompt_review_model');
+    expect(result.response.suggested_actions[2].id).toBe('chip_prompt_assumptions');
+
+    // 3. stage_indicator advances to 'analyse' as on the normal
+    //    success path — the summary replacement does not change the
+    //    persistence-driven stage signal.
+    expect(result.response.stage_indicator).toBe('analyse');
+
+    // 4. Source-selection telemetry reports the coaching_summary path,
+    //    pass=true, and the counts of the other sources that were
+    //    available but not used.
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.assumption_source).toBe('coaching_summary');
+    expect(payload.coaching_summary_present).toBe(true);
+    expect(payload.coaching_summary_passed_gate).toBe(true);
+    expect(payload.fallback_reason).toBeNull();
+    expect(payload.strengthen_items_count).toBe(1);
+    expect(payload.coaching_bias_signals_count).toBe(1);
+
+    // 5. assistant_text contains the legitimate user-facing labels
+    //    from the summary verbatim (no sanitiser rewrite).
+    expect(result.response.assistant_text).toContain('Mid-Market Customer Acquisition');
+    expect(result.response.assistant_text).toContain('Cash Runway Risk');
+    expect(result.response.assistant_text).toContain('Series A path');
+
+    // 6. No banned phrases survived — the gate did its job by
+    //    accepting only summaries free of premature recommendation
+    //    and internal-id leaks.
+    expect(result.response.assistant_text.toLowerCase()).not.toMatch(/\brecommend/);
+    expect(result.response.assistant_text.toLowerCase()).not.toMatch(/\bwinner\b/);
+    expect(result.response.assistant_text.toLowerCase()).not.toMatch(/\bbest option\b/);
+    expect(result.response.assistant_text).not.toMatch(/[—–]/);
+    expect(result.response.assistant_text).not.toMatch(/\b(?:fac|opt|out|risk|goal|dec|node)_[a-z0-9]+/i);
   });
 });

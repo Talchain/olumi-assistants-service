@@ -64,6 +64,7 @@ import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
+import { buildPostDraftNarrative } from '../coaching/post-draft-narrative.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -115,56 +116,6 @@ export interface DispatchDraftGraphResult {
  *     The response text here is never sent to the client; use the pipeline's
  *     own narration as a neutral fallback for server-side logging only.
  */
-/**
- * Pluralise a count noun. `1 option`, `2 options`, `0 options`. Cheap
- * helper local to this module — no need to drag a generic intl lib in
- * for three nouns.
- */
-function pluralise(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
-
-/**
- * Decision-language summary of the freshly drafted graph (brief
- * brief-display-safe-analysis A2). Never references nodes/edges — users
- * don't think in graph terms. Tiered template:
- *   - Full   (goalLabel + counts): names the goal and lists option /
- *     factor / risk counts. Risks clause omitted when riskCount is 0.
- *   - Partial (no goalLabel): drops the goal clause but keeps counts.
- *   - Fallback (no structured data): neutral phrasing.
- *
- * Used both as the successFallback when handler narration is absent and
- * as the safe substitute when the narration carries any node/edge-count
- * wording (matched OR mismatched — see checkDraftNarrationCounts).
- */
-function buildDraftSuccessFallback(graphOutput: DraftGraphResult['graphOutput']): string {
-  if (!graphOutput) return 'Drafted a decision graph.';
-
-  const nodes = graphOutput.nodes ?? [];
-  const optionCount = nodes.filter((n) => n.kind === 'option').length;
-  const factorCount = nodes.filter((n) => n.kind === 'factor').length;
-  const riskCount = nodes.filter((n) => n.kind === 'risk').length;
-  const goalNode = nodes.find((n) => n.kind === 'goal');
-  const goalLabel = typeof goalNode?.label === 'string' ? goalNode.label.trim() : '';
-
-  const hasCounts = optionCount > 0 || factorCount > 0;
-  if (!hasCounts) return 'Your decision model is ready to explore.';
-
-  const optionsPart = pluralise(optionCount, 'option', 'options');
-  const factorsPart = pluralise(factorCount, 'factor', 'factors');
-  const risksPart = pluralise(riskCount, 'risk', 'risks');
-
-  const countsClause = riskCount > 0
-    ? `${optionsPart}, ${factorsPart}, and ${risksPart}`
-    : `${optionsPart} and ${factorsPart}`;
-
-  if (goalLabel.length > 0) {
-    const tail = riskCount > 0 ? 'to consider' : 'to explore';
-    return `Your decision model for "${goalLabel}" is ready, with ${countsClause} ${tail}.`;
-  }
-  return `Your decision model is ready with ${countsClause} to explore.`;
-}
-
 function draftResultToOlumiResponse(
   result: DraftGraphResult,
   payload: MessageTurnPayload,
@@ -178,25 +129,48 @@ function draftResultToOlumiResponse(
 
   let assistantText: string;
   if (graphPersisted) {
-    // Success path: prefer handler narration, fall back to a decision-language
-    // summary derived from the final graph. Phase 2 workstream B: when
-    // narration explicitly states a count that disagrees with the final
-    // graph, fall back to deterministic prose so the user never sees
-    // numbers that contradict the canvas. Brief brief-display-safe-analysis A2:
-    // never include node/edge counts — users don't think in graph terms.
-    const successFallback = buildDraftSuccessFallback(result.graphOutput);
+    // Success path: ship the deterministic post-draft coaching narrative
+    // built from the persisted graph and analysisReady payload. The
+    // narrative is a five-sentence decision-coach summary — goal
+    // confirmation, options summary, key trade-off, one assumption to
+    // validate, run-analysis nudge — under 140 words and free of any
+    // graph-shape language (no "nodes" / "edges" / counts as the lead).
+    //
+    // The handler narration (`result.assistantText`) is no longer surfaced
+    // to users: it varied with the LLM, occasionally leaked graph-shape
+    // wording, and could not be relied on to follow the strict copy rules.
+    // We still invoke `checkDraftNarrationCounts` here purely for its
+    // telemetry side-effect — ops dashboards keep observing Sonnet's
+    // count-mismatch / wording drift even though the chosenText is now
+    // discarded. The third arg `fallback` is unused on this path.
     if (result.assistantText !== null) {
-      const guardCheck = checkDraftNarrationCounts({
+      checkDraftNarrationCounts({
         narration: result.assistantText,
         finalNodeCount,
         finalEdgeCount,
-        fallback: successFallback,
+        fallback: '',
         requestId,
       });
-      assistantText = guardCheck.chosenText;
-    } else {
-      assistantText = successFallback;
     }
+    // Gated-hybrid composer: feed the LLM-authored coaching strings
+    // (coachingSummary, strengthenItems, coachingBiasSignals) into the
+    // builder alongside the graph + analysisReady. The builder enforces
+    // a strict copy-quality gate on each candidate; the source it
+    // ultimately used is surfaced via `narrative.telemetry` for ops
+    // visibility (category/count only — no raw coaching text).
+    const narrative = buildPostDraftNarrative({
+      graph: result.graphOutput,
+      analysisReady: result.analysisReady ?? null,
+      strengthenItems: result.strengthenItems,
+      coachingSummary: result.coachingSummary,
+      coachingBiasSignals: result.coachingBiasSignals,
+    });
+    assistantText = narrative.text;
+    emit(TelemetryEvents.V5PostDraftCoachingSourceSelected, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      ...narrative.telemetry,
+    });
   } else {
     // Failure path: route discards this response and returns 500 INTERNAL_ERROR.
     // Use neutral narration; the client never sees this text.
@@ -274,12 +248,29 @@ function buildPostDraftChips(params: {
       ? (params.analysisReadyField as { status?: unknown }).status
       : undefined;
   if (readyStatus === 'ready') {
+    // Three-chip post-draft coaching pattern: a primary action chip
+    // (Run analysis, the only handler-dispatchable entry) followed by
+    // two conversational chips. Conversational chips carry a `message`
+    // but no `action_type` — clicking sends the message back through
+    // the V5 turn-executor as a normal user message, where Sonnet
+    // routes it to `explain_from_structure` (model review) or a
+    // clarification turn (assumptions). No new ActionType is added.
     return [
       {
         id: 'chip_action_run_analysis',
         label: 'Run analysis',
         message: 'Run analysis.',
         action_type: 'run_analysis',
+      },
+      {
+        id: 'chip_prompt_review_model',
+        label: 'Review model',
+        message: 'Walk me through the model so I can review it before running the analysis.',
+      },
+      {
+        id: 'chip_prompt_assumptions',
+        label: 'What assumptions matter most?',
+        message: 'Which assumptions in this model matter most to check before I run the analysis?',
       },
     ];
   }
