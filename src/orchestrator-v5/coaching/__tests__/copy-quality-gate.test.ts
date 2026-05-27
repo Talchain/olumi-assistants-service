@@ -136,6 +136,32 @@ describe('gateAssumptionFragment', () => {
     );
   });
 
+  it('rejects question-shaped fragments with apostrophe contractions ("What\'s")', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      "what's the actual bottleneck on the integration runway here",
+      'question_shaped',
+    );
+  });
+
+  it('rejects question-shaped fragments with curly apostrophe contractions ("Where’s")', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'where’s the slack in the recruitment funnel for Q3 next year',
+      'question_shaped',
+    );
+  });
+
+  it('accepts declarative "it\'s" since it is not an interrogative prefix', () => {
+    // Contraction handling strips trailing `'s`, but `it` is not in
+    // INTERROGATIVE_PREFIXES — so "it's been steady" passes as a
+    // legitimate declarative.
+    accepts(
+      gateAssumptionFragment,
+      "it's been steady so the assumption may not need stress-testing",
+    );
+  });
+
   it('rejects trailing punctuation', () => {
     rejectsWith(
       gateAssumptionFragment,

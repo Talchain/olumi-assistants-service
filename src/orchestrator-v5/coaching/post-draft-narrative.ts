@@ -119,7 +119,13 @@ export function validateUncertaintyDriver(driver: string): boolean {
   const text = driver.trim();
   if (text.length < DRIVER_MIN_CHARS || text.length > DRIVER_MAX_CHARS) return false;
   if (!/\w/.test(text.charAt(text.length - 1))) return false;
-  const firstToken = text.split(/\s+/, 1)[0]?.toLowerCase() ?? '';
+  // Strip a trailing `'s` contraction before lookup so "What's the
+  // bottleneck" trips the question-shape guard the same as "What is
+  // the bottleneck". Mirror of the same handling in copy-quality-
+  // gate.ts so both surfaces behave consistently.
+  const firstToken = (text.split(/\s+/, 1)[0] ?? '')
+    .toLowerCase()
+    .replace(/['’]s$/, '');
   if (INTERROGATIVE_PREFIXES.has(firstToken)) return false;
   const lower = text.toLowerCase();
   for (const term of FORBIDDEN_DRIVER_SUBSTRINGS) {
@@ -599,22 +605,29 @@ function numberWord(n: number): string {
 }
 
 function cleanLeadIn(s: string): string {
-  // Strip any leading bullet / dash glyph the pipeline may have left in
-  // place and any sentence-ending punctuation we are about to add back.
+  // Strip leading bullet / dash glyph the pipeline may have left in
+  // place, then strip ALL trailing sentence-end punctuation
+  // (handles doubled-punct cases like "Foo.!" or "Foo!?" — single-
+  // char .slice(-1) would only strip one).
   const trimmed = s.trim().replace(/^[-•*]+\s*/, '').trim();
-  return trimmed.endsWith('.') || trimmed.endsWith('!') || trimmed.endsWith('?')
-    ? trimmed.slice(0, -1).trim()
-    : trimmed;
+  return trimmed.replace(/[.!?]+$/, '').trim();
 }
 
 /**
  * Return the prefix of `text` up to (but not including) the first
- * sentence-terminating punctuation (`.`, `!`, `?`), trimmed. Returns
- * `null` when the input has no such punctuation or the prefix is
- * empty.
+ * sentence-terminating punctuation (`.`, `!`, `?`) that is followed by
+ * whitespace OR end-of-string. The whitespace/EOS lookahead avoids
+ * splitting on decimal numbers (`$1.5M`, `1.2x`) and abbreviations
+ * with no following space. Returns `null` when no such terminator
+ * exists or the resulting prefix is empty after trimming.
+ *
+ * Examples:
+ *   - "Hello world. How are you?" → "Hello world"
+ *   - "The estimate is $1.5M. Recast it." → "The estimate is $1.5M"
+ *   - "No terminator here"            → null
  */
 function extractFirstSentence(text: string): string | null {
-  const m = text.match(/^([^.!?]+)[.!?]/);
+  const m = text.match(/^(.*?)[.!?](?=\s|$)/);
   if (!m) return null;
   const candidate = m[1].trim();
   return candidate.length > 0 ? candidate : null;

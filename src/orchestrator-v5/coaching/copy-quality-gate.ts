@@ -219,7 +219,10 @@ export interface GateResult {
   readonly rejectReason?: GateRejectReason;
 }
 
-const ACCEPT: GateResult = { accept: true };
+// Frozen singleton — accept results have no per-call state, and freezing
+// guards against accidental shared-reference mutation from mixed-JS
+// callers that bypass the readonly type-level contract.
+const ACCEPT: GateResult = Object.freeze({ accept: true });
 
 /** Convenience: build a rejecting result with a category. */
 function reject(reason: GateRejectReason): GateResult {
@@ -278,8 +281,12 @@ export function gateAssumptionFragment(text: string): GateResult {
   // Trailing punctuation (the builder appends `.` itself).
   if (/[.!?,;:]$/.test(trimmed)) return reject('trailing_punctuation');
 
-  // Question-shaped first word.
-  const firstToken = trimmed.split(/\s+/, 1)[0]?.toLowerCase() ?? '';
+  // Question-shaped first word. Strip a trailing `'s` contraction
+  // before lookup so "What's the issue" / "Where's the data" /
+  // "How's the rollout" trip the same as their non-contracted forms.
+  const firstToken = (trimmed.split(/\s+/, 1)[0] ?? '')
+    .toLowerCase()
+    .replace(/['’]s$/, '');
   if (INTERROGATIVE_PREFIXES.has(firstToken)) return reject('question_shaped');
 
   // Reject obvious filler / awkward fragments — too few alphanumeric

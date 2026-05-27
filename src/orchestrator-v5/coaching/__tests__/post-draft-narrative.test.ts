@@ -535,6 +535,31 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
     expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
   });
 
+  it('does not split decimal numbers when extracting the first sentence from a long strengthen detail', () => {
+    // Previously the picker matched `^([^.!?]+)[.!?]` which truncated at
+    // the first `.`, even decimal points — so `"$1.5M"` got chopped to
+    // `"$1"`. The lookahead-for-whitespace fix in extractFirstSentence
+    // skips decimal points and lands on the real sentence terminator.
+    const items = [
+      {
+        id: 's-decimal',
+        label: 'tighten ramp curve',
+        // ~180-char detail with a decimal in the first sentence; too
+        // long to pass the fragment cap whole, so the first-sentence
+        // slice is exercised.
+        detail:
+          'the cost ramp passes $1.5M in the second year before stabilising. Stress-test the trajectory against a 20 percent overrun to surface what the comparison routes look like under pressure.',
+        action_type: 'add_constraint',
+      },
+    ];
+    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
+    // The whole first sentence (including the decimal) lands in the
+    // assumption tail; the decimal is NOT truncated to "$1.".
+    expect(result.text).toContain('the cost ramp passes $1.5M');
+    expect(result.text).not.toMatch(/passes \$1\.\s/);
+  });
+
   it('falls back to bias_findings when both strengthen.detail and .label fail the gate', () => {
     const items = [
       {
