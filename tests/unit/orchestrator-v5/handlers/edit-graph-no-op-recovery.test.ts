@@ -124,6 +124,253 @@ describe('decideNoOpRecovery', () => {
     }
   });
 
+  describe('explore_factor / explore_factor_stale (safety-net for label-shaped no-op messages)', () => {
+    const NODES = [
+      { label: 'Existing Team Size' },
+      { label: 'Launch Now' },
+      // Short label used in the word-boundary regression tests below.
+      { label: 'Cost' },
+    ];
+
+    it('FRESH: fires when message contains a known label, no mutation, with fresh prior analysis fact', () => {
+      const result = decideNoOpRecovery({
+        message: 'Explore Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor');
+      expect(result.has_run_analysis_fact).toBe(true);
+      expect(result.assistantText).not.toBeNull();
+      expect(result.assistantText).toContain("haven't changed the model");
+      expect(result.suggestedActions).toHaveLength(3);
+      const types = result.suggestedActions.map((a) => a.action_type ?? null);
+      expect(types).toEqual(['explain_results', 'what_would_flip', null]);
+    });
+
+    it('FRESH: matches word-bounded label embedded inside a longer message', () => {
+      const result = decideNoOpRecovery({
+        message: 'Tell me about Launch Now if you can.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor');
+    });
+
+    // Stale-aware copy was the round-2 reviewer's blocking finding —
+    // pre-fix, the safety net offered "walk me through the analysis"
+    // / "what could change the outcome" chips even when the prior
+    // analysis no longer reflected the graph. The stale variant
+    // forces a re-run before any exploration.
+    it('STALE: fires explore_factor_stale with the re-run chip; NO exploration chips', () => {
+      const result = decideNoOpRecovery({
+        message: 'Explore Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'stale',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor_stale');
+      expect(result.has_run_analysis_fact).toBe(true);
+      expect(result.assistantText).not.toBeNull();
+      expect(result.assistantText).toContain('earlier version');
+      expect(result.suggestedActions).toHaveLength(1);
+      expect(result.suggestedActions[0]?.action_type).toBe('run_analysis');
+      // Critically, NONE of the exploration chips appear (no
+      // explain_results / what_would_flip).
+      const types = result.suggestedActions.map((a) => a.action_type ?? null);
+      expect(types).not.toContain('explain_results');
+      expect(types).not.toContain('what_would_flip');
+    });
+
+    it('UNKNOWN: defers to ambiguous (cannot verify freshness, do not nudge)', () => {
+      const result = decideNoOpRecovery({
+        message: 'Explore Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'unknown',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('NONE freshness with no prior fact: defers to ambiguous', () => {
+      const result = decideNoOpRecovery({
+        message: 'Existing Team Size',
+        priorFacts: [],
+        freshness: 'none',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('does NOT fire when message contains a mutation signal (real edit)', () => {
+      const result = decideNoOpRecovery({
+        message: 'Set Existing Team Size to 8.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('does NOT fire when no nodes are supplied', () => {
+      const result = decideNoOpRecovery({
+        message: 'Change pricing factor',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('does NOT fire when nodes is empty', () => {
+      const result = decideNoOpRecovery({
+        message: 'Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: [],
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('analytical intent + fresh fact precedence: analytical_fresh wins over explore_factor', () => {
+      const result = decideNoOpRecovery({
+        message: 'Walk me through the analysis. Existing Team Size matters.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('analytical_fresh');
+    });
+
+    // Word-boundary regression — the pre-fix substring match would
+    // false-positive on "costs"/"costliness" matching the "Cost"
+    // label. The new \b…\b pattern requires whole-word matches.
+    it('WORD-BOUNDARY: 4-char label "Cost" does NOT match "costs" (substring false-positive guard)', () => {
+      const result = decideNoOpRecovery({
+        message: 'These costs are getting out of hand',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('WORD-BOUNDARY: 4-char label "Cost" does NOT match "costliness"', () => {
+      const result = decideNoOpRecovery({
+        message: 'Worried about costliness',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('WORD-BOUNDARY: 4-char label "Cost" DOES match standalone "cost" with surrounding punctuation', () => {
+      const result = decideNoOpRecovery({
+        message: 'Explore the Cost!',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor');
+    });
+
+    // Round-3 reviewer's medium finding — JS `\b` is defined as a
+    // word/non-word transition where `\w = [A-Za-z0-9_]`. A trailing
+    // `\b` cannot fire after a non-word label terminator like `)` or
+    // `+`. The custom alphanumeric-boundary pattern fixes the
+    // false-negative for labels like "Revenue (%)" or "C++".
+    it('ALPHANUMERIC-BOUNDARY: label "Revenue (%)" matches even though it ends with a non-word char', () => {
+      const result = decideNoOpRecovery({
+        message: 'Look at Revenue (%) here.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: [{ label: 'Revenue (%)' }],
+      });
+      expect(result.branch).toBe('explore_factor');
+    });
+
+    it('ALPHANUMERIC-BOUNDARY: label "C++" matches even though it ends with a non-word char', () => {
+      const result = decideNoOpRecovery({
+        message: 'I prefer C++ over Java',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: [{ label: 'C++' }],
+      });
+      expect(result.branch).toBe('explore_factor');
+    });
+
+    it('ALPHANUMERIC-BOUNDARY: label "Revenue (%)" does NOT match "Revenue (%)x" (alphanumeric run-on)', () => {
+      // Defensive — the trailing alphanumeric guard still applies.
+      // A run-on alphanumeric after the label means the user typed
+      // something other than the label.
+      const result = decideNoOpRecovery({
+        message: 'Look at Revenue (%)x',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: [{ label: 'Revenue (%)' }],
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('passes egress forbidden-phrase + success-claim guards (fresh + stale variants)', async () => {
+      const { findForbiddenPhraseHit, findSuccessClaimHit } = await import(
+        '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js'
+      );
+      for (const freshness of ['fresh', 'stale'] as const) {
+        const result = decideNoOpRecovery({
+          message: 'Existing Team Size',
+          priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+          freshness,
+          graphReady: true,
+          nodes: NODES,
+        });
+        expect(result.assistantText, freshness).not.toBeNull();
+        const text = result.assistantText ?? '';
+        expect(findForbiddenPhraseHit(text), freshness).toBeNull();
+        expect(findSuccessClaimHit(text), freshness).toBeNull();
+      }
+    });
+
+    // Round-2 reviewer's medium finding — the analytical-with-label
+    // phrase "What could change Existing Team Size?" is the
+    // documented high-risk case. Trace:
+    //   1. Upstream intercept's Predicate A rejects (contains
+    //      "change" → explicit_edit_verb_present).
+    //   2. Predicate B rejects (no trailing dash).
+    //   3. edit_graph dispatches and the V4 LLM no-ops.
+    //   4. THIS branch catches it (label present, no mutation
+    //      signal, fresh prior analysis) → three exploration chips.
+    // Documenting expected behaviour here so a future regression
+    // surfaces as a test failure rather than a UX surprise.
+    it('REGRESSION: "What could change Existing Team Size?" (no-op recovery catches it via explore_factor)', () => {
+      const result = decideNoOpRecovery({
+        message: 'What could change Existing Team Size?',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor');
+      expect(result.suggestedActions).toHaveLength(3);
+    });
+  });
+
   describe('ambiguous (preserves existing copy)', () => {
     it('does NOT match general conversational messages without a vague-edit signal', () => {
       const conversational = [

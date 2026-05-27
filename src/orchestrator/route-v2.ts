@@ -117,6 +117,10 @@ import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/gr
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
 import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
 import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
+import {
+  composePostAnalysisLabelInterceptResponse,
+  tryPostAnalysisLabelIntercept,
+} from '../orchestrator-v5/routing/post-analysis-label-intercept.js';
 import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
 import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
 
@@ -1158,6 +1162,49 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         nodes: interceptNodes,
         priorAnalysisIsFresh,
       });
+      return sendFinalised200(reply, requestId, 'edit_graph', response, {
+        graph: null,
+      });
+    }
+
+    // V5 post-analysis exploration intercept — narrow pre-LLM guards
+    // for bare-label clicks and the legacy `Change <known label> —`
+    // fill-in shape rendered by the pre-Touch-4 `buildLabelChip`. Both
+    // shapes would otherwise dispatch to V4 `edit_graph`, the LLM
+    // would no-op (no value to operate on), and the user would land
+    // in the ambiguous no-op recovery dead end.
+    //
+    // Strictly gated on:
+    //   - fresh prior analysis (no intercept before analysis exists),
+    //   - non-empty graph nodes (need labels to match against),
+    //   - no explicit edit verb (Predicate A — preserves real edits),
+    //   - no mutation signal (defensive — preserves real edits),
+    //   - no analytical-intent shape (Predicate A — preserves
+    //     analytical questions that mention a label).
+    //
+    // Predicate B catches the legacy `Change <label> —` shape AND
+    // rejects malformed shapes carrying a value after the dash.
+    //
+    // See src/orchestrator-v5/routing/post-analysis-label-intercept.ts
+    // for the predicate and copy contracts.
+    const labelIntercept = tryPostAnalysisLabelIntercept(
+      ingress.message,
+      interceptNodes,
+      priorAnalysisIsFresh,
+    );
+    if (labelIntercept.matched) {
+      emit(TelemetryEvents.V5PostAnalysisLabelIntercept, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        predicate: labelIntercept.predicate,
+        match_kind: labelIntercept.matchKind,
+        node_kind: labelIntercept.matchedNode.kind,
+        chips_emitted: 3,
+      });
+      const response = composePostAnalysisLabelInterceptResponse(
+        labelIntercept.matchedNode.label,
+        ingress.stage,
+      );
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
       });

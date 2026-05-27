@@ -81,12 +81,27 @@ import {
  * `assistantText: null` to leave the existing response unchanged.
  *
  * Branches:
- *   - `analytical_fresh`  — analytical intent + fresh run_analysis fact.
- *   - `analytical_stale`  — analytical intent + stale run_analysis fact.
- *   - `analytical_none`   — analytical intent + no run_analysis fact.
- *   - `vague_edit`        — no analytical intent, no concrete mutation
- *                            signal (message looks edit-like but vague).
- *   - `ambiguous`         — anything else; preserve existing copy.
+ *   - `analytical_fresh`        — analytical intent + fresh run_analysis fact.
+ *   - `analytical_stale`        — analytical intent + stale run_analysis fact.
+ *   - `analytical_none`         — analytical intent + no run_analysis fact.
+ *   - `vague_edit`              — no analytical intent, no concrete mutation
+ *                                  signal (message looks edit-like but vague).
+ *   - `explore_factor`          — message contains a known graph node label,
+ *                                  no mutation signal, fresh run_analysis
+ *                                  fact present. Three exploration chips
+ *                                  (explain / what-would-flip / pre-mortem).
+ *   - `explore_factor_stale`    — same as `explore_factor` but the prior
+ *                                  analysis is stale. Single rerun chip;
+ *                                  exploration chips suppressed to avoid
+ *                                  silent stale-context UX.
+ *   - `ambiguous`               — anything else; preserve existing copy.
+ *
+ * Freshness precedence for the explore_factor pair:
+ *   - 'fresh'           → explore_factor
+ *   - 'stale'           → explore_factor_stale
+ *   - 'unknown' / 'none'→ defer to ambiguous (cannot prove freshness;
+ *                          safer to preserve V4 copy than nudge with
+ *                          analysis-grounded chips).
  *
  * Copy contract: British English, calm, concise. No emoji, no em dashes,
  * no raw IDs, no internal terms ("validator", "patch", "schema",
@@ -98,6 +113,8 @@ type NoOpRecoveryBranch =
   | 'analytical_stale'
   | 'analytical_none'
   | 'vague_edit'
+  | 'explore_factor'
+  | 'explore_factor_stale'
   | 'ambiguous';
 
 interface NoOpRecoveryDecision {
@@ -120,6 +137,17 @@ interface DecideNoOpRecoveryInput {
    * suppressed and the copy nudges getting the model ready first.
    */
   readonly graphReady: boolean;
+  /**
+   * Current graph nodes — used ONLY by the `explore_factor` safety-net
+   * branch to detect a no-op message that references a known graph
+   * label without an edit verb / value (the symptom of a label-chip
+   * click that slipped past the upstream `tryPostAnalysisLabelIntercept`
+   * in route-v2.ts). An empty array is acceptable — the branch then
+   * never fires and recovery falls through to the existing ambiguous
+   * fallback. Each entry needs only `label` (case-insensitive substring
+   * compared against `message`); `id` / `kind` are unused here.
+   */
+  readonly nodes?: readonly { readonly label: string }[] | null;
 }
 
 const NO_OP_FRESH_TEXT =
@@ -142,6 +170,16 @@ const NO_OP_NONE_GRAPH_NOT_READY_TEXT =
 const NO_OP_VAGUE_EDIT_TEXT =
   "I haven't changed the model yet. Tell me which factor or edge you "
   + 'want to adjust and how.';
+
+const NO_OP_EXPLORE_FACTOR_TEXT =
+  "I haven't changed the model. It looks like you would like to "
+  + 'explore this. I can walk you through the analysis, look at '
+  + 'what could change the outcome, or run a pre-mortem.';
+
+const NO_OP_EXPLORE_FACTOR_STALE_TEXT =
+  "I haven't changed the model. The analysis is based on an earlier "
+  + 'version of the graph. Re-run analysis to explore this against '
+  + 'the latest result.';
 
 const EXPLAIN_RESULTS_CHIP: BoundaryAction = Object.freeze({
   id: 'chip_action_explain_results',
@@ -167,6 +205,96 @@ const RUN_ANALYSIS_CHIP: BoundaryAction = Object.freeze({
   message: 'Run analysis.',
   action_type: 'run_analysis' as const,
 });
+
+/**
+ * What-would-flip exploration chip. Carries `action_type:
+ * 'what_would_flip'` so a click hits the deterministic chip-click
+ * fast path in route-v2.ts:819 — zero Sonnet round-trip. Used by the
+ * `explore_factor` safety-net branch as one of three exploration
+ * affordances.
+ */
+const WHAT_WOULD_FLIP_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_what_would_flip',
+  label: 'What could change the outcome?',
+  message: 'What could change the outcome of this analysis?',
+  action_type: 'what_would_flip' as const,
+});
+
+/**
+ * Pre-mortem prompt chip. No `action_type` because there is no
+ * registered handler for the pre-mortem flow; the click routes
+ * through TurnExecutor as a normal user turn. Mirrors the
+ * decide-stage rule pattern in
+ * `compose/chip-generator.ts:541-546`.
+ */
+const RUN_PRE_MORTEM_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_run_pre_mortem',
+  label: 'Run a pre-mortem',
+  message: 'Imagine this decision went wrong. What would have caused it?',
+});
+
+/**
+ * Escape regex metacharacters in a literal label string so it can be
+ * embedded inside a custom-boundary pattern safely. Labels are
+ * user-authored and may contain `.()*+?[]{}^$|\` etc.
+ */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Case-insensitive ALPHANUMERIC-BOUNDARY check: does `message`
+ * contain any of `nodes`'s labels as a complete token?
+ *
+ * The pre-round-3 implementation used JS `\b` which is defined as a
+ * word/non-word transition where `\w = [A-Za-z0-9_]`. That rejects
+ * labels whose first or last character is non-word — e.g.
+ * `Revenue (%)` (ends with `)`) or `C++` (ends with `+`) — because
+ * the leading / trailing `\b` cannot fire when the label itself ends
+ * with a non-word character (no word→non-word transition is
+ * possible). Round-3 reviewer flagged this as a false-negative class
+ * the corpus could realistically hit.
+ *
+ * The custom boundary `(^|[^A-Za-z0-9])` / `(?=$|[^A-Za-z0-9])`
+ * fires on start-of-string / end-of-string or any non-alphanumeric
+ * character around the literal label. This:
+ *   - still rejects "costs" / "costliness" for label "Cost" (the
+ *     character AFTER "cost" is alphanumeric `s` / `l`),
+ *   - still matches standalone "cost" with surrounding punctuation
+ *     ("Explore the Cost!"),
+ *   - now matches "Revenue (%)" inside "Look at Revenue (%) here"
+ *     (the `)` is the label's own trailing char; the lookahead sees
+ *     the following space as non-alphanumeric).
+ *
+ * Labels shorter than 3 characters are still skipped — single- and
+ * two-letter labels would false-positive on common words even with
+ * alphanumeric boundaries (e.g. a label "AI" matching "wait" — the
+ * `A` after `w` is alphanumeric so the leading boundary fails, but
+ * a label "X" inside a numeric context could leak).
+ *
+ * Underscore (`_`) is intentionally treated as alphanumeric by
+ * `[^A-Za-z0-9]` (i.e. as a boundary character). Labels do not use
+ * underscores in practice; if they did, this would NOT match
+ * "foo_label" against label "label" — same conservative behaviour as
+ * `\b`.
+ */
+function messageContainsKnownLabel(
+  message: string,
+  nodes: readonly { readonly label: string }[] | null | undefined,
+): boolean {
+  if (!nodes || nodes.length === 0) return false;
+  for (const node of nodes) {
+    if (typeof node.label !== 'string') continue;
+    const label = node.label.trim();
+    if (label.length < 3) continue;
+    const pattern = new RegExp(
+      `(^|[^A-Za-z0-9])${escapeRegex(label)}(?=$|[^A-Za-z0-9])`,
+      'i',
+    );
+    if (pattern.test(message)) return true;
+  }
+  return false;
+}
 
 export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecoveryDecision {
   const hasRunAnalysisFact = input.priorFacts.some(
@@ -231,6 +359,66 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
       assistantText: NO_OP_VAGUE_EDIT_TEXT,
       suggestedActions: [],
     };
+  }
+
+  // Safety-net branches — `explore_factor` / `explore_factor_stale`.
+  //
+  // Fires when:
+  //   - no analytical intent matched (handled above),
+  //   - no mutation signal (the user did not supply a value),
+  //   - no vague-edit phrasing (handled above),
+  //   - BUT the message contains a known graph node label, AND
+  //   - a successful prior `run_analysis` fact exists.
+  //
+  // This is the second line of defence behind
+  // `tryPostAnalysisLabelIntercept` in route-v2.ts: if anything still
+  // dispatches into the V4 LLM and no-ops with a message that mentions
+  // a known label (e.g. a chip with an unusual submit shape, or a
+  // user typing a factor name plus a stray word), we turn the dead
+  // end into a useful affordance rather than surfacing the bland
+  // deterministic fallback with no chips.
+  //
+  // Freshness handling mirrors the analytical branches above:
+  //   - 'fresh' → three exploration chips (explain / what-would-flip /
+  //               pre-mortem). The analysis is current; explore freely.
+  //   - 'stale' → single re-run chip. The current analysis no longer
+  //               reflects the graph; offering exploration chips would
+  //               silently feed the user stale-context UX. Code+chip
+  //               mirror the existing `analytical_stale` branch.
+  //   - 'unknown' / 'none' → defer to ambiguous. With an unverifiable
+  //               freshness verdict the safest thing is to preserve
+  //               the V4 handler's existing copy rather than risk a
+  //               stale exploration nudge.
+  //
+  // Copy + chips are duplicated rather than imported from
+  // `compose/post-analysis-label-intercept.ts` to keep this module's
+  // no-circular-dependency contract intact.
+  if (
+    !mutationSignal
+    && hasRunAnalysisFact
+    && messageContainsKnownLabel(input.message, input.nodes ?? null)
+  ) {
+    if (input.freshness === 'fresh') {
+      return {
+        branch: 'explore_factor',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_EXPLORE_FACTOR_TEXT,
+        suggestedActions: [EXPLAIN_RESULTS_CHIP, WHAT_WOULD_FLIP_CHIP, RUN_PRE_MORTEM_CHIP],
+      };
+    }
+    if (input.freshness === 'stale') {
+      return {
+        branch: 'explore_factor_stale',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_EXPLORE_FACTOR_STALE_TEXT,
+        suggestedActions: [RERUN_ANALYSIS_CHIP],
+      };
+    }
+    // freshness === 'unknown' | 'none' — fall through to the ambiguous
+    // branch below. We have a fact but cannot prove freshness; offering
+    // analysis-exploration chips would risk a silent stale-context UX.
   }
 
   // Everything else (analytical intent + mutation signal, or no
@@ -989,6 +1177,11 @@ export async function dispatchEditGraph(
         priorFacts: priorFactsForRecovery,
         freshness: freshness.freshness,
         graphReady: graphReadyForRecovery,
+        // Pass the post-parse graph nodes so the `explore_factor`
+        // safety-net branch can detect a no-op message that mentions a
+        // known label (the symptom of any path that slips past the
+        // upstream `tryPostAnalysisLabelIntercept` in route-v2.ts).
+        nodes: parsedGraph.nodes,
       });
       if (recoveryOutcome.assistantText !== null) {
         response = { ...response, assistant_text: recoveryOutcome.assistantText };

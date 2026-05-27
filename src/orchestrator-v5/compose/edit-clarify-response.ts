@@ -161,9 +161,19 @@ function buildClarifyChips(
 }
 
 function buildLabelChip(nodeId: string, label: string): SuggestedAction {
+  // The submit message must NOT contain any verb in route-v2's
+  // `EDIT_GRAPH_POSITIVE_REGEX`
+  // (change|update|edit|modify|remove|delete|add|adjust|set|reduce|
+  //  increase|decrease|tweak|raise|lower). Otherwise a chip click would
+  // re-trigger the V4 edit_graph dispatch with a value-less prompt
+  // (the exact closed-loop trap observed on staging
+  // `Change Existing Team Size — ` → V4 LLM no-op →
+  // ambiguous recovery dead end). Phrased as a question so the click
+  // routes to TurnExecutor / Sonnet which can ask for the value.
+  // Locked by `__tests__/edit-clarify-response.test.ts`.
   return {
     id: `edit_clarify_${nodeId}`,
     label: `Change ${label}`,
-    message: `Change ${label} — `,
+    message: `For ${label}, what value should we use?`,
   };
 }
