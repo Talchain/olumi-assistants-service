@@ -162,24 +162,24 @@ describe('V5 draft_graph persistence integration', () => {
       expect(writeArg.turn_id).toBe(TURN_ID_1);
     });
 
-    it('assistant_text comes from the decision-language fallback when handler narration is graph-shaped', async () => {
+    it('assistant_text is the deterministic post-draft coaching narrative', async () => {
       const result = await dispatchDraftGraph({
         payload: makePayload(TURN_ID_1),
         requestId: 'req-scenario-1',
         request: STUB_REQUEST,
       });
 
-      // brief brief-display-safe-analysis A2: handler narration containing
-      // node/edge wording is suppressed in favour of the decision-language
-      // fallback derived from the final post-repair graph. The fixture
-      // narration at makeDraftResult contains "nodes" → suppressed.
-      // The graph has 1 factor + a goal labelled "Revenue target", no
-      // options → fallback names the goal and counts factor.
-      expect(result.response.assistant_text).toBe(
-        'Your decision model for "Revenue target" is ready, with 0 options and 1 factor to explore.',
-      );
-      expect(result.response.assistant_text).not.toContain('nodes');
-      expect(result.response.assistant_text).not.toContain('edges');
+      // Decision-coach narrative: names the goal, surfaces the single
+      // factor as a key consideration, and ends with a run-analysis nudge.
+      // Handler narration is no longer surfaced — graph-shaped wording in
+      // the fixture is silently discarded.
+      const text = result.response.assistant_text;
+      expect(text).toContain("I've built a first decision model");
+      expect(text).toContain('"Revenue target"');
+      expect(text).toContain('Market readiness');
+      expect(text).toContain('run the analysis');
+      expect(text).not.toContain('nodes');
+      expect(text).not.toContain('edges');
     });
 
     it('response contains empty blocks (graph is persisted via store, not in response body)', async () => {

@@ -214,15 +214,17 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      // brief brief-display-safe-analysis A2: never include node/edge counts.
-      // Graph has no option/factor/risk nodes → fallback template.
-      expect(result.response.assistant_text).toBe('Your decision model is ready to explore.');
+      // Decision-coach narrative: no options/factors → just confirms the
+      // goal and points the user at running analysis. No node/edge wording.
+      expect(result.response.assistant_text).toContain("I've built a first decision model");
+      expect(result.response.assistant_text).toContain('"B"');
+      expect(result.response.assistant_text).toContain('run the analysis');
       expect(result.response.assistant_text).not.toContain('nodes');
       expect(result.response.assistant_text).not.toContain('edges');
     });
 
-    // brief brief-display-safe-analysis A2 — draft narration template tiers.
-    it('decision-language fallback names the goal and lists option/factor/risk counts when all present', async () => {
+    // Decision-coach narrative — populated case (goal + options + factors + risk).
+    it('coaching narrative names the goal and summarises options and factors when all present', async () => {
       const graph = {
         nodes: [
           { id: 'g1', kind: 'goal', label: 'Maximise revenue' },
@@ -244,14 +246,20 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe(
-        'Your decision model for "Maximise revenue" is ready, with 2 options, 2 factors, and 1 risk to consider.',
-      );
-      expect(result.response.assistant_text).not.toContain('nodes');
-      expect(result.response.assistant_text).not.toContain('edges');
+      const text = result.response.assistant_text;
+      expect(text).toContain('"Maximise revenue"');
+      expect(text).toContain('two routes');
+      expect(text).toContain('Launch now');
+      expect(text).toContain('Delay');
+      expect(text).toMatch(/trade-off|consideration/);
+      expect(text).toContain('Market size');
+      expect(text).toContain('Cost');
+      expect(text).toContain('run the analysis');
+      expect(text).not.toContain('nodes');
+      expect(text).not.toContain('edges');
     });
 
-    it('decision-language fallback omits the risks clause when riskCount is 0', async () => {
+    it('coaching narrative omits any risk wording when riskCount is 0', async () => {
       const graph = {
         nodes: [
           { id: 'g1', kind: 'goal', label: 'Improve uptime' },
@@ -270,13 +278,18 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe(
-        'Your decision model for "Improve uptime" is ready, with 1 option and 1 factor to explore.',
-      );
-      expect(result.response.assistant_text).not.toContain('risks');
+      const text = result.response.assistant_text;
+      expect(text).toContain('"Improve uptime"');
+      expect(text).toContain('Migrate');
+      expect(text).toContain('one route');
+      expect(text).toContain('Latency');
+      expect(text).toContain('run the analysis');
+      // Risk wording must not leak when no risk nodes exist.
+      expect(text).not.toContain('risks');
+      expect(text).not.toContain('risk of');
     });
 
-    it('decision-language fallback drops the goal clause when no goal node is present', async () => {
+    it('coaching narrative uses the goalless lead when no goal node is present', async () => {
       const graph = {
         nodes: [
           { id: 'o1', kind: 'option', label: 'Plan A' },
@@ -296,18 +309,21 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe(
-        'Your decision model is ready with 2 options, 1 factor, and 1 risk to explore.',
-      );
-      expect(result.response.assistant_text).not.toContain('"');
-      expect(result.response.assistant_text).not.toContain('nodes');
+      const text = result.response.assistant_text;
+      expect(text).toContain("I've built a first decision model from your brief");
+      expect(text).toContain('Plan A');
+      expect(text).toContain('Plan B');
+      expect(text).toContain('two routes');
+      // No goal quote — there is no goal node to name.
+      expect(text).not.toContain('"');
+      expect(text).not.toContain('nodes');
     });
 
-    // brief brief-display-safe-analysis A2 — narration guard rejects ANY
-    // node/edge-count wording, even when the counts match. Users don't
-    // think in graph terms; the deterministic fallback always wins on
-    // that surface.
-    it('decision-language fallback replaces narration when counts match but wording is graph-shaped', async () => {
+    // The handler narration (`assistantText` from V4) is no longer surfaced
+    // to users at all. The deterministic coaching narrative is always shipped
+    // on success, regardless of what (potentially graph-shaped) wording the
+    // handler returned.
+    it('coaching narrative is shipped even when handler narration is graph-shaped', async () => {
       const graph = {
         nodes: [
           { id: 'g1', kind: 'goal', label: 'Win Q3' },
@@ -331,11 +347,15 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe(
-        'Your decision model for "Win Q3" is ready, with 1 option and 1 factor to explore.',
-      );
-      expect(result.response.assistant_text).not.toContain('nodes');
-      expect(result.response.assistant_text).not.toContain('edges');
+      const text = result.response.assistant_text;
+      expect(text).toContain('"Win Q3"');
+      expect(text).toContain('Plan A');
+      expect(text).toContain('Budget');
+      expect(text).toContain('run the analysis');
+      // The handler narration is now discarded — graph-shaped wording must
+      // never reach the user from the success path.
+      expect(text).not.toContain('nodes');
+      expect(text).not.toContain('edges');
     });
   });
 
@@ -822,7 +842,7 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     vi.clearAllMocks();
   });
 
-  it('emits an executable Run analysis chip when analysis_ready.status === "ready"', async () => {
+  it('emits the three-chip post-draft coaching set when analysis_ready.status === "ready"', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
@@ -835,12 +855,30 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
       request: STUB_REQUEST,
     });
 
-    expect(result.response.suggested_actions).toHaveLength(1);
+    expect(result.response.suggested_actions).toHaveLength(3);
+    // Run analysis stays the primary action chip with the existing
+    // handler-dispatchable action_type. Order matters — the UI surfaces the
+    // first chip as primary.
     expect(result.response.suggested_actions[0]).toMatchObject({
       id: 'chip_action_run_analysis',
       action_type: 'run_analysis',
       label: 'Run analysis',
     });
+    // Review model — conversational chip, no action_type. Clicking sends
+    // its `message` back through the turn-executor as a user message.
+    expect(result.response.suggested_actions[1]).toMatchObject({
+      id: 'chip_prompt_review_model',
+      label: 'Review model',
+    });
+    expect(result.response.suggested_actions[1].action_type).toBeUndefined();
+    expect(typeof result.response.suggested_actions[1].message).toBe('string');
+    // What assumptions matter most? — second conversational chip.
+    expect(result.response.suggested_actions[2]).toMatchObject({
+      id: 'chip_prompt_assumptions',
+      label: 'What assumptions matter most?',
+    });
+    expect(result.response.suggested_actions[2].action_type).toBeUndefined();
+    expect(typeof result.response.suggested_actions[2].message).toBe('string');
   });
 
   it('emits a conversational setup chip when analysis_ready is absent', async () => {
