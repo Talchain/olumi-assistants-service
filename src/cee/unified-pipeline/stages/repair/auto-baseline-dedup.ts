@@ -116,29 +116,58 @@ function buildSignature(interventions: Record<string, unknown> | undefined): str
 }
 
 /**
- * Detect whether an option is the auto-injected baseline. Mirrors the
- * priority used by graph-readiness.ts:206-217 to keep classification
- * consistent across surfaces.
+ * Strict baseline detection: ONLY an explicit `is_baseline === true`
+ * marker (data.is_baseline or node-level is_baseline) is sufficient to
+ * authorise deletion. Heuristic detection (label match / id-suffix) is
+ * NOT used as a deletion predicate — see `looksHeuristicallyLikeBaseline`
+ * below for the diagnostic-only path.
  *
- * The `anyExplicitBaseline` flag follows the same logic: when ANY option
- * carries an explicit `is_baseline === true`, ONLY explicit flags count;
- * heuristics are then disabled to avoid mis-classifying "Status quo with
- * bridge financing" as a baseline.
+ * SAFETY CONTRACT (round-2 review fix)
+ *
+ * A user can legitimately type "Status Quo", "No Change", "Baseline" or
+ * use an id like `opt_status_quo` as a deliberate, distinct option they
+ * want modelled. If the LLM happens to give that option the same
+ * intervention signature as another option, the failure mode is a real
+ * LLM contract violation — the user is asking for two genuinely distinct
+ * options that the model failed to differentiate. Silently deleting the
+ * "Status Quo" option in that case would be unsafe: it loses information
+ * the user explicitly supplied.
+ *
+ * The safe rule is: ONLY when the LLM (or some upstream marker) has
+ * explicitly tagged a node as a baseline via `is_baseline === true` may
+ * we infer that the node was auto-injected and is safe to drop on
+ * collision. Heuristic-only collisions flow to PR #202's OPTIONS_IDENTICAL
+ * bypass, which emits a typed clarification the user can act on.
+ *
+ * Canonical read path per src/adapters/llm/anthropic.ts:852: prefer
+ * `data.is_baseline`, fall back to node-level. Both surfaces are checked
+ * because the Anthropic adapter normalisation occasionally leaves the
+ * flag at one level or the other depending on schema version.
  */
-function makeBaselineDetector(options: readonly OptionLike[]) {
-  const anyExplicitBaseline = options.some((o) => readIsBaseline(o) === true);
-  return (o: OptionLike): boolean => {
-    if (anyExplicitBaseline) return readIsBaseline(o) === true;
-    const id = (o.id ?? "").toLowerCase();
-    const label = (o.label ?? "").toLowerCase().trim();
-    if (BASELINE_LABELS.has(label)) return true;
-    return BASELINE_ID_SUFFIXES.some((s) => id.endsWith(s));
-  };
+function isExplicitBaseline(o: OptionLike): boolean {
+  return readIsBaseline(o) === true;
+}
+
+/**
+ * Diagnostic-only baseline heuristic. Returns true when an option's
+ * label or id looks like a baseline but the explicit `is_baseline` flag
+ * is absent. This is NOT used for deletion — only for telemetry so
+ * operators can spot LLM contract violations (the prompt mandates
+ * `is_baseline: true` on status-quo options; missing flags indicate
+ * prompt drift or model regression).
+ *
+ * Mirrors the heuristic logic in src/routes/assist.v1.graph-readiness.ts
+ * to keep the classification vocabulary aligned across surfaces.
+ */
+function looksHeuristicallyLikeBaseline(o: OptionLike): boolean {
+  if (readIsBaseline(o) === true) return false; // explicit flag wins; heuristic only relevant when flag absent
+  const id = (o.id ?? "").toLowerCase();
+  const label = (o.label ?? "").toLowerCase().trim();
+  if (BASELINE_LABELS.has(label)) return true;
+  return BASELINE_ID_SUFFIXES.some((s) => id.endsWith(s));
 }
 
 function readIsBaseline(o: OptionLike): boolean | undefined {
-  // Canonical read path per src/adapters/llm/anthropic.ts:852: prefer
-  // data.is_baseline, fall back to node-level.
   if (typeof o.data?.is_baseline === "boolean") return o.data.is_baseline;
   if (typeof o.is_baseline === "boolean") return o.is_baseline;
   return undefined;
@@ -148,21 +177,35 @@ export interface AutoBaselineDedupReport {
   readonly dropped_option_ids: readonly string[];
   readonly dropped_edge_count: number;
   readonly groups_evaluated: number;
+  readonly heuristic_only_collisions: number;
 }
 
 /**
  * Stage 4 Substep 0.9: Drops auto-injected baseline options that
  * duplicate an explicit option's intervention signature.
  *
+ * SAFETY: Deletion requires an EXPLICIT `is_baseline === true` flag on
+ * the duplicated option (see `isExplicitBaseline`). Heuristic-only
+ * matches (label like "Status Quo", id ending `_status_quo`, etc.) are
+ * NOT sufficient to delete — those options may have been provided
+ * deliberately by the user as a distinct decision option. When a
+ * duplicate group is detected with only heuristic baselines, this
+ * substep emits a diagnostic telemetry event so operators can see the
+ * LLM contract drift (the prompt mandates `is_baseline: true` on
+ * status-quo options; missing flags indicate prompt regression) but
+ * does NOT mutate the graph. The downstream PR #202 OPTIONS_IDENTICAL
+ * bypass surfaces a typed clarification to the user for that case.
+ *
  * No-op when no option duplicates exist or when no duplicate group
- * contains both a baseline and a non-baseline. Records a structured
- * repair trace + telemetry whenever a dedup actually fires.
+ * contains both an EXPLICIT baseline and a non-baseline. Records a
+ * structured repair trace + telemetry whenever a dedup actually fires.
  */
 export function runAutoBaselineDedup(ctx: StageContext): AutoBaselineDedupReport {
   const empty: AutoBaselineDedupReport = {
     dropped_option_ids: [],
     dropped_edge_count: 0,
     groups_evaluated: 0,
+    heuristic_only_collisions: 0,
   };
   if (!ctx.graph) return empty;
   const graph = ctx.graph as { nodes?: OptionLike[]; edges?: EdgeLike[] };
@@ -181,28 +224,70 @@ export function runAutoBaselineDedup(ctx: StageContext): AutoBaselineDedupReport
     signatureToOptions.set(sig, existing);
   }
 
-  const isBaseline = makeBaselineDetector(optionNodes);
   const droppedOptionIds: string[] = [];
-  const droppedSignatures: string[] = [];
   let groupsEvaluated = 0;
+  let heuristicOnlyCollisions = 0;
+  const heuristicOnlyOptionIds: string[] = [];
 
-  for (const [sig, group] of signatureToOptions) {
+  for (const [, group] of signatureToOptions) {
     if (group.length < 2) continue;
     groupsEvaluated += 1;
-    const baselines = group.filter(isBaseline);
-    const nonBaselines = group.filter((o) => !isBaseline(o));
-    // Only safe to dedup when a non-baseline survives.
-    if (baselines.length === 0 || nonBaselines.length === 0) continue;
-    for (const b of baselines) {
-      if (typeof b.id === "string") {
-        droppedOptionIds.push(b.id);
-        droppedSignatures.push(sig);
+
+    // STRICT predicate: only options with an explicit `is_baseline === true`
+    // marker are candidates for deletion.
+    const explicitBaselines = group.filter(isExplicitBaseline);
+    const nonExplicitBaselines = group.filter((o) => !isExplicitBaseline(o));
+
+    if (explicitBaselines.length > 0 && nonExplicitBaselines.length > 0) {
+      // Safe: drop the explicit baselines. The non-explicit options
+      // survive — they're either real user options or other baselines
+      // without the explicit flag, which is itself worth surfacing.
+      for (const b of explicitBaselines) {
+        if (typeof b.id === "string") droppedOptionIds.push(b.id);
+      }
+      continue;
+    }
+
+    // Diagnostic-only path: no explicit baseline flag present in the
+    // duplicate group. Check if heuristics would have matched, log it
+    // for operator visibility, but DO NOT delete. The downstream
+    // OPTIONS_IDENTICAL bypass (PR #202) will surface a typed
+    // clarification to the user.
+    const heuristicBaselines = group.filter(looksHeuristicallyLikeBaseline);
+    if (heuristicBaselines.length > 0 && heuristicBaselines.length < group.length) {
+      heuristicOnlyCollisions += 1;
+      for (const h of heuristicBaselines) {
+        if (typeof h.id === "string") heuristicOnlyOptionIds.push(h.id);
       }
     }
   }
 
+  // Emit a diagnostic-only event when heuristic-only collisions were
+  // detected, regardless of whether any explicit-flag dedup also fired.
+  if (heuristicOnlyCollisions > 0) {
+    log.warn(
+      {
+        event: "cee.auto_baseline_dedup.heuristic_only_collision",
+        request_id: ctx.requestId,
+        heuristic_only_option_ids: heuristicOnlyOptionIds,
+        heuristic_only_groups: heuristicOnlyCollisions,
+      },
+      `Auto-baseline dedup: ${heuristicOnlyCollisions} duplicate group(s) contained options that LOOK like baselines (by label or id suffix) but lack the explicit is_baseline flag — declining to delete and falling through to OPTIONS_IDENTICAL bypass. This signals LLM prompt drift (prompt mandates is_baseline=true on status-quo options).`,
+    );
+    emit(TelemetryEvents.CeeAutoBaselineHeuristicOnlyCollision, {
+      request_id: ctx.requestId,
+      heuristic_only_option_ids_count: heuristicOnlyOptionIds.length,
+      heuristic_only_groups: heuristicOnlyCollisions,
+    });
+  }
+
   if (droppedOptionIds.length === 0) {
-    return { ...empty, groups_evaluated: groupsEvaluated };
+    return {
+      dropped_option_ids: [],
+      dropped_edge_count: 0,
+      groups_evaluated: groupsEvaluated,
+      heuristic_only_collisions: heuristicOnlyCollisions,
+    };
   }
 
   // Mutate graph: remove dropped option nodes AND any edges that touch them.
@@ -219,6 +304,7 @@ export function runAutoBaselineDedup(ctx: StageContext): AutoBaselineDedupReport
     dropped_option_ids: droppedOptionIds,
     dropped_edge_count: droppedEdgeCount,
     groups_evaluated: groupsEvaluated,
+    heuristic_only_collisions: heuristicOnlyCollisions,
   };
 
   // Surface on repairTrace so the downstream sweep / package stages see
@@ -230,6 +316,7 @@ export function runAutoBaselineDedup(ctx: StageContext): AutoBaselineDedupReport
       dropped_option_ids: droppedOptionIds,
       dropped_edge_count: droppedEdgeCount,
       groups_evaluated: groupsEvaluated,
+      heuristic_only_collisions: heuristicOnlyCollisions,
     },
   };
 
@@ -238,7 +325,7 @@ export function runAutoBaselineDedup(ctx: StageContext): AutoBaselineDedupReport
   // marked degraded — the resulting graph is fully valid.
   ctx.pipelineOutcome.warnings.push({
     stage: "repair",
-    error: `auto_baseline_dedup: dropped ${droppedOptionIds.length} baseline option(s) duplicating explicit options`,
+    error: `auto_baseline_dedup: dropped ${droppedOptionIds.length} explicit-baseline option(s) duplicating explicit options`,
     degraded: false,
   });
 
@@ -250,7 +337,7 @@ export function runAutoBaselineDedup(ctx: StageContext): AutoBaselineDedupReport
       dropped_edge_count: droppedEdgeCount,
       groups_evaluated: groupsEvaluated,
     },
-    `Auto-baseline dedup: dropped ${droppedOptionIds.length} baseline option(s) duplicating explicit options`,
+    `Auto-baseline dedup: dropped ${droppedOptionIds.length} explicit-baseline option(s) duplicating explicit options`,
   );
   emit(TelemetryEvents.CeeAutoBaselineDedupApplied, {
     request_id: ctx.requestId,

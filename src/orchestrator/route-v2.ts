@@ -1395,18 +1395,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         message_length: ingress.message.length,
         had_chip: ingress.chip != null,
       });
-      // Deterministic copy: clear, actionable, with concrete examples
-      // matching the brief regex's positive verbs. Does NOT echo the
-      // user's input (no PII leak risk). Stays in frame stage so the
-      // UI remains on the graph-creation path; suggested_actions /
-      // analysis_ready intentionally empty (no analysis to surface
-      // pre-graph).
+      // Deterministic copy: short, directly corrective for retry cases,
+      // with concrete examples matching the brief regex's positive
+      // verbs. Does NOT echo the user's input (no PII leak risk).
+      // Stays in frame stage so the UI remains on the graph-creation
+      // path; suggested_actions / analysis_ready intentionally empty
+      // (no analysis to surface pre-graph). Round-2 review tightening:
+      // shorter than the original draft.
       const assistantText =
-        "Let's start by framing your decision clearly. " +
-        "Send a single question stating the choice you're trying to make — for example: " +
-        "“Should we hire a tech lead or two developers?” or " +
-        "“Whether to launch the new SKU in Q3 or hold?” " +
-        "Include the options you're comparing so I can model them as distinct paths.";
+        "I need a single decision question to start. " +
+        "For example: “Should we hire a tech lead or two developers?” or " +
+        "“Whether to launch in Q3 or hold for Q4?” " +
+        "Include the options you're comparing.";
       const guardResponse: import('@talchain/schemas/boundary').OlumiResponse = {
         response_version: 2,
         assistant_text: assistantText,

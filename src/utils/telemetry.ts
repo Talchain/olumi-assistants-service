@@ -99,11 +99,22 @@ export const TelemetryEvents = {
   CeeOptionsIdenticalBypass: "cee.options_identical.pre_repair_bypass",
 
   // Stage 4 Substep 0.9 — deterministic auto-baseline dedup. Fires when
-  // the LLM-injected status-quo option duplicates an explicit option's
-  // intervention signature; drops the baseline so OPTIONS_IDENTICAL
-  // never gets raised for this known LLM-artefact case. See
+  // the LLM-injected status-quo option (with explicit is_baseline=true)
+  // duplicates an explicit option's intervention signature; drops the
+  // baseline so OPTIONS_IDENTICAL never gets raised for this known
+  // LLM-artefact case. See
   // src/cee/unified-pipeline/stages/repair/auto-baseline-dedup.ts.
   CeeAutoBaselineDedupApplied: "cee.auto_baseline_dedup.applied",
+
+  // Diagnostic-only counterpart to the above. Fires when a duplicate
+  // group contains options that LOOK like baselines by label / id-suffix
+  // heuristic but lack the explicit is_baseline flag. The dedup substep
+  // does NOT mutate the graph in this case (it would risk deleting a
+  // user-explicit option with a baseline-shaped label) — the collision
+  // flows through to the PR #202 OPTIONS_IDENTICAL typed-clarification
+  // bypass. The event surfaces LLM prompt drift to operators (the
+  // draft_graph prompt mandates is_baseline=true on status-quo options).
+  CeeAutoBaselineHeuristicOnlyCollision: "cee.auto_baseline_dedup.heuristic_only_collision",
 
   // V5 route-v2 frame-stage no-brief guard. Fires when a frame-stage
   // message arrives with no graph yet but does NOT match the

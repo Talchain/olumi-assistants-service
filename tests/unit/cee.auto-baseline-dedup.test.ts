@@ -294,34 +294,137 @@ describe("runAutoBaselineDedup", () => {
     expect(report.dropped_option_ids).toEqual(["opt_marked_explicit_baseline"]);
   });
 
-  // ── Baseline detection: label heuristic only when no explicit flags ──
-  it("falls back to label heuristic when no option has explicit is_baseline flag", () => {
+  // ── ROUND-2 REVIEW SAFETY TESTS — heuristic-only matches MUST NOT delete ──
+  //
+  // The reviewer caught a real safety issue: a user-explicit option
+  // labelled "Status Quo" / "No Change" / etc., or with id ending in
+  // `_status_quo` / `_baseline`, may be a deliberate user-supplied
+  // decision option. Deleting it silently when it collides with another
+  // option is unsafe. The strict-flag rule: deletion requires
+  // `is_baseline === true`; heuristic matches generate diagnostic
+  // telemetry only.
+
+  it("does NOT delete a user-provided 'Status Quo' label without explicit is_baseline flag", () => {
+    // User typed "Status Quo" as a deliberate, distinct option. The LLM
+    // forgot to set is_baseline=true (prompt drift). The collision must
+    // flow to PR #202's OPTIONS_IDENTICAL bypass, NOT silently delete
+    // the user's option.
     const graph = {
       nodes: [
         { id: "dec", kind: "decision" },
         optionNode("opt_explicit", { fac_x: 0.5 }),
-        optionNode("opt_baseline_via_label", { fac_x: 0.5 }, { label: "Status Quo" }),
+        optionNode("opt_user_status_quo", { fac_x: 0.5 }, { label: "Status Quo" }),
       ],
       edges: [],
     };
     const ctx = makeCtx(graph);
     const report = runAutoBaselineDedup(ctx);
-    expect(report.dropped_option_ids).toEqual(["opt_baseline_via_label"]);
+
+    // CRITICAL: no deletion. Both options survive intact.
+    expect(report.dropped_option_ids).toEqual([]);
+    expect(report.dropped_edge_count).toBe(0);
+    const finalIds = (ctx.graph as { nodes: Array<{ id: string }> }).nodes.map((n) => n.id);
+    expect(finalIds).toContain("opt_explicit");
+    expect(finalIds).toContain("opt_user_status_quo");
+
+    // Diagnostic-only telemetry IS emitted so operators can see the
+    // LLM prompt drift (prompt mandates is_baseline=true).
+    expect(report.heuristic_only_collisions).toBe(1);
   });
 
-  // ── Baseline detection: id-suffix heuristic ──
-  it("falls back to id-suffix heuristic when no option has explicit flag or matching label", () => {
+  it("does NOT delete an option whose id ends in '_status_quo' without explicit flag", () => {
     const graph = {
       nodes: [
         { id: "dec", kind: "decision" },
         optionNode("opt_explicit", { fac_x: 0.5 }),
+        // id-suffix matches heuristic, but no explicit flag.
         optionNode("opt_keep_current_status_quo", { fac_x: 0.5 }, { label: "Keep current" }),
       ],
       edges: [],
     };
     const ctx = makeCtx(graph);
     const report = runAutoBaselineDedup(ctx);
-    expect(report.dropped_option_ids).toEqual(["opt_keep_current_status_quo"]);
+
+    expect(report.dropped_option_ids).toEqual([]);
+    expect(report.heuristic_only_collisions).toBe(1);
+    const finalIds = (ctx.graph as { nodes: Array<{ id: string }> }).nodes.map((n) => n.id);
+    expect(finalIds).toContain("opt_keep_current_status_quo");
+  });
+
+  it("does NOT delete an option labelled 'No Change' / 'Baseline' / 'Do Nothing' without explicit flag", () => {
+    // The full heuristic label set must NOT authorise deletion alone.
+    // Use neutral ids (no _status_quo / _baseline suffix) so only the
+    // labelled option matches the heuristic — proves the LABEL alone
+    // is insufficient for deletion.
+    const labelsToTest = ["No Change", "Baseline", "Do Nothing"];
+    for (const label of labelsToTest) {
+      const graph = {
+        nodes: [
+          { id: "dec", kind: "decision" },
+          optionNode("opt_active", { fac_x: 0.5 }),
+          optionNode("opt_heuristic", { fac_x: 0.5 }, { label }),
+        ],
+        edges: [],
+      };
+      const ctx = makeCtx(graph);
+      const report = runAutoBaselineDedup(ctx);
+      expect(report.dropped_option_ids).toEqual([]);
+      // Exactly one option in the group is heuristic-baseline → diagnostic fires.
+      expect(report.heuristic_only_collisions).toBe(1);
+    }
+  });
+
+  it("heuristic-only collision still emits diagnostic telemetry (operator visibility)", () => {
+    // Even though no mutation occurred, the event fires so ops can see
+    // LLM prompt drift (missing is_baseline flag on a status-quo-shaped
+    // option).
+    const graph = {
+      nodes: [
+        { id: "dec", kind: "decision" },
+        optionNode("opt_explicit", { fac_x: 0.5 }),
+        optionNode("opt_user_status_quo", { fac_x: 0.5 }, { label: "Status Quo" }),
+      ],
+      edges: [],
+    };
+    const ctx = makeCtx(graph);
+    const report = runAutoBaselineDedup(ctx);
+    expect(report.heuristic_only_collisions).toBe(1);
+    // pipelineOutcome.warnings is NOT populated for heuristic-only
+    // (no mutation = no warning).
+    expect(ctx.pipelineOutcome.warnings).toHaveLength(0);
+    // repairTrace is NOT populated for heuristic-only (no mutation = no trace).
+    expect(ctx.repairTrace).toBeUndefined();
+  });
+
+  it("explicit is_baseline=true takes priority over a non-baseline-flagged 'Status Quo' label", () => {
+    // Existing precedence test: when ANY option has explicit
+    // is_baseline=true, only that option is droppable. A separate
+    // option labelled "Status Quo" with is_baseline=false (or absent)
+    // is NOT a deletion target.
+    const graph = {
+      nodes: [
+        { id: "dec", kind: "decision" },
+        optionNode(
+          "opt_real_baseline",
+          { fac_x: 0.5 },
+          { is_baseline: true, label: "Some marketing strategy" },
+        ),
+        optionNode(
+          "opt_user_status_quo",
+          { fac_x: 0.5 },
+          { is_baseline: false, label: "Status Quo" },
+        ),
+      ],
+      edges: [],
+    };
+    const ctx = makeCtx(graph);
+    const report = runAutoBaselineDedup(ctx);
+
+    // The explicit-flagged option IS dropped (safe — known LLM-injected baseline).
+    expect(report.dropped_option_ids).toEqual(["opt_real_baseline"]);
+    // The user's labelled-as-Status-Quo option survives (no explicit flag).
+    const finalIds = (ctx.graph as { nodes: Array<{ id: string }> }).nodes.map((n) => n.id);
+    expect(finalIds).toContain("opt_user_status_quo");
   });
 
   // ── No-op edge cases ──
