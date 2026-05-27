@@ -413,10 +413,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // {option}" chip, NOT a generic 500.
         //
         // The check is narrow: only PLoT 422s carrying a structured
-        // V2RunError with an `analysis_status` of "preflight_validation_failed"
-        // (or a critique matching the missing-intervention message). Any
-        // other PLoT error falls through to the existing `plot_error`
-        // path unchanged — see required behaviour rule #8.
+        // V2RunError with a preflight signal (analysis_status
+        // === "preflight_validation_failed" OR status_reason includes
+        // "preflight validation") AND a critique matching the
+        // missing-intervention message. Any other PLoT error falls
+        // through to the existing `plot_error` path unchanged — see
+        // required behaviour rule #8. (Detailed predicates below.)
         const v2Err = runError.v2RunError;
         if (runError.status === 422 && v2Err) {
           // Scan ALL critique messages (not just the first) — PLoT critique
