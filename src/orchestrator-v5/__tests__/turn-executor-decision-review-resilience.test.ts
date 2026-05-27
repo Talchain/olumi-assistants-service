@@ -151,15 +151,32 @@ function degradedEvent(): Event | undefined {
   return events.find((e) => e.event === 'v5.decision_review_degraded');
 }
 
-beforeEach(() => {
+// V5 latency gate: every test in THIS file exercises the legacy await
+// path (either resilience of the defensive catch, or brief-sourcing into
+// the enricher). They must run with `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW`
+// set to true. Default (flag false) is covered separately in
+// turn-executor-decision-review-fast-path.test.ts.
+let priorAwaitFlag: string | undefined;
+beforeEach(async () => {
   events = [];
   installSink();
   // Reset the session-store brief stub between tests so brief-presence
   // does not leak across the suite.
   mockSessionState.briefText = null;
+  priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+  process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
+  const { _resetConfigCache } = await import('../../config/index.js');
+  _resetConfigCache();
 });
-afterEach(() => {
+afterEach(async () => {
   uninstallSink();
+  if (priorAwaitFlag === undefined) {
+    delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+  } else {
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+  }
+  const { _resetConfigCache } = await import('../../config/index.js');
+  _resetConfigCache();
   vi.restoreAllMocks();
 });
 
@@ -347,5 +364,189 @@ describe('TurnExecutor — decision_review brief sourcing (V5 Phase 1)', () => {
 
     const call = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
     expect(call[0].brief).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 latency fast-path — V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=false (default).
+// Proves run_analysis does not await the decision_review enricher: the spy
+// is never called, the response composes immediately, and
+// v5.decision_review.skipped fires with reason 'autofire_disabled'.
+// ---------------------------------------------------------------------------
+
+describe('TurnExecutor — decision_review autofire gate (default fast path)', () => {
+  // Override the file-level beforeEach (which sets the flag to 'true') with
+  // the production default 'false'. Nested beforeEach runs after the outer
+  // one in vitest, so this last-write-wins for the cached config.
+  beforeEach(async () => {
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'false';
+    const { _resetConfigCache } = await import('../../config/index.js');
+    _resetConfigCache();
+  });
+
+  it('does NOT call the decision_review enricher', async () => {
+    const enricherSpy = vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview');
+    mockSessionState.briefText = 'A brief that would have been passed to the enricher';
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-fast-path-skip', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+    });
+
+    expect(enricherSpy).not.toHaveBeenCalled();
+    expect(result.telemetry.failure_type).toBeNull();
+    expect(result.telemetry.commit_performed).toBe(true);
+  });
+
+  it("emits v5.decision_review.skipped with reason 'autofire_disabled' and diagnostic fields", async () => {
+    mockSessionState.briefText = 'A persisted brief';
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-fast-path-telemetry', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+    });
+
+    const skipEvent = events.find((e) => e.event === 'v5.decision_review.skipped');
+    expect(skipEvent).toBeDefined();
+    expect(skipEvent!.data.reason).toBe('autofire_disabled');
+    expect(skipEvent!.data.brief_present).toBe(true);
+    expect(skipEvent!.data.brief_length).toBe('A persisted brief'.length);
+    expect(skipEvent!.data.has_enrichment).toBeDefined();
+    expect(skipEvent!.data.leading_option_present).toBeDefined();
+    expect(skipEvent!.data.scenario_id).toBe(TEST_SCENARIO_ID);
+  });
+
+  it('emits no v5.decision_review_degraded event (the call is never made, so the defensive catch is unreachable)', async () => {
+    mockSessionState.briefText = 'A brief';
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-fast-path-no-degrade', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+    });
+
+    expect(degradedEvent()).toBeUndefined();
+  });
+
+  it('response composes successfully and the analysis_result block has no decision_review enrichment', async () => {
+    mockSessionState.briefText = 'A brief';
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-fast-path-shape', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+    });
+
+    expect(result.telemetry.failure_type).toBeNull();
+    expect(result.telemetry.commit_performed).toBe(true);
+    const analysisBlock = result.response.blocks.find((b) => b.type === 'analysis_result');
+    expect(analysisBlock).toBeDefined();
+    if (analysisBlock?.type === 'analysis_result') {
+      const enrichment = analysisBlock.enrichment ?? null;
+      // Either no enrichment object at all (older shape) or an enrichment
+      // object that simply lacks the decision_review key — both are valid
+      // per the optional schema. Crucially, decision_review !== null here
+      // (null is the degraded-catch sentinel from the await branch, which
+      // we never enter on the fast path).
+      if (enrichment !== null) {
+        expect(
+          Object.prototype.hasOwnProperty.call(enrichment, 'decision_review'),
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('what_would_flip chip still appears in suggested_actions', async () => {
+    mockSessionState.briefText = 'A brief';
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-fast-path-chips', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+    });
+
+    const chips = result.response.suggested_actions ?? [];
+    const wwf = chips.find((c) => c.action_type === 'what_would_flip');
+    expect(wwf).toBeDefined();
+    expect(wwf!.label).toBe('What could change the outcome?');
+  });
+
+  it('completes quickly even when the enricher would hang forever (proves no await is being made)', async () => {
+    // If a future regression accidentally re-awaits the enricher on the
+    // gated path, this test would time out (~5 min default vitest cap).
+    // The fast path never reaches the spy, so the never-resolving promise
+    // is never created.
+    vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview').mockImplementation(
+      () => new Promise(() => { /* never resolves */ }),
+    );
+    mockSessionState.briefText = 'A brief';
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    const start = Date.now();
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-fast-path-hang', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+    });
+    const elapsedMs = Date.now() - start;
+
+    expect(elapsedMs).toBeLessThan(5000);
+    expect(result.telemetry.commit_performed).toBe(true);
+  });
+
+  it('completes successfully even when the enricher would throw (proves no try/catch is being entered)', async () => {
+    vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview').mockImplementation(
+      async () => {
+        throw new Error('regression: enricher should not be called on the fast path');
+      },
+    );
+    mockSessionState.briefText = 'A brief';
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-fast-path-throw', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+    });
+
+    expect(result.telemetry.failure_type).toBeNull();
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(degradedEvent()).toBeUndefined();
   });
 });

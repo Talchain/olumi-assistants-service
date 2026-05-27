@@ -68,7 +68,11 @@ type SkipReason =
   | 'no_run_analysis_fact'
   | 'no_brief'
   | 'no_results'
-  | 'no_winner';
+  | 'no_winner'
+  // Emitted by the caller (turn-executor / chip-click-dispatch) when the
+  // `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW` config flag is false. Listed
+  // here so callers share the same union via `TelemetryEvents.V5DecisionReviewSkipped`.
+  | 'autofire_disabled';
 
 /**
  * If the facts array contains a successful run_analysis fact, invoke

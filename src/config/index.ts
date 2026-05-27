@@ -366,6 +366,12 @@ const ConfigSchema = z.object({
     refinementEnabled: booleanString.default(false), // Enable draft refinement feature
     decisionReviewEnabled: booleanString.default(false), // Enable M2 Decision Review endpoint
     decisionReviewRateLimitRpm: z.coerce.number().int().positive().default(30), // Decision review rate limit
+    // V5 run_analysis decision_review auto-fire gate. When false (default),
+    // turn-executor and chip-click-dispatch do NOT await the
+    // `enrichRunAnalysisWithDecisionReview` call — `run_analysis` returns
+    // the deterministic PLoT analysis immediately and `v5.decision_review.skipped`
+    // fires with reason `autofire_disabled`. Env: V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW.
+    runAnalysisAwaitDecisionReview: booleanString.default(false),
     optionsFeatureVersion: z.string().optional(),
     explainFeatureVersion: z.string().optional(),
     evidenceHelperFeatureVersion: z.string().optional(),
@@ -757,6 +763,7 @@ function parseConfig(): Config {
       refinementEnabled: env.CEE_REFINEMENT_ENABLED,
       decisionReviewEnabled: env.CEE_DECISION_REVIEW_ENABLED,
       decisionReviewRateLimitRpm: env.CEE_DECISION_REVIEW_RATE_LIMIT_RPM,
+      runAnalysisAwaitDecisionReview: env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW,
       optionsFeatureVersion: env.CEE_OPTIONS_FEATURE_VERSION,
       explainFeatureVersion: env.CEE_EXPLAIN_FEATURE_VERSION,
       evidenceHelperFeatureVersion: env.CEE_EVIDENCE_HELPER_FEATURE_VERSION,
