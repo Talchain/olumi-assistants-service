@@ -394,6 +394,50 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     ]);
   }
 
+  // Rule: after a successful (precondition-met) what_would_flip turn,
+  // surface three exploration chips so the deterministic-fallback
+  // closing question "Which of those would you like to explore
+  // changing?" has clickable follow-ups. Pre-this rule the success
+  // path emitted zero chips and the user was asked a question with no
+  // answer affordance.
+  //
+  // Chips:
+  //   1. "Walk me through the analysis" → action_type 'explain_results'
+  //      (hits the deterministic chip-click fast path — zero LLM
+  //      round-trip).
+  //   2. "Re-run analysis" → action_type 'run_analysis' (same fast
+  //      path).
+  //   3. "Run a pre-mortem" → prompt chip (no action_type because
+  //      there is no registered handler for pre-mortem; the click
+  //      routes through TurnExecutor as a normal turn). Mirrors the
+  //      decide-stage rule pattern below.
+  //
+  // Placed AFTER the explain_results SUCCESS rule so the precedence
+  // (explain → what_would_flip → run_analysis) is preserved on
+  // unusual multi-fact turns; in practice the two handlers do not
+  // co-emit on a single turn.
+  if (findSuccessfulWhatWouldFlipJustRan(input.handlerFacts)) {
+    return cap([
+      {
+        id: 'chip_action_explain_results',
+        label: 'Walk me through the analysis',
+        message: 'Walk me through the analysis.',
+        action_type: 'explain_results',
+      },
+      {
+        id: 'chip_action_rerun_analysis',
+        label: 'Re-run analysis',
+        message: 'Re-run the analysis.',
+        action_type: 'run_analysis',
+      },
+      promptChip(
+        'run_pre_mortem',
+        'Run a pre-mortem',
+        'Imagine this decision went wrong. What would have caused it?',
+      ),
+    ]);
+  }
+
   // V5 spec §7 every-failure-path-includes-a-chip — explicit precondition rule.
   // When `explain_results` or `what_would_flip` returned a precondition-fail
   // outcome (`noop: true` + `result.precondition_unmet === true`), the
@@ -646,6 +690,33 @@ function findSuccessfulExplainResultsJustRan(
   if (!facts || facts.length === 0) return false;
   for (const f of facts) {
     if (f.fact_type !== 'explain_results') continue;
+    const result = (f as { result?: unknown }).result;
+    if (result && typeof result === 'object' && !Array.isArray(result)) {
+      const r = result as { precondition_unmet?: unknown };
+      if (r.precondition_unmet === false) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Did `what_would_flip` produce a successful (precondition-met) fact
+ * this turn? Mirrors `findSuccessfulExplainResultsJustRan` — production
+ * `what_would_flip` facts always carry `noop: true`; the success
+ * discriminator is `result.precondition_unmet === false`.
+ *
+ * Used by the new what_would_flip SUCCESS chip rule to surface the
+ * three follow-up exploration chips when the handler returns a valid
+ * answer (Sonnet's prose or the deterministic fallback). Without this
+ * rule, the closing question "Which of those would you like to explore
+ * changing?" had no clickable follow-up.
+ */
+function findSuccessfulWhatWouldFlipJustRan(
+  facts: readonly HandlerFact[] | undefined,
+): boolean {
+  if (!facts || facts.length === 0) return false;
+  for (const f of facts) {
+    if (f.fact_type !== 'what_would_flip') continue;
     const result = (f as { result?: unknown }).result;
     if (result && typeof result === 'object' && !Array.isArray(result)) {
       const r = result as { precondition_unmet?: unknown };

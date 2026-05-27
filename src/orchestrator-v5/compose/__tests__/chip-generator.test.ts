@@ -488,6 +488,128 @@ describe('generateChips — V5 0.9.0 facts_absent rule', () => {
   });
 });
 
+// New SUCCESS rule for what_would_flip — closes the missing follow-up
+// affordance on the deterministic-fallback closing question ("Which of
+// those would you like to explore changing?"). Mirrors the existing
+// explain_results SUCCESS rule at the top of generateChips.
+describe('generateChips — what_would_flip SUCCESS rule', () => {
+  function successfulWhatWouldFlipFact(): HandlerFact {
+    // Production what_would_flip facts always carry noop: true; the
+    // success discriminator is result.precondition_unmet === false.
+    return {
+      fact_type: 'what_would_flip',
+      fact_version: 1,
+      noop: true,
+      result: {
+        precondition_unmet: false,
+        option_count: 2,
+        answer_source: 'deterministic_fallback',
+        fallback_reason: null,
+        answer_text_length: 100,
+        staleness_prefixed: false,
+      },
+    } as HandlerFact;
+  }
+
+  it('emits exactly THREE exploration chips on a successful what_would_flip turn', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [successfulWhatWouldFlipFact()],
+      priorFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(3);
+  });
+
+  it('emits the canonical chip labels and action_types', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [successfulWhatWouldFlipFact()],
+      priorFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    const labels = chips.map((c) => c.label);
+    expect(labels).toEqual([
+      'Walk me through the analysis',
+      'Re-run analysis',
+      'Run a pre-mortem',
+    ]);
+    const types = chips.map((c) => c.action_type ?? null);
+    expect(types).toEqual(['explain_results', 'run_analysis', null]);
+  });
+
+  it('first two chips carry IDs that match the deterministic chip-click whitelist convention', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [successfulWhatWouldFlipFact()],
+      priorFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips[0].id).toBe('chip_action_explain_results');
+    expect(chips[1].id).toBe('chip_action_rerun_analysis');
+    expect(chips[2].id).toBe('chip_prompt_run_pre_mortem');
+  });
+
+  it('every chip is schema-valid per the boundary ActionSchema', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [successfulWhatWouldFlipFact()],
+      priorFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    for (const c of chips) {
+      expect(() => ActionSchema.parse(c)).not.toThrow();
+    }
+  });
+
+  it('does NOT fire for a precondition-UNMET what_would_flip fact (falls through to existing rule)', () => {
+    const preconditionFailFact: HandlerFact = {
+      fact_type: 'what_would_flip',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: true, option_count: 2 },
+    };
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [preconditionFailFact],
+      priorFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    // Existing precondition rule emits exactly ONE chip ("Run analysis").
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+  });
+
+  it('does NOT regress the explain_results SUCCESS rule (still emits its single chip)', () => {
+    const successfulExplainResultsFact: HandlerFact = {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: false, option_count: 2 },
+    };
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [successfulExplainResultsFact],
+      priorFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('what_would_flip');
+  });
+});
+
 // V5 0.9.0 — deriveProjectionStatus is the single helper that flattens
 // "no real run_analysis fact" / "fact present, projection empty" / "fact
 // present, projection populated" into one enum. Used by the facts_absent

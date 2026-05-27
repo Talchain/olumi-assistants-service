@@ -124,6 +124,129 @@ describe('decideNoOpRecovery', () => {
     }
   });
 
+  describe('explore_factor (safety-net for label-shaped no-op messages)', () => {
+    const NODES = [
+      { label: 'Existing Team Size' },
+      { label: 'Launch Now' },
+    ];
+
+    it('fires when message contains a known label, no mutation, with prior analysis fact', () => {
+      // Exact symptom of the staging failure: a chip-click submit
+      // message slipped past the upstream intercept (e.g. an unusual
+      // dash variant, or a future chip with a different prefix) and
+      // reached V4 LLM, which no-opped. The safety net recovers it.
+      const result = decideNoOpRecovery({
+        message: 'Explore Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'unknown',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor');
+      expect(result.has_run_analysis_fact).toBe(true);
+      expect(result.assistantText).not.toBeNull();
+      expect(result.assistantText).toContain("haven't changed the model");
+      expect(result.suggestedActions).toHaveLength(3);
+      const types = result.suggestedActions.map((a) => a.action_type ?? null);
+      expect(types).toEqual(['explain_results', 'what_would_flip', null]);
+    });
+
+    it('matches substring (label embedded inside a longer message)', () => {
+      // "Tell me about Launch Now if you can" — contains "Launch Now"
+      // as a substring. No mutation signal. With a run_analysis fact,
+      // the safety net should fire.
+      const result = decideNoOpRecovery({
+        message: 'Tell me about Launch Now if you can.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('explore_factor');
+    });
+
+    it('does NOT fire without a prior analysis fact (falls through to ambiguous)', () => {
+      const result = decideNoOpRecovery({
+        message: 'Existing Team Size',
+        priorFacts: [],
+        freshness: 'none',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('does NOT fire when message contains a mutation signal (real edit)', () => {
+      // "Set Existing Team Size to 8" carries a mutation signal;
+      // the safety net defers so the V4 LLM's existing copy
+      // survives (covered by the ambiguous branch).
+      const result = decideNoOpRecovery({
+        message: 'Set Existing Team Size to 8.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('does NOT fire when no nodes are supplied (existing tests use this implicit default)', () => {
+      // This is exactly the shape of the existing ambiguous tests at
+      // line 128-154 — they pass no `nodes` field. The safety net
+      // must remain inert in that case so existing behaviour is
+      // preserved.
+      const result = decideNoOpRecovery({
+        message: 'Change pricing factor',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('does NOT fire when nodes is empty', () => {
+      const result = decideNoOpRecovery({
+        message: 'Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: [],
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
+    it('analytical intent + fresh fact precedence: analytical_fresh wins over explore_factor', () => {
+      // The analytical branches run first. A message that both
+      // looks analytical AND contains a known label should match
+      // analytical_fresh, not explore_factor.
+      const result = decideNoOpRecovery({
+        message: 'Walk me through the analysis. Existing Team Size matters.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.branch).toBe('analytical_fresh');
+    });
+
+    it('passes egress forbidden-phrase + success-claim guards', async () => {
+      const { findForbiddenPhraseHit, findSuccessClaimHit } = await import(
+        '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js'
+      );
+      const result = decideNoOpRecovery({
+        message: 'Existing Team Size',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: NODES,
+      });
+      expect(result.assistantText).not.toBeNull();
+      const text = result.assistantText ?? '';
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+      expect(findSuccessClaimHit(text)).toBeNull();
+    });
+  });
+
   describe('ambiguous (preserves existing copy)', () => {
     it('does NOT match general conversational messages without a vague-edit signal', () => {
       const conversational = [

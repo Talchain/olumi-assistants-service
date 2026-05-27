@@ -894,7 +894,10 @@ export const TelemetryEvents = {
   // structural enums + booleans only. `intent_class` is the
   // AnalyticalIntentClass enum or null; `branch_taken` is the recovery
   // branch enum (analytical_fresh / analytical_stale / analytical_none /
-  // vague_edit / ambiguous).
+  // vague_edit / explore_factor / ambiguous). The `explore_factor`
+  // branch was added as a safety net for label-shaped no-op messages
+  // that slip past the upstream `tryPostAnalysisLabelIntercept`
+  // (V5PostAnalysisLabelIntercept event below).
   V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
 
   // V5 edit lifecycle recovery v1 — pre-LLM intercept for the legacy
@@ -1165,6 +1168,37 @@ export const TelemetryEvents = {
   OrchestratorXmlParseFallback: "orchestrator.xml_parse_fallback",
   CeeStage2EdgeCountInvariantViolated: "cee.stage2.edge_count_invariant_violated",
   CeePostEnrichInvariantViolation: "cee.post_enrich.invariant_violation",
+
+  // V5 post-analysis exploration intercept — fires when route-v2's
+  // `tryPostAnalysisLabelIntercept` short-circuits a chip-click /
+  // free-text submission that would otherwise dispatch into V4
+  // `edit_graph` and no-op. Two predicates share the event so
+  // dashboards can attribute hits to:
+  //   - 'bare_label'       — forward-looking gate (new chips and
+  //                          free-text label submissions).
+  //   - 'legacy_fill_in'   — catches the EXACT in-flight failing
+  //                          shape `Change <known label> [—|–|-]`
+  //                          rendered by the pre-Touch-4
+  //                          `buildLabelChip` in
+  //                          `compose/edit-clarify-response.ts`.
+  //                          Can be retired once that chip's submit
+  //                          message has bled through deployed UIs.
+  //
+  // Payload (structural enums + booleans only — NO label text):
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - predicate: 'bare_label' | 'legacy_fill_in'
+  //   - match_kind: 'exact'
+  //   - node_kind: string — the matched graph node's `kind` field
+  //     ('factor' | 'option' | 'driver' | ...); not enumerated so a
+  //     future kind doesn't require a telemetry-registry edit.
+  //   - chips_emitted: number — always 3 in the current composer;
+  //     dashboards can alert on drift if a future change reduces it.
+  //
+  // No label text crosses the wire. The matched node's `label`
+  // surfaces ONLY in the user-facing `assistant_text` via the
+  // composer in `routing/post-analysis-label-intercept.ts`.
+  V5PostAnalysisLabelIntercept: "v5.post_analysis_label_intercept",
 } as const;
 
 /**

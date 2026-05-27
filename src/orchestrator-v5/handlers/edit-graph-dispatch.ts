@@ -98,6 +98,7 @@ type NoOpRecoveryBranch =
   | 'analytical_stale'
   | 'analytical_none'
   | 'vague_edit'
+  | 'explore_factor'
   | 'ambiguous';
 
 interface NoOpRecoveryDecision {
@@ -120,6 +121,17 @@ interface DecideNoOpRecoveryInput {
    * suppressed and the copy nudges getting the model ready first.
    */
   readonly graphReady: boolean;
+  /**
+   * Current graph nodes — used ONLY by the `explore_factor` safety-net
+   * branch to detect a no-op message that references a known graph
+   * label without an edit verb / value (the symptom of a label-chip
+   * click that slipped past the upstream `tryPostAnalysisLabelIntercept`
+   * in route-v2.ts). An empty array is acceptable — the branch then
+   * never fires and recovery falls through to the existing ambiguous
+   * fallback. Each entry needs only `label` (case-insensitive substring
+   * compared against `message`); `id` / `kind` are unused here.
+   */
+  readonly nodes?: readonly { readonly label: string }[] | null;
 }
 
 const NO_OP_FRESH_TEXT =
@@ -142,6 +154,11 @@ const NO_OP_NONE_GRAPH_NOT_READY_TEXT =
 const NO_OP_VAGUE_EDIT_TEXT =
   "I haven't changed the model yet. Tell me which factor or edge you "
   + 'want to adjust and how.';
+
+const NO_OP_EXPLORE_FACTOR_TEXT =
+  "I haven't changed the model. It looks like you would like to "
+  + 'explore this. I can walk you through the analysis, look at '
+  + 'what could change the outcome, or run a pre-mortem.';
 
 const EXPLAIN_RESULTS_CHIP: BoundaryAction = Object.freeze({
   id: 'chip_action_explain_results',
@@ -167,6 +184,57 @@ const RUN_ANALYSIS_CHIP: BoundaryAction = Object.freeze({
   message: 'Run analysis.',
   action_type: 'run_analysis' as const,
 });
+
+/**
+ * What-would-flip exploration chip. Carries `action_type:
+ * 'what_would_flip'` so a click hits the deterministic chip-click
+ * fast path in route-v2.ts:819 — zero Sonnet round-trip. Used by the
+ * `explore_factor` safety-net branch as one of three exploration
+ * affordances.
+ */
+const WHAT_WOULD_FLIP_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_what_would_flip',
+  label: 'What could change the outcome?',
+  message: 'What could change the outcome of this analysis?',
+  action_type: 'what_would_flip' as const,
+});
+
+/**
+ * Pre-mortem prompt chip. No `action_type` because there is no
+ * registered handler for the pre-mortem flow; the click routes
+ * through TurnExecutor as a normal user turn. Mirrors the
+ * decide-stage rule pattern in
+ * `compose/chip-generator.ts:541-546`.
+ */
+const RUN_PRE_MORTEM_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_run_pre_mortem',
+  label: 'Run a pre-mortem',
+  message: 'Imagine this decision went wrong. What would have caused it?',
+});
+
+/**
+ * Case-insensitive substring check: does `message` contain any of
+ * `nodes`'s labels? Labels shorter than 3 characters are skipped
+ * (single-letter labels would false-positive on common words).
+ * Pure helper local to the `explore_factor` branch — does NOT
+ * mirror the upstream intercept's exact-equality match; here we
+ * want a looser safety net because the V4 LLM has already failed
+ * and the user deserves a non-empty recovery.
+ */
+function messageContainsKnownLabel(
+  message: string,
+  nodes: readonly { readonly label: string }[] | null | undefined,
+): boolean {
+  if (!nodes || nodes.length === 0) return false;
+  const lower = message.toLowerCase();
+  for (const node of nodes) {
+    if (typeof node.label !== 'string') continue;
+    const label = node.label.trim();
+    if (label.length < 3) continue;
+    if (lower.includes(label.toLowerCase())) return true;
+  }
+  return false;
+}
 
 export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecoveryDecision {
   const hasRunAnalysisFact = input.priorFacts.some(
@@ -230,6 +298,39 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
       has_run_analysis_fact: hasRunAnalysisFact,
       assistantText: NO_OP_VAGUE_EDIT_TEXT,
       suggestedActions: [],
+    };
+  }
+
+  // Safety-net branch — `explore_factor`. Fires when:
+  //   - no analytical intent matched (handled above),
+  //   - no mutation signal (the user did not supply a value),
+  //   - no vague-edit phrasing (handled above),
+  //   - BUT the message contains a known graph node label, AND
+  //   - a successful prior `run_analysis` fact exists.
+  //
+  // This is the second line of defence behind
+  // `tryPostAnalysisLabelIntercept` in route-v2.ts: if anything still
+  // dispatches into the V4 LLM and no-ops with a message that mentions
+  // a known label (e.g. a chip with an unusual submit shape, or a
+  // user typing a factor name plus a stray word), we turn the dead
+  // end into three useful exploration affordances rather than
+  // surfacing the bland deterministic fallback with no chips.
+  //
+  // Copy + chips are identical in intent to the upstream intercept
+  // composer (`compose/post-analysis-label-intercept.ts` —
+  // co-evolved). They are duplicated rather than imported to keep
+  // this module's no-circular-dependency contract intact.
+  if (
+    !mutationSignal
+    && hasRunAnalysisFact
+    && messageContainsKnownLabel(input.message, input.nodes ?? null)
+  ) {
+    return {
+      branch: 'explore_factor',
+      intent_class: intentClass,
+      has_run_analysis_fact: true,
+      assistantText: NO_OP_EXPLORE_FACTOR_TEXT,
+      suggestedActions: [EXPLAIN_RESULTS_CHIP, WHAT_WOULD_FLIP_CHIP, RUN_PRE_MORTEM_CHIP],
     };
   }
 
@@ -989,6 +1090,11 @@ export async function dispatchEditGraph(
         priorFacts: priorFactsForRecovery,
         freshness: freshness.freshness,
         graphReady: graphReadyForRecovery,
+        // Pass the post-parse graph nodes so the `explore_factor`
+        // safety-net branch can detect a no-op message that mentions a
+        // known label (the symptom of any path that slips past the
+        // upstream `tryPostAnalysisLabelIntercept` in route-v2.ts).
+        nodes: parsedGraph.nodes,
       });
       if (recoveryOutcome.assistantText !== null) {
         response = { ...response, assistant_text: recoveryOutcome.assistantText };

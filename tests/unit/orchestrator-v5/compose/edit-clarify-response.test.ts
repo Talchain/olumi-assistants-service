@@ -182,6 +182,58 @@ describe('composeEditClarifyResponse', () => {
       }
     });
 
+    it('chip submit messages do NOT match EDIT_GRAPH_POSITIVE_REGEX (no edit-verb re-trigger)', () => {
+      // Locked regression. Pre-Touch-4 the buildLabelChip emitted
+      // `message: "Change ${label} — "` (with the em-dash + trailing
+      // space). The bare verb "Change" matched EDIT_GRAPH_POSITIVE_REGEX
+      // in route-v2.ts, so a click re-dispatched into V4 edit_graph
+      // with a value-less prompt → LLM no-op → ambiguous recovery
+      // dead end (the observed staging failure). The new chip phrasing
+      // ("For ${label}, what value should we use?") contains no edit
+      // verb, so a click falls through to TurnExecutor / Sonnet which
+      // can ask for the value.
+      //
+      // Source of truth for the regex: src/orchestrator/route-v2.ts at
+      // `EDIT_GRAPH_POSITIVE_REGEX`. Duplicated here as a literal so
+      // this test does not require the regex to be exported (which
+      // would create needless coupling between route-v2 and this
+      // compose-layer test).
+      const EDIT_GRAPH_POSITIVE_REGEX =
+        /\b(change|update|edit|modify|remove|delete|add|adjust|set|reduce|increase|decrease|tweak|raise|lower)\b/i;
+
+      const r = composeEditClarifyResponse({
+        reason: 'vague_edit',
+        stage: 'analyse',
+        nodes: FACTOR_NODES,
+      });
+      const labelChips = r.suggested_actions.filter((c) =>
+        c.id.startsWith('edit_clarify_') && c.id !== 'edit_clarify_cancel',
+      );
+      expect(labelChips.length).toBeGreaterThan(0);
+      for (const chip of labelChips) {
+        expect(chip.message, `chip message="${chip.message}" must not contain an edit verb`).not.toMatch(
+          EDIT_GRAPH_POSITIVE_REGEX,
+        );
+      }
+    });
+
+    it('chip submit messages are question-shaped (invite the user to supply the value)', () => {
+      const r = composeEditClarifyResponse({
+        reason: 'vague_edit',
+        stage: 'analyse',
+        nodes: FACTOR_NODES,
+      });
+      const labelChips = r.suggested_actions.filter((c) =>
+        c.id.startsWith('edit_clarify_') && c.id !== 'edit_clarify_cancel',
+      );
+      for (const chip of labelChips) {
+        // Pinned shape — "For <label>, what value should we use?" —
+        // chosen so it (a) contains no edit verb, (b) is clearly a
+        // question, (c) interpolates the canonical label.
+        expect(chip.message).toMatch(/^For .+,\s+what value should we use\?$/);
+      }
+    });
+
     it('skips empty / whitespace-only / short labels', () => {
       const r = composeEditClarifyResponse({
         reason: 'vague_edit',

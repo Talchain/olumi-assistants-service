@@ -642,4 +642,202 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
     const body = JSON.parse(res.body);
     expect(body.assistant_text).not.toContain('still current');
   });
+
+  // ──────────────────────────────────────────────────────────────────
+  // V5 post-analysis exploration intercept — end-to-end coverage
+  // for the new `tryPostAnalysisLabelIntercept` route-v2 wiring and
+  // the deterministic composer in
+  // `routing/post-analysis-label-intercept.ts`. Covers:
+  //   - Predicate A (bare label) — forward-looking gate.
+  //   - Predicate B (legacy `Change <label> —`) — the EXACT observed
+  //     staging failure shape.
+  //   - The Touch-4 chip-message rewrite — new chip messages must NOT
+  //     trip `EDIT_GRAPH_POSITIVE_REGEX` so a click falls through to
+  //     TurnExecutor instead of re-entering edit_graph.
+  // ──────────────────────────────────────────────────────────────────
+  describe('V5 post-analysis label intercept (Predicates A + B)', () => {
+    /**
+     * Build the request body for a post-analysis turn where prior
+     * analysis is fresh — Predicate A AND Predicate B require this.
+     * Computes the live graph hash so `isPriorAnalysisFreshFromRequest`
+     * returns true.
+     */
+    async function postAnalysisPayload(
+      message: string,
+      turnId = '11111111-1111-4111-8111-111111111ee0',
+    ): Promise<Record<string, unknown>> {
+      const { computeAnalysisAffectingGraphHash } = await import(
+        '../../../src/orchestrator-v5/context/graph-hash.js'
+      );
+      const liveHash = computeAnalysisAffectingGraphHash(GRAPH_STATE as never);
+      return {
+        ...payload({ message, turn_id: turnId }),
+        analysis_state: {
+          analysis_status: 'completed',
+          meta: {
+            graph_hash_at_run: liveHash,
+            seed_used: 0,
+            n_samples: 0,
+            response_hash: '',
+          },
+        },
+      };
+    }
+
+    // Case 1 — Predicate A: bare label click.
+    it('bare known label "Hiring and Salary Cost" → intercepted; NO edit_graph dispatch; three chips emitted', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: await postAnalysisPayload('Hiring and Salary Cost'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+
+      const intercept = findEvent('v5.post_analysis_label_intercept');
+      expect(intercept).toBeDefined();
+      expect(intercept!.predicate).toBe('bare_label');
+      expect(intercept!.match_kind).toBe('exact');
+      expect(intercept!.node_kind).toBe('factor');
+      expect(intercept!.chips_emitted).toBe(3);
+
+      // No no-op recovery should fire — the intercept short-circuited
+      // BEFORE V4 LLM was called.
+      expect(emittedNames()).not.toContain('v5.edit_graph.no_op_recovery');
+
+      const body = JSON.parse(res.body);
+      expect(body.assistant_text).toContain('Hiring and Salary Cost');
+      expect(body.suggested_actions).toHaveLength(3);
+      const actionTypes = body.suggested_actions.map(
+        (a: { action_type?: string | null }) => a.action_type ?? null,
+      );
+      expect(actionTypes).toEqual(['explain_results', 'run_analysis', null]);
+    });
+
+    // Case 2 — Predicate B: the EXACT observed staging failure.
+    it('legacy "Change Hiring and Salary Cost — " → intercepted; NO edit_graph dispatch; predicate=legacy_fill_in', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: await postAnalysisPayload(
+          'Change Hiring and Salary Cost — ',
+          '11111111-1111-4111-8111-111111111ee1',
+        ),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+
+      const intercept = findEvent('v5.post_analysis_label_intercept');
+      expect(intercept).toBeDefined();
+      expect(intercept!.predicate).toBe('legacy_fill_in');
+      expect(intercept!.chips_emitted).toBe(3);
+      expect(emittedNames()).not.toContain('v5.edit_graph.no_op_recovery');
+
+      const body = JSON.parse(res.body);
+      expect(body.suggested_actions).toHaveLength(3);
+    });
+
+    // Predicate gates — without fresh prior, the intercept defers and
+    // the message returns to the existing routing chain (no intercept
+    // telemetry, no chips from this module).
+    it('bare label WITHOUT fresh prior analysis → intercept does NOT fire', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({
+          message: 'Hiring and Salary Cost',
+          turn_id: '11111111-1111-4111-8111-111111111ee2',
+        }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(emittedNames()).not.toContain('v5.post_analysis_label_intercept');
+    });
+
+    // Predicate B with a value after the dash must defer so the V4
+    // LLM gets the real edit attempt. The downstream path then
+    // depends on whether the mock response is wired; here we assert
+    // ONLY the intercept's product behaviour (defers) — the
+    // downstream 500 vs 200 split is the dispatchEditGraph mock's
+    // concern, not the intercept's.
+    it('legacy shape WITH value after dash ("Change Revenue — 100") → intercept does NOT fire', async () => {
+      dispatchEditGraphMock.mockResolvedValueOnce({
+        response: {
+          response_version: 2,
+          assistant_text: 'ok',
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+        commitPerformed: true,
+        graph: null,
+      });
+      await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: await postAnalysisPayload(
+          'Change Revenue — 100',
+          '11111111-1111-4111-8111-111111111ee3',
+        ),
+      });
+      expect(emittedNames()).not.toContain('v5.post_analysis_label_intercept');
+    });
+
+    // Explicit edit verbs must NEVER be intercepted. Three shapes
+    // cover the gate's negative-verb-list: "Set" (line-leading
+    // imperative), "Change" (legacy verb), "Adjust" (alternate
+    // edit verb). Each must defer; the intercept never fires.
+    it.each([
+      'Set Revenue to 100',
+      'Change Hiring and Salary Cost to 50',
+      'Adjust Revenue by 10',
+    ])('explicit-edit message "%s" → intercept does NOT fire', async (message) => {
+      dispatchEditGraphMock.mockResolvedValue({
+        response: {
+          response_version: 2,
+          assistant_text: 'ok',
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+        commitPerformed: true,
+        graph: null,
+      });
+      await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: await postAnalysisPayload(
+          message,
+          '11111111-1111-4111-8111-111111111ee4',
+        ),
+      });
+      expect(emittedNames()).not.toContain('v5.post_analysis_label_intercept');
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Touch 4 regression — the new chip submit message
+  // ("For ${label}, what value should we use?") must NOT re-trigger
+  // EDIT_GRAPH_POSITIVE_REGEX. If it did, the click would re-enter
+  // edit_graph and reproduce the same closed-loop trap.
+  // ──────────────────────────────────────────────────────────────────
+  describe('Touch 4 chip-message hardening (regression)', () => {
+    it('new buildLabelChip message "For Revenue, what value should we use?" → does NOT dispatch edit_graph', async () => {
+      // This is the literal shape a Touch-4-hardened chip would
+      // submit. Asserts the message falls through to TurnExecutor
+      // (which the test setup's mock LLM router responds to with a
+      // bland text reply), NOT into dispatchEditGraph.
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({
+          message: 'For Revenue, what value should we use?',
+          turn_id: '11111111-1111-4111-8111-111111111ee5',
+        }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    });
+  });
 });
