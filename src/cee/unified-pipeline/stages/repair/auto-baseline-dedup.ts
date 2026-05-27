@@ -32,42 +32,69 @@
  * the explicit options (a true no-action baseline). That graph passes
  * OPTIONS_IDENTICAL today and must continue to pass. This dedup ONLY
  * fires inside groups whose intervention signatures collide AND that
- * contain ≥1 baseline AND ≥1 non-baseline.
+ * contain ≥1 explicit-baseline option AND ≥1 non-explicit option.
  *
- * SAFETY RULES
+ * SAFETY RULES (round-2 review: strict-flag-only deletion)
  *
- * 1. Detect baseline using the SAME priority as graph-readiness.ts:206-217
- *    (explicit `is_baseline === true` → label match → id-suffix). This
- *    ensures dedup decisions align with existing baseline-aware code.
+ * 1. Deletion requires an EXPLICIT `is_baseline === true` marker —
+ *    either `node.data.is_baseline === true` (canonical) or
+ *    `node.is_baseline === true` (legacy). See `isExplicitBaseline`.
+ *    Heuristic detection (label match / id-suffix) is NOT used for
+ *    deletion — it would risk silently removing a user-explicit
+ *    "Status Quo" / "No Change" / `_status_quo`-id option supplied
+ *    deliberately as a decision alternative.
+ *
  * 2. Within a duplicate-signature group:
- *    - If ≥1 baseline AND ≥1 non-baseline → drop baselines, keep
- *      non-baselines. This is the load-bearing case.
- *    - If all options in the group are baselines → DO NOT dedup (would
- *      drop all options in the group). Fall through to PR #202 bypass.
- *    - If all options in the group are non-baselines → DO NOT dedup
+ *    - If ≥1 EXPLICIT baseline AND ≥1 non-explicit option → drop the
+ *      explicit baselines, keep the non-explicit options. Load-bearing
+ *      case (the staging pricing-brief failure).
+ *    - If all options are explicit baselines → DO NOT dedup (would
+ *      drop all options). Fall through to PR #202 bypass.
+ *    - If no option has the explicit flag, BUT one or more options
+ *      heuristically look like baselines (label / id-suffix) →
+ *      DO NOT dedup; emit a diagnostic-only
+ *      `cee.auto_baseline_dedup.heuristic_only_collision` telemetry
+ *      event so operators can see LLM prompt drift (missing
+ *      is_baseline=true on a status-quo-shaped option). Collision
+ *      flows to PR #202 bypass for a typed user-facing clarification.
+ *    - If no explicit baseline AND no heuristic match → DO NOT dedup
  *      (the user-explicit duplicates are a genuine LLM error worth
  *      raising to the user). Fall through to PR #202 bypass.
- * 3. When a baseline is dropped, ALL edges that reference its node id
- *    are removed (no dangling edges; preserves DAG invariants).
- * 4. ctx.graph is mutated in place. Subsequent substeps see a clean graph.
+ *
+ * 3. When an explicit baseline is dropped, ALL edges that reference
+ *    its node id are removed (no dangling edges; preserves DAG
+ *    invariants).
+ *
+ * 4. ctx.graph is mutated in place. Subsequent substeps see a clean
+ *    graph. The deterministic sweep's OPTIONS_IDENTICAL validator
+ *    then sees no collision (for the dedup'd case) and the rest of
+ *    the pipeline produces a valid persisted graph.
  *
  * RUN ORDER
  *
  * This substep runs BEFORE the deterministic sweep (substep 1) so the
  * validator inside the sweep never sees the auto-baseline duplicate.
- * If, after dedup, non-baseline duplicates remain, the deterministic
- * sweep still detects OPTIONS_IDENTICAL and the PR #202 bypass fires
- * as before. The user's "Do not loosen graph validation" constraint is
- * honoured — we don't widen the validator, we just clean up a known
- * LLM artefact before it reaches the validator.
+ * If, after dedup, OPTIONS_IDENTICAL collisions remain (e.g. the LLM
+ * forgot to set is_baseline=true, or two user-explicit options have
+ * identical interventions), the deterministic sweep still detects
+ * OPTIONS_IDENTICAL and the PR #202 bypass fires as before. The
+ * user's "Do not loosen graph validation" constraint is honoured —
+ * we don't widen the validator, we just clean up a known LLM artefact
+ * (an explicit-baseline-flagged duplicate) before it reaches the
+ * validator.
  */
 
 import type { StageContext } from "../../types.js";
 import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 
-// Baseline detection — copied verbatim from
-// src/routes/assist.v1.graph-readiness.ts:209-217 to keep the heuristic
-// aligned with existing baseline-aware surfaces.
+// Heuristic baseline tokens — used ONLY by `looksHeuristicallyLikeBaseline`
+// (diagnostic-only path) so operators can see when the LLM produces an
+// option that LOOKS like a baseline but lacks the explicit is_baseline
+// flag (prompt drift signal). Vocabulary is copied from
+// src/routes/assist.v1.graph-readiness.ts:209-217 to keep dashboards
+// aligned with existing baseline-aware surfaces — but, critically,
+// these tokens NEVER authorise deletion. Deletion requires explicit
+// is_baseline === true (see `isExplicitBaseline`).
 const BASELINE_LABELS = new Set(["status quo", "baseline", "do nothing", "no change"]);
 const BASELINE_ID_SUFFIXES = ["_status_quo", "_baseline"];
 

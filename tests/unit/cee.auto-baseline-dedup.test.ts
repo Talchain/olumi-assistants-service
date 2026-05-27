@@ -24,6 +24,7 @@ vi.mock("../../src/utils/telemetry.js", async (importOriginal) => {
 
 import { runAutoBaselineDedup } from "../../src/cee/unified-pipeline/stages/repair/auto-baseline-dedup.js";
 import type { StageContext, PipelineOutcome } from "../../src/cee/unified-pipeline/types.js";
+import { emit, TelemetryEvents } from "../../src/utils/telemetry.js";
 
 function makeOutcome(): PipelineOutcome {
   return {
@@ -394,6 +395,81 @@ describe("runAutoBaselineDedup", () => {
     expect(ctx.pipelineOutcome.warnings).toHaveLength(0);
     // repairTrace is NOT populated for heuristic-only (no mutation = no trace).
     expect(ctx.repairTrace).toBeUndefined();
+  });
+
+  it("emits CeeAutoBaselineHeuristicOnlyCollision event directly on heuristic-only collision (round-2 review test #3)", () => {
+    // Reviewer specifically requested: assert the diagnostic telemetry
+    // is emitted, not just that `report.heuristic_only_collisions` is
+    // incremented. The emit call surfaces the drift signal to the
+    // observability layer (datadog/sentry/etc.).
+    vi.mocked(emit).mockClear();
+    const graph = {
+      nodes: [
+        { id: "dec", kind: "decision" },
+        optionNode("opt_explicit", { fac_x: 0.5 }),
+        optionNode("opt_user_status_quo", { fac_x: 0.5 }, { label: "Status Quo" }),
+      ],
+      edges: [],
+    };
+    runAutoBaselineDedup(makeCtx(graph));
+
+    // Direct assertion: the emit call landed.
+    const calls = vi.mocked(emit).mock.calls;
+    const heuristicEvent = calls.find(
+      (c) => c[0] === TelemetryEvents.CeeAutoBaselineHeuristicOnlyCollision,
+    );
+    expect(heuristicEvent).toBeDefined();
+    // Payload is count-only (no IDs in the emitted event — IDs are in
+    // the structured log line for operator diagnostics).
+    expect(heuristicEvent![1]).toMatchObject({
+      heuristic_only_groups: 1,
+      heuristic_only_option_ids_count: 1,
+    });
+    expect(heuristicEvent![1]).not.toHaveProperty("heuristic_only_option_ids");
+
+    // The dedup-applied event is NOT emitted on heuristic-only paths.
+    const appliedEvent = calls.find(
+      (c) => c[0] === TelemetryEvents.CeeAutoBaselineDedupApplied,
+    );
+    expect(appliedEvent).toBeUndefined();
+  });
+
+  it("emits CeeAutoBaselineDedupApplied event directly on successful dedup (round-2 review test #3)", () => {
+    // Paired test: when dedup DOES fire, the applied event lands with
+    // count-only payload.
+    vi.mocked(emit).mockClear();
+    const graph = {
+      nodes: [
+        { id: "dec", kind: "decision" },
+        optionNode("opt_explicit", { fac_x: 0.5 }),
+        optionNode(
+          "opt_status_quo",
+          { fac_x: 0.5 },
+          { is_baseline: true, label: "Status Quo" },
+        ),
+      ],
+      edges: [edge("dec", "opt_explicit"), edge("dec", "opt_status_quo")],
+    };
+    runAutoBaselineDedup(makeCtx(graph));
+
+    const calls = vi.mocked(emit).mock.calls;
+    const appliedEvent = calls.find(
+      (c) => c[0] === TelemetryEvents.CeeAutoBaselineDedupApplied,
+    );
+    expect(appliedEvent).toBeDefined();
+    expect(appliedEvent![1]).toMatchObject({
+      dropped_option_ids_count: 1,
+      dropped_edge_count: 1,
+      groups_evaluated: 1,
+    });
+    // Count-only — IDs in the structured log, not the emit event.
+    expect(appliedEvent![1]).not.toHaveProperty("dropped_option_ids");
+
+    // Heuristic-only event is NOT emitted on the applied path.
+    const heuristicEvent = calls.find(
+      (c) => c[0] === TelemetryEvents.CeeAutoBaselineHeuristicOnlyCollision,
+    );
+    expect(heuristicEvent).toBeUndefined();
   });
 
   it("explicit is_baseline=true takes priority over a non-baseline-flagged 'Status Quo' label", () => {

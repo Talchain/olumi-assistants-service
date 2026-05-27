@@ -75,21 +75,29 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
 
   log.info({ requestId: ctx.requestId, stage: "repair" }, "Unified pipeline: Stage 4 (Repair) started");
 
-  // Substep 0.9: Auto-baseline dedup — drops auto-injected status-quo /
-  // baseline options that duplicate an explicit option's intervention
-  // signature BEFORE the deterministic sweep's OPTIONS_IDENTICAL check.
-  // Only fires when a duplicate signature group contains both a baseline
-  // AND a non-baseline option (the load-bearing case from staging
-  // pricing-brief failures). Verified-passing fixtures (hiring brief)
-  // are unaffected because their baselines have distinct interventions.
-  // See auto-baseline-dedup.ts for the full safety rule.
+  // Substep 0.9: Auto-baseline dedup — drops options carrying an
+  // EXPLICIT `is_baseline === true` flag that duplicate another
+  // (non-explicit) option's intervention signature, BEFORE the
+  // deterministic sweep's OPTIONS_IDENTICAL check.
+  //
+  // Fires only when a duplicate-signature group contains BOTH an
+  // explicit-baseline option AND a non-explicit option (the
+  // load-bearing case from staging pricing-brief failures). Heuristic-
+  // only matches (label like "Status Quo", id ending `_status_quo`,
+  // etc.) emit a diagnostic-only telemetry event and FALL THROUGH to
+  // the PR #202 OPTIONS_IDENTICAL bypass — never silently delete a
+  // user-supplied option. Verified-passing fixtures (hiring brief)
+  // are unaffected because their baselines have distinct interventions
+  // and the validator never raises a collision in the first place.
+  // See auto-baseline-dedup.ts for the full safety contract.
   runAutoBaselineDedup(ctx);
 
-  // Substep 1: Deterministic sweep — resolves mechanical violations, unreachable factors, status quo
-  // Runs FIRST (after 0.9) so mechanical fixes (NaN, sign, status quo wiring)
-  // are applied before orchestrator validation can 422 on issues the sweep
-  // can resolve. Sees the dedup'd graph from 0.9 — never raises
-  // OPTIONS_IDENTICAL for the auto-baseline-duplicates-explicit case.
+  // Substep 1: Deterministic sweep — resolves mechanical violations,
+  // unreachable factors, status quo. Runs after 0.9 so mechanical
+  // fixes (NaN, sign, status quo wiring) are applied before
+  // orchestrator validation can 422 on issues the sweep can resolve.
+  // Sees the dedup'd graph from 0.9 — never raises OPTIONS_IDENTICAL
+  // for the explicit-baseline-duplicates-non-explicit case.
   await runDeterministicSweep(ctx);
 
   // Substep 1.5: Pre-LLM-repair fail-fast gate for OPTIONS_IDENTICAL.

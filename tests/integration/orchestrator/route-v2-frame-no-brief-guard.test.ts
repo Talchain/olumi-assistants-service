@@ -265,10 +265,63 @@ describe('POST /orchestrate/v2/turn — frame-stage no-brief guard', () => {
     if (res.statusCode === 200) {
       const body = JSON.parse(res.body);
       const text = String(body.assistant_text ?? '');
-      expect(text).not.toContain("Let's start by framing");
-      expect(text).not.toContain("Send a single question");
+      expect(text).not.toContain("I need a single decision question");
+      expect(text).not.toContain("Include the options you're comparing");
     }
     // Should NOT short-circuit through the guard with the framing prompt.
     expect(res.statusCode).toBeLessThan(500);
+  });
+
+  // PR #203 round-2 review test #4: document the intended interception
+  // behaviour for legitimate frame-stage non-brief messages.
+  //
+  // The reviewer noted the guard is broad and may intercept legitimate
+  // early conversational input. The PRODUCT decision is that this is
+  // acceptable — the guard's framing copy is user-safe and avoids the
+  // worst-case TurnExecutor max_tokens fallback. This test documents
+  // and pins that intentional behaviour.
+  it('legitimate non-brief conversational message at frame is INTENTIONALLY intercepted with framing copy', async () => {
+    // A user opens the app and types a thoughtful but non-brief message
+    // (e.g. exploring what to model). Previously routed to Sonnet which
+    // often hit max_tokens. Now caught by the guard with a clear next
+    // step, no LLM cost. Messages chosen so they pass ingress validation
+    // but contain no decision-verb that would trigger draft_graph.
+    const conversationalMessages = [
+      "thinking through some product strategy options for next year",
+      "exploring different paths for the engineering team next quarter",
+      "mapping out what I might want to model with this tool today",
+    ];
+
+    let i = 0;
+    for (const message of conversationalMessages) {
+      runTurnExecutorMock.mockReset();
+      dispatchDraftGraphMock.mockReset();
+      // UUID format: 8-4-4-4-12 hex chars. Use a hex-formatted index in
+      // the last segment.
+      const idx = (i++).toString(16).padStart(2, '0');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'message',
+          turn_id: `55555555-5555-4555-8555-5555fbeef0${idx}`,
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          message,
+          turn_class: 'frame',
+          source: 'composer',
+        },
+      });
+
+      // Guard fires deterministically for all three; the broad LLM
+      // never runs; the user gets the framing prompt.
+      expect(res.statusCode).toBe(200);
+      expect(runTurnExecutorMock).not.toHaveBeenCalled();
+      expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+      const body = JSON.parse(res.body);
+      expect(body.assistant_text).toContain('decision question');
+      // Stays in frame stage — user remains on graph-creation path.
+      expect(body.stage_indicator).toBe('frame');
+    }
   });
 });
