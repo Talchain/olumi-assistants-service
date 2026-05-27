@@ -414,7 +414,7 @@ function buildInvokeInput(
  *
  * Returns `[]` only when all three sources are absent or empty.
  */
-function readResultsArraySources(
+export function readResultsArraySources(
   enrichment: Record<string, unknown>,
 ): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
   const sources: Array<ReadonlyArray<Record<string, unknown>>> = [];
@@ -460,7 +460,7 @@ function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<stri
  * fall back to the highest-probability entry (returns null if none of
  * the entries carry a usable win_probability).
  */
-function selectWinner(
+export function selectWinner(
   results: ReadonlyArray<Record<string, unknown>>,
   leadingOptionId: string | null,
 ): DecisionReviewInvokeInput['winner'] | null {
@@ -532,7 +532,7 @@ function projectOptionAsWinner(r: Record<string, unknown>): DecisionReviewInvoke
   };
 }
 
-function readGraph(enrichment: Record<string, unknown>): Record<string, unknown> {
+export function readGraph(enrichment: Record<string, unknown>): Record<string, unknown> {
   const raw = enrichment.graph;
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
@@ -887,11 +887,11 @@ function readFlipThresholdData(
 // Helpers — defensive narrowing for opaque enrichment reads
 // ============================================================================
 
-function readNumber(value: unknown): number | null {
+export function readNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function readRecord(value: unknown): Record<string, unknown> | null {
+export function readRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
@@ -905,7 +905,7 @@ function countArray(value: unknown): number {
  * Build factor_id → display label map from `enrichment.graph.nodes[]`.
  * Defensive: returns an empty Map when the graph shape isn't recognisable.
  */
-function buildNodeLabelMap(graph: Record<string, unknown>): Map<string, string> {
+export function buildNodeLabelMap(graph: Record<string, unknown>): Map<string, string> {
   const map = new Map<string, string>();
   const nodes = graph.nodes;
   if (!Array.isArray(nodes)) return map;
@@ -945,7 +945,7 @@ function buildNodeUnitMap(graph: Record<string, unknown>): Map<string, string> {
 /**
  * Read robustness.level defensively from the V2 envelope.
  */
-function readRobustnessLevel(enrichment: Record<string, unknown>): string | null {
+export function readRobustnessLevel(enrichment: Record<string, unknown>): string | null {
   const rob = readRecord(enrichment.robustness);
   if (!rob) return null;
   return typeof rob.level === 'string' ? rob.level : null;

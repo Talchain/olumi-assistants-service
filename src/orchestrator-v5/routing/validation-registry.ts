@@ -74,6 +74,34 @@ const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
   return '';
 };
 
+// V5 deterministic analysis-result headline: forward the handler's
+// `outcome.assistant_text` ONLY when it matches one of the safe shapes
+// the handler is permitted to emit — a locked-template prefix or the
+// deterministic headline pattern. Anything else falls back to the
+// safety-net literal so a misbehaving handler — or a test mock that
+// emits improvised prose — cannot reach the wire. This preserves the
+// pre-headline defence-in-depth invariant ("registry filters handler
+// output") while unlocking the headline path for the production
+// run_analysis handler.
+const RUN_ANALYSIS_TEMPLATE_PREFIX = 'Ran analysis on your current scenario';
+const RUN_ANALYSIS_HEADLINE_SHAPE = / currently leads\b/;
+const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
+  const fallback = 'Ran analysis on your current scenario.';
+  if (
+    outcome === null ||
+    typeof outcome !== 'object' ||
+    !('assistant_text' in outcome) ||
+    typeof (outcome as { assistant_text: unknown }).assistant_text !== 'string'
+  ) {
+    return fallback;
+  }
+  const text = (outcome as { assistant_text: string }).assistant_text;
+  if (text.length === 0) return fallback;
+  if (text.startsWith(RUN_ANALYSIS_TEMPLATE_PREFIX)) return text;
+  if (RUN_ANALYSIS_HEADLINE_SHAPE.test(text)) return text;
+  return fallback;
+};
+
 export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   run_analysis: {
     handler_id: 'run_analysis',
@@ -84,7 +112,7 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
     // either is a valid addressable target.
     accepted_entity_kinds: ['option', 'goal'],
     preconditions: runAnalysisPrecondition,
-    confirmation_template: 'Ran analysis on your current scenario.',
+    confirmation_template: runAnalysisConfirmationTemplate,
   },
   // 0.9.0 — V5 no-op routing handlers. None has a graph-level precondition;
   // explain_results and what_would_flip do their own analysis-fact-presence

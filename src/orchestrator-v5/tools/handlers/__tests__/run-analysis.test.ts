@@ -118,7 +118,7 @@ function makeInvocation(overrides?: Partial<HandlerInvocation>): HandlerInvocati
 // ---------------------------------------------------------------------------
 
 describe('run_analysis handler — happy path', () => {
-  it('returns a HandlerOutcome with DEFAULT template, exactly one fact, zero LLM calls', async () => {
+  it('returns a HandlerOutcome with a deterministic headline, exactly one fact, zero LLM calls', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(),
@@ -126,7 +126,16 @@ describe('run_analysis handler — happy path', () => {
 
     const outcome = await handler(makeInvocation());
 
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    // Headline derived from happy fixture: leader = Option A, top driver =
+    // Price (highest |elasticity| × confidence). No fragility resolvable
+    // (no from_label/to_label/from_node_id/to_node_id on the lone fragile
+    // edge, no graph nodes to map against), so Case B fires.
+    expect(outcome.assistant_text).toBe(
+      'Option A currently leads because Price is the strongest driver.',
+    );
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(fact.result.summary).toBe(outcome.assistant_text);  // card/chat parity
     expect(outcome.handler_facts).toHaveLength(1);
     expect(outcome.llm_calls_used).toBe(0);
   });
@@ -346,7 +355,8 @@ describe('run_analysis handler — freshness fields on the fact', () => {
 // ---------------------------------------------------------------------------
 
 describe('run_analysis handler — assistant_text ownership contract', () => {
-  const allowedTemplates = Object.values(RUN_ANALYSIS_ASSISTANT_TEMPLATES);
+  const allowedTemplates: readonly string[] = Object.values(RUN_ANALYSIS_ASSISTANT_TEMPLATES);
+  const HEADLINE_SHAPE = / currently leads\b/;
 
   it('DEFAULT template matches the locked string exactly', () => {
     expect(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT).toBe('Ran analysis on your current scenario.');
@@ -358,13 +368,16 @@ describe('run_analysis handler — assistant_text ownership contract', () => {
     );
   });
 
-  it('emitted assistant_text is exactly one of the two locked templates (allowlist)', async () => {
+  it('emitted assistant_text is deterministic — either a locked template or the headline shape', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(allowedTemplates).toContain(outcome.assistant_text);
+    const text = outcome.assistant_text;
+    const isTemplate = allowedTemplates.includes(text);
+    const isHeadline = HEADLINE_SHAPE.test(text);
+    expect(isTemplate || isHeadline).toBe(true);
   });
 
   it('assistant_text contains NO recommendation language', async () => {
@@ -389,15 +402,18 @@ describe('run_analysis handler — assistant_text ownership contract', () => {
     );
   });
 
-  it('assistant_text contains NO numeric values from the result payload', async () => {
+  it('assistant_text contains NO raw decimal numbers from the result payload', async () => {
+    // V5 deterministic headline (2026-05-28): integer percentages are
+    // permitted in the Case D headline ("X currently leads with 62%
+    // probability ..."). Raw decimals (e.g. "0.62", "0.123") remain
+    // forbidden — that was the load-bearing invariant. The happy fixture
+    // hits Case B (driver-only) and emits no numerals at all, so this
+    // assertion is still tight for the canonical golden path.
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    // No percent-style numbers
-    expect(outcome.assistant_text).not.toMatch(/\d+(\.\d+)?%/);
-    // No decimal numbers
     expect(outcome.assistant_text).not.toMatch(/\d+\.\d+/);
   });
 
@@ -515,7 +531,9 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('oc_a');
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    // option_comparison shape yields a Case D headline (winner + probability,
+    // no driver/fragility data in this synthetic fixture).
+    expect(outcome.assistant_text).toContain('OC A currently leads');
   });
 
   it('record with only option_label (no option_id) uses the label as id', async () => {
@@ -716,7 +734,10 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    // Single option at 100% → Case D headline (winner + probability).
+    expect(outcome.assistant_text).toBe(
+      'X currently leads with 100% probability. Run the follow-up checks before treating this as final.',
+    );
   });
 
   it('args validation failure (scenario_id non-string) → cause_kind=args_validation_failed', async () => {
@@ -858,7 +879,8 @@ describe('run_analysis handler — golden fixture coverage (R5)', () => {
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('opt_only');
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    // Minimal fixture has a single option at 1.0 → Case D headline.
+    expect(outcome.assistant_text).toContain('currently leads with 100% probability');
   });
 
   it('larger fixture (3 options) selects the top-prob option deterministically', async () => {
@@ -1122,7 +1144,7 @@ describe('run_analysis handler — numeric integrity guard', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    expect(outcome.assistant_text).toContain('Option A currently leads');
     expect(findInvalidNumericEvent()).toBeUndefined();
   });
 });
