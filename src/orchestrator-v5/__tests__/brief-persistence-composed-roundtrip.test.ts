@@ -30,7 +30,7 @@
  * regressions, etc.).
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { commitDirectAnswer } from '../commit.js';
 import { buildTurnContext } from '../build-turn-context.js';
@@ -358,7 +358,26 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
   // body; restoring after each keeps that idempotent and prevents a
   // future test that asserts on call counts from silently inheriting
   // prior invocations.
-  afterEach(() => {
+  //
+  // V5 latency gate: this suite specifically asserts the brief reaches
+  // the enricher, so it must run with the await path enabled. The
+  // production default (flag false) is covered separately by the
+  // fast-path tests in turn-executor-decision-review-fast-path.test.ts.
+  let priorAwaitFlag: string | undefined;
+  beforeEach(async () => {
+    priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
+    const { _resetConfigCache } = await import('../../config/index.js');
+    _resetConfigCache();
+  });
+  afterEach(async () => {
+    if (priorAwaitFlag === undefined) {
+      delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    } else {
+      process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+    }
+    const { _resetConfigCache } = await import('../../config/index.js');
+    _resetConfigCache();
     vi.restoreAllMocks();
   });
 

@@ -312,12 +312,27 @@ function createStatefulFakeStore(): SessionStore {
 // ---------------------------------------------------------------------------
 
 describe('chip-click run_analysis — real enricher integration', () => {
-  beforeEach(() => {
+  let priorAwaitFlag: string | undefined;
+  beforeEach(async () => {
     liveStoreHolder.current = createStatefulFakeStore();
     invokeDecisionReviewMock.mockReset();
     invokeDecisionReviewMock.mockResolvedValue(makeCannedInvokeResult());
+    // V5 latency gate: this suite specifically exercises the
+    // decision_review attachment, so opt into the await path. Default
+    // production behaviour (flag false) is covered separately.
+    priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
+    const { _resetConfigCache } = await import('../../config/index.js');
+    _resetConfigCache();
   });
-  afterEach(() => {
+  afterEach(async () => {
+    if (priorAwaitFlag === undefined) {
+      delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    } else {
+      process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+    }
+    const { _resetConfigCache } = await import('../../config/index.js');
+    _resetConfigCache();
     vi.restoreAllMocks();
   });
 

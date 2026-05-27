@@ -49,6 +49,7 @@
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
+import { config } from '../../config/index.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
@@ -438,13 +439,49 @@ export async function dispatchChipClickRunAnalysis(
     // `brief: null` made decision_review always skip with reason
     // `no_brief` on the chip-click path — independently of TurnExecutor's
     // parallel bug (defect B). Fixing both call sites atomically here.
-    const enrichedFacts = await enrichRunAnalysisWithDecisionReview({
-      handlerFacts: outcome.handler_facts,
-      requestId,
-      scenarioId: context.session_id,
-      signal: turnAbort.signal,
-      brief: context.scenarioBriefText,
-    });
+    //
+    // Latency gate (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW): when this
+    // flag is false (the default), the chip-click run_analysis path
+    // skips the auto-fire so the click returns immediately on the
+    // deterministic PLoT analysis. `v5.decision_review.skipped` with
+    // reason `autofire_disabled` is emitted in place of the await.
+    let enrichedFacts: readonly HandlerFact[];
+    if (!config.cee.runAnalysisAwaitDecisionReview) {
+      const briefLength =
+        typeof context.scenarioBriefText === 'string'
+          ? context.scenarioBriefText.length
+          : 0;
+      const runAnalysisFact = outcome.handler_facts.find(
+        (f) => f.fact_type === 'run_analysis',
+      );
+      const enrichment =
+        runAnalysisFact && runAnalysisFact.fact_type === 'run_analysis'
+          ? runAnalysisFact.result.enrichment
+          : undefined;
+      const leadingOptionPresent =
+        runAnalysisFact !== undefined
+        && runAnalysisFact.fact_type === 'run_analysis'
+        && typeof runAnalysisFact.result.leading_option_id === 'string'
+        && runAnalysisFact.result.leading_option_id.length > 0;
+      emit(TelemetryEvents.V5DecisionReviewSkipped, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        reason: 'autofire_disabled',
+        brief_present: briefLength > 0,
+        brief_length: briefLength,
+        has_enrichment: enrichment !== undefined,
+        leading_option_present: leadingOptionPresent,
+      });
+      enrichedFacts = outcome.handler_facts;
+    } else {
+      enrichedFacts = await enrichRunAnalysisWithDecisionReview({
+        handlerFacts: outcome.handler_facts,
+        requestId,
+        scenarioId: context.session_id,
+        signal: turnAbort.signal,
+        brief: context.scenarioBriefText,
+      });
+    }
 
     // V5 coaching parity — emit the same post-analysis suggested_actions
     // the Sonnet-routed run_analysis path emits. Reuses the existing

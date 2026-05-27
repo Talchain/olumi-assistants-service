@@ -4117,51 +4117,89 @@ export async function runTurnExecutor(
       // "review attempted, degraded" from "review absent" (the latter is
       // the soft-fail path inside the enricher, where the field is simply
       // not set).
+      //
+      // Latency gate (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW): when this
+      // flag is false (the default), the auto-fire is short-circuited
+      // and `run_analysis` returns the deterministic PLoT analysis
+      // without waiting on the enrichment LLM call. The persisted
+      // analysis fact is unchanged; `enrichment.decision_review` is
+      // simply absent, the same shape consumers already see on the
+      // legitimate timeout-degrade path. A `v5.decision_review.skipped`
+      // event with reason `autofire_disabled` records the skip.
       if (proposedHandlerId === 'run_analysis') {
         // V5 Phase 1 brief persistence: prefer the canonical-state value
         // from buildTurnContext (`scenarios.brief_text`). Fall back to
-        // the legacy out-of-band `options.scenarioBrief` for one release
-        // — emit a deprecation warning when it is the source so
-        // operators see the legacy channel still in use.
-        let resolvedBrief: string | null = context.scenarioBriefText;
-        if (resolvedBrief === null && options.scenarioBrief != null && options.scenarioBrief.length > 0) {
-          log.warn(
-            {
-              request_id: requestId,
-              scenario_id: context.session_id,
-              source: 'options.scenarioBrief',
-            },
-            'V5 decision_review: legacy options.scenarioBrief used as fallback. ' +
-              'This channel is deprecated and will be removed in Phase 2.',
+        // the legacy out-of-band `options.scenarioBrief` for one release.
+        const legacyFallbackInUse =
+          context.scenarioBriefText === null
+          && options.scenarioBrief != null
+          && options.scenarioBrief.length > 0;
+        const resolvedBrief: string | null = legacyFallbackInUse
+          ? (options.scenarioBrief ?? null)
+          : context.scenarioBriefText;
+
+        if (!config.cee.runAnalysisAwaitDecisionReview) {
+          const briefLength = typeof resolvedBrief === 'string' ? resolvedBrief.length : 0;
+          const runAnalysisFact = handlerOutcome.handler_facts.find(
+            (f) => f.fact_type === 'run_analysis',
           );
-          resolvedBrief = options.scenarioBrief;
-        }
-        try {
-          handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
-            handlerFacts: handlerOutcome.handler_facts,
-            requestId,
-            scenarioId: context.session_id,
-            signal: turnAbort.signal,
-            brief: resolvedBrief,
-          });
-        } catch (err) {
-          log.error(
-            {
-              request_id: requestId,
-              scenario_id: context.session_id,
-              err: err instanceof Error ? err.message : String(err),
-              stack: err instanceof Error ? err.stack : undefined,
-            },
-            'V5 decision_review enrichment escaped enricher safety net',
-          );
-          emit(TelemetryEvents.V5DecisionReviewDegraded, {
+          const enrichment =
+            runAnalysisFact && runAnalysisFact.fact_type === 'run_analysis'
+              ? runAnalysisFact.result.enrichment
+              : undefined;
+          const leadingOptionPresent =
+            runAnalysisFact !== undefined
+            && runAnalysisFact.fact_type === 'run_analysis'
+            && typeof runAnalysisFact.result.leading_option_id === 'string'
+            && runAnalysisFact.result.leading_option_id.length > 0;
+          emit(TelemetryEvents.V5DecisionReviewSkipped, {
             request_id: requestId,
             scenario_id: context.session_id,
-            reason: err instanceof Error ? err.message : 'unknown',
+            reason: 'autofire_disabled',
+            brief_present: briefLength > 0,
+            brief_length: briefLength,
+            has_enrichment: enrichment !== undefined,
+            leading_option_present: leadingOptionPresent,
           });
-          handlerFactsForCommit = patchRunAnalysisDecisionReviewNull(
-            handlerOutcome.handler_facts,
-          );
+        } else {
+          if (legacyFallbackInUse) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: context.session_id,
+                source: 'options.scenarioBrief',
+              },
+              'V5 decision_review: legacy options.scenarioBrief used as fallback. ' +
+                'This channel is deprecated and will be removed in Phase 2.',
+            );
+          }
+          try {
+            handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
+              handlerFacts: handlerOutcome.handler_facts,
+              requestId,
+              scenarioId: context.session_id,
+              signal: turnAbort.signal,
+              brief: resolvedBrief,
+            });
+          } catch (err) {
+            log.error(
+              {
+                request_id: requestId,
+                scenario_id: context.session_id,
+                err: err instanceof Error ? err.message : String(err),
+                stack: err instanceof Error ? err.stack : undefined,
+              },
+              'V5 decision_review enrichment escaped enricher safety net',
+            );
+            emit(TelemetryEvents.V5DecisionReviewDegraded, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              reason: err instanceof Error ? err.message : 'unknown',
+            });
+            handlerFactsForCommit = patchRunAnalysisDecisionReviewNull(
+              handlerOutcome.handler_facts,
+            );
+          }
         }
       }
 
