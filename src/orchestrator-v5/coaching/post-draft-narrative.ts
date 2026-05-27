@@ -46,7 +46,11 @@
 
 import type { GraphV3T } from '../../orchestrator/types.js';
 
-import { gateAssumptionFragment, gateFullResponse } from './copy-quality-gate.js';
+import {
+  gateAssumptionFragment,
+  gateFullResponse,
+  type GateRejectReason,
+} from './copy-quality-gate.js';
 
 const MAX_WORDS = 140;
 const MAX_LABEL_CHARS = 40;
@@ -173,6 +177,13 @@ export interface PostDraftNarrativeTelemetry {
   readonly assumption_source: AssumptionSource;
   readonly coaching_summary_present: boolean;
   readonly coaching_summary_passed_gate: boolean;
+  /**
+   * When `coachingSummary` was present but rejected by
+   * {@link gateFullResponse}, the category of the first failing rule.
+   * `null` when the summary was missing or accepted. Category-only —
+   * never carries raw user or coaching text.
+   */
+  readonly coaching_summary_reject_reason: GateRejectReason | null;
   readonly fallback_reason: FallbackReason;
   readonly strengthen_items_count: number;
   readonly bias_findings_count: number;
@@ -210,16 +221,28 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     typeof coachingSummary === 'string' ? coachingSummary.trim() : '';
   const coachingSummaryPresent = summaryCandidate.length > 0;
 
+  // Run the full-response gate once so we can capture both the
+  // pass/fail and (on fail) the categorical reject reason for ops
+  // telemetry — without re-running the gate.
+  const summaryGateResult = coachingSummaryPresent
+    ? gateFullResponse(summaryCandidate)
+    : null;
+  const summaryRejectReason: GateRejectReason | null =
+    summaryGateResult && !summaryGateResult.accept
+      ? (summaryGateResult.rejectReason ?? null)
+      : null;
+
   // Short-circuit: coachingSummary may replace the WHOLE response when
   // it passes the strict full-response gate. No deterministic opener is
   // prepended — the summary stands alone or it does not run.
-  if (coachingSummaryPresent && gateFullResponse(summaryCandidate).accept) {
+  if (summaryGateResult && summaryGateResult.accept) {
     return {
       text: summaryCandidate,
       telemetry: {
         assumption_source: 'coaching_summary',
         coaching_summary_present: true,
         coaching_summary_passed_gate: true,
+        coaching_summary_reject_reason: null,
         fallback_reason: null,
         strengthen_items_count: strengthenItemsCount,
         bias_findings_count: biasFindingsCount,
@@ -237,6 +260,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         assumption_source: 'deterministic_fallback',
         coaching_summary_present: coachingSummaryPresent,
         coaching_summary_passed_gate: false,
+        coaching_summary_reject_reason: summaryRejectReason,
         fallback_reason: 'no_candidate',
         strengthen_items_count: strengthenItemsCount,
         bias_findings_count: biasFindingsCount,
@@ -277,6 +301,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       assumption_source: assumption.source,
       coaching_summary_present: coachingSummaryPresent,
       coaching_summary_passed_gate: false,
+      coaching_summary_reject_reason: summaryRejectReason,
       fallback_reason: assumption.fallbackReason,
       strengthen_items_count: strengthenItemsCount,
       bias_findings_count: biasFindingsCount,
@@ -342,10 +367,16 @@ interface AssumptionPick {
 /**
  * Strict source-priority chain for sentence 4:
  *   1. strengthenItems[0].detail (then .label)
- *   2. analysisReady.bias_findings[0].explanation
- *   3. coachingBiasSignals[0].detail
+ *   2. first acceptable analysisReady.bias_findings[*].explanation
+ *   3. first acceptable coachingBiasSignals[*].detail
  *   4. uncertainty_driver (with grammar guard)
  *   5. fixed-generic
+ *
+ * For priorities 2 and 3 the picker iterates the array and returns the
+ * first element whose extracted text (or first-sentence slice)
+ * survives {@link gateAssumptionFragment}. Strengthen always reads
+ * `[0]` only — first item is the highest-confidence coaching signal
+ * the pipeline produced.
  *
  * `fallback_reason` distinguishes `gate_rejected` (a higher-priority
  * candidate existed but failed) from `no_candidate` (nothing was

@@ -23,16 +23,28 @@
 const FRAGMENT_MIN_CHARS = 5;
 const FRAGMENT_MAX_CHARS = 150;
 const RESPONSE_MIN_CHARS = 80;
-const RESPONSE_MAX_CHARS = 1200;
+// Tightened from 1200 → 800 chars to land closer to the deterministic
+// five-sentence budget (~700 chars / 140 words). A coaching summary that
+// blows past the deterministic envelope is almost always rambling or a
+// list dump in disguise, neither of which reads cleanly as a single
+// post-draft paragraph.
+const RESPONSE_MAX_CHARS = 800;
 
 /**
- * Internal-id prefix tokens that should never reach a user. Matches the
- * coaching-safety scanner taxonomy. Detection is anchored to a word
- * boundary so legitimate snake-case labels like "go_to_market" (no
- * matching prefix) pass through.
+ * Internal-id prefix tokens that should never reach a user.
+ *
+ * Aligned with the central detector at
+ * {@link ../../orchestrator/shared/entity-id-pattern.ts:25} so the copy
+ * gate, the egress sanitiser, and the patch-summary path all share the
+ * same prefix taxonomy. Detection is anchored to a word boundary so
+ * legitimate user-chosen snake-case labels whose prefix is NOT in this
+ * list — e.g. `go_to_market`, `b2b_partnership` — survive unchanged.
+ *
+ * The separator class `[_:-]` matches the central detector exactly:
+ * `factor_id`, `factor:id`, `factor-id` all leak.
  */
 const INTERNAL_ID_PREFIX_REGEX =
-  /\b(?:fac|opt|out|risk|goal|dec|node)_[a-z0-9]+/i;
+  /\b(?:fac|opt|goal|dec|out|risk|con|node|factor|option|decision|outcome|constraint)[_:-][a-z0-9][a-z0-9_:-]*/i;
 
 /**
  * Named schema / service / debug terms. These are concrete phrases the
@@ -62,19 +74,59 @@ const FORBIDDEN_SCHEMA_TERMS: readonly string[] = [
 ];
 
 /**
- * Premature-recommendation language. Post-draft coaching runs before
- * any analysis, so the assistant must not declare a winner or
- * preferred option. The regex matches whole-word tokens (case-
- * insensitive) plus a handful of multi-word phrases.
+ * Graph-shape language. The post-draft surface is decision-coaching
+ * copy; users never see "nodes", "edges", or "graph" in a working
+ * draft. A coaching summary that mentions them is showing graph
+ * inventory rather than reasoning about the decision, which is the
+ * exact regression PR #207 set out to prevent. Word-boundary anchored
+ * so "anode", "wedge", "telegraph" are not false positives.
  */
-const PREMATURE_RECOMMENDATION_REGEX =
-  /\b(?:recommend(?:s|ed|ation|ations)?|winner|winning option|best option|top choice|chosen route|chosen option|favoured option|favored option|preferred option)\b/i;
+const GRAPH_SHAPE_REGEX = /\b(?:nodes?|edges?|graphs?)\b/i;
+
+/**
+ * Premature-recommendation language. Post-draft coaching runs before
+ * any analysis, so the assistant must not declare a winner, name a
+ * preferred option, or instruct the user toward a specific choice. The
+ * regex covers single-word tokens plus the common multi-word phrases
+ * an LLM tends to slip into a "coaching" register.
+ *
+ * Whole-word anchoring with `\b` so legitimate uses ("the chosen
+ * route" inside a summary that is NOT pre-analysis recommendation
+ * still gets flagged — there is no innocuous use of these phrases at
+ * the post-draft stage).
+ */
+const PREMATURE_RECOMMENDATION_REGEX = new RegExp(
+  [
+    '\\brecommend(?:s|ed|ation|ations)?\\b',
+    '\\bwinner\\b',
+    '\\bwinning (?:option|route|path|choice)\\b',
+    '\\bbest (?:option|route|path|choice|approach)\\b',
+    '\\btop (?:choice|option|route|path)\\b',
+    '\\bchosen (?:route|option|path|choice)\\b',
+    '\\bfavou?red (?:option|route|path|choice)\\b',
+    '\\bpreferred (?:option|route|path|choice)\\b',
+    '\\b(?:you|i) (?:should|would) (?:choose|pick|go with|select)\\b',
+    '\\b(?:clear|obvious) (?:choice|winner|favou?rite)\\b',
+    '\\b(?:strongest|most promising|leading) (?:option|route|path|choice)\\b',
+  ].join('|'),
+  'i',
+);
 
 /**
  * Em dash detection. The existing draft-narrative tests pin this as a
  * hard ban, mirroring the egress guard. En dashes also trip (U+2013).
  */
 const EM_DASH_REGEX = /[–—]/;
+
+/**
+ * Markdown / bullet / numbered-list / header formatting. A coaching
+ * summary should render as a single paragraph of prose; bullet-shaped
+ * input is almost always either an LLM that ignored the format
+ * instruction or a debug dump leaking through. Applied only to the
+ * whole-response surface — sentence-4 fragments are too short to
+ * legitimately contain list formatting.
+ */
+const MARKDOWN_LIST_REGEX = /(?:^|\n)\s*(?:[-*+]\s|\d+\.\s|#+\s)/;
 
 /**
  * First-word tokens that read as question-shaped, unsuitable as the
@@ -134,10 +186,12 @@ export type GateRejectReason =
   | 'em_dash'
   | 'internal_id'
   | 'schema_term'
+  | 'graph_shape'
   | 'premature_recommendation'
   | 'question_shaped'
   | 'trailing_punctuation'
   | 'awkward_grammar'
+  | 'markdown'
   | 'no_decision_framing'
   | 'no_tradeoff_or_gap'
   | 'no_next_step';
@@ -164,6 +218,7 @@ function checkShared(text: string): GateResult | null {
   if (trimmed.length === 0) return reject('empty');
   if (EM_DASH_REGEX.test(trimmed)) return reject('em_dash');
   if (INTERNAL_ID_PREFIX_REGEX.test(trimmed)) return reject('internal_id');
+  if (GRAPH_SHAPE_REGEX.test(trimmed)) return reject('graph_shape');
   const lower = trimmed.toLowerCase();
   for (const term of FORBIDDEN_SCHEMA_TERMS) {
     if (lower.includes(term)) return reject('schema_term');
@@ -221,6 +276,10 @@ export function gateFullResponse(text: string): GateResult {
 
   if (trimmed.length < RESPONSE_MIN_CHARS) return reject('too_short');
   if (trimmed.length > RESPONSE_MAX_CHARS) return reject('too_long');
+
+  // Bullet- / list- / header-shaped input is rejected outright. A coaching
+  // summary must render as a single paragraph of decision-coaching prose.
+  if (MARKDOWN_LIST_REGEX.test(trimmed)) return reject('markdown');
 
   if (!DECISION_FRAMING_TOKENS_REGEX.test(trimmed)) return reject('no_decision_framing');
   if (!TRADEOFF_OR_GAP_TOKENS_REGEX.test(trimmed)) return reject('no_tradeoff_or_gap');

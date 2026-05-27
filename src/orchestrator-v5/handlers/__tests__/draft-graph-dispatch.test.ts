@@ -1148,6 +1148,115 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
     expect(payload.assumption_source).toBe('strengthen_item_detail');
   });
 
+  // ───── Round-3 reviewer regression tests (negative dispatch-level)
+  it('dispatch rejects coachingSummary containing graph-shape language ("nodes" / "edges") and falls back', async () => {
+    const badSummary =
+      "I've built a decision model with seven nodes and eight edges. The options weigh delivery against quality risk. Next, run the analysis to compare the routes.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-nodes',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('seven nodes');
+    expect(result.response.assistant_text).not.toContain('eight edges');
+    expect(result.response.assistant_text).not.toMatch(/\bnodes?\b/i);
+    expect(result.response.assistant_text).not.toMatch(/\bedges?\b/i);
+    // Deterministic five-sentence path fired.
+    expect(result.response.assistant_text).toMatch(/run the analysis/);
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.coaching_summary_passed_gate).toBe(false);
+    expect(payload.coaching_summary_reject_reason).toBe('graph_shape');
+  });
+
+  it('dispatch rejects coachingSummary with "best route" premature recommendation and falls back', async () => {
+    const badSummary =
+      "I've built a decision model. The best route here is to hire a tech lead before scaling. The options weigh cost against risk. Next, run the analysis to compare the routes.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-best-route',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text.toLowerCase()).not.toContain('best route');
+    expect(result.response.assistant_text).toMatch(/run the analysis/);
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.coaching_summary_reject_reason).toBe('premature_recommendation');
+  });
+
+  it('dispatch rejects coachingSummary with "you should choose" instruction and falls back', async () => {
+    const badSummary =
+      "I've built a decision model for the launch. You should choose the partnership route given the cost profile and the risk in the comparison. Next, run the analysis to confirm.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-should-choose',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text.toLowerCase()).not.toContain('you should choose');
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.coaching_summary_reject_reason).toBe('premature_recommendation');
+  });
+
+  it('dispatch rejects coachingSummary with markdown bullets and falls back', async () => {
+    const badSummary =
+      "I've built a decision model. The options weigh against risk:\n- Hire a tech lead\n- Hire two developers\nNext, run the analysis to compare them under stress.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-markdown',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('- Hire');
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.coaching_summary_reject_reason).toBe('markdown');
+  });
+
   it('positive E2E: realistic CEE-style coachingSummary passes the gate and lands verbatim in assistant_text', async () => {
     // Shape mirrors the CEE pipeline's `coaching.summary` output: one
     // or two prose sentences that frame the decision, surface a

@@ -806,6 +806,56 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     expect(result.text).toBe(summary);
     expect(result.telemetry.assumption_source).toBe('coaching_summary');
   });
+
+  // ───── Round-3: coaching_summary_reject_reason telemetry
+  it('telemetry surfaces coaching_summary_reject_reason when the summary is rejected', () => {
+    const summary =
+      "I've built a decision model with seven nodes and eight edges. The options weigh cost against risk. Next, run the analysis to validate.";
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    expect(result.telemetry.coaching_summary_present).toBe(true);
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('graph_shape');
+  });
+
+  it('telemetry surfaces premature_recommendation as the reject reason', () => {
+    const summary =
+      "I've built a decision model. The best route here is to hire a tech lead. The options weigh cost against risk. Next, run the analysis.";
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('premature_recommendation');
+  });
+
+  it('telemetry surfaces internal_id as the reject reason for factor_* leaks', () => {
+    const summary =
+      "I've built a decision model. The options weigh delivery speed against risk in factor_delivery_cost. Next, run the analysis to compare the routes.";
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('internal_id');
+  });
+
+  it('telemetry reject_reason is null when the summary passes the gate', () => {
+    const summary =
+      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare.';
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(true);
+    expect(result.telemetry.coaching_summary_reject_reason).toBeNull();
+  });
+
+  it('telemetry reject_reason is null when the summary is missing entirely', () => {
+    const result = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: null });
+    expect(result.telemetry.coaching_summary_present).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBeNull();
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────

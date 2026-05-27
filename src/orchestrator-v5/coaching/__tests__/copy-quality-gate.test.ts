@@ -161,6 +161,121 @@ describe('gateAssumptionFragment', () => {
       'the b2b_partnership path depends on closing the channel agreement first',
     );
   });
+
+  // ───── Graph-shape rejection (reviewer round-3 finding #2)
+  it('rejects graph-shape language: nodes', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'the model lists seven nodes which is more than your team can manage',
+      'graph_shape',
+    );
+  });
+
+  it('rejects graph-shape language: edges', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'eight edges connect the cost factor to the delivery outcome each turn',
+      'graph_shape',
+    );
+  });
+
+  it('rejects graph-shape language: graph', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'the graph you produced may not match the underlying budget reality here',
+      'graph_shape',
+    );
+  });
+
+  // ───── Internal-id prefix coverage (reviewer round-3 finding #4)
+  it('rejects full-word internal-id prefixes: factor_', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'factor_delivery_cost may understate the real overhead under stress conditions',
+      'internal_id',
+    );
+  });
+
+  it('rejects full-word internal-id prefixes: option_', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'option_launch_now compresses timelines too aggressively for the first quarter',
+      'internal_id',
+    );
+  });
+
+  it('rejects full-word internal-id prefixes: constraint_', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'constraint_budget_limit may need to flex if hiring runs hot in Q3 onwards',
+      'internal_id',
+    );
+  });
+
+  it('rejects full-word internal-id prefixes: decision_', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'decision_launch_path has not been re-validated since the last brief was edited',
+      'internal_id',
+    );
+  });
+
+  // ───── Premature-recommendation breadth (reviewer round-3 finding #3)
+  it('rejects premature recommendation: best route', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'the best route here looks like hiring a senior tech lead before scaling up',
+      'premature_recommendation',
+    );
+  });
+
+  it('rejects premature recommendation: best path', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'the best path forward is to outsource delivery while keeping the lead in house',
+      'premature_recommendation',
+    );
+  });
+
+  it('rejects premature recommendation: you should choose', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'you should choose the partnership route given the synergy potential on the table',
+      'premature_recommendation',
+    );
+  });
+
+  it('rejects premature recommendation: I would choose', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'I would choose the build path here given the long-term margin profile of the team',
+      'premature_recommendation',
+    );
+  });
+
+  it('rejects premature recommendation: clear choice', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'this is a clear choice based on the cost profile of the alternative routes here',
+      'premature_recommendation',
+    );
+  });
+
+  it('rejects premature recommendation: strongest option', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'the strongest option here balances ramp risk against the speed-to-market upside',
+      'premature_recommendation',
+    );
+  });
+
+  it('rejects premature recommendation: most promising route', () => {
+    rejectsWith(
+      gateAssumptionFragment,
+      'the most promising route is the partnership path given the deal terms in play',
+      'premature_recommendation',
+    );
+  });
 });
 
 describe('gateFullResponse', () => {
@@ -228,5 +343,62 @@ describe('gateFullResponse', () => {
     const text =
       "I've built a decision model for the launch. The routes compare go_to_market and b2b_partnership against the in-house build option, with capacity risk to consider as a key assumption. Next, run the analysis to see how the options compare.";
     accepts(gateFullResponse, text);
+  });
+
+  // ───── Round-3 reviewer additions: graph-shape, breadth, markdown
+  it('rejects a response with graph-shape language (nodes / edges)', () => {
+    const text =
+      "I've built a decision model with seven nodes and eight edges. The options weigh cost against risk. Next, run the analysis to validate the comparison across the routes.";
+    rejectsWith(gateFullResponse, text, 'graph_shape');
+  });
+
+  it('rejects a response with bare "graph" wording', () => {
+    const text =
+      "I've built a graph for the launch decision. The options weigh delivery speed against quality risk in the routes. Next, run the analysis to compare the options.";
+    rejectsWith(gateFullResponse, text, 'graph_shape');
+  });
+
+  it('rejects a response with "best route" premature recommendation', () => {
+    const text =
+      "I've built a decision model for the launch. The best route here is to hire a tech lead before scaling. Next, run the analysis to validate the assumptions across all options.";
+    rejectsWith(gateFullResponse, text, 'premature_recommendation');
+  });
+
+  it('rejects a response with "you should choose" instruction', () => {
+    const text =
+      "I've built a decision model. You should choose the partnership path given the synergy potential and the risk profile in the comparison routes. Next, run the analysis to confirm.";
+    rejectsWith(gateFullResponse, text, 'premature_recommendation');
+  });
+
+  it('rejects a response with full-word internal id (factor_*)', () => {
+    const text =
+      "I've built a decision model for the launch. The options weigh delivery speed against quality risk in factor_delivery_cost. Next, run the analysis to compare the options across routes.";
+    rejectsWith(gateFullResponse, text, 'internal_id');
+  });
+
+  it('rejects a response with markdown bullets', () => {
+    const text =
+      "I've built a decision model. The options weigh delivery against risk:\n- Hire a tech lead\n- Hire two mid-weight developers\nNext, run the analysis to compare them and check the assumptions.";
+    rejectsWith(gateFullResponse, text, 'markdown');
+  });
+
+  it('rejects a response with numbered-list formatting', () => {
+    const text =
+      "I've built a decision model. Consider the trade-offs:\n1. Cost\n2. Speed\n3. Quality\nNext, run the analysis to weigh the options against the routes.";
+    rejectsWith(gateFullResponse, text, 'markdown');
+  });
+
+  it('rejects a response with markdown header formatting', () => {
+    const text =
+      "## Decision model\nI've built a model for the launch. The options weigh cost against risk in the routes. Next, run the analysis to compare them under the assumption set.";
+    rejectsWith(gateFullResponse, text, 'markdown');
+  });
+
+  it('rejects a response longer than the tightened 800-char cap', () => {
+    const text =
+      "I've built a decision model for the launch. The options weigh delivery speed against quality risk in the routes. " +
+      'a'.repeat(900) +
+      ' Next, run the analysis to compare the options.';
+    rejectsWith(gateFullResponse, text, 'too_long');
   });
 });
