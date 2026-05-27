@@ -152,9 +152,24 @@ function draftResultToOlumiResponse(
         requestId,
       });
     }
-    assistantText = buildPostDraftNarrative({
+    // Gated-hybrid composer: feed the LLM-authored coaching strings
+    // (coachingSummary, strengthenItems, coachingBiasSignals) into the
+    // builder alongside the graph + analysisReady. The builder enforces
+    // a strict copy-quality gate on each candidate; the source it
+    // ultimately used is surfaced via `narrative.telemetry` for ops
+    // visibility (category/count only — no raw coaching text).
+    const narrative = buildPostDraftNarrative({
       graph: result.graphOutput,
       analysisReady: result.analysisReady ?? null,
+      strengthenItems: result.strengthenItems,
+      coachingSummary: result.coachingSummary,
+      coachingBiasSignals: result.coachingBiasSignals,
+    });
+    assistantText = narrative.text;
+    emit(TelemetryEvents.V5PostDraftCoachingSourceSelected, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      ...narrative.telemetry,
     });
   } else {
     // Failure path: route discards this response and returns 500 INTERNAL_ERROR.

@@ -1,6 +1,6 @@
 /**
  * Tests for `buildPostDraftNarrative` — the deterministic post-draft
- * coaching assistant_text builder.
+ * coaching gated-hybrid composer.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -38,8 +38,12 @@ function assertCleanCopy(text: string): void {
   }
   // No em dashes.
   expect(text, 'should not contain em dash').not.toMatch(/—/);
-  // No internal-id-shaped substrings (lower-snake with an underscore).
-  expect(text, 'should not expose internal ids').not.toMatch(/\b[a-z]+(?:_[a-z0-9]+){1,}\b/);
+  // No internal-id-shaped prefix tokens (only the specific internal-ID
+  // prefixes leak — legitimate user-facing snake-case labels like
+  // `go_to_market` or `b2b_partnership` must survive.)
+  expect(text, 'should not expose internal id prefixes').not.toMatch(
+    /\b(?:fac|opt|out|risk|goal|dec|node)_[a-z0-9]+/i,
+  );
 }
 
 function wordCount(text: string): number {
@@ -48,6 +52,15 @@ function wordCount(text: string): number {
 
 function makeGraph(nodes: GraphV3T['nodes']): GraphV3T {
   return { nodes, edges: [] } as unknown as GraphV3T;
+}
+
+/**
+ * Helper: most tests only care about the rendered `text` field of the
+ * builder result. Kept as a thin adapter so the existing assertions
+ * remain readable.
+ */
+function textOf(input: Parameters<typeof buildPostDraftNarrative>[0]): string {
+  return buildPostDraftNarrative(input).text;
 }
 
 const GOAL_NODE = {
@@ -84,17 +97,17 @@ const RISK_RAMP = { id: 'r1', kind: 'risk' as const, label: 'New hires take time
 
 describe('buildPostDraftNarrative', () => {
   it('returns a graceful single line when the graph is null', () => {
-    const text = buildPostDraftNarrative({ graph: null });
+    const text = textOf({ graph: null });
     expect(text).toBe('Your decision model is ready to explore.');
   });
 
   it('returns a graceful single line when the graph has no nodes', () => {
-    const text = buildPostDraftNarrative({ graph: makeGraph([]) });
+    const text = textOf({ graph: makeGraph([]) });
     expect(text).toBe('Your decision model is ready to explore.');
   });
 
   it('confirms the goal label and uses it in the lead sentence', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toContain('"Deliver Successful Launch Within Three Months at Acceptable Quality"');
@@ -103,7 +116,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('falls back to a goalless confirmation when no goal node exists', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toContain("I've built a first decision model from your brief");
@@ -111,7 +124,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('summarises two options as "two routes"', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B]),
     });
     expect(text).toContain('comparing two routes');
@@ -121,7 +134,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('summarises three options as "three routes" with serial layout', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, OPTION_C]),
     });
     expect(text).toContain('comparing three routes');
@@ -132,7 +145,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('summarises four options as "four routes"', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, OPTION_C, OPTION_D]),
     });
     expect(text).toContain('comparing four routes');
@@ -141,7 +154,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('collapses 5+ options to "main routes include …" with up to three named', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, OPTION_C, OPTION_D, OPTION_E]),
     });
     expect(text).toContain('main routes include');
@@ -161,7 +174,7 @@ describe('buildPostDraftNarrative', () => {
       kind: 'option' as const,
       label: 'Hire a tech lead and rebuild the entire engineering organisation top-to-bottom this quarter',
     };
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, longOpt, OPTION_B]),
     });
     // The truncated label should fit within ~40 chars and should not chop mid-word.
@@ -171,7 +184,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('frames the trade-off using the first two factor labels', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toContain('Leadership quality');
@@ -181,7 +194,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('falls back to a single key consideration when only one factor exists', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
     });
     expect(text).toContain('A key consideration is Leadership quality');
@@ -189,7 +202,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('uses the first risk when no factors exist', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, RISK_RAMP]),
     });
     expect(text).toContain('A key consideration is the risk of');
@@ -198,7 +211,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('mentions an uncertainty driver when present on a factor', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toContain('One assumption worth checking');
@@ -206,7 +219,13 @@ describe('buildPostDraftNarrative', () => {
     assertCleanCopy(text);
   });
 
-  it('falls back to a model_adjustment reason when no uncertainty drivers exist', () => {
+  it('uses the deterministic generic when only model_adjustments are present (no longer a sentence-4 source)', () => {
+    // The gated-hybrid composer drops `analysisReady.model_adjustments`
+    // from the sentence-4 source set: the LLM-authored coaching surface
+    // is now richer (strengthenItems / coachingBiasSignals / bias_findings)
+    // and model_adjustments are operational reasons, not user-facing
+    // assumption signals. When they are the only available signal, the
+    // builder falls through to the fixed-generic copy.
     const analysisReady = {
       options: [],
       goal_node_id: 'g1',
@@ -219,12 +238,14 @@ describe('buildPostDraftNarrative', () => {
         },
       ],
     } as unknown as AnalysisReadyPayloadT;
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
       analysisReady,
     });
-    expect(text).toContain('One assumption worth checking');
-    expect(text).toContain('per-month rate');
+    expect(text).toContain(
+      "One assumption worth checking is whether the model's key inputs reflect your real delivery constraints.",
+    );
+    expect(text).not.toContain('per-month rate');
     assertCleanCopy(text);
   });
 
@@ -242,7 +263,7 @@ describe('buildPostDraftNarrative', () => {
         },
       ],
     } as unknown as AnalysisReadyPayloadT;
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
       analysisReady,
     });
@@ -252,7 +273,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('always ends with a run-analysis nudge', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toMatch(/run the analysis/);
@@ -270,7 +291,7 @@ describe('buildPostDraftNarrative', () => {
       bias_findings: [],
       model_adjustments: [{ code: 'X', reason: longReason }],
     } as unknown as AnalysisReadyPayloadT;
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([
         { ...GOAL_NODE, label: GOAL_NODE.label + ' across three product lines' },
         OPTION_A, OPTION_B, OPTION_C, OPTION_D, OPTION_E,
@@ -292,7 +313,7 @@ describe('buildPostDraftNarrative', () => {
       bias_findings: [{ id: 'b1', category: 'x', severity: 'low', explanation: 'a clean explanation in user words' }],
       model_adjustments: [{ code: 'STRP', reason: 'we made the threshold consistent across options' }],
     } as unknown as AnalysisReadyPayloadT;
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, OPTION_C, FACTOR_QUALITY, FACTOR_CAPACITY, RISK_RAMP]),
       analysisReady,
     });
@@ -302,7 +323,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('does not make any recommendation before analysis has run', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, OPTION_C, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text.toLowerCase()).not.toContain('best');
@@ -314,7 +335,7 @@ describe('buildPostDraftNarrative', () => {
   });
 
   it('contains the lead, options, key trade-off and next step when data is rich', () => {
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toContain("I've built a first decision model");      // lead
@@ -326,7 +347,7 @@ describe('buildPostDraftNarrative', () => {
   it('drops the assumption sentence first when the budget is tight', () => {
     // No factors and no analysisReady → no trade-off sentence and no
     // assumption sentence will be built; output should be 3 sentences.
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B]),
     });
     expect(text).toContain("I've built a first decision model");
@@ -345,7 +366,7 @@ describe('buildPostDraftNarrative', () => {
         uncertainty_drivers: ['how the team will absorb the extra workload'],
       },
     };
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, factorWithBadDriver]),
     });
     expect(text).toContain(
@@ -366,7 +387,7 @@ describe('buildPostDraftNarrative', () => {
         uncertainty_drivers: ['the launch ships on time.'],
       },
     };
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, factorWithBadDriver]),
     });
     expect(text).toContain(
@@ -396,7 +417,7 @@ describe('buildPostDraftNarrative', () => {
       bias_findings: [],
       model_adjustments: [{ code: 'STRP', reason: 'we adjusted a threshold to make options comparable' }],
     } as unknown as AnalysisReadyPayloadT;
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, factorWithBadDriver]),
       analysisReady,
     });
@@ -414,7 +435,7 @@ describe('buildPostDraftNarrative', () => {
     // ID-leak heuristic that might mistake real labels for IDs.
     const goToMarket = { id: 'opt_one', kind: 'option' as const, label: 'go_to_market' };
     const b2b = { id: 'opt_two', kind: 'option' as const, label: 'b2b_partnership' };
-    const text = buildPostDraftNarrative({
+    const text = textOf({
       graph: makeGraph([GOAL_NODE, goToMarket, b2b, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toContain('go_to_market');
@@ -435,7 +456,7 @@ describe('buildPostDraftNarrative', () => {
     const goToMarket = { id: 'opt_one', kind: 'option' as const, label: 'go_to_market' };
     const b2b = { id: 'opt_two', kind: 'option' as const, label: 'b2b_partnership' };
     const graph = makeGraph([GOAL_NODE, goToMarket, b2b, FACTOR_QUALITY, FACTOR_CAPACITY]);
-    const text = buildPostDraftNarrative({ graph });
+    const text = textOf({ graph });
     const sanitised = sanitiseUserFacingText(text, graph);
     expect(sanitised.text).toContain('go_to_market');
     expect(sanitised.text).toContain('b2b_partnership');
@@ -445,6 +466,345 @@ describe('buildPostDraftNarrative', () => {
     // And the post-sanitiser text equals the pre-sanitiser text — no
     // hidden whitespace / punctuation changes either.
     expect(sanitised.text).toBe(text);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────
+// Gated-hybrid composer — strengthen / bias_finding / coaching_bias_signal
+// source priority and `coachingSummary` whole-response replacement.
+// ───────────────────────────────────────────────────────────────────────
+
+describe('buildPostDraftNarrative — gated-hybrid sources', () => {
+  // Common short-graph fixture without uncertainty drivers — keeps the
+  // sentence-4 source priority deterministic across cases.
+  const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]);
+
+  it('uses strengthenItems[0].detail in sentence 4 when it passes the gate', () => {
+    // Short, declarative detail well within the 150-char fragment cap;
+    // no schema terms, no premature recommendation, no question shape.
+    const items = [
+      {
+        id: 's1',
+        label: 'Stress synergy estimate',
+        detail: 'the synergy assumption sits as a point value and would benefit from a 10 to 30M range',
+        action_type: 'add_constraint',
+      },
+    ];
+    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    expect(result.text).toContain('One assumption worth checking');
+    expect(result.text).toContain('synergy assumption sits as a point value');
+    expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
+    expect(result.telemetry.fallback_reason).toBeNull();
+    assertCleanCopy(result.text);
+  });
+
+  it('falls back to strengthenItems[0].label when detail is too long and has no usable first sentence', () => {
+    // Detail too long for the fragment cap AND has no sentence-ending
+    // punctuation, so the first-sentence fallback inside the picker
+    // also fails — we land on the label.
+    const longDetail =
+      'a long uninterrupted clause that runs well past the fragment cap and offers no sentence boundary the picker could trim back to before the assumption gate even has a chance to look at the candidate';
+    const items = [
+      {
+        id: 's2',
+        label: 'tighten the cost ramp curve',
+        detail: longDetail,
+        action_type: 'add_constraint',
+      },
+    ];
+    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    expect(result.text).toContain('One assumption worth checking');
+    expect(result.text).toContain('tighten the cost ramp curve');
+    expect(result.text).not.toContain('long uninterrupted clause');
+    expect(result.telemetry.assumption_source).toBe('strengthen_item_label');
+  });
+
+  it('extracts the first sentence from a long strengthen detail when it ends with sentence punctuation', () => {
+    const items = [
+      {
+        id: 's3',
+        label: 'too short',
+        detail:
+          'the synergy assumption sits as a point value. Recast it as a 10 to 30M range to surface downside scenarios and let the simulation expose fragility under stress.',
+        action_type: 'add_constraint',
+      },
+    ];
+    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    expect(result.text).toContain('the synergy assumption sits as a point value');
+    expect(result.text).not.toContain('Recast it as a 10');
+    expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
+  });
+
+  it('falls back to bias_findings when both strengthen.detail and .label fail the gate', () => {
+    const items = [
+      {
+        id: 's4',
+        // Premature recommendation language — gate rejects both fields.
+        label: 'we recommend hiring',
+        detail: 'we recommend hiring a senior lead before scaling the team further',
+        action_type: 'add_constraint',
+      },
+    ];
+    const analysisReady = {
+      options: [],
+      goal_node_id: 'g1',
+      status: 'ready',
+      bias_findings: [
+        {
+          id: 'b1',
+          category: 'confirmation',
+          severity: 'medium',
+          explanation: 'the brief leans on a single positive prior for the leadership scenario',
+        },
+      ],
+    } as unknown as AnalysisReadyPayloadT;
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      strengthenItems: items,
+      analysisReady,
+    });
+    expect(result.text).toContain('single positive prior');
+    expect(result.text).not.toContain('we recommend hiring');
+    expect(result.telemetry.assumption_source).toBe('bias_finding');
+    expect(result.telemetry.fallback_reason).toBe('gate_rejected');
+  });
+
+  it('falls back to coachingBiasSignals when strengthen and bias_findings both fail', () => {
+    const items = [
+      { id: 's5', label: 'recommend foo', detail: 'we recommend doing foo', action_type: 'x' },
+    ];
+    const analysisReady = {
+      options: [],
+      goal_node_id: 'g1',
+      status: 'ready',
+      bias_findings: [
+        {
+          id: 'b1',
+          category: 'x',
+          severity: 'low',
+          // Trips the schema-term rule.
+          explanation: 'the intervention sets baseline incorrectly across all options',
+        },
+      ],
+    } as unknown as AnalysisReadyPayloadT;
+    const signals = [
+      {
+        type: 'narrow_framing',
+        detail: 'the brief frames the decision as binary acquire-or-skip when partner routes also exist',
+      },
+    ];
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      strengthenItems: items,
+      analysisReady,
+      coachingBiasSignals: signals,
+    });
+    expect(result.text).toContain('binary acquire-or-skip');
+    expect(result.telemetry.assumption_source).toBe('coaching_bias_signal');
+    expect(result.telemetry.fallback_reason).toBe('gate_rejected');
+  });
+
+  it('falls back to uncertainty_driver when all coaching sources fail', () => {
+    const items = [
+      { id: 's6', label: 'recommend foo', detail: 'we recommend doing foo', action_type: 'x' },
+    ];
+    const analysisReady = {
+      options: [],
+      goal_node_id: 'g1',
+      status: 'ready',
+      bias_findings: [
+        { id: 'b1', category: 'x', severity: 'low', explanation: 'the intervention frames things badly' },
+      ],
+    } as unknown as AnalysisReadyPayloadT;
+    const signals = [{ type: 't', detail: 'the model_adjustment is suspect across the board' }];
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
+      strengthenItems: items,
+      analysisReady,
+      coachingBiasSignals: signals,
+    });
+    expect(result.text).toContain('extra developers may add coordination overhead');
+    expect(result.telemetry.assumption_source).toBe('uncertainty_driver');
+    expect(result.telemetry.fallback_reason).toBe('gate_rejected');
+  });
+
+  it('falls through to fixed-generic when every source fails or is missing', () => {
+    const items = [
+      { id: 's7', label: 'recommend foo', detail: 'we recommend doing foo', action_type: 'x' },
+    ];
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
+      strengthenItems: items,
+    });
+    expect(result.text).toContain(
+      "One assumption worth checking is whether the model's key inputs reflect your real delivery constraints.",
+    );
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+    expect(result.telemetry.fallback_reason).toBe('gate_rejected');
+  });
+
+  it('reports `no_candidate` fallback when no source was available at all', () => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
+    });
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+    expect(result.telemetry.fallback_reason).toBe('no_candidate');
+  });
+
+  it('rejects internal-id prefixes from strengthen.detail (fac_xxx)', () => {
+    const items = [
+      {
+        id: 's8',
+        label: 'review fac cost',
+        detail: 'fac_cost may understate the real overhead by a wide margin under stress',
+        action_type: 'x',
+      },
+    ];
+    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    expect(result.text).not.toContain('fac_cost');
+    expect(result.telemetry.assumption_source).not.toBe('strengthen_item_detail');
+    assertCleanCopy(result.text);
+  });
+
+  it('rejects schema-term leaks from coachingBiasSignals (intervention)', () => {
+    const signals = [
+      { type: 'narrow_framing', detail: 'the intervention modelling looks shaky on the third route' },
+    ];
+    const result = buildPostDraftNarrative({ graph: baseGraph, coachingBiasSignals: signals });
+    expect(result.text).not.toMatch(/intervention/i);
+    expect(result.telemetry.assumption_source).not.toBe('coaching_bias_signal');
+  });
+
+  it('accepts user-facing snake-case labels inside a coaching source (go_to_market)', () => {
+    const items = [
+      {
+        id: 's9',
+        label: 'stress the go_to_market timing',
+        detail: 'the go_to_market path may compress timelines too aggressively in the first quarter',
+        action_type: 'add_constraint',
+      },
+    ];
+    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    expect(result.text).toContain('go_to_market');
+    // Source accepted — the legitimate user-facing label is NOT a
+    // matching internal-id prefix and so passes the gate cleanly.
+    expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
+  });
+
+  it('telemetry counts reflect the input arrays', () => {
+    const items = [
+      { id: 'a', label: 'A', detail: 'detail A', action_type: 'x' },
+      { id: 'b', label: 'B', detail: 'detail B', action_type: 'x' },
+    ];
+    const analysisReady = {
+      options: [],
+      goal_node_id: 'g1',
+      status: 'ready',
+      bias_findings: [{ id: 'b1', category: 'x', severity: 'low', explanation: 'a clean finding' }],
+    } as unknown as AnalysisReadyPayloadT;
+    const signals = [{ type: 't', detail: 'a signal' }, { type: 't', detail: 'another signal' }, { type: 't', detail: 'third' }];
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      strengthenItems: items,
+      analysisReady,
+      coachingBiasSignals: signals,
+    });
+    expect(result.telemetry.strengthen_items_count).toBe(2);
+    expect(result.telemetry.bias_findings_count).toBe(1);
+    expect(result.telemetry.coaching_bias_signals_count).toBe(3);
+  });
+});
+
+describe('buildPostDraftNarrative — coachingSummary whole-response replacement', () => {
+  const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
+
+  it('replaces the whole response with coachingSummary when it passes the full-response gate', () => {
+    // Summary intentionally does NOT use the builder's deterministic
+    // opener "I've built a first decision model for …" — so any
+    // accidental concat with builder output would be detectable.
+    const summary =
+      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare under stress.';
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    // Exact pass-through — no deterministic opener was prepended.
+    expect(result.text).toBe(summary);
+    expect(result.telemetry.assumption_source).toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_present).toBe(true);
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(true);
+    expect(result.telemetry.fallback_reason).toBeNull();
+    // The five-sentence builder's lead never appears.
+    expect(result.text).not.toContain("I've built a first decision model");
+    assertCleanCopy(result.text);
+  });
+
+  it('ignores coachingSummary with premature recommendation and falls back to the five-sentence builder', () => {
+    const summary =
+      "I've built a first decision model. The options weigh delivery speed against risk. We recommend hiring a tech lead first given the timeline pressure. Next, run the analysis to validate the assumptions across all routes.";
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    // Five-sentence builder ran — text starts with our deterministic confirm.
+    expect(result.text.startsWith("I've built a first decision model for")).toBe(true);
+    // The premature recommendation does not appear anywhere in the output.
+    expect(result.text.toLowerCase()).not.toContain('we recommend hiring');
+    expect(result.telemetry.assumption_source).not.toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_present).toBe(true);
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    assertCleanCopy(result.text);
+  });
+
+  it('ignores coachingSummary missing a next-step token', () => {
+    const summary =
+      "I've built a decision model for the launch. The options weigh delivery speed against quality risk, with assumptions to consider. One assumption is whether the team can absorb extra overhead under load conditions in the coordination flow.";
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    expect(result.text.startsWith("I've built a first decision model for")).toBe(true);
+    expect(result.telemetry.coaching_summary_present).toBe(true);
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+  });
+
+  it('ignores coachingSummary leaking an internal id prefix', () => {
+    const summary =
+      "I've built a first decision model for your launch. The routes weigh delivery against risk in fac_cost. Next, run the analysis to validate the assumptions across the comparison routes.";
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    expect(result.text).not.toContain('fac_cost');
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.assumption_source).not.toBe('coaching_summary');
+    assertCleanCopy(result.text);
+  });
+
+  it('ignores empty / missing coachingSummary cleanly', () => {
+    const r1 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: '' });
+    const r2 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: null });
+    const r3 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: '   \n\t  ' });
+    for (const r of [r1, r2, r3]) {
+      expect(r.telemetry.coaching_summary_present).toBe(false);
+      expect(r.telemetry.coaching_summary_passed_gate).toBe(false);
+      expect(r.telemetry.assumption_source).not.toBe('coaching_summary');
+    }
+  });
+
+  it('treats coachingSummary as full-replace even when richer strengthen sources are present', () => {
+    const summary =
+      "I've built a first decision model for the launch. The routes weigh delivery speed against quality risk, and one assumption worth checking is whether the team can absorb extra coordination overhead. Next, run the analysis to compare them.";
+    const items = [
+      { id: 's', label: 'L', detail: 'detail to consider as an assumption worth checking later', action_type: 'x' },
+    ];
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+      strengthenItems: items,
+    });
+    expect(result.text).toBe(summary);
+    expect(result.telemetry.assumption_source).toBe('coaching_summary');
   });
 });
 

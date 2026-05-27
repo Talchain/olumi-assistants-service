@@ -32,11 +32,20 @@ vi.mock('../../commit.js', () => ({
   computeRequestHash: vi.fn().mockReturnValue('sha256:testhash'),
 }));
 
+vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();
+  return {
+    ...actual,
+    emit: vi.fn(),
+  };
+});
+
 // ── imports after mocks ───────────────────────────────────────────────────────
 
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import { Stage } from '@talchain/schemas/boundary';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -62,6 +71,12 @@ const MINIMAL_GRAPH = {
   edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
 };
 
+// Cast to the DraftGraphResult['analysisReady'] shape rather than
+// `as const`: the latter forces every literal field to readonly, which
+// fails to assign through `makeDraftResult(_, analysisReady)`. The
+// cast preserves type-level validation against the schema while
+// allowing the fixture to flow through helper signatures expecting a
+// mutable AnalysisReadyPayload.
 const MINIMAL_ANALYSIS_READY = {
   status: 'ready',
   options: [
@@ -69,7 +84,7 @@ const MINIMAL_ANALYSIS_READY = {
     { option_id: 'opt_delay',      label: 'Delay 6mo',  status: 'ready', interventions: { fac_revenue: 0.3 } },
   ],
   goal_node_id: 'goal_revenue',
-} as const;
+} as unknown as NonNullable<DraftGraphResult['analysisReady']>;
 
 function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH, analysisReady?: DraftGraphResult['analysisReady']) {
   return {
@@ -964,5 +979,172 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
         expect(parsed.success).toBe(true);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 post-draft coaching — gated-hybrid composer wiring
+// ---------------------------------------------------------------------------
+//
+// These tests exercise the dispatch boundary: the new fields on
+// DraftGraphResult (strengthenItems, coachingSummary, coachingBiasSignals)
+// are passed to buildPostDraftNarrative, and the source-selection
+// telemetry event fires on the success path.
+
+describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+  });
+
+  const CLEAN_SUMMARY =
+    'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare under stress.';
+
+  it('uses coachingSummary verbatim as assistant_text when it passes the full-response gate', async () => {
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: CLEAN_SUMMARY,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-pass',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).toBe(CLEAN_SUMMARY);
+  });
+
+  it('falls back to the five-sentence builder when coachingSummary fails the gate (premature recommendation)', async () => {
+    const badSummary =
+      "I've built a model. We recommend hiring a tech lead first given the timeline pressure. The options weigh delivery speed against risk. Next, run the analysis to validate the assumptions.";
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: badSummary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-summary-reject',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('we recommend hiring');
+    expect(result.response.assistant_text).toMatch(/run the analysis/);
+  });
+
+  it('emits V5PostDraftCoachingSourceSelected telemetry with the right payload on the coachingSummary path', async () => {
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: CLEAN_SUMMARY,
+      strengthenItems: [{ id: 's', label: 'L', detail: 'd', action_type: 'x' }],
+      coachingBiasSignals: [{ type: 't', detail: 'whatever' }],
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as unknown as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-telemetry-summary',
+      request: STUB_REQUEST,
+    });
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.request_id).toBe('req-telemetry-summary');
+    expect(payload.scenario_id).toBe(SCENARIO_ID);
+    expect(payload.assumption_source).toBe('coaching_summary');
+    expect(payload.coaching_summary_present).toBe(true);
+    expect(payload.coaching_summary_passed_gate).toBe(true);
+    expect(payload.fallback_reason).toBeNull();
+    expect(payload.strengthen_items_count).toBe(1);
+    expect(payload.coaching_bias_signals_count).toBe(1);
+  });
+
+  it('emits V5PostDraftCoachingSourceSelected telemetry with deterministic_fallback when no coaching sources are present', async () => {
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: null,
+      strengthenItems: [],
+      coachingBiasSignals: null,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-telemetry-fallback',
+      request: STUB_REQUEST,
+    });
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.assumption_source).toBe('deterministic_fallback');
+    expect(payload.coaching_summary_present).toBe(false);
+    expect(payload.coaching_summary_passed_gate).toBe(false);
+    expect(payload.fallback_reason).toBe('no_candidate');
+    expect(payload.strengthen_items_count).toBe(0);
+    expect(payload.coaching_bias_signals_count).toBe(0);
+  });
+
+  it('does NOT emit V5PostDraftCoachingSourceSelected when graph persistence fails', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockRejectedValue(new Error('StateCommitFailedError'));
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-telemetry-nopersist',
+      request: STUB_REQUEST,
+    });
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('uses strengthenItems[0].detail as assistant_text sentence 4 when summary is absent and detail passes the gate', async () => {
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: null,
+      strengthenItems: [
+        {
+          id: 's1',
+          label: 'Stress synergy estimate',
+          detail: 'the synergy assumption sits as a point value and warrants a 10 to 30M range',
+          action_type: 'add_constraint',
+        },
+      ],
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-strengthen-detail',
+      request: STUB_REQUEST,
+    });
+
+    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls
+      .filter((c) => c[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][1] as Record<string, unknown>;
+    expect(payload.assumption_source).toBe('strengthen_item_detail');
   });
 });

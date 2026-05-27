@@ -1,36 +1,52 @@
 /**
- * Deterministic post-draft coaching narrative.
+ * Deterministic post-draft coaching narrative — gated hybrid composer.
  *
  * Builds the `assistant_text` for a successful draft_graph turn from
  * already-available response data — the persisted graph plus the
- * analysis_ready payload. No LLM call. No new context fetch.
+ * analysis_ready payload and the LLM-authored coaching fields
+ * (`coachingSummary`, `strengthenItems`, `coachingBiasSignals`).
  *
- * Replaces the prior thin "Your decision model for X is ready, with N
- * options, M factors, and K risks to consider." copy. The new shape is
- * five short sentences:
+ * Two output paths:
  *
- *   1. Confirm the model was built (names the goal where available).
- *   2. Summarise the main options.
- *   3. Frame the key trade-off in plain decision language.
- *   4. Name one or two assumptions worth checking.
- *   5. Point the user at running the analysis.
+ *   1. coachingSummary replacement. When `coachingSummary` is present
+ *      and passes the strict whole-response gate in
+ *      {@link ../coaching/copy-quality-gate.ts}, the summary is used
+ *      verbatim as the entire assistant_text. No deterministic opener
+ *      is prepended — the summary stands alone or it does not run.
  *
- * Style invariants enforced by construction:
+ *   2. Five-sentence hybrid. When the summary is missing or rejected,
+ *      a deterministic five-sentence narrative is assembled:
+ *        1. Confirm the model was built (names the goal where available).
+ *        2. Summarise the main options.
+ *        3. Frame the key trade-off in plain decision language.
+ *        4. Name one assumption worth checking. Source picked through a
+ *           strict priority chain (strengthen.detail → strengthen.label
+ *           → bias_finding.explanation → coaching_bias_signal.detail →
+ *           uncertainty_driver → fixed-generic), each candidate passing
+ *           a deterministic copy-quality gate before being adopted.
+ *        5. Point the user at running the analysis.
+ *
+ * Style invariants enforced by construction and by the gate:
  *   - British English ("summarise", "favour", "behaviour").
- *   - No em dashes.
- *   - No internal IDs — only human labels.
- *   - No jargon: "intervention", "schema", "graph node", "payload",
- *     "analysis_ready", "factor IDs", "model adjustment", "bias finding".
+ *   - No em / en dashes.
+ *   - No internal IDs — only human labels survive.
+ *   - No jargon (intervention, schema, payload, analysis_ready, …).
  *   - No raw counts as the lead value.
- *   - No recommendation — analysis has not run yet.
+ *   - No recommendation / winner / best-option language — the analysis
+ *     has not run yet.
  *   - Under 140 words. Trailing sentences are dropped when over budget.
  *
- * The builder is defensive: every field is treated as best-effort, and a
- * graceful single-line fallback covers the case where the graph is null
- * or has no usable structure.
+ * The builder is defensive: every field is treated as best-effort, and
+ * a graceful single-line fallback covers the case where the graph is
+ * null or has no usable structure. The function returns a
+ * {@link PostDraftNarrativeResult} with both the rendered `text` and a
+ * lightweight `telemetry` payload describing which source filled
+ * sentence 4. The caller emits the telemetry — this module never logs.
  */
 
 import type { GraphV3T } from '../../orchestrator/types.js';
+
+import { gateAssumptionFragment, gateFullResponse } from './copy-quality-gate.js';
 
 const MAX_WORDS = 140;
 const MAX_LABEL_CHARS = 40;
@@ -54,10 +70,10 @@ const INTERROGATIVE_PREFIXES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Internal-jargon substrings (case-insensitive). Mirrors the
- * forbidden-list enforced by the dispatch unit tests' `assertCleanCopy`
- * helper. Any match disqualifies the driver and routes us to the fixed
- * generic fallback.
+ * Internal-jargon substrings (case-insensitive) for uncertainty drivers.
+ * Mirrors the broader copy gate but kept colocated for the
+ * driver-specific grammar guard exported as
+ * {@link validateUncertaintyDriver}.
  */
 const FORBIDDEN_DRIVER_SUBSTRINGS: readonly string[] = [
   'intervention',
@@ -77,35 +93,22 @@ const FORBIDDEN_DRIVER_SUBSTRINGS: readonly string[] = [
 ];
 
 /**
- * Fixed-generic assumption-line fallback used when an uncertainty driver
- * candidate exists but fails the grammar guard. Wording is deliberately
- * broad and decision-coach in tone so it never reads as a substitute for
- * a missing signal — it reads as a deliberate prompt.
+ * Fixed-generic assumption-line fallback used when no source passes
+ * its respective gate. Wording is deliberately broad and
+ * decision-coach in tone so it never reads as a substitute for a
+ * specific signal — it reads as a deliberate prompt.
  */
 const FIXED_GENERIC_ASSUMPTION =
   "One assumption worth checking is whether the model's key inputs reflect your real delivery constraints.";
 
 /**
  * Pure deterministic heuristic — accepts an uncertainty driver phrase
- * iff every condition holds:
- *
- *   1. After trimming, the length is between {@link DRIVER_MIN_CHARS}
- *      and {@link DRIVER_MAX_CHARS} characters (inclusive).
- *   2. The final character is a word character (letter, digit or
- *      underscore). Trailing punctuation that breaks sentence flow —
- *      `.`, `?`, `!`, `,`, `;` — disqualifies the phrase, because the
- *      builder appends a `.` already and the user would otherwise see
- *      a doubled stop.
- *   3. The first whitespace-delimited token (case-insensitive) is not
- *      one of {@link INTERROGATIVE_PREFIXES}. Question-shaped phrases
- *      do not read naturally after "One assumption worth checking:".
- *   4. No {@link FORBIDDEN_DRIVER_SUBSTRINGS} appears anywhere in the
- *      phrase (case-insensitive). Mirrors the broader copy ban on
- *      internal jargon and IDs.
- *
- * Returns `true` when the phrase is safe to embed verbatim; `false`
- * otherwise. Exported so the unit tests can pin specific pass/fail
- * fixtures.
+ * iff every condition holds (length, trailing punctuation,
+ * question-shape, jargon). Kept as a narrower guard than the broader
+ * {@link gateAssumptionFragment}, since drivers come from the
+ * pipeline's own factor-level annotations and have historically been
+ * tested at the same calibration. Exported so unit tests can pin
+ * specific pass/fail fixtures.
  */
 export function validateUncertaintyDriver(driver: string): boolean {
   if (typeof driver !== 'string') return false;
@@ -143,22 +146,103 @@ export interface PostDraftAnalysisReadyLite {
   readonly bias_findings?: ReadonlyArray<unknown> | undefined;
 }
 
+/**
+ * Telemetry source labels emitted alongside the rendered text. Closed
+ * set — see {@link PostDraftNarrativeTelemetry}. Category-only; the
+ * caller never logs the underlying source text.
+ */
+export type AssumptionSource =
+  | 'coaching_summary'
+  | 'strengthen_item_detail'
+  | 'strengthen_item_label'
+  | 'bias_finding'
+  | 'coaching_bias_signal'
+  | 'uncertainty_driver'
+  | 'deterministic_fallback';
+
+/**
+ * Coarse fallback category emitted alongside {@link AssumptionSource}.
+ *   - `gate_rejected`: a higher-priority candidate existed but failed
+ *     the copy-quality gate.
+ *   - `no_candidate`: no higher-priority candidate was available at all.
+ *   - `null`: the highest-priority available source was used cleanly.
+ */
+export type FallbackReason = 'gate_rejected' | 'no_candidate' | null;
+
+export interface PostDraftNarrativeTelemetry {
+  readonly assumption_source: AssumptionSource;
+  readonly coaching_summary_present: boolean;
+  readonly coaching_summary_passed_gate: boolean;
+  readonly fallback_reason: FallbackReason;
+  readonly strengthen_items_count: number;
+  readonly bias_findings_count: number;
+  readonly coaching_bias_signals_count: number;
+}
+
+export interface PostDraftNarrativeResult {
+  readonly text: string;
+  readonly telemetry: PostDraftNarrativeTelemetry;
+}
+
 export interface BuildPostDraftNarrativeInput {
   readonly graph: GraphV3T | null;
   readonly analysisReady?: PostDraftAnalysisReadyLite | null;
+  readonly strengthenItems?: ReadonlyArray<unknown> | null;
+  readonly coachingSummary?: string | null;
+  readonly coachingBiasSignals?: ReadonlyArray<unknown> | null;
 }
 
 /**
- * Build the deterministic post-draft assistant_text.
- *
- * Pure function. Never throws. Always returns a non-empty string.
+ * Build the deterministic post-draft assistant_text and its source
+ * telemetry. Pure function. Never throws. Always returns a non-empty
+ * `text`.
  */
-export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): string {
-  const { graph, analysisReady } = input;
+export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): PostDraftNarrativeResult {
+  const { graph, analysisReady, strengthenItems, coachingSummary, coachingBiasSignals } = input;
+
+  const strengthenItemsCount = Array.isArray(strengthenItems) ? strengthenItems.length : 0;
+  const biasFindingsCount = Array.isArray(analysisReady?.bias_findings)
+    ? (analysisReady?.bias_findings?.length ?? 0)
+    : 0;
+  const coachingBiasSignalsCount = Array.isArray(coachingBiasSignals) ? coachingBiasSignals.length : 0;
+
+  const summaryCandidate =
+    typeof coachingSummary === 'string' ? coachingSummary.trim() : '';
+  const coachingSummaryPresent = summaryCandidate.length > 0;
+
+  // Short-circuit: coachingSummary may replace the WHOLE response when
+  // it passes the strict full-response gate. No deterministic opener is
+  // prepended — the summary stands alone or it does not run.
+  if (coachingSummaryPresent && gateFullResponse(summaryCandidate).accept) {
+    return {
+      text: summaryCandidate,
+      telemetry: {
+        assumption_source: 'coaching_summary',
+        coaching_summary_present: true,
+        coaching_summary_passed_gate: true,
+        fallback_reason: null,
+        strengthen_items_count: strengthenItemsCount,
+        bias_findings_count: biasFindingsCount,
+        coaching_bias_signals_count: coachingBiasSignalsCount,
+      },
+    };
+  }
+
   const nodes = (graph?.nodes ?? []) as readonly NodeLite[];
 
   if (nodes.length === 0) {
-    return 'Your decision model is ready to explore.';
+    return {
+      text: 'Your decision model is ready to explore.',
+      telemetry: {
+        assumption_source: 'deterministic_fallback',
+        coaching_summary_present: coachingSummaryPresent,
+        coaching_summary_passed_gate: false,
+        fallback_reason: 'no_candidate',
+        strengthen_items_count: strengthenItemsCount,
+        bias_findings_count: biasFindingsCount,
+        coaching_bias_signals_count: coachingBiasSignalsCount,
+      },
+    };
   }
 
   const goalLabel = findGoalLabel(nodes);
@@ -175,14 +259,30 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): st
   const tradeOffSentence = buildTradeOffSentence(factors, risks);
   if (tradeOffSentence) sentences.push(tradeOffSentence);
 
-  const assumptionSentence = buildAssumptionSentence(nodes, analysisReady);
-  if (assumptionSentence) sentences.push(assumptionSentence);
+  const assumption = pickAssumption({
+    nodes,
+    analysisReady,
+    strengthenItems,
+    coachingBiasSignals,
+  });
+  if (assumption.text) sentences.push(assumption.text);
 
   sentences.push(
     'Next, run the analysis to see how the options compare and what could shift the outcome.',
   );
 
-  return enforceWordBudget(sentences);
+  return {
+    text: enforceWordBudget(sentences),
+    telemetry: {
+      assumption_source: assumption.source,
+      coaching_summary_present: coachingSummaryPresent,
+      coaching_summary_passed_gate: false,
+      fallback_reason: assumption.fallbackReason,
+      strengthen_items_count: strengthenItemsCount,
+      bias_findings_count: biasFindingsCount,
+      coaching_bias_signals_count: coachingBiasSignalsCount,
+    },
+  };
 }
 
 // ----- sentence builders ----------------------------------------------------
@@ -233,40 +333,174 @@ function buildTradeOffSentence(
   return null;
 }
 
-function buildAssumptionSentence(
-  nodes: readonly NodeLite[],
-  analysisReady: PostDraftAnalysisReadyLite | null | undefined,
-): string | null {
-  // Priority 1: factor-level uncertainty drivers — user-facing phrases
-  // produced upstream in the unified pipeline. We additionally enforce
-  // the deterministic grammar guard so a malformed phrase can never
-  // produce awkward copy. When a driver candidate exists but fails the
-  // guard we DELIBERATELY short-circuit to the fixed-generic copy
-  // instead of falling through to priorities 2 or 3: the presence of a
-  // driver signal already attests to relevant uncertainty in the graph,
-  // so the right response is a generic prompt, not a different topic.
+interface AssumptionPick {
+  readonly text: string;
+  readonly source: AssumptionSource;
+  readonly fallbackReason: FallbackReason;
+}
+
+/**
+ * Strict source-priority chain for sentence 4:
+ *   1. strengthenItems[0].detail (then .label)
+ *   2. analysisReady.bias_findings[0].explanation
+ *   3. coachingBiasSignals[0].detail
+ *   4. uncertainty_driver (with grammar guard)
+ *   5. fixed-generic
+ *
+ * `fallback_reason` distinguishes `gate_rejected` (a higher-priority
+ * candidate existed but failed) from `no_candidate` (nothing was
+ * available at all, so we fell through to the generic).
+ */
+function pickAssumption(input: {
+  readonly nodes: readonly NodeLite[];
+  readonly analysisReady: PostDraftAnalysisReadyLite | null | undefined;
+  readonly strengthenItems: ReadonlyArray<unknown> | null | undefined;
+  readonly coachingBiasSignals: ReadonlyArray<unknown> | null | undefined;
+}): AssumptionPick {
+  const { nodes, analysisReady, strengthenItems, coachingBiasSignals } = input;
+  let anyCandidateRejected = false;
+
+  // Priority 1: strengthenItems — prefer .detail, fall back to .label.
+  const strengthen = pickStrengthenAssumption(strengthenItems);
+  if (strengthen) {
+    return {
+      text: `One assumption worth checking: ${strengthen.text}.`,
+      source: strengthen.source,
+      fallbackReason: null,
+    };
+  }
+  if (Array.isArray(strengthenItems) && strengthenItems.length > 0) {
+    anyCandidateRejected = true;
+  }
+
+  // Priority 2: bias_findings.explanation
+  const biasFinding = pickBiasFindingAssumption(analysisReady);
+  if (biasFinding) {
+    return {
+      text: `One assumption worth checking: ${biasFinding}.`,
+      source: 'bias_finding',
+      fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
+    };
+  }
+  if (Array.isArray(analysisReady?.bias_findings) && (analysisReady?.bias_findings?.length ?? 0) > 0) {
+    anyCandidateRejected = true;
+  }
+
+  // Priority 3: coachingBiasSignals.detail
+  const coachingBias = pickCoachingBiasSignalAssumption(coachingBiasSignals);
+  if (coachingBias) {
+    return {
+      text: `One assumption worth checking: ${coachingBias}.`,
+      source: 'coaching_bias_signal',
+      fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
+    };
+  }
+  if (Array.isArray(coachingBiasSignals) && coachingBiasSignals.length > 0) {
+    anyCandidateRejected = true;
+  }
+
+  // Priority 4: uncertainty_driver (factor-level, with grammar guard).
   const driver = pickUncertaintyDriver(nodes);
   if (driver) {
     if (validateUncertaintyDriver(driver)) {
-      return `One assumption worth checking: ${cleanLeadIn(driver)}.`;
+      return {
+        text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
+        source: 'uncertainty_driver',
+        fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
+      };
     }
-    return FIXED_GENERIC_ASSUMPTION;
+    anyCandidateRejected = true;
   }
 
-  // Priority 2: one model_adjustment, translated through its `reason`
-  // field (which is the human-readable narrative the pipeline already
-  // produced). We never expose `code`, `field`, `before` or `after`.
-  const adjustmentReason = pickAdjustmentReason(analysisReady);
-  if (adjustmentReason) {
-    return `One assumption worth checking: ${cleanLeadIn(adjustmentReason)}.`;
+  // Priority 5: fixed-generic.
+  return {
+    text: FIXED_GENERIC_ASSUMPTION,
+    source: 'deterministic_fallback',
+    fallbackReason: anyCandidateRejected ? 'gate_rejected' : 'no_candidate',
+  };
+}
+
+// ----- assumption-source pickers --------------------------------------------
+
+function pickStrengthenAssumption(
+  items: ReadonlyArray<unknown> | null | undefined,
+):
+  | { readonly text: string; readonly source: 'strengthen_item_detail' | 'strengthen_item_label' }
+  | null {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  const first = items[0];
+  if (typeof first !== 'object' || first === null) return null;
+
+  const detail = (first as { detail?: unknown }).detail;
+  const label = (first as { label?: unknown }).label;
+
+  // Try the full detail first (richer coaching value). If too long /
+  // gate-rejected, try the first-sentence slice of the detail.
+  if (typeof detail === 'string') {
+    const candidate = cleanLeadIn(detail);
+    if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) {
+      return { text: candidate, source: 'strengthen_item_detail' };
+    }
+    const firstSentence = extractFirstSentence(detail);
+    if (firstSentence) {
+      const cleaned = cleanLeadIn(firstSentence);
+      if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) {
+        return { text: cleaned, source: 'strengthen_item_detail' };
+      }
+    }
   }
 
-  // Priority 3: one bias_finding explanation — same principle as above.
-  const biasExplanation = pickBiasExplanation(analysisReady);
-  if (biasExplanation) {
-    return `One assumption worth checking: ${cleanLeadIn(biasExplanation)}.`;
+  // Fall back to label.
+  if (typeof label === 'string') {
+    const cleaned = cleanLeadIn(label);
+    if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) {
+      return { text: cleaned, source: 'strengthen_item_label' };
+    }
   }
 
+  return null;
+}
+
+function pickBiasFindingAssumption(
+  analysisReady: PostDraftAnalysisReadyLite | null | undefined,
+): string | null {
+  const findings = analysisReady?.bias_findings;
+  if (!Array.isArray(findings) || findings.length === 0) return null;
+  for (const f of findings) {
+    if (typeof f !== 'object' || f === null) continue;
+    const explanation = (f as { explanation?: unknown }).explanation;
+    if (typeof explanation !== 'string') continue;
+    const candidate = cleanLeadIn(explanation);
+    if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) {
+      return candidate;
+    }
+    const firstSentence = extractFirstSentence(explanation);
+    if (firstSentence) {
+      const cleaned = cleanLeadIn(firstSentence);
+      if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+    }
+  }
+  return null;
+}
+
+function pickCoachingBiasSignalAssumption(
+  signals: ReadonlyArray<unknown> | null | undefined,
+): string | null {
+  if (!Array.isArray(signals) || signals.length === 0) return null;
+  for (const s of signals) {
+    if (typeof s !== 'object' || s === null) continue;
+    const detail = (s as { detail?: unknown }).detail;
+    if (typeof detail !== 'string') continue;
+    const candidate = cleanLeadIn(detail);
+    if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) {
+      return candidate;
+    }
+    const firstSentence = extractFirstSentence(detail);
+    if (firstSentence) {
+      const cleaned = cleanLeadIn(firstSentence);
+      if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+    }
+  }
   return null;
 }
 
@@ -305,34 +539,6 @@ function pickUncertaintyDriver(nodes: readonly NodeLite[]): string | null {
   return null;
 }
 
-function pickAdjustmentReason(
-  analysisReady: PostDraftAnalysisReadyLite | null | undefined,
-): string | null {
-  const adjustments = analysisReady?.model_adjustments;
-  if (!adjustments || adjustments.length === 0) return null;
-  for (const adj of adjustments) {
-    if (typeof adj !== 'object' || adj === null) continue;
-    const reason = (adj as { reason?: unknown }).reason;
-    if (typeof reason === 'string' && reason.trim().length > 0) return reason.trim();
-  }
-  return null;
-}
-
-function pickBiasExplanation(
-  analysisReady: PostDraftAnalysisReadyLite | null | undefined,
-): string | null {
-  const findings = analysisReady?.bias_findings;
-  if (!findings || findings.length === 0) return null;
-  for (const f of findings) {
-    if (typeof f !== 'object' || f === null) continue;
-    const explanation = (f as { explanation?: unknown }).explanation;
-    if (typeof explanation === 'string' && explanation.trim().length > 0) {
-      return explanation.trim();
-    }
-  }
-  return null;
-}
-
 // ----- text utilities -------------------------------------------------------
 
 function truncate(label: string, max: number): string {
@@ -366,8 +572,21 @@ function cleanLeadIn(s: string): string {
   // place and any sentence-ending punctuation we are about to add back.
   const trimmed = s.trim().replace(/^[-•*]+\s*/, '').trim();
   return trimmed.endsWith('.') || trimmed.endsWith('!') || trimmed.endsWith('?')
-    ? trimmed.slice(0, -1)
+    ? trimmed.slice(0, -1).trim()
     : trimmed;
+}
+
+/**
+ * Return the prefix of `text` up to (but not including) the first
+ * sentence-terminating punctuation (`.`, `!`, `?`), trimmed. Returns
+ * `null` when the input has no such punctuation or the prefix is
+ * empty.
+ */
+function extractFirstSentence(text: string): string | null {
+  const m = text.match(/^([^.!?]+)[.!?]/);
+  if (!m) return null;
+  const candidate = m[1].trim();
+  return candidate.length > 0 ? candidate : null;
 }
 
 function countWords(text: string): number {
