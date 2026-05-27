@@ -399,6 +399,70 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         );
       }
       if (runError instanceof PLoTError) {
+        // Demo-readiness recovery: PLoT 422 "preflight validation failed"
+        // for an option that does not specify at least one intervention is
+        // a recoverable model-readiness failure, NOT a true internal
+        // error. The pre-PLoT options_not_configured guard at the top of
+        // this handler catches the common case (all options missing
+        // interventions), but the PLoT preflight is stricter — it can
+        // reject a graph where one option appears configured locally but
+        // PLoT's normaliser still rejects it (e.g. interventions that
+        // resolve to no usable effect). Route those into the existing
+        // recoverable `options_not_configured` cause + composer template
+        // so the user sees a typed 200 with the option name + "Configure
+        // {option}" chip, NOT a generic 500.
+        //
+        // The check is narrow: only PLoT 422s carrying a structured
+        // V2RunError with an `analysis_status` of "preflight_validation_failed"
+        // (or a critique matching the missing-intervention message). Any
+        // other PLoT error falls through to the existing `plot_error`
+        // path unchanged — see required behaviour rule #8.
+        const v2Err = runError.v2RunError;
+        if (runError.status === 422 && v2Err) {
+          const firstCritiqueMsg =
+            typeof v2Err.critiques?.[0]?.message === 'string'
+              ? (v2Err.critiques![0]!.message as string)
+              : null;
+          const statusReason =
+            typeof v2Err.status_reason === 'string' ? v2Err.status_reason : null;
+          const analysisStatus =
+            typeof v2Err.analysis_status === 'string' ? v2Err.analysis_status : null;
+          // Pattern match: the preflight rejects an option for missing
+          // interventions. Conservative match — three signals AND'd so
+          // we don't accidentally absorb other PLoT 422 shapes.
+          const isPreflight =
+            analysisStatus === 'preflight_validation_failed' ||
+            (statusReason ?? '').toLowerCase().includes('preflight validation');
+          const isMissingIntervention =
+            (firstCritiqueMsg ?? '').toLowerCase().includes('does not specify what it changes') ||
+            (firstCritiqueMsg ?? '').toLowerCase().includes('must define at least one intervention');
+          if (isPreflight && isMissingIntervention) {
+            // Extract the option label from the critique. PLoT emits
+            // single-quoted labels in the message: "Option 'Foo Bar' does
+            // not specify ...". Match conservatively; if extraction fails,
+            // surface as the generic options_not_configured (no label
+            // branch in the composer handles that cleanly).
+            const labelMatch = (firstCritiqueMsg ?? '').match(/Option '([^']+)'/);
+            const extractedLabel =
+              labelMatch && labelMatch[1] && labelMatch[1].trim().length > 0
+                ? labelMatch[1].trim()
+                : null;
+            throw new HandlerInvocationFailedError(
+              'PLoT preflight rejected option for missing interventions',
+              {
+                cause_kind: 'options_not_configured',
+                retryable: false,
+                details: {
+                  ...errorDetailsBase,
+                  ...(extractedLabel !== null ? { first_option_label: extractedLabel } : {}),
+                  plot_preflight_recovery: true,
+                  analysis_status: analysisStatus ?? undefined,
+                },
+                cause: runError,
+              },
+            );
+          }
+        }
         throw new HandlerInvocationFailedError(
           `PLoT returned error: ${runError.message}`,
           {
