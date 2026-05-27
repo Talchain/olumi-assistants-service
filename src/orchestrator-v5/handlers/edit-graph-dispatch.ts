@@ -81,12 +81,27 @@ import {
  * `assistantText: null` to leave the existing response unchanged.
  *
  * Branches:
- *   - `analytical_fresh`  — analytical intent + fresh run_analysis fact.
- *   - `analytical_stale`  — analytical intent + stale run_analysis fact.
- *   - `analytical_none`   — analytical intent + no run_analysis fact.
- *   - `vague_edit`        — no analytical intent, no concrete mutation
- *                            signal (message looks edit-like but vague).
- *   - `ambiguous`         — anything else; preserve existing copy.
+ *   - `analytical_fresh`        — analytical intent + fresh run_analysis fact.
+ *   - `analytical_stale`        — analytical intent + stale run_analysis fact.
+ *   - `analytical_none`         — analytical intent + no run_analysis fact.
+ *   - `vague_edit`              — no analytical intent, no concrete mutation
+ *                                  signal (message looks edit-like but vague).
+ *   - `explore_factor`          — message contains a known graph node label,
+ *                                  no mutation signal, fresh run_analysis
+ *                                  fact present. Three exploration chips
+ *                                  (explain / what-would-flip / pre-mortem).
+ *   - `explore_factor_stale`    — same as `explore_factor` but the prior
+ *                                  analysis is stale. Single rerun chip;
+ *                                  exploration chips suppressed to avoid
+ *                                  silent stale-context UX.
+ *   - `ambiguous`               — anything else; preserve existing copy.
+ *
+ * Freshness precedence for the explore_factor pair:
+ *   - 'fresh'           → explore_factor
+ *   - 'stale'           → explore_factor_stale
+ *   - 'unknown' / 'none'→ defer to ambiguous (cannot prove freshness;
+ *                          safer to preserve V4 copy than nudge with
+ *                          analysis-grounded chips).
  *
  * Copy contract: British English, calm, concise. No emoji, no em dashes,
  * no raw IDs, no internal terms ("validator", "patch", "schema",
@@ -220,34 +235,48 @@ const RUN_PRE_MORTEM_CHIP: BoundaryAction = Object.freeze({
 
 /**
  * Escape regex metacharacters in a literal label string so it can be
- * embedded inside a `\b…\b` pattern safely. Labels are user-authored
- * and may contain `.()*+?[]{}^$|\` etc.
+ * embedded inside a custom-boundary pattern safely. Labels are
+ * user-authored and may contain `.()*+?[]{}^$|\` etc.
  */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * Case-insensitive WORD-BOUNDARY check: does `message` contain any of
- * `nodes`'s labels as a complete-word match?
+ * Case-insensitive ALPHANUMERIC-BOUNDARY check: does `message`
+ * contain any of `nodes`'s labels as a complete token?
  *
- * Word-boundary (\b…\b) prevents the previous substring-match
- * regression where a 4-character label like "Cost" would
- * false-positive on a no-op message containing "costs" or
- * "costliness". The safety net is still looser than the upstream
- * intercept's exact-equality match — the message can include
- * surrounding text — but the matched span must be a whole label,
- * not an embedded substring.
+ * The pre-round-3 implementation used JS `\b` which is defined as a
+ * word/non-word transition where `\w = [A-Za-z0-9_]`. That rejects
+ * labels whose first or last character is non-word — e.g.
+ * `Revenue (%)` (ends with `)`) or `C++` (ends with `+`) — because
+ * the leading / trailing `\b` cannot fire when the label itself ends
+ * with a non-word character (no word→non-word transition is
+ * possible). Round-3 reviewer flagged this as a false-negative class
+ * the corpus could realistically hit.
  *
- * Labels shorter than 3 characters are skipped (single- and
+ * The custom boundary `(^|[^A-Za-z0-9])` / `(?=$|[^A-Za-z0-9])`
+ * fires on start-of-string / end-of-string or any non-alphanumeric
+ * character around the literal label. This:
+ *   - still rejects "costs" / "costliness" for label "Cost" (the
+ *     character AFTER "cost" is alphanumeric `s` / `l`),
+ *   - still matches standalone "cost" with surrounding punctuation
+ *     ("Explore the Cost!"),
+ *   - now matches "Revenue (%)" inside "Look at Revenue (%) here"
+ *     (the `)` is the label's own trailing char; the lookahead sees
+ *     the following space as non-alphanumeric).
+ *
+ * Labels shorter than 3 characters are still skipped — single- and
  * two-letter labels would false-positive on common words even with
- * word boundaries).
+ * alphanumeric boundaries (e.g. a label "AI" matching "wait" — the
+ * `A` after `w` is alphanumeric so the leading boundary fails, but
+ * a label "X" inside a numeric context could leak).
  *
- * Note: `\b` is ASCII-aware in JS regex. Labels containing only
- * Unicode-letter boundaries (e.g. CJK) would not gain protection
- * from the word-boundary anchors, but their substring match would
- * also be exact-by-shape in practice. The current English-only
- * label corpus is fully covered.
+ * Underscore (`_`) is intentionally treated as alphanumeric by
+ * `[^A-Za-z0-9]` (i.e. as a boundary character). Labels do not use
+ * underscores in practice; if they did, this would NOT match
+ * "foo_label" against label "label" — same conservative behaviour as
+ * `\b`.
  */
 function messageContainsKnownLabel(
   message: string,
@@ -258,7 +287,10 @@ function messageContainsKnownLabel(
     if (typeof node.label !== 'string') continue;
     const label = node.label.trim();
     if (label.length < 3) continue;
-    const pattern = new RegExp(`\\b${escapeRegex(label)}\\b`, 'i');
+    const pattern = new RegExp(
+      `(^|[^A-Za-z0-9])${escapeRegex(label)}(?=$|[^A-Za-z0-9])`,
+      'i',
+    );
     if (pattern.test(message)) return true;
   }
   return false;

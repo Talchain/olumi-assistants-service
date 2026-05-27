@@ -287,6 +287,47 @@ describe('decideNoOpRecovery', () => {
       expect(result.branch).toBe('explore_factor');
     });
 
+    // Round-3 reviewer's medium finding — JS `\b` is defined as a
+    // word/non-word transition where `\w = [A-Za-z0-9_]`. A trailing
+    // `\b` cannot fire after a non-word label terminator like `)` or
+    // `+`. The custom alphanumeric-boundary pattern fixes the
+    // false-negative for labels like "Revenue (%)" or "C++".
+    it('ALPHANUMERIC-BOUNDARY: label "Revenue (%)" matches even though it ends with a non-word char', () => {
+      const result = decideNoOpRecovery({
+        message: 'Look at Revenue (%) here.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: [{ label: 'Revenue (%)' }],
+      });
+      expect(result.branch).toBe('explore_factor');
+    });
+
+    it('ALPHANUMERIC-BOUNDARY: label "C++" matches even though it ends with a non-word char', () => {
+      const result = decideNoOpRecovery({
+        message: 'I prefer C++ over Java',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: [{ label: 'C++' }],
+      });
+      expect(result.branch).toBe('explore_factor');
+    });
+
+    it('ALPHANUMERIC-BOUNDARY: label "Revenue (%)" does NOT match "Revenue (%)x" (alphanumeric run-on)', () => {
+      // Defensive — the trailing alphanumeric guard still applies.
+      // A run-on alphanumeric after the label means the user typed
+      // something other than the label.
+      const result = decideNoOpRecovery({
+        message: 'Look at Revenue (%)x',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+        nodes: [{ label: 'Revenue (%)' }],
+      });
+      expect(result.branch).toBe('ambiguous');
+    });
+
     it('passes egress forbidden-phrase + success-claim guards (fresh + stale variants)', async () => {
       const { findForbiddenPhraseHit, findSuccessClaimHit } = await import(
         '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js'

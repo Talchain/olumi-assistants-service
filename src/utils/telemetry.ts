@@ -893,11 +893,16 @@ export const TelemetryEvents = {
   // clarification when the message looks edit-like but vague. Payload:
   // structural enums + booleans only. `intent_class` is the
   // AnalyticalIntentClass enum or null; `branch_taken` is the recovery
-  // branch enum (analytical_fresh / analytical_stale / analytical_none /
-  // vague_edit / explore_factor / ambiguous). The `explore_factor`
-  // branch was added as a safety net for label-shaped no-op messages
-  // that slip past the upstream `tryPostAnalysisLabelIntercept`
-  // (V5PostAnalysisLabelIntercept event below).
+  // branch enum:
+  //   analytical_fresh / analytical_stale / analytical_none / vague_edit
+  //   / explore_factor / explore_factor_stale / ambiguous
+  // The `explore_factor` / `explore_factor_stale` pair was added as a
+  // safety net for label-shaped no-op messages that slip past the
+  // upstream `tryPostAnalysisLabelIntercept` (V5PostAnalysisLabelIntercept
+  // event below). The `_stale` variant fires when the prior analysis is
+  // stale; it emits a single re-run chip instead of the three
+  // exploration chips so users never get an analysis-grounded nudge
+  // against an out-of-date result.
   V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
 
   // V5 edit lifecycle recovery v1 — pre-LLM intercept for the legacy
