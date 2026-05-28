@@ -67,7 +67,10 @@ import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/tu
 import { config } from '../../../config/index.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
-import { buildAnalysisResultHeadline } from '../../coaching/analysis-result-headline.js';
+import {
+  buildAnalysisResultHeadline,
+  describeAnalysisHeadline,
+} from '../../coaching/analysis-result-headline.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -608,12 +611,33 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       statusOutcome.kind === 'ok' || statusOutcome.kind === 'partial' || statusOutcome.kind === 'unknown'
         ? statusOutcome.kind
         : 'ok';
-    const headline = buildAnalysisResultHeadline({
+    const headlineInput = {
       enrichment: response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
       status_kind: headlineStatusKind,
-    });
+    };
+    const headline = buildAnalysisResultHeadline(headlineInput);
     const summary = headline ?? template;
+
+    // V5 link-safe response floor: when the deterministic headline builder
+    // picks Case-E ("{label} currently leads.") because stronger cases
+    // (A/B/C/D) did not qualify, emit a metadata-only telemetry event so
+    // dashboards can track how often the floor saves users from the bland
+    // locked template. Same pure descriptor source as the builder; never
+    // includes raw user text, labels, prose, arrays, or nested objects.
+    const headlineDescriptor = describeAnalysisHeadline(headlineInput);
+    if (headlineDescriptor.case === 'E') {
+      emit(TelemetryEvents.V5HeadlineFellBack, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        reason: headlineDescriptor.reason,
+        has_leading_option: headlineDescriptor.has_leading_option,
+        has_clean_label: headlineDescriptor.has_clean_label,
+        has_driver: headlineDescriptor.has_driver,
+        has_fragility: headlineDescriptor.has_fragility,
+        margin_bucket: headlineDescriptor.margin_bucket ?? 'unknown',
+      });
+    }
 
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',

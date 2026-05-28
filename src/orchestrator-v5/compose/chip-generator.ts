@@ -45,7 +45,7 @@
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 import type { StageType } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import type { SuggestedAction } from './types.js';
 import type { HandlerValidationRegistry } from '../routing/validator.js';
 import { curatedHandlerChips } from './helpers.js';
@@ -176,13 +176,150 @@ export function validateAndFilterChips(
 }
 
 /**
- * Build chips for the compose layer. Returns at most MAX_CHIPS. Returns
- * empty array when no rule applies for the current stage/signals. All
+ * Build chips for the compose layer. Returns at most MAX_CHIPS. All
  * emitted chips are passed through `validateAndFilterChips` so a chip
  * with an unmapped or literally-null `action_type` cannot reach the wire.
+ *
+ * V5 link-safe response floor: when the existing rules + filter would
+ * return an empty array, {@link applyChipFloor} attempts to attach one
+ * deterministic conversational or executable chip drawn from current
+ * state (analysisReady, prior run_analysis facts, freshness). If no
+ * floor candidate qualifies, the empty array is preserved and
+ * `v5.chips.empty_intentional` is emitted with `reason: 'no_safe_floor'`
+ * so monitoring can see that the empty state was deliberate, not a
+ * regression.
  */
 export function generateChips(input: ChipGeneratorInput): readonly SuggestedAction[] {
-  return validateAndFilterChips(generateChipsRaw(input), input.validationRegistry);
+  const filtered = validateAndFilterChips(generateChipsRaw(input), input.validationRegistry);
+  if (filtered.length > 0) return filtered;
+  return applyChipFloor(input);
+}
+
+/**
+ * Link-safe response floor. Called when the standard rules + filter
+ * produced an empty array. Picks a single safe chip from a priority
+ * ladder driven entirely by existing input signals. No new wire
+ * `action_type` is invented; no edit-path is implied. When no rung
+ * matches, returns `[]` and emits `v5.chips.empty_intentional` —
+ * an empty product turn is honest, a filler chip would be noise.
+ *
+ * Priority ladder (first match wins):
+ *
+ *   1. Post-edit stale analysis (`turnOutcome.analysis_freshness === 'stale'`
+ *      AND any prior/current run_analysis fact) → conversational
+ *      "Re-run analysis" prompt. Conversational rather than executable
+ *      so upstream gates can refuse the run when readiness regressed.
+ *   2. Ready + no analysis fact (yet) → existing executable
+ *      `run_analysis` chip, only when the handler is in the validation
+ *      registry. Safe because `analysisReady.status === 'ready'`
+ *      already enforces goal + ≥2 options + numeric interventions.
+ *   3. Any run_analysis fact present (current or prior) → conversational
+ *      "What could change the outcome?" prompt. Routes through the
+ *      existing post-analysis advice gate as plain text.
+ *   4. `analysisReady.status` in {`needs_user_input`, `needs_user_mapping`,
+ *      `needs_encoding`} → conversational "Set values for options"
+ *      prompt. Does NOT emit the executable `run_analysis` chip here —
+ *      the upstream readiness gate would reject it.
+ *   5. None of the above → empty preserved; `V5ChipsEmptyIntentional`
+ *      emitted with `reason: 'no_safe_floor'`.
+ */
+function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
+  const readyStatus = input.analysisReady?.status;
+  const readyStatusLabel: string = readyStatus ?? 'unknown';
+  const hasCurrentRunAnalysisFact = (input.handlerFacts ?? []).some(
+    isSuccessfulRunAnalysisFact,
+  );
+  const hasPriorRunAnalysisFact = (input.priorFacts ?? []).some(
+    isSuccessfulRunAnalysisFact,
+  );
+  const hasAnyRunAnalysisFact = hasCurrentRunAnalysisFact || hasPriorRunAnalysisFact;
+  const freshness = input.turnOutcome?.analysis_freshness;
+  const stage = input.stage;
+
+  // Priority 1: stale post-edit → conversational re-run prompt.
+  if (hasAnyRunAnalysisFact && freshness === 'stale') {
+    emit(TelemetryEvents.V5ChipsFloorApplied, {
+      reason: 'stale_post_edit',
+      stage,
+      analysis_ready_status: readyStatusLabel,
+      has_run_analysis_fact: true,
+    });
+    return [
+      promptChip(
+        'floor_rerun_analysis',
+        'Re-run analysis',
+        'Please re-run the analysis.',
+      ),
+    ];
+  }
+
+  // Priority 2: ready + no analysis fact → executable run_analysis chip.
+  if (readyStatus === 'ready' && !hasAnyRunAnalysisFact) {
+    const curated = curatedHandlerChips(input.validationRegistry);
+    const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
+    if (runAnalysis) {
+      emit(TelemetryEvents.V5ChipsFloorApplied, {
+        reason: 'analysis_ready',
+        stage,
+        analysis_ready_status: readyStatusLabel,
+        has_run_analysis_fact: false,
+      });
+      return [
+        executableChip(
+          runAnalysis.handler_id as V5ActionType,
+          runAnalysis.label,
+        ),
+      ];
+    }
+  }
+
+  // Priority 3: any run_analysis fact present → exploration prompt.
+  if (hasAnyRunAnalysisFact) {
+    emit(TelemetryEvents.V5ChipsFloorApplied, {
+      reason: 'post_analysis_no_obvious_next',
+      stage,
+      analysis_ready_status: readyStatusLabel,
+      has_run_analysis_fact: true,
+    });
+    return [
+      promptChip(
+        'floor_post_analysis_explore',
+        'What could change the outcome?',
+        'What could change the outcome of this analysis?',
+      ),
+    ];
+  }
+
+  // Priority 4: readiness needs user input → setup prompt.
+  if (
+    readyStatus === 'needs_user_input' ||
+    readyStatus === 'needs_user_mapping' ||
+    readyStatus === 'needs_encoding'
+  ) {
+    emit(TelemetryEvents.V5ChipsFloorApplied, {
+      reason: 'needs_input',
+      stage,
+      analysis_ready_status: readyStatusLabel,
+      has_run_analysis_fact: false,
+    });
+    return [
+      promptChip(
+        'floor_set_option_values',
+        'Set values for options',
+        'Help me set up the options for this decision so the analysis can run.',
+      ),
+    ];
+  }
+
+  // No safe floor applies. Empty is honest — emit telemetry so monitoring
+  // can distinguish an intentional empty turn from a regression.
+  emit(TelemetryEvents.V5ChipsEmptyIntentional, {
+    reason: 'no_safe_floor',
+    stage,
+    analysis_ready_status: readyStatusLabel,
+    has_run_analysis_fact: hasAnyRunAnalysisFact,
+  });
+  return [];
 }
 
 function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[] {

@@ -490,6 +490,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5StaleRerunGuard: "v5.stale_rerun_guard",
         V5NoAnalysisGuard: "v5.no_analysis_guard",
         V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
+        // V5 link-safe response floor — headline Case-E + chip floor.
+        V5HeadlineFellBack: "v5.headline.fell_back",
+        V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
+        V5ChipsFloorApplied: "v5.chips.floor_applied",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites.
         EditGraphNoOperations: "edit_graph.no_operations",
         StreamingGeneratorPreflightFailure: "streaming.generator_preflight_failure",
@@ -527,7 +531,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.no_operations$|v5\.(brief_text|coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|edit_graph|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.no_operations$|v5\.(brief_text|coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|edit_graph|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1582,6 +1586,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.stale_rerun_guard",
         "v5.no_analysis_guard",
         "v5.edit_graph.no_op_recovery",
+        // V5 link-safe response floor — headline Case-E + chip floor
+        "v5.headline.fell_back",
+        "v5.chips.empty_intentional",
+        "v5.chips.floor_applied",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites
         "edit_graph.no_operations",
         "streaming.generator_preflight_failure",
