@@ -69,7 +69,6 @@ import {
   decideProposalContinuation,
   findProposedConceptAction,
 } from '../coaching/proposal-continuation.js';
-import type { PendingAction } from '../session/pending-action.js';
 import { derivePendingActionsFromChips } from '../compose/derive-pending-actions.js';
 import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
 

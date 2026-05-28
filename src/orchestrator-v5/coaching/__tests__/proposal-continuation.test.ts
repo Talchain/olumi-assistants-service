@@ -504,8 +504,7 @@ describe('buildPendingActionsWithProposalCapture', () => {
     // Non-string assistantText causes extractProposedConcept to return null
     // (graceful, not an error), so the helper returns undefined.
     const out = buildPendingActionsWithProposalCapture({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      assistantText: 123 as any,
+      assistantText: 123 as unknown as string,
       chips: [],
       scenarioId: '11111111-1111-1111-1111-111111111111',
       graphHash: 'h1',
