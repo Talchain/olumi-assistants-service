@@ -683,6 +683,114 @@ describe('resolveWinnerLabel — multi-source fallthrough on ID-shaped labels', 
   });
 });
 
+describe('resolveWinner — same-source label + probability invariant', () => {
+  // Round-3 review medium finding: previously `resolveWinnerLabel`
+  // and `resolveWinnerProbabilities` walked sources independently,
+  // so a clean label from one source could be paired with a
+  // probability from a different source if the two disagreed. The
+  // resolver is now a single pass that returns label + winner prob
+  // + runner-up prob from the SAME source per candidate.
+
+  it('skips a source whose label is ID-shaped EVEN IF its probability is finite — uses next source for both', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        // ID-shaped label, distinctive probability. The probability
+        // would leak into the headline under cross-source mixing.
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.99 },
+      ],
+      option_comparison: [
+        // Clean label, different probability. Same-source contract:
+        // the headline must use this source's probability (62%), not
+        // results[]'s 99%.
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.62 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).not.toBeNull();
+    expect(out!).toContain('Hire X currently leads with 62% probability');
+    // Distinctive 99% from results[] must NOT appear — that would
+    // signal cross-source mixing.
+    expect(out!).not.toContain('99');
+  });
+
+  it('skips a source whose probability is missing EVEN IF its label is clean — uses next source for both', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        // Clean label, NO probability. Source skipped entirely.
+        { option_id: 'opt_a', option_label: 'Hire X' /* no win_probability */ },
+        { option_id: 'opt_b', option_label: 'Plan B' /* no win_probability */ },
+      ],
+      option_comparison: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.62 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.38 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).not.toBeNull();
+    expect(out!).toContain('Hire X currently leads with 62% probability');
+  });
+
+  it('runner-up probability comes from the same source as the winner', () => {
+    // The first accepted source provides BOTH probabilities together.
+    // The second source has mismatched numbers — a near-tie that would
+    // otherwise gate out the lead via the margin guard. The headline
+    // must use the first source's numbers (62% / 38%, margin 24pp).
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.62 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.38 },
+      ],
+      option_comparison: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.50 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.49 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).not.toBeNull();
+    expect(out!).toContain('Hire X currently leads with 62% probability');
+  });
+
+  it('first source is a near-tie — guard fires on THAT source, does not silently switch to a later source with a wider margin', () => {
+    // The first source is internally consistent (clean label, finite
+    // probability) but the margin is too narrow. The same-source
+    // resolver returns it; hasMeaningfulLead rejects it; the headline
+    // falls back to the template. The resolver does NOT cherry-pick a
+    // later source's wider margin — that would be a different form of
+    // cross-source mixing, this time on the maths side rather than
+    // the label side. Pins "first acceptable source wins" so the
+    // probability/margin guard applies to a single coherent set of
+    // numbers.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.41 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.40 },
+      ],
+      option_comparison: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.80 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.20 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+});
+
 describe('RUN_ANALYSIS_LOCKED_TEMPLATES kept in sync with run-analysis.ts', () => {
   // The exported set is the registry forwarder's source of truth for
   // the locked-template literals. If RUN_ANALYSIS_ASSISTANT_TEMPLATES
@@ -732,6 +840,75 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
     const headline =
       'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final.';
     expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
+  });
+
+  it('returns true for every Case A/B/C/D shape with every status suffix', () => {
+    // Twelve combinations: 4 cases × 3 suffix states (none, partial,
+    // unknown). The predicate must accept all of them — these are the
+    // exact shapes `buildAnalysisResultHeadline` can emit.
+    const acceptedShapes = [
+      // Case A
+      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality.',
+      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      // Case B
+      'Hire A currently leads because Cost is the strongest driver.',
+      'Hire A currently leads because Cost is the strongest driver. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads because Cost is the strongest driver. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      // Case C
+      'Hire A currently leads, but the result is sensitive to Quality.',
+      'Hire A currently leads, but the result is sensitive to Quality. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads, but the result is sensitive to Quality. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      // Case D
+      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final.',
+      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final. The analysis engine reported an unfamiliar status — treat the result with caution.',
+    ];
+    for (const text of acceptedShapes) {
+      expect(isAllowedRunAnalysisAssistantText(text), `should accept: "${text}"`).toBe(true);
+    }
+  });
+
+  it('rejects anchor-shaped prose that does not match any case grammar (round-3 reviewer example)', () => {
+    // Was previously accepted by the anchor-plus-blacklist predicate.
+    // Now rejected because none of the Case A/B/C/D grammars match.
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'Hire A currently leads for reasons outside the deterministic headline grammar.',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects Case-A-shaped prose with the wrong driver-clause wording', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'Hire A currently leads because Cost is the dominant factor, but the result is sensitive to Quality.',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects Case-D-shaped prose with the wrong follow-up sentence', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'Hire A currently leads with 62% probability. Please run more tests before deciding.',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects Case-D-shaped prose with a 4-digit percentage', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'Hire A currently leads with 1234% probability. Run the follow-up checks before treating this as final.',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects status-suffix variants with the wrong wording', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'Hire A currently leads because Cost is the strongest driver. The run was a bit unusual.',
+      ),
+    ).toBe(false);
   });
 
   it('rejects improvised prose containing the anchor mid-sentence', () => {

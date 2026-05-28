@@ -88,18 +88,26 @@ export function buildAnalysisResultHeadline(
 ): string | null {
   const { enrichment, leading_option_id, status_kind } = input;
 
-  const winnerLabel = resolveWinnerLabel(enrichment, leading_option_id);
-  if (winnerLabel === null) return null;
+  // Same-source resolution: the winner label, winner probability, and
+  // runner-up probability ALL come from the SAME source array (one of
+  // results[], option_comparison[], decision_brief.options[] in priority
+  // order). This guards against the round-2 cross-source mixing risk —
+  // a clean label from one source paired with stale or inconsistent
+  // probability maths from another.
+  const winner = resolveWinner(enrichment, leading_option_id);
+  if (winner === null) return null;
 
   // Probability/margin guard — applied to ALL "currently leads" cases.
   // The headline never says "leads" unless the leading option holds a
   // finite probability above MIN_LEAD_PROBABILITY AND (when a runner-up
-  // probability is present) the margin is at least MIN_LEAD_MARGIN.
-  // Near-ties (e.g. 0.34 / 0.33 / 0.33) and weak leaders (e.g. winner
-  // at 0.30 with no clear plurality) fall through to the locked template.
-  const probs = resolveWinnerProbabilities(enrichment, leading_option_id);
-  if (!hasMeaningfulLead(probs)) return null;
-  const winnerProbability = probs.winner;
+  // probability is present in the same source) the margin is at least
+  // MIN_LEAD_MARGIN. Near-ties (e.g. 0.34 / 0.33 / 0.33) and weak
+  // leaders (e.g. winner at 0.30 with no clear plurality) fall through
+  // to the locked template.
+  if (!hasMeaningfulLead(winner)) return null;
+
+  const winnerLabel = winner.label;
+  const winnerProbability = winner.winnerProb;
 
   const driverLabel = resolveTopDriverLabel(enrichment);
   const fragileLabel = resolveFragileLabel(enrichment);
@@ -142,33 +150,40 @@ export function buildAnalysisResultHeadline(
   return caseD.length <= MAX_HEADLINE_CHARS ? caseD : null;
 }
 
-interface WinnerProbabilities {
+interface ResolvedWinner {
+  /** Sanitised label (no ID-shape, trimmed, non-empty). */
+  readonly label: string;
   /** Finite winner probability, in [0, 1]. */
-  readonly winner: number;
+  readonly winnerProb: number;
   /**
-   * Finite runner-up probability, in [0, 1], or null when no other
-   * entry in the same source carries a finite probability (e.g.,
-   * a single-option result, or runner-up missing its probability
-   * field). When null, the margin guard is waived; only the absolute
-   * probability check applies.
+   * Finite runner-up probability from the SAME source, in [0, 1],
+   * or null when no other entry in that source carries a finite
+   * probability (e.g., a single-option source, or a runner-up
+   * missing its probability field). When null the margin guard is
+   * waived; only the absolute probability check applies.
    */
-  readonly runner_up: number | null;
+  readonly runnerUpProb: number | null;
 }
 
 /**
- * Resolve the leading option's win_probability AND the next-highest
- * probability among the other entries in the SAME source. Iterates
- * sources in priority order ({@link readResultsArraySources}); the
- * first source that yields a winner with a finite probability wins.
+ * Resolve the leading option's label, its win_probability, AND the
+ * runner-up probability — all from the SAME source array in a single
+ * pass. Iterates sources in priority order
+ * ({@link readResultsArraySources}); a source is accepted only when
+ * BOTH the candidate winner has a non-ID-shaped label AND a finite,
+ * in-range win_probability. Sources that fail either check are
+ * skipped (continue) so a thin/ID-shaped first source can be rescued
+ * by a richer subsequent source — but each accepted source provides
+ * the full triple, never a label from one and a probability from
+ * another.
  *
- * Returns null when no source produces a winner with a finite,
- * in-range probability — the caller treats null as "fall back to the
- * locked template", matching the existing thin-data convention.
+ * Returns null when no source provides all three signals — the
+ * caller treats null as "fall back to the locked template".
  */
-function resolveWinnerProbabilities(
+function resolveWinner(
   enrichment: Record<string, unknown>,
   leadingOptionId: string,
-): WinnerProbabilities | null {
+): ResolvedWinner | null {
   const sources = readResultsArraySources(enrichment);
   if (sources.length === 0) return null;
 
@@ -176,9 +191,26 @@ function resolveWinnerProbabilities(
   for (const source of sources) {
     const winner = selectWinner(source, id.length > 0 ? id : null);
     if (winner === null) continue;
-    const winnerProb = readNumber(winner.win_probability);
-    if (winnerProb === null) continue;
-    if (winnerProb < 0 || winnerProb > 1) continue;
+    const cleanedLabel = sanitiseLabel(winner.label, winner.id);
+    if (cleanedLabel === null) continue;
+
+    // Re-read the winner's probability directly from the source.
+    // `selectWinner` calls `projectOptionAsWinner` which coerces a
+    // missing/non-finite `win_probability` to 0 — that conceals the
+    // difference between "explicitly 0" (a legitimate, finite signal
+    // for a dominated option) and "missing entirely" (a thin source
+    // that should be skipped so a richer downstream source can carry
+    // both label and probability). Reading raw lets the skip path
+    // fire when the source can't supply a finite probability at all.
+    const winnerRaw = source.find((r) => {
+      const rId =
+        (typeof r.option_id === 'string' && r.option_id) ||
+        (typeof r.id === 'string' && r.id) ||
+        '';
+      return rId === winner.id;
+    });
+    const winnerProb = winnerRaw ? readNumber(winnerRaw.win_probability) : null;
+    if (winnerProb === null || winnerProb < 0 || winnerProb > 1) continue;
 
     let runnerUpProb: number | null = null;
     for (const raw of source) {
@@ -191,32 +223,25 @@ function resolveWinnerProbabilities(
       if (p === null || p < 0 || p > 1) continue;
       if (runnerUpProb === null || p > runnerUpProb) runnerUpProb = p;
     }
-    return { winner: winnerProb, runner_up: runnerUpProb };
+    return { label: cleanedLabel, winnerProb, runnerUpProb };
   }
   return null;
 }
 
 /**
- * Predicate: does the resolved winner/runner-up pair support a
- * "currently leads" headline? Two gates:
+ * Predicate: does the resolved winner support a "currently leads"
+ * headline? Two gates:
  *   1. Winner probability ≥ MIN_LEAD_PROBABILITY (an absolute floor —
  *      a leader below 40% is a "no real leader" race regardless of
  *      margin).
- *   2. If a runner-up probability exists, the margin must be
- *      ≥ MIN_LEAD_MARGIN. Single-option results (runner_up === null)
- *      waive the margin check.
- *
- * Tightens the predicate to `probs is WinnerProbabilities` so the
- * caller can read `probs.winner` after the guard without a null
- * dance.
+ *   2. If a runner-up probability exists in the same source, the
+ *      margin must be ≥ MIN_LEAD_MARGIN. Single-option sources
+ *      (runnerUpProb === null) waive the margin check.
  */
-function hasMeaningfulLead(
-  probs: WinnerProbabilities | null,
-): probs is WinnerProbabilities {
-  if (probs === null) return false;
-  if (probs.winner < MIN_LEAD_PROBABILITY) return false;
-  if (probs.runner_up !== null) {
-    const margin = probs.winner - probs.runner_up;
+function hasMeaningfulLead(winner: ResolvedWinner): boolean {
+  if (winner.winnerProb < MIN_LEAD_PROBABILITY) return false;
+  if (winner.runnerUpProb !== null) {
+    const margin = winner.winnerProb - winner.runnerUpProb;
     if (margin < MIN_LEAD_MARGIN) return false;
   }
   return true;
@@ -226,29 +251,6 @@ function statusSuffix(kind: AnalysisResultHeadlineInput['status_kind']): string 
   if (kind === 'partial') return PARTIAL_SUFFIX;
   if (kind === 'unknown') return UNKNOWN_SUFFIX;
   return '';
-}
-
-function resolveWinnerLabel(
-  enrichment: Record<string, unknown>,
-  leadingOptionId: string,
-): string | null {
-  const sources = readResultsArraySources(enrichment);
-  if (sources.length === 0) return null;
-
-  const id = leadingOptionId.trim();
-  for (const source of sources) {
-    const winner = selectWinner(source, id.length > 0 ? id : null);
-    if (winner === null) continue;
-    const cleaned = sanitiseLabel(winner.label, winner.id);
-    if (cleaned !== null) return cleaned;
-    // Winner found but label is ID-shaped in this source. Try the next
-    // source (e.g., option_comparison / decision_brief.options may carry
-    // a cleaner label for the same option_id) rather than abandoning
-    // the headline entirely after one bad source. The label sanitiser
-    // still gates ID-shape leaks, so each source's candidate goes
-    // through the same check.
-  }
-  return null;
 }
 
 interface DriverCandidate {
@@ -428,41 +430,97 @@ const ASSISTANT_TEXT_ID_REGEX = /\b(?:opt|goal|fac|node|edge|n|e)_[a-z0-9_]+/i;
 const RAW_DECIMAL_REGEX = /\d+\.\d+/;
 
 /**
- * Anchor required for any non-template headline emission. Matches the
- * "currently leads" phrase used by every Case A/B/C/D shape this
- * module produces. The anchor alone is necessary but not sufficient —
- * other structural rules apply.
+ * Headline grammar regex set — mirrors the exact Case A/B/C/D shapes
+ * {@link buildAnalysisResultHeadline} can emit, optionally followed
+ * by one of the two status-suffix sentences. The placeholders
+ * (winner label, driver label, fragility label, integer probability)
+ * match any non-newline character sequence; the SURROUNDING tokens
+ * are pinned verbatim so improvised prose containing only the
+ * "currently leads" anchor (e.g. "Hire A currently leads for reasons
+ * outside the deterministic headline grammar.") cannot satisfy the
+ * grammar.
+ *
+ * Defence-in-depth rules (length cap, no newlines, no forbidden
+ * vocabulary, no ID prefixes, no raw decimals) still apply on top of
+ * the grammar match — a label slot or driver slot that happened to
+ * contain forbidden vocabulary would still be rejected after the
+ * grammar matches.
+ *
+ * Each pattern uses lazy `.+?` so the engine prefers shorter slot
+ * matches and the trailing `\.${STATUS_SUFFIX}$` anchor pins the
+ * terminator. The lazy quantifier prevents the regex from skipping
+ * across a legitimate sentence boundary inside an unusual label.
  */
-const HEADLINE_ANCHOR_REGEX = / currently leads\b/;
+function escapeForRegex(source: string): string {
+  return source.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+}
+const PARTIAL_SUFFIX_RE_SRC = escapeForRegex(PARTIAL_SUFFIX);
+const UNKNOWN_SUFFIX_RE_SRC = escapeForRegex(UNKNOWN_SUFFIX);
+const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_SRC})?`;
+
+const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
+  // Case A: winner + driver + fragility.
+  new RegExp(
+    `^.+? currently leads because .+? is the strongest driver, but the result is sensitive to .+?\\.${STATUS_SUFFIX_PATTERN}$`,
+  ),
+  // Case B: winner + driver.
+  new RegExp(
+    `^.+? currently leads because .+? is the strongest driver\\.${STATUS_SUFFIX_PATTERN}$`,
+  ),
+  // Case C: winner + fragility.
+  new RegExp(
+    `^.+? currently leads, but the result is sensitive to .+?\\.${STATUS_SUFFIX_PATTERN}$`,
+  ),
+  // Case D: winner + integer-percentage probability + follow-up nudge.
+  new RegExp(
+    `^.+? currently leads with \\d{1,3}% probability\\. Run the follow-up checks before treating this as final\\.${STATUS_SUFFIX_PATTERN}$`,
+  ),
+];
+
+function matchesHeadlineGrammar(text: string): boolean {
+  for (const re of HEADLINE_GRAMMAR_REGEXES) {
+    if (re.test(text)) return true;
+  }
+  return false;
+}
 
 /**
  * Returns true when `text` is a string the run_analysis handler is
  * permitted to expose on the wire — either an exact locked-template
  * literal, or a string that satisfies the deterministic headline
- * grammar. The validation-registry forwarder uses this as the second
- * line of defence: if a future handler regression emits improvised
- * prose, the forwarder substitutes the locked-template fallback
- * instead of letting the prose through.
+ * grammar end-to-end. The validation-registry forwarder uses this as
+ * the second line of defence: if a future handler regression emits
+ * improvised prose, the forwarder substitutes the locked-template
+ * fallback instead of letting the prose through.
  *
  * Rules (in order):
  *   1. Must be a non-empty string.
  *   2. Must be at most {@link MAX_HEADLINE_CHARS}.
  *   3. Must not contain newline characters.
  *   4. Locked-template literals pass exactly (case-sensitive).
- *   5. Otherwise must:
- *      a. End with a period.
- *      b. Contain " currently leads" (the headline anchor).
- *      c. Contain no forbidden vocabulary (recommend / winner / best / …).
- *      d. Contain no ID-prefix tokens (opt_, fac_, …).
- *      e. Contain no raw decimal numbers (only integer % allowed).
+ *   5. Otherwise must match one of the four headline grammar regexes
+ *      ({@link HEADLINE_GRAMMAR_REGEXES}) — Case A/B/C/D with an
+ *      optional partial / unknown status suffix. Anchor-only prose
+ *      that lacks the surrounding tokens (e.g. lacking
+ *      "because X is the strongest driver" or
+ *      ", but the result is sensitive to Y" or
+ *      "with N% probability. Run the follow-up checks…") is rejected.
+ *   6. Even when the grammar matches, the following defence-in-depth
+ *      rules still apply:
+ *        - no forbidden vocabulary (recommend / winner / best / …)
+ *        - no ID-prefix tokens (opt_, fac_, …)
+ *        - no raw decimal numbers (only integer % allowed)
  */
 export function isAllowedRunAnalysisAssistantText(text: unknown): boolean {
   if (typeof text !== 'string') return false;
   if (text.length === 0 || text.length > MAX_HEADLINE_CHARS) return false;
   if (text.includes('\n') || text.includes('\r')) return false;
   if (RUN_ANALYSIS_LOCKED_TEMPLATES.has(text)) return true;
-  if (!text.endsWith('.')) return false;
-  if (!HEADLINE_ANCHOR_REGEX.test(text)) return false;
+  if (!matchesHeadlineGrammar(text)) return false;
+  // Defence-in-depth: grammar-shaped but content-leaky strings still
+  // fail. A slot filler that happens to contain forbidden vocabulary
+  // or an internal ID is caught here even though the surrounding
+  // grammar matched.
   if (FORBIDDEN_HEADLINE_VOCABULARY_REGEX.test(text)) return false;
   if (ASSISTANT_TEXT_ID_REGEX.test(text)) return false;
   if (RAW_DECIMAL_REGEX.test(text)) return false;

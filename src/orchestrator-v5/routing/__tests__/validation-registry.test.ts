@@ -186,6 +186,80 @@ describe('run_analysis confirmation_template forwarder', () => {
     expect(fwd({ assistant_text: headline })).toBe(headline);
   });
 
+  it('forwards each Case A/B/C/D shape and each status suffix verbatim', () => {
+    // Exact grammar alternatives (post-round-3 tightening). The
+    // forwarder must accept every shape `buildAnalysisResultHeadline`
+    // can emit and every status-suffix combination so a partial /
+    // unknown PLoT run is not silently downgraded to the fallback.
+    const acceptedShapes = [
+      // Case A — winner + driver + fragility
+      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality.',
+      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      // Case B — winner + driver
+      'Hire A currently leads because Cost is the strongest driver.',
+      'Hire A currently leads because Cost is the strongest driver. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads because Cost is the strongest driver. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      // Case C — winner + fragility
+      'Hire A currently leads, but the result is sensitive to Quality.',
+      'Hire A currently leads, but the result is sensitive to Quality. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads, but the result is sensitive to Quality. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      // Case D — winner + probability
+      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final.',
+      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final. The analysis engine reported an unfamiliar status — treat the result with caution.',
+    ];
+    for (const text of acceptedShapes) {
+      expect(fwd({ assistant_text: text })).toBe(text);
+    }
+  });
+
+  it('falls back when text contains the anchor but does NOT match the Case A/B/C/D grammar (round-3 reviewer example)', () => {
+    // The round-2 predicate (anchor + blacklist) would have ACCEPTED
+    // this string because it contains " currently leads", ends with
+    // ".", is under 220 chars, has no forbidden vocab, no IDs, no
+    // raw decimals. The round-3 grammar predicate REJECTS it
+    // because it lacks the surrounding tokens of every case:
+    //   - no "because X is the strongest driver" (Case A/B)
+    //   - no ", but the result is sensitive to Y" (Case A/C)
+    //   - no "with N% probability. Run the follow-up checks…" (Case D)
+    const adversarial =
+      'Hire A currently leads for reasons outside the deterministic headline grammar.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when text passes the blacklist + length + anchor checks but is structurally arbitrary', () => {
+    // Additional anchor-shaped-but-non-grammar variants.
+    const adversaries = [
+      'Option A currently leads strongly in this analysis.',
+      'Option A currently leads as the primary path forward.',
+      'Looking at the data, Option A currently leads on every metric.',
+      'In this scenario, Option A currently leads despite the noise.',
+    ];
+    for (const adv of adversaries) {
+      expect(fwd({ assistant_text: adv })).toBe(FALLBACK);
+    }
+  });
+
+  it('falls back when text is Case A shape but missing the " is the strongest driver" clause', () => {
+    // Specific grammar gap — typo / partial emission. Must reject.
+    const adversarial =
+      'Hire A currently leads because Cost is the dominant factor, but the result is sensitive to Quality.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when text is Case D shape with the wrong follow-up phrase', () => {
+    const adversarial =
+      'Hire A currently leads with 62% probability. Please run more tests before deciding.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when text is Case D shape with a non-integer percentage (raw decimal)', () => {
+    const adversarial =
+      'Hire A currently leads with 62.5% probability. Run the follow-up checks before treating this as final.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
   it('falls back when assistant_text contains "currently leads" mid-sentence with extra prose', () => {
     // The pre-fix forwarder accepted any string containing the
     // substring " currently leads". This regression test pins the
