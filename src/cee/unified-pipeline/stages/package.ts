@@ -42,41 +42,55 @@ import { buildLLMRawTrace } from "../../llm-output-store.js";
 import { SERVICE_VERSION } from "../../../version.js";
 import { assembleContextPack } from "../../../context/context-pack.js";
 import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.js";
-import { sanitiseUserFacingText } from "../../../orchestrator-v5/compose/output-safety.js";
+import { sanitiseCoachingProse } from "../../../orchestrator-v5/compose/output-safety.js";
 import { scanCoachingForIdLeakage } from "../../validation/coaching-safety-scanner.js";
 import type { DraftCoaching } from "../../../orchestrator/types.js";
 import type { GraphV3T, NodeV3T } from "../../../schemas/cee-v3.js";
 import type { GraphV1 } from "../../../contracts/plot/engine.js";
 
 /**
- * Project a V1 graph into the minimal GraphV3T shape the sanitiser needs
- * for label resolution. The sanitiser's `resolveLabel` only reads
- * `nodes[].id` and `nodes[].label`; we additionally satisfy `kind` because
- * NodeV3T requires it. Edges are not consulted by `sanitiseUserFacingText`,
- * so an empty edge array is fine.
+ * Project a V1 graph into the minimal GraphV3T shape the coaching scrubber
+ * (`sanitiseCoachingProse`) consumes. The scrubber reads `nodes[].id` to
+ * decide whether a token in coaching prose is a real graph ID and
+ * `nodes[].label` to substitute a human label when one is available; we
+ * additionally satisfy `kind` because NodeV3T requires it. Edges are not
+ * consulted, so an empty edge array is fine.
  *
- * This avoids both (a) sanitising with a null graph (which loses label
+ * Unlike a label-resolution-only projection, this projection RETAINS nodes
+ * whose label is missing, empty, or equal to the id. The scrubber's rule 1
+ * is "token present in `graph.nodes[].id`" (not "label resolves to a
+ * non-id string"), so carrying these nodes through preserves the evidence
+ * that the id is real — closing the leak path where a single-segment
+ * risky-prefix id like `{id: "risk_churn", label: "risk_churn"}` would
+ * otherwise be classified as an ambiguous orphan and preserved verbatim.
+ *
+ * The scrubber's internal `label !== id` check then decides between
+ * substituting the label and falling back to the prefix-aware
+ * `PREFIX_GENERIC` neutral phrase. NodeV3T requires `label: z.string()`,
+ * so when the source has no usable label we pass `n.id` as the label
+ * placeholder; the scrubber treats `label === id` as "no usable label"
+ * and emits the generic fallback.
+ *
+ * Avoids both (a) scrubbing with a null graph (which loses all label
  * resolution) and (b) reaching for an `as unknown as GraphV3T` cast.
  */
 const V3_VALID_NODE_KINDS = new Set<NodeV3T["kind"]>([
   "goal", "factor", "outcome", "decision", "risk", "action", "option",
 ]);
 
-function projectGraphForLabelLookup(graph: GraphV1 | undefined): GraphV3T | null {
+function projectGraphForCoachingScrub(graph: GraphV1 | undefined): GraphV3T | null {
   if (!graph || !Array.isArray(graph.nodes)) return null;
   const nodes: NodeV3T[] = [];
   for (const n of graph.nodes) {
     if (typeof n.id !== "string" || n.id.length === 0) continue;
-    // Skip nodes without a usable label, including the degenerate case where
-    // label === id. If we kept these, resolveLabel(graph, id) would "succeed"
-    // by returning the raw ID, and the sanitiser would silently re-emit the
-    // leaked entity ID it was meant to scrub. By dropping them here, the
-    // sanitiser falls through to the prefix-aware generic ("the relevant
-    // factor"), which is the correct safety behaviour for a missing label.
-    if (typeof n.label !== "string" || n.label.length === 0 || n.label === n.id) continue;
+    // Retain label-less and `label === id` nodes; pass `n.id` as the label
+    // placeholder when no usable label is available. The downstream scrubber
+    // detects `label === id` and emits the prefix-aware generic instead of
+    // re-emitting the leaked id.
+    const label = typeof n.label === "string" && n.label.length > 0 ? n.label : n.id;
     const rawKind = typeof n.kind === "string" ? (n.kind as NodeV3T["kind"]) : "factor";
     const kind: NodeV3T["kind"] = V3_VALID_NODE_KINDS.has(rawKind) ? rawKind : "factor";
-    nodes.push({ id: n.id, kind, label: n.label });
+    nodes.push({ id: n.id, kind, label });
   }
   return { nodes, edges: [] };
 }
@@ -109,16 +123,25 @@ function hasMeaningfulCoaching(coaching: DraftCoaching): boolean {
  * Scrub user-facing coaching strings against the entity-ID leak guard.
  * Returns a new DraftCoaching with the same shape; original input is untouched.
  *
- * The graph (projected from V1 to a minimal GraphV3T-shaped object) is
- * threaded through so the sanitiser can resolve leaked IDs to the actual
- * node label rather than falling back to the generic ("the relevant factor").
+ * The graph (projected from V1 to a minimal GraphV3T-shaped object by
+ * `projectGraphForCoachingScrub`) is threaded through so the scrubber's
+ * rule 1 can resolve leaked IDs to the actual node label, or — when a real
+ * graph node carries no usable label — fall back to the prefix-aware
+ * generic ("the relevant factor") rather than re-emitting the raw id.
+ *
+ * Delegates per-string scrubbing to `sanitiseCoachingProse` (not the
+ * codebase-wide `sanitiseUserFacingText`): the coaching context has a
+ * stricter prompt rule (DISPLAY SAFETY: "Do not mention internal IDs")
+ * so the narrow-guard scrubber catches real-graph leaks the broader
+ * heuristic-gated scrubber misses, while preserving English compounds
+ * like `risk_adjusted` / `goal_setting` via rule 3.
  */
 function sanitiseCoachingForDisplay(
   coaching: DraftCoaching | null,
   graph: GraphV3T | null,
 ): DraftCoaching | null {
   if (!coaching) return null;
-  const scrub = (text: string): string => sanitiseUserFacingText(text, graph).text;
+  const scrub = (text: string): string => sanitiseCoachingProse(text, graph).text;
   return {
     summary: coaching.summary !== null ? scrub(coaching.summary) : null,
     strengthen_items: coaching.strengthen_items.map((item) => ({
@@ -344,7 +367,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   // into a minimal GraphV3T shape so label resolution works (sanitiser
   // replaces `fac_churn` with the actual node label rather than the generic
   // "the relevant factor" fallback).
-  const labelGraph = projectGraphForLabelLookup(ctx.graph);
+  const scrubGraph = projectGraphForCoachingScrub(ctx.graph);
   const narrowedCoaching: DraftCoaching | null = ctx.coaching
     ? narrowCoachingForResponse(ctx.coaching)
     : null;
@@ -374,7 +397,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   }
 
   const sanitisedCoaching: DraftCoaching | null = narrowedCoaching
-    ? sanitiseCoachingForDisplay(narrowedCoaching, labelGraph)
+    ? sanitiseCoachingForDisplay(narrowedCoaching, scrubGraph)
     : null;
 
   const payload: Record<string, unknown> = {
