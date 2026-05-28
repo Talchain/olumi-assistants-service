@@ -1085,6 +1085,11 @@ function composeAdvice(
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
 ): string {
+  // Readability sectioning: opener + margin form the lead paragraph; the
+  // closing actionable sentence is lifted into a `What to check next`
+  // bullet so the scannable next-step lands on its own line. The phrase
+  // wording inside the bullet is unchanged so existing `.toContain`
+  // pinning continues to match.
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
   const margin = marginPpString(analysis.margin_pp);
@@ -1093,10 +1098,11 @@ function composeAdvice(
     margin && runnerLabel
       ? ` It sits ahead of ${runnerLabel} by ${margin}.`
       : '';
-  if (topDriverLabel) {
-    return `${opener}${marginClause} The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`;
-  }
-  return `${opener}${marginClause} Let me know which factor you'd like to look at next.`;
+  const lead = `${opener}${marginClause}`;
+  const nextStep = topDriverLabel
+    ? `The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`
+    : "Let me know which factor you'd like to look at next.";
+  return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }
 
 function composeImprovement(
@@ -1105,6 +1111,11 @@ function composeImprovement(
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
 ): string {
+  // Readability sectioning: opener + robustness qualifier form the lead
+  // paragraph; the "most useful thing to examine" sentence is lifted
+  // into a `What to check next` bullet. Phrase wording is unchanged so
+  // existing `.toContain('To improve confidence')` style pinning keeps
+  // matching.
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
   // Suppress the "smaller adjustments may not move the picture much"
@@ -1119,12 +1130,13 @@ function composeImprovement(
       : analysis.robustness_band
         ? ` The robustness band is ${analysis.robustness_band}, so smaller adjustments may not move the picture much.`
         : '';
-  if (topDriverLabel) {
-    return `${opener} To improve confidence here, the most useful thing to examine is ${topDriverLabel}, because it has the most influence on the result.${robustness}`;
-  }
-  // `improvement` requires a top driver per CLASS_REQUIREMENTS, so this
-  // branch is unreachable in normal flow. Kept as a defensive default.
-  return `${opener} To improve confidence, look at the most influential factor for this decision.${robustness}`;
+  const lead = `${opener}${robustness}`;
+  const nextStep = topDriverLabel
+    ? `To improve confidence here, the most useful thing to examine is ${topDriverLabel}, because it has the most influence on the result.`
+    // `improvement` requires a top driver per CLASS_REQUIREMENTS, so this
+    // branch is unreachable in normal flow. Kept as a defensive default.
+    : 'To improve confidence, look at the most influential factor for this decision.';
+  return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }
 
 function composeMeaning(
@@ -1138,6 +1150,11 @@ function composeMeaning(
   // ("doing most of the work to make it the leader"). The downstream
   // "reflects the model you've built so far" sentence is preserved so
   // existing regression tests continue to match.
+  //
+  // Readability sectioning: the closing meta-statement
+  // ("The result reflects … not a forecast.") moves to its own paragraph
+  // separated by a blank line. No `What to check next` block here —
+  // meaning is interpretive prose, not an action item.
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
@@ -1146,9 +1163,11 @@ function composeMeaning(
       ? ` It sits ahead of ${runnerLabel} by ${margin}.`
       : '';
   if (topDriverLabel) {
-    return `Based on this model, the analysis currently favours ${leadingLabel}${probability}, and the result appears to be driven by ${topDriverLabel}.${marginSentence} The result reflects the model you've built so far, not a forecast.`;
+    const lead = `Based on this model, the analysis currently favours ${leadingLabel}${probability}, and the result appears to be driven by ${topDriverLabel}.${marginSentence}`;
+    return `${lead}\n\nThe result reflects the model you've built so far, not a forecast.`;
   }
-  return `Based on this model, the analysis currently favours ${leadingLabel}${probability}, given the model you've built so far.${marginSentence} The result reflects your current setup, not a forecast.`;
+  const lead = `Based on this model, the analysis currently favours ${leadingLabel}${probability}, given the model you've built so far.${marginSentence}`;
+  return `${lead}\n\nThe result reflects your current setup, not a forecast.`;
 }
 
 function composeReadiness(
@@ -1369,14 +1388,18 @@ function composeExplainResults(
     );
   }
 
-  // Closing nudge: skip on the fragile / near-tie path — the fragile-aware
-  // sentence above already conveys "small changes matter" without the
-  // milder duplicate. On the confident path the existing closing sentence
-  // remains as the gentle factor-focus nudge.
+  // Readability sectioning: the lead paragraph holds the favour/tie
+  // opener, margin, drivers and robustness sentences (joined with spaces
+  // as before). The closing nudge is split out into a `What to check
+  // next` block when present so it lands on its own line. On the
+  // fragile/near-tie path no nudge exists and no block is appended —
+  // the fragility sentence inside the lead paragraph already conveys
+  // "small changes matter".
+  const lead = sentences.join(' ');
   if (!nearTie && !rawFragile) {
-    sentences.push('Small changes to the strongest factor can shift the picture.');
+    return `${lead}\n\nWhat to check next\n• Small changes to the strongest factor can shift the picture.`;
   }
-  return sentences.join(' ');
+  return lead;
 }
 
 function composeWhatWouldFlip(
@@ -1454,8 +1477,11 @@ function composeWhatWouldFlip(
       `The robustness band is currently ${analysis.robustness_band}, so smaller changes are unlikely to flip the outcome on their own.`,
     );
   }
-  sentences.push(
-    'Try changing its value or strength and re-running to see where the leading option moves.',
-  );
-  return sentences.join(' ');
+  // Readability sectioning: lead paragraph (opener + margin/runner-up +
+  // drivers + robustness) joined with spaces, then the closing
+  // try-and-rerun nudge as a `What to check next` bullet on its own
+  // line. The closing sentence phrase is unchanged so existing
+  // `.toContain` assertions keep matching.
+  const lead = sentences.join(' ');
+  return `${lead}\n\nWhat to check next\n• Try changing its value or strength and re-running to see where the leading option moves.`;
 }

@@ -60,10 +60,11 @@ describe('MUTATION_ACK_PATTERN — rejects Mode A / draft / Step-1 echo', () => 
     'I have changes in mind for Headcount and Scaling Budget, but I need the specifics to apply them directly.',
     // Verbatim from Docs/v5/v5-dl7-edit-graph-diagnostic.md:169 (intermittent Mode A draft, correct rejection).
     "I've drafted a change that fits your description, but I can't apply a draft proposal automatically yet.",
-    // V5 post-draft coaching narrative (the new draft success copy). The
-    // mutation-ack pattern must continue NOT to match a draft success
-    // narrative — there is no committed mutation on a fresh draft turn.
-    "I've built a first decision model for \"Build a High-Performing, Sustainable Team\". I'm comparing four routes: Hire a tech lead, Hire two developers, Hire one tech lead plus one developer and Continue with the current team. The main trade-off centres on Leadership quality balanced against Delivery capacity. Next, run the analysis to see how the options compare and what could shift the outcome.",
+    // V5 post-draft coaching narrative (the new sectioned draft success
+    // copy). The mutation-ack pattern must continue NOT to match a draft
+    // success narrative — there is no committed mutation on a fresh
+    // draft turn, regardless of how the narrative is laid out.
+    "I've built a first decision model for \"Build a High-Performing, Sustainable Team\".\n\nOptions compared\n• Hire a tech lead\n• Hire two developers\n• Hire one tech lead plus one developer\n• Continue with the current team\n\nWhat the model is weighing\n• Main trade-off: Leadership quality balanced against Delivery capacity\n• Assumption to check: whether the model's key inputs reflect your real delivery constraints\n\nNext, run the analysis to see how the options compare and what could shift the outcome.",
     // Generic denial — no mutation verb.
     'No changes were needed.',
   ])('does not match: %s', (text) => {

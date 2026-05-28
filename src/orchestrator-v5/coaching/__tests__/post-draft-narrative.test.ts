@@ -123,46 +123,46 @@ describe('buildPostDraftNarrative', () => {
     assertCleanCopy(text);
   });
 
-  it('summarises two options as "two routes"', () => {
+  it('renders two options as an Options compared bullet section', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B]),
     });
-    expect(text).toContain('comparing two routes');
-    expect(text).toContain('Hire a tech lead');
-    expect(text).toContain('Hire two mid-weight developers');
+    expect(text).toContain('Options compared');
+    expect(text).toMatch(/^• Hire a tech lead$/m);
+    expect(text).toMatch(/^• Hire two mid-weight developers$/m);
     assertCleanCopy(text);
   });
 
-  it('summarises three options as "three routes" with serial layout', () => {
+  it('renders three options as three bullets under Options compared', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, OPTION_C]),
     });
-    expect(text).toContain('comparing three routes');
-    expect(text).toContain('Hire a tech lead');
-    expect(text).toContain('Hire two mid-weight developers');
-    expect(text).toContain('Hire one tech lead plus one developer');
+    expect(text).toContain('Options compared');
+    expect(text).toMatch(/^• Hire a tech lead$/m);
+    expect(text).toMatch(/^• Hire two mid-weight developers$/m);
+    expect(text).toMatch(/^• Hire one tech lead plus one developer$/m);
     assertCleanCopy(text);
   });
 
-  it('summarises four options as "four routes"', () => {
+  it('renders four options as four bullets under Options compared', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, OPTION_C, OPTION_D]),
     });
-    expect(text).toContain('comparing four routes');
-    expect(text).toContain('Continue with the current team');
+    expect(text).toContain('Options compared');
+    expect(text).toMatch(/^• Continue with the current team$/m);
     assertCleanCopy(text);
   });
 
-  it('collapses 5+ options to "main routes include …" with up to three named', () => {
+  it('collapses 5+ options to three named bullets plus a canvas-overflow bullet', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, OPTION_C, OPTION_D, OPTION_E]),
     });
-    expect(text).toContain('main routes include');
-    expect(text).toContain('with further variants on the canvas');
-    // Only the first three labels should appear in the option list line.
-    expect(text).toContain('Hire a tech lead');
-    expect(text).toContain('Hire two mid-weight developers');
-    expect(text).toContain('Hire one tech lead plus one developer');
+    expect(text).toContain('Options compared');
+    expect(text).toContain('Other variants are on the canvas.');
+    // Only the first three labels should appear as bullets.
+    expect(text).toMatch(/^• Hire a tech lead$/m);
+    expect(text).toMatch(/^• Hire two mid-weight developers$/m);
+    expect(text).toMatch(/^• Hire one tech lead plus one developer$/m);
     expect(text).not.toContain('Continue with the current team');
     expect(text).not.toContain('Outsource delivery to an agency');
     assertCleanCopy(text);
@@ -183,49 +183,51 @@ describe('buildPostDraftNarrative', () => {
     assertCleanCopy(text);
   });
 
-  it('frames the trade-off using the first two factor labels', () => {
+  it('frames the trade-off as a Main trade-off bullet using the first two factor labels', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
+    expect(text).toContain('What the model is weighing');
     expect(text).toContain('Leadership quality');
     expect(text).toContain('Delivery capacity');
-    expect(text).toMatch(/trade-off centres on|balanced against/);
+    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
     assertCleanCopy(text);
   });
 
-  it('falls back to a single key consideration when only one factor exists', () => {
+  it('falls back to a Key consideration bullet when only one factor exists', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
     });
-    expect(text).toContain('A key consideration is Leadership quality');
+    expect(text).toContain('What the model is weighing');
+    expect(text).toMatch(/^• Key consideration: Leadership quality$/m);
     assertCleanCopy(text);
   });
 
-  it('uses the first risk when no factors exist', () => {
+  it('uses the first risk in a Key consideration bullet when no factors exist', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, RISK_RAMP]),
     });
-    expect(text).toContain('A key consideration is the risk of');
-    expect(text).toContain('New hires take time to ramp up');
+    expect(text).toMatch(/^• Key consideration: the risk of New hires take time to ramp up$/m);
     assertCleanCopy(text);
   });
 
-  it('mentions an uncertainty driver when present on a factor', () => {
+  it('renders an uncertainty driver as an Assumption to check bullet when present on a factor', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
-    expect(text).toContain('One assumption worth checking');
+    expect(text).toContain('Assumption to check:');
     expect(text).toContain('extra developers may add coordination overhead');
     assertCleanCopy(text);
   });
 
-  it('uses the deterministic generic when only model_adjustments are present (no longer a sentence-4 source)', () => {
+  it('uses the deterministic generic Assumption to check bullet when only model_adjustments are present', () => {
     // The gated-hybrid composer drops `analysisReady.model_adjustments`
-    // from the sentence-4 source set: the LLM-authored coaching surface
-    // is now richer (strengthenItems / coachingBiasSignals / bias_findings)
-    // and model_adjustments are operational reasons, not user-facing
-    // assumption signals. When they are the only available signal, the
-    // builder falls through to the fixed-generic copy.
+    // from the assumption-bullet source set: the LLM-authored coaching
+    // surface is now richer (strengthenItems / coachingBiasSignals /
+    // bias_findings) and model_adjustments are operational reasons, not
+    // user-facing assumption signals. When they are the only available
+    // signal, the builder falls through to the fixed-generic copy
+    // (lifted into the bullet as `Assumption to check: whether …`).
     const analysisReady = {
       options: [],
       goal_node_id: 'g1',
@@ -243,13 +245,13 @@ describe('buildPostDraftNarrative', () => {
       analysisReady,
     });
     expect(text).toContain(
-      "One assumption worth checking is whether the model's key inputs reflect your real delivery constraints.",
+      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
     );
     expect(text).not.toContain('per-month rate');
     assertCleanCopy(text);
   });
 
-  it('falls back to a bias_finding explanation when no other assumption source is available', () => {
+  it('falls back to a bias_finding explanation in the Assumption to check bullet when no other source is available', () => {
     const analysisReady = {
       options: [],
       goal_node_id: 'g1',
@@ -267,7 +269,7 @@ describe('buildPostDraftNarrative', () => {
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
       analysisReady,
     });
-    expect(text).toContain('One assumption worth checking');
+    expect(text).toContain('Assumption to check:');
     expect(text).toContain('single positive prior');
     assertCleanCopy(text);
   });
@@ -334,29 +336,33 @@ describe('buildPostDraftNarrative', () => {
     expect(text.toLowerCase()).not.toContain('the strongest option');
   });
 
-  it('contains the lead, options, key trade-off and next step when data is rich', () => {
+  it('contains all four sections (confirm, options, weighing, next step) when data is rich', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
-    expect(text).toContain("I've built a first decision model");      // lead
-    expect(text).toMatch(/two routes/);                                 // options summary
-    expect(text).toMatch(/trade-off|consideration/);                    // trade-off / consideration
+    expect(text).toContain("I've built a first decision model");      // confirm
+    expect(text).toContain('Options compared');                         // options section
+    expect(text).toContain('What the model is weighing');               // weighing section
     expect(text).toMatch(/run the analysis/);                           // next step
   });
 
-  it('drops the assumption sentence first when the budget is tight', () => {
-    // No factors and no analysisReady → no trade-off sentence and no
-    // assumption sentence will be built; output should be 3 sentences.
+  it('renders confirm, options bullets and the next step even when no factors or risks exist', () => {
+    // No factors, no risks, no analysisReady → no trade-off bullet. The
+    // weighing block still carries the fixed-generic Assumption to
+    // check bullet, so all four section slots are present.
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B]),
     });
     expect(text).toContain("I've built a first decision model");
-    expect(text).toContain('two routes');
+    expect(text).toContain('Options compared');
+    expect(text).toMatch(/^• Hire a tech lead$/m);
+    expect(text).toMatch(/^• Hire two mid-weight developers$/m);
+    expect(text).toContain('Assumption to check:');
     expect(text).toContain('run the analysis');
   });
 
   // ───── Grammar guard — fallback when an unsafe driver is the only signal
-  it('substitutes the fixed-generic assumption when the only driver is question-shaped', () => {
+  it('substitutes the fixed-generic Assumption to check bullet when the only driver is question-shaped', () => {
     const factorWithBadDriver = {
       id: 'f_bad',
       kind: 'factor' as const,
@@ -370,14 +376,14 @@ describe('buildPostDraftNarrative', () => {
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, factorWithBadDriver]),
     });
     expect(text).toContain(
-      "One assumption worth checking is whether the model's key inputs reflect your real delivery constraints.",
+      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
     );
     // The bad driver itself must not appear verbatim — the guard short-circuits.
     expect(text).not.toContain('how the team will absorb');
     assertCleanCopy(text);
   });
 
-  it('substitutes the fixed-generic assumption when the only driver ends with punctuation', () => {
+  it('substitutes the fixed-generic Assumption to check bullet when the only driver ends with punctuation', () => {
     const factorWithBadDriver = {
       id: 'f_bad',
       kind: 'factor' as const,
@@ -391,7 +397,7 @@ describe('buildPostDraftNarrative', () => {
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, factorWithBadDriver]),
     });
     expect(text).toContain(
-      "One assumption worth checking is whether the model's key inputs reflect your real delivery constraints.",
+      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
     );
     expect(text).not.toContain('on time.');
   });
@@ -422,7 +428,7 @@ describe('buildPostDraftNarrative', () => {
       analysisReady,
     });
     expect(text).toContain(
-      "One assumption worth checking is whether the model's key inputs reflect your real delivery constraints.",
+      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
     );
     expect(text).not.toContain('we adjusted a threshold');
   });
@@ -440,9 +446,49 @@ describe('buildPostDraftNarrative', () => {
     });
     expect(text).toContain('go_to_market');
     expect(text).toContain('b2b_partnership');
-    expect(text).toContain('two routes');
-    // The labels appear in the options list line exactly as supplied.
-    expect(text).toMatch(/two routes:\s+go_to_market\s+and\s+b2b_partnership\./);
+    expect(text).toContain('Options compared');
+    // The labels appear as Options compared bullets exactly as supplied.
+    expect(text).toMatch(/^• go_to_market$/m);
+    expect(text).toMatch(/^• b2b_partnership$/m);
+  });
+
+  // ───── Sectioned-shape regressions
+  it('renders the assistant text as multiple blank-line-separated blocks', () => {
+    const text = textOf({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
+    });
+    // Confirm + Options compared + What the model is weighing + Next-step
+    // = 4 blocks separated by blank lines. The single-option case
+    // collapses Options compared to an inline sentence (3 blocks); this
+    // fixture has two options so we expect 4.
+    const blocks = text.split('\n\n');
+    expect(blocks.length).toBe(4);
+    expect(blocks[0]).toMatch(/^I've built a first decision model/);
+    expect(blocks[1]).toMatch(/^Options compared\n• /);
+    expect(blocks[2]).toMatch(/^What the model is weighing\n• /);
+    expect(blocks[3]).toMatch(/^Next, run the analysis/);
+  });
+
+  it('uses • (U+2022) for bullets, not - or *', () => {
+    const text = textOf({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B]),
+    });
+    expect(text).toMatch(/^• /m);
+    // No markdown-style list characters at line start (would trip
+    // MARKDOWN_LIST_REGEX in the coachingSummary gate; the deterministic
+    // builder must not introduce them either).
+    expect(text).not.toMatch(/^[-*+]\s/m);
+    expect(text).not.toMatch(/^\d+\.\s/m);
+    expect(text).not.toMatch(/^#+\s/m);
+  });
+
+  it('emits an inline single-option line (no bullets) when only one option exists', () => {
+    const text = textOf({
+      graph: makeGraph([GOAL_NODE, OPTION_A]),
+    });
+    expect(text).toContain('The model so far includes one route: Hire a tech lead.');
+    // The single-option degrade has no bullet glyph on the options line.
+    expect(text).not.toMatch(/^• Hire a tech lead$/m);
   });
 
   it('snake-case option labels survive the egress sanitiser unchanged', () => {
@@ -479,7 +525,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
   // sentence-4 source priority deterministic across cases.
   const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]);
 
-  it('uses strengthenItems[0].detail in sentence 4 when it passes the gate', () => {
+  it('uses strengthenItems[0].detail in the Assumption to check bullet when it passes the gate', () => {
     // Short, declarative detail well within the 150-char fragment cap;
     // no schema terms, no premature recommendation, no question shape.
     const items = [
@@ -491,7 +537,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
       },
     ];
     const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
-    expect(result.text).toContain('One assumption worth checking');
+    expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('synergy assumption sits as a point value');
     expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
     expect(result.telemetry.fallback_reason).toBeNull();
@@ -513,7 +559,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
       },
     ];
     const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
-    expect(result.text).toContain('One assumption worth checking');
+    expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('tighten the cost ramp curve');
     expect(result.text).not.toContain('long uninterrupted clause');
     expect(result.telemetry.assumption_source).toBe('strengthen_item_label');
@@ -653,7 +699,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
     expect(result.telemetry.fallback_reason).toBe('gate_rejected');
   });
 
-  it('falls through to fixed-generic when every source fails or is missing', () => {
+  it('falls through to the fixed-generic Assumption to check bullet when every source fails or is missing', () => {
     const items = [
       { id: 's7', label: 'recommend foo', detail: 'we recommend doing foo', action_type: 'x' },
     ];
@@ -662,7 +708,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
       strengthenItems: items,
     });
     expect(result.text).toContain(
-      "One assumption worth checking is whether the model's key inputs reflect your real delivery constraints.",
+      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
     );
     expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
     expect(result.telemetry.fallback_reason).toBe('gate_rejected');
