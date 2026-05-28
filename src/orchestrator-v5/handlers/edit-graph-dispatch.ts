@@ -50,7 +50,7 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import { buildTurnContext } from '../build-turn-context.js';
+import { buildTurnContext, loadMostRecentPendingActions } from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
@@ -69,7 +69,6 @@ import {
   decideProposalContinuation,
   findProposedConceptAction,
 } from '../coaching/proposal-continuation.js';
-import { getSessionStore } from '../session/index.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { derivePendingActionsFromChips } from '../compose/derive-pending-actions.js';
 import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
@@ -889,37 +888,10 @@ function buildStructuralFallback(
  * downstream consumers receive the shape they expect without this module
  * applying a type-erasing `as unknown as` cast.
  */
-/**
- * V5 P0 proposal-memory continuation — pre-LLM intercept support.
- *
- * Load the most recent prior turn's pending actions inline, mirroring the
- * graceful-degradation pattern used by `buildTurnContext.fetchMostRecent
- * PendingActions`. Returns an empty array on store-factory failure or read
- * failure so the caller can transparently fall through to the LLM path.
- *
- * Kept separate from buildTurnContext so the pre-LLM intercept doesn't pay
- * the cost of loading prior_facts / scenario_state on every edit_graph
- * dispatch.
- */
-async function loadMostRecentPendingActionsSafely(
-  scenarioId: string,
-  requestId: string,
-): Promise<readonly PendingAction[]> {
-  try {
-    const store = getSessionStore();
-    return await store.readMostRecentPendingActions(scenarioId);
-  } catch (err) {
-    log.warn(
-      {
-        request_id: requestId,
-        scenario_id: scenarioId,
-        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-      },
-      'V5 edit_graph dispatch — pre-LLM pending-action load failed; falling through to LLM path',
-    );
-    return [];
-  }
-}
+// `loadMostRecentPendingActions` lives in `build-turn-context.ts` so the
+// state-write-invariant pre-push guard (SessionStore imports restricted to
+// session/, commit.ts, build-turn-context.ts) stays satisfied. The
+// pre-LLM intercept below calls it directly.
 
 function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnvelope {
   const raw = a as AnalysisStateIngress & {
@@ -1094,7 +1066,7 @@ export async function dispatchEditGraph(
       // full prior_facts + scenario_state load on every edit_graph
       // dispatch. On factory failure the intercept silently returns
       // null and the LLM path runs normally.
-      const earlyPending = await loadMostRecentPendingActionsSafely(
+      const earlyPending = await loadMostRecentPendingActions(
         payload.scenario_id,
         requestId,
       );
