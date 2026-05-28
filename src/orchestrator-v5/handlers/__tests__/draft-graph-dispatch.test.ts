@@ -1342,3 +1342,207 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
     expect(result.response.assistant_text).not.toMatch(/\b(?:fac|opt|out|risk|goal|dec|node)_[a-z0-9]+/i);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// V5 narrow-guard coaching scrub — pre-scrub the LLM-authored coaching
+// strings (coachingSummary, strengthenItems[].label/.detail,
+// coachingBiasSignals[].detail) before they reach `buildPostDraftNarrative`
+// so internal node IDs cannot leak into `assistant_text`. The central
+// egress sanitiser (`sanitiseUserFacingText`) cannot close this gap for
+// `label === id` cases because `resolveLabel` returns the raw id as the
+// label and substitutes the leak with itself.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('dispatchDraftGraph — V5 coaching ID scrub (narrow-guard)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+  });
+
+  // A coachingSummary long enough and clean enough to pass `gateFullResponse`
+  // and become the whole-response replacement. The single token under test
+  // is the only ID-shaped string in the body.
+  const baseSummary =
+    'The routes here weigh delivery speed against quality. Watch {TOKEN} carefully as the dominant variable. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare under stress.';
+
+  function graphWithNode(node: { id: string; label: string; kind?: string }) {
+    return {
+      nodes: [
+        { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
+        { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+        { ...node, kind: node.kind ?? 'risk' },
+      ],
+      edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
+    };
+  }
+
+  it('scrubs `risk_churn` when the graph node has `label === id` → no raw id in assistant_text', async () => {
+    // The motivating regression: `{id: "risk_churn", label: "risk_churn"}` is
+    // a real graph node with no human label. Without pre-scrub, the
+    // narrative composer emits the summary verbatim and the central egress
+    // sanitiser resolves `risk_churn` → `risk_churn` (label === id) — the
+    // leak passes through unchanged.
+    const draftResult = {
+      ...makeDraftResult(graphWithNode({ id: 'risk_churn', label: 'risk_churn' }), MINIMAL_ANALYSIS_READY),
+      coachingSummary: baseSummary.replace('{TOKEN}', 'risk_churn'),
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-scrub-labelid',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('risk_churn');
+    expect(result.response.assistant_text).toContain('the relevant risk');
+  });
+
+  it('substitutes the human label when the graph node has a usable label', async () => {
+    const draftResult = {
+      ...makeDraftResult(graphWithNode({ id: 'risk_churn', label: 'Customer Churn' }), MINIMAL_ANALYSIS_READY),
+      coachingSummary: baseSummary.replace('{TOKEN}', 'risk_churn'),
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-scrub-label-hit',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('risk_churn');
+    expect(result.response.assistant_text).toContain('Customer Churn');
+  });
+
+  it('preserves `risk_adjusted return on capital` — English compound, not an id', async () => {
+    const summary = baseSummary.replace(
+      'Watch {TOKEN} carefully',
+      'Use a risk_adjusted return on capital framework',
+    );
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: summary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-preserve-risk-adjusted',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).toContain('risk_adjusted return on capital');
+  });
+
+  it('preserves `goal_setting`, `decision_making`, and `go_to_market` (English / non-tracked)', async () => {
+    const summary = baseSummary.replace(
+      'Watch {TOKEN} carefully',
+      'Apply goal_setting and decision_making across go_to_market choices',
+    );
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: summary,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-preserve-english',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).toContain('goal_setting');
+    expect(result.response.assistant_text).toContain('decision_making');
+    expect(result.response.assistant_text).toContain('go_to_market');
+  });
+
+  it('scrubs ids in strengthenItems[].detail when the gated-hybrid fallback excerpts them', async () => {
+    // Force the coachingSummary path to be rejected so the builder falls
+    // through to strengthenItems excerpting. A markdown bullet in the
+    // summary trips the full-response gate.
+    const draftResult = {
+      ...makeDraftResult(graphWithNode({ id: 'risk_churn', label: 'risk_churn' }), MINIMAL_ANALYSIS_READY),
+      coachingSummary: '- bullet form is rejected by gateFullResponse',
+      strengthenItems: [
+        {
+          id: 's1',
+          label: 'Bound the variable',
+          detail:
+            'Watch risk_churn week-over-week and bound it with a guardrail before the launch window.',
+          action_type: 'add_constraint',
+        },
+      ],
+      coachingBiasSignals: null,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-scrub-strengthen',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('risk_churn');
+  });
+
+  it('scrubs ids in coachingBiasSignals[].detail when that path is selected', async () => {
+    const draftResult = {
+      ...makeDraftResult(graphWithNode({ id: 'risk_churn', label: 'risk_churn' }), MINIMAL_ANALYSIS_READY),
+      // Reject summary AND empty strengthenItems → builder reaches biasSignals.
+      coachingSummary: '- bullet form is rejected by gateFullResponse',
+      strengthenItems: [],
+      coachingBiasSignals: [
+        {
+          type: 'anchoring',
+          detail: 'Pinned on risk_churn last quarter — re-anchor against current data.',
+          target: 'risk_churn',
+        },
+      ],
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as unknown as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-scrub-bias-detail',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).not.toContain('risk_churn');
+  });
+
+  it('leaves a clean coaching summary byte-for-byte unchanged', async () => {
+    // Idempotency / no-op sanity: when no ID tokens are present, the scrub
+    // produces the same string and the narrative composer emits it verbatim.
+    const clean =
+      'The routes here weigh delivery speed against quality. Watch the customer churn rate carefully. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare under stress.';
+    const draftResult = {
+      ...makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY),
+      coachingSummary: clean,
+    };
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-clean-passthrough',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.assistant_text).toBe(clean);
+  });
+});
