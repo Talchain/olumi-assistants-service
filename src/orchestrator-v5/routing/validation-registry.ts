@@ -24,6 +24,7 @@ import {
   AdjustEdgeStrengthSchema,
   AdjustEdgeStrengthStdSchema,
 } from '../tools/handlers/adjust-edge-strength.js';
+import { isAllowedRunAnalysisAssistantText } from '../coaching/analysis-result-headline.js';
 
 /**
  * run_analysis precondition (Phase 1.5 review — P0-1 wire reality fix).
@@ -74,6 +75,36 @@ const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
   return '';
 };
 
+// V5 deterministic analysis-result headline: forward the handler's
+// `outcome.assistant_text` ONLY when {@link
+// isAllowedRunAnalysisAssistantText} accepts it. The predicate is the
+// single source of truth — it exact-matches one of the locked
+// `RUN_ANALYSIS_ASSISTANT_TEMPLATES` strings, OR validates a
+// deterministic headline shape end-to-end (length cap, no newlines,
+// no raw decimals, no forbidden vocabulary, no internal-ID prefixes,
+// "currently leads" anchor present, terminating period). Anything
+// else — including improvised prose that happens to contain
+// "currently leads" mid-sentence — falls back to the locked DEFAULT
+// literal so a misbehaving handler or test mock cannot reach the
+// wire. The previous loose prefix-or-regex check was promoted to this
+// stricter allowlist after the PR #210 review flagged the substring
+// match as too permissive.
+const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
+const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
+  if (
+    outcome === null ||
+    typeof outcome !== 'object' ||
+    !('assistant_text' in outcome)
+  ) {
+    return RUN_ANALYSIS_FALLBACK_TEXT;
+  }
+  const candidate = (outcome as { assistant_text: unknown }).assistant_text;
+  if (isAllowedRunAnalysisAssistantText(candidate)) {
+    return candidate as string;
+  }
+  return RUN_ANALYSIS_FALLBACK_TEXT;
+};
+
 export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   run_analysis: {
     handler_id: 'run_analysis',
@@ -84,7 +115,7 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
     // either is a valid addressable target.
     accepted_entity_kinds: ['option', 'goal'],
     preconditions: runAnalysisPrecondition,
-    confirmation_template: 'Ran analysis on your current scenario.',
+    confirmation_template: runAnalysisConfirmationTemplate,
   },
   // 0.9.0 — V5 no-op routing handlers. None has a graph-level precondition;
   // explain_results and what_would_flip do their own analysis-fact-presence

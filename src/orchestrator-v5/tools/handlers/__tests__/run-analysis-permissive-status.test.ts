@@ -121,13 +121,18 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     // Brief 2.3 pinned regression. Pre-hardening, this case returned
     // HANDLER_INVOCATION_FAILED(analysis_not_completed); post-hardening
     // it succeeds with the DEFAULT template and a populated fact.
+    //
+    // V5 deterministic headline (2026-05-28): when winner data is present
+    // (Raise price 0.62, Keep price 0.38, no driver/fragility), the
+    // handler emits the Case D headline. Status template still fires when
+    // winner extraction is null (covered by the PARTIAL_NO_RESULTS test).
     const handler = createRunAnalysisHandler({
       plotClient: mkPlot(withStatus('computed')),
       scenarioReader,
     });
 
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    expect(outcome.assistant_text).toMatch(/^Raise price currently leads with 62% probability/);
     expect(outcome.handler_facts).toHaveLength(1);
     const fact = outcome.handler_facts[0]!;
     expect(fact.fact_type).toBe('run_analysis');
@@ -137,35 +142,40 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     }
   });
 
-  it('analysis_status=null (absent) succeeds with DEFAULT template', async () => {
+  it('analysis_status=null (absent) succeeds with Case D headline', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: mkPlot(withStatus(null)),
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    expect(outcome.assistant_text).toMatch(/^Raise price currently leads with 62% probability/);
   });
 
-  it('analysis_status="completed" succeeds with DEFAULT template', async () => {
+  it('analysis_status="completed" succeeds with Case D headline', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: mkPlot(withStatus('completed')),
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    expect(outcome.assistant_text).toMatch(/^Raise price currently leads with 62% probability/);
   });
 
-  it('analysis_status="partial" succeeds with PARTIAL caveat template', async () => {
+  it('analysis_status="partial" succeeds with Case D headline + partial caveat suffix', async () => {
+    // V5 deterministic headline (2026-05-28): partial caveat now appends
+    // to the headline as a status suffix rather than overwriting the
+    // user-visible string entirely. The handler still passes the partial
+    // caveat through `summary` (correction 4 — no schema extension).
     const handler = createRunAnalysisHandler({
       plotClient: mkPlot(withStatus('partial')),
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL);
-    // Caveat surfaces through summary field (correction 4 — no schema ext).
+    expect(outcome.assistant_text).toMatch(/^Raise price currently leads with 62% probability/);
+    expect(outcome.assistant_text).toContain('provisional');
+    // Card/chat parity: summary equals assistant_text.
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type === 'run_analysis') {
-      expect(fact.result.summary).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL);
+      expect(fact.result.summary).toBe(outcome.assistant_text);
     }
   });
 
@@ -191,13 +201,17 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     });
   });
 
-  it('unknown status WITH usable fields proceeds with UNKNOWN_STATUS + warning log', async () => {
+  it('unknown status WITH usable fields proceeds with Case D headline + caution caveat + warning log', async () => {
+    // V5 deterministic headline (2026-05-28): unknown-status caveat now
+    // appends to the headline as a status suffix. The warning log still
+    // fires (assertion below).
     const handler = createRunAnalysisHandler({
       plotClient: mkPlot(withStatus('still_thinking_very_hard')),
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.UNKNOWN_STATUS);
+    expect(outcome.assistant_text).toMatch(/^Raise price currently leads with 62% probability/);
+    expect(outcome.assistant_text).toContain('treat the result with caution');
 
     const warnCall = warnSpy.mock.calls.find((c) => {
       const payload = c[0] as Record<string, unknown>;
@@ -300,6 +314,9 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
+    // Winner opt_3 has 35.3% probability → below Case D's ≥50% threshold,
+    // and no driver/fragility present → headline returns null and the
+    // handler falls back to the locked DEFAULT template.
     expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type === 'run_analysis') {

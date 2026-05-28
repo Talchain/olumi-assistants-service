@@ -246,11 +246,17 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
       handlerRegistry: registry,
     });
 
+    // V5 deterministic headline (2026-05-28): the registry forwards the
+    // handler's outcome.assistant_text (template OR headline shape) to the
+    // wire confirmation. The synthetic happy fixture used by this mock
+    // produces a Case D headline ("X currently leads with N% probability
+    // ...") rather than the locked DEFAULT template.
+    //
     // V5 Group 1 Task C: on a first successful run_analysis, Step 5 emits the
     // FIRST_ANALYSIS_COMPLETE signal and compose appends its coaching text
-    // after the confirmation template. Both pieces must be present; order
-    // is confirmation then coaching (composeToolCallResponse).
-    expect(response.assistant_text).toContain('Ran analysis on your current scenario.');
+    // after the confirmation. Both pieces must be present; order is
+    // confirmation then coaching (composeToolCallResponse).
+    expect(response.assistant_text).toMatch(/ currently leads\b/);
     expect(response.assistant_text).toContain('first analysis');
   });
 

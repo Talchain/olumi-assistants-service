@@ -391,10 +391,18 @@ describe('TurnExecutor — success path is unchanged', () => {
     // V5 Group 1 Task B: successful run_analysis now emits an analysis_result
     // block carrying the PLoT enrichment (and, when the auto-fire completed,
     // enrichment.decision_review). The assistant_text invariant is unchanged.
+    //
+    // V5 deterministic headline (2026-05-28): the confirmation portion is
+    // either the locked DEFAULT template or a Case A/B/C/D headline,
+    // depending on whether the fixture supplies enough data for
+    // `buildAnalysisResultHeadline` to fire. Accept either shape so the
+    // contract under test ("successful run_analysis emits orientation +
+    // confirmation + analysis_result block") stays intact across both
+    // emission paths.
     expect(result.response.blocks).toHaveLength(1);
     expect(result.response.blocks[0]).toMatchObject({ type: 'analysis_result' });
     expect(result.response.assistant_text).toContain('Running the analysis.');
-    expect(result.response.assistant_text).toContain('Ran analysis');
+    expect(result.response.assistant_text).toMatch(/Ran analysis|currently leads/);
 
     expect(failureResponseEvent()).toBeUndefined();
     expectBI01();

@@ -67,6 +67,7 @@ import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/tu
 import { config } from '../../../config/index.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
+import { buildAnalysisResultHeadline } from '../../coaching/analysis-result-headline.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -599,6 +600,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // through the existing `summary` / `assistant_text` fields only — do
     // NOT extend RunAnalysisHandlerFactSchema.
     const template = selectTemplate(statusOutcome.kind, resultRecords.length);
+    // Deterministic headline: when PLoT supplies enough data (winner label +
+    // either a top driver, fragility, or a usable win_probability) the
+    // headline replaces the bland template. Returns null when data is too
+    // thin — handler falls back to the locked template string.
+    const headlineStatusKind: 'ok' | 'partial' | 'unknown' =
+      statusOutcome.kind === 'ok' || statusOutcome.kind === 'partial' || statusOutcome.kind === 'unknown'
+        ? statusOutcome.kind
+        : 'ok';
+    const headline = buildAnalysisResultHeadline({
+      enrichment: response as Record<string, unknown>,
+      leading_option_id: leadingOptionId ?? '',
+      status_kind: headlineStatusKind,
+    });
+    const summary = headline ?? template;
 
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
@@ -611,7 +626,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // schema shape (zod strict rejects explicit undefined on optional
         // fields in some builds — safer to conditionally include).
         ...(winProbabilities !== null ? { win_probabilities: winProbabilities } : {}),
-        summary: template,
+        summary,
         // Byte-for-byte pass-through of the validated PLoT envelope. No
         // projection, no stripping, no derived CEE-owned fields. F.6
         // ownership; the handler-ownership invariant enforces this pattern
@@ -654,7 +669,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // omit `__plot_timings` entirely so HandlerOutcome carries no debug
     // surface in default-OFF production.
     return {
-      assistant_text: template,
+      assistant_text: summary,
       handler_facts: [parsed.data],
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),

@@ -173,7 +173,16 @@ describe('phase 1 routing end-to-end — execute turn via tool-use', () => {
     expect(write.handler_facts[0]!.fact_type).toBe('run_analysis');
 
     expect(response.assistant_text).toContain('Running analysis on your scenario...');
-    expect(response.assistant_text).toContain('Ran analysis on your current scenario.');
+    // V5 deterministic headline (2026-05-28): the registry-driven
+    // confirmation is now either the locked DEFAULT template (when
+    // winner data is too thin) or a Case A/B/C/D headline produced by
+    // `buildAnalysisResultHeadline`. The single-option happy fixture
+    // used here renders Case D ("X currently leads with N% probability
+    // …"). Accept either shape so the contract under test —
+    // "registry-driven confirmation reaches the wire after the
+    // routing orientation" — stays intact regardless of which branch
+    // of the headline builder fired.
+    expect(response.assistant_text).toMatch(/Ran analysis on your current scenario\.|currently leads/);
 
     // BI-01
     const started = events.filter((e) => e.event === 'turn_executor.started');

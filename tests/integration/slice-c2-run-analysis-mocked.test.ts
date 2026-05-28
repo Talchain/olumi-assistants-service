@@ -217,9 +217,15 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
     expect(fact.fact_type).toBe('run_analysis');
 
     // v5-maintenance: the V5 Group 1 Task C coaching signal detector may
-    // append a FIRST_ANALYSIS_COMPLETE coaching line after the template
-    // text. Assert the template prefix rather than verbatim equality.
-    expect(response.assistant_text.startsWith('Ran analysis on your current scenario.')).toBe(true);
+    // append a FIRST_ANALYSIS_COMPLETE coaching line after the headline.
+    //
+    // V5 deterministic headline (2026-05-28): the assistant_text now opens
+    // with a deterministic headline derived from the happy fixture's data
+    // (leader "Option A", top driver "Price" — no fragile-edge labels
+    // resolvable). The locked DEFAULT template is still produced by the
+    // handler when winner data is too thin; the regression-fixture test
+    // below ("template fallback when winner data is missing") covers that.
+    expect(response.assistant_text).toMatch(/^Option A currently leads/);
     expect(telemetry.response_emitted).toBe(true);
     expect(telemetry.failure_type).toBeNull();
     expect(telemetry.llm_calls_used).toBe(1); // classifier only
@@ -270,6 +276,36 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
     expect(fact.result.enrichment.decision_brief).toBeDefined();
     expect(Array.isArray(fact.result.enrichment.fact_objects)).toBe(true);
     expect(Array.isArray(fact.result.enrichment.factor_sensitivity)).toBe(true);
+  });
+
+  it('headline falls back to locked template when winner label is ID-shaped (regression)', async () => {
+    // V5 deterministic headline (2026-05-28): when option_label === option_id
+    // the headline helper returns null and the handler falls back to the
+    // locked DEFAULT template. This regression test guards the safe-default
+    // path so future helper changes can't silently strand the user with no
+    // user-facing string.
+    const idShapedFixture: V2RunResponseEnvelope = {
+      meta: { seed_used: 1, n_samples: 10, response_hash: 'idshape' },
+      results: [
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
+        { option_id: 'opt_b', option_label: 'opt_b', win_probability: 0.38 },
+      ],
+      response_hash: 'idshape-top',
+      analysis_status: 'completed',
+    } as unknown as V2RunResponseEnvelope;
+    registryDeps = {
+      plotClient: makeMockPlot(idShapedFixture),
+      scenarioReader: async () => makeSnapshot(),
+    };
+
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-suite-b-fallback');
+    expect(response.assistant_text.startsWith('Ran analysis on your current scenario.')).toBe(true);
+
+    const write = appendCalls[0]!;
+    const fact = (write.handler_facts as Array<Record<string, unknown>>)[0] as {
+      result: { summary: string };
+    };
+    expect(fact.result.summary.startsWith('Ran analysis on your current scenario.')).toBe(true);
   });
 
   it('BI-01 holds on handler failure path (PLoT rejection)', async () => {
