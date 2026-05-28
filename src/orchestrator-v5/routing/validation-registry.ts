@@ -24,6 +24,7 @@ import {
   AdjustEdgeStrengthSchema,
   AdjustEdgeStrengthStdSchema,
 } from '../tools/handlers/adjust-edge-strength.js';
+import { isAllowedRunAnalysisAssistantText } from '../coaching/analysis-result-headline.js';
 
 /**
  * run_analysis precondition (Phase 1.5 review — P0-1 wire reality fix).
@@ -75,31 +76,33 @@ const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
 };
 
 // V5 deterministic analysis-result headline: forward the handler's
-// `outcome.assistant_text` ONLY when it matches one of the safe shapes
-// the handler is permitted to emit — a locked-template prefix or the
-// deterministic headline pattern. Anything else falls back to the
-// safety-net literal so a misbehaving handler — or a test mock that
-// emits improvised prose — cannot reach the wire. This preserves the
-// pre-headline defence-in-depth invariant ("registry filters handler
-// output") while unlocking the headline path for the production
-// run_analysis handler.
-const RUN_ANALYSIS_TEMPLATE_PREFIX = 'Ran analysis on your current scenario';
-const RUN_ANALYSIS_HEADLINE_SHAPE = / currently leads\b/;
+// `outcome.assistant_text` ONLY when {@link
+// isAllowedRunAnalysisAssistantText} accepts it. The predicate is the
+// single source of truth — it exact-matches one of the locked
+// `RUN_ANALYSIS_ASSISTANT_TEMPLATES` strings, OR validates a
+// deterministic headline shape end-to-end (length cap, no newlines,
+// no raw decimals, no forbidden vocabulary, no internal-ID prefixes,
+// "currently leads" anchor present, terminating period). Anything
+// else — including improvised prose that happens to contain
+// "currently leads" mid-sentence — falls back to the locked DEFAULT
+// literal so a misbehaving handler or test mock cannot reach the
+// wire. The previous loose prefix-or-regex check was promoted to this
+// stricter allowlist after the PR #210 review flagged the substring
+// match as too permissive.
+const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
 const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
-  const fallback = 'Ran analysis on your current scenario.';
   if (
     outcome === null ||
     typeof outcome !== 'object' ||
-    !('assistant_text' in outcome) ||
-    typeof (outcome as { assistant_text: unknown }).assistant_text !== 'string'
+    !('assistant_text' in outcome)
   ) {
-    return fallback;
+    return RUN_ANALYSIS_FALLBACK_TEXT;
   }
-  const text = (outcome as { assistant_text: string }).assistant_text;
-  if (text.length === 0) return fallback;
-  if (text.startsWith(RUN_ANALYSIS_TEMPLATE_PREFIX)) return text;
-  if (RUN_ANALYSIS_HEADLINE_SHAPE.test(text)) return text;
-  return fallback;
+  const candidate = (outcome as { assistant_text: unknown }).assistant_text;
+  if (isAllowedRunAnalysisAssistantText(candidate)) {
+    return candidate as string;
+  }
+  return RUN_ANALYSIS_FALLBACK_TEXT;
 };
 
 export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {

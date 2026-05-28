@@ -147,3 +147,121 @@ describe('run_analysis precondition', () => {
     }
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+// run_analysis confirmation_template forwarder — defence-in-depth
+// against an outcome.assistant_text that doesn't match the locked
+// templates or the deterministic headline grammar. The forwarder must
+// substitute the safe fallback literal rather than letting improvised
+// prose through. Reviewer-blocking gap from the PR #210 round-2
+// review (the prior regex was a loose " currently leads" substring
+// match that any prose containing the phrase would have passed).
+// ────────────────────────────────────────────────────────────────────
+
+describe('run_analysis confirmation_template forwarder', () => {
+  const FALLBACK = 'Ran analysis on your current scenario.';
+  const template = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
+
+  function fwd(outcome: unknown): string {
+    if (typeof template === 'function') return template(outcome);
+    throw new Error('expected function-form confirmation_template');
+  }
+
+  it('forwards each locked RUN_ANALYSIS_ASSISTANT_TEMPLATES literal verbatim', () => {
+    const locked = [
+      'Ran analysis on your current scenario.',
+      'Ran analysis on your current scenario. No options were compared.',
+      'Ran analysis on your current scenario. Some results may be incomplete — treat with caution.',
+      'Ran analysis on your current scenario. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      'Ran analysis on your current scenario. The engine flagged the run as partial and produced no option comparisons — treat with caution.',
+    ];
+    for (const literal of locked) {
+      expect(fwd({ assistant_text: literal })).toBe(literal);
+    }
+  });
+
+  it('forwards a well-shaped deterministic headline verbatim', () => {
+    const headline =
+      'Hire One Senior Technical Lead currently leads because Technical Leadership in Place is the strongest driver, but the result is sensitive to Hiring and Salary Cost.';
+    expect(fwd({ assistant_text: headline })).toBe(headline);
+  });
+
+  it('falls back when assistant_text contains "currently leads" mid-sentence with extra prose', () => {
+    // The pre-fix forwarder accepted any string containing the
+    // substring " currently leads". This regression test pins the
+    // tighter allowlist — improvised prose around the anchor is now
+    // rejected, even when the anchor itself is present.
+    const adversarial =
+      'Recommend Hire One Senior Technical Lead. Option B currently leads but the model is unreliable.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text starts with the locked-template prefix but adds improvised tail prose', () => {
+    // The pre-fix forwarder accepted anything starting with
+    // "Ran analysis on your current scenario". This regression test
+    // pins the exact-match-only contract.
+    const adversarial =
+      'Ran analysis on your current scenario plus we now recommend Hire X immediately.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text leaks a recommendation token', () => {
+    const adversarial = 'Hire A currently leads. We recommend you proceed.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text leaks a winner token', () => {
+    const adversarial = 'Hire A currently leads. The winner is clear.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text leaks an ID-shaped token (opt_a)', () => {
+    const adversarial = 'Hire opt_a currently leads in this run.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text contains a raw decimal (e.g. 0.62)', () => {
+    const adversarial = 'Hire A currently leads with 0.62 probability.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text contains a newline (multi-line prose)', () => {
+    const adversarial = 'Hire A currently leads.\nAlso, consider these alternatives.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text exceeds the 220-char headline cap', () => {
+    const longTail = 'X'.repeat(220);
+    const adversarial = `Hire A currently leads ${longTail}.`;
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text does not end with a period', () => {
+    const adversarial = 'Hire A currently leads in this analysis';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text is missing the "currently leads" anchor', () => {
+    const adversarial = 'Hire A is the strongest option in this run.';
+    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+  });
+
+  it('falls back when outcome is null', () => {
+    expect(fwd(null)).toBe(FALLBACK);
+  });
+
+  it('falls back when outcome has no assistant_text field', () => {
+    expect(fwd({})).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text is a non-string', () => {
+    expect(fwd({ assistant_text: 42 })).toBe(FALLBACK);
+    expect(fwd({ assistant_text: null })).toBe(FALLBACK);
+    expect(fwd({ assistant_text: undefined })).toBe(FALLBACK);
+    expect(fwd({ assistant_text: ['not', 'a', 'string'] })).toBe(FALLBACK);
+  });
+
+  it('falls back when assistant_text is the empty string', () => {
+    expect(fwd({ assistant_text: '' })).toBe(FALLBACK);
+  });
+});

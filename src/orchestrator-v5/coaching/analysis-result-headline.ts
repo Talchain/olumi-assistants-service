@@ -1,20 +1,33 @@
 /**
  * V5 deterministic analysis-result headline builder.
  *
- * Pure helper consumed by the run_analysis handler. Builds a one-sentence
- * British-English headline from the already-available PLoT V2RunResponseEnvelope
- * fields (leading option label, top driver, fragility) when sufficient data is
- * present. Returns null when data is too thin — the handler then falls back to
- * the locked RUN_ANALYSIS_ASSISTANT_TEMPLATES string.
+ * Pure helper consumed by the run_analysis handler. Builds a short
+ * British-English headline (one or two sentences) from the already-
+ * available PLoT V2RunResponseEnvelope fields (leading option label,
+ * top driver, fragility) when sufficient data is present. Returns null
+ * when data is too thin — the handler then falls back to the locked
+ * RUN_ANALYSIS_ASSISTANT_TEMPLATES string.
  *
  * Invariants:
  *  - No LLM call. No I/O. No telemetry side effects. No graph mutation.
  *  - No raw decimals in output (win_probability is rendered as integer %).
  *  - No internal IDs leak (winner / driver / fragility labels are guarded
  *    against ID-shaped strings).
- *  - One sentence — max ~220 chars including the status suffix.
+ *  - One short sentence, or one + one status-suffix sentence — never more.
+ *    Maximum {@link MAX_HEADLINE_CHARS} characters including any suffix.
  *  - Uses "currently leads", "provisional", "sensitive to" — never
- *    "best" / "recommended".
+ *    "best" / "recommended" / "winner".
+ *  - "currently leads" is emitted ONLY when the leading option has a
+ *    finite win_probability ≥ {@link MIN_LEAD_PROBABILITY} AND, if a
+ *    runner-up exists in the same source, the margin is at least
+ *    {@link MIN_LEAD_MARGIN}. Near-ties and weak leaders fall back to
+ *    the locked template by returning null.
+ *
+ * The registry forwarder ({@link isAllowedRunAnalysisAssistantText})
+ * is exported here so the only strings the wire ever sees from
+ * run_analysis are either a locked template literal or a string this
+ * helper could have emitted. The handler is trusted to call into this
+ * module; the registry is the second line of defence.
  */
 
 import {
@@ -27,7 +40,28 @@ import {
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
 
-const MAX_HEADLINE_CHARS = 220;
+export const MAX_HEADLINE_CHARS = 220;
+
+/**
+ * Minimum win_probability for the leading option before the headline
+ * may say "currently leads". A leader below this threshold is treated
+ * as too weak to assert a lead, regardless of any margin to the
+ * runner-up — fall back to the locked template instead. Calibrated
+ * against typical 3-way decision races: 40% is a plausible plurality;
+ * anything below would read as "no real leader".
+ */
+const MIN_LEAD_PROBABILITY = 0.4;
+
+/**
+ * Minimum margin (winner.win_probability − runner_up.win_probability)
+ * required before the headline may say "currently leads". Pads above
+ * the existing 1pp near-tie threshold used by the advice-gate copy in
+ * post-analysis-advice-gate.ts so headline copy is consistently more
+ * conservative than free-text follow-ups. When no runner-up entry
+ * carries a finite probability (single-option result) the margin
+ * check is waived and only {@link MIN_LEAD_PROBABILITY} applies.
+ */
+const MIN_LEAD_MARGIN = 0.05;
 
 const PARTIAL_SUFFIX =
   ' The run was flagged as partial — treat as provisional.';
@@ -57,10 +91,15 @@ export function buildAnalysisResultHeadline(
   const winnerLabel = resolveWinnerLabel(enrichment, leading_option_id);
   if (winnerLabel === null) return null;
 
-  const winnerProbability = resolveWinnerProbability(
-    enrichment,
-    leading_option_id,
-  );
+  // Probability/margin guard — applied to ALL "currently leads" cases.
+  // The headline never says "leads" unless the leading option holds a
+  // finite probability above MIN_LEAD_PROBABILITY AND (when a runner-up
+  // probability is present) the margin is at least MIN_LEAD_MARGIN.
+  // Near-ties (e.g. 0.34 / 0.33 / 0.33) and weak leaders (e.g. winner
+  // at 0.30 with no clear plurality) fall through to the locked template.
+  const probs = resolveWinnerProbabilities(enrichment, leading_option_id);
+  if (!hasMeaningfulLead(probs)) return null;
+  const winnerProbability = probs.winner;
 
   const driverLabel = resolveTopDriverLabel(enrichment);
   const fragileLabel = resolveFragileLabel(enrichment);
@@ -93,17 +132,94 @@ export function buildAnalysisResultHeadline(
     return caseC.length <= MAX_HEADLINE_CHARS ? caseC : null;
   }
 
-  // Case D: winner + win_probability (≥ 50%), no driver/fragility.
-  if (winnerProbability !== null && winnerProbability >= 0.5) {
-    const pct = Math.round(winnerProbability * 100);
-    const caseD =
-      `${winnerLabel} currently leads with ${pct}% probability.` +
-      ` Run the follow-up checks before treating this as final.${suffix}`;
-    return caseD.length <= MAX_HEADLINE_CHARS ? caseD : null;
-  }
+  // Case D: winner + win_probability, no driver/fragility. The probability
+  // guard above already enforced winnerProbability ≥ MIN_LEAD_PROBABILITY,
+  // so the rendered integer percentage is always ≥ 40%.
+  const pct = Math.round(winnerProbability * 100);
+  const caseD =
+    `${winnerLabel} currently leads with ${pct}% probability.` +
+    ` Run the follow-up checks before treating this as final.${suffix}`;
+  return caseD.length <= MAX_HEADLINE_CHARS ? caseD : null;
+}
 
-  // Winner alone (no driver, fragility, or usable probability) — fall back.
+interface WinnerProbabilities {
+  /** Finite winner probability, in [0, 1]. */
+  readonly winner: number;
+  /**
+   * Finite runner-up probability, in [0, 1], or null when no other
+   * entry in the same source carries a finite probability (e.g.,
+   * a single-option result, or runner-up missing its probability
+   * field). When null, the margin guard is waived; only the absolute
+   * probability check applies.
+   */
+  readonly runner_up: number | null;
+}
+
+/**
+ * Resolve the leading option's win_probability AND the next-highest
+ * probability among the other entries in the SAME source. Iterates
+ * sources in priority order ({@link readResultsArraySources}); the
+ * first source that yields a winner with a finite probability wins.
+ *
+ * Returns null when no source produces a winner with a finite,
+ * in-range probability — the caller treats null as "fall back to the
+ * locked template", matching the existing thin-data convention.
+ */
+function resolveWinnerProbabilities(
+  enrichment: Record<string, unknown>,
+  leadingOptionId: string,
+): WinnerProbabilities | null {
+  const sources = readResultsArraySources(enrichment);
+  if (sources.length === 0) return null;
+
+  const id = leadingOptionId.trim();
+  for (const source of sources) {
+    const winner = selectWinner(source, id.length > 0 ? id : null);
+    if (winner === null) continue;
+    const winnerProb = readNumber(winner.win_probability);
+    if (winnerProb === null) continue;
+    if (winnerProb < 0 || winnerProb > 1) continue;
+
+    let runnerUpProb: number | null = null;
+    for (const raw of source) {
+      const rId =
+        (typeof raw.option_id === 'string' && raw.option_id) ||
+        (typeof raw.id === 'string' && raw.id) ||
+        '';
+      if (rId === winner.id) continue;
+      const p = readNumber(raw.win_probability);
+      if (p === null || p < 0 || p > 1) continue;
+      if (runnerUpProb === null || p > runnerUpProb) runnerUpProb = p;
+    }
+    return { winner: winnerProb, runner_up: runnerUpProb };
+  }
   return null;
+}
+
+/**
+ * Predicate: does the resolved winner/runner-up pair support a
+ * "currently leads" headline? Two gates:
+ *   1. Winner probability ≥ MIN_LEAD_PROBABILITY (an absolute floor —
+ *      a leader below 40% is a "no real leader" race regardless of
+ *      margin).
+ *   2. If a runner-up probability exists, the margin must be
+ *      ≥ MIN_LEAD_MARGIN. Single-option results (runner_up === null)
+ *      waive the margin check.
+ *
+ * Tightens the predicate to `probs is WinnerProbabilities` so the
+ * caller can read `probs.winner` after the guard without a null
+ * dance.
+ */
+function hasMeaningfulLead(
+  probs: WinnerProbabilities | null,
+): probs is WinnerProbabilities {
+  if (probs === null) return false;
+  if (probs.winner < MIN_LEAD_PROBABILITY) return false;
+  if (probs.runner_up !== null) {
+    const margin = probs.winner - probs.runner_up;
+    if (margin < MIN_LEAD_MARGIN) return false;
+  }
+  return true;
 }
 
 function statusSuffix(kind: AnalysisResultHeadlineInput['status_kind']): string {
@@ -125,25 +241,12 @@ function resolveWinnerLabel(
     if (winner === null) continue;
     const cleaned = sanitiseLabel(winner.label, winner.id);
     if (cleaned !== null) return cleaned;
-    // Winner found but label is ID-shaped — bail out rather than headline an ID.
-    return null;
-  }
-  return null;
-}
-
-function resolveWinnerProbability(
-  enrichment: Record<string, unknown>,
-  leadingOptionId: string,
-): number | null {
-  const sources = readResultsArraySources(enrichment);
-  if (sources.length === 0) return null;
-
-  const id = leadingOptionId.trim();
-  for (const source of sources) {
-    const winner = selectWinner(source, id.length > 0 ? id : null);
-    if (winner === null) continue;
-    const p = readNumber(winner.win_probability);
-    if (p !== null) return p;
+    // Winner found but label is ID-shaped in this source. Try the next
+    // source (e.g., option_comparison / decision_brief.options may carry
+    // a cleaner label for the same option_id) rather than abandoning
+    // the headline entirely after one bad source. The label sanitiser
+    // still gates ID-shape leaks, so each source's candidate goes
+    // through the same check.
   }
   return null;
 }
@@ -261,4 +364,107 @@ function sanitiseLabel(rawLabel: string, idGuess: string): string | null {
   if (ID_PREFIX_PATTERN.test(trimmed)) return null;
   if (UUID_PATTERN.test(trimmed)) return null;
   return trimmed;
+}
+
+// ============================================================================
+// Registry-side allowlist for run_analysis assistant_text
+// ============================================================================
+//
+// The validation-registry forwarder ({@link
+// ../routing/validation-registry.ts}) calls into this module so the wire
+// only ever sees strings the handler is permitted to emit:
+//   1. An exact match for one of the locked RUN_ANALYSIS_ASSISTANT_TEMPLATES
+//      values (kept in sync below — see the `RUN_ANALYSIS_LOCKED_TEMPLATES`
+//      constant), OR
+//   2. A string that satisfies the deterministic headline grammar
+//      defined here (single-line, length-capped, no forbidden vocabulary,
+//      no internal-ID prefixes, no raw decimals, must contain the
+//      "currently leads" anchor, must end with a period).
+//
+// A regressed handler emitting arbitrary prose — even if the prose
+// happens to contain the substring "currently leads" — is rejected by
+// the structural rules below and falls back to the locked template.
+
+/**
+ * Exact-match set mirroring `RUN_ANALYSIS_ASSISTANT_TEMPLATES` in
+ * `../tools/handlers/run-analysis.ts`. Kept here as a frozen
+ * compile-time constant so the registry forwarder can do a strict
+ * `.has()` membership test without importing the handler module
+ * (which would cause an undesirable dependency cycle). The pinned
+ * test `analysis-result-headline.test.ts > locked templates kept in
+ * sync` verifies these values match the handler's source of truth.
+ */
+export const RUN_ANALYSIS_LOCKED_TEMPLATES: ReadonlySet<string> = new Set([
+  'Ran analysis on your current scenario.',
+  'Ran analysis on your current scenario. No options were compared.',
+  'Ran analysis on your current scenario. Some results may be incomplete — treat with caution.',
+  'Ran analysis on your current scenario. The analysis engine reported an unfamiliar status — treat the result with caution.',
+  'Ran analysis on your current scenario. The engine flagged the run as partial and produced no option comparisons — treat with caution.',
+]);
+
+/**
+ * Forbidden vocabulary in any run_analysis assistant_text. Case-
+ * insensitive substring / word-boundary checks; mirrors the spirit of
+ * the broader forbidden-user-facing-phrases list but narrowed to the
+ * headline-relevant prescriptive terms.
+ */
+const FORBIDDEN_HEADLINE_VOCABULARY_REGEX =
+  /\b(?:recommend(?:s|ed|ation|ations)?|winners?|best|optimal|preferred)\b/i;
+
+/**
+ * Slug-shape ID prefixes. Mirrors the runtime ID-prefix detector used
+ * by {@link sanitiseLabel}, but applied to the whole assistant_text
+ * — a regressed handler that interpolates `opt_a` into its prose
+ * would be caught here even when the headline builder's label
+ * sanitiser was bypassed.
+ */
+const ASSISTANT_TEXT_ID_REGEX = /\b(?:opt|goal|fac|node|edge|n|e)_[a-z0-9_]+/i;
+
+/**
+ * Raw decimals: `\d+\.\d+`. The headline only emits integer
+ * percentages ("62%"); any decimal in the text suggests improvised
+ * prose.
+ */
+const RAW_DECIMAL_REGEX = /\d+\.\d+/;
+
+/**
+ * Anchor required for any non-template headline emission. Matches the
+ * "currently leads" phrase used by every Case A/B/C/D shape this
+ * module produces. The anchor alone is necessary but not sufficient —
+ * other structural rules apply.
+ */
+const HEADLINE_ANCHOR_REGEX = / currently leads\b/;
+
+/**
+ * Returns true when `text` is a string the run_analysis handler is
+ * permitted to expose on the wire — either an exact locked-template
+ * literal, or a string that satisfies the deterministic headline
+ * grammar. The validation-registry forwarder uses this as the second
+ * line of defence: if a future handler regression emits improvised
+ * prose, the forwarder substitutes the locked-template fallback
+ * instead of letting the prose through.
+ *
+ * Rules (in order):
+ *   1. Must be a non-empty string.
+ *   2. Must be at most {@link MAX_HEADLINE_CHARS}.
+ *   3. Must not contain newline characters.
+ *   4. Locked-template literals pass exactly (case-sensitive).
+ *   5. Otherwise must:
+ *      a. End with a period.
+ *      b. Contain " currently leads" (the headline anchor).
+ *      c. Contain no forbidden vocabulary (recommend / winner / best / …).
+ *      d. Contain no ID-prefix tokens (opt_, fac_, …).
+ *      e. Contain no raw decimal numbers (only integer % allowed).
+ */
+export function isAllowedRunAnalysisAssistantText(text: unknown): boolean {
+  if (typeof text !== 'string') return false;
+  if (text.length === 0 || text.length > MAX_HEADLINE_CHARS) return false;
+  if (text.includes('\n') || text.includes('\r')) return false;
+  if (RUN_ANALYSIS_LOCKED_TEMPLATES.has(text)) return true;
+  if (!text.endsWith('.')) return false;
+  if (!HEADLINE_ANCHOR_REGEX.test(text)) return false;
+  if (FORBIDDEN_HEADLINE_VOCABULARY_REGEX.test(text)) return false;
+  if (ASSISTANT_TEXT_ID_REGEX.test(text)) return false;
+  if (RAW_DECIMAL_REGEX.test(text)) return false;
+  return true;
 }

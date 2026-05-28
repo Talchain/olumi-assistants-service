@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAnalysisResultHeadline } from '../analysis-result-headline.js';
+import {
+  buildAnalysisResultHeadline,
+  isAllowedRunAnalysisAssistantText,
+  RUN_ANALYSIS_LOCKED_TEMPLATES,
+  MAX_HEADLINE_CHARS,
+} from '../analysis-result-headline.js';
+import { RUN_ANALYSIS_ASSISTANT_TEMPLATES } from '../../tools/handlers/run-analysis.js';
 
 const HIRING_FULL: Record<string, unknown> = {
   results: [
@@ -379,7 +385,12 @@ describe('buildAnalysisResultHeadline', () => {
     expect(out).toBeNull();
   });
 
-  it('Case D requires win_probability ≥ 0.5 — bare winner with low prob returns null', () => {
+  it('near-tie bare winner (3-way 0.34/0.33/0.33) returns null via the probability/margin guard', () => {
+    // Originally pinned Case D's local `≥ 0.5` check. Now caught earlier
+    // by the global probability/margin guard (winner 0.34 < 0.4 floor)
+    // so the result is null regardless of which case branch would have
+    // fired. Test fixture and outcome unchanged; doc updated to reflect
+    // the post-round-2-review gating.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
@@ -411,5 +422,402 @@ describe('buildAnalysisResultHeadline', () => {
       status_kind: 'ok',
     });
     expect(out).toContain('Quality Index is the strongest driver');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Round-2 review hardening (PR #210):
+//   - Near-tie and weak-leader probability/margin guard.
+//   - resolveWinnerLabel falls through to next source on ID-shaped
+//     labels rather than abandoning the headline.
+//   - Locked templates kept in sync with run-analysis.ts.
+//   - isAllowedRunAnalysisAssistantText predicate behaviour pinned
+//     for the validation-registry forwarder.
+// ════════════════════════════════════════════════════════════════════
+
+describe('buildAnalysisResultHeadline — probability and margin guard', () => {
+  // The headline must NEVER say "currently leads" without a finite
+  // winner probability ≥ MIN_LEAD_PROBABILITY (40%) AND (when a
+  // runner-up probability is available in the same source) a margin
+  // of at least MIN_LEAD_MARGIN (5pp). Near-ties and weak leaders
+  // fall back to the locked template by returning null.
+
+  it('near-tie 0.34 / 0.33 / 0.33 + driver + fragility — falls back', () => {
+    // The reviewer-blocking case: the bare Case A path used to emit
+    // "currently leads because…" on a 1pp lead. Now gated by the
+    // probability/margin guard.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.33 },
+      ],
+      factor_sensitivity: [
+        { label: 'Delivery Capacity', elasticity: 0.6, confidence: 0.8 },
+      ],
+      robustness: {
+        level: 'low',
+        fragile_edges: [{ from_label: 'Cost', switch_probability: 0.5 }],
+      },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('weak margin 0.42 / 0.40 (2pp) + driver — falls back', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
+      ],
+      factor_sensitivity: [
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('weak winner 0.30 / 0.25 / 0.25 / 0.20 (5pp margin BUT below 40% floor) — falls back', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.30 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.25 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.25 },
+        { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.20 },
+      ],
+      factor_sensitivity: [
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('missing win_probability on winner + driver + fragility — falls back', () => {
+    // Reviewer-blocking case 3: Cases A/B/C used to emit even when
+    // win_probability was missing. The guard now requires a finite
+    // probability before any "currently leads" emission.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A' /* no win_probability */ },
+      ],
+      factor_sensitivity: [
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+      ],
+      robustness: {
+        level: 'low',
+        fragile_edges: [{ from_label: 'Throughput', switch_probability: 0.4 }],
+      },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('clear winner 0.50 / 0.30 / 0.20 + driver — emits Case B headline', () => {
+    // Positive control: a clear plurality lead with a comfortable
+    // margin passes both thresholds and renders confidently.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.50 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.30 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.20 },
+      ],
+      factor_sensitivity: [
+        { label: 'Strong Driver', elasticity: 0.6, confidence: 0.8 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toContain('Option A currently leads because Strong Driver is the strongest driver');
+  });
+
+  it('boundary: winner exactly at MIN_LEAD_PROBABILITY (0.40) with 5pp margin — emits headline', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.40 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.35 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.25 },
+      ],
+      factor_sensitivity: [
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).not.toBeNull();
+    expect(out!).toContain('Option A currently leads');
+  });
+
+  it('single-option result with finite probability — margin check waived', () => {
+    // When no runner-up entry has a probability, only the absolute
+    // probability floor applies. A single-option scenario with a
+    // healthy probability still produces a headline.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+      ],
+      factor_sensitivity: [
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toContain('Option A currently leads because Driver is the strongest driver');
+  });
+
+  it('out-of-range winner probability (1.5) — falls back', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 1.5 },
+      ],
+      factor_sensitivity: [
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+});
+
+describe('resolveWinnerLabel — multi-source fallthrough on ID-shaped labels', () => {
+  // Round-2 review medium finding: a first source with ID-shaped
+  // labels used to abandon the headline entirely. The loop now
+  // continues to the next source so option_comparison /
+  // decision_brief.options can rescue a cleaner label for the same
+  // option_id.
+
+  it('ID-shaped label in results[] falls through to option_comparison label', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
+        { option_id: 'opt_b', option_label: 'opt_b', win_probability: 0.38 },
+      ],
+      option_comparison: [
+        {
+          option_id: 'opt_a',
+          option_label: 'Hire One Senior Technical Lead',
+          win_probability: 0.62,
+        },
+        {
+          option_id: 'opt_b',
+          option_label: 'Defer Hiring',
+          win_probability: 0.38,
+        },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toContain('Hire One Senior Technical Lead currently leads');
+  });
+
+  it('ID-shaped labels in BOTH results[] and option_comparison falls through to decision_brief.options', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
+      ],
+      option_comparison: [
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
+      ],
+      decision_brief: {
+        options: [
+          { option_id: 'opt_a', label: 'Hire One Senior Technical Lead', win_probability: 0.62 },
+        ],
+      },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toContain('Hire One Senior Technical Lead currently leads');
+  });
+
+  it('ID-shaped labels in every source — final fallback to null', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
+      ],
+      option_comparison: [
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+});
+
+describe('RUN_ANALYSIS_LOCKED_TEMPLATES kept in sync with run-analysis.ts', () => {
+  // The exported set is the registry forwarder's source of truth for
+  // the locked-template literals. If RUN_ANALYSIS_ASSISTANT_TEMPLATES
+  // in run-analysis.ts gains a new template (or drifts in wording),
+  // this test forces the constant here to update too — without that
+  // bump the forwarder would silently substitute the new template
+  // for the safe fallback.
+
+  it('every RUN_ANALYSIS_ASSISTANT_TEMPLATES value is in the exported locked set', () => {
+    for (const literal of Object.values(RUN_ANALYSIS_ASSISTANT_TEMPLATES)) {
+      expect(
+        RUN_ANALYSIS_LOCKED_TEMPLATES.has(literal),
+        `RUN_ANALYSIS_LOCKED_TEMPLATES is missing the literal: "${literal}"`,
+      ).toBe(true);
+    }
+  });
+
+  it('every locked template literal corresponds to a RUN_ANALYSIS_ASSISTANT_TEMPLATES value', () => {
+    const handlerLiterals = new Set<string>(Object.values(RUN_ANALYSIS_ASSISTANT_TEMPLATES));
+    for (const literal of RUN_ANALYSIS_LOCKED_TEMPLATES) {
+      expect(
+        handlerLiterals.has(literal),
+        `Locked set has a literal not in RUN_ANALYSIS_ASSISTANT_TEMPLATES: "${literal}"`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe('isAllowedRunAnalysisAssistantText predicate', () => {
+  // Direct unit tests for the predicate. The validation-registry test
+  // file exercises it end-to-end through the forwarder; these tests
+  // pin the predicate's individual rules.
+
+  it('returns true for every locked template literal', () => {
+    for (const literal of RUN_ANALYSIS_LOCKED_TEMPLATES) {
+      expect(isAllowedRunAnalysisAssistantText(literal)).toBe(true);
+    }
+  });
+
+  it('returns true for a clean deterministic headline', () => {
+    const headline =
+      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality.';
+    expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
+  });
+
+  it('returns true for a Case D probability headline', () => {
+    const headline =
+      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final.';
+    expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
+  });
+
+  it('rejects improvised prose containing the anchor mid-sentence', () => {
+    const adversarial =
+      'Recommend Hire X. Hire B currently leads but the model is unreliable.';
+    expect(isAllowedRunAnalysisAssistantText(adversarial)).toBe(false);
+  });
+
+  it('rejects an extended locked-template prefix with added prose', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'Ran analysis on your current scenario plus we recommend Hire X.',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects strings with forbidden vocabulary (recommend / winner / best / optimal / preferred)', () => {
+    for (const phrase of [
+      'Hire A currently leads. We recommend acting now.',
+      'Hire A currently leads. The winner is clear.',
+      'Hire A currently leads — the best option.',
+      'Hire A currently leads. This is the optimal choice.',
+      'Hire A currently leads. Preferred over alternatives.',
+    ]) {
+      expect(isAllowedRunAnalysisAssistantText(phrase)).toBe(false);
+    }
+  });
+
+  it('rejects strings with internal ID prefixes', () => {
+    for (const phrase of [
+      'opt_a currently leads in this run.',
+      'Hire fac_x currently leads in this run.',
+      'goal_root currently leads in this run.',
+      'Hire A currently leads via node_42.',
+      'Hire A currently leads via edge_xy.',
+    ]) {
+      expect(isAllowedRunAnalysisAssistantText(phrase)).toBe(false);
+    }
+  });
+
+  it('rejects strings with raw decimals', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText('Hire A currently leads with 0.62 probability.'),
+    ).toBe(false);
+  });
+
+  it('accepts integer percentages (e.g. 62%)', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText('Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final.'),
+    ).toBe(true);
+  });
+
+  it('rejects multi-line text', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText('Hire A currently leads.\nMore detail follows.'),
+    ).toBe(false);
+    expect(
+      isAllowedRunAnalysisAssistantText('Hire A currently leads.\r\nMore detail follows.'),
+    ).toBe(false);
+  });
+
+  it('rejects text exceeding MAX_HEADLINE_CHARS', () => {
+    const tail = 'X'.repeat(MAX_HEADLINE_CHARS);
+    expect(
+      isAllowedRunAnalysisAssistantText(`Hire A currently leads ${tail}.`),
+    ).toBe(false);
+  });
+
+  it('rejects text not ending with a period (when not a locked template)', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText('Hire A currently leads in this analysis'),
+    ).toBe(false);
+  });
+
+  it('rejects text missing the "currently leads" anchor (when not a locked template)', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText('Hire A is the strongest option in this run.'),
+    ).toBe(false);
+  });
+
+  it('rejects empty / non-string inputs', () => {
+    expect(isAllowedRunAnalysisAssistantText('')).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(null)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(undefined)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(42)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText({})).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(['Hire A currently leads.'])).toBe(false);
   });
 });
