@@ -597,6 +597,131 @@ export function findProposedConceptAction(
   return null;
 }
 
+/**
+ * Locate the most recent `proposed_concept` pending action entry (full
+ * object, not the narrowed concept). Used by the resume sites that also
+ * need to inspect `preconditions.graph_hash` for divergence and
+ * `expires_at_iso` for wall-clock expiry.
+ *
+ * Returns null when no `proposed_concept` entry is present.
+ */
+export function findProposedConceptEntry(
+  pendingActions: readonly PendingAction[] | null | undefined,
+): PendingAction | null {
+  if (!pendingActions || pendingActions.length === 0) return null;
+  for (let i = pendingActions.length - 1; i >= 0; i--) {
+    const pa = pendingActions[i];
+    if (!pa) continue;
+    if (pa.action.kind !== 'proposed_concept') continue;
+    return pa;
+  }
+  return null;
+}
+
+/**
+ * Wall-clock TTL check for a `proposed_concept` pending action. Mirrors
+ * the `isExpired` rule used by `tryClarificationResume` and
+ * `tryShortConfirmResume` so all three resume paths agree on what
+ * "expired" means.
+ *
+ * Returns true when:
+ *   - `expires_at_iso` is not a parseable timestamp (defensive — the
+ *     parser should already reject malformed entries, but we treat any
+ *     unparseable timestamp as expired so the resume fails closed);
+ *   - the current wall-clock time is after `expires_at_iso`.
+ *
+ * Turn-count TTL is NOT checked here because it is effectively enforced
+ * by `readMostRecentPendingActions`'s most-recent-only read pattern
+ * (proposals from more than one turn back are not in the prior turn's
+ * pending_actions row by the time the next-turn resumer queries).
+ */
+export function isProposedConceptExpired(pa: PendingAction, nowMs: number): boolean {
+  const expiresMs = Date.parse(pa.expires_at_iso);
+  if (!Number.isFinite(expiresMs)) return true;
+  if (nowMs > expiresMs) return true;
+  return false;
+}
+
+export type ProposalResumeRejection =
+  | 'no_pending'
+  | 'expired_wall'
+  | 'graph_hash_changed';
+
+export interface ResolveProposalResumeInput {
+  readonly message: string;
+  readonly pendingActions: readonly PendingAction[] | null | undefined;
+  readonly nodes?:
+    | ReadonlyArray<{ readonly label?: string; readonly kind?: string }>
+    | null;
+  readonly currentGraphHash: string | null;
+  readonly nowMs: number;
+}
+
+export interface ResolveProposalResumeResult {
+  readonly decision: ProposalContinuationDecision | null;
+  /**
+   * When `decision === null`, why the gate rejected. `null` means the
+   * pending was safe and `decideProposalContinuation` simply returned
+   * null (neither agreement nor add-as-factor matched). Callers use the
+   * rejection reason to emit telemetry; a `null` reason emits nothing.
+   */
+  readonly rejection: ProposalResumeRejection | null;
+}
+
+/**
+ * Single source of truth for the proposal-continuation resume gate.
+ *
+ * Composition of the four safety checks called out by review:
+ *   1. No prior `proposed_concept` entry → reject `no_pending` (no
+ *      telemetry — this is the steady-state on most turns).
+ *   2. Wall-clock TTL elapsed → reject `expired_wall`. Mirrors the
+ *      `isExpired` rule used by `tryClarificationResume` / `tryShort
+ *      ConfirmResume` so all three resumers agree on what "expired"
+ *      means.
+ *   3. Graph hash diverged since emit → reject `graph_hash_changed`.
+ *      Defensive check against a graph mutation between proposal and
+ *      agreement.
+ *   4. Otherwise → return the Stage 1 / Stage 2 decision from
+ *      `decideProposalContinuation` (which may itself return null when
+ *      neither agreement nor add-as-factor matches).
+ *
+ * The wall-clock check runs BEFORE the hash check so a stale-by-time
+ * proposal is dropped before we waste compute. The dispatch call sites
+ * use `rejection` to emit `v5.proposal_continuation.invalidated` with
+ * the specific reason.
+ *
+ * Turn-count TTL is NOT enforced here — it is implicitly handled by
+ * `readMostRecentPendingActions`'s most-recent-only read pattern.
+ * Proposals from more than one turn back are not in the prior turn's
+ * pending_actions row by the time the next-turn resumer queries.
+ */
+export function resolveProposalResume(
+  input: ResolveProposalResumeInput,
+): ResolveProposalResumeResult {
+  const entry = findProposedConceptEntry(input.pendingActions);
+  const proposed = findProposedConceptAction(input.pendingActions);
+  if (entry === null || proposed === null) {
+    return { decision: null, rejection: 'no_pending' };
+  }
+  if (isProposedConceptExpired(entry, input.nowMs)) {
+    return { decision: null, rejection: 'expired_wall' };
+  }
+  const persistedHash = entry.preconditions.graph_hash;
+  const hashDiverged =
+    persistedHash !== undefined
+    && input.currentGraphHash !== null
+    && input.currentGraphHash !== persistedHash;
+  if (hashDiverged) {
+    return { decision: null, rejection: 'graph_hash_changed' };
+  }
+  const decision = decideProposalContinuation({
+    message: input.message,
+    pendingProposedConcept: proposed,
+    nodes: input.nodes ?? null,
+  });
+  return { decision, rejection: null };
+}
+
 export interface CaptureProposalForCommitInput {
   readonly assistantText: string | null | undefined;
   readonly chips: readonly SuggestedAction[];

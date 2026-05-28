@@ -10,7 +10,10 @@ import {
   detectsContinuationAgreement,
   extractProposedConcept,
   findProposedConceptAction,
+  findProposedConceptEntry,
+  isProposedConceptExpired,
   pickCandidateAffectLabels,
+  resolveProposalResume,
 } from '../proposal-continuation.js';
 
 import type { PendingAction } from '../../session/pending-action.js';
@@ -555,5 +558,266 @@ describe('findProposedConceptAction', () => {
     const found = findProposedConceptAction([a1, a2]);
     expect(found?.concept).toBe('second concept');
     expect(found?.preferred_kind).toBe('factor');
+  });
+});
+
+describe('findProposedConceptEntry', () => {
+  it('returns the full PendingAction object for the most recent proposed_concept', () => {
+    const entry = buildProposalPendingAction({
+      concept: 'team morale',
+      preferred_kind: 'factor',
+      scenario_id: '11111111-1111-1111-1111-111111111111',
+      emitted_at_iso: '2026-05-28T10:00:00.000Z',
+      graph_hash: 'h1',
+    });
+    const found = findProposedConceptEntry([entry]);
+    expect(found).not.toBeNull();
+    expect(found?.expires_at_iso).toBe(entry.expires_at_iso);
+    expect(found?.preconditions.graph_hash).toBe('h1');
+  });
+
+  it('returns null on empty / missing input', () => {
+    expect(findProposedConceptEntry([])).toBeNull();
+    expect(findProposedConceptEntry(null)).toBeNull();
+    expect(findProposedConceptEntry(undefined)).toBeNull();
+  });
+
+  it('returns null when no proposed_concept entry present', () => {
+    // Non-proposed_concept pending shapes do not match.
+    const nonProposed: PendingAction = {
+      id: 'pa_1',
+      scenario_id: '11111111-1111-1111-1111-111111111111',
+      chip_id: 'chip_1',
+      action: { kind: 'run_analysis' },
+      preconditions: {},
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-01-01T00:00:00.000Z',
+      emitted_at_iso: '2026-05-28T10:00:00.000Z',
+    };
+    expect(findProposedConceptEntry([nonProposed])).toBeNull();
+  });
+});
+
+describe('isProposedConceptExpired', () => {
+  const baseEntry: PendingAction = buildProposalPendingAction({
+    concept: 'team morale',
+    preferred_kind: 'factor',
+    scenario_id: '11111111-1111-1111-1111-111111111111',
+    emitted_at_iso: '2026-05-28T10:00:00.000Z',
+    graph_hash: 'h1',
+  });
+
+  it('returns false when expires_at_iso is in the future', () => {
+    const future: PendingAction = {
+      ...baseEntry,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+    };
+    expect(isProposedConceptExpired(future, Date.parse('2026-05-28T10:00:00.000Z'))).toBe(false);
+  });
+
+  it('returns true when now is strictly past expires_at_iso', () => {
+    const expired: PendingAction = {
+      ...baseEntry,
+      expires_at_iso: '2026-05-28T10:00:00.000Z',
+    };
+    // one millisecond past expiry
+    expect(isProposedConceptExpired(expired, Date.parse('2026-05-28T10:00:00.001Z'))).toBe(true);
+  });
+
+  it('returns false at the exact expiry instant (inclusive boundary)', () => {
+    const atBoundary: PendingAction = {
+      ...baseEntry,
+      expires_at_iso: '2026-05-28T10:00:00.000Z',
+    };
+    expect(isProposedConceptExpired(atBoundary, Date.parse('2026-05-28T10:00:00.000Z'))).toBe(false);
+  });
+
+  it('returns true when expires_at_iso is unparseable (fail closed)', () => {
+    const malformed: PendingAction = {
+      ...baseEntry,
+      expires_at_iso: 'not-a-date',
+    };
+    expect(isProposedConceptExpired(malformed, Date.now())).toBe(true);
+  });
+});
+
+describe('resolveProposalResume — wall-clock + graph-hash gate', () => {
+  const SCENARIO = '11111111-1111-1111-1111-111111111111';
+  const EMITTED_AT = '2026-05-28T10:00:00.000Z';
+  const FRESH_GRAPH_HASH = 'sha256:fresh';
+  const CONCEPT = 'team morale or cultural fit';
+
+  function buildValidPending(): PendingAction {
+    return buildProposalPendingAction({
+      concept: CONCEPT,
+      preferred_kind: 'factor',
+      scenario_id: SCENARIO,
+      emitted_at_iso: EMITTED_AT,
+      graph_hash: FRESH_GRAPH_HASH,
+    });
+  }
+
+  function buildExpiredPending(): PendingAction {
+    const valid = buildValidPending();
+    // Force expiry into the past — covers the wall-clock branch even
+    // when the test clock has not advanced.
+    return {
+      ...valid,
+      expires_at_iso: '2026-05-28T09:59:59.999Z',
+    };
+  }
+
+  const NOW_MS = Date.parse('2026-05-28T10:00:00.001Z');
+
+  it('returns no_pending when the list is empty', () => {
+    const r = resolveProposalResume({
+      message: "That's a good idea.",
+      pendingActions: [],
+      nodes: null,
+      currentGraphHash: FRESH_GRAPH_HASH,
+      nowMs: NOW_MS,
+    });
+    expect(r.decision).toBeNull();
+    expect(r.rejection).toBe('no_pending');
+  });
+
+  it('returns no_pending when the list contains no proposed_concept entry', () => {
+    const nonProposed: PendingAction = {
+      id: 'pa_1',
+      scenario_id: SCENARIO,
+      chip_id: 'chip_1',
+      action: { kind: 'run_analysis' },
+      preconditions: {},
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-01-01T00:00:00.000Z',
+      emitted_at_iso: EMITTED_AT,
+    };
+    const r = resolveProposalResume({
+      message: "That's a good idea.",
+      pendingActions: [nonProposed],
+      nodes: null,
+      currentGraphHash: FRESH_GRAPH_HASH,
+      nowMs: NOW_MS,
+    });
+    expect(r.decision).toBeNull();
+    expect(r.rejection).toBe('no_pending');
+  });
+
+  // ─── User-required test case 1 ─────────────────────────────────────
+  it('expired pending + agreement → no Stage 1 (rejection: expired_wall)', () => {
+    const r = resolveProposalResume({
+      message: "That's a good idea. Let's involve the team.",
+      pendingActions: [buildExpiredPending()],
+      nodes: null,
+      currentGraphHash: FRESH_GRAPH_HASH,
+      nowMs: NOW_MS,
+    });
+    expect(r.decision).toBeNull();
+    expect(r.rejection).toBe('expired_wall');
+  });
+
+  // ─── User-required test case 2 ─────────────────────────────────────
+  it('expired pending + Add as factor → no Stage 2 (rejection: expired_wall)', () => {
+    const r = resolveProposalResume({
+      message: 'Add team morale as a factor.',
+      pendingActions: [buildExpiredPending()],
+      nodes: [{ label: 'Delivery speed', kind: 'goal' }],
+      currentGraphHash: FRESH_GRAPH_HASH,
+      nowMs: NOW_MS,
+    });
+    expect(r.decision).toBeNull();
+    expect(r.rejection).toBe('expired_wall');
+  });
+
+  // ─── User-required test case 3 ─────────────────────────────────────
+  it('valid (non-expired, matching hash) pending + agreement → Stage 1 resumes normally', () => {
+    const r = resolveProposalResume({
+      message: "That's a good idea. Let's involve the team.",
+      pendingActions: [buildValidPending()],
+      nodes: null,
+      currentGraphHash: FRESH_GRAPH_HASH,
+      nowMs: NOW_MS,
+    });
+    expect(r.rejection).toBeNull();
+    expect(r.decision).not.toBeNull();
+    expect(r.decision?.stage).toBe('stage_one');
+    expect(r.decision?.assistantText).toContain(CONCEPT);
+    expect(r.decision?.suggestedActions).toHaveLength(3);
+  });
+
+  it('valid pending + Add as factor → Stage 2 resumes normally with affect-target chips', () => {
+    const r = resolveProposalResume({
+      message: 'Add team morale as a factor.',
+      pendingActions: [buildValidPending()],
+      nodes: [
+        { label: 'Delivery speed', kind: 'goal' },
+        { label: 'Quality', kind: 'outcome' },
+      ],
+      currentGraphHash: FRESH_GRAPH_HASH,
+      nowMs: NOW_MS,
+    });
+    expect(r.rejection).toBeNull();
+    expect(r.decision?.stage).toBe('stage_two');
+    expect(r.decision?.suggestedActions).toHaveLength(2);
+  });
+
+  it('wall-clock TTL takes precedence over graph-hash divergence (expired first)', () => {
+    // Both conditions hold (expired AND diverged); the gate rejects on
+    // wall-clock because it runs first.
+    const r = resolveProposalResume({
+      message: "That's a good idea.",
+      pendingActions: [buildExpiredPending()],
+      nodes: null,
+      currentGraphHash: 'sha256:diverged',
+      nowMs: NOW_MS,
+    });
+    expect(r.rejection).toBe('expired_wall');
+  });
+
+  it('graph-hash divergence rejects the resume when not expired', () => {
+    const r = resolveProposalResume({
+      message: "That's a good idea.",
+      pendingActions: [buildValidPending()],
+      nodes: null,
+      currentGraphHash: 'sha256:diverged',
+      nowMs: NOW_MS,
+    });
+    expect(r.rejection).toBe('graph_hash_changed');
+    expect(r.decision).toBeNull();
+  });
+
+  it('valid pending + unrelated message → decision null, rejection null (gate satisfied, no agreement)', () => {
+    // The gate passes (pending exists, fresh, hash matches), but
+    // decideProposalContinuation returns null because the message
+    // matches neither agreement nor add-as-factor. Callers fall through
+    // to existing branches with NO invalidated telemetry.
+    const r = resolveProposalResume({
+      message: 'Walk me through the analysis.',
+      pendingActions: [buildValidPending()],
+      nodes: null,
+      currentGraphHash: FRESH_GRAPH_HASH,
+      nowMs: NOW_MS,
+    });
+    expect(r.decision).toBeNull();
+    expect(r.rejection).toBeNull();
+  });
+
+  it('passes through when persisted hash is absent (no precondition to compare)', () => {
+    const noHash = buildProposalPendingAction({
+      concept: CONCEPT,
+      preferred_kind: 'factor',
+      scenario_id: SCENARIO,
+      emitted_at_iso: EMITTED_AT,
+      // omit graph_hash
+    });
+    const r = resolveProposalResume({
+      message: "That's a good idea.",
+      pendingActions: [noHash],
+      nodes: null,
+      currentGraphHash: 'sha256:anything',
+      nowMs: NOW_MS,
+    });
+    expect(r.rejection).toBeNull();
+    expect(r.decision?.stage).toBe('stage_one');
   });
 });

@@ -68,6 +68,7 @@ import {
   buildProposalPendingAction,
   decideProposalContinuation,
   findProposedConceptAction,
+  resolveProposalResume,
 } from '../coaching/proposal-continuation.js';
 import { derivePendingActionsFromChips } from '../compose/derive-pending-actions.js';
 import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
@@ -1069,45 +1070,35 @@ export async function dispatchEditGraph(
         payload.scenario_id,
         requestId,
       );
-      const earlyProposed = findProposedConceptAction(earlyPending);
-      // Graph-hash divergence check matches the no-op recovery layer
-      // semantics. The pending's emit-time hash is compared against
-      // the request ingress graph hash (parsedGraph). If they differ,
-      // the proposal is stale and we skip the intercept (telemetry
-      // surfaces the invalidation).
-      let earlyProposedSafe: typeof earlyProposed = null;
-      let earlyGraphHash: string | null = null;
-      if (earlyProposed !== null) {
-        try {
-          earlyGraphHash = computeAnalysisAffectingGraphHash(
-            graphState as GraphStateIngress | null | undefined,
-          );
-        } catch {
-          earlyGraphHash = null;
-        }
-        const entry = (earlyPending ?? []).find(
-          (p) => p.action.kind === 'proposed_concept',
+      // Resolve the proposal-resume gate via the shared helper. It runs
+      // the no-pending → wall-clock-TTL → graph-hash ladder in that
+      // order and either returns a Stage 1 / Stage 2 decision or a
+      // typed rejection reason. The wall-clock TTL mirrors the
+      // `isExpired` semantics used by tryClarificationResume /
+      // tryShortConfirmResume so all three resumers agree.
+      let earlyCurrentGraphHash: string | null = null;
+      try {
+        earlyCurrentGraphHash = computeAnalysisAffectingGraphHash(
+          graphState as GraphStateIngress | null | undefined,
         );
-        const persistedHash = entry?.preconditions.graph_hash;
-        const hashDiverged =
-          persistedHash !== undefined
-          && earlyGraphHash !== null
-          && earlyGraphHash !== persistedHash;
-        if (hashDiverged) {
-          emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
-            request_id: requestId,
-            scenario_id: payload.scenario_id,
-            reason: 'graph_hash_changed',
-          });
-        } else {
-          earlyProposedSafe = earlyProposed;
-        }
+      } catch {
+        earlyCurrentGraphHash = null;
       }
-      const earlyDecision = decideProposalContinuation({
+      const resumeOutcome = resolveProposalResume({
         message: payload.message,
-        pendingProposedConcept: earlyProposedSafe,
+        pendingActions: earlyPending,
         nodes: parsedGraph.nodes,
+        currentGraphHash: earlyCurrentGraphHash,
+        nowMs: Date.now(),
       });
+      if (resumeOutcome.rejection === 'expired_wall' || resumeOutcome.rejection === 'graph_hash_changed') {
+        emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          reason: resumeOutcome.rejection,
+        });
+      }
+      const earlyDecision = resumeOutcome.decision;
       if (earlyDecision !== null) {
         editResult = {
           blocks: [],
@@ -1215,30 +1206,39 @@ export async function dispatchEditGraph(
       persistedPostEditGraph as GraphStateIngress | null | undefined,
     );
     currentGraphHashForRecovery = currentGraphHash;
-    // V5 P0 — read the most recent prior turn's pending actions and pick
-    // out a `proposed_concept` entry if present. Invalidate it if the
-    // graph hash has diverged (e.g. a mutation between proposal and
-    // agreement) — invalidation telemetry surfaces the reason.
+    // V5 P0 — resolve the proposal-resume gate via the shared helper.
+    // It runs the no-pending → wall-clock-TTL → graph-hash ladder in
+    // that order and either returns a Stage 1 / Stage 2 decision or a
+    // typed rejection. We only need the concept itself here (the
+    // decision will be re-derived inside `decideNoOpRecovery` after
+    // intent classification); a non-null decision means the gate is
+    // satisfied and the concept is safe to pass through. The wall-clock
+    // TTL mirrors the `isExpired` semantics used by
+    // tryClarificationResume / tryShortConfirmResume.
     const priorPending = turnContext.most_recent_pending_actions ?? [];
-    const proposed = findProposedConceptAction(priorPending);
-    if (proposed !== null) {
-      // Locate the originating pending entry so we can inspect its
-      // preconditions for graph-hash divergence.
-      const entry = priorPending.find((p) => p.action.kind === 'proposed_concept');
-      const persistedHash = entry?.preconditions.graph_hash;
-      const hashDiverged =
-        persistedHash !== undefined
-        && currentGraphHash !== null
-        && currentGraphHash !== persistedHash;
-      if (hashDiverged) {
-        emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          reason: 'graph_hash_changed',
-        });
-      } else {
-        pendingProposedConceptForRecovery = proposed;
-      }
+    const recoveryGateOutcome = resolveProposalResume({
+      message: payload.message,
+      pendingActions: priorPending,
+      nodes: null,
+      currentGraphHash,
+      nowMs: Date.now(),
+    });
+    if (
+      recoveryGateOutcome.rejection === 'expired_wall'
+      || recoveryGateOutcome.rejection === 'graph_hash_changed'
+    ) {
+      emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        reason: recoveryGateOutcome.rejection,
+      });
+    }
+    if (recoveryGateOutcome.rejection === null) {
+      // Gate satisfied — surface the concept to the no-op recovery
+      // layer. (decideNoOpRecovery may still return a non-proposal
+      // branch if the message does not match agreement / add-as-factor.)
+      const concept = findProposedConceptAction(priorPending);
+      pendingProposedConceptForRecovery = concept;
     }
     freshness = deriveAnalysisFreshness(turnContext.prior_facts, currentGraphHash);
     emitFreshnessTelemetry(
