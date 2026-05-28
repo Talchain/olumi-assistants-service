@@ -50,7 +50,7 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import { buildTurnContext } from '../build-turn-context.js';
+import { buildTurnContext, loadMostRecentPendingActions } from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
@@ -64,6 +64,14 @@ import {
   hasMutationSignal,
   looksLikeVagueEdit,
 } from '../routing/analytical-intent.js';
+import {
+  buildProposalPendingAction,
+  decideProposalContinuation,
+  findProposedConceptAction,
+  resolveProposalResume,
+} from '../coaching/proposal-continuation.js';
+import { derivePendingActionsFromChips } from '../compose/derive-pending-actions.js';
+import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
 // V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
@@ -115,6 +123,8 @@ type NoOpRecoveryBranch =
   | 'vague_edit'
   | 'explore_factor'
   | 'explore_factor_stale'
+  | 'proposal_stage_one'
+  | 'proposal_stage_two'
   | 'ambiguous';
 
 interface NoOpRecoveryDecision {
@@ -138,16 +148,36 @@ interface DecideNoOpRecoveryInput {
    */
   readonly graphReady: boolean;
   /**
-   * Current graph nodes — used ONLY by the `explore_factor` safety-net
-   * branch to detect a no-op message that references a known graph
-   * label without an edit verb / value (the symptom of a label-chip
-   * click that slipped past the upstream `tryPostAnalysisLabelIntercept`
-   * in route-v2.ts). An empty array is acceptable — the branch then
-   * never fires and recovery falls through to the existing ambiguous
-   * fallback. Each entry needs only `label` (case-insensitive substring
-   * compared against `message`); `id` / `kind` are unused here.
+   * V5 P0 — Most-recent-turn proposed concept, if any. Populated by the
+   * caller from `EnrichedTurnContext.most_recent_pending_actions` via
+   * `findProposedConceptAction`. When non-null, this enables the
+   * `proposal_stage_one` / `proposal_stage_two` branches that resume
+   * a Sonnet-emitted proposal as a deterministic clarifier instead of
+   * dead-ending in `vague_edit`.
+   *
+   * Optional on the type so existing callers / tests that did not
+   * receive the field continue to compile; behaviour is identical to
+   * the prior implementation when this is undefined or null.
    */
-  readonly nodes?: readonly { readonly label: string }[] | null;
+  readonly pendingProposedConcept?: {
+    readonly concept: string;
+    readonly preferred_kind: 'risk' | 'factor' | 'either';
+  } | null;
+  /**
+   * Current graph nodes — used by:
+   *   1. the `explore_factor` safety-net branch to detect a no-op message
+   *      that references a known graph label without an edit verb / value
+   *      (the symptom of a label-chip click that slipped past the upstream
+   *      `tryPostAnalysisLabelIntercept` in route-v2.ts);
+   *   2. the V5 P0 `proposal_stage_two` clarifier to pick candidate
+   *      affect-target labels from the existing model (goal / outcome
+   *      kinds first, then other factors).
+   *
+   * An empty array is acceptable — the explore branch never fires and the
+   * Stage 2 clarifier falls back to a free-text prompt. Each entry needs
+   * `label`; `kind` is optional and used only by Stage 2's ordering.
+   */
+  readonly nodes?: readonly { readonly label: string; readonly kind?: string }[] | null;
 }
 
 const NO_OP_FRESH_TEXT =
@@ -302,6 +332,42 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
   );
   const intentClass = classifyAnalyticalIntent(input.message);
   const mutationSignal = hasMutationSignal(input.message);
+
+  // V5 P0 proposal-memory continuation — Stage 2 / Stage 1 ladder.
+  //
+  // Runs FIRST, before any other branch. Only fires when the caller
+  // supplied a non-null `pendingProposedConcept` (the prior turn's
+  // commit captured a Sonnet-emitted proposal AND its preconditions
+  // — graph hash, TTL — still hold).
+  //
+  // The decision logic is shared with the pre-LLM intercept (see
+  // `decideProposalContinuation`); this branch is defence-in-depth
+  // for the case where the pre-LLM intercept did not fire (e.g.
+  // graph parse failure made it unsafe). Pending exists but neither
+  // Stage 1 nor Stage 2 matched → null return → fall through to the
+  // existing branch ladder. The pending decays naturally via TTL or
+  // is invalidated by a subsequent graph mutation.
+  const proposalDecision = decideProposalContinuation({
+    message: input.message,
+    pendingProposedConcept: input.pendingProposedConcept ?? null,
+    nodes: input.nodes ?? null,
+  });
+  if (proposalDecision !== null) {
+    return {
+      branch:
+        proposalDecision.stage === 'stage_two'
+          ? 'proposal_stage_two'
+          : 'proposal_stage_one',
+      intent_class: intentClass,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: proposalDecision.assistantText,
+      suggestedActions: proposalDecision.suggestedActions.map((a) => ({
+        id: a.id,
+        label: a.label,
+        message: a.message,
+      })),
+    };
+  }
 
   if (intentClass !== null && !mutationSignal) {
     if (hasRunAnalysisFact && input.freshness === 'fresh') {
@@ -822,6 +888,11 @@ function buildStructuralFallback(
  * downstream consumers receive the shape they expect without this module
  * applying a type-erasing `as unknown as` cast.
  */
+// `loadMostRecentPendingActions` lives in `build-turn-context.ts` so the
+// state-write-invariant pre-push guard (SessionStore imports restricted to
+// session/, commit.ts, build-turn-context.ts) stays satisfied. The
+// pre-LLM intercept below calls it directly.
+
 function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnvelope {
   const raw = a as AnalysisStateIngress & {
     meta?: V2RunResponseEnvelope['meta'];
@@ -981,13 +1052,90 @@ export async function dispatchEditGraph(
         });
       }
     } else {
-      editResult = await handleEditGraph(
-        context,
-        payload.message,
-        adapter,
+      // V5 P0 proposal-memory continuation — pre-LLM intercept.
+      //
+      // Sits between the add-risk fast path and the LLM call so the
+      // Stage 1 (agreement) and Stage 2 (add-as-factor) branches emit
+      // deterministically without paying the ~16s handleEditGraph LLM
+      // round-trip. Add-risk still wins (we only reach here when the
+      // add-risk classifier did not match) so the existing fast path
+      // is unchanged.
+      //
+      // Pending actions are loaded inline via the SessionStore factory
+      // rather than reusing buildTurnContext to avoid pulling in the
+      // full prior_facts + scenario_state load on every edit_graph
+      // dispatch. On factory failure the intercept silently returns
+      // null and the LLM path runs normally.
+      const earlyPending = await loadMostRecentPendingActions(
+        payload.scenario_id,
         requestId,
-        payload.turn_id,
       );
+      // Resolve the proposal-resume gate via the shared helper. It runs
+      // the no-pending → wall-clock-TTL → graph-hash ladder in that
+      // order and either returns a Stage 1 / Stage 2 decision or a
+      // typed rejection reason. The wall-clock TTL mirrors the
+      // `isExpired` semantics used by tryClarificationResume /
+      // tryShortConfirmResume so all three resumers agree.
+      let earlyCurrentGraphHash: string | null = null;
+      try {
+        earlyCurrentGraphHash = computeAnalysisAffectingGraphHash(
+          graphState as GraphStateIngress | null | undefined,
+        );
+      } catch {
+        earlyCurrentGraphHash = null;
+      }
+      const resumeOutcome = resolveProposalResume({
+        message: payload.message,
+        pendingActions: earlyPending,
+        nodes: parsedGraph.nodes,
+        currentGraphHash: earlyCurrentGraphHash,
+        nowMs: Date.now(),
+      });
+      if (resumeOutcome.rejection === 'expired_wall' || resumeOutcome.rejection === 'graph_hash_changed') {
+        emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          reason: resumeOutcome.rejection,
+        });
+      }
+      const earlyDecision = resumeOutcome.decision;
+      if (earlyDecision !== null) {
+        editResult = {
+          blocks: [],
+          assistantText: earlyDecision.assistantText,
+          latencyMs: Date.now() - startedAt,
+          appliedGraph: null,
+          wasRejected: false,
+          suggestedActions: earlyDecision.suggestedActions.map((a) => ({
+            label: a.label,
+            prompt: a.message,
+            role: 'facilitator' as const,
+          })),
+        };
+        emit(TelemetryEvents.V5ProposalContinuationResumed, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          outcome: earlyDecision.stage === 'stage_two' ? 'stage_two' : 'stage_one',
+          pre_llm: true,
+        });
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            stage: earlyDecision.stage,
+            latency_ms: editResult.latencyMs,
+          },
+          'V5 edit_graph proposal-continuation intercept emitted deterministic response without LLM call',
+        );
+      } else {
+        editResult = await handleEditGraph(
+          context,
+          payload.message,
+          adapter,
+          requestId,
+          payload.turn_id,
+        );
+      }
     }
   } catch (err) {
     log.error(
@@ -1033,12 +1181,65 @@ export async function dispatchEditGraph(
 
   let freshness: FreshnessDerivation;
   let priorFactsForRecovery: readonly HandlerFact[] = [];
+  // V5 P0 — captured proposed concept from the prior turn's pending
+  // actions, used by the no-op recovery layer to drive the deterministic
+  // Stage 1 / Stage 2 clarifier. Null when no prior proposal exists, when
+  // it was invalidated by graph divergence, or when the buildTurnContext
+  // catch branch fired.
+  let pendingProposedConceptForRecovery:
+    | { readonly concept: string; readonly preferred_kind: 'risk' | 'factor' | 'either' }
+    | null = null;
+  // The current graph hash, surfaced out of the try so the resume path
+  // can use it to construct the refreshed pending action.
+  let currentGraphHashForRecovery: string | null = null;
+  // V5 P0 — refreshed pending action to persist alongside the commit
+  // when the recovery layer emits Stage 1 or Stage 2. Stays null on
+  // every other path so the commit defaults to its existing
+  // chip-derived behaviour.
+  let proposalPendingForCommit:
+    | import('../session/pending-action.js').PendingAction
+    | null = null;
   try {
     const turnContext = await buildTurnContext(payload, requestId);
     priorFactsForRecovery = turnContext.prior_facts;
     const currentGraphHash = computeAnalysisAffectingGraphHash(
       persistedPostEditGraph as GraphStateIngress | null | undefined,
     );
+    currentGraphHashForRecovery = currentGraphHash;
+    // V5 P0 — resolve the proposal-resume gate via the shared helper.
+    // It runs the no-pending → wall-clock-TTL → graph-hash ladder in
+    // that order and either returns a Stage 1 / Stage 2 decision or a
+    // typed rejection. We only need the concept itself here (the
+    // decision will be re-derived inside `decideNoOpRecovery` after
+    // intent classification); a non-null decision means the gate is
+    // satisfied and the concept is safe to pass through. The wall-clock
+    // TTL mirrors the `isExpired` semantics used by
+    // tryClarificationResume / tryShortConfirmResume.
+    const priorPending = turnContext.most_recent_pending_actions ?? [];
+    const recoveryGateOutcome = resolveProposalResume({
+      message: payload.message,
+      pendingActions: priorPending,
+      nodes: null,
+      currentGraphHash,
+      nowMs: Date.now(),
+    });
+    if (
+      recoveryGateOutcome.rejection === 'expired_wall'
+      || recoveryGateOutcome.rejection === 'graph_hash_changed'
+    ) {
+      emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        reason: recoveryGateOutcome.rejection,
+      });
+    }
+    if (recoveryGateOutcome.rejection === null) {
+      // Gate satisfied — surface the concept to the no-op recovery
+      // layer. (decideNoOpRecovery may still return a non-proposal
+      // branch if the message does not match agreement / add-as-factor.)
+      const concept = findProposedConceptAction(priorPending);
+      pendingProposedConceptForRecovery = concept;
+    }
     freshness = deriveAnalysisFreshness(turnContext.prior_facts, currentGraphHash);
     emitFreshnessTelemetry(
       freshness,
@@ -1182,7 +1383,53 @@ export async function dispatchEditGraph(
         // known label (the symptom of any path that slips past the
         // upstream `tryPostAnalysisLabelIntercept` in route-v2.ts).
         nodes: parsedGraph.nodes,
+        // V5 P0 proposal-memory continuation. Null when no fresh prior
+        // proposal exists or graph hash has diverged since emit. The
+        // proposal_stage_one / _two branches only fire when this is
+        // non-null AND the corresponding agreement / add-as-factor
+        // signal matches the user's message.
+        pendingProposedConcept: pendingProposedConceptForRecovery,
       });
+      // V5 P0 — surface stage outcome telemetry independently of the
+      // existing V5EditGraphNoOpRecovery event so dashboards can track
+      // proposal-resume rate without joining on branch_taken.
+      if (pendingProposedConceptForRecovery !== null) {
+        const stageOutcome: 'stage_one' | 'stage_two' | 'no_agreement' =
+          recoveryOutcome.branch === 'proposal_stage_two'
+            ? 'stage_two'
+            : recoveryOutcome.branch === 'proposal_stage_one'
+            ? 'stage_one'
+            : 'no_agreement';
+        emit(TelemetryEvents.V5ProposalContinuationResumed, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          outcome: stageOutcome,
+          pre_llm: false,
+        });
+        // V5 P0 — refresh the pending action on Stage 1 and Stage 2 emits
+        // so the user has another TTL window to walk through Stage 1 →
+        // Stage 2 → Stage 3 without expiry surprises. Stage 3 ("affecting
+        // X" disambiguated) falls through to existing edit_graph dispatch
+        // with full context, and the pending decays naturally there.
+        if (
+          recoveryOutcome.branch === 'proposal_stage_one'
+          || recoveryOutcome.branch === 'proposal_stage_two'
+        ) {
+          const refreshGraphHash =
+            currentGraphHashForRecovery !== null
+              ? currentGraphHashForRecovery
+              : computeAnalysisAffectingGraphHash(
+                  persistedPostEditGraph as GraphStateIngress | null | undefined,
+                );
+          proposalPendingForCommit = buildProposalPendingAction({
+            concept: pendingProposedConceptForRecovery.concept,
+            preferred_kind: pendingProposedConceptForRecovery.preferred_kind,
+            scenario_id: payload.scenario_id,
+            emitted_at_iso: new Date().toISOString(),
+            ...(refreshGraphHash ? { graph_hash: refreshGraphHash } : {}),
+          });
+        }
+      }
       if (recoveryOutcome.assistantText !== null) {
         response = { ...response, assistant_text: recoveryOutcome.assistantText };
       }
@@ -1445,6 +1692,27 @@ export async function dispatchEditGraph(
     const graphForCommit = successfulAppliedMutation
       ? editResult.appliedGraph ?? undefined
       : undefined;
+    // V5 P0 — when the no-op recovery emitted Stage 1 or Stage 2 it
+    // built a refreshed `proposed_concept` pending action so the next
+    // turn can also resume. Combine it with the chip-derived list and
+    // pass the combined list explicitly. Cap at PENDING_ACTIONS_PER_TURN
+    // _CAP=3 (enforced by the DB CHECK constraint as well).
+    let pendingActionsForCommit:
+      | readonly import('../session/pending-action.js').PendingAction[]
+      | undefined = undefined;
+    if (proposalPendingForCommit !== null) {
+      const chipDerived = derivePendingActionsFromChips(
+        (response.suggested_actions ?? []) as readonly BoundarySuggestedAction[],
+        {
+          scenario_id: payload.scenario_id,
+          emitted_at_iso: new Date().toISOString(),
+          ...(currentGraphHashForRecovery
+            ? { graph_hash: currentGraphHashForRecovery }
+            : {}),
+        },
+      );
+      pendingActionsForCommit = [...chipDerived, proposalPendingForCommit].slice(0, 3);
+    }
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -1460,6 +1728,9 @@ export async function dispatchEditGraph(
       duration_ms: Date.now() - startedAt,
       handler_facts: editGraphFact ? [editGraphFact] : [],
       graph: graphForCommit,
+      ...(pendingActionsForCommit !== undefined
+        ? { pending_actions: pendingActionsForCommit }
+        : {}),
     });
     log.info(
       {

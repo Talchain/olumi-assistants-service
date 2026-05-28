@@ -44,6 +44,12 @@ vi.mock('../../build-turn-context.js', () => ({
     persistedGraph: null,
     most_recent_pending_actions: [],
   }),
+  // V5 P0 proposal-memory continuation — the pre-LLM intercept in
+  // dispatchEditGraph calls this load helper. The mock returns an empty
+  // array so the intercept's `findProposedConceptEntry` returns null,
+  // the gate emits no telemetry, and control falls through to
+  // handleEditGraph exactly as the test expects.
+  loadMostRecentPendingActions: vi.fn().mockResolvedValue([]),
 }));
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';

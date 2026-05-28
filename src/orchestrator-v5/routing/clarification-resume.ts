@@ -188,6 +188,16 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // change the graph; hash divergence is not a safety concern.
   run_analysis: 'non_mutating',
   what_would_flip: 'non_mutating',
+  // V5 P0 proposal-memory continuation. The resumer in
+  // `edit-graph-dispatch::decideNoOpRecovery` only emits deterministic
+  // clarification copy (Stage 1 risk/factor/note chips or Stage 2
+  // affect-target chips); no graph mutation is performed. Hash
+  // divergence is still observed by the edit-graph-dispatch caller
+  // (which emits `v5.proposal_continuation.invalidated` and skips
+  // the resume), but for the safety classification here it is
+  // non-mutating because applying the persisted concept does not
+  // change the graph.
+  proposed_concept: 'non_mutating',
 };
 
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(

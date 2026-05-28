@@ -31,6 +31,20 @@
  *                                 across the A4 missing-driver clarify
  *                                 turn so the deterministic add path can
  *                                 resume on reply.
+ *   - `proposed_concept`        — V5 P0 post-analysis proposal memory.
+ *                                 Captures a noun-phrase concept emitted
+ *                                 by Sonnet ("add team morale as a
+ *                                 factor"). DOES NOT auto-apply. Read by
+ *                                 `decideNoOpRecovery` in
+ *                                 `edit-graph-dispatch` to drive a
+ *                                 two-stage deterministic clarifier:
+ *                                 Stage 1 offers risk/factor/note chips
+ *                                 on agreement; Stage 2 offers affect-
+ *                                 target chips on "add as factor" intent.
+ *                                 Server-only (NOT chip-derivable);
+ *                                 emitted alongside the LLM Sonnet
+ *                                 direct-answer commit. No new wire-
+ *                                 level action_type is introduced.
  */
 
 export type PendingActionId = string;
@@ -114,6 +128,31 @@ export type PendingActionAction =
       readonly kind: 'edit_graph_add_risk';
       readonly label: string;
       readonly connect_to_node_id?: string;
+    }
+  | {
+      /**
+       * V5 P0 proposal-memory continuation. Captures a noun-phrase
+       * concept extracted from the prior assistant turn's Sonnet-emitted
+       * "add X as a factor" / "would you like me to add X" proposal.
+       *
+       * Server-only. Never derived from a user-facing chip. Read on the
+       * next user turn by `decideNoOpRecovery` in `edit-graph-dispatch`
+       * to drive the deterministic two-stage clarifier. The kind does
+       * NOT auto-apply a graph mutation; the resumer always emits
+       * either a Stage 1 (risk/factor/note) or Stage 2 (affect target)
+       * clarification.
+       *
+       * Persisted in JSONB via the existing `pending_actions` column;
+       * the DB CHECK constraint enforces only array + length <= 3, so
+       * no migration is required to add the kind. Per-element shape
+       * is validated by `parsePendingAction` below.
+       */
+      readonly kind: 'proposed_concept';
+      readonly concept: string;
+      readonly preferred_kind: 'risk' | 'factor' | 'either';
+      /** Stable public copy captured at emit time. */
+      readonly public_label: string;
+      readonly public_message: string;
     };
 
 export type PendingActionKind = PendingActionAction['kind'];
@@ -135,6 +174,7 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   'what_would_flip',
   'apply_proposed_change',
   'edit_graph_add_risk',
+  'proposed_concept',
 ]);
 
 /**
@@ -263,6 +303,21 @@ export function parsePendingAction(input: unknown): PendingAction | null {
   }
   if (a.kind === 'edit_graph_add_risk') {
     if (typeof a.label !== 'string' || a.label.length === 0) return null;
+  }
+  if (a.kind === 'proposed_concept') {
+    // V5 P0 proposal-memory continuation. Both fields REQUIRED.
+    // concept is the noun-phrase captured from the prior assistant turn;
+    // preferred_kind is the LLM's stated preference at emit time. The
+    // resumer reads both to pick Stage 1 copy and Stage 2 chip routing.
+    if (typeof a.concept !== 'string' || a.concept.length === 0) return null;
+    if (a.concept.length > 120) return null;
+    if (typeof a.preferred_kind !== 'string') return null;
+    if (!['risk', 'factor', 'either'].includes(a.preferred_kind)) return null;
+    // Public copy fields mirror the apply_proposed_change requirement so
+    // the resumer always has user-safe strings to render even if the
+    // helper module is missing.
+    if (typeof a.public_label !== 'string' || a.public_label.length === 0) return null;
+    if (typeof a.public_message !== 'string' || a.public_message.length === 0) return null;
   }
   if (a.kind === 'apply_proposed_change') {
     // Both proposal_ref AND inline_patch are REQUIRED for V5 emits.

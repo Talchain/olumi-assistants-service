@@ -253,6 +253,32 @@ async function fetchMostRecentPendingActions(
   }
 }
 
+/**
+ * V5 P0 proposal-memory continuation — public load helper.
+ *
+ * Standalone variant of `fetchMostRecentPendingActions` for callers that
+ * need just the pending actions without paying the cost of a full
+ * `buildTurnContext` load (which also reads prior_facts +
+ * scenario_state + persistedGraph). Used by the pre-LLM intercept in
+ * `dispatchEditGraph` so a fast Stage 1 / Stage 2 emit can read pending
+ * state before deciding whether to skip the LLM call.
+ *
+ * Resolves the session store inline via `tryGetSessionStore` so the
+ * state-write-invariant pre-push guard stays satisfied (SessionStore
+ * imports are restricted to session/, commit.ts, and this module).
+ *
+ * Graceful degradation: store-factory failure or read failure both
+ * resolve to an empty array — never throws. Telemetry on
+ * read-degradation is emitted at the store layer.
+ */
+export async function loadMostRecentPendingActions(
+  scenarioId: string,
+  requestId: string,
+): Promise<readonly PendingAction[]> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  return fetchMostRecentPendingActions(scenarioId, requestId, store);
+}
+
 async function fetchPersistedScenarioState(
   scenarioId: string,
   requestId: string,
