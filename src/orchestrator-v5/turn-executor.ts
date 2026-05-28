@@ -135,6 +135,7 @@ import { sanitiseNarrateOutput } from './sanitise.js';
 import { sanitiseAssistantTextProse } from './format/numeric-prose-formatter.js';
 import { generateChips } from './compose/chip-generator.js';
 import { generatePostAnalysisCoaching } from './coaching/post-analysis-wrapper.js';
+import { buildPendingActionsWithProposalCapture } from './coaching/proposal-continuation.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
 
 
@@ -3153,6 +3154,32 @@ export async function runTurnExecutor(
           llmCallsUsed = 0;
           stagesCompleted.push('orient');
           stagesCompleted.push('compose');
+          // V5 P0 proposal-memory continuation — emit-time capture at
+          // the advice-gate commit. `composeEvidenceGap` can surface
+          // decision_review.evidence_enhancements[].specific_action
+          // strings verbatim; if a specific_action is shaped like
+          // "add team morale as a factor" the user sees a proposal
+          // that the next-turn no-op recovery should be able to resume.
+          // The helper is a no-op when no proposal pattern matches.
+          const adviceGraphHash = (() => {
+            try {
+              return (
+                computeAnalysisAffectingGraphHash(
+                  (options.graphState as GraphStateIngress | null | undefined) ?? undefined,
+                ) ?? null
+              );
+            } catch {
+              return null;
+            }
+          })();
+          const advicePending = buildPendingActionsWithProposalCapture({
+            assistantText: adviceResponse.assistant_text,
+            chips: adviceResponse.suggested_actions ?? [],
+            scenarioId: context.session_id,
+            graphHash: adviceGraphHash,
+            requestId,
+            originPath: 'advice_gate',
+          });
           try {
             const committed = await commitDirectAnswer(adviceResponse, {
               scenario_id: context.session_id,
@@ -3163,6 +3190,7 @@ export async function runTurnExecutor(
               llm_calls_used: 0,
               duration_ms: Date.now() - startedAt,
               handler_facts: [],
+              ...(advicePending !== undefined ? { pending_actions: advicePending } : {}),
             });
             commitPerformed = committed.performed;
             stagesCompleted.push('commit');
@@ -4649,6 +4677,37 @@ export async function runTurnExecutor(
           turnTimings.compose_ms = commitStartedAt - composeStartedAt;
         }
       }
+      // V5 P0 proposal-memory continuation — emit-time capture.
+      //
+      // When the upstream composer (LLM Sonnet on this commit site) has
+      // emitted assistant_text shaped like "would you like me to add X
+      // as a factor?", persist a `proposed_concept` pending action
+      // alongside the commit so the next-turn no-op recovery in
+      // edit-graph-dispatch (and the pre-LLM intercept) can resume it
+      // as a deterministic clarifier. Conservative — the helper returns
+      // undefined when no proposal pattern matches, in which case the
+      // commit falls back to its existing chip-derived implicit
+      // behaviour. Capture failures degrade silently.
+      const llmGraphHash = (() => {
+        try {
+          return (
+            computeAnalysisAffectingGraphHash(
+              (graphForCommit as GraphStateIngress | null | undefined) ?? undefined,
+            ) ?? null
+          );
+        } catch {
+          return null;
+        }
+      })();
+      const proposalPendingForCommit = buildPendingActionsWithProposalCapture({
+        assistantText: composedOk.assistant_text,
+        chips: composedOk.suggested_actions ?? [],
+        scenarioId: context.session_id,
+        graphHash: llmGraphHash,
+        requestId,
+        originPath: 'llm_sonnet',
+      });
+
       // Defence-in-depth brief persistence (V5 Phase 3A prerequisite):
       // re-pass the scenario brief that build-turn-context already
       // loaded. The RPC's first-write-wins predicate makes this a no-op
@@ -4668,6 +4727,9 @@ export async function runTurnExecutor(
         handler_facts: handlerFactsForCommit,
         graph: graphForCommit,
         briefText: context.scenarioBriefText ?? undefined,
+        ...(proposalPendingForCommit !== undefined
+          ? { pending_actions: proposalPendingForCommit }
+          : {}),
       });
       if (timingsEnabled) {
         turnTimings.commit_ms = Date.now() - commitStartedAt;

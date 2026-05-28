@@ -550,6 +550,16 @@ export const TelemetryEvents = {
   PendingActionRecoveryAmbiguous: "v5.pending_action.recovery_ambiguous",
   PendingActionRerunAnalysisRequired: "v5.pending_action.rerun_analysis_required",
   PendingActionsReadDegraded: "v5.pending_actions.read_degraded",
+  // V5 P0 proposal-memory continuation (post-analysis coaching → action).
+  // captured: emit-time hook recognised a Sonnet-emitted "add X as a
+  //   factor/risk" proposal in the assistant_text and persisted a
+  //   `proposed_concept` pending action alongside the turn commit.
+  // resumed: next-turn no-op recovery layer matched the pending and
+  //   emitted either a Stage 1 (agreement) or Stage 2 (add-as-factor)
+  //   deterministic clarifier instead of the bland vague-edit fallback.
+  V5ProposalContinuationCaptured: "v5.proposal_continuation.captured",
+  V5ProposalContinuationResumed: "v5.proposal_continuation.resumed",
+  V5ProposalContinuationInvalidated: "v5.proposal_continuation.invalidated",
   // Preflight skipped the LLM call because the requested edit would
   // exceed structural limits. Reason names match the post-validator
   // codes so dashboards can correlate (edge_limit ↔

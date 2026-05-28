@@ -494,6 +494,12 @@ describe('tryClarificationResume — kind classification regression', () => {
     // change the graph.
     run_analysis: 'non_mutating',
     what_would_flip: 'non_mutating',
+    // V5 P0 proposal-memory continuation — server-only, never applies
+    // a graph mutation when resumed (the resumer in edit-graph-dispatch
+    // emits deterministic Stage 1 / Stage 2 clarification copy only).
+    // Graph-hash divergence is observed at the resume site but does
+    // NOT use this classification's divergence guard.
+    proposed_concept: 'non_mutating',
   };
 
   it('every PendingAction kind has the expected safety classification (semantic regression)', () => {
