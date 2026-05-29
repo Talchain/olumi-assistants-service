@@ -175,9 +175,24 @@ describe('extractProposedConcept', () => {
   it.each([
     "Would you like me to add team morale rather than something else?",
     "Would you like me to add what's most important to you?",
-    "Would you like me to add first principles thinking?",
   ])('rejects concepts that retain question-tail vocab after truncation: %s', (prose) => {
     expect(extractProposedConcept(prose)).toBeNull();
+  });
+
+  it('rejects a concept ending in trailing question-tail "first"', () => {
+    // No earlier clause boundary, so "first" survives truncation and
+    // the trailing-anchored QUESTION_TAIL pattern rejects it.
+    expect(extractProposedConcept('Would you like me to add team morale first?')).toBeNull();
+  });
+
+  it('preserves leading "first" in legitimate concepts (first-mover, first principles)', () => {
+    // PR #216 review follow-up: a bare `\bfirst\b` reject would have
+    // false-positively dropped these. The trailing-anchored pattern
+    // preserves them.
+    expect(extractProposedConcept('Would you like me to add first principles thinking?')?.concept)
+      .toBe('first principles thinking');
+    expect(extractProposedConcept('You should add first-mover advantage as a factor.')?.concept)
+      .toBe('first-mover advantage');
   });
 
   it('preserves "team morale" (clean, ≤8 words, no trailing kind)', () => {

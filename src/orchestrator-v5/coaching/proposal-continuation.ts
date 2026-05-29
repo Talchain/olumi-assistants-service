@@ -191,13 +191,28 @@ const TRAILING_KIND_STRIP: ReadonlyArray<{
  * Conservative list — the staging smoke surfaced "would you rather
  * explore what's most likely to drive disengagement first" as a tail
  * that slipped past the bare `?`/`.` non-greedy bound.
+ *
+ * `would you` / `rather` / `explore` / `what's` have no legitimate use
+ * inside a decision-model concept noun phrase, so they reject on a
+ * bare word-boundary match anywhere in the capture.
+ *
+ * `first` is matched ONLY in trailing position (`first$`). The
+ * question-tail form is adverbial and trailing ("...drive
+ * disengagement first"), whereas "first" leads several legitimate
+ * concepts ("first-mover advantage", "first principles thinking",
+ * "first-quarter targets"). A bare `\bfirst\b` rejected those
+ * false-positively; the trailing anchor catches the question-tail
+ * use while preserving leading legitimate uses. (In the staging-smoke
+ * prose the "...most likely" clause boundary already truncates before
+ * "first" is reached, so this anchor only changes the backstop
+ * behaviour for prose without an earlier boundary.)
  */
 const QUESTION_TAIL_TOKENS: ReadonlyArray<RegExp> = [
   /\bwould\s+you\b/i,
   /\brather\b/i,
   /\bexplore\b/i,
   /\bwhat'?s\b/i,
-  /\bfirst\b/i,
+  /\bfirst\s*$/i,
 ];
 
 function truncateAtClauseBoundary(s: string): string {

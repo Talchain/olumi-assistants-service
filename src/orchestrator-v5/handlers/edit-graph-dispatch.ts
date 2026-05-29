@@ -964,6 +964,17 @@ export async function dispatchEditGraph(
   // `decideNoOpRecovery` call to suppress its parallel proposal
   // branches so the wire response carries one chip set, not two.
   let proposalEarlyEmitted = false;
+  // PR #216 review follow-up: set true when the pre-LLM intercept
+  // already emitted a `V5ProposalContinuationInvalidated` event for an
+  // expired / diverged pending. The recovery block re-runs the same
+  // resume gate against the same most-recent pending and would emit a
+  // SECOND identical invalidation when `handleEditGraph` no-ops after
+  // the intercept rejected — double-counting the metric. The recovery
+  // block reads this to skip its own invalidation emit. It does NOT
+  // suppress a recovery-only invalidation (the case where the
+  // intercept's graph-hash compute failed but the recovery's
+  // succeeded) because that path leaves this flag false.
+  let interceptEmittedInvalidation = false;
   try {
     // V5 A4 — deterministic clarification intercept. Pre-LLM classifier
     // catches high-confidence bare "add X as a risk" patterns, but the
@@ -1128,6 +1139,7 @@ export async function dispatchEditGraph(
           scenario_id: payload.scenario_id,
           reason: resumeOutcome.rejection,
         });
+        interceptEmittedInvalidation = true;
       }
       const earlyDecision = resumeOutcome.decision;
       if (earlyDecision !== null) {
@@ -1256,8 +1268,18 @@ export async function dispatchEditGraph(
       nowMs: Date.now(),
     });
     if (
-      recoveryGateOutcome.rejection === 'expired_wall'
-      || recoveryGateOutcome.rejection === 'graph_hash_changed'
+      (recoveryGateOutcome.rejection === 'expired_wall'
+        || recoveryGateOutcome.rejection === 'graph_hash_changed')
+      // PR #216 review follow-up: suppress the duplicate emit when the
+      // pre-LLM intercept already reported this same invalidation this
+      // turn. The intercept and this block both run the resume gate
+      // against the same most-recent pending; without this guard an
+      // expired / diverged pending that then no-ops through
+      // `handleEditGraph` would emit the metric twice. When the
+      // intercept did NOT emit (e.g. its graph-hash compute failed but
+      // this block's succeeded), the flag is false and we still emit
+      // exactly once.
+      && !interceptEmittedInvalidation
     ) {
       emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
         request_id: requestId,
