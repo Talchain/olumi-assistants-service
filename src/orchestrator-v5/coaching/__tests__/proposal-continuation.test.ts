@@ -248,6 +248,31 @@ describe('extractProposedConcept', () => {
     expect(extractProposedConcept('Would you like me to add a business model?')?.concept).toBe('business model');
   });
 
+  // ─── PR #217 smoke follow-up: pronoun over-capture ────────────────
+  // Real Sonnet prose anchored the proposal on a pronoun referring to
+  // the prior sentence ("...add it to the model?"). Pattern 2 captured
+  // "it to the model"; the new "to/in the model" clause boundary
+  // truncates to "it", and the bare-pronoun reject drops it.
+  it.each([
+    'Would you like me to add it to the model?',
+    'Would you like me to add this to the model?',
+    'Would you like me to add that to the decision?',
+    'Would you like me to add them to the graph?',
+    'I could add it to the model as a factor.',
+    'Adding it to the model would help.',
+  ])('rejects a pronoun-anchored over-capture: %s', (prose) => {
+    expect(extractProposedConcept(prose)).toBeNull();
+  });
+
+  it('truncates a real concept at the "to the model" boundary (preserving the concept)', () => {
+    // The clause boundary must NOT eat a legitimate concept — only the
+    // trailing "to the model" clause.
+    expect(extractProposedConcept('Would you like me to add team morale to the model?')?.concept)
+      .toBe('team morale');
+    expect(extractProposedConcept('Would you like me to add change resistance to the decision?')?.concept)
+      .toBe('change resistance');
+  });
+
   // ─── PR #216 second-round review: curly apostrophe + "what is" ────
   it('truncates at a curly-apostrophe "what’s most likely" clause boundary', () => {
     // Curly apostrophe (U+2019) — LLM prose routinely emits it; a
