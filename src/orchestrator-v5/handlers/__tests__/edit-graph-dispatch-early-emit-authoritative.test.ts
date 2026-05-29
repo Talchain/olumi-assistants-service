@@ -95,6 +95,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
+import { buildTurnContext } from '../../build-turn-context.js';
 import { TelemetryEvents } from '../../../utils/telemetry.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -182,5 +183,58 @@ describe('dispatchEditGraph — pre-LLM early-emit is authoritative (BLOCKER reg
     expect(meta.llm_calls_used).toBe(0);
     expect(meta.pending_actions).toBeDefined();
     expect(meta.pending_actions!.some((p) => p.action.kind === 'proposed_concept')).toBe(true);
+  });
+
+  // PR #216 round-3 review (SHOULD-FIX): the early-emit refresh must NOT
+  // depend on the later buildTurnContext pending read. Here the
+  // intercept's loadMostRecentPendingActions returns the valid pending
+  // (so Stage 1 emits), but buildTurnContext degrades — its
+  // most_recent_pending_actions comes back empty. The refreshed
+  // proposed_concept pending must STILL be persisted (built in the
+  // intercept), so the next Stage 1 → Stage 2 click can resume.
+  it('refreshes the pending even when the later buildTurnContext read degrades', async () => {
+    vi.mocked(buildTurnContext).mockResolvedValueOnce({
+      prior_turns: [],
+      prior_facts: [],
+      scenarioBriefText: null,
+      persistedGraph: null,
+      most_recent_pending_actions: [], // ← degraded: no pending returned
+    } as unknown as Awaited<ReturnType<typeof buildTurnContext>>);
+
+    const result = await dispatchEditGraph({
+      payload: {
+        kind: 'message', scenario_id: SCENARIO_ID, turn_id: 'turn-1',
+        stage: 'analyse', message: TRANSCRIPT, turn_class: 'review', source: 'composer',
+      },
+      requestId: 'req-early-emit-degraded',
+      request: STUB_REQUEST,
+      graphState: makeGraph(),
+      analysisState: null,
+    });
+
+    // Stage 1 still authoritative.
+    expect(result.response.assistant_text ?? '').toContain('team morale');
+    expect(result.response.suggested_actions ?? []).toHaveLength(3);
+
+    // Pending STILL refreshed despite the degraded second read.
+    const meta = commitMock.mock.calls[0][1] as {
+      pending_actions?: readonly PendingAction[];
+    };
+    expect(meta.pending_actions).toBeDefined();
+    expect(meta.pending_actions!.some((p) => p.action.kind === 'proposed_concept')).toBe(true);
+  });
+
+  it('does NOT emit V5EditGraphNoOpRecovery on the early-emit path', async () => {
+    await dispatchEditGraph({
+      payload: {
+        kind: 'message', scenario_id: SCENARIO_ID, turn_id: 'turn-1',
+        stage: 'analyse', message: TRANSCRIPT, turn_class: 'review', source: 'composer',
+      },
+      requestId: 'req-early-emit-no-noise',
+      request: STUB_REQUEST,
+      graphState: makeGraph(),
+      analysisState: null,
+    });
+    expect(emitCount(TelemetryEvents.V5EditGraphNoOpRecovery)).toBe(0);
   });
 });

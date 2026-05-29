@@ -212,9 +212,34 @@ describe('extractProposedConcept', () => {
     expect(extractProposedConcept(prose)).toBeNull();
   });
 
+  // ─── PR #216 round-3 review: bare generic structural nouns ────────
+  it.each([
+    'Would you like me to add a goal?',
+    'Would you like me to add an option?',
+    'Would you like me to add an outcome?',
+    'Would you like me to add a constraint?',
+    'Would you like me to add a decision?',
+    'Would you like me to add an objective?',
+    'Would you like me to add an assumption?',
+    'Would you like me to add a lever?',
+    'Would you like me to add a scenario?',
+    'Would you like me to add a criterion?',
+    'Would you like me to add criteria?',
+    'Would you like me to add options?',
+  ])('rejects a concept that reduces to a bare generic structural noun: %s', (prose) => {
+    expect(extractProposedConcept(prose)).toBeNull();
+  });
+
   it('still extracts the noun from a multi-word "X factor" / "X risk" concept', () => {
     expect(extractProposedConcept('Would you like me to add a cost factor?')?.concept).toBe('cost');
     expect(extractProposedConcept('Would you like me to add the onboarding risk?')?.concept).toBe('onboarding');
+  });
+
+  it('still extracts multi-word concepts ending in a generic structural noun', () => {
+    // The bare-noun reject is EXACT single-token only; multi-word
+    // concepts that happen to end in a structural noun survive.
+    expect(extractProposedConcept('Would you like me to add a delivery goal?')?.concept).toBe('delivery goal');
+    expect(extractProposedConcept('Would you like me to add a stretch objective?')?.concept).toBe('stretch objective');
   });
 
   // ─── PR #216 second-round review: curly apostrophe + "what is" ────
