@@ -212,9 +212,15 @@ const NO_OP_NONE_GRAPH_NOT_READY_TEXT =
   "I haven't changed the model. Once the model is ready, run analysis "
   + "and I'll explain what drove the outcome.";
 
+// PR #218 smoke follow-up (Fix B): the prior copy said "Tell me which
+// factor or edge you want to adjust" — "factor or edge" leaks internal
+// schema vocabulary the copy contract forbids, and the smoke showed it
+// reaching the user whenever a genuine proposal fell through extraction.
+// Reworded to keep the meaning (nothing changed yet; ask what to change)
+// without naming schema concepts (edge/node/graph/schema/patch).
 const NO_OP_VAGUE_EDIT_TEXT =
-  "I haven't changed the model yet. Tell me which factor or edge you "
-  + 'want to adjust and how.';
+  'I have not changed the model yet. Tell me what you want to change, '
+  + 'and I will help apply it.';
 
 const NO_OP_EXPLORE_FACTOR_TEXT =
   "I haven't changed the model. It looks like you would like to "

@@ -79,6 +79,21 @@ const CONCEPT_PATTERNS: ReadonlyArray<{
     pattern: /\b(?:add(?:ing)?|include|introduce)\s+(.+?)\s+as\s+(?:a\s+|an\s+)?(risk|factor|driver)\b/i,
     preferred_kind: 'capture',
   },
+  // PR #218 smoke follow-up: "add a {concept} factor to the model" form.
+  // Real Sonnet output proposed "...would it help to add a 'Team Morale
+  // and Retention' factor to the model? ... Would you like to do that?"
+  // — a clean proposal that the "as a factor" / "would you like me to
+  // add X" patterns miss. This pattern requires an EXPLICIT kind word
+  // (risk|factor|driver) immediately before "to/in the model|decision|
+  // graph", so it never fires on vague phrasings without a kind word
+  // ("add more detail to the model" → no match). The lead-in is
+  // unanchored, so "would it help to add ...", "should we add ...", and
+  // a bare "add ..." all match the same core. group1 = concept (quotes
+  // and articles stripped downstream), group2 = kind word → preferred_kind.
+  {
+    pattern: /\badd(?:ing)?\s+(?:a\s+|an\s+)?(.+?)\s+(risk|factor|driver)\s+(?:to|in)\s+the\s+(?:model|decision|graph)\b/i,
+    preferred_kind: 'capture',
+  },
   {
     pattern: /\bwould\s+you\s+like\s+(?:me\s+)?to\s+add\s+(.+?)(?:[?.]|$)/i,
     preferred_kind: 'either',
@@ -571,6 +586,12 @@ export function pickCandidateAffectLabels(
 function cleanConcept(raw: string): string | null {
   let s = raw.trim().replace(/\s+/g, ' ');
   s = s.replace(/[.,;:!?\s]+$/g, '');
+  // Strip surrounding quotes (straight + curly, single + double). PR
+  // #218 smoke follow-up: Sonnet quotes the proposed concept name —
+  // 'add a "Team Morale and Retention" factor to the model' captures
+  // the quoted span. Quotes are stripped from both edges; interior
+  // quotes (rare) are left alone.
+  s = s.replace(/^["'\u2018\u2019\u201c\u201d]+/, '').replace(/["'\u2018\u2019\u201c\u201d]+$/, '').trim();
   if (s.length === 0) return null;
   // Forbidden-token rejection runs BEFORE article stripping so the
   // egress guard's article-aware patterns (e.g. `\bthe\s+winners?\b`)

@@ -273,6 +273,47 @@ describe('extractProposedConcept', () => {
       .toBe('change resistance');
   });
 
+  // ─── PR #218 smoke follow-up: "add a {X} kind to the model" coverage ─
+  // The real staging proposal Sonnet emitted — "...would it help to add
+  // a 'Team Morale and Retention' factor to the model? ... Would you
+  // like to do that?" — matched none of the prior patterns, so the
+  // agreement turn dead-ended in vague-edit recovery. The new
+  // kind-word-anchored pattern captures it.
+  it('extracts the real staging proposal "add a \'X\' factor to the model"', () => {
+    const r = extractProposedConcept(
+      'One structural option worth considering: would it help to add a '
+      + '"Team Morale and Retention" factor to the model? It would let you '
+      + 'test sensitivity. Would you like to do that?',
+    );
+    expect(r?.concept).toBe('Team Morale and Retention');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it.each([
+    ['Should we add a team morale factor to the decision?', 'team morale', 'factor'],
+    ['Add change resistance risk to the model.', 'change resistance', 'risk'],
+    ['add code review depth driver in the graph', 'code review depth', 'factor'],
+    ['Would it help to add a hiring cost factor to the model?', 'hiring cost', 'factor'],
+  ])('extracts "%s" → "%s" (%s)', (prose, concept, kind) => {
+    const r = extractProposedConcept(prose);
+    expect(r?.concept).toBe(concept);
+    expect(r?.preferred_kind).toBe(kind);
+  });
+
+  it.each([
+    // The new pattern requires an EXPLICIT kind word before "to the
+    // model", so vague non-concepts never match.
+    'Would you like to do that?',
+    'Add a factor to the model',
+    'Add a model to the decision',
+    'Add more detail to the model',
+    'Add a lot of detail to the model',
+    'Add it to the model',
+    'Add this to the decision',
+  ])('does NOT extract a vague / bare phrase: %s', (prose) => {
+    expect(extractProposedConcept(prose)).toBeNull();
+  });
+
   // ─── PR #216 second-round review: curly apostrophe + "what is" ────
   it('truncates at a curly-apostrophe "what’s most likely" clause boundary', () => {
     // Curly apostrophe (U+2019) — LLM prose routinely emits it; a
