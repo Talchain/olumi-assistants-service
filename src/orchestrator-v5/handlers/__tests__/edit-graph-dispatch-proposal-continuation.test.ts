@@ -444,3 +444,32 @@ describe('decideNoOpRecovery — proposal-continuation chip-duplication guard', 
     expect(new Set(messages).size).toBe(messages.length); // no duplicate messages
   });
 });
+
+// PR #218 smoke follow-up (Fix B): the vague-edit fallback copy must not
+// leak internal schema vocabulary. The previous "...which factor or edge
+// you want to adjust..." reached the user whenever a genuine proposal
+// fell through extraction. The reworded copy keeps the meaning without
+// naming schema concepts.
+describe('decideNoOpRecovery — vague_edit fallback copy is schema-vocab-free', () => {
+  it('vague edit returns clean copy (no "factor or edge" / node / edge / graph / schema / patch)', () => {
+    const r = decideNoOpRecovery({
+      message: 'Let me change it.',
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: null,
+    });
+    expect(r.branch).toBe('vague_edit');
+    const text = r.assistantText ?? '';
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).not.toMatch(/factor or edge/i);
+    expect(text).not.toMatch(/\bnode\b/i);
+    expect(text).not.toMatch(/\bedge\b/i);
+    expect(text).not.toMatch(/\bgraph\b/i);
+    expect(text).not.toMatch(/\bschema\b/i);
+    expect(text).not.toMatch(/\bpatch\b/i);
+    // Still conveys "nothing changed yet, tell me what to change".
+    expect(text).toMatch(/have not changed the model|haven't changed the model/i);
+    expect(text).toMatch(/what you want to change/i);
+  });
+});
