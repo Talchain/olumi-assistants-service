@@ -79,6 +79,58 @@ export interface AnalysisResultHeadlineInput {
 }
 
 /**
+ * Which deterministic case the headline builder picked, or `null` when
+ * the locked template is the safe fallback.
+ *
+ *   A — winner + driver + fragility
+ *   B — winner + driver
+ *   C — winner + fragility
+ *   D — winner + integer-percent probability (strict gates passed)
+ *   E — minimal floor: `{label} currently leads.`
+ *   null — fall back to locked template
+ *
+ * Case E is the link-safe response floor (v5/link-safe). It fires when
+ * a clean leading-option label exists but the stronger cases failed
+ * because of soft confidence, low margin, or because a length cap
+ * forced an A/B/C/D candidate to be dropped.
+ */
+export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | null;
+
+/**
+ * Locked reason class for telemetry. Always present on the descriptor
+ * (even when a strong case fired) so call sites can branch deterministically.
+ *
+ *  - `soft_confidence`        — winner probability below MIN_LEAD_PROBABILITY
+ *  - `low_margin`             — margin to runner-up below MIN_LEAD_MARGIN
+ *  - `no_driver_no_fragility` — meaningful lead but no driver and no fragility data and Case D length-capped out
+ *  - `length_cap`             — driver and/or fragility present but the stronger case exceeded MAX_HEADLINE_CHARS
+ *  - `unsafe_label`           — leading option label was missing, ID-shaped, UUID, or otherwise rejected by sanitiseLabel
+ *  - `unknown`                — a strong case (A/B/C/D) fired; reason is not applicable
+ */
+export type HeadlineFallbackReason =
+  | 'soft_confidence'
+  | 'low_margin'
+  | 'no_driver_no_fragility'
+  | 'length_cap'
+  | 'unsafe_label'
+  | 'unknown';
+
+export interface HeadlineDescriptor {
+  readonly case: HeadlineCase;
+  readonly reason: HeadlineFallbackReason;
+  readonly has_leading_option: boolean;
+  readonly has_clean_label: boolean;
+  readonly has_driver: boolean;
+  readonly has_fragility: boolean;
+  readonly margin_bucket: 'tight' | 'moderate' | 'comfortable' | null;
+}
+
+interface HeadlineResult {
+  readonly text: string | null;
+  readonly descriptor: HeadlineDescriptor;
+}
+
+/**
  * Returns a deterministic headline sentence, or null when fallback to the
  * locked template is the safe choice. The handler should treat null as
  * "use the existing template" — never invent a string from nothing.
@@ -86,6 +138,22 @@ export interface AnalysisResultHeadlineInput {
 export function buildAnalysisResultHeadline(
   input: AnalysisResultHeadlineInput,
 ): string | null {
+  return computeHeadline(input).text;
+}
+
+/**
+ * Pure introspection helper used by the run_analysis handler to emit
+ * `v5.headline.fell_back` telemetry when Case E fires. Shares all
+ * internal computation with {@link buildAnalysisResultHeadline}; same
+ * pure-function contract (no I/O, no telemetry side effects).
+ */
+export function describeAnalysisHeadline(
+  input: AnalysisResultHeadlineInput,
+): HeadlineDescriptor {
+  return computeHeadline(input).descriptor;
+}
+
+function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const { enrichment, leading_option_id, status_kind } = input;
 
   // Same-source resolution: the winner label, winner probability, and
@@ -95,59 +163,165 @@ export function buildAnalysisResultHeadline(
   // a clean label from one source paired with stale or inconsistent
   // probability maths from another.
   const winner = resolveWinner(enrichment, leading_option_id);
-  if (winner === null) return null;
-
-  // Probability/margin guard — applied to ALL "currently leads" cases.
-  // The headline never says "leads" unless the leading option holds a
-  // finite probability above MIN_LEAD_PROBABILITY AND (when a runner-up
-  // probability is present in the same source) the margin is at least
-  // MIN_LEAD_MARGIN. Near-ties (e.g. 0.34 / 0.33 / 0.33) and weak
-  // leaders (e.g. winner at 0.30 with no clear plurality) fall through
-  // to the locked template.
-  if (!hasMeaningfulLead(winner)) return null;
+  if (winner === null) {
+    // No source produced a winner with a clean label AND a finite
+    // probability — fall back to the locked template. Telemetry reports
+    // `unsafe_label` as the predominant cause; could also be "no
+    // probability anywhere" but that case is rare and the floor is the
+    // same.
+    return {
+      text: null,
+      descriptor: {
+        case: null,
+        reason: 'unsafe_label',
+        has_leading_option: false,
+        has_clean_label: false,
+        has_driver: false,
+        has_fragility: false,
+        margin_bucket: null,
+      },
+    };
+  }
 
   const winnerLabel = winner.label;
   const winnerProbability = winner.winnerProb;
-
   const driverLabel = resolveTopDriverLabel(enrichment);
   const fragileLabel = resolveFragileLabel(enrichment);
   const suffix = statusSuffix(status_kind);
+  const marginBucket = computeMarginBucket(winner);
+  const hasDriver = driverLabel !== null;
+  const hasFragility = fragileLabel !== null;
 
-  // Case A: winner + driver + fragility (with length-aware retry).
-  if (driverLabel !== null && fragileLabel !== null) {
-    const caseA =
-      `${winnerLabel} currently leads because ${driverLabel} is the strongest driver,` +
-      ` but the result is sensitive to ${fragileLabel}.${suffix}`;
-    if (caseA.length <= MAX_HEADLINE_CHARS) return caseA;
-    // Retry as Case B (drop fragility clause).
-    const caseB =
-      `${winnerLabel} currently leads because ${driverLabel} is the strongest driver.${suffix}`;
-    if (caseB.length <= MAX_HEADLINE_CHARS) return caseB;
-    return null;
+  // Stronger cases only fire when probability/margin gates pass.
+  if (hasMeaningfulLead(winner)) {
+    // Case A: winner + driver + fragility (with length-aware Case-B-shape retry).
+    if (hasDriver && hasFragility) {
+      const caseA =
+        `${winnerLabel} currently leads because ${driverLabel} is the strongest driver,` +
+        ` but the result is sensitive to ${fragileLabel}.${suffix}`;
+      if (caseA.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: caseA,
+          descriptor: buildDescriptor('A', 'unknown', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      const caseBRetry =
+        `${winnerLabel} currently leads because ${driverLabel} is the strongest driver.${suffix}`;
+      if (caseBRetry.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: caseBRetry,
+          descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      // Both stronger candidates exceeded length cap — fall through to Case E.
+    } else if (hasDriver) {
+      // Case B: winner + driver, no fragility.
+      const caseB =
+        `${winnerLabel} currently leads because ${driverLabel} is the strongest driver.${suffix}`;
+      if (caseB.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: caseB,
+          descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      // Length cap exceeded — fall through to Case E.
+    } else if (hasFragility) {
+      // Case C: winner + fragility, no driver.
+      const caseC =
+        `${winnerLabel} currently leads, but the result is sensitive to ${fragileLabel}.${suffix}`;
+      if (caseC.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: caseC,
+          descriptor: buildDescriptor('C', 'unknown', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      // Length cap exceeded — fall through to Case E.
+    } else {
+      // Case D: meaningful lead with no driver, no fragility. The
+      // probability guard already enforced ≥ MIN_LEAD_PROBABILITY so
+      // the rendered integer percentage is always ≥ 40%.
+      const pct = Math.round(winnerProbability * 100);
+      const caseD =
+        `${winnerLabel} currently leads with ${pct}% probability.` +
+        ` Run the follow-up checks before treating this as final.${suffix}`;
+      if (caseD.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: caseD,
+          descriptor: buildDescriptor('D', 'unknown', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      // Length cap exceeded — fall through to Case E.
+    }
   }
 
-  // Case B: winner + driver, no fragility.
-  if (driverLabel !== null) {
-    const caseB =
-      `${winnerLabel} currently leads because ${driverLabel} is the strongest driver.${suffix}`;
-    return caseB.length <= MAX_HEADLINE_CHARS ? caseB : null;
+  // Case E (link-safe floor): we have a clean winner label but the
+  // stronger cases didn't qualify or didn't fit. Output is the minimum
+  // non-overclaiming "{Label} currently leads." (+ status suffix).
+  // No "best", "winner", "recommended", "optimal", "preferred". No
+  // probability number. No driver/fragility clauses.
+  const caseE = `${winnerLabel} currently leads.${suffix}`;
+  const reason = deriveCaseEReason(winner, driverLabel, fragileLabel);
+  if (caseE.length <= MAX_HEADLINE_CHARS) {
+    return {
+      text: caseE,
+      descriptor: buildDescriptor('E', reason, { hasDriver, hasFragility, marginBucket }),
+    };
   }
 
-  // Case C: winner + fragility, no driver.
-  if (fragileLabel !== null) {
-    const caseC =
-      `${winnerLabel} currently leads, but the result is sensitive to ${fragileLabel}.${suffix}`;
-    return caseC.length <= MAX_HEADLINE_CHARS ? caseC : null;
-  }
+  // Even Case E exceeds the length cap (extremely long sanitised label).
+  // Fall back to the locked template.
+  return {
+    text: null,
+    descriptor: buildDescriptor(null, 'length_cap', { hasDriver, hasFragility, marginBucket }),
+  };
+}
 
-  // Case D: winner + win_probability, no driver/fragility. The probability
-  // guard above already enforced winnerProbability ≥ MIN_LEAD_PROBABILITY,
-  // so the rendered integer percentage is always ≥ 40%.
-  const pct = Math.round(winnerProbability * 100);
-  const caseD =
-    `${winnerLabel} currently leads with ${pct}% probability.` +
-    ` Run the follow-up checks before treating this as final.${suffix}`;
-  return caseD.length <= MAX_HEADLINE_CHARS ? caseD : null;
+function buildDescriptor(
+  caseKind: HeadlineCase,
+  reason: HeadlineFallbackReason,
+  args: { hasDriver: boolean; hasFragility: boolean; marginBucket: 'tight' | 'moderate' | 'comfortable' | null },
+): HeadlineDescriptor {
+  return {
+    case: caseKind,
+    reason,
+    has_leading_option: true,
+    has_clean_label: true,
+    has_driver: args.hasDriver,
+    has_fragility: args.hasFragility,
+    margin_bucket: args.marginBucket,
+  };
+}
+
+function deriveCaseEReason(
+  winner: ResolvedWinner,
+  driverLabel: string | null,
+  fragileLabel: string | null,
+): HeadlineFallbackReason {
+  // Soft confidence: absolute probability gate failed.
+  if (winner.winnerProb < MIN_LEAD_PROBABILITY) return 'soft_confidence';
+  // Low margin: margin gate failed.
+  if (winner.runnerUpProb !== null) {
+    const margin = winner.winnerProb - winner.runnerUpProb;
+    if (margin < MIN_LEAD_MARGIN) return 'low_margin';
+  }
+  // Meaningful lead but a stronger case failed. The only reasons we
+  // reach Case E at this point are: (a) Case D-shape (no driver, no
+  // fragility) overshot the length cap, or (b) a Case A/B/C with
+  // driver/fragility overshot it.
+  if (driverLabel === null && fragileLabel === null) {
+    return 'no_driver_no_fragility';
+  }
+  return 'length_cap';
+}
+
+function computeMarginBucket(
+  winner: ResolvedWinner,
+): 'tight' | 'moderate' | 'comfortable' | null {
+  if (winner.runnerUpProb === null) return null;
+  const margin = winner.winnerProb - winner.runnerUpProb;
+  if (margin < 0.05) return 'tight';
+  if (margin < 0.15) return 'moderate';
+  return 'comfortable';
 }
 
 interface ResolvedWinner {
@@ -430,7 +604,7 @@ const ASSISTANT_TEXT_ID_REGEX = /\b(?:opt|goal|fac|node|edge|n|e)_[a-z0-9_]+/i;
 const RAW_DECIMAL_REGEX = /\d+\.\d+/;
 
 /**
- * Headline grammar regex set — mirrors the exact Case A/B/C/D shapes
+ * Headline grammar regex set — mirrors the exact Case A/B/C/D/E shapes
  * {@link buildAnalysisResultHeadline} can emit, optionally followed
  * by one of the two status-suffix sentences. The placeholders
  * (winner label, driver label, fragility label, integer probability)
@@ -438,7 +612,11 @@ const RAW_DECIMAL_REGEX = /\d+\.\d+/;
  * are pinned verbatim so improvised prose containing only the
  * "currently leads" anchor (e.g. "Hire A currently leads for reasons
  * outside the deterministic headline grammar.") cannot satisfy the
- * grammar.
+ * grammar. Case E ("{label} currently leads.") is the link-safe
+ * floor — it is the only pattern where the leading "currently leads"
+ * anchor is followed immediately by a literal period; cases A/B/C/D
+ * all extend with "because", ", but", or "with N% probability" before
+ * the terminal period.
  *
  * Defence-in-depth rules (length cap, no newlines, no forbidden
  * vocabulary, no ID prefixes, no raw decimals) still apply on top of
@@ -475,6 +653,13 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   new RegExp(
     `^.+? currently leads with \\d{1,3}% probability\\. Run the follow-up checks before treating this as final\\.${STATUS_SUFFIX_PATTERN}$`,
   ),
+  // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
+  // MUST stay last — the trailing `\\.${STATUS_SUFFIX_PATTERN}$` anchor is
+  // strictly less specific than cases A/B/C/D and would not match their
+  // outputs (those require "because", ", but", or "with N% probability"
+  // before the terminal period), so ordering is for clarity rather than
+  // correctness.
+  new RegExp(`^.+? currently leads\\.${STATUS_SUFFIX_PATTERN}$`),
 ];
 
 function matchesHeadlineGrammar(text: string): boolean {
@@ -498,13 +683,14 @@ function matchesHeadlineGrammar(text: string): boolean {
  *   2. Must be at most {@link MAX_HEADLINE_CHARS}.
  *   3. Must not contain newline characters.
  *   4. Locked-template literals pass exactly (case-sensitive).
- *   5. Otherwise must match one of the four headline grammar regexes
- *      ({@link HEADLINE_GRAMMAR_REGEXES}) — Case A/B/C/D with an
+ *   5. Otherwise must match one of the five headline grammar regexes
+ *      ({@link HEADLINE_GRAMMAR_REGEXES}) — Case A/B/C/D/E with an
  *      optional partial / unknown status suffix. Anchor-only prose
- *      that lacks the surrounding tokens (e.g. lacking
- *      "because X is the strongest driver" or
- *      ", but the result is sensitive to Y" or
- *      "with N% probability. Run the follow-up checks…") is rejected.
+ *      that lacks the surrounding tokens (e.g. "Hire A currently leads
+ *      for reasons outside the deterministic grammar.") is rejected by
+ *      the case-E literal-period anchor. Cases A/B/C/D extend the
+ *      anchor with "because", ", but", or "with N% probability" before
+ *      the terminal period.
  *   6. Even when the grammar matches, the following defence-in-depth
  *      rules still apply:
  *        - no forbidden vocabulary (recommend / winner / best / …)

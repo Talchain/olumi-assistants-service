@@ -10,7 +10,7 @@
  *   - other combinations → []
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { ActionSchema } from '@talchain/schemas/boundary';
@@ -18,6 +18,7 @@ import { ActionSchema } from '@talchain/schemas/boundary';
 import { generateChips } from '../chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import type { ContextPackAnalysis } from '../../context/context-pack-assembler.js';
+import { setTestSink } from '../../../utils/telemetry.js';
 
 const REGISTRY = HANDLER_VALIDATION_REGISTRY;
 
@@ -1219,5 +1220,411 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
         expect(blob).not.toContain(bad);
       }
     }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// V5 link-safe response floor — chip floor.
+// When existing rules + filter would emit an empty array, applyChipFloor
+// picks one safe deterministic chip from a priority ladder driven by
+// analysisReady / handler facts / freshness. When no rung qualifies,
+// empty is preserved and v5.chips.empty_intentional is emitted with
+// reason 'no_safe_floor'.
+// ════════════════════════════════════════════════════════════════════
+
+describe('generateChips — V5 link-safe chip floor', () => {
+  let events: Array<{ name: string; data: Record<string, unknown> }> = [];
+
+  beforeEach(() => {
+    events = [];
+    setTestSink((name, data) => {
+      events.push({ name, data });
+    });
+  });
+
+  afterEach(() => {
+    setTestSink(null);
+  });
+
+  const eventsNamed = (name: string) => events.filter((e) => e.name === name);
+
+  // Helpers to build well-typed fixtures for the chip floor tests.
+  const readyAnalysis = () => ({
+    options: [
+      {
+        option_id: 'opt_a',
+        label: 'Option A',
+        status: 'ready',
+        interventions: {},
+        is_baseline: false,
+      },
+      {
+        option_id: 'opt_b',
+        label: 'Option B',
+        status: 'ready',
+        interventions: {},
+        is_baseline: false,
+      },
+    ],
+    goal_node_id: 'goal',
+    status: 'ready' as const,
+  });
+  const needsInputAnalysis = (status: 'needs_user_input' | 'needs_user_mapping' | 'needs_encoding') => ({
+    options: [],
+    goal_node_id: 'goal',
+    status: status as string,
+  });
+  const staleOutcome = () => ({
+    graph_mutated: true,
+    analysis_run: false,
+    analysis_selected_fact_index: 0,
+    analysis_freshness: 'stale' as const,
+    freshness_reason: 'graph_hash_diverged' as const,
+  });
+
+  it('existing rule emitted chips → floor does not fire (no telemetry, chips unchanged)', () => {
+    // The post-run_analysis rule emits 2 executable chips. The floor
+    // must be invisible in this happy path.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips.length).toBeGreaterThan(0);
+    expect(eventsNamed('v5.chips.floor_applied')).toHaveLength(0);
+    expect(eventsNamed('v5.chips.empty_intentional')).toHaveLength(0);
+  });
+
+  it('frame stage no graph + no analysisReady → empty preserved + V5ChipsEmptyIntentional fires with reason no_safe_floor', () => {
+    const chips = generateChips({
+      stage: 'frame',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toEqual([]);
+    const empty = eventsNamed('v5.chips.empty_intentional');
+    expect(empty).toHaveLength(1);
+    expect(empty[0].data.reason).toBe('no_safe_floor');
+    expect(empty[0].data.stage).toBe('frame');
+    expect(empty[0].data.has_run_analysis_fact).toBe(false);
+    // No floor_applied telemetry on empty case.
+    expect(eventsNamed('v5.chips.floor_applied')).toHaveLength(0);
+  });
+
+  it('decide stage + analysis ready + no run_analysis fact → floor adds executable run_analysis chip', () => {
+    // The analyse-stage rule does not fire (stage=decide), the
+    // post-mutation rule does not fire (no mutation fact), the decide
+    // rules require hasAnalysis or fragile. With no analysis, the
+    // existing rules return []. Floor's "ready + no fact" rung picks
+    // the executable run_analysis chip.
+    const chips = generateChips({
+      stage: 'decide',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: readyAnalysis(),
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+    const floor = eventsNamed('v5.chips.floor_applied');
+    expect(floor).toHaveLength(1);
+    expect(floor[0].data.reason).toBe('analysis_ready');
+    expect(floor[0].data.has_run_analysis_fact).toBe(false);
+  });
+
+  it('decide stage + analysisReady needs_user_input → floor adds conversational Set values prompt (no action_type)', () => {
+    const chips = generateChips({
+      stage: 'decide',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: needsInputAnalysis('needs_user_input'),
+    });
+    expect(chips).toHaveLength(1);
+    // Conversational prompt chip — no action_type so the upstream
+    // readiness gate cannot reject it.
+    expect(chips[0]).not.toHaveProperty('action_type');
+    expect(chips[0].label).toBe('Set values for options');
+    const floor = eventsNamed('v5.chips.floor_applied');
+    expect(floor).toHaveLength(1);
+    expect(floor[0].data.reason).toBe('needs_input');
+    expect(floor[0].data.analysis_ready_status).toBe('needs_user_input');
+  });
+
+  it('decide stage + analysisReady needs_encoding → floor adds Set values prompt (does NOT emit executable run_analysis)', () => {
+    const chips = generateChips({
+      stage: 'decide',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: needsInputAnalysis('needs_encoding'),
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).not.toHaveProperty('action_type');
+    // Safety: executable run_analysis chip MUST NOT be emitted when
+    // readiness is not 'ready' — the upstream gate would reject it.
+    expect(chips[0].action_type).toBeUndefined();
+    expect(eventsNamed('v5.chips.floor_applied')[0].data.reason).toBe('needs_input');
+  });
+
+  it('decide stage + analysisReady needs_user_mapping → floor adds Set values prompt', () => {
+    const chips = generateChips({
+      stage: 'decide',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: needsInputAnalysis('needs_user_mapping'),
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).not.toHaveProperty('action_type');
+    expect(eventsNamed('v5.chips.floor_applied')[0].data.reason).toBe('needs_input');
+  });
+
+  it('frame stage + prior run_analysis fact + no current handler → floor adds "What could change the outcome?" prompt (post_analysis_no_obvious_next)', () => {
+    // The analyse-stage rule requires hasAnalysis=false. Here we have a
+    // prior fact but no projection on this turn, and stage=frame so the
+    // analyse-stage rule doesn't run anyway. Existing rules return [];
+    // floor's priority 3 (post-analysis without obvious next) picks the
+    // conversational exploration prompt.
+    const chips = generateChips({
+      stage: 'frame',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      priorFacts: [runAnalysisFact()],
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).not.toHaveProperty('action_type');
+    expect(chips[0].label).toBe('What could change the outcome?');
+    const floor = eventsNamed('v5.chips.floor_applied');
+    expect(floor).toHaveLength(1);
+    expect(floor[0].data.reason).toBe('post_analysis_no_obvious_next');
+    expect(floor[0].data.has_run_analysis_fact).toBe(true);
+  });
+
+  it('stale freshness + prior run_analysis fact → floor adds conversational Re-run prompt (does NOT emit executable run_analysis)', () => {
+    const chips = generateChips({
+      stage: 'frame',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      priorFacts: [runAnalysisFact()],
+      turnOutcome: staleOutcome(),
+    });
+    expect(chips).toHaveLength(1);
+    // Conversational, not executable — upstream gate may have changed
+    // since the fact was recorded.
+    expect(chips[0]).not.toHaveProperty('action_type');
+    expect(chips[0].label).toBe('Re-run analysis');
+    const floor = eventsNamed('v5.chips.floor_applied');
+    expect(floor).toHaveLength(1);
+    expect(floor[0].data.reason).toBe('stale_post_edit');
+    expect(floor[0].data.has_run_analysis_fact).toBe(true);
+  });
+
+  it('no floor chip uses an unsupported action_type', () => {
+    // Sweep every priority rung. The only chip that should carry an
+    // action_type is the priority-2 "ready + no fact" rung, and it
+    // must use the registered 'run_analysis' identifier.
+    const supportedActionTypes = new Set([
+      'run_analysis',
+      'explain_results',
+      'what_would_flip',
+    ]);
+    const probes: Array<Parameters<typeof generateChips>[0]> = [
+      // priority 1 (stale)
+      {
+        stage: 'frame',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        priorFacts: [runAnalysisFact()],
+        turnOutcome: staleOutcome(),
+      },
+      // priority 2 (ready, no fact)
+      {
+        stage: 'decide',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        analysisReady: readyAnalysis(),
+      },
+      // priority 3 (post-analysis no next)
+      {
+        stage: 'frame',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        priorFacts: [runAnalysisFact()],
+      },
+      // priority 4 (needs_input)
+      {
+        stage: 'decide',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        analysisReady: needsInputAnalysis('needs_encoding'),
+      },
+    ];
+    for (const input of probes) {
+      const chips = generateChips(input);
+      for (const chip of chips) {
+        if ('action_type' in chip && chip.action_type !== undefined) {
+          expect(supportedActionTypes).toContain(chip.action_type);
+        }
+      }
+    }
+  });
+
+  it('no floor chip label/message contains forbidden user-facing internal vocabulary', () => {
+    const forbidden = ['factor', 'node', 'edge', 'graph', 'schema', 'validator', 'patch'];
+    const idPattern = /\b(opt|goal|fac|node|edge|n|e)_/i;
+    const probes: Array<Parameters<typeof generateChips>[0]> = [
+      {
+        stage: 'frame',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        priorFacts: [runAnalysisFact()],
+        turnOutcome: staleOutcome(),
+      },
+      {
+        stage: 'decide',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        analysisReady: readyAnalysis(),
+      },
+      {
+        stage: 'frame',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        priorFacts: [runAnalysisFact()],
+      },
+      {
+        stage: 'decide',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        analysisReady: needsInputAnalysis('needs_encoding'),
+      },
+    ];
+    for (const input of probes) {
+      const chips = generateChips(input);
+      for (const chip of chips) {
+        const blob = `${chip.label} ${chip.message}`.toLowerCase();
+        for (const bad of forbidden) {
+          expect(blob, `chip "${chip.label}" contains forbidden term "${bad}"`).not.toContain(bad);
+        }
+        expect(blob, `chip "${chip.label}" leaks ID-shape token`).not.toMatch(idPattern);
+      }
+    }
+  });
+
+  it('floor chips have deterministic IDs prefixed with chip_prompt_floor_ or chip_action_*', () => {
+    // Stale path
+    const stale = generateChips({
+      stage: 'frame',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      priorFacts: [runAnalysisFact()],
+      turnOutcome: staleOutcome(),
+    });
+    expect(stale[0].id).toBe('chip_prompt_floor_rerun_analysis');
+
+    // Needs-input path
+    const needsInput = generateChips({
+      stage: 'decide',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: needsInputAnalysis('needs_encoding'),
+    });
+    expect(needsInput[0].id).toBe('chip_prompt_floor_set_option_values');
+
+    // Post-analysis explore path
+    const postAnalysis = generateChips({
+      stage: 'frame',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      priorFacts: [runAnalysisFact()],
+    });
+    expect(postAnalysis[0].id).toBe('chip_prompt_floor_post_analysis_explore');
+
+    // Ready-no-fact path uses existing executable chip id
+    const ready = generateChips({
+      stage: 'decide',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: readyAnalysis(),
+    });
+    expect(ready[0].id).toBe('chip_action_run_analysis');
+  });
+
+  it('every floor chip passes ActionSchema validation', () => {
+    const probes: Array<Parameters<typeof generateChips>[0]> = [
+      {
+        stage: 'frame',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        priorFacts: [runAnalysisFact()],
+        turnOutcome: staleOutcome(),
+      },
+      {
+        stage: 'decide',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        analysisReady: readyAnalysis(),
+      },
+      {
+        stage: 'frame',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        priorFacts: [runAnalysisFact()],
+      },
+      {
+        stage: 'decide',
+        handlerFacts: [],
+        analysis: null,
+        validationRegistry: REGISTRY,
+        analysisReady: needsInputAnalysis('needs_encoding'),
+      },
+    ];
+    for (const input of probes) {
+      const chips = generateChips(input);
+      for (const chip of chips) {
+        const parsed = ActionSchema.safeParse(chip);
+        expect(parsed.success, `chip "${chip.label}" failed ActionSchema: ${JSON.stringify(chip)}`).toBe(true);
+      }
+    }
+  });
+
+  it('floor priority — stale beats ready (does NOT emit executable run_analysis even if readiness is ready)', () => {
+    // A turn that is both ready-to-run AND has stale analysis should
+    // surface the conversational Re-run prompt rather than the
+    // executable Run analysis chip — readiness can drift between when
+    // the fact was recorded and now.
+    const chips = generateChips({
+      stage: 'frame',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      priorFacts: [runAnalysisFact()],
+      analysisReady: readyAnalysis(),
+      turnOutcome: staleOutcome(),
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).not.toHaveProperty('action_type');
+    expect(chips[0].label).toBe('Re-run analysis');
+    expect(eventsNamed('v5.chips.floor_applied')[0].data.reason).toBe('stale_post_edit');
   });
 });

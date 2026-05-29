@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAnalysisResultHeadline,
+  describeAnalysisHeadline,
   isAllowedRunAnalysisAssistantText,
   RUN_ANALYSIS_LOCKED_TEMPLATES,
   MAX_HEADLINE_CHARS,
@@ -385,12 +386,14 @@ describe('buildAnalysisResultHeadline', () => {
     expect(out).toBeNull();
   });
 
-  it('near-tie bare winner (3-way 0.34/0.33/0.33) returns null via the probability/margin guard', () => {
-    // Originally pinned Case D's local `≥ 0.5` check. Now caught earlier
-    // by the global probability/margin guard (winner 0.34 < 0.4 floor)
-    // so the result is null regardless of which case branch would have
-    // fired. Test fixture and outcome unchanged; doc updated to reflect
-    // the post-round-2-review gating.
+  it('near-tie bare winner (3-way 0.34/0.33/0.33) falls back to Case E label-only floor', () => {
+    // Originally pinned Case D's local `≥ 0.5` check. The probability/
+    // margin guard still catches the weak lead (0.34 < 0.4 floor), so
+    // strong cases A/B/C/D do not fire. The link-safe Case-E floor
+    // (link-safe response floor workstream) now produces the minimum
+    // non-overclaiming "{label} currently leads." instead of null.
+    // The label-only output cannot overclaim by construction — it has
+    // no driver/fragility clause and no probability number.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
@@ -403,7 +406,7 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe('Option A currently leads.');
   });
 
   it('driver label filtered when it matches an ID prefix; falls through to next-best', () => {
@@ -442,10 +445,13 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
   // of at least MIN_LEAD_MARGIN (5pp). Near-ties and weak leaders
   // fall back to the locked template by returning null.
 
-  it('near-tie 0.34 / 0.33 / 0.33 + driver + fragility — falls back', () => {
+  it('near-tie 0.34 / 0.33 / 0.33 + driver + fragility — falls back to Case E label-only floor (no overclaim)', () => {
     // The reviewer-blocking case: the bare Case A path used to emit
-    // "currently leads because…" on a 1pp lead. Now gated by the
-    // probability/margin guard.
+    // "currently leads because…" on a 1pp lead. The probability/margin
+    // guard still suppresses Case A — Case E now provides the minimum
+    // "{label} currently leads." floor (link-safe response floor
+    // workstream). Driver and fragility clauses are intentionally
+    // dropped at soft confidence to avoid overclaiming.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
@@ -465,10 +471,14 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe('Option A currently leads.');
+    // The strong-case clauses must NOT appear.
+    expect(out).not.toContain('because');
+    expect(out).not.toContain('sensitive to');
+    expect(out).not.toMatch(/\d+%/);
   });
 
-  it('weak margin 0.42 / 0.40 (2pp) + driver — falls back', () => {
+  it('weak margin 0.42 / 0.40 (2pp) + driver — falls back to Case E label-only floor (no driver clause)', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
@@ -483,10 +493,11 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe('Option A currently leads.');
+    expect(out).not.toContain('because');
   });
 
-  it('weak winner 0.30 / 0.25 / 0.25 / 0.20 (5pp margin BUT below 40% floor) — falls back', () => {
+  it('weak winner 0.30 / 0.25 / 0.25 / 0.20 (5pp margin BUT below 40% floor) — falls back to Case E label-only floor', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.30 },
@@ -503,7 +514,8 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe('Option A currently leads.');
+    expect(out).not.toContain('because');
   });
 
   it('missing win_probability on winner + driver + fragility — falls back', () => {
@@ -762,16 +774,16 @@ describe('resolveWinner — same-source label + probability invariant', () => {
     expect(out!).toContain('Hire X currently leads with 62% probability');
   });
 
-  it('first source is a near-tie — guard fires on THAT source, does not silently switch to a later source with a wider margin', () => {
+  it('first source is a near-tie — guard fires on THAT source; Case E fires on the first source, does NOT silently switch to a later source with a wider margin', () => {
     // The first source is internally consistent (clean label, finite
     // probability) but the margin is too narrow. The same-source
-    // resolver returns it; hasMeaningfulLead rejects it; the headline
-    // falls back to the template. The resolver does NOT cherry-pick a
-    // later source's wider margin — that would be a different form of
-    // cross-source mixing, this time on the maths side rather than
-    // the label side. Pins "first acceptable source wins" so the
-    // probability/margin guard applies to a single coherent set of
-    // numbers.
+    // resolver returns it; hasMeaningfulLead rejects it; Case E now
+    // takes over with the minimum "{label} currently leads." floor
+    // (link-safe response floor workstream). The resolver does NOT
+    // cherry-pick a later source's wider margin — that would be a
+    // different form of cross-source mixing on the maths side. Pins
+    // "first acceptable source wins" so the guards apply to a single
+    // coherent set of numbers.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.41 },
@@ -787,7 +799,11 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    // Case E label-only output. Crucially the 80% from option_comparison
+    // must NOT leak into the headline — same-source invariant still holds.
+    expect(out).toBe('Hire X currently leads.');
+    expect(out).not.toContain('80%');
+    expect(out).not.toMatch(/\d+%/);
   });
 });
 
@@ -996,5 +1012,421 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
     expect(isAllowedRunAnalysisAssistantText(42)).toBe(false);
     expect(isAllowedRunAnalysisAssistantText({})).toBe(false);
     expect(isAllowedRunAnalysisAssistantText(['Hire A currently leads.'])).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// V5 link-safe response floor — Case E (label-only fallback).
+// Fires when a clean leading-option label exists but stronger cases
+// (A/B/C/D) failed because of soft confidence, low margin, or length
+// cap. The deterministic output is "{label} currently leads." plus
+// the existing status suffix when applicable.
+// ════════════════════════════════════════════════════════════════════
+
+describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
+  it('soft confidence (winner 0.34) + clean label → "{label} currently leads."', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+        { option_id: 'opt_c', option_label: 'Plan C', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Hire X currently leads.');
+  });
+
+  it('low margin (0.42 / 0.40, 2pp) + clean label → Case E fires', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Option A currently leads.');
+  });
+
+  it('soft confidence + driver + fragility → still Case E (no overclaim)', () => {
+    // The data has driver + fragility BUT the lead is too weak. Case E
+    // intentionally drops the driver/fragility clauses to avoid
+    // overclaiming on a soft lead — the lead itself is the only safe
+    // signal at this confidence level.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+      ],
+      factor_sensitivity: [
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+      ],
+      robustness: {
+        level: 'low',
+        fragile_edges: [{ from_label: 'Throughput', switch_probability: 0.5 }],
+      },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Hire X currently leads.');
+  });
+
+  it('Case E preserves partial status suffix', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'partial',
+    });
+    expect(out).toBe(
+      'Hire X currently leads. The run was flagged as partial — treat as provisional.',
+    );
+  });
+
+  it('Case E preserves unknown status suffix', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'unknown',
+    });
+    expect(out).toBe(
+      'Hire X currently leads. The analysis engine reported an unfamiliar status — treat the result with caution.',
+    );
+  });
+
+  it('Case E never uses "best", "winner", "recommended", "optimal", or "preferred"', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).not.toBeNull();
+    expect(out!).not.toMatch(/\b(best|winner|winners|recommend|recommends|recommended|recommendation|recommendations|optimal|preferred)\b/i);
+  });
+
+  it('Case E never emits a probability number (no overclaim)', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).not.toBeNull();
+    expect(out!).not.toMatch(/\d+%/);
+    expect(out!).not.toMatch(/\d+\.\d+/);
+  });
+
+  it('Case E output passes isAllowedRunAnalysisAssistantText (5th grammar regex registered)', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).not.toBeNull();
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+
+  it('Case E output is ≤ MAX_HEADLINE_CHARS', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'unknown',  // longest suffix
+    });
+    expect(out).not.toBeNull();
+    expect(out!.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
+  });
+
+  it('strong cases A/B/C/D still win when their data + meaningful lead is present', () => {
+    // Regression: with Case E added, strong cases must remain the first
+    // choice. A clear lead (62% vs 38%, 24pp margin) with driver +
+    // fragility data must produce Case A, not Case E.
+    const out = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toContain('Hire One Senior Technical Lead currently leads because');
+    expect(out).toContain('the strongest driver');
+    // Case E literal form must NOT show up.
+    expect(out).not.toBe('Hire One Senior Technical Lead currently leads.');
+  });
+
+  it('ID-shaped leading label still returns null (Case E does not paper over unsafe labels)', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'opt_b', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('UUID leading label still returns null', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        {
+          option_id: 'opt_a',
+          option_label: '6b3c2a90-1f4d-4b1a-9c2e-d5f1a2b3c4d5',
+          win_probability: 0.34,
+        },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('missing label still returns null', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', win_probability: 0.34 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('missing win_probability still returns null even with clean label (resolveWinner requires probability)', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X' /* no win_probability */ },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('isAllowedRunAnalysisAssistantText accepts every Case-E shape with every status suffix', () => {
+    const acceptedShapes = [
+      'Hire A currently leads.',
+      'Hire A currently leads. The run was flagged as partial — treat as provisional.',
+      'Hire A currently leads. The analysis engine reported an unfamiliar status — treat the result with caution.',
+    ];
+    for (const text of acceptedShapes) {
+      expect(isAllowedRunAnalysisAssistantText(text), `should accept: "${text}"`).toBe(true);
+    }
+  });
+
+  it('isAllowedRunAnalysisAssistantText still rejects anchor-shaped prose despite Case-E (e.g. "currently leads for reasons…")', () => {
+    // The Case-E regex requires a literal period right after "currently leads".
+    // Prose like "currently leads for reasons …" extends with extra tokens
+    // and is rejected.
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'Hire A currently leads for reasons outside the deterministic headline grammar.',
+      ),
+    ).toBe(false);
+  });
+
+  it('isAllowedRunAnalysisAssistantText still rejects forbidden vocabulary even in Case-E shape', () => {
+    // "Hire A currently leads. We recommend acting now." — regex matches
+    // the Case-E shape via the leading "Hire A currently leads." prefix,
+    // but the trailing " We recommend acting now." causes the full-string
+    // match to fail (the regex anchors with `$`). And even if grammar
+    // matched, defence-in-depth catches "recommend".
+    expect(
+      isAllowedRunAnalysisAssistantText('Hire A currently leads. We recommend acting now.'),
+    ).toBe(false);
+    // Standalone Case-E forbidden vocab check.
+    expect(
+      isAllowedRunAnalysisAssistantText('Recommend Hire A currently leads.'),
+    ).toBe(false);
+  });
+});
+
+describe('describeAnalysisHeadline — descriptor metadata for telemetry', () => {
+  it('Case E from soft confidence — reason: soft_confidence', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+      ],
+    };
+    const descriptor = describeAnalysisHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(descriptor.case).toBe('E');
+    expect(descriptor.reason).toBe('soft_confidence');
+    expect(descriptor.has_leading_option).toBe(true);
+    expect(descriptor.has_clean_label).toBe(true);
+    expect(descriptor.has_driver).toBe(false);
+    expect(descriptor.has_fragility).toBe(false);
+  });
+
+  it('Case E from low margin — reason: low_margin', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
+      ],
+    };
+    const descriptor = describeAnalysisHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(descriptor.case).toBe('E');
+    expect(descriptor.reason).toBe('low_margin');
+    expect(descriptor.margin_bucket).toBe('tight');
+  });
+
+  it('Case A (strong lead with driver + fragility) — reason: unknown', () => {
+    const descriptor = describeAnalysisHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(descriptor.case).toBe('A');
+    expect(descriptor.reason).toBe('unknown');
+    expect(descriptor.has_driver).toBe(true);
+    expect(descriptor.has_fragility).toBe(true);
+    expect(descriptor.margin_bucket).toBe('comfortable');  // 62 - 38 = 24pp
+  });
+
+  it('Case D — reason: unknown, has_driver false, has_fragility false', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.38 },
+      ],
+    };
+    const descriptor = describeAnalysisHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(descriptor.case).toBe('D');
+    expect(descriptor.reason).toBe('unknown');
+    expect(descriptor.has_driver).toBe(false);
+    expect(descriptor.has_fragility).toBe(false);
+  });
+
+  it('No clean leading option (ID-shaped label) — case: null, reason: unsafe_label', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
+      ],
+    };
+    const descriptor = describeAnalysisHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(descriptor.case).toBeNull();
+    expect(descriptor.reason).toBe('unsafe_label');
+    expect(descriptor.has_leading_option).toBe(false);
+    expect(descriptor.has_clean_label).toBe(false);
+  });
+
+  it('margin buckets reflect margin size (comfortable / moderate / tight)', () => {
+    // Comfortable (24pp)
+    const comfortable = describeAnalysisHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(comfortable.margin_bucket).toBe('comfortable');
+
+    // Moderate (10pp): 0.5 / 0.4
+    const moderate = describeAnalysisHeadline({
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.5 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.4 },
+        ],
+      } as Record<string, unknown>,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(moderate.margin_bucket).toBe('moderate');
+
+    // Tight (2pp): 0.42 / 0.40
+    const tight = describeAnalysisHeadline({
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
+        ],
+      } as Record<string, unknown>,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(tight.margin_bucket).toBe('tight');
+  });
+
+  it('single-option result — margin_bucket null', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+      ],
+    };
+    const descriptor = describeAnalysisHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(descriptor.margin_bucket).toBeNull();
   });
 });

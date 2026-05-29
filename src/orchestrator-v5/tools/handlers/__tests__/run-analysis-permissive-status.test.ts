@@ -314,10 +314,14 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    // Winner opt_3 has 35.3% probability → below Case D's ≥50% threshold,
-    // and no driver/fragility present → headline returns null and the
-    // handler falls back to the locked DEFAULT template.
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    // Winner opt_3 has 35.3% probability → below MIN_LEAD_PROBABILITY
+    // (0.4) so strong cases A/B/C/D suppress. The V5 link-safe response
+    // floor (Case E) now produces the minimum non-overclaiming label-
+    // only headline instead of the locked DEFAULT template. Reference:
+    // RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT remains the fallback when
+    // no clean leading-option label exists at all.
+    expect(outcome.assistant_text).toBe('Introduce tiered pricing currently leads.');
+    expect(outcome.assistant_text).not.toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type === 'run_analysis') {
       // opt_3 has the highest probability — handler picks it.

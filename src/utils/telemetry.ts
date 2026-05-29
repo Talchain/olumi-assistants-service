@@ -1239,6 +1239,26 @@ export const TelemetryEvents = {
   // surfaces ONLY in the user-facing `assistant_text` via the
   // composer in `routing/post-analysis-label-intercept.ts`.
   V5PostAnalysisLabelIntercept: "v5.post_analysis_label_intercept",
+
+  // V5 link-safe response floor — analysis headline Case-E fallback. Fires
+  // from src/orchestrator-v5/tools/handlers/run-analysis.ts when the
+  // deterministic headline builder chooses the minimal Case-E branch
+  // (`{label} currently leads.`) because stronger cases (A/B/C/D) did not
+  // qualify. Surfaces *why* the stronger cases were skipped so we can tune
+  // the strict gates over time. Metadata-only — no user prose or label
+  // text crosses the wire.
+  V5HeadlineFellBack: "v5.headline.fell_back",
+
+  // V5 link-safe response floor — chip floor. Fires from
+  // src/orchestrator-v5/compose/chip-generator.ts. EmptyIntentional is
+  // emitted when a 200 response legitimately has no chips (clarification,
+  // terminal acknowledgement, error recovery, or no safe floor available).
+  // FloorApplied is emitted when the generator would otherwise return an
+  // empty array but the floor mechanism picks a single safe deterministic
+  // chip based on `analysisReady.status` / handler facts / freshness. Both
+  // events carry only reason classes + booleans/counts — no user text.
+  V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
+  V5ChipsFloorApplied: "v5.chips.floor_applied",
 } as const;
 
 /**
