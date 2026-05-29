@@ -289,3 +289,130 @@ describe('decideNoOpRecovery — emit-to-resume round-trip', () => {
     expect(stage2.suggestedActions[0]?.message).toContain('Delivery speed');
   });
 });
+
+// ─── PR #212 staging-smoke follow-up: chip-duplication guard ──────────
+//
+// Verifies `decideNoOpRecovery` skips its proposal_stage_one / _two
+// branches when the pre-LLM intercept already fired for the same
+// pending concept. Before this guard, the wire response carried 6
+// chips (3 from the intercept + 3 from the recovery layer) for Stage
+// 1, and 8 for Stage 2.
+
+describe('decideNoOpRecovery — proposal-continuation chip-duplication guard', () => {
+  const PENDING_TEAM_MORALE = {
+    concept: 'team morale or cultural fit',
+    preferred_kind: 'factor' as const,
+  };
+
+  it('skips proposal_stage_one when proposalAlreadyEmittedInThisTurn=true (agreement message)', () => {
+    const r = decideNoOpRecovery({
+      message: "That's a good idea.",
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: PENDING_TEAM_MORALE,
+      proposalAlreadyEmittedInThisTurn: true,
+    });
+    expect(r.branch).not.toBe('proposal_stage_one');
+    expect(r.branch).not.toBe('proposal_stage_two');
+    // No proposal chips appended from the recovery layer.
+    expect(r.suggestedActions.find((a) => a.label === 'Add as risk')).toBeUndefined();
+    expect(r.suggestedActions.find((a) => a.label === 'Add as factor')).toBeUndefined();
+    expect(r.suggestedActions.find((a) => a.label === 'Keep as note')).toBeUndefined();
+  });
+
+  it('skips proposal_stage_two when proposalAlreadyEmittedInThisTurn=true (add-as-factor message)', () => {
+    const r = decideNoOpRecovery({
+      message: 'Add team morale as a factor.',
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: PENDING_TEAM_MORALE,
+      nodes: [{ label: 'Delivery speed', kind: 'goal' }],
+      proposalAlreadyEmittedInThisTurn: true,
+    });
+    expect(r.branch).not.toBe('proposal_stage_two');
+    expect(r.branch).not.toBe('proposal_stage_one');
+    // No affect-target chips appended from the recovery layer.
+    expect(r.suggestedActions.find((a) => a.label === 'Delivery speed')).toBeUndefined();
+  });
+
+  it('still fires proposal_stage_one when proposalAlreadyEmittedInThisTurn is undefined (backward compat)', () => {
+    const r = decideNoOpRecovery({
+      message: "That's a good idea.",
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: PENDING_TEAM_MORALE,
+      // proposalAlreadyEmittedInThisTurn intentionally omitted
+    });
+    expect(r.branch).toBe('proposal_stage_one');
+    expect(r.suggestedActions).toHaveLength(3);
+  });
+
+  it('still fires proposal_stage_one when proposalAlreadyEmittedInThisTurn=false', () => {
+    const r = decideNoOpRecovery({
+      message: "That's a good idea.",
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: PENDING_TEAM_MORALE,
+      proposalAlreadyEmittedInThisTurn: false,
+    });
+    expect(r.branch).toBe('proposal_stage_one');
+    expect(r.suggestedActions).toHaveLength(3);
+  });
+
+  it('flag does NOT affect non-proposal branches: analytical message + flag set still routes analytically', () => {
+    const r = decideNoOpRecovery({
+      message: 'Walk me through the analysis.',
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: PENDING_TEAM_MORALE,
+      proposalAlreadyEmittedInThisTurn: true,
+    });
+    // No pending facts in this test so the analytical_none branch
+    // fires (with graphReady=true → run_analysis chip). The flag
+    // only suppresses the proposal ladder, not the rest of the
+    // branch chain.
+    expect(r.branch).not.toBe('proposal_stage_one');
+    expect(r.branch).not.toBe('proposal_stage_two');
+  });
+
+  it('chip-count contract: Stage 1 returns EXACTLY 3 chips (no duplicates)', () => {
+    const r = decideNoOpRecovery({
+      message: "That's a good idea.",
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: PENDING_TEAM_MORALE,
+    });
+    expect(r.branch).toBe('proposal_stage_one');
+    expect(r.suggestedActions).toHaveLength(3);
+    const labels = r.suggestedActions.map((a) => a.label);
+    expect(labels).toEqual(['Add as risk', 'Add as factor', 'Keep as note']);
+    expect(new Set(labels).size).toBe(labels.length); // no duplicate labels
+  });
+
+  it('chip-count contract: Stage 2 returns at most 4 chips and zero duplicates', () => {
+    const r = decideNoOpRecovery({
+      message: 'Add team morale as a factor.',
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: PENDING_TEAM_MORALE,
+      nodes: [
+        { label: 'Delivery speed', kind: 'goal' },
+        { label: 'Code quality', kind: 'outcome' },
+        { label: 'Cost', kind: 'goal' },
+        { label: 'Onboarding pace', kind: 'goal' },
+        { label: 'Extra node', kind: 'goal' },
+      ],
+    });
+    expect(r.branch).toBe('proposal_stage_two');
+    expect(r.suggestedActions.length).toBeLessThanOrEqual(4);
+    const messages = r.suggestedActions.map((a) => a.message);
+    expect(new Set(messages).size).toBe(messages.length); // no duplicate messages
+  });
+});
