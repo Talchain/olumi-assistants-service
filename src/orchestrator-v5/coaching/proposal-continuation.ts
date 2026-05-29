@@ -200,14 +200,17 @@ const TRAILING_KIND_STRIP: ReadonlyArray<{
  * PR #216 round-3 review (SHOULD-FIX): the first pass closed only
  * factor/risk/driver; "Would you like me to add a goal? / an option? /
  * an outcome? / a constraint?" still produced bare-noun proposals.
+ * Round-4 review added `target` and `model` (both meaningless as bare
+ * concepts: "add a target?" / "add a model?").
  *
  * Matched as an EXACT single token (after article stripping), so it
- * never touches multi-word concepts ("delivery goal", "cost outcome").
- * `node` / `edge` / `graph` are already rejected upstream as internal
- * vocabulary (FORBIDDEN_CONCEPT_TOKENS), so they are omitted here.
+ * never touches multi-word concepts ("delivery goal", "sales target",
+ * "business model"). `node` / `edge` / `graph` are already rejected
+ * upstream as internal vocabulary (FORBIDDEN_CONCEPT_TOKENS), so they
+ * are omitted here.
  */
 const GENERIC_BARE_CONCEPT =
-  /^(?:factors?|risks?|drivers?|goals?|options?|outcomes?|constraints?|decisions?|objectives?|assumptions?|levers?|scenarios?|criteri(?:on|a)|metrics?|variables?)$/i;
+  /^(?:factors?|risks?|drivers?|goals?|options?|outcomes?|constraints?|decisions?|objectives?|assumptions?|levers?|scenarios?|criteri(?:on|a)|metrics?|variables?|targets?|models?)$/i;
 
 /**
  * Tokens that should never appear inside a clean concept — they are

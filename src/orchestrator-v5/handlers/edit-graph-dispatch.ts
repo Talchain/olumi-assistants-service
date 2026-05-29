@@ -1833,11 +1833,19 @@ export async function dispatchEditGraph(
     const graphForCommit = successfulAppliedMutation
       ? editResult.appliedGraph ?? undefined
       : undefined;
-    // V5 P0 — when the no-op recovery emitted Stage 1 or Stage 2 it
-    // built a refreshed `proposed_concept` pending action so the next
-    // turn can also resume. Combine it with the chip-derived list and
-    // pass the combined list explicitly. Cap at PENDING_ACTIONS_PER_TURN
-    // _CAP=3 (enforced by the DB CHECK constraint as well).
+    // V5 P0 — when the early-emit intercept or the no-op recovery
+    // produced a refreshed `proposed_concept` pending action, persist
+    // it so the next turn can resume. Combine it with the chip-derived
+    // list and pass the combined list explicitly, capped at
+    // PENDING_ACTIONS_PER_TURN_CAP=3 (also enforced by the DB CHECK).
+    //
+    // Proposal FIRST so the cap never drops it (PR #217 round-4 review):
+    // mirrors `buildPendingActionsWithProposalCapture` in
+    // proposal-continuation.ts. In practice the proposal-path response
+    // carries only text-prompt chips (no `action_type`), so chipDerived
+    // is empty here and ordering is moot — but proposal-first is the
+    // correct policy and removes the latent drop if a chip-derivable
+    // action is ever co-emitted on this path.
     let pendingActionsForCommit:
       | readonly import('../session/pending-action.js').PendingAction[]
       | undefined = undefined;
@@ -1852,7 +1860,7 @@ export async function dispatchEditGraph(
             : {}),
         },
       );
-      pendingActionsForCommit = [...chipDerived, proposalPendingForCommit].slice(0, 3);
+      pendingActionsForCommit = [proposalPendingForCommit, ...chipDerived].slice(0, 3);
     }
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,

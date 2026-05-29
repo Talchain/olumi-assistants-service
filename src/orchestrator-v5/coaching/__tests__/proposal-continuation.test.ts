@@ -226,6 +226,10 @@ describe('extractProposedConcept', () => {
     'Would you like me to add a criterion?',
     'Would you like me to add criteria?',
     'Would you like me to add options?',
+    // Round-4 review: target + model.
+    'Would you like me to add a target?',
+    'Would you like me to add a model?',
+    'Would you like me to add targets?',
   ])('rejects a concept that reduces to a bare generic structural noun: %s', (prose) => {
     expect(extractProposedConcept(prose)).toBeNull();
   });
@@ -240,6 +244,8 @@ describe('extractProposedConcept', () => {
     // concepts that happen to end in a structural noun survive.
     expect(extractProposedConcept('Would you like me to add a delivery goal?')?.concept).toBe('delivery goal');
     expect(extractProposedConcept('Would you like me to add a stretch objective?')?.concept).toBe('stretch objective');
+    expect(extractProposedConcept('Would you like me to add a sales target?')?.concept).toBe('sales target');
+    expect(extractProposedConcept('Would you like me to add a business model?')?.concept).toBe('business model');
   });
 
   // ─── PR #216 second-round review: curly apostrophe + "what is" ────
