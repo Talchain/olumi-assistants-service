@@ -156,7 +156,12 @@ const CLAUSE_BOUNDARY_PATTERNS: ReadonlyArray<RegExp> = [
   // Question-continuation patterns observed in real Sonnet output.
   /\bor\s+would\s+you\s+rather\b/i,
   /\bwould\s+you\s+rather\b/i,
-  /\bwhat'?s\s+most\s+likely\b/i,
+  // "what's most likely" / "what is most likely". The apostrophe class
+  // `['’]` covers both the straight (U+0027) and curly (U+2019)
+  // forms — LLM prose routinely uses the curly variant, which a bare
+  // `'?` would miss. Written as an explicit ’ escape so the byte
+  // is unambiguous in source. (PR #216 review NICE-TO-HAVE.)
+  /\bwhat(?:['’]?s|\s+is)\s+most\s+likely\b/i,
   // Comma-bridged continuation: `, or X` / `, and X` / `, but X`.
   /,\s*or\s+(?=\w)/i,
   /,\s*(?:and|but)\s+/i,
@@ -211,7 +216,9 @@ const QUESTION_TAIL_TOKENS: ReadonlyArray<RegExp> = [
   /\bwould\s+you\b/i,
   /\brather\b/i,
   /\bexplore\b/i,
-  /\bwhat'?s\b/i,
+  // `what's` (straight U+0027 or curly U+2019 apostrophe) and bare
+  // `what is` — LLM prose uses the curly form a bare `'?` would miss.
+  /\bwhat(?:['’]?s|\s+is)\b/i,
   /\bfirst\s*$/i,
 ];
 
@@ -541,6 +548,15 @@ function cleanConcept(raw: string): string | null {
   // check.
   s = s.replace(/^(?:a|an|the)\s+/i, '');
   if (s.length === 0) return null;
+  // Reject a concept that reduced to a bare proposal-kind word after
+  // article stripping. PR #216 review (SHOULD-FIX): "Would you like me
+  // to add a factor?" captures "a factor"; `stripTrailingKindWord`
+  // declines (the residue "a" is < 2 alpha chars), and the article
+  // strip above then leaves the generic "factor". Rendering "Add
+  // factor as a risk." is meaningless — there is no concept to add.
+  // Reject so extraction returns null and the turn falls through to
+  // its normal (non-proposal) handling.
+  if (/^(?:factors?|risks?|drivers?)$/i.test(s)) return null;
   // Concept must contain at least 2 alphabetic characters. Rejects
   // single-letter captures (e.g. extract regex over-shooting on a
   // truncated proposal: "add X as a factor" → "X") and pure-digit

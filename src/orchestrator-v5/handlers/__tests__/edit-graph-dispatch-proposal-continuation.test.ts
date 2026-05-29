@@ -304,7 +304,15 @@ describe('decideNoOpRecovery — proposal-continuation chip-duplication guard', 
     preferred_kind: 'factor' as const,
   };
 
-  it('skips proposal_stage_one when proposalAlreadyEmittedInThisTurn=true (agreement message)', () => {
+  // PR #216 review BLOCKER fix: when the pre-LLM intercept already
+  // emitted Stage 1/2 (`proposalAlreadyEmittedInThisTurn = true`),
+  // decideNoOpRecovery must be FULLY INERT — assistantText null and
+  // zero suggestedActions — so the dispatch's text-apply / strip /
+  // append are all no-ops and the authoritative early-emit response
+  // is never overwritten. A narrower "suppress only the proposal
+  // ladder" guard let analytical / vague_edit branches return
+  // overwriting text.
+  it('is fully inert when proposalAlreadyEmittedInThisTurn=true (agreement message)', () => {
     const r = decideNoOpRecovery({
       message: "That's a good idea.",
       priorFacts: NO_FACTS,
@@ -313,15 +321,12 @@ describe('decideNoOpRecovery — proposal-continuation chip-duplication guard', 
       pendingProposedConcept: PENDING_TEAM_MORALE,
       proposalAlreadyEmittedInThisTurn: true,
     });
-    expect(r.branch).not.toBe('proposal_stage_one');
-    expect(r.branch).not.toBe('proposal_stage_two');
-    // No proposal chips appended from the recovery layer.
-    expect(r.suggestedActions.find((a) => a.label === 'Add as risk')).toBeUndefined();
-    expect(r.suggestedActions.find((a) => a.label === 'Add as factor')).toBeUndefined();
-    expect(r.suggestedActions.find((a) => a.label === 'Keep as note')).toBeUndefined();
+    expect(r.branch).toBe('ambiguous');
+    expect(r.assistantText).toBeNull();
+    expect(r.suggestedActions).toHaveLength(0);
   });
 
-  it('skips proposal_stage_two when proposalAlreadyEmittedInThisTurn=true (add-as-factor message)', () => {
+  it('is fully inert when proposalAlreadyEmittedInThisTurn=true (add-as-factor message)', () => {
     const r = decideNoOpRecovery({
       message: 'Add team morale as a factor.',
       priorFacts: NO_FACTS,
@@ -331,10 +336,34 @@ describe('decideNoOpRecovery — proposal-continuation chip-duplication guard', 
       nodes: [{ label: 'Delivery speed', kind: 'goal' }],
       proposalAlreadyEmittedInThisTurn: true,
     });
-    expect(r.branch).not.toBe('proposal_stage_two');
-    expect(r.branch).not.toBe('proposal_stage_one');
-    // No affect-target chips appended from the recovery layer.
-    expect(r.suggestedActions.find((a) => a.label === 'Delivery speed')).toBeUndefined();
+    expect(r.branch).toBe('ambiguous');
+    expect(r.assistantText).toBeNull();
+    expect(r.suggestedActions).toHaveLength(0);
+  });
+
+  // The exact failing transcript: it satisfies BOTH agreement (so the
+  // intercept emits Stage 1) AND `looksLikeVagueEdit` (so the recovery
+  // would otherwise classify it as vague_edit). With the flag set, the
+  // recovery MUST stay inert — not return the "I haven't changed the
+  // model yet. Tell me which factor or edge..." copy that the
+  // pre-fix narrow guard allowed through.
+  it('exact transcript with flag=true does NOT return vague_edit overwriting copy', () => {
+    const r = decideNoOpRecovery({
+      message:
+        "That's a good idea. Let's involve the team in the hiring process. "
+        + 'For that risk, how should we update the decision model?',
+      priorFacts: NO_FACTS,
+      freshness: 'fresh',
+      graphReady: true,
+      pendingProposedConcept: PENDING_TEAM_MORALE,
+      proposalAlreadyEmittedInThisTurn: true,
+    });
+    expect(r.branch).toBe('ambiguous');
+    expect(r.assistantText).toBeNull();
+    // Defence-in-depth: even if a future change returned text, it must
+    // never be the forbidden vague-edit copy.
+    expect(r.assistantText ?? '').not.toContain('factor or edge');
+    expect(r.assistantText ?? '').not.toContain("haven't changed the model");
   });
 
   it('still fires proposal_stage_one when proposalAlreadyEmittedInThisTurn is undefined (backward compat)', () => {
@@ -363,7 +392,7 @@ describe('decideNoOpRecovery — proposal-continuation chip-duplication guard', 
     expect(r.suggestedActions).toHaveLength(3);
   });
 
-  it('flag does NOT affect non-proposal branches: analytical message + flag set still routes analytically', () => {
+  it('flag=true overrides even an analytical message (fully inert, no analytical recovery)', () => {
     const r = decideNoOpRecovery({
       message: 'Walk me through the analysis.',
       priorFacts: NO_FACTS,
@@ -372,12 +401,11 @@ describe('decideNoOpRecovery — proposal-continuation chip-duplication guard', 
       pendingProposedConcept: PENDING_TEAM_MORALE,
       proposalAlreadyEmittedInThisTurn: true,
     });
-    // No pending facts in this test so the analytical_none branch
-    // fires (with graphReady=true → run_analysis chip). The flag
-    // only suppresses the proposal ladder, not the rest of the
-    // branch chain.
-    expect(r.branch).not.toBe('proposal_stage_one');
-    expect(r.branch).not.toBe('proposal_stage_two');
+    // The early-emit response is authoritative; recovery is inert
+    // regardless of how the message would otherwise classify.
+    expect(r.branch).toBe('ambiguous');
+    expect(r.assistantText).toBeNull();
+    expect(r.suggestedActions).toHaveLength(0);
   });
 
   it('chip-count contract: Stage 1 returns EXACTLY 3 chips (no duplicates)', () => {

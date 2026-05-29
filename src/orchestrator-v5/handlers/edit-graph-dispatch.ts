@@ -345,32 +345,51 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
   const hasRunAnalysisFact = input.priorFacts.some(
     (f) => f.fact_type === 'run_analysis' && isSuccessfulRunAnalysisFact(f),
   );
+
+  // V5 P0 — early-emit authority guard (PR #216 review BLOCKER fix).
+  //
+  // When the pre-LLM proposal intercept has ALREADY emitted a Stage 1
+  // / Stage 2 response this turn (`proposalAlreadyEmittedInThisTurn ===
+  // true`), that response is authoritative: it carries the clean
+  // concept and exactly the right chips. The no-op recovery layer must
+  // NOT touch it via ANY branch.
+  //
+  // A narrower "suppress only the proposal_stage_* branches" guard was
+  // insufficient: the SAME agreement message can also satisfy
+  // `looksLikeVagueEdit` / `classifyAnalyticalIntent` (e.g. the staging
+  // transcript "...how should we update the decision model?" matches
+  // the vague-edit signal), so after the proposal branch was suppressed
+  // the recovery returned `vague_edit` copy — "I haven't changed the
+  // model yet. Tell me which factor or edge..." — which the dispatch
+  // then applied over the Stage 1 text, reintroducing the exact failure
+  // this feature removes AND leaking the forbidden "factor or edge"
+  // phrasing. Returning a fully INERT decision here makes it
+  // structurally impossible for any current or future recovery branch
+  // to overwrite or append to the authoritative early-emit response.
+  // The dispatch still refreshes the pending-action TTL on the
+  // early-emit path independently of this return value.
+  if (input.proposalAlreadyEmittedInThisTurn === true) {
+    return {
+      branch: 'ambiguous',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: null,
+      suggestedActions: [],
+    };
+  }
+
   const intentClass = classifyAnalyticalIntent(input.message);
   const mutationSignal = hasMutationSignal(input.message);
 
   // V5 P0 proposal-memory continuation — Stage 2 / Stage 1 ladder.
   //
-  // Runs FIRST, before any other branch. Only fires when the caller
-  // supplied a non-null `pendingProposedConcept` AND has NOT already
-  // emitted the same proposal chips via the pre-LLM intercept earlier
-  // in this turn.
-  //
-  // The decision logic is shared with the pre-LLM intercept (see
-  // `decideProposalContinuation`); this branch is defence-in-depth
-  // for the case where the pre-LLM intercept did not fire (e.g.
-  // graph parse failure made it unsafe). When the intercept DID fire
-  // (`proposalAlreadyEmittedInThisTurn === true`), running it again
-  // here would duplicate chips on the wire (3 → 6 / 4 → 8) because
-  // the intercept's editResult chips and the recovery's chips have
-  // different ids and the chip-merge step dedupes only by
-  // `action_type`. PR #212 staging-smoke surfaced this as a real
-  // user-visible duplication; the guard keeps single-source-of-truth.
-  //
-  // Pending exists but neither Stage 1 nor Stage 2 matched → null
-  // return → fall through to the existing branch ladder. The pending
-  // decays naturally via TTL or is invalidated by a subsequent graph
-  // mutation.
-  if (input.proposalAlreadyEmittedInThisTurn !== true) {
+  // Defence-in-depth for the case where the pre-LLM intercept did NOT
+  // fire (e.g. graph parse failure made it unsafe, or this is the
+  // add-risk branch where the intercept is skipped). When the intercept
+  // DID fire, the early-emit authority guard above has already returned;
+  // we never reach here. Pending exists but neither Stage 1 nor Stage 2
+  // matched → null return → fall through to the existing branch ladder.
+  {
     const proposalDecision = decideProposalContinuation({
       message: input.message,
       pendingProposedConcept: input.pendingProposedConcept ?? null,
@@ -1802,10 +1821,16 @@ export async function dispatchEditGraph(
       // the long comment above for the V5ActionType-expansion rationale.
       handler_id: null,
       request_hash: computeRequestHash(payload),
-      // Deterministic clarification path makes zero LLM calls; LLM path
-      // makes at least one (handleEditGraph drives the classification +
-      // repair loop). Distinguish so dashboards can attribute cost honestly.
-      llm_calls_used: deterministicAddRiskAttempted ? 0 : 1,
+      // Deterministic paths make zero LLM calls; the LLM path makes at
+      // least one (handleEditGraph drives the classification + repair
+      // loop). Both the add-risk clarification (`deterministicAddRisk
+      // Attempted`) and the proposal-continuation pre-LLM intercept
+      // (`proposalEarlyEmitted`) short-circuit BEFORE handleEditGraph,
+      // so neither spends an LLM call. PR #216 review (SHOULD-FIX):
+      // the early-emit path was previously counted as 1, overcounting
+      // LLM cost for the new deterministic path. Distinguish so
+      // dashboards attribute cost honestly.
+      llm_calls_used: deterministicAddRiskAttempted || proposalEarlyEmitted ? 0 : 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: editGraphFact ? [editGraphFact] : [],
       graph: graphForCommit,

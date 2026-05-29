@@ -195,6 +195,49 @@ describe('extractProposedConcept', () => {
       .toBe('first-mover advantage');
   });
 
+  it('preserves internal "first" ("time to first value")', () => {
+    // PR #216 review NICE-TO-HAVE: trailing-anchored `first` reject does
+    // not touch an internal "first".
+    expect(extractProposedConcept('Would you like me to add time to first value?')?.concept)
+      .toBe('time to first value');
+  });
+
+  // ─── PR #216 second-round review: bare kind-word rejection ────────
+  it.each([
+    'Would you like me to add a factor?',
+    'Would you like me to add a risk?',
+    'Would you like me to add a driver?',
+    'Would you like me to add factors?',
+  ])('rejects a concept that reduces to a bare kind word: %s', (prose) => {
+    expect(extractProposedConcept(prose)).toBeNull();
+  });
+
+  it('still extracts the noun from a multi-word "X factor" / "X risk" concept', () => {
+    expect(extractProposedConcept('Would you like me to add a cost factor?')?.concept).toBe('cost');
+    expect(extractProposedConcept('Would you like me to add the onboarding risk?')?.concept).toBe('onboarding');
+  });
+
+  // ─── PR #216 second-round review: curly apostrophe + "what is" ────
+  it('truncates at a curly-apostrophe "what’s most likely" clause boundary', () => {
+    // Curly apostrophe (U+2019) — LLM prose routinely emits it; a
+    // straight-only pattern would have missed the boundary.
+    const r = extractProposedConcept(
+      'Would you like me to add team morale, or what’s most likely driving this?',
+    );
+    expect(r?.concept).toBe('team morale');
+  });
+
+  it('truncates at a "what is most likely" clause boundary (no contraction)', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add team morale, or what is most likely the cause?',
+    );
+    expect(r?.concept).toBe('team morale');
+  });
+
+  it('rejects a concept retaining a curly-apostrophe "what’s" tail', () => {
+    expect(extractProposedConcept('Would you like me to add what’s most important?')).toBeNull();
+  });
+
   it('preserves "team morale" (clean, ≤8 words, no trailing kind)', () => {
     const r = extractProposedConcept('Would you like me to add team morale?');
     expect(r?.concept).toBe('team morale');
