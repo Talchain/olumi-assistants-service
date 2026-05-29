@@ -65,6 +65,7 @@ import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative } from '../coaching/post-draft-narrative.js';
+import { sanitiseCoachingProse } from '../compose/output-safety.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -165,7 +166,29 @@ function draftResultToOlumiResponse(
       coachingSummary: result.coachingSummary,
       coachingBiasSignals: result.coachingBiasSignals,
     });
-    assistantText = narrative.text;
+    // Narrow-guard scrub of the composed narrative before it becomes
+    // assistant_text. Two leak paths land here:
+    //   (1) LLM-authored coaching strings the narrative embeds — either
+    //       verbatim via the coachingSummary whole-response short-circuit
+    //       (post-draft-narrative.ts §coachingSummary) or via excerpt
+    //       selection from strengthenItems / coachingBiasSignals.
+    //   (2) Graph-derived prose the deterministic sectioned builder
+    //       composes — `collectLabels(nodes, 'risk')` etc. reads
+    //       `graph.nodes[].label` directly and embeds it (e.g.
+    //       `"the risk of risk_churn"` when a risk node has
+    //       `label === id`).
+    // The central egress sanitiser (`sanitiseUserFacingText` invoked by
+    // `sanitiseOlumiResponseForEgress`) cannot close either path for
+    // `label === id` cases: its `resolveLabel(graph, "risk_churn")`
+    // returns `"risk_churn"` (the label, which IS the raw id) and
+    // substitutes the leak with itself. `sanitiseCoachingProse` applies
+    // a stricter rule scoped to coaching: real graph-ID hits with no
+    // usable label fall back to the prefix-aware generic ("the
+    // relevant risk"), never to the raw id. English compounds like
+    // `risk_adjusted` / `goal_setting` / `out_of_scope` are preserved
+    // (rule 3). The scrub is idempotent — running it again before the
+    // central egress is a no-op.
+    assistantText = sanitiseCoachingProse(narrative.text, result.graphOutput).text;
     emit(TelemetryEvents.V5PostDraftCoachingSourceSelected, {
       request_id: requestId,
       scenario_id: payload.scenario_id,

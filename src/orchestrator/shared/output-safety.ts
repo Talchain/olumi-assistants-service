@@ -57,6 +57,12 @@ const PREFIX_GENERIC: Readonly<Record<string, string>> = {
   risk: 'the relevant risk',
   con: 'the relevant constraint',
   constraint: 'the relevant constraint',
+  // `node_` is a scanner-only prefix (see `coaching-safety-scanner.ts`) — used
+  // by `sanitiseCoachingProse` when the LLM emits a generic `node_<x>` token
+  // that does not carry kind information. The general-purpose entity-ID regex
+  // (`ENTITY_ID_LEAK_RE`) does NOT include `node_`, so the only caller of this
+  // entry is the coaching-context scrubber.
+  node: 'the relevant element',
 };
 
 // Prefix-extraction regex. The prefix list MUST stay in lockstep with the
@@ -233,6 +239,153 @@ export function sanitiseUserFacingText(text: string, graph: GraphV3T | null): Sa
     matches.push({ prefix: split.prefix, resolved: 'generic' });
     changed = true;
     return generic;
+  });
+
+  return { text: changed ? replaced : text, matches };
+}
+
+// ----------------------------------------------------------------------------
+// Coaching-context scrub — narrow-guard variant for draft_graph coaching
+// prose where the LLM prompt forbids ID emission entirely. Uses the same
+// prefix taxonomy as `scanCoachingForIdLeakage`
+// (`src/cee/validation/coaching-safety-scanner.ts`) so detection scanner
+// and rewriter share a single set and findings are coherent.
+// ----------------------------------------------------------------------------
+
+/**
+ * Tracked prefixes for coaching-context ID detection. Seven short prefixes,
+ * mirroring `NODE_ID_PREFIXES` in `coaching-safety-scanner.ts`. `con_`
+ * (constraint) is intentionally absent here even though it is present in
+ * the broader `ENTITY_ID_LEAK_RE` / `PREFIX_GENERIC` — the scanner does
+ * not track it, so neither does this rewriter; alignment keeps scanner
+ * findings and rewriter capabilities matched.
+ *
+ * Full-word forms (`factor_`, `option_`, …) are NOT tracked here. The
+ * draft_graph adapter emits short prefixes; full-word forms come from
+ * deterministic V4 handlers whose strings flow through
+ * `sanitiseUserFacingText`, not through this function.
+ */
+const COACHING_ID_RE = /\b(?:fac|opt|out|risk|goal|dec|node)_[a-z0-9_]+\b/i;
+
+const COACHING_SPLIT_RE = /^(fac|opt|out|risk|goal|dec|node)_(.+)$/i;
+
+function splitCoachingMatch(match: string): { prefix: string; suffix: string } | null {
+  const m = match.match(COACHING_SPLIT_RE);
+  if (!m) return null;
+  return { prefix: m[1]!.toLowerCase(), suffix: m[2]! };
+}
+
+/**
+ * Rule 2 — orphan high-confidence gate. An orphan (token NOT present in
+ * `graph.nodes[].id`) is replaced only when its shape unambiguously
+ * identifies it as an internal ID rather than an English compound:
+ *
+ *   - Suffix contains a digit (`fac_42`, `risk_5`).
+ *   - Prefix is `fac` or `opt` (no English collisions exist for these;
+ *     same rule as the codebase-wide `UNAMBIGUOUS_SHORT_PREFIXES`).
+ *   - Suffix is multi-segment AND the first segment is ≥4 chars
+ *     (`risk_churn_rate`, `goal_revenue_growth`). Short first segments
+ *     like `of`/`to` indicate English connectors (`out_of_scope`).
+ *
+ * Anything else — single-segment risky-prefix orphan with no digit
+ * (e.g. `risk_adjusted`, `goal_setting`, `risk_phantom`) — is
+ * preserved by the caller (rule 3 in `sanitiseCoachingProse`). The
+ * trade-off is intentional: producing `the relevant risk` in place of
+ * `risk_adjusted` would mangle legitimate English compounds, and broken
+ * user-facing copy is worse than a residual leak on a genuinely
+ * ambiguous hallucinated single-segment token.
+ */
+function isHighConfidenceCoachingOrphan(split: { prefix: string; suffix: string }): boolean {
+  if (/\d/.test(split.suffix)) return true;
+  if (split.prefix === 'fac' || split.prefix === 'opt') return true;
+  const firstSeg = split.suffix.split('_', 1)[0] ?? '';
+  if (firstSeg === split.suffix) return false;
+  return firstSeg.length >= 4;
+}
+
+/**
+ * Scrub a single coaching-context string for entity-ID leaks using a
+ * narrow guard. Compared to `sanitiseUserFacingText`:
+ *
+ *   - Uses the seven scanner-taxonomy short prefixes only
+ *     (`fac/opt/out/risk/goal/dec/node`); the broader
+ *     `ENTITY_ID_LEAK_RE` (with `con` and full-word forms) is NOT used.
+ *   - Rule 1 (graph hit): looks the token up in `graph.nodes[].id`
+ *     directly. When the node exists with a usable label
+ *     (non-empty AND `label !== id`) the label is substituted; when the
+ *     node exists but the label is missing or equals the id, falls back
+ *     to the prefix-aware `PREFIX_GENERIC` neutral phrase. This closes
+ *     the leak path where the existing label-resolution gate misses
+ *     real graph nodes with `label === id`.
+ *   - Rule 2 (orphan): only high-confidence orphans
+ *     (`isHighConfidenceCoachingOrphan` above) are replaced; ambiguous
+ *     single-segment risky-prefix orphans are preserved.
+ *
+ * Caller (`sanitiseCoachingForDisplay` in
+ * `src/cee/unified-pipeline/stages/package.ts`) must pass a graph
+ * projection that retains nodes where `label === id` so rule 1 can
+ * detect them; otherwise they fall through to rule 2 and leak.
+ *
+ * Returns `SanitiseResult` matching `sanitiseUserFacingText` for
+ * telemetry parity. Empty/whitespace-only inputs are a no-op fast path.
+ * `matches[]` is only populated for actual replacements; preserved
+ * tokens (rule 3) do not generate entries.
+ */
+export function sanitiseCoachingProse(text: string, graph: GraphV3T | null): SanitiseResult {
+  if (!text || !text.trim()) return { text, matches: [] };
+
+  // Build the lookup once per call. `idSet` answers "is this token a real
+  // node ID?" (rule 1 gate). `idToLabel` answers "if it is, what label do
+  // we substitute?" — populated only when the node carries a usable label
+  // (non-empty AND distinct from the id). When a node is in `idSet` but
+  // absent from `idToLabel`, rule 1 falls back to `PREFIX_GENERIC`.
+  const idSet = new Set<string>();
+  const idToLabel = new Map<string, string>();
+  if (graph !== null) {
+    for (const node of graph.nodes) {
+      const id = (node as { id?: string }).id;
+      if (typeof id !== 'string' || id.length === 0) continue;
+      idSet.add(id);
+      const label = (node as { label?: string }).label;
+      if (typeof label === 'string' && label.length > 0 && label !== id) {
+        idToLabel.set(id, label);
+      }
+    }
+  }
+
+  // Per-call global matcher — never mutate the source regex.
+  const matcher = new RegExp(COACHING_ID_RE.source, 'gi');
+  const matches: SanitiseMatch[] = [];
+  let changed = false;
+
+  const replaced = text.replace(matcher, (match) => {
+    const split = splitCoachingMatch(match);
+    if (!split) return match;
+
+    // Rule 1: exact graph-ID hit.
+    if (idSet.has(match)) {
+      const label = idToLabel.get(match);
+      if (typeof label === 'string') {
+        matches.push({ prefix: split.prefix, resolved: 'label' });
+        changed = true;
+        return label;
+      }
+      const generic = PREFIX_GENERIC[split.prefix] ?? 'the relevant element';
+      matches.push({ prefix: split.prefix, resolved: 'generic' });
+      changed = true;
+      return generic;
+    }
+
+    // Rule 2: orphan — apply the high-confidence gate.
+    if (isHighConfidenceCoachingOrphan(split)) {
+      const generic = PREFIX_GENERIC[split.prefix] ?? 'the relevant element';
+      matches.push({ prefix: split.prefix, resolved: 'generic' });
+      changed = true;
+      return generic;
+    }
+
+    // Rule 3: ambiguous single-segment risky-prefix orphan — preserve.
+    return match;
   });
 
   return { text: changed ? replaced : text, matches };

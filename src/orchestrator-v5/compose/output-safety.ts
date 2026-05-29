@@ -65,11 +65,12 @@ import { log } from '../../utils/telemetry.js';
 
 import {
   sanitiseUserFacingText,
+  sanitiseCoachingProse,
   type SanitiseMatch,
   type SanitiseResult,
 } from '../../orchestrator/shared/output-safety.js';
 
-export { sanitiseUserFacingText };
+export { sanitiseUserFacingText, sanitiseCoachingProse };
 export type { SanitiseMatch, SanitiseResult };
 
 // ----------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import {
   sanitiseUserFacingText,
+  sanitiseCoachingProse,
   sanitiseOlumiResponseForEgress,
 } from '../output-safety.js';
 import { log } from '../../../utils/telemetry.js';
@@ -713,5 +714,270 @@ describe('sanitiseOlumiResponseForEgress', () => {
       expect(block.counter_case).toBeUndefined();
       expect(block.review_trigger).toBeUndefined();
     }
+  });
+});
+
+// ----------------------------------------------------------------------------
+// sanitiseCoachingProse — narrow-guard coaching-context scrub
+//
+// Covers the three rules described in
+// `src/orchestrator/shared/output-safety.ts`:
+//   - Rule 1: exact graph-ID hit → label (or PREFIX_GENERIC when label is
+//     missing / equals id).
+//   - Rule 2: orphan with high-confidence shape (digit, fac/opt prefix, or
+//     multi-segment ≥4-char first segment) → PREFIX_GENERIC.
+//   - Rule 3: ambiguous orphan (single-segment risky-prefix, no digit) →
+//     preserved verbatim. The intentional trade-off: broken copy is worse
+//     than a residual leak on a genuinely ambiguous token.
+// ----------------------------------------------------------------------------
+
+function coachingGraph(
+  nodes: Array<{ id: string; label?: string; kind?: string }>,
+): GraphV3T {
+  return {
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      kind: (n.kind ?? 'factor') as 'factor',
+      // `label === id` placeholder for the "no usable label" projection
+      // behaviour in `projectGraphForCoachingScrub` (package.ts).
+      label: n.label ?? n.id,
+    })),
+    edges: [],
+  } as unknown as GraphV3T;
+}
+
+describe('sanitiseCoachingProse', () => {
+  describe('rule 1 — exact graph-ID hit', () => {
+    it('replaces token with the node label when the label is usable', () => {
+      const g = coachingGraph([{ id: 'fac_pricing', label: 'Pricing' }]);
+      const r = sanitiseCoachingProse(
+        'Strengthen fac_pricing analysis to improve confidence.',
+        g,
+      );
+      expect(r.text).toBe('Strengthen Pricing analysis to improve confidence.');
+      expect(r.text).not.toContain('fac_pricing');
+      expect(r.matches).toEqual([{ prefix: 'fac', resolved: 'label' }]);
+    });
+
+    it('falls back to PREFIX_GENERIC when the graph node has label === id', () => {
+      // The motivating leak: `risk_churn` is a real node id but the LLM
+      // emitted no human label. The existing `sanitiseUserFacingText`
+      // gate misses this because (a) the projection drops the node and
+      // (b) the slug-shape gate classifies single-segment risky-prefix
+      // orphans as English compounds. `sanitiseCoachingProse` closes the
+      // gap by keying off `idSet`, not `resolveLabel`.
+      const g = coachingGraph([{ id: 'risk_churn', label: 'risk_churn' }]);
+      const r = sanitiseCoachingProse('Watch risk_churn carefully.', g);
+      expect(r.text).toBe('Watch the relevant risk carefully.');
+      expect(r.text).not.toContain('risk_churn');
+      expect(r.matches).toEqual([{ prefix: 'risk', resolved: 'generic' }]);
+    });
+
+    it('falls back to PREFIX_GENERIC for a real-graph dec_main with no usable label', () => {
+      const g = coachingGraph([{ id: 'dec_main', label: 'dec_main' }]);
+      const r = sanitiseCoachingProse('Commit dec_main before quarter-end.', g);
+      expect(r.text).toBe('Commit the relevant decision before quarter-end.');
+      expect(r.matches[0]).toEqual({ prefix: 'dec', resolved: 'generic' });
+    });
+  });
+
+  describe('rule 2 — orphan high-confidence', () => {
+    it('replaces orphan with a digit (risk_5)', () => {
+      const r = sanitiseCoachingProse('See risk_5 last quarter.', coachingGraph([]));
+      expect(r.text).toBe('See the relevant risk last quarter.');
+      expect(r.matches[0]).toEqual({ prefix: 'risk', resolved: 'generic' });
+    });
+
+    it('replaces orphan with multi-segment ≥4-char first segment (risk_churn_rate)', () => {
+      const r = sanitiseCoachingProse(
+        'Bound risk_churn_rate against historical baseline.',
+        coachingGraph([]),
+      );
+      expect(r.text).toBe('Bound the relevant risk against historical baseline.');
+      expect(r.matches[0]).toEqual({ prefix: 'risk', resolved: 'generic' });
+    });
+
+    it('replaces orphan with UNAMBIGUOUS `fac_` prefix even single-segment', () => {
+      const r = sanitiseCoachingProse('Strengthen fac_anything.', coachingGraph([]));
+      expect(r.text).toBe('Strengthen the relevant factor.');
+      expect(r.matches[0]).toEqual({ prefix: 'fac', resolved: 'generic' });
+    });
+
+    it('replaces orphan with UNAMBIGUOUS `opt_` prefix even single-segment', () => {
+      const r = sanitiseCoachingProse('Compare opt_x to baseline.', coachingGraph([]));
+      expect(r.text).toBe('Compare the relevant option to baseline.');
+      expect(r.matches[0]).toEqual({ prefix: 'opt', resolved: 'generic' });
+    });
+
+    it('uses "the relevant element" for `node_` orphan with digit', () => {
+      const r = sanitiseCoachingProse('Resolve node_42 reference.', coachingGraph([]));
+      expect(r.text).toBe('Resolve the relevant element reference.');
+      expect(r.matches[0]).toEqual({ prefix: 'node', resolved: 'generic' });
+    });
+  });
+
+  describe('rule 3 — ambiguous preservation', () => {
+    it('preserves `risk_adjusted` (single-segment risky-prefix orphan)', () => {
+      const text = 'Use risk_adjusted analysis to compare options.';
+      const r = sanitiseCoachingProse(text, coachingGraph([]));
+      expect(r.text).toBe(text);
+      expect(r.matches).toEqual([]);
+    });
+
+    it('preserves `risk_adjusted return on capital` without mangling adjacent words', () => {
+      // The regex matches only `risk_adjusted`; the word boundary stops
+      // before the space, so ` return on capital` is outside the match
+      // and rule 3 leaves the matched token alone.
+      const text = 'Use a risk_adjusted return on capital framework.';
+      const r = sanitiseCoachingProse(text, coachingGraph([]));
+      expect(r.text).toBe(text);
+      expect(r.matches).toEqual([]);
+    });
+
+    it('preserves `goal_setting`', () => {
+      const text = 'Apply goal_setting principles to the team.';
+      const r = sanitiseCoachingProse(text, coachingGraph([]));
+      expect(r.text).toBe(text);
+      expect(r.matches).toEqual([]);
+    });
+
+    it('preserves `out_of_scope` (short connector first segment)', () => {
+      const text = 'Treating that as out_of_scope is reasonable.';
+      const r = sanitiseCoachingProse(text, coachingGraph([]));
+      expect(r.text).toBe(text);
+      expect(r.matches).toEqual([]);
+    });
+
+    it('preserves an ambiguous orphan like `risk_phantom` (accepted trade-off)', () => {
+      // Documented trade-off: producing "the relevant risk" in place of
+      // every single-segment risky-prefix orphan would mangle English
+      // compounds like `risk_adjusted`. The narrow guard preserves;
+      // residual leaks on hallucinated single-segment IDs are accepted.
+      const text = 'Track risk_phantom carefully.';
+      const r = sanitiseCoachingProse(text, coachingGraph([]));
+      expect(r.text).toBe(text);
+      expect(r.matches).toEqual([]);
+    });
+  });
+
+  describe('regex non-match cases (preserved by construction)', () => {
+    it('preserves `go_to_market` (non-tracked prefix `go_`)', () => {
+      const text = 'Compare go_to_market against status_quo.';
+      const r = sanitiseCoachingProse(text, coachingGraph([]));
+      expect(r.text).toBe(text);
+      expect(r.matches).toEqual([]);
+    });
+
+    it('preserves `decision_making` (no `_` immediately after `dec`)', () => {
+      // `dec_` prefix requires an underscore as the third character;
+      // `decision_making` is `dec` + `i...`, no match.
+      const text = 'Sharpen decision_making and outcome_based reasoning.';
+      const r = sanitiseCoachingProse(text, coachingGraph([]));
+      expect(r.text).toBe(text);
+      expect(r.matches).toEqual([]);
+    });
+  });
+
+  describe('content-shape behaviours', () => {
+    it('passes clean coaching prose through unchanged', () => {
+      const text = 'Add a baseline option to anchor your comparison.';
+      const r = sanitiseCoachingProse(text, coachingGraph([]));
+      expect(r.text).toBe(text);
+      expect(r.matches).toEqual([]);
+    });
+
+    it('rewrites multiple IDs in one string', () => {
+      const g = coachingGraph([
+        { id: 'opt_a', label: 'Option A' },
+        { id: 'opt_b', label: 'Option B' },
+        { id: 'fac_cost', label: 'Cost' },
+      ]);
+      const r = sanitiseCoachingProse(
+        'Compare opt_a and opt_b on fac_cost dimensions.',
+        g,
+      );
+      expect(r.text).toBe('Compare Option A and Option B on Cost dimensions.');
+      expect(r.text).not.toMatch(/\b(?:fac|opt|out|risk|goal|dec|node)_[a-z0-9_]+\b/i);
+      expect(r.matches).toHaveLength(3);
+      expect(r.matches.every((m) => m.resolved === 'label')).toBe(true);
+    });
+
+    it('is a no-op fast path on empty / whitespace-only input', () => {
+      expect(sanitiseCoachingProse('', null)).toEqual({ text: '', matches: [] });
+      expect(sanitiseCoachingProse('   \n\t  ', null)).toEqual({
+        text: '   \n\t  ',
+        matches: [],
+      });
+    });
+
+    it('returns SanitiseResult shape matching sanitiseUserFacingText for telemetry parity', () => {
+      const g = coachingGraph([
+        { id: 'fac_pricing', label: 'Pricing' },
+        { id: 'risk_churn', label: 'risk_churn' },
+      ]);
+      const r = sanitiseCoachingProse(
+        'See fac_pricing, watch risk_churn, ignore risk_adjusted, replace risk_5.',
+        g,
+      );
+      // Three replacements:
+      //   - fac_pricing → 'Pricing' (rule 1 label)
+      //   - risk_churn → 'the relevant risk' (rule 1 generic, label===id)
+      //   - risk_5 → 'the relevant risk' (rule 2 digit)
+      //   - risk_adjusted preserved (rule 3 ambiguous)
+      expect(r.matches).toEqual([
+        { prefix: 'fac', resolved: 'label' },
+        { prefix: 'risk', resolved: 'generic' },
+        { prefix: 'risk', resolved: 'generic' },
+      ]);
+      expect(r.text).toContain('Pricing');
+      expect(r.text).toContain('risk_adjusted');
+      expect(r.text).not.toContain('fac_pricing');
+      expect(r.text).not.toContain('risk_churn');
+      expect(r.text).not.toContain('risk_5');
+    });
+  });
+
+  describe('idempotency', () => {
+    it('rule 1 (label hit) reaches a fixed point on the second pass', () => {
+      const g = coachingGraph([{ id: 'fac_pricing', label: 'Pricing' }]);
+      const once = sanitiseCoachingProse('See fac_pricing.', g);
+      const twice = sanitiseCoachingProse(once.text, g);
+      expect(twice.text).toBe(once.text);
+      expect(twice.matches).toEqual([]);
+    });
+
+    it('rule 1 (generic via label===id) reaches a fixed point on the second pass', () => {
+      const g = coachingGraph([{ id: 'risk_churn', label: 'risk_churn' }]);
+      const once = sanitiseCoachingProse('Track risk_churn closely.', g);
+      const twice = sanitiseCoachingProse(once.text, g);
+      expect(twice.text).toBe(once.text);
+      expect(twice.matches).toEqual([]);
+    });
+
+    it('rule 2 (high-confidence orphan) reaches a fixed point on the second pass', () => {
+      const once = sanitiseCoachingProse(
+        'Strengthen fac_anything and bound risk_churn_rate.',
+        coachingGraph([]),
+      );
+      const twice = sanitiseCoachingProse(once.text, coachingGraph([]));
+      expect(twice.text).toBe(once.text);
+      expect(twice.matches).toEqual([]);
+    });
+
+    it('rule 3 (preserved) is trivially idempotent', () => {
+      const text = 'Use risk_adjusted analysis and apply goal_setting.';
+      const once = sanitiseCoachingProse(text, coachingGraph([]));
+      const twice = sanitiseCoachingProse(once.text, coachingGraph([]));
+      expect(once.text).toBe(text);
+      expect(twice.text).toBe(text);
+    });
+
+    it('clean input is trivially idempotent', () => {
+      const text = 'Add a baseline option.';
+      const once = sanitiseCoachingProse(text, coachingGraph([]));
+      const twice = sanitiseCoachingProse(once.text, coachingGraph([]));
+      expect(once.text).toBe(text);
+      expect(twice.text).toBe(text);
+    });
   });
 });
