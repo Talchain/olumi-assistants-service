@@ -426,7 +426,15 @@ function attachDraftGraphTimings(
   timings: DraftGraphTimings,
   requestId: string,
 ): unknown {
-  if (!config.cee.timingDebugEnabled) {
+  // Gate: either the original V5_TIMING_DEBUG operator flag OR the new
+  // CEE_DIAGNOSTIC_TRACE_ENABLED flag. When the diagnostic trace is on,
+  // V5 reads the unified-pipeline substage timings via this body field
+  // to populate `_diagnostic_trace.benchmarking.substage_timings`. The
+  // wire emission of `_timings` itself still requires the two-gate
+  // model in route-v2 (`V5_TIMING_DEBUG` + `X-Olumi-Debug: timings`),
+  // so this relaxation only changes IN-MEMORY availability — the wire
+  // surface contract is unchanged.
+  if (!config.cee.timingDebugEnabled && !config.features.diagnosticTraceEnabled) {
     return body;
   }
   emit(TelemetryEvents.CeeUnifiedPipelineStageTimings, {
@@ -471,7 +479,14 @@ export async function runUnifiedPipeline(
   // fixes gated the telemetry emit + body mutation; this round eliminates
   // the residual stage-timer overhead too so the OFF story is consistent
   // across V5 turn + run_analysis + draft_graph.
-  const timingsEnabled = config.cee.timingDebugEnabled;
+  // Gate: original V5_TIMING_DEBUG operator flag OR CEE_DIAGNOSTIC_TRACE_ENABLED.
+  // See `attachDraftGraphTimings` for the wire-surface contract; this
+  // controls IN-MEMORY substage capture only, not wire emission of
+  // `_timings`. The V5 diagnostic trace reads the captured numbers via
+  // `DraftGraphResult.draftGraphTimings` and surfaces them under
+  // `_diagnostic_trace.benchmarking.substage_timings` when the diagnostic
+  // flag is on.
+  const timingsEnabled = config.cee.timingDebugEnabled || config.features.diagnosticTraceEnabled;
   const stageStart: () => number = timingsEnabled
     ? () => Date.now()
     : () => 0;

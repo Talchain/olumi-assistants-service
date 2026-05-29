@@ -66,6 +66,11 @@ import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative } from '../coaching/post-draft-narrative.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
+import {
+  buildV5DiagnosticTrace,
+  buildErrorV5DiagnosticTrace,
+  type V5DiagnosticTrace,
+} from '../diagnostics/v5-diagnostic-trace.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -99,6 +104,16 @@ export interface DispatchDraftGraphResult {
    * and to make the wire field present on every CEE dispatch path.
    */
   readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
+  /**
+   * V5 diagnostic trace (additive observability) — populated when
+   * `CEE_DIAGNOSTIC_TRACE_ENABLED=true`. Carries per-stage latency
+   * breakdown, LLM call records, pipeline outcome, correlation IDs.
+   * `undefined` when the flag is off. The route's egress wrapper
+   * threads this onto the wire envelope via the strip-validate-reattach
+   * pattern alongside the existing `_timings` block; OlumiResponseSchema
+   * never sees it.
+   */
+  readonly diagnosticTrace?: V5DiagnosticTrace;
 }
 
 /**
@@ -324,6 +339,27 @@ export async function dispatchDraftGraph(
       },
       'V5 draft_graph dispatch — unified pipeline threw',
     );
+    // V5 diagnostic trace — error path. Builder short-circuits when the
+    // flag is off (returns undefined). Pipeline telemetry attached on the
+    // error by `handleDraftGraph` (toolLLMTelemetry, pipelineDetails) is
+    // best-effort: it may be absent on early failures and present on late
+    // ones (e.g. SO parse fail after the LLM call landed). The trace is
+    // attached to the thrown error so route-v2's catch block can thread it
+    // onto the 500 BoundaryError wire envelope. This surface meets brief
+    // test #5 (timeout → `timed_out: true`, `retry_count` reflects attempts).
+    const errToolTel = (err as { toolLLMTelemetry?: DraftGraphResult['toolLLMTelemetry'] })
+      .toolLLMTelemetry;
+    const diagnosticTraceOnError = buildErrorV5DiagnosticTrace({
+      startedAt,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+      error: err,
+      toolLLMTelemetry: errToolTel,
+    });
+    if (diagnosticTraceOnError !== undefined && err && typeof err === 'object') {
+      (err as { diagnosticTrace?: V5DiagnosticTrace }).diagnosticTrace = diagnosticTraceOnError;
+    }
     // Throw upward — route-v2.ts can decide the wire-level mapping. Keeping
     // the branch honest: success path returns normally; failure surfaces
     // as a thrown error that the route converts to a 500 BoundaryError.
@@ -381,6 +417,11 @@ export async function dispatchDraftGraph(
     }
     const briefTextForCommit = briefNorm.value;
 
+    // Capture persistence_ms for the diagnostic trace's substage timings.
+    // Cheap: two Date.now() calls regardless of flag state — the timing is
+    // only surfaced when the trace is built (flag-on); flag-off path
+    // discards the value at the build site without allocating the trace.
+    const commitStartedAt = Date.now();
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
@@ -399,6 +440,7 @@ export async function dispatchDraftGraph(
         briefText: briefTextForCommit,
       },
     );
+    const persistenceMs = Date.now() - commitStartedAt;
 
     const response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId);
     // V5 finaliser contract: surface the rich pipeline payload on the
@@ -457,6 +499,23 @@ export async function dispatchDraftGraph(
       reason: 'dispatcher_invariant_forbids_readRecent',
     });
 
+    // V5 diagnostic trace — additive observability. Builder short-circuits
+    // when CEE_DIAGNOSTIC_TRACE_ENABLED is off (returns undefined; no
+    // allocations). Otherwise produces the full per-stage breakdown from
+    // V4's existing telemetry (toolLLMTelemetry, pipelineOutcome,
+    // draftGraphTimings) plus the captured persistence_ms. The route's
+    // egress wrapper threads this onto the wire via the strip-validate-
+    // reattach pattern.
+    const diagnosticTrace = buildV5DiagnosticTrace({
+      startedAt,
+      draftResult,
+      commitResult,
+      persistenceMs,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+
     log.info(
       {
         request_id: requestId,
@@ -474,6 +533,7 @@ export async function dispatchDraftGraph(
       analysisReady,
       graph: draftResult.graphOutput,
       freshness,
+      ...(diagnosticTrace !== undefined ? { diagnosticTrace } : {}),
     };
   } catch (err) {
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).

@@ -30,6 +30,7 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
+import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 
 const DEBUG_HEADER_NAME = 'x-olumi-debug';
 
@@ -82,6 +83,21 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    * than wrapping a non-object into a typed-valid surface.
    */
   readonly _timings?: TurnTimingsBlock;
+  /**
+   * V5 diagnostic trace (additive observability). Populated only when
+   * `config.features.diagnosticTraceEnabled` (env
+   * `CEE_DIAGNOSTIC_TRACE_ENABLED=true`) is set. Carries per-stage
+   * latency breakdown, LLM call records, pipeline outcome, correlation
+   * IDs. Stripped before strict `OlumiResponseSchema` validation,
+   * re-attached after — same mechanic as `_timings`. The route's
+   * runtime guard (`coerceV5DiagnosticTrace`) drops malformed shapes
+   * before re-attach.
+   *
+   * Gating: flag-only in Phase A (no `X-Olumi-Debug: diagnostics`
+   * token requirement). The `'diagnostics'` token below is reserved
+   * for forward-compatibility; no caller reads it today.
+   */
+  readonly _diagnostic_trace?: V5DiagnosticTrace;
 };
 
 /**
@@ -90,7 +106,7 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
  * the literal string. Keeping the union tight catches typos at the
  * caller site (`debugFieldRequested(headers, 'timins')` is a tsc error).
  */
-export type DebugFieldToken = 'timings';
+export type DebugFieldToken = 'timings' | 'diagnostics';
 
 /**
  * Returns true when the request's `X-Olumi-Debug` header includes the

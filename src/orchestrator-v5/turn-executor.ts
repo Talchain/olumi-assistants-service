@@ -380,12 +380,20 @@ export async function runTurnExecutor(
   const stagesCompleted: string[] = [];
 
   // Fix 4 (observability): per-step wall-clock accumulator. Every collection
-  // site checks `timingsEnabled` so production (default `V5_TIMING_DEBUG=false`)
-  // pays zero allocation, no `Date.now()` deltas, no telemetry emit, and no
-  // response mutation. The flag is the single switch — defense-in-depth at
-  // the route egress (sendFinalised200) catches any upstream attach that
-  // bypasses this gate.
-  const timingsEnabled = config.cee.timingDebugEnabled;
+  // site checks `timingsEnabled` so production (default `V5_TIMING_DEBUG=false`
+  // AND `CEE_DIAGNOSTIC_TRACE_ENABLED=false`) pays zero allocation, no
+  // `Date.now()` deltas, no telemetry emit, and no response mutation.
+  //
+  // V5 diagnostic trace (Phase A) — gate relaxation: timings populate when
+  // EITHER the original V5_TIMING_DEBUG operator flag is on OR the new
+  // CEE_DIAGNOSTIC_TRACE_ENABLED flag is on. The wire emission of
+  // `_timings` still requires the two-gate model in route-v2; the new
+  // flag only enables IN-MEMORY substage capture so the V5 diagnostic
+  // trace can surface them under `_diagnostic_trace.benchmarking`. The
+  // wire surface contract is unchanged. Defence-in-depth at the route
+  // egress (sendFinalised200) catches any upstream attach that bypasses
+  // this gate.
+  const timingsEnabled = config.cee.timingDebugEnabled || config.features.diagnosticTraceEnabled;
   const turnTimings: V5TurnTimings = {};
   // Handler-level run_analysis PLoT timings are reported back via a typed
   // `__plot_timings` slot on the HandlerOutcome. The executor copies them

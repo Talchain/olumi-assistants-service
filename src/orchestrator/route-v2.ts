@@ -90,6 +90,9 @@ import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { debugFieldRequested, type OlumiResponseWithDebugFields } from './debug-fields.js';
 import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
+import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
@@ -225,6 +228,35 @@ function sendFinalised200(
      *  omits today; graph-mutating system events are scoped narrowly and
      *  most do not ship the readiness field. */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
+    /**
+     * V5 diagnostic trace (additive observability). Threaded in by paths
+     * that build the trace out-of-band on the dispatch result
+     * (draft_graph). For paths that attach the trace on the candidate
+     * response body (turn_executor, edit_graph, chip_click, system_event),
+     * leave this undefined — the strip step below will lift the trace off
+     * the body. Either source path lands in the same re-attach gate.
+     *
+     * When set AND `config.features.diagnosticTraceEnabled` is true, the
+     * trace is stripped before egress validation (so the strict
+     * `OlumiResponseSchema` never sees it), then re-attached on the
+     * wire body after validation passes. `finalisation_ms` and
+     * `response_hash` are stamped during re-attach.
+     */
+    readonly diagnosticTrace?: V5DiagnosticTrace;
+    /**
+     * V5 diagnostic trace (additive observability) — minimal-trace
+     * fallback. When the dispatch path did NOT provide its own full
+     * trace (no `ctx.diagnosticTrace`, no body-attached
+     * `_diagnostic_trace`) AND `requestStartedAt` is set AND the flag is
+     * on, `sendFinalised200` builds a minimal trace inline from
+     * `requestStartedAt` + `scenarioId` + `turnId` + the optional graph.
+     * This covers edit_graph / chip_click / system_event without needing
+     * to touch their dispatch handlers (avoids overlap with P0 work in
+     * those files).
+     */
+    readonly requestStartedAt?: number;
+    readonly scenarioId?: string;
+    readonly turnId?: string;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -244,30 +276,78 @@ function sendFinalised200(
   // re-introduce a leak via a future validator transform. The fallback is
   // currently hard-coded clean; scrubbing it is defence-in-depth against
   // future fallback drift. See output-safety.ts for the design rationale.
+  // Capture wall-clock for the finalisation substage. Stamped on the
+  // diagnostic trace at the very bottom of this function (after re-
+  // attach) so the trace records the actual time spent in finalisation +
+  // egress validation + re-attach + send. Flag-off cost is one
+  // `Date.now()` call — the value is discarded if no trace is built.
+  const finaliseStart = Date.now();
   const candidateFinalised = finaliseV5Response(candidate, ctx);
-  // Fix 4 (observability): pluck out the optional `_timings` block before
-  // egress validation. OlumiResponseSchema is `.strict()` — unknown keys
-  // would fail safeParse and trigger the typed-fallback path. We strip
-  // unconditionally (defense-in-depth: a stale upstream attach must not
+  // Fix 4 (observability) + V5 diagnostic trace (Phase A): pluck out the
+  // optional `_timings` and `_diagnostic_trace` blocks before egress
+  // validation. OlumiResponseSchema is `.strict()` — unknown keys would
+  // fail safeParse and trigger the typed-fallback path. We strip
+  // unconditionally (defence-in-depth: a stale upstream attach must not
   // leak past this seam), validate the cleaned shape, then re-attach
-  // ONLY when the two-gate model passes — see the re-attach block below
-  // for the gate (server permission `config.cee.timingDebugEnabled` AND
-  // per-request `X-Olumi-Debug: timings` header). The route is the last
-  // guard — upstream callers cannot bypass either gate by attaching
-  // `_timings` themselves.
-  const stripped = ((): { timings: unknown; body: import('@talchain/schemas/boundary').OlumiResponse } => {
-    const raw = (candidateFinalised as Record<string, unknown>)._timings;
-    if (raw === undefined) {
-      return { timings: undefined, body: candidateFinalised };
+  // each surface under its own gate model:
+  //   - `_timings` re-attaches when BOTH `config.cee.timingDebugEnabled`
+  //     AND the per-request `X-Olumi-Debug: timings` header pass (two-
+  //     gate, post-PR-181 contract).
+  //   - `_diagnostic_trace` re-attaches when `config.features.
+  //     diagnosticTraceEnabled` passes (flag-only Phase A — see
+  //     plan file for rationale). When the dispatch path provided
+  //     `ctx.diagnosticTrace`, that wins over any body-attached trace
+  //     (out-of-band threading from draft_graph dispatch supersedes the
+  //     body-attached convention used by other paths).
+  // The route is the last guard — upstream callers cannot bypass either
+  // gate by attaching the field themselves.
+  const stripped = ((): {
+    timings: unknown;
+    diagnosticTrace: unknown;
+    body: import('@talchain/schemas/boundary').OlumiResponse;
+  } => {
+    const asRecord = candidateFinalised as Record<string, unknown>;
+    const hasTimings = '_timings' in asRecord;
+    const hasTrace = '_diagnostic_trace' in asRecord;
+    if (!hasTimings && !hasTrace) {
+      return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
-    const cloned = { ...(candidateFinalised as Record<string, unknown>) };
+    const cloned = { ...asRecord };
+    const timings = cloned._timings;
+    const diagnosticTrace = cloned._diagnostic_trace;
     delete cloned._timings;
+    delete cloned._diagnostic_trace;
     return {
-      timings: raw,
+      timings: hasTimings ? timings : undefined,
+      diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
       body: cloned as import('@talchain/schemas/boundary').OlumiResponse,
     };
   })();
   const timingsForWire = stripped.timings;
+  // `ctx.diagnosticTrace` (out-of-band, e.g. from dispatchDraftGraph) wins
+  // over a body-attached trace (e.g. from turn_executor `finalizeRun`).
+  // When both are absent AND ctx.requestStartedAt + scenarioId + turnId
+  // are provided AND the flag is on, build a minimal trace inline. This
+  // is the fallback path for the 4 non-draft V5 dispatch exits whose
+  // handlers we deliberately leave untouched (avoids overlap with P0
+  // proposal-memory work in turn-executor.ts / edit-graph-dispatch.ts).
+  const minimalTrace: V5DiagnosticTrace | undefined =
+    ctx.diagnosticTrace === undefined &&
+    stripped.diagnosticTrace === undefined &&
+    ctx.requestStartedAt !== undefined &&
+    ctx.scenarioId !== undefined &&
+    ctx.turnId !== undefined
+      ? buildMinimalV5DiagnosticTrace({
+          startedAt: ctx.requestStartedAt,
+          scenarioId: ctx.scenarioId,
+          turnId: ctx.turnId,
+          requestId,
+          exitPath,
+          graph: ctx.graph,
+        })
+      : undefined;
+  const diagnosticTraceForWire: unknown =
+    ctx.diagnosticTrace ?? stripped.diagnosticTrace ?? minimalTrace;
   const candidateForValidation = stripped.body;
   const candidateSanitised = sanitiseOlumiResponseForEgress(candidateForValidation, {
     graph: ctx.graph,
@@ -335,6 +415,47 @@ function sendFinalised200(
       ctx,
     );
   }
+  // Re-attach `_diagnostic_trace` post-validation on the success path AND
+  // only when `config.features.diagnosticTraceEnabled` is set (single-flag
+  // gating per the Phase A plan). The DebugFieldToken vocabulary includes
+  // `'diagnostics'` for forward-compat, but no header check is enforced
+  // here today — operators flip the flag at the deployment level to opt
+  // in. The fallback envelope never carries a debug surface; an upstream
+  // attach with the flag off is silently dropped by the strip step above.
+  //
+  // Spreading breaks WeakSet membership (Mechanism B of the finaliser
+  // brand), so we re-finalise the augmented body for the preSerialization
+  // hook just as the `_timings` re-attach does. The trace's
+  // `benchmarking.substage_timings.finalisation_ms` is stamped from
+  // `finaliseStart` captured at function entry; `correlation_ids.response_hash`
+  // is stamped from the hash of the AUGMENTED body minus the trace itself
+  // so the hash ties the trace to the actual wire shape the consumer sees.
+  const traceForWire = coerceV5DiagnosticTrace(diagnosticTraceForWire);
+  if (egress.ok && traceForWire !== null && config.features.diagnosticTraceEnabled) {
+    const finalisationMs = Math.max(0, Date.now() - finaliseStart);
+    const stampedTrace: V5DiagnosticTrace = {
+      ...traceForWire,
+      benchmarking: {
+        ...traceForWire.benchmarking,
+        substage_timings: {
+          ...traceForWire.benchmarking.substage_timings,
+          finalisation_ms: finalisationMs,
+        },
+      },
+      correlation_ids: {
+        ...traceForWire.correlation_ids,
+        response_hash: computeResponseHash(wireBody),
+      },
+    };
+    const augmented: OlumiResponseWithDebugFields = {
+      ...wireBody,
+      _diagnostic_trace: stampedTrace,
+    };
+    wireBody = finaliseV5Response(
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      ctx,
+    );
+  }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok);
   return reply.code(200).send(wireBody);
 }
@@ -371,6 +492,44 @@ function coerceTurnTimingsBlock(raw: unknown): TurnTimingsBlock | null {
   const proto = Object.getPrototypeOf(raw);
   if (proto !== Object.prototype && proto !== null) return null;
   return raw as TurnTimingsBlock;
+}
+
+/**
+ * Runtime guard for the V5 diagnostic trace at the wire seam.
+ *
+ * Same defence-in-depth shape as `coerceTurnTimingsBlock`: plain object
+ * by prototype, plus a couple of structural sanity checks that the
+ * `V5DiagnosticTrace` invariants hold (the `benchmarking` and
+ * `correlation_ids` sub-objects exist and look right). Failing any check
+ * drops the trace silently — better than shipping a half-shaped trace
+ * that confuses the exporter or fails its own consumer-side validation.
+ *
+ * Field-level depth is intentionally shallow: the upstream builder is
+ * the source of truth for the trace shape; this guard only catches
+ * shape regressions that bypass the type system (a stale upstream
+ * attach via `as unknown as V5DiagnosticTrace`, or a future producer
+ * that returns the wrong wrapper).
+ */
+function coerceV5DiagnosticTrace(raw: unknown): V5DiagnosticTrace | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'object') return null;
+  if (Array.isArray(raw)) return null;
+  const proto = Object.getPrototypeOf(raw);
+  if (proto !== Object.prototype && proto !== null) return null;
+  const rec = raw as Record<string, unknown>;
+  const bench = rec.benchmarking;
+  if (bench === null || typeof bench !== 'object' || Array.isArray(bench)) return null;
+  const benchRec = bench as Record<string, unknown>;
+  if (typeof benchRec.total_duration_ms !== 'number') return null;
+  const subst = benchRec.substage_timings;
+  if (subst === null || typeof subst !== 'object' || Array.isArray(subst)) return null;
+  const corr = rec.correlation_ids;
+  if (corr === null || typeof corr !== 'object' || Array.isArray(corr)) return null;
+  const corrRec = corr as Record<string, unknown>;
+  if (typeof corrRec.request_id !== 'string') return null;
+  if (typeof corrRec.scenario_id !== 'string') return null;
+  if (typeof corrRec.turn_id !== 'string') return null;
+  return raw as V5DiagnosticTrace;
 }
 
 /**
@@ -738,6 +897,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
   app.addHook('preSerialization', v5FinaliserPreSerializationHook);
 
   app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', async (req, reply) => {
+    // V5 diagnostic trace (Phase A) — route-handler wall-clock baseline.
+    // Threaded into `sendFinalised200` via `ctx.requestStartedAt` so the
+    // minimal-trace builder can compute `total_duration_ms` from a
+    // consistent reference across all V5 exit paths. Captured at the
+    // earliest possible moment so it covers pre-flight + dispatch +
+    // composition; the trace's `finalisation_ms` substage records the
+    // egress-side cost separately.
+    const routeStartedAt = Date.now();
     // Shared pre-flight: extension parse → B1 ingress → scenario upsert.
     // Every dispatch branch in this handler runs AFTER this call. The
     // helper is the only site that may invoke those three primitives in
@@ -794,6 +961,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return sendFinalised200(reply, requestId, 'system_event', sysResult.response, {
         analysisReady: sysResult.analysisReady,
         graph: sysResult.graph,
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
       });
     }
 
@@ -875,6 +1045,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisReady: cc.analysisReady,
           graph: cc.graph,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
         });
       } catch (err) {
         log.error(
@@ -984,6 +1157,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisReady: dg.analysisReady,
           graph: dg.graph,
           ...(dg.freshness ? { freshness: dg.freshness } : {}),
+          ...(dg.diagnosticTrace ? { diagnosticTrace: dg.diagnosticTrace } : {}),
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
         });
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
@@ -1054,6 +1231,24 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           stage: ingress.stage,
           ...(Object.keys(postStageExtras).length > 0 ? { postStageExtras } : {}),
         });
+        // V5 diagnostic trace — error path. When CEE_DIAGNOSTIC_TRACE_ENABLED
+        // is on AND the dispatcher's catch block attached a trace to the
+        // thrown error (see draft-graph-dispatch.ts), thread it onto the
+        // 500 BoundaryError envelope so debug exports can see the timeout
+        // / SO-parse-failure substage timings even on failed turns.
+        // Brief test #5 (timeout → `timed_out: true`, `retry_count`) reads
+        // this surface. Flag-off / no-trace cases ship the unchanged
+        // BoundaryError shape bit-for-bit.
+        const errorTrace = coerceV5DiagnosticTrace(
+          (err as { diagnosticTrace?: unknown }).diagnosticTrace,
+        );
+        const wireBoundary: BoundaryError =
+          errorTrace !== null && config.features.diagnosticTraceEnabled
+            ? ({
+                ...boundaryError,
+                _diagnostic_trace: errorTrace,
+              } as unknown as BoundaryError)
+            : boundaryError;
         // HTTP 500 preserved: keep DGAI's status-code semantics unchanged.
         // Wire body carries (each at top level of `details`):
         //   - `reason` (typed reason)
@@ -1063,7 +1258,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         //     pipeline body's `details` — e.g. for OPTIONS_IDENTICAL bypass:
         //     `identical_option_ids`, `violation_code`,
         //     `intervention_signature`, `repair_skip_reason`.
-        return reply.code(500).send(boundaryError);
+        // Top-level (alongside `error` / `details`):
+        //   - `_diagnostic_trace` when the flag is on AND the dispatcher
+        //     attached a trace; absent otherwise.
+        return reply.code(500).send(wireBoundary);
       }
     }
 
@@ -1164,6 +1362,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
       });
     }
 
@@ -1207,6 +1408,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       );
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
       });
     }
 
@@ -1226,6 +1430,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
       });
     }
 
@@ -1377,6 +1584,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisReady: eg.analysisReady,
           graph: eg.graph,
           ...(eg.freshness ? { freshness: eg.freshness } : {}),
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
         });
       } catch (err) {
         log.error(
@@ -1464,6 +1674,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       } as import('@talchain/schemas/boundary').OlumiResponse;
       return sendFinalised200(reply, requestId, 'frame_no_brief_guard', guardResponse, {
         graph: null,
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
       });
     }
 
@@ -1550,6 +1763,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       analysisReady: run.analysisReady,
       graph: turnGraph,
       ...(run.freshness ? { freshness: run.freshness } : {}),
+      requestStartedAt: routeStartedAt,
+      scenarioId: ingress.scenario_id,
+      turnId: ingress.turn_id,
     });
   });
 }
