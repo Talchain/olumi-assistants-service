@@ -36,8 +36,10 @@ turns — i.e. tool-selection quality and the explanation `answer_text` on free-
 every gate. It would **not** change: gated turns (deterministic copy), `decision_review` prose (enricher
 reads raw enrichment), post-analysis advice copy (deterministic from thin projections), or the analysis
 headline / chips (deterministic from raw enrichment). **Generic ContextPack enrichment is therefore
-low-leverage.** The leverage is at the deterministic copy-owning surfaces and the enricher's input
-adapter.
+low-leverage on current static evidence** — but note the routing prompt *is* a real consumer (it writes
+the explanation `answer_text`), so v41.8 is **held pending the §10b runtime bypass-rate trace, not
+dismissed as structurally irrelevant**. Today's leverage is at the deterministic copy-owning surfaces and
+the enricher's input adapter.
 
 **Drop-point tally (of the six known):** 0 fully fixed · 4 partially fixed · 1 fixed-for-blocks /
 residual-for-free-text · `triggered_plays` + `top_fragile_assumption` **still true** (V4-only, absent
@@ -382,7 +384,9 @@ fall-through routing prompt. A1–A4 deliver user-visible lift on surfaces that 
 already have the fields on the V5 side, so there is no boundary risk. Tranche B is net-new plumbing whose
 payoff is conditional on a proven consumer; do not start it speculatively. **Before any v41.8 / generic
 ContextPack work, run the §10b prompt-bypass-rate trace** — it is the single measurement that tells us
-whether enriching the routing prompt is worth it at all.
+whether enriching the routing prompt is worth it at all. All cited line numbers are as of baseline
+`d59be1a8`; reconcile against current `origin/staging` HEAD before implementing — staging has advanced
+since this audit (now `72bf16f0`).
 
 ---
 
