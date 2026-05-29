@@ -164,6 +164,21 @@ interface DecideNoOpRecoveryInput {
     readonly preferred_kind: 'risk' | 'factor' | 'either';
   } | null;
   /**
+   * V5 P0 staging-smoke follow-up (PR #212): when the pre-LLM
+   * proposal-continuation intercept in `dispatchEditGraph` has already
+   * emitted Stage 1 / Stage 2 deterministic chips on this turn, the
+   * no-op recovery layer MUST NOT also fire its `proposal_stage_one`
+   * / `_two` branches — that produced 6 chips instead of 3 on staging.
+   *
+   * When `true`, the proposal-resume ladder is skipped here entirely;
+   * existing branches (analytical_*, vague_edit, explore_factor*,
+   * ambiguous) still run as defence-in-depth. When `undefined` or
+   * `false`, behaviour is identical to the prior implementation.
+   *
+   * The flag is set by the dispatch call site, not by the resumer.
+   */
+  readonly proposalAlreadyEmittedInThisTurn?: boolean;
+  /**
    * Current graph nodes — used by:
    *   1. the `explore_factor` safety-net branch to detect a no-op message
    *      that references a known graph label without an edit verb / value
@@ -336,37 +351,47 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
   // V5 P0 proposal-memory continuation — Stage 2 / Stage 1 ladder.
   //
   // Runs FIRST, before any other branch. Only fires when the caller
-  // supplied a non-null `pendingProposedConcept` (the prior turn's
-  // commit captured a Sonnet-emitted proposal AND its preconditions
-  // — graph hash, TTL — still hold).
+  // supplied a non-null `pendingProposedConcept` AND has NOT already
+  // emitted the same proposal chips via the pre-LLM intercept earlier
+  // in this turn.
   //
   // The decision logic is shared with the pre-LLM intercept (see
   // `decideProposalContinuation`); this branch is defence-in-depth
   // for the case where the pre-LLM intercept did not fire (e.g.
-  // graph parse failure made it unsafe). Pending exists but neither
-  // Stage 1 nor Stage 2 matched → null return → fall through to the
-  // existing branch ladder. The pending decays naturally via TTL or
-  // is invalidated by a subsequent graph mutation.
-  const proposalDecision = decideProposalContinuation({
-    message: input.message,
-    pendingProposedConcept: input.pendingProposedConcept ?? null,
-    nodes: input.nodes ?? null,
-  });
-  if (proposalDecision !== null) {
-    return {
-      branch:
-        proposalDecision.stage === 'stage_two'
-          ? 'proposal_stage_two'
-          : 'proposal_stage_one',
-      intent_class: intentClass,
-      has_run_analysis_fact: hasRunAnalysisFact,
-      assistantText: proposalDecision.assistantText,
-      suggestedActions: proposalDecision.suggestedActions.map((a) => ({
-        id: a.id,
-        label: a.label,
-        message: a.message,
-      })),
-    };
+  // graph parse failure made it unsafe). When the intercept DID fire
+  // (`proposalAlreadyEmittedInThisTurn === true`), running it again
+  // here would duplicate chips on the wire (3 → 6 / 4 → 8) because
+  // the intercept's editResult chips and the recovery's chips have
+  // different ids and the chip-merge step dedupes only by
+  // `action_type`. PR #212 staging-smoke surfaced this as a real
+  // user-visible duplication; the guard keeps single-source-of-truth.
+  //
+  // Pending exists but neither Stage 1 nor Stage 2 matched → null
+  // return → fall through to the existing branch ladder. The pending
+  // decays naturally via TTL or is invalidated by a subsequent graph
+  // mutation.
+  if (input.proposalAlreadyEmittedInThisTurn !== true) {
+    const proposalDecision = decideProposalContinuation({
+      message: input.message,
+      pendingProposedConcept: input.pendingProposedConcept ?? null,
+      nodes: input.nodes ?? null,
+    });
+    if (proposalDecision !== null) {
+      return {
+        branch:
+          proposalDecision.stage === 'stage_two'
+            ? 'proposal_stage_two'
+            : 'proposal_stage_one',
+        intent_class: intentClass,
+        has_run_analysis_fact: hasRunAnalysisFact,
+        assistantText: proposalDecision.assistantText,
+        suggestedActions: proposalDecision.suggestedActions.map((a) => ({
+          id: a.id,
+          label: a.label,
+          message: a.message,
+        })),
+      };
+    }
   }
 
   if (intentClass !== null && !mutationSignal) {
@@ -933,6 +958,23 @@ export async function dispatchEditGraph(
   // Track the deterministic clarification path independently so
   // llm_calls_used records 0 when no adapter call was made.
   let deterministicAddRiskAttempted = false;
+  // V5 P0 staging-smoke follow-up (PR #212): set true when the
+  // pre-LLM proposal-continuation intercept emits Stage 1 / Stage 2
+  // chips. Read by the downstream no-op recovery layer's
+  // `decideNoOpRecovery` call to suppress its parallel proposal
+  // branches so the wire response carries one chip set, not two.
+  let proposalEarlyEmitted = false;
+  // PR #216 review follow-up: set true when the pre-LLM intercept
+  // already emitted a `V5ProposalContinuationInvalidated` event for an
+  // expired / diverged pending. The recovery block re-runs the same
+  // resume gate against the same most-recent pending and would emit a
+  // SECOND identical invalidation when `handleEditGraph` no-ops after
+  // the intercept rejected — double-counting the metric. The recovery
+  // block reads this to skip its own invalidation emit. It does NOT
+  // suppress a recovery-only invalidation (the case where the
+  // intercept's graph-hash compute failed but the recovery's
+  // succeeded) because that path leaves this flag false.
+  let interceptEmittedInvalidation = false;
   try {
     // V5 A4 — deterministic clarification intercept. Pre-LLM classifier
     // catches high-confidence bare "add X as a risk" patterns, but the
@@ -1097,6 +1139,7 @@ export async function dispatchEditGraph(
           scenario_id: payload.scenario_id,
           reason: resumeOutcome.rejection,
         });
+        interceptEmittedInvalidation = true;
       }
       const earlyDecision = resumeOutcome.decision;
       if (earlyDecision !== null) {
@@ -1112,6 +1155,7 @@ export async function dispatchEditGraph(
             role: 'facilitator' as const,
           })),
         };
+        proposalEarlyEmitted = true;
         emit(TelemetryEvents.V5ProposalContinuationResumed, {
           request_id: requestId,
           scenario_id: payload.scenario_id,
@@ -1224,8 +1268,18 @@ export async function dispatchEditGraph(
       nowMs: Date.now(),
     });
     if (
-      recoveryGateOutcome.rejection === 'expired_wall'
-      || recoveryGateOutcome.rejection === 'graph_hash_changed'
+      (recoveryGateOutcome.rejection === 'expired_wall'
+        || recoveryGateOutcome.rejection === 'graph_hash_changed')
+      // PR #216 review follow-up: suppress the duplicate emit when the
+      // pre-LLM intercept already reported this same invalidation this
+      // turn. The intercept and this block both run the resume gate
+      // against the same most-recent pending; without this guard an
+      // expired / diverged pending that then no-ops through
+      // `handleEditGraph` would emit the metric twice. When the
+      // intercept did NOT emit (e.g. its graph-hash compute failed but
+      // this block's succeeded), the flag is false and we still emit
+      // exactly once.
+      && !interceptEmittedInvalidation
     ) {
       emit(TelemetryEvents.V5ProposalContinuationInvalidated, {
         request_id: requestId,
@@ -1389,31 +1443,58 @@ export async function dispatchEditGraph(
         // non-null AND the corresponding agreement / add-as-factor
         // signal matches the user's message.
         pendingProposedConcept: pendingProposedConceptForRecovery,
+        // V5 P0 staging-smoke follow-up (PR #212): suppress the
+        // recovery's proposal_stage_* branches when the pre-LLM
+        // intercept already emitted Stage 1 / Stage 2 chips. Without
+        // this guard both layers fire and the wire response carries
+        // 6 chips instead of 3.
+        proposalAlreadyEmittedInThisTurn: proposalEarlyEmitted,
       });
       // V5 P0 — surface stage outcome telemetry independently of the
       // existing V5EditGraphNoOpRecovery event so dashboards can track
       // proposal-resume rate without joining on branch_taken.
       if (pendingProposedConceptForRecovery !== null) {
-        const stageOutcome: 'stage_one' | 'stage_two' | 'no_agreement' =
-          recoveryOutcome.branch === 'proposal_stage_two'
-            ? 'stage_two'
-            : recoveryOutcome.branch === 'proposal_stage_one'
-            ? 'stage_one'
-            : 'no_agreement';
-        emit(TelemetryEvents.V5ProposalContinuationResumed, {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          outcome: stageOutcome,
-          pre_llm: false,
-        });
+        // Emit the post-recovery telemetry ONLY when the recovery
+        // layer was authoritative for the outcome on this turn.
+        // PR #212 staging-smoke follow-up: when the pre-LLM intercept
+        // already emitted Stage 1 / Stage 2 the recovery's proposal
+        // branch is suppressed (proposalAlreadyEmittedInThisTurn=true)
+        // so recoveryOutcome.branch would compute as something other
+        // than proposal_stage_*. Reporting `outcome: 'no_agreement'`
+        // here would be misleading — the proposal DID resume via the
+        // early-emit path, which already emitted its own
+        // `V5ProposalContinuationResumed{pre_llm: true}` event with
+        // the correct stage_one / stage_two outcome.
+        if (!proposalEarlyEmitted) {
+          const stageOutcome: 'stage_one' | 'stage_two' | 'no_agreement' =
+            recoveryOutcome.branch === 'proposal_stage_two'
+              ? 'stage_two'
+              : recoveryOutcome.branch === 'proposal_stage_one'
+              ? 'stage_one'
+              : 'no_agreement';
+          emit(TelemetryEvents.V5ProposalContinuationResumed, {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            outcome: stageOutcome,
+            pre_llm: false,
+          });
+        }
         // V5 P0 — refresh the pending action on Stage 1 and Stage 2 emits
         // so the user has another TTL window to walk through Stage 1 →
         // Stage 2 → Stage 3 without expiry surprises. Stage 3 ("affecting
         // X" disambiguated) falls through to existing edit_graph dispatch
         // with full context, and the pending decays naturally there.
+        //
+        // PR #212 staging-smoke follow-up: also refresh when the pre-LLM
+        // intercept emitted Stage 1 / Stage 2. The recovery branches
+        // are intentionally suppressed in that case (see the chip-
+        // duplication guard on `proposalAlreadyEmittedInThisTurn`),
+        // but the pending still needs a fresh TTL window so the user
+        // can walk Stage 1 → Stage 2 → Stage 3 either path.
         if (
           recoveryOutcome.branch === 'proposal_stage_one'
           || recoveryOutcome.branch === 'proposal_stage_two'
+          || proposalEarlyEmitted
         ) {
           const refreshGraphHash =
             currentGraphHashForRecovery !== null

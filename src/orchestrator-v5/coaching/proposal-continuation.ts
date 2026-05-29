@@ -62,6 +62,7 @@ import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
  */
 
 const MAX_CONCEPT_LENGTH = 80;
+const MAX_CONCEPT_WORDS = 8;
 const MAX_AGREEMENT_MESSAGE_LENGTH = 400;
 
 /**
@@ -132,6 +133,116 @@ const FORBIDDEN_CONCEPT_TOKENS: ReadonlyArray<RegExp> = [
 /** ID-shape prefixes that must never reach user-facing copy. */
 const ID_SHAPE = /(?:opt|fac|goal|node|edge|n|e)_[A-Za-z0-9_-]+/i;
 
+/**
+ * Clause-boundary patterns that terminate the raw concept capture. The
+ * staging smoke after PR #212 surfaced real Sonnet prose that chained
+ * multiple clauses inside a single question — without an intermediate
+ * `?`/`.`, the non-greedy regex captured the whole tail. These
+ * boundary patterns truncate the capture at the first qualifying
+ * boundary so the concept is bounded by sentence semantics, not just
+ * sentence terminators.
+ *
+ * Order is not significant — `truncateAtClauseBoundary` finds the
+ * earliest match across all patterns and cuts there.
+ *
+ * Boundaries deliberately preserve a bare `or` inside the concept (so
+ * "team sentiment or change resistance" survives) but stop at `, or`
+ * and at any of the explicit question-tail phrasings the smoke
+ * surfaced.
+ */
+const CLAUSE_BOUNDARY_PATTERNS: ReadonlyArray<RegExp> = [
+  // Sentence / clause terminators.
+  /[.!?;]/,
+  // Question-continuation patterns observed in real Sonnet output.
+  /\bor\s+would\s+you\s+rather\b/i,
+  /\bwould\s+you\s+rather\b/i,
+  /\bwhat'?s\s+most\s+likely\b/i,
+  // Comma-bridged continuation: `, or X` / `, and X` / `, but X`.
+  /,\s*or\s+(?=\w)/i,
+  /,\s*(?:and|but)\s+/i,
+];
+
+/**
+ * Proposal-kind words that may appear at the end of a concept capture
+ * when the LLM phrases the kind inline ("add a {concept} factor as a
+ * factor"). Stripped from the trailing edge so the persisted concept
+ * is the noun phrase only; the inferred kind is returned to the
+ * caller as a fallback when the capturing pattern did not extract one
+ * itself.
+ *
+ * Plural forms accepted because LLM output occasionally pluralises
+ * ("add team morale factors as factors").
+ */
+const TRAILING_KIND_STRIP: ReadonlyArray<{
+  readonly pattern: RegExp;
+  readonly kind: 'risk' | 'factor';
+}> = [
+  { pattern: /\s+factors?\s*$/i, kind: 'factor' },
+  { pattern: /\s+drivers?\s*$/i, kind: 'factor' },
+  { pattern: /\s+risks?\s*$/i, kind: 'risk' },
+];
+
+/**
+ * Tokens that should never appear inside a clean concept — they are
+ * question-tail vocabulary from the prior LLM clause. Run AFTER
+ * clause-boundary truncation; if any of these survive the truncation
+ * the capture was bad and the concept is rejected entirely.
+ *
+ * Conservative list — the staging smoke surfaced "would you rather
+ * explore what's most likely to drive disengagement first" as a tail
+ * that slipped past the bare `?`/`.` non-greedy bound.
+ *
+ * `would you` / `rather` / `explore` / `what's` have no legitimate use
+ * inside a decision-model concept noun phrase, so they reject on a
+ * bare word-boundary match anywhere in the capture.
+ *
+ * `first` is matched ONLY in trailing position (`first$`). The
+ * question-tail form is adverbial and trailing ("...drive
+ * disengagement first"), whereas "first" leads several legitimate
+ * concepts ("first-mover advantage", "first principles thinking",
+ * "first-quarter targets"). A bare `\bfirst\b` rejected those
+ * false-positively; the trailing anchor catches the question-tail
+ * use while preserving leading legitimate uses. (In the staging-smoke
+ * prose the "...most likely" clause boundary already truncates before
+ * "first" is reached, so this anchor only changes the backstop
+ * behaviour for prose without an earlier boundary.)
+ */
+const QUESTION_TAIL_TOKENS: ReadonlyArray<RegExp> = [
+  /\bwould\s+you\b/i,
+  /\brather\b/i,
+  /\bexplore\b/i,
+  /\bwhat'?s\b/i,
+  /\bfirst\s*$/i,
+];
+
+function truncateAtClauseBoundary(s: string): string {
+  let earliest = s.length;
+  for (const p of CLAUSE_BOUNDARY_PATTERNS) {
+    const m = p.exec(s);
+    if (m && m.index < earliest) {
+      earliest = m.index;
+    }
+  }
+  return s.slice(0, earliest).trim();
+}
+
+function stripTrailingKindWord(
+  s: string,
+): { readonly text: string; readonly kind: 'risk' | 'factor' | null } {
+  for (const entry of TRAILING_KIND_STRIP) {
+    const m = entry.pattern.exec(s);
+    if (m) {
+      const candidate = s.slice(0, m.index).trim();
+      // Require post-strip text to have ≥2 alpha chars so we don't
+      // strip "factor" or "risk" down to "".
+      if (/[A-Za-z]{2,}/.test(candidate)) {
+        return { text: candidate, kind: entry.kind };
+      }
+    }
+  }
+  return { text: s, kind: null };
+}
+
 /** Standalone affirmatives that don't carry topical content. */
 const STANDALONE_AGREEMENT = /^\s*(?:yes|yeah|yep|sure|ok|okay|please|absolutely)\s*[.!?]?\s*$/i;
 
@@ -198,14 +309,33 @@ export function extractProposedConcept(
     if (!match) continue;
     const raw = match[1];
     if (typeof raw !== 'string') continue;
-    const cleaned = cleanConcept(raw);
+
+    // Three-pass hardening (PR #212 staging-smoke follow-up):
+    //   1. Truncate at clause / question-tail boundaries so a chained
+    //      Sonnet question ("...factor, or would you rather explore...")
+    //      does not bleed into the concept.
+    //   2. Strip a trailing proposal-kind word ("factor", "risk",
+    //      "driver") so "team morale factor" → "team morale" and the
+    //      stripped kind is offered back as a fallback when the
+    //      capturing pattern itself did not extract one.
+    //   3. Run `cleanConcept` for the remaining defences (ID-shape
+    //      rejection, forbidden-vocabulary rejection, question-tail
+    //      vocabulary rejection, article stripping, word-count cap,
+    //      length cap).
+    const rawTrimmed = raw.trim();
+    const truncated = truncateAtClauseBoundary(rawTrimmed);
+    const { text: afterTrailingStrip, kind: inferredKind } = stripTrailingKindWord(truncated);
+    const cleaned = cleanConcept(afterTrailingStrip);
     if (cleaned === null) continue;
+
     let preferredKind: 'risk' | 'factor' | 'either';
     if (entry.preferred_kind === 'capture') {
       const captured = match[2]?.toLowerCase();
       if (captured === 'risk') preferredKind = 'risk';
       else if (captured === 'factor' || captured === 'driver') preferredKind = 'factor';
       else preferredKind = 'either';
+    } else if (inferredKind !== null) {
+      preferredKind = inferredKind;
     } else {
       preferredKind = entry.preferred_kind;
     }
@@ -396,6 +526,17 @@ function cleanConcept(raw: string): string | null {
   for (const forbidden of FORBIDDEN_CONCEPT_TOKENS) {
     if (forbidden.test(s)) return null;
   }
+  // Reject any concept that still carries question-tail vocabulary
+  // after upstream clause-boundary truncation. PR #212 staging-smoke
+  // follow-up: real Sonnet output can chain multiple clauses inside
+  // one question without an intermediate `?`/`.`, and although the
+  // upstream `truncateAtClauseBoundary` cuts most of the chain off,
+  // any residual fragment containing these tokens is a strong signal
+  // the capture was bad. Failing closed is preferable to renders
+  // like "Add team morale rather than as a risk." reaching the user.
+  for (const tail of QUESTION_TAIL_TOKENS) {
+    if (tail.test(s)) return null;
+  }
   // Strip leading articles + leftover whitespace AFTER the forbidden
   // check.
   s = s.replace(/^(?:a|an|the)\s+/i, '');
@@ -405,6 +546,16 @@ function cleanConcept(raw: string): string | null {
   // truncated proposal: "add X as a factor" → "X") and pure-digit
   // captures. Matches the floor used by `pickClarifierLabels`.
   if (!/[A-Za-z]{2,}/.test(s)) return null;
+  // Word-count cap mirrors the char-length cap as a second-axis
+  // bound: a 79-char concept that happens to be 20 short words is
+  // still too long for a chip message. PR #212 staging-smoke
+  // follow-up. Truncates at the word boundary rather than rejecting
+  // outright — most over-length captures are an extra clause the
+  // upstream truncation missed, not a malformed extract.
+  const words = s.split(/\s+/);
+  if (words.length > MAX_CONCEPT_WORDS) {
+    s = words.slice(0, MAX_CONCEPT_WORDS).join(' ');
+  }
   if (s.length > MAX_CONCEPT_LENGTH) {
     const cut = s.lastIndexOf(' ', MAX_CONCEPT_LENGTH);
     s = cut > 20 ? s.slice(0, cut).trim() : s.slice(0, MAX_CONCEPT_LENGTH).trim();

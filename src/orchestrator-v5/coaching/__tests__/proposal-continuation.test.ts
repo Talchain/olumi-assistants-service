@@ -122,6 +122,122 @@ describe('extractProposedConcept', () => {
     expect(r).not.toBeNull();
     expect(r!.concept.length).toBeLessThanOrEqual(80);
   });
+
+  // ─── PR #212 staging-smoke regression corpus ──────────────────────
+  //
+  // Each entry is real or near-real LLM output that the v1 extractor
+  // either misclassified or over-captured. The expected concept is the
+  // clean noun phrase a human would write into a chip message.
+
+  it('staging smoke: chained Sonnet question truncates at "or would you rather"', () => {
+    const prose =
+      'This is a real risk. Would you like me to add a team sentiment or '
+      + 'change resistance factor, or would you rather explore what\'s most '
+      + 'likely to drive disengagement first?';
+    const r = extractProposedConcept(prose);
+    expect(r).not.toBeNull();
+    expect(r!.concept).toBe('team sentiment or change resistance');
+    // Trailing "factor" was stripped → preferred_kind comes from the
+    // strip, not the pattern.
+    expect(r!.preferred_kind).toBe('factor');
+  });
+
+  it('staging smoke: trailing kind word "factor" is stripped from the concept', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add a team morale factor?',
+    );
+    expect(r?.concept).toBe('team morale');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('staging smoke: trailing kind word "risk" is stripped from the concept', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add a stakeholder pushback risk?',
+    );
+    expect(r?.concept).toBe('stakeholder pushback');
+    expect(r?.preferred_kind).toBe('risk');
+  });
+
+  it('staging smoke: clause boundary "or would you rather" truncates without preceding comma', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add team morale or would you rather explore engagement?',
+    );
+    expect(r?.concept).toBe('team morale');
+  });
+
+  it('staging smoke: clause boundary ", and X" truncates a chained continuation', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add team morale, and would you also like to add cultural fit?',
+    );
+    expect(r?.concept).toBe('team morale');
+  });
+
+  it.each([
+    "Would you like me to add team morale rather than something else?",
+    "Would you like me to add what's most important to you?",
+  ])('rejects concepts that retain question-tail vocab after truncation: %s', (prose) => {
+    expect(extractProposedConcept(prose)).toBeNull();
+  });
+
+  it('rejects a concept ending in trailing question-tail "first"', () => {
+    // No earlier clause boundary, so "first" survives truncation and
+    // the trailing-anchored QUESTION_TAIL pattern rejects it.
+    expect(extractProposedConcept('Would you like me to add team morale first?')).toBeNull();
+  });
+
+  it('preserves leading "first" in legitimate concepts (first-mover, first principles)', () => {
+    // PR #216 review follow-up: a bare `\bfirst\b` reject would have
+    // false-positively dropped these. The trailing-anchored pattern
+    // preserves them.
+    expect(extractProposedConcept('Would you like me to add first principles thinking?')?.concept)
+      .toBe('first principles thinking');
+    expect(extractProposedConcept('You should add first-mover advantage as a factor.')?.concept)
+      .toBe('first-mover advantage');
+  });
+
+  it('preserves "team morale" (clean, ≤8 words, no trailing kind)', () => {
+    const r = extractProposedConcept('Would you like me to add team morale?');
+    expect(r?.concept).toBe('team morale');
+  });
+
+  it('preserves "cultural fit" (clean, ≤8 words, no trailing kind)', () => {
+    const r = extractProposedConcept('Would you like me to add cultural fit?');
+    expect(r?.concept).toBe('cultural fit');
+  });
+
+  it('preserves "change resistance" (clean, ≤8 words, no trailing kind)', () => {
+    const r = extractProposedConcept('Would you like me to add change resistance?');
+    expect(r?.concept).toBe('change resistance');
+  });
+
+  it('preserves "team sentiment or change resistance" (bare "or" without comma)', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add team sentiment or change resistance?',
+    );
+    expect(r?.concept).toBe('team sentiment or change resistance');
+  });
+
+  it('truncates an 11-word concept at the 8-word boundary', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add one two three four five six seven eight nine ten eleven?',
+    );
+    expect(r).not.toBeNull();
+    expect(r!.concept.split(/\s+/).length).toBeLessThanOrEqual(8);
+  });
+
+  it('handles "add X as a factor" with a trailing kind word in X (double-kind)', () => {
+    // Pattern 1 captures "team morale factor" (capture stops at " as a
+    // factor"). Trailing-strip removes "factor" → "team morale".
+    const r = extractProposedConcept('You should add a team morale factor as a factor.');
+    expect(r?.concept).toBe('team morale');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('handles "add X as a driver" (driver maps to factor)', () => {
+    const r = extractProposedConcept('Consider adding code review depth as a driver.');
+    expect(r?.concept).toBe('code review depth');
+    expect(r?.preferred_kind).toBe('factor');
+  });
 });
 
 describe('detectsContinuationAgreement', () => {
