@@ -164,6 +164,16 @@ const CLAUSE_BOUNDARY_PATTERNS: ReadonlyArray<RegExp> = [
   // to a straight quote (which happened during the first attempt).
   // (PR #216 review NICE-TO-HAVE.)
   /\bwhat(?:['\u2019]?s|\s+is)\s+most\s+likely\b/i,
+  // "<X> to/in the model|decision|graph" \u2014 pattern 2
+  // ("would you like me to add X?") captures everything up to the
+  // sentence terminator, so prose like "add it to the model?" yields
+  // "it to the model". Pattern 3 already uses this phrase as its own
+  // capture terminator; adding it as a shared clause boundary truncates
+  // pattern-2 captures at the same point ("it to the model" \u2192 "it",
+  // "team morale to the model" \u2192 "team morale"). PR #217 smoke
+  // follow-up. (Pattern 3 captures already stop before this phrase, so
+  // the boundary is a no-op for them.)
+  /\b(?:to|in)\s+the\s+(?:model|decision|graph)\b/i,
   // Comma-bridged continuation: `, or X` / `, and X` / `, but X`.
   /,\s*or\s+(?=\w)/i,
   /,\s*(?:and|but)\s+/i,
@@ -211,6 +221,18 @@ const TRAILING_KIND_STRIP: ReadonlyArray<{
  */
 const GENERIC_BARE_CONCEPT =
   /^(?:factors?|risks?|drivers?|goals?|options?|outcomes?|constraints?|decisions?|objectives?|assumptions?|levers?|scenarios?|criteri(?:on|a)|metrics?|variables?|targets?|models?)$/i;
+
+/**
+ * Bare pronouns that carry no concept of their own. PR #217 smoke
+ * follow-up: real Sonnet prose anchored a proposal on a pronoun
+ * referring to the prior sentence ("...add it to the model?"), which
+ * the clause boundary truncates to "it". A bare pronoun is meaningless
+ * as a concept ("Add it as a risk." / "Before I add this..."), so it is
+ * rejected and the turn falls through to normal handling. Matched as an
+ * EXACT single token (after clause truncation + article stripping), so
+ * multi-word concepts that merely contain a pronoun are unaffected.
+ */
+const BARE_PRONOUN_CONCEPT = /^(?:it|this|that|these|those|them)$/i;
 
 /**
  * Tokens that should never appear inside a clean concept — they are
@@ -585,6 +607,13 @@ function cleanConcept(raw: string): string | null {
   // extraction returns null and the turn falls through to its normal
   // (non-proposal) handling.
   if (GENERIC_BARE_CONCEPT.test(s)) return null;
+  // Reject a concept that reduced to a bare pronoun after clause
+  // truncation + article stripping. PR #217 smoke follow-up: real
+  // Sonnet prose anchored the proposal on "it" / "this" referring to
+  // the prior sentence ("...add it to the model?" → truncated to
+  // "it"). A bare pronoun has no concept meaning, so reject and fall
+  // through to normal handling.
+  if (BARE_PRONOUN_CONCEPT.test(s)) return null;
   // Concept must contain at least 2 alphabetic characters. Rejects
   // single-letter captures (e.g. extract regex over-shooting on a
   // truncated proposal: "add X as a factor" → "X") and pure-digit
