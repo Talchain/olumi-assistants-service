@@ -156,7 +156,14 @@ const CLAUSE_BOUNDARY_PATTERNS: ReadonlyArray<RegExp> = [
   // Question-continuation patterns observed in real Sonnet output.
   /\bor\s+would\s+you\s+rather\b/i,
   /\bwould\s+you\s+rather\b/i,
-  /\bwhat'?s\s+most\s+likely\b/i,
+  // "what's most likely" / "what is most likely". The apostrophe class
+  // `['\u2019]` covers both the straight (U+0027) and curly (U+2019)
+  // forms — LLM prose routinely uses the curly variant, which a bare
+  // `'?` would miss. The curly char is written as a `\u2019` escape so
+  // the source stays ASCII and no editor can silently re-normalise it
+  // to a straight quote (which happened during the first attempt).
+  // (PR #216 review NICE-TO-HAVE.)
+  /\bwhat(?:['\u2019]?s|\s+is)\s+most\s+likely\b/i,
   // Comma-bridged continuation: `, or X` / `, and X` / `, but X`.
   /,\s*or\s+(?=\w)/i,
   /,\s*(?:and|but)\s+/i,
@@ -181,6 +188,29 @@ const TRAILING_KIND_STRIP: ReadonlyArray<{
   { pattern: /\s+drivers?\s*$/i, kind: 'factor' },
   { pattern: /\s+risks?\s*$/i, kind: 'risk' },
 ];
+
+/**
+ * Generic decision-model element types and structural nouns. After
+ * article stripping, a concept that is EXACTLY one of these (singular
+ * or plural) carries no specific meaning — the LLM proposed adding an
+ * element *type*, not a concept. Rendering "Add {noun} as a risk." is
+ * meaningless, so extraction rejects it and the turn falls through to
+ * normal handling.
+ *
+ * PR #216 round-3 review (SHOULD-FIX): the first pass closed only
+ * factor/risk/driver; "Would you like me to add a goal? / an option? /
+ * an outcome? / a constraint?" still produced bare-noun proposals.
+ * Round-4 review added `target` and `model` (both meaningless as bare
+ * concepts: "add a target?" / "add a model?").
+ *
+ * Matched as an EXACT single token (after article stripping), so it
+ * never touches multi-word concepts ("delivery goal", "sales target",
+ * "business model"). `node` / `edge` / `graph` are already rejected
+ * upstream as internal vocabulary (FORBIDDEN_CONCEPT_TOKENS), so they
+ * are omitted here.
+ */
+const GENERIC_BARE_CONCEPT =
+  /^(?:factors?|risks?|drivers?|goals?|options?|outcomes?|constraints?|decisions?|objectives?|assumptions?|levers?|scenarios?|criteri(?:on|a)|metrics?|variables?|targets?|models?)$/i;
 
 /**
  * Tokens that should never appear inside a clean concept — they are
@@ -211,7 +241,9 @@ const QUESTION_TAIL_TOKENS: ReadonlyArray<RegExp> = [
   /\bwould\s+you\b/i,
   /\brather\b/i,
   /\bexplore\b/i,
-  /\bwhat'?s\b/i,
+  // `what's` (straight U+0027 or curly U+2019 apostrophe) and bare
+  // `what is` — LLM prose uses the curly form a bare `'?` would miss.
+  /\bwhat(?:['\u2019]?s|\s+is)\b/i,
   /\bfirst\s*$/i,
 ];
 
@@ -541,6 +573,18 @@ function cleanConcept(raw: string): string | null {
   // check.
   s = s.replace(/^(?:a|an|the)\s+/i, '');
   if (s.length === 0) return null;
+  // Reject a concept that reduced to a bare proposal-kind word after
+  // article stripping. PR #216 review (SHOULD-FIX): "Would you like me
+  // to add a factor?" captures "a factor"; `stripTrailingKindWord`
+  // declines (the residue "a" is < 2 alpha chars), and the article
+  // strip above then leaves the generic "factor". Rendering "Add
+  // factor as a risk." is meaningless — there is no concept to add.
+  // The set spans all generic decision-model element types (see
+  // GENERIC_BARE_CONCEPT) so "a goal" / "an option" / "an outcome" /
+  // "a constraint" are rejected too (round-3 review). Reject so
+  // extraction returns null and the turn falls through to its normal
+  // (non-proposal) handling.
+  if (GENERIC_BARE_CONCEPT.test(s)) return null;
   // Concept must contain at least 2 alphabetic characters. Rejects
   // single-letter captures (e.g. extract regex over-shooting on a
   // truncated proposal: "add X as a factor" → "X") and pure-digit

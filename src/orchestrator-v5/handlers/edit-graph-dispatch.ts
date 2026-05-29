@@ -345,32 +345,51 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
   const hasRunAnalysisFact = input.priorFacts.some(
     (f) => f.fact_type === 'run_analysis' && isSuccessfulRunAnalysisFact(f),
   );
+
+  // V5 P0 — early-emit authority guard (PR #216 review BLOCKER fix).
+  //
+  // When the pre-LLM proposal intercept has ALREADY emitted a Stage 1
+  // / Stage 2 response this turn (`proposalAlreadyEmittedInThisTurn ===
+  // true`), that response is authoritative: it carries the clean
+  // concept and exactly the right chips. The no-op recovery layer must
+  // NOT touch it via ANY branch.
+  //
+  // A narrower "suppress only the proposal_stage_* branches" guard was
+  // insufficient: the SAME agreement message can also satisfy
+  // `looksLikeVagueEdit` / `classifyAnalyticalIntent` (e.g. the staging
+  // transcript "...how should we update the decision model?" matches
+  // the vague-edit signal), so after the proposal branch was suppressed
+  // the recovery returned `vague_edit` copy — "I haven't changed the
+  // model yet. Tell me which factor or edge..." — which the dispatch
+  // then applied over the Stage 1 text, reintroducing the exact failure
+  // this feature removes AND leaking the forbidden "factor or edge"
+  // phrasing. Returning a fully INERT decision here makes it
+  // structurally impossible for any current or future recovery branch
+  // to overwrite or append to the authoritative early-emit response.
+  // The dispatch still refreshes the pending-action TTL on the
+  // early-emit path independently of this return value.
+  if (input.proposalAlreadyEmittedInThisTurn === true) {
+    return {
+      branch: 'ambiguous',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: null,
+      suggestedActions: [],
+    };
+  }
+
   const intentClass = classifyAnalyticalIntent(input.message);
   const mutationSignal = hasMutationSignal(input.message);
 
   // V5 P0 proposal-memory continuation — Stage 2 / Stage 1 ladder.
   //
-  // Runs FIRST, before any other branch. Only fires when the caller
-  // supplied a non-null `pendingProposedConcept` AND has NOT already
-  // emitted the same proposal chips via the pre-LLM intercept earlier
-  // in this turn.
-  //
-  // The decision logic is shared with the pre-LLM intercept (see
-  // `decideProposalContinuation`); this branch is defence-in-depth
-  // for the case where the pre-LLM intercept did not fire (e.g.
-  // graph parse failure made it unsafe). When the intercept DID fire
-  // (`proposalAlreadyEmittedInThisTurn === true`), running it again
-  // here would duplicate chips on the wire (3 → 6 / 4 → 8) because
-  // the intercept's editResult chips and the recovery's chips have
-  // different ids and the chip-merge step dedupes only by
-  // `action_type`. PR #212 staging-smoke surfaced this as a real
-  // user-visible duplication; the guard keeps single-source-of-truth.
-  //
-  // Pending exists but neither Stage 1 nor Stage 2 matched → null
-  // return → fall through to the existing branch ladder. The pending
-  // decays naturally via TTL or is invalidated by a subsequent graph
-  // mutation.
-  if (input.proposalAlreadyEmittedInThisTurn !== true) {
+  // Defence-in-depth for the case where the pre-LLM intercept did NOT
+  // fire (e.g. graph parse failure made it unsafe, or this is the
+  // add-risk branch where the intercept is skipped). When the intercept
+  // DID fire, the early-emit authority guard above has already returned;
+  // we never reach here. Pending exists but neither Stage 1 nor Stage 2
+  // matched → null return → fall through to the existing branch ladder.
+  {
     const proposalDecision = decideProposalContinuation({
       message: input.message,
       pendingProposedConcept: input.pendingProposedConcept ?? null,
@@ -975,6 +994,19 @@ export async function dispatchEditGraph(
   // intercept's graph-hash compute failed but the recovery's
   // succeeded) because that path leaves this flag false.
   let interceptEmittedInvalidation = false;
+  // PR #216 round-3 review (SHOULD-FIX): refreshed proposed_concept
+  // pending action to persist with the commit. Declared at function
+  // scope so the pre-LLM intercept can build it directly from the
+  // concept it just resolved — making the early-emit refresh
+  // independent of the LATER `buildTurnContext` pending read. If that
+  // second read degrades (returns no pending / throws), the early-emit
+  // response is still authoritative AND its pending is still refreshed,
+  // so the next Stage 1 → Stage 2 click resumes. Stays null on paths
+  // that emit no proposal; the commit then falls back to chip-derived
+  // pending actions.
+  let proposalPendingForCommit:
+    | import('../session/pending-action.js').PendingAction
+    | null = null;
   try {
     // V5 A4 — deterministic clarification intercept. Pre-LLM classifier
     // catches high-confidence bare "add X as a risk" patterns, but the
@@ -1156,6 +1188,26 @@ export async function dispatchEditGraph(
           })),
         };
         proposalEarlyEmitted = true;
+        // PR #216 round-3 review (SHOULD-FIX): refresh the pending
+        // action HERE, from the concept the intercept just resolved
+        // (`earlyPending` + `earlyCurrentGraphHash`), rather than
+        // relying on the later `buildTurnContext` pending read in the
+        // recovery block. The gate already passed (decision !== null →
+        // not expired, not diverged), so the concept is safe to carry
+        // forward. This keeps the Stage 1 → Stage 2 continuation
+        // resumable even if that second read degrades. The graph was
+        // not mutated on the early-emit (no-op) path, so the current
+        // ingress graph hash is the right precondition.
+        const earlyConcept = findProposedConceptAction(earlyPending);
+        if (earlyConcept !== null) {
+          proposalPendingForCommit = buildProposalPendingAction({
+            concept: earlyConcept.concept,
+            preferred_kind: earlyConcept.preferred_kind,
+            scenario_id: payload.scenario_id,
+            emitted_at_iso: new Date().toISOString(),
+            ...(earlyCurrentGraphHash ? { graph_hash: earlyCurrentGraphHash } : {}),
+          });
+        }
         emit(TelemetryEvents.V5ProposalContinuationResumed, {
           request_id: requestId,
           scenario_id: payload.scenario_id,
@@ -1236,13 +1288,10 @@ export async function dispatchEditGraph(
   // The current graph hash, surfaced out of the try so the resume path
   // can use it to construct the refreshed pending action.
   let currentGraphHashForRecovery: string | null = null;
-  // V5 P0 — refreshed pending action to persist alongside the commit
-  // when the recovery layer emits Stage 1 or Stage 2. Stays null on
-  // every other path so the commit defaults to its existing
-  // chip-derived behaviour.
-  let proposalPendingForCommit:
-    | import('../session/pending-action.js').PendingAction
-    | null = null;
+  // `proposalPendingForCommit` is declared at the top of the function
+  // (above the intercept) so the early-emit path can populate it
+  // directly. The recovery-path resume below assigns it for the
+  // non-early-emit Stage 1 / Stage 2 case.
   try {
     const turnContext = await buildTurnContext(payload, requestId);
     priorFactsForRecovery = turnContext.prior_facts;
@@ -1479,22 +1528,22 @@ export async function dispatchEditGraph(
             pre_llm: false,
           });
         }
-        // V5 P0 — refresh the pending action on Stage 1 and Stage 2 emits
-        // so the user has another TTL window to walk through Stage 1 →
-        // Stage 2 → Stage 3 without expiry surprises. Stage 3 ("affecting
-        // X" disambiguated) falls through to existing edit_graph dispatch
-        // with full context, and the pending decays naturally there.
+        // V5 P0 — refresh the pending action on the RECOVERY-path Stage 1
+        // / Stage 2 emits so the user has another TTL window to walk
+        // through Stage 1 → Stage 2 → Stage 3 without expiry surprises.
+        // Stage 3 ("affecting X" disambiguated) falls through to existing
+        // edit_graph dispatch with full context, and the pending decays
+        // naturally there.
         //
-        // PR #212 staging-smoke follow-up: also refresh when the pre-LLM
-        // intercept emitted Stage 1 / Stage 2. The recovery branches
-        // are intentionally suppressed in that case (see the chip-
-        // duplication guard on `proposalAlreadyEmittedInThisTurn`),
-        // but the pending still needs a fresh TTL window so the user
-        // can walk Stage 1 → Stage 2 → Stage 3 either path.
+        // The early-emit path is NOT handled here: it refreshes the
+        // pending in the intercept itself (PR #216 round-3), independent
+        // of this block's `buildTurnContext` pending read — so the
+        // refresh survives a degraded second read. On the early-emit
+        // path `recoveryOutcome.branch` is 'ambiguous' (inert), so this
+        // condition is correctly false.
         if (
           recoveryOutcome.branch === 'proposal_stage_one'
           || recoveryOutcome.branch === 'proposal_stage_two'
-          || proposalEarlyEmitted
         ) {
           const refreshGraphHash =
             currentGraphHashForRecovery !== null
@@ -1565,17 +1614,28 @@ export async function dispatchEditGraph(
       // would have appended in isolation. `stripped_actions` reports
       // existing-chip removals so observability covers both edges of
       // the merge logic.
-      emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-        intent_class: recoveryOutcome.intent_class,
-        has_run_analysis_fact: recoveryOutcome.has_run_analysis_fact,
-        freshness: freshness.freshness,
-        branch_taken: recoveryOutcome.branch,
-        rewrote_text: recoveryOutcome.assistantText !== null,
-        appended_actions: appendedActions,
-        stripped_actions: strippedActions,
-      });
+      //
+      // PR #216 round-3 review (NICE-TO-HAVE): suppress on the
+      // early-emit path. There the recovery decision is inert by
+      // construction (branch 'ambiguous', no rewrite, no append), so
+      // emitting `V5EditGraphNoOpRecovery{branch:ambiguous,
+      // rewrote_text:false, appended:0}` is pure noise that conflates
+      // "recovery ran and did nothing" with "early-emit was
+      // authoritative". The `V5ProposalContinuationResumed{pre_llm:
+      // true}` event already records the early-emit outcome.
+      if (!proposalEarlyEmitted) {
+        emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          intent_class: recoveryOutcome.intent_class,
+          has_run_analysis_fact: recoveryOutcome.has_run_analysis_fact,
+          freshness: freshness.freshness,
+          branch_taken: recoveryOutcome.branch,
+          rewrote_text: recoveryOutcome.assistantText !== null,
+          appended_actions: appendedActions,
+          stripped_actions: strippedActions,
+        });
+      }
     }
   }
 
@@ -1773,11 +1833,19 @@ export async function dispatchEditGraph(
     const graphForCommit = successfulAppliedMutation
       ? editResult.appliedGraph ?? undefined
       : undefined;
-    // V5 P0 — when the no-op recovery emitted Stage 1 or Stage 2 it
-    // built a refreshed `proposed_concept` pending action so the next
-    // turn can also resume. Combine it with the chip-derived list and
-    // pass the combined list explicitly. Cap at PENDING_ACTIONS_PER_TURN
-    // _CAP=3 (enforced by the DB CHECK constraint as well).
+    // V5 P0 — when the early-emit intercept or the no-op recovery
+    // produced a refreshed `proposed_concept` pending action, persist
+    // it so the next turn can resume. Combine it with the chip-derived
+    // list and pass the combined list explicitly, capped at
+    // PENDING_ACTIONS_PER_TURN_CAP=3 (also enforced by the DB CHECK).
+    //
+    // Proposal FIRST so the cap never drops it (PR #217 round-4 review):
+    // mirrors `buildPendingActionsWithProposalCapture` in
+    // proposal-continuation.ts. In practice the proposal-path response
+    // carries only text-prompt chips (no `action_type`), so chipDerived
+    // is empty here and ordering is moot — but proposal-first is the
+    // correct policy and removes the latent drop if a chip-derivable
+    // action is ever co-emitted on this path.
     let pendingActionsForCommit:
       | readonly import('../session/pending-action.js').PendingAction[]
       | undefined = undefined;
@@ -1792,7 +1860,7 @@ export async function dispatchEditGraph(
             : {}),
         },
       );
-      pendingActionsForCommit = [...chipDerived, proposalPendingForCommit].slice(0, 3);
+      pendingActionsForCommit = [proposalPendingForCommit, ...chipDerived].slice(0, 3);
     }
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
@@ -1802,10 +1870,16 @@ export async function dispatchEditGraph(
       // the long comment above for the V5ActionType-expansion rationale.
       handler_id: null,
       request_hash: computeRequestHash(payload),
-      // Deterministic clarification path makes zero LLM calls; LLM path
-      // makes at least one (handleEditGraph drives the classification +
-      // repair loop). Distinguish so dashboards can attribute cost honestly.
-      llm_calls_used: deterministicAddRiskAttempted ? 0 : 1,
+      // Deterministic paths make zero LLM calls; the LLM path makes at
+      // least one (handleEditGraph drives the classification + repair
+      // loop). Both the add-risk clarification (`deterministicAddRisk
+      // Attempted`) and the proposal-continuation pre-LLM intercept
+      // (`proposalEarlyEmitted`) short-circuit BEFORE handleEditGraph,
+      // so neither spends an LLM call. PR #216 review (SHOULD-FIX):
+      // the early-emit path was previously counted as 1, overcounting
+      // LLM cost for the new deterministic path. Distinguish so
+      // dashboards attribute cost honestly.
+      llm_calls_used: deterministicAddRiskAttempted || proposalEarlyEmitted ? 0 : 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: editGraphFact ? [editGraphFact] : [],
       graph: graphForCommit,
