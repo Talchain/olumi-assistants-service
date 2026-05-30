@@ -43,6 +43,10 @@ import {
   type DriverSummary,
   type OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
+import {
+  resolveInfluenceDirection,
+  type InfluenceDirection,
+} from '../../orchestrator/context/influence-direction.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import { selectRunAnalysisFact } from './freshness.js';
 
@@ -92,7 +96,7 @@ function deriveTopDriversFromTopLevel(
 
   const factorMap = new Map<
     string,
-    { label: string; absSensitivity: number; direction: 'positive' | 'negative' }
+    { label: string; absSensitivity: number; direction: InfluenceDirection }
   >();
 
   for (const entry of raw) {
@@ -119,12 +123,10 @@ function deriveTopDriversFromTopLevel(
       : typeof e.label === 'string' && e.label.length > 0 ? e.label
       : factorId;
 
-    // direction may be explicit ('positive'|'negative') or implied by the sign
-    // of sensitivity/elasticity.
-    const explicitDirection =
-      e.direction === 'positive' || e.direction === 'negative' ? e.direction : null;
-    const direction: 'positive' | 'negative' =
-      explicitDirection ?? (sensitivityRaw >= 0 ? 'positive' : 'negative');
+    // Honour the authoritative `direction` enum ('positive'|'negative'|
+    // 'neutral'); only sign-derive when it is absent (elasticity is unsigned
+    // per the sensitivity contract). Shared rule with the primary derive path.
+    const direction: InfluenceDirection = resolveInfluenceDirection(e.direction, sensitivityRaw);
 
     const absSensitivity = Math.abs(sensitivityRaw);
     const existing = factorMap.get(factorId);

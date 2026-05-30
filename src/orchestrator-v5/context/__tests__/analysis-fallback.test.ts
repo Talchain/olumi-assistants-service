@@ -416,6 +416,27 @@ describe('buildAnalysisFromPriorFacts', () => {
       expect(driver.sensitivity).toBeCloseTo(0.45);
     });
 
+    it('top-level factor_sensitivity: explicit neutral direction is preserved, not collapsed to positive', () => {
+      // 'neutral' is an authoritative enum value (sensitivity contract). It must
+      // survive as 'neutral' even with a non-trivial magnitude — pre-fix the
+      // fallback dropped it to the sign and rendered a positive ("strengthens").
+      const fact = runAnalysisFactWithEnrichment({
+        meta: { seed_used: 1, n_samples: 1000, response_hash: 'h-neutral' },
+        results: [
+          { option_id: 'opt-a', option_label: 'A', win_probability: 0.6, outcome_mean: 100 },
+          { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
+        ],
+        factor_sensitivity: [
+          { label: 'Mixed Signal', elasticity: 0.5, direction: 'neutral' },
+        ],
+        analysis_status: 'complete',
+      });
+      const summary = buildAnalysisFromPriorFacts([fact])!;
+      const driver = summary.top_drivers.find((d) => d.factor_label === 'Mixed Signal')!;
+      expect(driver.direction).toBe('neutral');
+      expect(driver.sensitivity).toBeCloseTo(0.5);
+    });
+
     it('top-level factor_sensitivity excludes entries with non-finite values', () => {
       const fact = runAnalysisFactWithEnrichment({
         meta: { seed_used: 1, n_samples: 1000, response_hash: 'h-bad' },

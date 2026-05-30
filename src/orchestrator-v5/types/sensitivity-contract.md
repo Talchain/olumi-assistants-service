@@ -28,14 +28,25 @@ Semantics:
 The signed display value used inside CEE for prose and chips is:
 
 ```
-sensitivity_value = direction === 'negative' ? -elasticity : elasticity
+sensitivity_value =
+    direction === 'neutral'  ? 0
+  : direction === 'negative' ? -elasticity
+  :                            elasticity
 ```
 
-This is applied at
-[`src/orchestrator-v5/context/context-pack-assembler.ts`](../context/context-pack-assembler.ts)
-when projecting `top_drivers` for the ContextPack. The
-decision-review-enricher passes raw `elasticity` + `direction` through
-unchanged; consumers (the decision-review prompt) re-apply the sign on
+`neutral` maps to `0` — it has **no directional signal**, so the near-zero
+influence band renders "has little effect" rather than a strengthen/weaken
+claim. It must NOT fall through to the positive branch.
+
+This rule is the shared `resolveInfluenceDirection` / `toSignedInfluenceValue`
+pair in
+[`src/orchestrator/context/influence-direction.ts`](../../orchestrator/context/influence-direction.ts),
+used by both derive paths (`deriveTopDrivers`,
+`deriveTopDriversFromTopLevel`) and both sign-reattachment sites
+([`context-pack-assembler.ts`](../context/context-pack-assembler.ts)
+`projectAnalysis` and the chip-click dispatch) — never re-implement it
+locally. The decision-review-enricher passes raw `elasticity` + `direction`
+through unchanged; consumers (the decision-review prompt) re-apply the sign on
 their side.
 
 ## Inner-envelope (ISL) convention — DO NOT consume directly

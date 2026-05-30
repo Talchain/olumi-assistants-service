@@ -110,6 +110,73 @@ describe("compactAnalysis", () => {
     expect(summary!.top_drivers[1].direction).toBe("negative");
   });
 
+  it("honours the authoritative direction enum over the magnitude sign (unsigned elasticity)", () => {
+    // Contract: elasticity is unsigned and `direction` is authoritative. A
+    // factor with positive (unsigned) elasticity but direction 'negative' must
+    // resolve negative — pre-fix it sign-derived 'positive' from the magnitude.
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", elasticity: 0.6, direction: "negative" },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    expect(summary!.top_drivers[0].factor_id).toBe("factor_1");
+    expect(summary!.top_drivers[0].direction).toBe("negative");
+  });
+
+  it("preserves a 'neutral' direction instead of collapsing it to positive", () => {
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", elasticity: 0.5, direction: "neutral" },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    expect(summary!.top_drivers[0].direction).toBe("neutral");
+  });
+
+  it("falls back to the magnitude sign only when direction is absent", () => {
+    // Regression: signed sensitivity with no explicit direction → sign wins.
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", sensitivity: -0.7 },
+          { node_id: "factor_2", label: "Factor 2", sensitivity: 0.3 },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    const f1 = summary!.top_drivers.find((d) => d.factor_id === "factor_1");
+    const f2 = summary!.top_drivers.find((d) => d.factor_id === "factor_2");
+    expect(f1!.direction).toBe("negative");
+    expect(f2!.direction).toBe("positive");
+  });
+
+  it("excludes per-result factor sensitivities that are non-finite (NaN, Infinity, -Infinity)", () => {
+    // Matches the top-level fallback's guard so no NaN/Infinity reaches a
+    // DriverSummary shared by downstream consumers that do not re-filter.
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_good", label: "Good", sensitivity: 0.5, direction: "positive" },
+          { node_id: "factor_nan", label: "NaN", sensitivity: Number.NaN, direction: "positive" },
+          { node_id: "factor_inf", label: "Inf", elasticity: Number.POSITIVE_INFINITY, direction: "negative" },
+          { node_id: "factor_ninf", label: "NegInf", elasticity: Number.NEGATIVE_INFINITY, direction: "negative" },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    expect(summary!.top_drivers.map((d) => d.factor_id)).toEqual(["factor_good"]);
+    expect(summary!.top_drivers.every((d) => Number.isFinite(d.sensitivity))).toBe(true);
+  });
+
   it("deduplicates drivers across options (max absolute sensitivity wins)", () => {
     const results = [
       {

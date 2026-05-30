@@ -1,8 +1,9 @@
 /**
  * V5 Phase 2 workstream D — sensitivity sign contract.
  *
- * Pins the documented rule (sensitivity_value = direction === 'negative'
- * ? -elasticity : elasticity) and reproduces the producer-side
+ * Pins the documented three-way rule (sensitivity_value =
+ * direction === 'neutral' ? 0 : direction === 'negative' ? -elasticity
+ * : elasticity — `neutral` projects to 0) and reproduces the producer-side
  * inconsistency captured in
  * `tests/fixtures/cross-service/v5-turn.run-analysis.staging.json`.
  *
@@ -23,7 +24,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { assembleContextPackWithSummary } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
-import type { AnalysisResponseSummary } from '../../src/orchestrator/context/analysis-compact.js';
+import { compactAnalysis, type AnalysisResponseSummary } from '../../src/orchestrator/context/analysis-compact.js';
+import type { V2RunResponseEnvelope } from '../../src/orchestrator/types.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 // ─── helpers ──────────────────────────────────────────────────────────────
@@ -115,6 +117,56 @@ describe('Sensitivity sign — ContextPack projection rule', () => {
     expect(drivers[1]?.sensitivity_value).toBe(-0.42);
     expect(drivers[2]?.factor_label).toBe('C');
     expect(drivers[2]?.sensitivity_value).toBe(-0.10);
+  });
+});
+
+// ─── derive path: compactAnalysis honours the enum, not the magnitude sign ─
+
+describe('Sensitivity sign — derive path honours the direction enum', () => {
+  function envelopeWith(
+    factors: ReadonlyArray<Record<string, unknown>>,
+  ): V2RunResponseEnvelope {
+    return {
+      meta: { seed_used: 1, n_samples: 1000, response_hash: 'h-derive' },
+      results: [
+        {
+          option_id: 'opt_a',
+          option_label: 'Option A',
+          win_probability: 0.6,
+          outcome_mean: 1,
+          factor_sensitivity: factors,
+        },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.4, outcome_mean: 0.8 },
+      ],
+      analysis_status: 'complete',
+    } as unknown as V2RunResponseEnvelope;
+  }
+
+  it('unsigned elasticity + direction "negative" resolves negative (not sign-derived positive)', () => {
+    // The core bug: pre-fix, deriveTopDrivers read the sign of the unsigned
+    // elasticity (0.6 >= 0) and emitted 'positive'. The enum must win.
+    const summary = compactAnalysis(
+      envelopeWith([{ node_id: 'fac_cost', label: 'Cost', elasticity: 0.6, direction: 'negative' }]),
+    );
+    expect(summary?.top_drivers[0]?.factor_label).toBe('Cost');
+    expect(summary?.top_drivers[0]?.direction).toBe('negative');
+  });
+
+  it('direction "neutral" survives the derive path and projects to sensitivity_value 0', () => {
+    const summary = compactAnalysis(
+      envelopeWith([{ node_id: 'fac_mix', label: 'Mixed', elasticity: 0.5, direction: 'neutral' }]),
+    )!;
+    expect(summary.top_drivers[0]?.direction).toBe('neutral');
+
+    // End-to-end: the reattachment maps neutral → 0 in the ContextPack so the
+    // near-zero band renders "has little effect" rather than a directional claim.
+    const { contextPack } = assembleContextPackWithSummary({
+      payload: makePayload(),
+      priorTurns: [],
+      analysis: summary,
+    });
+    const driver = contextPack.analysis?.top_drivers?.find((d) => d.factor_label === 'Mixed');
+    expect(driver?.sensitivity_value).toBe(0);
   });
 });
 

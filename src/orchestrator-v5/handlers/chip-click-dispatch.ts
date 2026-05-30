@@ -73,6 +73,7 @@ import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
 import { buildAnalysisProjectionSummary } from '../context/projection-summaries.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
+import { projectTopDrivers } from '../context/context-pack-assembler.js';
 import {
   createRegistry,
   getDefaultPlotClient,
@@ -1053,10 +1054,10 @@ function buildProjectionInputs(
           analysisFromPrior.robustness_level !== 'unknown'
             ? analysisFromPrior.robustness_level
             : null,
-        top_drivers: analysisFromPrior.top_drivers.map((d) => ({
-          factor_label: d.factor_label,
-          sensitivity_value: d.direction === 'negative' ? -d.sensitivity : d.sensitivity,
-        })),
+        // Shared with projectAnalysis via projectTopDrivers: filter non-finite,
+        // neutral → 0, sort by |signed value|, cap — so a no-effect driver is
+        // never left leading a "would shift the most" claim on this path.
+        top_drivers: projectTopDrivers(analysisFromPrior.top_drivers),
         fragile_edges: (analysisFromPrior.top_fragile_edges ?? []).map((e) => ({
           from_label: e.from_label,
           to_label: e.to_label,
