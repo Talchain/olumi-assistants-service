@@ -791,6 +791,16 @@ function hasRenderableTopDriver(analysis: AdviceGateAnalysis): boolean {
 }
 
 /**
+ * True when a renderable SECOND driver exists. Used by the evidence-gap
+ * fallback to name the two highest-leverage factors (where more evidence
+ * matters most) instead of one, when the projection carries them. Same
+ * non-empty-label contract as {@link hasRenderableTopDriver}.
+ */
+function hasRenderableSecondDriver(analysis: AdviceGateAnalysis): boolean {
+  return hasNonEmptyLabel(analysis.top_drivers[1]?.factor_label);
+}
+
+/**
  * Per-edge renderability check. Both endpoint labels are interpolated
  * into prose (`"the link from <from> to <to>"`); a blank label on
  * either side would emit a malformed sentence.
@@ -1218,14 +1228,25 @@ function composeEvidenceGap(
     }
   }
   if (gaps.length === 0 && hasRenderableTopDriver(analysis)) {
-    // Fallback: name the top driver as the place evidence matters most.
-    // Gated on `hasRenderableTopDriver` (non-empty trimmed label) so a
-    // bare `length > 0` can't emit "sensitivity is on   " when the
-    // label is whitespace-only.
+    // Fallback: name where evidence matters most. The first sentence is
+    // byte-identical to the historical single-driver copy (gated on
+    // `hasRenderableTopDriver` so a whitespace-only label can't emit
+    // "sensitivity is on   "). When a renderable SECOND driver exists, add it
+    // as a second gap so the two highest-leverage factors both surface — this
+    // is the deterministic stand-in for "evidence priorities" when the
+    // decision_review enrichment is unavailable (the by-design phase3 path).
+    // It makes NO direction claim, so it is direction-honest by construction
+    // and never re-derives a driver's sign.
     const top = analysis.top_drivers[0]!.factor_label;
     gaps.push(
       `the strongest sensitivity is on ${top}, so that's where more evidence would change the analysis the most`,
     );
+    if (hasRenderableSecondDriver(analysis)) {
+      const second = analysis.top_drivers[1]!.factor_label;
+      gaps.push(
+        `${second} is the next most sensitive factor, so it's the second place where more evidence would help`,
+      );
+    }
   }
   if (gaps.length === 0) {
     return "Looking at the analysis, there aren't obvious structural gaps right now. If you have a specific factor you're uncertain about, let me know and we can look at it together.";

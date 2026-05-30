@@ -2102,3 +2102,98 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     }
   });
 });
+
+// ===========================================================================
+// Scope B — two-driver evidence-gap fallback + by-design phase3 grounding
+// ===========================================================================
+
+describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
+  // Pure top-driver fallback: no readiness gaps (no analysisReady), no fragile
+  // edges, no decision_review → the composer names where evidence matters most.
+  const TWO_DRIVERS_NO_EDGES: AdviceGateAnalysis = {
+    ...FIXTURE_ANALYSIS,
+    fragile_edges: [],
+    top_drivers: [
+      { factor_label: 'Delivery risk' },
+      { factor_label: 'Cost overrun risk' },
+    ],
+  };
+
+  it('names BOTH highest-leverage drivers when the projection carries a second one', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: TWO_DRIVERS_NO_EDGES,
+      freshness: 'fresh',
+      // no analysisReady, no decisionReview — the by-design fallback source.
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.assistant_text).toContain('Delivery risk');
+      expect(out.assistant_text).toContain('Cost overrun risk');
+      expect(out.assistant_text).toMatch(/next most sensitive factor/);
+      // Both surface as bullets under the plural header.
+      expect(out.assistant_text).toMatch(/biggest open gaps right now are/i);
+      // Direction-honest by construction: makes no increases/decreases claim.
+      expect(out.assistant_text).not.toMatch(/increase|decrease|raises|lowers/i);
+      // No raw IDs / decimals / readiness percentage.
+      expect(out.assistant_text).not.toMatch(/\bfac_|\bopt_|\d{1,3}\s*%/);
+    }
+  });
+
+  it('keeps single-driver wording intact when only one driver is renderable', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: { ...TWO_DRIVERS_NO_EDGES, top_drivers: [{ factor_label: 'Delivery risk' }] },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Singular header, original sentence, no second-driver line.
+      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      expect(out.assistant_text).toContain(
+        'the strongest sensitivity is on Delivery risk, so that',
+      );
+      expect(out.assistant_text).not.toContain('Cost overrun risk');
+      expect(out.assistant_text).not.toMatch(/next most sensitive/);
+    }
+  });
+});
+
+describe('post-analysis stays grounded when decision_review is unavailable (by-design phase3 path)', () => {
+  // Regression for the resolved gate: on a fresh follow-up the persisted
+  // run_analysis fact carries raw PLoT enrichment only (no decision_review),
+  // so phase3_block_context_available is false BY DESIGN
+  // (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW defaults off). The advice gate must
+  // still answer from the projected analysis fallback, never degrade to a
+  // generic template.
+  it('answers an explanatory question with concrete drivers, not generic copy', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+      // decisionReview deliberately omitted — mirrors the fresh-follow-up shape.
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Hire two senior engineers locally');
+      expect(out.assistant_text).toMatch(/Delivery risk|Cost overrun risk/);
+      expect(out.assistant_text.length).toBeGreaterThan(60);
+    }
+  });
+
+  it('answers an evidence-gap question from the projection when decision_review is absent', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What evidence is missing?',
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      // Grounded in the projection (fragile edge / top driver), not a template.
+      expect(out.assistant_text).toMatch(/biggest open gap/i);
+      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+    }
+  });
+});
