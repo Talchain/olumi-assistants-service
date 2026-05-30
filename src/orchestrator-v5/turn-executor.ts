@@ -96,6 +96,7 @@ import {
   deriveContextReadiness,
   type ContextReadiness,
 } from './context/readiness.js';
+import type { V5CoachingDelivery } from './diagnostics/v5-diagnostic-trace.js';
 import { tryProposalOrdinalSelect } from './routing/proposal-ordinal-select.js';
 import {
   PROPOSAL_DISMISSAL_RESPONSE,
@@ -254,6 +255,13 @@ export interface TurnExecutorRunResult {
    * computed_at instead of restamping with Date.now() on every emit.
    */
   freshness?: FreshnessDerivation;
+  /**
+   * Copy-source delivery diagnostics (Scope C, additive). Set when the
+   * deterministic post-analysis advice gate produced the response, so
+   * route-v2 can attach it to the flag-gated diagnostic trace. Undefined for
+   * every other path. Never reaches the wire body directly.
+   */
+  coachingDelivery?: V5CoachingDelivery;
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -531,6 +539,11 @@ export async function runTurnExecutor(
   let contextPackForLog: ContextPack | null = null;
   let cqeSummaryForLog: CqeExtractionSummary | null = null;
   let contextReadiness: ContextReadiness | null = null;
+  // Scope C: copy-source delivery diagnostics for the deterministic
+  // post-analysis advice gate. Set in the advice-gate matched branch and
+  // surfaced on TurnExecutorRunResult so route-v2 can attach it to the
+  // flag-gated diagnostic trace. Null on every other path.
+  let coachingDelivery: V5CoachingDelivery | null = null;
 
   // Phase 1.5: graph lookup + drift detection. Initialised inside the try
   // block so any failure during telemetry emit still lands in the top-level
@@ -3148,6 +3161,27 @@ export async function runTurnExecutor(
           suggested_action_count: adviceOutcome.matched
             ? adviceOutcome.suggested_actions.length
             : 0,
+          // ── Copy-source delivery diagnostics (Scope C, additive) ────────
+          // Structural-only: which source the copy drew from, which projected
+          // analysis fields were available, and whether the by-design phase3
+          // path was in effect. No labels, no values, no user prose.
+          copy_source: adviceOutcome.matched ? adviceOutcome.copy_source : null,
+          coaching_fields_used: adviceOutcome.matched
+            ? adviceOutcome.coaching_fields_used
+            : null,
+          // phase3 block context availability at routing time — by-design
+          // false when V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW is off. Pairs with
+          // `matched` so a dashboard can prove structured copy was delivered
+          // even when phase3 block context was unavailable.
+          phase3_block_context_available:
+            contextReadiness?.phase3_block_context_available ?? null,
+          // True when the matched copy drew from the projected analysis
+          // fallback rather than the decision_review enrichment.
+          fallback_analysis_used: adviceOutcome.matched
+            ? adviceOutcome.copy_source !== 'decision_review'
+            : null,
+          // The advice-gate path is always deterministic (llm_calls_used: 0).
+          deterministic: adviceOutcome.matched ? true : null,
         });
         if (adviceOutcome.matched) {
           const adviceResponse = composeDirectAnswerResponse({
@@ -3162,6 +3196,19 @@ export async function runTurnExecutor(
           llmCallsUsed = 0;
           stagesCompleted.push('orient');
           stagesCompleted.push('compose');
+          // Scope C: capture copy-source delivery diagnostics for the
+          // flag-gated diagnostic trace. Structural-only; surfaced on the
+          // run result, never on the wire body. Deterministic path → no LLM.
+          coachingDelivery = {
+            handler: 'post_analysis_advice_gate',
+            composer: adviceOutcome.advice_class,
+            copy_source: adviceOutcome.copy_source,
+            coaching_fields_used: adviceOutcome.coaching_fields_used,
+            phase3_block_context_available:
+              contextReadiness?.phase3_block_context_available ?? false,
+            fallback_analysis_used: adviceOutcome.copy_source !== 'decision_review',
+            deterministic: true,
+          };
           // V5 P0 proposal-memory continuation — emit-time capture at
           // the advice-gate commit. `composeEvidenceGap` can surface
           // decision_review.evidence_enhancements[].specific_action
@@ -5016,6 +5063,7 @@ export async function runTurnExecutor(
       analysisReady: analysisReadyForTurn,
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),
+      ...(coachingDelivery ? { coachingDelivery } : {}),
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,

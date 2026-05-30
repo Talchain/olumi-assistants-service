@@ -2197,3 +2197,84 @@ describe('post-analysis stays grounded when decision_review is unavailable (by-d
     }
   });
 });
+
+describe('advice-gate copy-source descriptor (Scope C diagnostics)', () => {
+  it('tags evidence_gap from decision_review when usable evidence_enhancements exist', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: {
+        produced_at: '2026-05-21T10:00:00.000Z',
+        evidence_enhancements: {
+          fac_a: { specific_action: 'Pull the last two quarters of delivery data and check the variance.' },
+        },
+        key_assumptions: ['The hiring market stays as competitive as today.'],
+      },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('decision_review');
+      expect(out.coaching_fields_used).toContain('decision_review');
+    }
+  });
+
+  it('tags the evidence_gap fallback as top_drivers when only drivers remain', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: { ...FIXTURE_ANALYSIS, fragile_edges: [] },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('top_drivers');
+      expect(out.coaching_fields_used).toContain('top_drivers');
+      expect(out.coaching_fields_used).not.toContain('decision_review');
+    }
+  });
+
+  it('tags the evidence_gap fallback as fragile_edges when a renderable edge exists', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS, // carries one renderable fragile edge
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('fragile_edges');
+      expect(out.coaching_fields_used).toContain('fragile_edges');
+    }
+  });
+
+  it('tags projection-class composers as analysis_projection with the fields used', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What would you recommend?',
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('advice');
+      expect(out.copy_source).toBe('analysis_projection');
+      expect(out.coaching_fields_used).toEqual(
+        expect.arrayContaining(['leading_option', 'top_drivers']),
+      );
+      expect(out.coaching_fields_used).not.toContain('decision_review');
+    }
+  });
+
+  it('tags the readiness composer as readiness', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: "What's blocking the analysis?",
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('readiness');
+      expect(out.copy_source).toBe('readiness');
+    }
+  });
+});

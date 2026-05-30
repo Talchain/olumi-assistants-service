@@ -257,6 +257,14 @@ function sendFinalised200(
     readonly requestStartedAt?: number;
     readonly scenarioId?: string;
     readonly turnId?: string;
+    /**
+     * V5 copy-source delivery diagnostics (Scope C, additive). Threaded in by
+     * the turn_executor path from `run.coachingDelivery` when the deterministic
+     * post-analysis advice gate produced the response. Folded into the
+     * flag-gated minimal diagnostic trace below; never reaches the wire body
+     * outside the trace.
+     */
+    readonly coachingDelivery?: import('../orchestrator-v5/diagnostics/v5-diagnostic-trace.js').V5CoachingDelivery;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -344,6 +352,7 @@ function sendFinalised200(
           requestId,
           exitPath,
           graph: ctx.graph,
+          ...(ctx.coachingDelivery ? { coachingDelivery: ctx.coachingDelivery } : {}),
         })
       : undefined;
   const diagnosticTraceForWire: unknown =
@@ -1766,6 +1775,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       requestStartedAt: routeStartedAt,
       scenarioId: ingress.scenario_id,
       turnId: ingress.turn_id,
+      ...(run.coachingDelivery ? { coachingDelivery: run.coachingDelivery } : {}),
     });
   });
 }

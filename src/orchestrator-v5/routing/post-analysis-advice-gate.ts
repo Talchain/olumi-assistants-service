@@ -209,12 +209,37 @@ export interface AdviceGateSuggestedAction {
   readonly action_type: 'explain_results' | 'what_would_flip';
 }
 
+/**
+ * Coarse category of WHICH structured source the matched copy was composed
+ * from. Additive copy-source diagnostic (non-user-facing) so future traces can
+ * prove that structured coaching reached the user surface, and which surface.
+ * `decision_review` is the LLM-authored enrichment (only reachable when the
+ * auto-fire flag is on); the others are deterministic projections from the
+ * raw persisted PLoT analysis — the by-design fallback.
+ */
+export type AdviceGateCopySource =
+  | 'decision_review'
+  | 'analysis_projection'
+  | 'fragile_edges'
+  | 'top_drivers'
+  | 'readiness';
+
 export interface AdviceGateMatched {
   readonly matched: true;
   readonly advice_class: AdviceClass;
   readonly assistant_text: string;
   readonly leading_option_label: string;
   readonly top_driver_label: string | null;
+  /**
+   * Copy-source delivery diagnostics (additive, structural-only — never a
+   * label or value). `copy_source` is the dominant source the copy drew from;
+   * `coaching_fields_used` lists the projected analysis fields that were
+   * present and available to the composer. The turn-executor surfaces these
+   * on the `v5.post_analysis_advice_gate` telemetry event and (flag-gated) on
+   * the diagnostic trace.
+   */
+  readonly copy_source: AdviceGateCopySource;
+  readonly coaching_fields_used: readonly string[];
   /**
    * Per-class chip set computed at composition time. Always present
    * (possibly empty). Per-class behaviour:
@@ -964,14 +989,16 @@ export function tryPostAnalysisAdviceGate(
   const leadingLabel = analysis.leading_option?.label ?? '';
   const topDriverLabel = analysis.top_drivers[0]?.factor_label ?? null;
 
-  const assistantText = composeForClass(matchedClass, {
+  const composeInput: ComposeInput = {
     leadingLabel,
     topDriverLabel,
     analysis,
     analysisReady: input.analysisReady ?? undefined,
     decisionReview: input.decisionReview ?? undefined,
     rawRobustness: input.rawRobustness ?? undefined,
-  });
+  };
+  const assistantText = composeForClass(matchedClass, composeInput);
+  const { copy_source, coaching_fields_used } = describeCopySource(matchedClass, composeInput);
 
   return {
     matched: true,
@@ -980,7 +1007,57 @@ export function tryPostAnalysisAdviceGate(
     leading_option_label: leadingLabel,
     top_driver_label: topDriverLabel,
     suggested_actions: suggestedActionsForClass(matchedClass),
+    copy_source,
+    coaching_fields_used,
   };
+}
+
+/**
+ * Derive the copy-source delivery diagnostic for a matched class. Pure,
+ * additive, non-user-facing — mirrors the branch conditions the composers use
+ * so a trace can prove which structured source the copy drew from. Returns
+ * structural-only data (no labels, no values). For `evidence_gap` it re-checks
+ * the same precedence the composer applies (decision_review → readiness gaps →
+ * fragile edges → top driver → projection); the re-check is a cheap pure call.
+ */
+function describeCopySource(
+  cls: AdviceClass,
+  input: ComposeInput,
+): { copy_source: AdviceGateCopySource; coaching_fields_used: readonly string[] } {
+  const a = input.analysis;
+  const fields: string[] = [];
+  if (hasNonEmptyLabel(a.leading_option?.label)) fields.push('leading_option');
+  if (hasNonEmptyLabel(a.runner_up?.label)) fields.push('runner_up');
+  if (typeof a.margin_pp === 'number' && Number.isFinite(a.margin_pp)) fields.push('margin_pp');
+  if (hasNonEmptyLabel(a.robustness_band ?? undefined)) fields.push('robustness_band');
+  if (hasRenderableTopDriver(a)) fields.push('top_drivers');
+  if (renderableFragileEdges(a).length > 0) fields.push('fragile_edges');
+  if (input.rawRobustness != null) fields.push('raw_robustness');
+
+  let copy_source: AdviceGateCopySource;
+  if (cls === 'readiness') {
+    copy_source = 'readiness';
+  } else if (cls === 'evidence_gap') {
+    if (extractValidationGuidanceFromDecisionReview(input.decisionReview) != null) {
+      copy_source = 'decision_review';
+      fields.push('decision_review');
+    } else if (
+      input.analysisReady
+      && hasSufficientReadinessData(input.analysisReady)
+      && summariseReadiness(input.analysisReady).open_items.length > 0
+    ) {
+      copy_source = 'readiness';
+    } else if (renderableFragileEdges(a).length > 0) {
+      copy_source = 'fragile_edges';
+    } else if (hasRenderableTopDriver(a)) {
+      copy_source = 'top_drivers';
+    } else {
+      copy_source = 'analysis_projection';
+    }
+  } else {
+    copy_source = 'analysis_projection';
+  }
+  return { copy_source, coaching_fields_used: fields };
 }
 
 /**
