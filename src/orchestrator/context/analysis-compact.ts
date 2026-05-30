@@ -10,6 +10,7 @@
 
 import type { V2RunResponseEnvelope } from "../types.js";
 import { log } from "../../utils/telemetry.js";
+import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
 
 // ============================================================================
 // Output Types
@@ -38,7 +39,7 @@ export interface DriverSummary {
   factor_id: string;
   factor_label: string;
   sensitivity: number;
-  direction: 'positive' | 'negative';
+  direction: InfluenceDirection;
 }
 
 export interface FlipThreshold {
@@ -486,7 +487,7 @@ function deriveTopDrivers(
 ): DriverSummary[] {
   const results = getResultsArray(response);
   // Map from factor_id → { max_abs_sensitivity, direction }
-  const factorMap = new Map<string, { label: string; maxSensitivity: number; direction: 'positive' | 'negative' }>();
+  const factorMap = new Map<string, { label: string; maxSensitivity: number; direction: InfluenceDirection }>();
 
   for (const result of results) {
     if (!isOptionResult(result)) continue;
@@ -504,7 +505,9 @@ function deriveTopDrivers(
       if (sensitivityRaw === null) continue;
 
       const absSensitivity = Math.abs(sensitivityRaw);
-      const direction: 'positive' | 'negative' = sensitivityRaw >= 0 ? 'positive' : 'negative';
+      // Honour the authoritative PLoT `direction` enum; only sign-derive when
+      // it is absent (elasticity is unsigned per the sensitivity contract).
+      const direction: InfluenceDirection = resolveInfluenceDirection(factor.direction, sensitivityRaw);
 
       // Derive label: graph lookup → factor.label → factor.factor_label → factor_id
       const label = graphNodeLabels?.get(factorId)

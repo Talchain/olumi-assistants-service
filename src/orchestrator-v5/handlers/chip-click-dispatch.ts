@@ -1055,7 +1055,13 @@ function buildProjectionInputs(
             : null,
         top_drivers: analysisFromPrior.top_drivers.map((d) => ({
           factor_label: d.factor_label,
-          sensitivity_value: d.direction === 'negative' ? -d.sensitivity : d.sensitivity,
+          // Mirror projectAnalysis: `neutral` → 0 (no directional claim).
+          sensitivity_value:
+            d.direction === 'neutral'
+              ? 0
+              : d.direction === 'negative'
+                ? -d.sensitivity
+                : d.sensitivity,
         })),
         fragile_edges: (analysisFromPrior.top_fragile_edges ?? []).map((e) => ({
           from_label: e.from_label,

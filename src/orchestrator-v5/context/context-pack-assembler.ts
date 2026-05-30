@@ -540,12 +540,19 @@ function projectAnalysis(
   // 2. Top drivers: filter non-finite, sort by |sensitivity| desc, cap at 3.
   //    Upstream `DriverSummary.sensitivity` is already the absolute value
   //    (Math.abs in deriveTopDrivers); sign is in `direction`. Re-attach
-  //    sign so consumers see a signed magnitude.
+  //    sign so consumers see a signed magnitude. A `neutral` direction has no
+  //    directional signal, so it projects to 0 → the near-zero band renders
+  //    "has little effect" rather than a strengthen/weaken claim.
   const topDrivers: ContextPackAnalysisDriver[] = analysis.top_drivers
     .filter((d) => isFiniteSensitivity(d.sensitivity))
     .map((d) => ({
       factor_label: d.factor_label,
-      sensitivity_value: d.direction === 'negative' ? -d.sensitivity : d.sensitivity,
+      sensitivity_value:
+        d.direction === 'neutral'
+          ? 0
+          : d.direction === 'negative'
+            ? -d.sensitivity
+            : d.sensitivity,
     }))
     .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
     .slice(0, TOP_DRIVER_CAP);
