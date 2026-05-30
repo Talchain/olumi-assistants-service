@@ -1,8 +1,9 @@
 /**
  * V5 Phase 2 workstream D — sensitivity sign contract.
  *
- * Pins the documented rule (sensitivity_value = direction === 'negative'
- * ? -elasticity : elasticity) and reproduces the producer-side
+ * Pins the documented three-way rule (sensitivity_value =
+ * direction === 'neutral' ? 0 : direction === 'negative' ? -elasticity
+ * : elasticity — `neutral` projects to 0) and reproduces the producer-side
  * inconsistency captured in
  * `tests/fixtures/cross-service/v5-turn.run-analysis.staging.json`.
  *

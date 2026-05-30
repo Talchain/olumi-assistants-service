@@ -40,21 +40,26 @@ export function resolveInfluenceDirection(
 }
 
 /**
- * Re-attach the sign to an unsigned influence magnitude using a resolved
- * direction — the single rule for projecting a driver's signed display value.
+ * Re-attach the sign to an influence magnitude using a resolved direction —
+ * the single rule for projecting a driver's signed display value.
  *
  * `neutral` carries no directional signal, so it projects to `0`; downstream
  * the near-zero influence band renders "has little effect" rather than a
  * strengthen/weaken claim. `neutral` must NOT fall through to the positive
- * branch. `magnitude` is expected to be the unsigned (abs) sensitivity per the
- * `DriverSummary` contract. Used by both sign-reattachment sites
- * (`projectAnalysis` and the chip-click dispatch) so the rule lives in exactly
- * one place.
+ * branch.
+ *
+ * Misuse-resistant: `direction` is the authoritative sign source, so the
+ * magnitude is normalised with `Math.abs` (a signed input cannot double-flip),
+ * and a non-finite magnitude projects to `0` (never emits `NaN` / `Infinity`).
+ * Mirrors `resolveInfluenceDirection`'s non-finite guard. Used by both
+ * sign-reattachment sites (`projectAnalysis` and the chip-click dispatch) so
+ * the rule lives in exactly one place.
  */
 export function toSignedInfluenceValue(
   direction: InfluenceDirection,
   magnitude: number,
 ): number {
-  if (direction === 'neutral') return 0;
-  return direction === 'negative' ? -magnitude : magnitude;
+  if (direction === 'neutral' || !Number.isFinite(magnitude)) return 0;
+  const abs = Math.abs(magnitude);
+  return direction === 'negative' ? -abs : abs;
 }
