@@ -611,6 +611,26 @@ describe('projectAnalysis — enriched projection', () => {
     ]);
   });
 
+  it('demotes a HIGH-magnitude neutral below a lower-magnitude directional driver (sort runs after neutral → 0)', () => {
+    const pack = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      analysis: makeAnalysis({
+        top_drivers: [
+          // The neutral has the LARGER raw magnitude but no directional signal.
+          { factor_id: 'f1', factor_label: 'Big Neutral', sensitivity: 0.80, direction: 'neutral' },
+          { factor_id: 'f2', factor_label: 'Small Directional', sensitivity: 0.30, direction: 'negative' },
+        ],
+      }),
+    });
+    // The directional driver leads despite its smaller raw magnitude; the
+    // neutral (→ 0) ranks last, so it can never headline "would shift the most".
+    expect(pack.analysis?.top_drivers).toEqual([
+      { factor_label: 'Small Directional', sensitivity_value: -0.30 },
+      { factor_label: 'Big Neutral',       sensitivity_value: 0 },
+    ]);
+  });
+
   it('returns empty top_drivers when none supplied', () => {
     const pack = assembleContextPack({
       payload: BASE_PAYLOAD,

@@ -457,4 +457,58 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     // The neutral driver is still named — no raw id leak.
     expect(text).toContain('Acquisition cost');
   });
+
+  it('multi-driver: a lower-magnitude DIRECTIONAL driver is selected ahead of a higher-magnitude NEUTRAL driver', async () => {
+    // Regression for the chip-click projection ordering bug: before the shared
+    // `projectTopDrivers` (sort AFTER neutral → 0), the high-magnitude neutral
+    // stayed first and the composer said it "would shift this result the most".
+    // Now the directional driver must be named ahead of the neutral one.
+    buildTurnContextMock.mockResolvedValueOnce(
+      await buildFreshFragileContext({
+        leading_prob: 0.55,
+        runner_prob: 0.45,
+        margin_pp: 10,
+        raw_robustness_level: null,
+        results: [
+          {
+            option_id: 'opt_freelance',
+            option_label: 'Freelance Consultant + Moderate Ad Spend',
+            win_probability: 0.55,
+            outcome_mean: 1,
+            factor_sensitivity: [
+              // Neutral has the LARGER raw magnitude; directional is smaller.
+              { node_id: 'fac_brand', label: 'Brand sentiment', elasticity: 0.8, direction: 'neutral' },
+              { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.4, direction: 'negative' },
+            ],
+          },
+          {
+            option_id: 'opt_hire',
+            option_label: 'Hire Marketing Manager',
+            win_probability: 0.45,
+            outcome_mean: 0.8,
+          },
+        ],
+      }),
+    );
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor(),
+      requestId: 'req-flip-multi-driver',
+      handlerRegistry: REAL_REGISTRY,
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+    expect(routeWithToolUseSpy).not.toHaveBeenCalled();
+
+    const text = commitedAssistantText();
+    // Both named, but the directional driver leads (appears first).
+    expect(text).toContain('Acquisition cost');
+    expect(text).toContain('Brand sentiment');
+    expect(text.indexOf('Acquisition cost')).toBeLessThan(text.indexOf('Brand sentiment'));
+    // Honest direction: the directional driver weakens; the neutral one has
+    // little effect (and is never mis-signed as strengthen/weaken).
+    expect(text.toLowerCase()).toMatch(/weakens/);
+    expect(text.toLowerCase()).toContain('has little effect');
+  });
 });

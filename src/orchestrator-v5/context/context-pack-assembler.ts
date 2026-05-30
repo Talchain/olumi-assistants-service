@@ -30,6 +30,7 @@ import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
 import type {
   AnalysisResponseSummary,
+  DriverSummary,
   OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
@@ -502,6 +503,31 @@ function isProbabilityValid(
 
 const TOP_DRIVER_CAP = 3;
 
+/**
+ * Project `DriverSummary[]` into the display-safe ContextPack driver shape —
+ * the single rule shared by `projectAnalysis` (routed path) and the chip-click
+ * dispatch so the two sign-reattachment sites cannot drift:
+ *   1. drop non-finite magnitudes;
+ *   2. re-attach the sign via `toSignedInfluenceValue` (`neutral` → 0);
+ *   3. sort by absolute signed value, descending;
+ *   4. cap at `TOP_DRIVER_CAP`.
+ * Because the sort runs AFTER `neutral` is zeroed, a no-effect driver is always
+ * demoted (and usually capped out) in both paths — it can never lead a "would
+ * shift the most" claim on one path while being demoted on the other.
+ */
+export function projectTopDrivers(
+  drivers: readonly DriverSummary[],
+): ContextPackAnalysisDriver[] {
+  return drivers
+    .filter((d) => isFiniteSensitivity(d.sensitivity))
+    .map((d) => ({
+      factor_label: d.factor_label,
+      sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
+    }))
+    .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
+    .slice(0, TOP_DRIVER_CAP);
+}
+
 function projectAnalysis(
   analysis: AnalysisResponseSummary | null,
   stalenessReason: string | null,
@@ -538,20 +564,10 @@ function projectAnalysis(
   const marginPp =
     leading && runnerUp ? analysis.margin_pp ?? null : null;
 
-  // 2. Top drivers: filter non-finite, sort by |sensitivity| desc, cap at 3.
-  //    Upstream `DriverSummary.sensitivity` is already the absolute value
-  //    (Math.abs in deriveTopDrivers); sign is in `direction`. Re-attach via
-  //    the shared `toSignedInfluenceValue` rule: `neutral` → 0 (no directional
-  //    signal) → the near-zero band renders "has little effect"; negative →
-  //    negated magnitude; positive → magnitude.
-  const topDrivers: ContextPackAnalysisDriver[] = analysis.top_drivers
-    .filter((d) => isFiniteSensitivity(d.sensitivity))
-    .map((d) => ({
-      factor_label: d.factor_label,
-      sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
-    }))
-    .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
-    .slice(0, TOP_DRIVER_CAP);
+  // 2. Top drivers — shared with the chip-click dispatch via projectTopDrivers:
+  //    filter non-finite, re-attach sign (neutral → 0), sort by |signed value|,
+  //    cap. Keeping both reattachment sites on one helper prevents drift.
+  const topDrivers: ContextPackAnalysisDriver[] = projectTopDrivers(analysis.top_drivers);
 
   // 3. Robustness band: null when source is unknown / empty; do not fabricate.
   const rawBand = analysis.robustness_level;
