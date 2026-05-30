@@ -1314,18 +1314,22 @@ function composeEvidenceGap(
     // decision_review enrichment is unavailable (the by-design phase3 path).
     // It makes NO direction claim, so it is direction-honest by construction
     // and never re-derives a driver's sign.
-    const top = analysis.top_drivers[0]!.factor_label;
+    // Trim at extraction so rendered copy never carries incidental upstream
+    // whitespace, and the dedup compare below operates on clean labels.
+    // `hasRenderable*Driver` already rejects whitespace-only labels, so the
+    // trimmed value is always non-empty here.
+    const top = analysis.top_drivers[0]!.factor_label.trim();
     gaps.push(
       `the strongest sensitivity is on ${top}, so that's where more evidence would change the analysis the most`,
     );
     if (hasRenderableSecondDriver(analysis)) {
-      const second = analysis.top_drivers[1]!.factor_label;
+      const second = analysis.top_drivers[1]!.factor_label.trim();
       // Defensive: skip the second-driver line when it would name the same
-      // factor twice. Compare on a normalised label (trimmed, case-folded) so
-      // incidental whitespace / case variants of the same display label are
-      // caught too. The projection sorts distinct factors by |sensitivity|;
-      // this only guards the rare shared-label edge case.
-      if (second.trim().toLowerCase() !== top.trim().toLowerCase()) {
+      // factor twice. Compare case-folded (labels already trimmed) so
+      // whitespace / case variants of the same display label are caught. The
+      // projection sorts distinct factors by |sensitivity|; this only guards
+      // the rare shared-label edge case.
+      if (second.toLowerCase() !== top.toLowerCase()) {
         gaps.push(
           `${second} is the next most sensitive factor, so it's the second place where more evidence would help`,
         );

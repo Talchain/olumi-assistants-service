@@ -2240,6 +2240,25 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
       expect(out.assistant_text).not.toContain('delivery risk ');
     }
   });
+
+  it('renders a distinct second label trimmed (no incidental whitespace from upstream)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...TWO_DRIVERS_NO_EDGES,
+        // Two DISTINCT factors; the second carries an incidental trailing space.
+        top_drivers: [{ factor_label: 'Delivery risk' }, { factor_label: 'Cost risk ' }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Both named (distinct), and the second renders trimmed — no double space.
+      expect(out.assistant_text).toMatch(/next most sensitive factor/);
+      expect(out.assistant_text).toContain('Cost risk is the next most sensitive factor');
+      expect(out.assistant_text).not.toContain('Cost risk  is');
+    }
+  });
 });
 
 describe('post-analysis stays grounded when decision_review is unavailable (by-design phase3 path)', () => {
