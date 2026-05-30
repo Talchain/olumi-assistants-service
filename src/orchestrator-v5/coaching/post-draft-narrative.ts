@@ -63,7 +63,7 @@
  * never logs.
  */
 
-import type { GraphV3T } from '../../orchestrator/types.js';
+import type { GraphV3T, DraftCoachingWideningLog } from '../../orchestrator/types.js';
 
 import {
   gateAssumptionFragment,
@@ -76,6 +76,30 @@ const MAX_LABEL_CHARS = 40;
 const MAX_GOAL_CHARS = 80;
 const MAX_NAMED_OPTIONS = 4;
 const MAX_LISTED_WHEN_OVER = 3;
+
+/**
+ * Cap on EXTRA "check" bullets surfaced in the weighing section beyond the
+ * single primary assumption bullet. One keeps the section at most one line
+ * longer than today — enough to add a second high-value point without
+ * overwhelming the reader.
+ */
+const MAX_ADDITIONAL_CHECKS = 1;
+
+/**
+ * Calm advisory phrases mapped from the widening_log `brief_completeness`
+ * enum. The enum value is NEVER emitted verbatim — it selects a phrase.
+ * `complete` surfaces nothing (no nudge needed). Hard-coded trusted copy
+ * (same pattern as {@link FIXED_GENERIC_ASSUMPTION}): British English, no
+ * graph-shape words, no schema terms, no sentence-leading commit verbs, no
+ * em / en dashes — so it passes both the assumption-fragment gate and the
+ * egress success-claim / forbidden-phrase guards by construction.
+ */
+const COMPLETENESS_ADVISORY: Record<DraftCoachingWideningLog['brief_completeness'], string | null> = {
+  complete: null,
+  partial:
+    'Your brief covered the main points; adding detail on the lighter areas would sharpen the comparison.',
+  thin: 'Your brief was light on detail, so adding specifics will make the comparison more reliable.',
+};
 
 /** Length window for an acceptable uncertainty driver phrase. */
 const DRIVER_MIN_CHARS = 5;
@@ -213,6 +237,24 @@ export interface PostDraftNarrativeTelemetry {
   readonly strengthen_items_count: number;
   readonly bias_findings_count: number;
   readonly coaching_bias_signals_count: number;
+  // ── Copy-source delivery diagnostics (additive; category/count only,
+  //    never raw coaching text or IDs) ──────────────────────────────────
+  /** Whether a canonical widening_log object was supplied to the builder. */
+  readonly widening_log_present: boolean;
+  /**
+   * The widening_log `brief_completeness` enum value, or null when absent.
+   * The enum value is telemetry-only — it is never emitted into user copy
+   * verbatim (it is mapped to an advisory phrase first).
+   */
+  readonly brief_completeness: 'complete' | 'partial' | 'thin' | null;
+  /** Whether the brief-completeness advisory line survived into the rendered
+   *  text (false for `complete`, when absent, or when dropped under budget). */
+  readonly brief_completeness_surfaced: boolean;
+  /** Count of EXTRA "check" bullets surfaced in the rendered text beyond the
+   *  single primary assumption bullet (0 or 1 under the current cap). */
+  readonly additional_checks_surfaced: number;
+  /** Source category of the extra check bullet, or null when none surfaced. */
+  readonly additional_check_source: 'strengthen_item' | 'coaching_bias_signal' | null;
 }
 
 export interface PostDraftNarrativeResult {
@@ -226,6 +268,12 @@ export interface BuildPostDraftNarrativeInput {
   readonly strengthenItems?: ReadonlyArray<unknown> | null;
   readonly coachingSummary?: string | null;
   readonly coachingBiasSignals?: ReadonlyArray<unknown> | null;
+  /**
+   * Canonical (v0.11.0+) coaching.widening_log object. Only `brief_completeness`
+   * is surfaced (mapped to an advisory phrase); `elements_considered_but_excluded`
+   * and especially `elements_added` (NODE IDs) are never rendered raw.
+   */
+  readonly wideningLog?: DraftCoachingWideningLog | null;
 }
 
 /**
@@ -234,7 +282,10 @@ export interface BuildPostDraftNarrativeInput {
  * `text`.
  */
 export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): PostDraftNarrativeResult {
-  const { graph, analysisReady, strengthenItems, coachingSummary, coachingBiasSignals } = input;
+  const { graph, analysisReady, strengthenItems, coachingSummary, coachingBiasSignals, wideningLog } = input;
+
+  const wideningLogPresent = wideningLog != null;
+  const briefCompleteness = wideningLog?.brief_completeness ?? null;
 
   const strengthenItemsCount = Array.isArray(strengthenItems) ? strengthenItems.length : 0;
   const biasFindingsCount = Array.isArray(analysisReady?.bias_findings)
@@ -272,6 +323,12 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         strengthen_items_count: strengthenItemsCount,
         bias_findings_count: biasFindingsCount,
         coaching_bias_signals_count: coachingBiasSignalsCount,
+        // Verbatim-summary path renders no deterministic blocks.
+        widening_log_present: wideningLogPresent,
+        brief_completeness: briefCompleteness,
+        brief_completeness_surfaced: false,
+        additional_checks_surfaced: 0,
+        additional_check_source: null,
       },
     };
   }
@@ -290,6 +347,12 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         strengthen_items_count: strengthenItemsCount,
         bias_findings_count: biasFindingsCount,
         coaching_bias_signals_count: coachingBiasSignalsCount,
+        // Graphless single-line fallback renders no deterministic blocks.
+        widening_log_present: wideningLogPresent,
+        brief_completeness: briefCompleteness,
+        brief_completeness_surfaced: false,
+        additional_checks_surfaced: 0,
+        additional_check_source: null,
       },
     };
   }
@@ -313,21 +376,47 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   });
   const assumptionBullet = assumption.text ? toAssumptionBullet(assumption.text) : null;
 
-  const weighingBlock = renderBulletSection('What the model is weighing', [
+  // One extra "check" bullet from the next unused coaching signal. Seed the
+  // dedup set with the text the assumption bullet already used (label stripped)
+  // so the same signal is never surfaced twice.
+  const usedTexts = new Set<string>();
+  if (assumptionBullet) usedTexts.add(normaliseForDedup(stripBulletLabel(assumptionBullet)));
+  const additionalChecks = pickAdditionalChecks({
+    strengthenItems,
+    coachingBiasSignals,
+    alreadyUsed: usedTexts,
+    limit: MAX_ADDITIONAL_CHECKS,
+  });
+  const additionalBullets = additionalChecks.map((c) => toCheckBullet(c.text));
+
+  const coreBullets = [
     ...(tradeOffBullet ? [tradeOffBullet] : []),
     ...(assumptionBullet ? [assumptionBullet] : []),
+  ];
+  const weighingBlockCore = renderBulletSection('What the model is weighing', coreBullets);
+  const weighingBlock = renderBulletSection('What the model is weighing', [
+    ...coreBullets,
+    ...additionalBullets,
   ]);
+
+  // Brief-completeness advisory (own droppable block). Only the enum is read;
+  // it is mapped to a calm advisory phrase and never emitted verbatim.
+  const completenessBlock = buildBriefCompletenessLine(wideningLog);
 
   const nextStep =
     'Next, run the analysis to see how the options compare and what could shift the outcome.';
 
+  const sectioned = assembleSectionedNarrative({
+    confirm: confirmSentence,
+    optionsBlock,
+    weighingBlock,
+    weighingBlockCore,
+    completenessBlock,
+    nextStep,
+  });
+
   return {
-    text: assembleSectionedNarrative({
-      confirm: confirmSentence,
-      optionsBlock,
-      weighingBlock,
-      nextStep,
-    }),
+    text: sectioned.text,
     telemetry: {
       assumption_source: assumption.source,
       coaching_summary_present: coachingSummaryPresent,
@@ -337,6 +426,11 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       strengthen_items_count: strengthenItemsCount,
       bias_findings_count: biasFindingsCount,
       coaching_bias_signals_count: coachingBiasSignalsCount,
+      widening_log_present: wideningLogPresent,
+      brief_completeness: briefCompleteness,
+      brief_completeness_surfaced: sectioned.includedCompleteness,
+      additional_checks_surfaced: sectioned.includedWeighingExtra ? additionalBullets.length : 0,
+      additional_check_source: additionalChecks[0]?.source ?? null,
     },
   };
 }
@@ -606,6 +700,142 @@ function pickCoachingBiasSignalAssumption(
   return null;
 }
 
+// ----- additional-check picker (second weighing point) ----------------------
+
+interface AdditionalCheckPick {
+  readonly text: string;
+  readonly source: 'strengthen_item' | 'coaching_bias_signal';
+}
+
+/**
+ * Collect up to `limit` extra coaching points beyond the single primary
+ * assumption bullet, drawn from the next unused `strengthen_items` then
+ * `coaching_bias_signals`. Each candidate passes the SAME
+ * {@link gateAssumptionFragment} the primary picker uses, and is deduped by
+ * normalised text against `alreadyUsed` (seeded with the assumption bullet's
+ * text) so the same signal is never surfaced twice. Iterates from index 0 and
+ * relies on text-dedup — not index skipping — because the primary assumption
+ * may have come from a bias finding / uncertainty driver, leaving
+ * `strengthen[0]` legitimately unused.
+ */
+function pickAdditionalChecks(input: {
+  readonly strengthenItems: ReadonlyArray<unknown> | null | undefined;
+  readonly coachingBiasSignals: ReadonlyArray<unknown> | null | undefined;
+  readonly alreadyUsed: ReadonlySet<string>;
+  readonly limit: number;
+}): AdditionalCheckPick[] {
+  const { strengthenItems, coachingBiasSignals, alreadyUsed, limit } = input;
+  const out: AdditionalCheckPick[] = [];
+  const used = new Set<string>(alreadyUsed);
+
+  const tryAdd = (text: string | null, source: AdditionalCheckPick['source']): void => {
+    if (out.length >= limit || text === null) return;
+    const key = normaliseForDedup(text);
+    if (key.length === 0 || used.has(key)) return;
+    used.add(key);
+    out.push({ text, source });
+  };
+
+  if (Array.isArray(strengthenItems)) {
+    for (const item of strengthenItems) {
+      if (out.length >= limit) break;
+      tryAdd(extractStrengthenText(item), 'strengthen_item');
+    }
+  }
+  if (Array.isArray(coachingBiasSignals)) {
+    for (const signal of coachingBiasSignals) {
+      if (out.length >= limit) break;
+      tryAdd(extractBiasSignalText(signal), 'coaching_bias_signal');
+    }
+  }
+  return out;
+}
+
+/**
+ * Extract a gated, cleaned coaching fragment from a single strengthen item
+ * (detail preferred, then the detail's first sentence, then label). Returns
+ * null when nothing survives {@link gateAssumptionFragment}. Mirrors the
+ * detail/label precedence in {@link pickStrengthenAssumption} but for one item.
+ */
+function extractStrengthenText(item: unknown): string | null {
+  if (typeof item !== 'object' || item === null) return null;
+  const detail = (item as { detail?: unknown }).detail;
+  const label = (item as { label?: unknown }).label;
+  if (typeof detail === 'string') {
+    const candidate = cleanLeadIn(detail);
+    if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) return candidate;
+    const firstSentence = extractFirstSentence(detail);
+    if (firstSentence) {
+      const cleaned = cleanLeadIn(firstSentence);
+      if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+    }
+  }
+  if (typeof label === 'string') {
+    const cleaned = cleanLeadIn(label);
+    if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+  }
+  return null;
+}
+
+/**
+ * Extract a gated, cleaned coaching fragment from a single bias signal
+ * (`detail`, then its first sentence). Returns null when nothing survives
+ * {@link gateAssumptionFragment}.
+ */
+function extractBiasSignalText(signal: unknown): string | null {
+  if (typeof signal !== 'object' || signal === null) return null;
+  const detail = (signal as { detail?: unknown }).detail;
+  if (typeof detail !== 'string') return null;
+  const candidate = cleanLeadIn(detail);
+  if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) return candidate;
+  const firstSentence = extractFirstSentence(detail);
+  if (firstSentence) {
+    const cleaned = cleanLeadIn(firstSentence);
+    if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+  }
+  return null;
+}
+
+/**
+ * Render an extra weighing point as a bullet-ready fragment. The label is
+ * deliberately distinct from `Assumption to check:` (so two such bullets do
+ * not read identically) and is NOT a sentence-leading commit verb (which
+ * would trip the egress success-claim guard).
+ */
+function toCheckBullet(text: string): string {
+  return `Worth a look: ${text}`;
+}
+
+/**
+ * Map the widening_log `brief_completeness` enum to a calm advisory line, or
+ * null when the log is absent or the brief is `complete`. The enum value is
+ * never emitted verbatim. `elements_added` (NODE IDs) and
+ * `elements_considered_but_excluded` are intentionally NOT read here.
+ */
+function buildBriefCompletenessLine(
+  wideningLog: DraftCoachingWideningLog | null | undefined,
+): string | null {
+  if (!wideningLog) return null;
+  return COMPLETENESS_ADVISORY[wideningLog.brief_completeness];
+}
+
+/** Normalise a fragment for dedup: lowercase, collapse whitespace, trim. */
+function normaliseForDedup(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Strip a known weighing-bullet label prefix so dedup compares the underlying
+ * signal text rather than the label. Matches the labels emitted by
+ * {@link toAssumptionBullet}, {@link buildTradeOffBullet} and
+ * {@link toCheckBullet}.
+ */
+function stripBulletLabel(bullet: string): string {
+  return bullet
+    .replace(/^(?:Assumption to check|Main trade-off|Key consideration|Worth a look):\s*/i, '')
+    .trim();
+}
+
 // ----- data accessors -------------------------------------------------------
 
 function findGoalLabel(nodes: readonly NodeLite[]): string | null {
@@ -697,43 +927,87 @@ function renderBulletSection(label: string, bullets: readonly string[]): string 
 interface SectionedNarrativeInput {
   readonly confirm: string;
   readonly optionsBlock: string | null;
+  /** Full weighing block including any extra "check" bullet. */
   readonly weighingBlock: string;
+  /** Weighing block with only the trade-off + primary assumption bullets. */
+  readonly weighingBlockCore: string;
+  /** Brief-completeness advisory line, or null when absent / `complete`. */
+  readonly completenessBlock: string | null;
   readonly nextStep: string;
 }
 
+interface SectionedNarrativeResult {
+  readonly text: string;
+  /** Whether the FULL weighing block (with the extra check bullet) survived. */
+  readonly includedWeighingExtra: boolean;
+  /** Whether the brief-completeness advisory block survived. */
+  readonly includedCompleteness: boolean;
+}
+
 /**
- * Assemble the four block slots into the final sectioned narrative,
- * separating blocks with `\n\n`. Enforce the 140-word ceiling by
- * dropping blocks in this order: weighing first, then options. The
- * confirm sentence and the next-step nudge are load-bearing and
- * always survive.
+ * Assemble the block slots into the final sectioned narrative, separating
+ * blocks with `\n\n`, and report which optional blocks survived so the caller
+ * can record honest copy-source telemetry. Enforce the 140-word ceiling by
+ * shedding the lowest-value content first:
  *
- * The options block is structurally important (the demo reader scans
- * it first), so it is dropped only as a last resort. The weighing
- * block holds the trade-off + assumption bullets — informative but
- * not load-bearing for the first-glance comprehension.
+ *   1. full (extra check bullet + completeness + options)
+ *   2. drop the extra check bullet (weighing core)
+ *   3. drop the completeness advisory
+ *   4. drop the whole weighing block
+ *   5. drop options too (confirm + next-step only)
+ *
+ * The confirm sentence and next-step nudge are load-bearing and never drop.
+ * When there is no extra bullet and no completeness block, `weighingBlock ===
+ * weighingBlockCore` and `completenessBlock === null`, so rungs 1-3 collapse
+ * to the original two-outcome behaviour (output is byte-identical to before).
  */
-function assembleSectionedNarrative(input: SectionedNarrativeInput): string {
+function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNarrativeResult {
   const tryAssemble = (
-    includeWeighing: boolean,
+    weighing: string | null,
     includeOptions: boolean,
+    includeCompleteness: boolean,
   ): string => {
     const blocks: string[] = [input.confirm];
     if (includeOptions && input.optionsBlock !== null) {
       blocks.push(input.optionsBlock);
     }
-    if (includeWeighing && input.weighingBlock.length > 0) {
-      blocks.push(input.weighingBlock);
+    if (weighing !== null && weighing.length > 0) {
+      blocks.push(weighing);
+    }
+    if (includeCompleteness && input.completenessBlock !== null) {
+      blocks.push(input.completenessBlock);
     }
     blocks.push(input.nextStep);
     return blocks.join('\n\n');
   };
 
-  let text = tryAssemble(true, true);
-  if (countWords(text) <= MAX_WORDS) return text;
+  const hasCompleteness = input.completenessBlock !== null;
+  const hasExtra = input.weighingBlock !== input.weighingBlockCore;
 
-  text = tryAssemble(false, true);
-  if (countWords(text) <= MAX_WORDS) return text;
-
-  return tryAssemble(false, false);
+  // Rung 1 — everything.
+  let text = tryAssemble(input.weighingBlock, true, true);
+  if (countWords(text) <= MAX_WORDS) {
+    return { text, includedWeighingExtra: hasExtra, includedCompleteness: hasCompleteness };
+  }
+  // Rung 2 — drop the extra check bullet.
+  text = tryAssemble(input.weighingBlockCore, true, true);
+  if (countWords(text) <= MAX_WORDS) {
+    return { text, includedWeighingExtra: false, includedCompleteness: hasCompleteness };
+  }
+  // Rung 3 — drop the completeness advisory.
+  text = tryAssemble(input.weighingBlockCore, true, false);
+  if (countWords(text) <= MAX_WORDS) {
+    return { text, includedWeighingExtra: false, includedCompleteness: false };
+  }
+  // Rung 4 — drop the whole weighing block.
+  text = tryAssemble(null, true, false);
+  if (countWords(text) <= MAX_WORDS) {
+    return { text, includedWeighingExtra: false, includedCompleteness: false };
+  }
+  // Rung 5 — drop options too.
+  return {
+    text: tryAssemble(null, false, false),
+    includedWeighingExtra: false,
+    includedCompleteness: false,
+  };
 }

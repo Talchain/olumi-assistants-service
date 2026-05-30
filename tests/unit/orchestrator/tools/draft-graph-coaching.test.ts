@@ -23,6 +23,8 @@ vi.mock('../../../../src/cee/unified-pipeline/index.js', () => ({
 
 import { handleDraftGraph } from '../../../../src/orchestrator/tools/draft-graph.js';
 import type { FastifyRequest } from 'fastify';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const mockRequest = {} as FastifyRequest;
 
@@ -116,5 +118,111 @@ describe('handleDraftGraph coaching field preservation (V5 Group 1)', () => {
 
     expect(result.coachingWideningLog).toBeNull();
     expect(result.coachingBiasSignals).toBeNull();
+  });
+});
+
+/**
+ * V5 coaching-surface delivery: the canonical (v0.11.0+) widening_log OBJECT
+ * shape. The legacy `coachingWideningLog` ARRAY extractor returns null for the
+ * object shape (the Anthropic-adapter normaliser converts the LLM output to
+ * `{elements_added, elements_considered_but_excluded, brief_completeness}`),
+ * so without the object extractor the widening signal was dead on V5. These
+ * tests prove `coachingWideningLogObject` carries the live object.
+ */
+describe('handleDraftGraph coaching widening_log object (v0.11.0 liveness fix)', () => {
+  beforeEach(() => {
+    mockRunUnifiedPipeline.mockReset();
+  });
+
+  it('narrows the canonical widening_log object onto coachingWideningLogObject', async () => {
+    const widening = {
+      elements_added: ['risk_runway', 'fac_integration_cost'],
+      elements_considered_but_excluded: ['Regulatory pause unlikely in this horizon'],
+      brief_completeness: 'partial' as const,
+    };
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({
+        ...MINIMAL_GRAPH,
+        coaching: { summary: 's', strengthen_items: [], widening_log: widening },
+      }),
+    );
+
+    const result = await handleDraftGraph('a 30-character decision brief..........', mockRequest, 'turn-1');
+
+    expect(result.coachingWideningLogObject).toEqual(widening);
+    // The legacy array field stays null for the object shape — that is exactly
+    // the dead-on-V5 path this fix routes around.
+    expect(result.coachingWideningLog).toBeNull();
+  });
+
+  it('defaults an unknown brief_completeness to "thin" and string-filters the arrays', async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({
+        ...MINIMAL_GRAPH,
+        coaching: {
+          summary: 's',
+          strengthen_items: [],
+          widening_log: {
+            elements_added: ['ok', 42, null],
+            elements_considered_but_excluded: ['reason', {}],
+            brief_completeness: 'bogus',
+          },
+        },
+      }),
+    );
+
+    const result = await handleDraftGraph('a 30-character decision brief..........', mockRequest, 'turn-1');
+
+    expect(result.coachingWideningLogObject).toEqual({
+      elements_added: ['ok'],
+      elements_considered_but_excluded: ['reason'],
+      brief_completeness: 'thin',
+    });
+  });
+
+  it('returns null coachingWideningLogObject for the legacy array shape and when absent', async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({
+        ...MINIMAL_GRAPH,
+        coaching: { summary: 's', strengthen_items: [], widening_log: [{ node_id: 'n1', reason: 'r' }] },
+      }),
+    );
+    const arrayResult = await handleDraftGraph('a 30-character decision brief..........', mockRequest, 'turn-1');
+    expect(arrayResult.coachingWideningLogObject).toBeNull();
+
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({ ...MINIMAL_GRAPH, coaching: { summary: 's', strengthen_items: [] } }),
+    );
+    const absentResult = await handleDraftGraph('a 30-character decision brief..........', mockRequest, 'turn-1');
+    expect(absentResult.coachingWideningLogObject).toBeNull();
+  });
+
+  it('extracts the object from a real staging draft pipeline body (contract)', async () => {
+    // Real staging capture: coaching.widening_log is the canonical OBJECT.
+    const fixture = JSON.parse(
+      readFileSync(
+        join(process.cwd(), 'tests/fixtures/cross-service/draft-graph.coaching-populated.staging.json'),
+        'utf8',
+      ),
+    ) as { graph: { nodes: unknown[]; edges: unknown[] }; coaching: Record<string, unknown> };
+
+    mockRunUnifiedPipeline.mockResolvedValueOnce(
+      makePipelineSuccess({
+        nodes: fixture.graph.nodes,
+        edges: fixture.graph.edges,
+        coaching: fixture.coaching,
+      }),
+    );
+
+    const result = await handleDraftGraph('a 30-character decision brief..........', mockRequest, 'turn-1');
+
+    expect(result.coachingWideningLogObject).toEqual({
+      elements_added: ['risk_runway'],
+      elements_considered_but_excluded: [
+        'Regulatory pause unlikely in this 12-month horizon',
+        'FX exposure not material at projected revenue scale',
+      ],
+      brief_completeness: 'partial',
+    });
   });
 });
