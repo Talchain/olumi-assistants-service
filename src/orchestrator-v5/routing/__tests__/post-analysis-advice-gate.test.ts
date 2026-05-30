@@ -2220,6 +2220,26 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
       expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
     }
   });
+
+  it('treats whitespace / case variants of a label as the same factor (normalised dedup)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...TWO_DRIVERS_NO_EDGES,
+        // Same factor, incidental trailing space + case difference.
+        top_drivers: [{ factor_label: 'Delivery risk' }, { factor_label: 'delivery risk ' }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Normalised compare → treated as one factor → single-driver wording.
+      expect(out.assistant_text).not.toMatch(/next most sensitive/);
+      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      // The variant second label must not appear as its own named driver.
+      expect(out.assistant_text).not.toContain('delivery risk ');
+    }
+  });
 });
 
 describe('post-analysis stays grounded when decision_review is unavailable (by-design phase3 path)', () => {

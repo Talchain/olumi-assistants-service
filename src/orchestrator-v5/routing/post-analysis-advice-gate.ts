@@ -1321,10 +1321,11 @@ function composeEvidenceGap(
     if (hasRenderableSecondDriver(analysis)) {
       const second = analysis.top_drivers[1]!.factor_label;
       // Defensive: skip the second-driver line when it would name the same
-      // factor twice. The projection sorts distinct factors by |sensitivity|
-      // and should not emit a duplicate label, but two factors can share a
-      // display label — never repeat the same name.
-      if (second !== top) {
+      // factor twice. Compare on a normalised label (trimmed, case-folded) so
+      // incidental whitespace / case variants of the same display label are
+      // caught too. The projection sorts distinct factors by |sensitivity|;
+      // this only guards the rare shared-label edge case.
+      if (second.trim().toLowerCase() !== top.trim().toLowerCase()) {
         gaps.push(
           `${second} is the next most sensitive factor, so it's the second place where more evidence would help`,
         );

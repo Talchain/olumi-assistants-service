@@ -1155,6 +1155,39 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
     expect(result.telemetry.additional_checks_surfaced).toBe(0);
     expect(result.telemetry.additional_check_source).toBeNull();
   });
+
+  // Documents accepted formatting (per review): the copy-quality gate accepts
+  // numeric PROSE figures in coaching fragments (e.g. "$23.5M range") — these
+  // are legitimate references to the user's own inputs, not leaked computed
+  // values. The new "Worth a look" check path uses the SAME
+  // gateAssumptionFragment as the primary assumption bullet, so it introduces
+  // no new numeric exposure vs the existing path. Raw COMPUTED long-decimals
+  // (sensitivity/probability values) are an ANALYSIS-copy concern handled by
+  // the analysis-value formatters — they are not produced in LLM-authored
+  // post-draft coaching prose.
+  it('handles a numeric prose figure identically on the assumption and the extra check (parity, no new regression)', () => {
+    const figure = 'Widen the 23.5M synergy estimate into a downside range before deciding';
+
+    // As the primary assumption (single strengthen item).
+    const asAssumption = buildPostDraftNarrative({
+      graph: TWO_FACTOR_GRAPH,
+      strengthenItems: [strengthen('s1', 'L1', figure)],
+    });
+    expect(asAssumption.text).toContain('Assumption to check:');
+    expect(asAssumption.text).toContain('23.5M');
+
+    // As the extra "Worth a look" check (a distinct item[0], the figure at [1]).
+    const asCheck = buildPostDraftNarrative({
+      graph: TWO_FACTOR_GRAPH,
+      strengthenItems: [
+        strengthen('s0', 'L0', 'Confirm the delivery timeline assumption holds under load'),
+        strengthen('s1', 'L1', figure),
+      ],
+    });
+    expect(asCheck.text).toContain('Worth a look:');
+    expect(asCheck.text).toContain('23.5M');
+    expect(asCheck.telemetry.additional_check_source).toBe('strengthen_item');
+  });
 });
 
 describe('buildPostDraftNarrative — new copy passes the real egress guards', () => {
