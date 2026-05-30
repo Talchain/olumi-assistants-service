@@ -22,6 +22,10 @@ import {
   type AdviceClass,
   type AdviceGateAnalysis,
 } from '../post-analysis-advice-gate.js';
+import {
+  findForbiddenPhraseHit,
+  findSuccessClaimHit,
+} from '../../compose/forbidden-user-facing-phrases.js';
 import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
@@ -2099,6 +2103,279 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
       // (what_would_flip chip) — chip ownership not affected by near-tie.
       expect(out.suggested_actions.length).toBe(1);
       expect(out.suggested_actions[0]?.action_type).toBe('what_would_flip');
+    }
+  });
+});
+
+// ===========================================================================
+// Scope B — two-driver evidence-gap fallback + by-design phase3 grounding
+// ===========================================================================
+
+describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
+  // Pure top-driver fallback: no readiness gaps (no analysisReady), no fragile
+  // edges, no decision_review → the composer names where evidence matters most.
+  const TWO_DRIVERS_NO_EDGES: AdviceGateAnalysis = {
+    ...FIXTURE_ANALYSIS,
+    fragile_edges: [],
+    top_drivers: [
+      { factor_label: 'Delivery risk' },
+      { factor_label: 'Cost overrun risk' },
+    ],
+  };
+
+  it('names BOTH highest-leverage drivers when the projection carries a second one', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: TWO_DRIVERS_NO_EDGES,
+      freshness: 'fresh',
+      // no analysisReady, no decisionReview — the by-design fallback source.
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.assistant_text).toContain('Delivery risk');
+      expect(out.assistant_text).toContain('Cost overrun risk');
+      expect(out.assistant_text).toMatch(/next most sensitive factor/);
+      // Both surface as bullets under the plural header.
+      expect(out.assistant_text).toMatch(/biggest open gaps right now are/i);
+      // Direction-honest by construction: makes no increases/decreases claim.
+      expect(out.assistant_text).not.toMatch(/increase|decrease|raises|lowers/i);
+      // No raw IDs / decimals / readiness percentage.
+      expect(out.assistant_text).not.toMatch(/\bfac_|\bopt_|\d{1,3}\s*%/);
+    }
+  });
+
+  it('keeps single-driver wording intact when only one driver is renderable', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: { ...TWO_DRIVERS_NO_EDGES, top_drivers: [{ factor_label: 'Delivery risk' }] },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Singular header, original sentence, no second-driver line.
+      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      expect(out.assistant_text).toContain(
+        'the strongest sensitivity is on Delivery risk, so that',
+      );
+      expect(out.assistant_text).not.toContain('Cost overrun risk');
+      expect(out.assistant_text).not.toMatch(/next most sensitive/);
+    }
+  });
+
+  it('two-driver fallback copy passes the real egress guards (no forbidden / success-claim / ID / decimal / internal-label leak)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: TWO_DRIVERS_NO_EDGES, // 2 drivers, no edges, no readiness, no DR
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Confirm we exercised the two-driver branch (not single-driver / DR / readiness).
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.assistant_text).toMatch(/biggest open gaps right now are/i);
+      expect(out.assistant_text).toMatch(/next most sensitive factor/);
+
+      const text = out.assistant_text;
+      // Real egress guards run against the matched assistant_text.
+      expect(findForbiddenPhraseHit(text), `forbidden phrase in:\n${text}`).toBeNull();
+      expect(findSuccessClaimHit(text), `success-claim phrase in:\n${text}`).toBeNull();
+      // No raw entity IDs.
+      expect(text).not.toMatch(/\b(?:fac|opt|out|risk|goal|dec|node|con)_[a-z0-9]+/i);
+      // No raw long decimals (2+ fractional digits).
+      expect(text).not.toMatch(/\d+\.\d{2,}/);
+      // No internal labels / schema tokens.
+      for (const token of [
+        'phase3',
+        'm1_coaching',
+        'widening_log',
+        'strengthen_items',
+        'bias_signals',
+        'decision_review',
+        'factor_sensitivity',
+        'top_drivers',
+        'analysis_projection',
+        'highly_stable',
+      ]) {
+        expect(text.toLowerCase(), `internal token "${token}" leaked`).not.toContain(token);
+      }
+    }
+  });
+
+  it('never names the same factor twice when the two top drivers share a label', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...TWO_DRIVERS_NO_EDGES,
+        top_drivers: [{ factor_label: 'Delivery risk' }, { factor_label: 'Delivery risk' }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Only one distinct factor exists → single-driver wording, named once.
+      const occurrences = out.assistant_text.split('Delivery risk').length - 1;
+      expect(occurrences).toBe(1);
+      expect(out.assistant_text).not.toMatch(/next most sensitive/);
+      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+    }
+  });
+
+  it('treats whitespace / case variants of a label as the same factor (normalised dedup)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...TWO_DRIVERS_NO_EDGES,
+        // Same factor, incidental trailing space + case difference.
+        top_drivers: [{ factor_label: 'Delivery risk' }, { factor_label: 'delivery risk ' }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Normalised compare → treated as one factor → single-driver wording.
+      expect(out.assistant_text).not.toMatch(/next most sensitive/);
+      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      // The variant second label must not appear as its own named driver.
+      expect(out.assistant_text).not.toContain('delivery risk ');
+    }
+  });
+
+  it('renders a distinct second label trimmed (no incidental whitespace from upstream)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...TWO_DRIVERS_NO_EDGES,
+        // Two DISTINCT factors; the second carries an incidental trailing space.
+        top_drivers: [{ factor_label: 'Delivery risk' }, { factor_label: 'Cost risk ' }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Both named (distinct), and the second renders trimmed — no double space.
+      expect(out.assistant_text).toMatch(/next most sensitive factor/);
+      expect(out.assistant_text).toContain('Cost risk is the next most sensitive factor');
+      expect(out.assistant_text).not.toContain('Cost risk  is');
+    }
+  });
+});
+
+describe('post-analysis stays grounded when decision_review is unavailable (by-design phase3 path)', () => {
+  // Regression for the resolved gate: on a fresh follow-up the persisted
+  // run_analysis fact carries raw PLoT enrichment only (no decision_review),
+  // so phase3_block_context_available is false BY DESIGN
+  // (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW defaults off). The advice gate must
+  // still answer from the projected analysis fallback, never degrade to a
+  // generic template.
+  it('answers an explanatory question with concrete drivers, not generic copy', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+      // decisionReview deliberately omitted — mirrors the fresh-follow-up shape.
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Hire two senior engineers locally');
+      expect(out.assistant_text).toMatch(/Delivery risk|Cost overrun risk/);
+      expect(out.assistant_text.length).toBeGreaterThan(60);
+    }
+  });
+
+  it('answers an evidence-gap question from the projection when decision_review is absent', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What evidence is missing?',
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      // Grounded in the projection (fragile edge / top driver), not a template.
+      expect(out.assistant_text).toMatch(/biggest open gap/i);
+      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+    }
+  });
+});
+
+describe('advice-gate copy-source descriptor (Scope C diagnostics)', () => {
+  it('tags evidence_gap from decision_review when usable evidence_enhancements exist', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: {
+        produced_at: '2026-05-21T10:00:00.000Z',
+        evidence_enhancements: {
+          fac_a: { specific_action: 'Pull the last two quarters of delivery data and check the variance.' },
+        },
+        key_assumptions: ['The hiring market stays as competitive as today.'],
+      },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('decision_review');
+      expect(out.coaching_fields_used).toContain('decision_review');
+    }
+  });
+
+  it('tags the evidence_gap fallback as top_drivers when only drivers remain', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: { ...FIXTURE_ANALYSIS, fragile_edges: [] },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('top_drivers');
+      expect(out.coaching_fields_used).toContain('top_drivers');
+      expect(out.coaching_fields_used).not.toContain('decision_review');
+    }
+  });
+
+  it('tags the evidence_gap fallback as fragile_edges when a renderable edge exists', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS, // carries one renderable fragile edge
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('fragile_edges');
+      expect(out.coaching_fields_used).toContain('fragile_edges');
+    }
+  });
+
+  it('tags projection-class composers as analysis_projection with the fields used', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What would you recommend?',
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('advice');
+      expect(out.copy_source).toBe('analysis_projection');
+      expect(out.coaching_fields_used).toEqual(
+        expect.arrayContaining(['leading_option', 'top_drivers']),
+      );
+      expect(out.coaching_fields_used).not.toContain('decision_review');
+    }
+  });
+
+  it('tags the readiness composer as readiness', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: "What's blocking the analysis?",
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('readiness');
+      expect(out.copy_source).toBe('readiness');
     }
   });
 });

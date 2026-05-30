@@ -104,6 +104,46 @@ describe('buildMinimalV5DiagnosticTrace', () => {
     expect(call.cache_read_tokens).toBe(200);
     expect(call.latency_ms).toBe(800);
   });
+
+  it('threads a coaching_delivery section onto the trace when provided (Scope C)', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 30,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'turn_executor',
+      coachingDelivery: {
+        handler: 'post_analysis_advice_gate',
+        composer: 'evidence_gap',
+        copy_source: 'top_drivers',
+        coaching_fields_used: ['leading_option', 'top_drivers'],
+        phase3_block_context_available: false,
+        fallback_analysis_used: true,
+        deterministic: true,
+      },
+    });
+    expect(trace!.coaching_delivery).toBeDefined();
+    expect(trace!.coaching_delivery!.handler).toBe('post_analysis_advice_gate');
+    expect(trace!.coaching_delivery!.composer).toBe('evidence_gap');
+    expect(trace!.coaching_delivery!.copy_source).toBe('top_drivers');
+    expect(trace!.coaching_delivery!.coaching_fields_used).toEqual(['leading_option', 'top_drivers']);
+    expect(trace!.coaching_delivery!.phase3_block_context_available).toBe(false);
+    expect(trace!.coaching_delivery!.fallback_analysis_used).toBe(true);
+    expect(trace!.coaching_delivery!.deterministic).toBe(true);
+  });
+
+  it('omits coaching_delivery when not provided', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 30,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'turn_executor',
+    });
+    expect(trace!.coaching_delivery).toBeUndefined();
+  });
 });
 
 describe('buildErrorV5DiagnosticTrace', () => {

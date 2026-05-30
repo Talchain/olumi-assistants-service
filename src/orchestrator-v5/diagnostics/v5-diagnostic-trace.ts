@@ -108,6 +108,35 @@ export interface V5Environment {
   environment?: string;
 }
 
+/**
+ * Copy-source delivery diagnostics (Scope C). Additive, non-user-facing
+ * record proving which structured coaching source reached the user surface on
+ * a deterministic post-analysis turn. Structural only — no labels, no values,
+ * no user prose. Populated today only on the `turn_executor` minimal-trace
+ * path (the post-analysis advice gate); other exit paths leave it undefined.
+ */
+export interface V5CoachingDelivery {
+  /** Surface/handler that produced the user-facing copy. */
+  handler: string;
+  /** Composer / advice class within the handler. */
+  composer: string;
+  /** Dominant structured source the copy drew from. */
+  copy_source: string;
+  /** Projected analysis fields available to the composer (structural only). */
+  coaching_fields_used: readonly string[];
+  /**
+   * Whether phase3 block context (decision_review on the selected fact) was
+   * available — by-design false when V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW
+   * is off.
+   */
+  phase3_block_context_available: boolean;
+  /** Whether the copy drew from the projected analysis fallback rather than
+   *  the decision_review enrichment. */
+  fallback_analysis_used: boolean;
+  /** Whether the response was deterministic (no LLM call) or LLM-backed. */
+  deterministic: boolean;
+}
+
 export interface V5DiagnosticTrace extends DiagnosticTrace {
   benchmarking: V5BenchmarkingTimings;
   correlation_ids: V5CorrelationIds;
@@ -119,6 +148,12 @@ export interface V5DiagnosticTrace extends DiagnosticTrace {
    * filtering across a debug bundle that spans multiple turns.
    */
   exit_path: V5DiagnosticExitPath;
+  /**
+   * Copy-source delivery diagnostics (Scope C, additive). Present only when a
+   * deterministic coaching surface (the post-analysis advice gate) produced
+   * the response and the flag is on; undefined otherwise.
+   */
+  coaching_delivery?: V5CoachingDelivery;
   /**
    * Schema version of the V5 trace envelope itself (NOT a prompt /
    * grammar version). Bumped on any breaking shape change. Exporters
@@ -156,6 +191,9 @@ export interface BuildMinimalV5DiagnosticTraceInput {
   readonly exitPath: V5DiagnosticExitPath;
   readonly graph?: GraphV3T | null;
   readonly turnTimings?: V5TurnTimings;
+  /** Copy-source delivery diagnostics (Scope C). Surfaced when the
+   *  post-analysis advice gate produced the response. */
+  readonly coachingDelivery?: V5CoachingDelivery;
 }
 
 export interface BuildErrorV5DiagnosticTraceInput {
@@ -249,6 +287,7 @@ export function buildMinimalV5DiagnosticTrace(
     correlationIds,
     environment: buildEnvironment(),
     exitPath: input.exitPath,
+    coachingDelivery: input.coachingDelivery,
   });
 }
 
@@ -315,6 +354,7 @@ interface AssembleInput {
   readonly retry?: V5Retry;
   readonly environment?: V5Environment;
   readonly exitPath: V5DiagnosticExitPath;
+  readonly coachingDelivery?: V5CoachingDelivery;
 }
 
 function assembleTrace(input: AssembleInput): V5DiagnosticTrace {
@@ -334,6 +374,7 @@ function assembleTrace(input: AssembleInput): V5DiagnosticTrace {
     ...(input.pipelineOutcome ? { pipeline_outcome: input.pipelineOutcome } : {}),
     ...(input.retry ? { retry: input.retry } : {}),
     ...(input.environment ? { environment: input.environment } : {}),
+    ...(input.coachingDelivery ? { coaching_delivery: input.coachingDelivery } : {}),
     exit_path: input.exitPath,
     trace_version: 1,
   };

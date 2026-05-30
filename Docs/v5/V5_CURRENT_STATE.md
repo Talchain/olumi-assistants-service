@@ -68,6 +68,10 @@ The handler map ranks these first: V5-owned, surgical, and already across the V4
 
 > **Re-confirm on HEAD before implementing.** The map found A1–A3 V5-owned and safe pre-V4-lift, but all cited line numbers are as of baseline `d59be1a8`. Reconcile against current `origin/staging` HEAD when implementation starts.
 
+> **Update (2026-05-30, branch `feat/v5-coaching-surface-delivery`, base `27bb71a8`; delivered via [PR #222](https://github.com/Talchain/olumi-assistants-service/pull/222) → `staging`).** A1–A3 implemented deterministically: revived the `widening_log` liveness path (the canonical object shape was dead on V5) and surface its `brief_completeness` as a calm advisory; the post-draft narrative now surfaces a second `strengthen_items` / `bias_signals` "check" point; the post-analysis advice gate names the two highest-leverage drivers in its evidence-gap fallback. Plus additive, flag-gated copy-source diagnostics. No prompt/PMS/schema/env/DGAI/PLoT/ISL changes; deterministic, no new LLM calls.
+>
+> **A4 / `decision_review` auto-fire remains an OPEN product decision — not resolved here.** `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW` defaults **off**, so the persisted `run_analysis` fact carries raw PLoT enrichment only and `phase3_block_context_available` is false on follow-up turns **by design** (not a propagation bug). This branch builds the deterministic enrichment-backed bridge — the right immediate path — and the advice gate already draws from the projected-analysis fallback, so it does not degrade. Whether to enable the flag despite its added latency is a pending **product / latency** decision to revisit separately.
+
 ---
 
 ## 6. Phase 3 reconciliation (13 May Completion Plan → handler map)

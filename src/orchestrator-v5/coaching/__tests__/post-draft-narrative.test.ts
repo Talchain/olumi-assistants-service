@@ -3,12 +3,18 @@
  * coaching gated-hybrid composer.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   buildPostDraftNarrative,
   validateUncertaintyDriver,
 } from '../post-draft-narrative.js';
 import { sanitiseUserFacingText } from '../../compose/output-safety.js';
-import type { GraphV3T } from '../../../orchestrator/types.js';
+import {
+  findForbiddenPhraseHit,
+  findSuccessClaimHit,
+} from '../../compose/forbidden-user-facing-phrases.js';
+import type { GraphV3T, DraftCoachingWideningLog } from '../../../orchestrator/types.js';
 import type { AnalysisReadyPayloadT } from '../../../schemas/analysis-ready.js';
 
 const FORBIDDEN_TERMS = [
@@ -995,5 +1001,270 @@ describe('validateUncertaintyDriver', () => {
     expect(validateUncertaintyDriver(undefined as unknown as string)).toBe(false);
     expect(validateUncertaintyDriver(null as unknown as string)).toBe(false);
     expect(validateUncertaintyDriver(123 as unknown as string)).toBe(false);
+  });
+});
+
+// ============================================================================
+// Scope A — multi-point coaching + widening_log delivery
+// ============================================================================
+
+const TWO_FACTOR_GRAPH = makeGraph([
+  GOAL_NODE,
+  OPTION_A,
+  OPTION_B,
+  FACTOR_QUALITY,
+  FACTOR_CAPACITY,
+]);
+
+function strengthen(id: string, label: string, detail: string) {
+  return { id, label, detail, action_type: 'add_context' };
+}
+function biasSignal(type: string, detail: string) {
+  return { type, detail };
+}
+
+/** Assert the rendered text survives BOTH egress guards and the clean-copy
+ *  helper — proving new copy never trips success-claim / forbidden-phrase
+ *  detection and leaks no IDs / internal labels. */
+function assertPassesAllGuards(text: string): void {
+  assertCleanCopy(text);
+  expect(findForbiddenPhraseHit(text), `forbidden phrase in:\n${text}`).toBeNull();
+  expect(findSuccessClaimHit(text), `success-claim phrase in:\n${text}`).toBeNull();
+}
+
+describe('buildPostDraftNarrative — widening_log brief completeness', () => {
+  it('surfaces a calm advisory for a thin brief without leaking the enum or node IDs', () => {
+    const wideningLog: DraftCoachingWideningLog = {
+      // elements_added holds NODE IDs — must never be rendered.
+      elements_added: ['fac_hidden_cost', 'risk_runway'],
+      elements_considered_but_excluded: [],
+      brief_completeness: 'thin',
+    };
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, wideningLog });
+    expect(result.text).toContain('adding specifics will make the comparison more reliable');
+    // The schema enum value is never emitted verbatim.
+    expect(result.text).not.toMatch(/\bthin\b/);
+    // elements_added node IDs never surface.
+    expect(result.text).not.toContain('fac_hidden_cost');
+    expect(result.text).not.toContain('risk_runway');
+    assertPassesAllGuards(result.text);
+    expect(result.telemetry.widening_log_present).toBe(true);
+    expect(result.telemetry.brief_completeness).toBe('thin');
+    expect(result.telemetry.brief_completeness_surfaced).toBe(true);
+  });
+
+  it('surfaces the partial-brief advisory line', () => {
+    const wideningLog: DraftCoachingWideningLog = {
+      elements_added: [],
+      elements_considered_but_excluded: ['Regulatory pause unlikely in this horizon'],
+      brief_completeness: 'partial',
+    };
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, wideningLog });
+    expect(result.text).toContain('adding detail on the lighter areas would sharpen the comparison');
+    expect(result.telemetry.brief_completeness_surfaced).toBe(true);
+    // The enum value is mapped to a phrase and never emitted verbatim.
+    expect(result.text).not.toMatch(/\bpartial\b/i);
+    assertPassesAllGuards(result.text);
+  });
+
+  it('renders no advisory block for a complete brief', () => {
+    const wideningLog: DraftCoachingWideningLog = {
+      elements_added: [],
+      elements_considered_but_excluded: [],
+      brief_completeness: 'complete',
+    };
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, wideningLog });
+    expect(result.text).not.toContain('sharpen the comparison');
+    expect(result.text).not.toContain('more reliable');
+    // The enum value is never emitted verbatim (the block is omitted entirely).
+    expect(result.text).not.toMatch(/\bcomplete\b/i);
+    expect(result.telemetry.widening_log_present).toBe(true);
+    expect(result.telemetry.brief_completeness).toBe('complete');
+    expect(result.telemetry.brief_completeness_surfaced).toBe(false);
+  });
+
+  it('is byte-identical to the no-widening output when widening_log is absent or null', () => {
+    const without = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH });
+    const withNull = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, wideningLog: null });
+    expect(without.text).toBe(withNull.text);
+    expect(without.telemetry.widening_log_present).toBe(false);
+    expect(without.telemetry.brief_completeness).toBeNull();
+    expect(without.telemetry.brief_completeness_surfaced).toBe(false);
+  });
+});
+
+describe('buildPostDraftNarrative — multiple coaching points', () => {
+  it('surfaces a second "Worth a look" check bullet from a second strengthen item', () => {
+    const strengthenItems = [
+      strengthen(
+        'strengthen_001',
+        'Stress the synergy estimate',
+        'The synergy figure is a single point value; widen it to a range to surface downside scenarios',
+      ),
+      strengthen(
+        'strengthen_002',
+        'Add a staged path',
+        'A phased pilot is a real third path that the binary framing hides from the comparison',
+      ),
+    ];
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    expect(result.text).toContain('Assumption to check:');
+    expect(result.text).toContain('Worth a look:');
+    expect(result.telemetry.additional_checks_surfaced).toBe(1);
+    expect(result.telemetry.additional_check_source).toBe('strengthen_item');
+    assertPassesAllGuards(result.text);
+  });
+
+  it('caps the extra check bullets at one (no overload)', () => {
+    const strengthenItems = [
+      strengthen('s1', 'L1', 'First specific assumption worth testing against the real delivery plan'),
+      strengthen('s2', 'L2', 'Second distinct assumption that also merits a closer look before analysis'),
+      strengthen('s3', 'L3', 'Third separate point that should not appear because the cap is one extra item'),
+    ];
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    const checkBullets = result.text.split('\n').filter((line) => line.includes('Worth a look:'));
+    expect(checkBullets.length).toBe(1);
+    expect(result.telemetry.additional_checks_surfaced).toBe(1);
+  });
+
+  it('draws the extra check from a bias signal when strengthen items are exhausted', () => {
+    const strengthenItems = [
+      strengthen('s1', 'L1', 'Only one strengthen item, which becomes the primary assumption bullet here'),
+    ];
+    const coachingBiasSignals = [
+      biasSignal('narrow_framing', 'The brief frames the choice as binary when phased routes also exist'),
+      biasSignal('overconfidence', 'The estimate is a single point with no stated uncertainty band'),
+    ];
+    const result = buildPostDraftNarrative({
+      graph: TWO_FACTOR_GRAPH,
+      strengthenItems,
+      coachingBiasSignals,
+    });
+    expect(result.text).toContain('Worth a look:');
+    expect(result.telemetry.additional_check_source).toBe('coaching_bias_signal');
+    assertPassesAllGuards(result.text);
+  });
+
+  it('does not repeat the primary assumption text as the extra check (dedup)', () => {
+    const strengthenItems = [
+      strengthen('s1', 'L1', 'The single coaching point that becomes the assumption bullet only'),
+    ];
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    const checkBullets = result.text.split('\n').filter((line) => line.includes('Worth a look:'));
+    expect(checkBullets.length).toBe(0);
+    expect(result.telemetry.additional_checks_surfaced).toBe(0);
+    expect(result.telemetry.additional_check_source).toBeNull();
+  });
+
+  // Documents accepted formatting (per review): the copy-quality gate accepts
+  // numeric PROSE figures in coaching fragments (e.g. "$23.5M range") — these
+  // are legitimate references to the user's own inputs, not leaked computed
+  // values. The new "Worth a look" check path uses the SAME
+  // gateAssumptionFragment as the primary assumption bullet, so it introduces
+  // no new numeric exposure vs the existing path. Raw COMPUTED long-decimals
+  // (sensitivity/probability values) are an ANALYSIS-copy concern handled by
+  // the analysis-value formatters — they are not produced in LLM-authored
+  // post-draft coaching prose.
+  it('handles a numeric prose figure identically on the assumption and the extra check (parity, no new regression)', () => {
+    const figure = 'Widen the 23.5M synergy estimate into a downside range before deciding';
+
+    // As the primary assumption (single strengthen item).
+    const asAssumption = buildPostDraftNarrative({
+      graph: TWO_FACTOR_GRAPH,
+      strengthenItems: [strengthen('s1', 'L1', figure)],
+    });
+    expect(asAssumption.text).toContain('Assumption to check:');
+    expect(asAssumption.text).toContain('23.5M');
+
+    // As the extra "Worth a look" check (a distinct item[0], the figure at [1]).
+    const asCheck = buildPostDraftNarrative({
+      graph: TWO_FACTOR_GRAPH,
+      strengthenItems: [
+        strengthen('s0', 'L0', 'Confirm the delivery timeline assumption holds under load'),
+        strengthen('s1', 'L1', figure),
+      ],
+    });
+    expect(asCheck.text).toContain('Worth a look:');
+    expect(asCheck.text).toContain('23.5M');
+    expect(asCheck.telemetry.additional_check_source).toBe('strengthen_item');
+  });
+});
+
+describe('buildPostDraftNarrative — new copy passes the real egress guards', () => {
+  it('protects commit-verb-leading coaching text behind bullet labels (success-claim guard)', () => {
+    // Details that START with commit verbs (Set/Added/Updated) would trip
+    // SUCCESS_CLAIM_PATTERNS at a line start; the bullet glyph + label prefix
+    // must keep them off the line lead. This is the regression the user asked
+    // for: prove the new bullets cannot accidentally read as a success claim.
+    const strengthenItems = [
+      strengthen('s1', 'Set a deadline', 'Set a firm go or no-go deadline before the full budget is committed'),
+      strengthen('s2', 'Add a pilot', 'Added scope for a staged pilot path is worth weighing before deciding'),
+    ];
+    const coachingBiasSignals = [
+      biasSignal('anchoring', 'Updated estimates may anchor on the first figure rather than the evidence'),
+    ];
+    const wideningLog: DraftCoachingWideningLog = {
+      elements_added: ['fac_x'],
+      elements_considered_but_excluded: ['Set aside FX exposure as immaterial at this scale'],
+      brief_completeness: 'thin',
+    };
+    const result = buildPostDraftNarrative({
+      graph: TWO_FACTOR_GRAPH,
+      strengthenItems,
+      coachingBiasSignals,
+      wideningLog,
+    });
+    // The commit-verb text DID reach a bullet (proves the guard ran on real copy).
+    expect(result.text).toMatch(/Worth a look:|Assumption to check:/);
+    assertPassesAllGuards(result.text);
+  });
+});
+
+describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery (contract)', () => {
+  // Real staging-shaped draft capture: 9-node graph + LLM coaching with a
+  // canonical widening_log object (elements_added: ["risk_runway"],
+  // brief_completeness: "partial"), two strengthen_items and two bias_signals.
+  const fixture = JSON.parse(
+    readFileSync(
+      join(process.cwd(), 'tests/fixtures/cross-service/draft-graph.coaching-populated.staging.json'),
+      'utf8',
+    ),
+  ) as {
+    graph: GraphV3T;
+    coaching: {
+      summary: string;
+      strengthen_items: ReadonlyArray<unknown>;
+      bias_signals: ReadonlyArray<unknown>;
+      widening_log: DraftCoachingWideningLog;
+    };
+  };
+
+  it('surfaces structured coaching from a real staging draft into the rendered narrative, leaking no IDs', () => {
+    const result = buildPostDraftNarrative({
+      graph: fixture.graph,
+      // Exercise the deterministic sectioned path (summary absent / rejected) —
+      // that is where the structured widening / strengthen / bias fields surface.
+      coachingSummary: null,
+      strengthenItems: fixture.coaching.strengthen_items,
+      coachingBiasSignals: fixture.coaching.bias_signals,
+      wideningLog: fixture.coaching.widening_log,
+    });
+
+    // Brief-completeness advisory reached the rendered surface text.
+    expect(result.text).toContain('adding detail on the lighter areas would sharpen the comparison');
+    // A primary assumption AND a deduped second check bullet both reached the surface.
+    expect(result.text).toContain('Assumption to check:');
+    expect(result.text).toContain('Worth a look:');
+    expect(result.telemetry.additional_checks_surfaced).toBe(1);
+    expect(result.telemetry.brief_completeness_surfaced).toBe(true);
+
+    // No raw IDs leak — elements_added node-id and strengthen item ids.
+    expect(result.text).not.toContain('risk_runway');
+    expect(result.text).not.toContain('strengthen_001');
+    expect(result.text).not.toContain('strengthen_002');
+
+    // Word budget respected and all egress guards clean on real data.
+    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
+    assertPassesAllGuards(result.text);
   });
 });

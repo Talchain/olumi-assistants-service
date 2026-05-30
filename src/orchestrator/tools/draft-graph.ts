@@ -12,7 +12,7 @@ import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts, PipelineOutcome } from "../../cee/unified-pipeline/types.js";
-import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry, DraftCoachingStrengthenItem } from "../types.js";
+import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry, DraftCoachingStrengthenItem, DraftCoachingWideningLog } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
@@ -75,6 +75,16 @@ export interface DraftGraphResult {
   coachingSummary: string | null;
   /** Raw LLM coaching.widening_log, preserved byte-for-byte for V5 ContextPack. */
   coachingWideningLog: readonly unknown[] | null;
+  /**
+   * Canonical (v0.11.0+) coaching.widening_log OBJECT, narrowed and validated.
+   * The legacy `coachingWideningLog` array field only matches the pre-v0.11.0
+   * shape — on V5 the Anthropic-adapter ingress normaliser converts the LLM
+   * output to the `{elements_added, elements_considered_but_excluded,
+   * brief_completeness}` object, so the array extractor returns null and that
+   * field is effectively dead. This field carries the live object.
+   * SAFETY: `elements_added` holds NODE IDs — consumers must NEVER render it raw.
+   */
+  coachingWideningLogObject?: DraftCoachingWideningLog | null;
   /** Raw LLM coaching.bias_signals (namespaced under draft_coaching in V5 to
    *  avoid collision with CEE preflight bias_signals). */
   coachingBiasSignals: readonly unknown[] | null;
@@ -342,6 +352,7 @@ export async function handleDraftGraph(
   // the existing narrationHint/strengthenItems flow; no V4 behaviour change.
   const coachingSummaryRaw = extractCoachingSummaryRaw(body);
   const coachingWideningLog = extractCoachingWideningLog(body);
+  const coachingWideningLogObject = extractCoachingWideningLogObject(body);
   const coachingBiasSignals = extractCoachingBiasSignals(body);
 
   // Build narration_hint from coaching data (for Phase 3 LLM context)
@@ -395,6 +406,7 @@ export async function handleDraftGraph(
     strengthenItems,
     coachingSummary: coachingSummaryRaw,
     coachingWideningLog,
+    coachingWideningLogObject,
     coachingBiasSignals,
     draftWarnings,
     graphOutput,
@@ -637,6 +649,41 @@ function extractCoachingWideningLog(body: Record<string, unknown>): readonly unk
   if (!coaching) return null;
   const raw = coaching.widening_log;
   return Array.isArray(raw) ? raw : null;
+}
+
+/**
+ * Extract the canonical (v0.11.0+) coaching.widening_log OBJECT and narrow it
+ * to `{elements_added, elements_considered_but_excluded, brief_completeness}`,
+ * or null. Mirrors `narrowWideningLog` in `../draft-coaching.ts` (kept local to
+ * avoid a value import into the tool layer). `extractCoachingWideningLog` above
+ * only matches the legacy ARRAY shape, which the Anthropic-adapter normaliser
+ * has already converted to this object — so on V5 that field is always null and
+ * this is the live accessor. SAFETY: `elements_added` holds NODE IDs; callers
+ * must never render its contents raw.
+ */
+function extractCoachingWideningLogObject(
+  body: Record<string, unknown>,
+): DraftCoachingWideningLog | null {
+  const coaching = body.coaching as Record<string, unknown> | undefined;
+  if (!coaching) return null;
+  const raw = coaching.widening_log;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const elementsAdded = Array.isArray(o.elements_added)
+    ? o.elements_added.filter((s): s is string => typeof s === 'string')
+    : [];
+  const excluded = Array.isArray(o.elements_considered_but_excluded)
+    ? o.elements_considered_but_excluded.filter((s): s is string => typeof s === 'string')
+    : [];
+  const briefCompleteness: DraftCoachingWideningLog['brief_completeness'] =
+    o.brief_completeness === 'complete' || o.brief_completeness === 'partial' || o.brief_completeness === 'thin'
+      ? o.brief_completeness
+      : 'thin';
+  return {
+    elements_added: elementsAdded,
+    elements_considered_but_excluded: excluded,
+    brief_completeness: briefCompleteness,
+  };
 }
 
 /** Extract raw coaching.bias_signals; pass-through array or null. */

@@ -180,6 +180,9 @@ function draftResultToOlumiResponse(
       strengthenItems: result.strengthenItems,
       coachingSummary: result.coachingSummary,
       coachingBiasSignals: result.coachingBiasSignals,
+      // Canonical widening_log object (the legacy array field is dead on V5).
+      // The builder surfaces only `brief_completeness` as advisory copy.
+      wideningLog: result.coachingWideningLogObject ?? null,
     });
     // Narrow-guard scrub of the composed narrative before it becomes
     // assistant_text. Two leak paths land here:
