@@ -22,6 +22,10 @@ import {
   type AdviceClass,
   type AdviceGateAnalysis,
 } from '../post-analysis-advice-gate.js';
+import {
+  findForbiddenPhraseHit,
+  findSuccessClaimHit,
+} from '../../compose/forbidden-user-facing-phrases.js';
 import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
@@ -2156,6 +2160,64 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
       );
       expect(out.assistant_text).not.toContain('Cost overrun risk');
       expect(out.assistant_text).not.toMatch(/next most sensitive/);
+    }
+  });
+
+  it('two-driver fallback copy passes the real egress guards (no forbidden / success-claim / ID / decimal / internal-label leak)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: TWO_DRIVERS_NO_EDGES, // 2 drivers, no edges, no readiness, no DR
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Confirm we exercised the two-driver branch (not single-driver / DR / readiness).
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.assistant_text).toMatch(/biggest open gaps right now are/i);
+      expect(out.assistant_text).toMatch(/next most sensitive factor/);
+
+      const text = out.assistant_text;
+      // Real egress guards run against the matched assistant_text.
+      expect(findForbiddenPhraseHit(text), `forbidden phrase in:\n${text}`).toBeNull();
+      expect(findSuccessClaimHit(text), `success-claim phrase in:\n${text}`).toBeNull();
+      // No raw entity IDs.
+      expect(text).not.toMatch(/\b(?:fac|opt|out|risk|goal|dec|node|con)_[a-z0-9]+/i);
+      // No raw long decimals (2+ fractional digits).
+      expect(text).not.toMatch(/\d+\.\d{2,}/);
+      // No internal labels / schema tokens.
+      for (const token of [
+        'phase3',
+        'm1_coaching',
+        'widening_log',
+        'strengthen_items',
+        'bias_signals',
+        'decision_review',
+        'factor_sensitivity',
+        'top_drivers',
+        'analysis_projection',
+        'highly_stable',
+      ]) {
+        expect(text.toLowerCase(), `internal token "${token}" leaked`).not.toContain(token);
+      }
+    }
+  });
+
+  it('never names the same factor twice when the two top drivers share a label', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...TWO_DRIVERS_NO_EDGES,
+        top_drivers: [{ factor_label: 'Delivery risk' }, { factor_label: 'Delivery risk' }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // Only one distinct factor exists → single-driver wording, named once.
+      const occurrences = out.assistant_text.split('Delivery risk').length - 1;
+      expect(occurrences).toBe(1);
+      expect(out.assistant_text).not.toMatch(/next most sensitive/);
+      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
     }
   });
 });

@@ -1062,6 +1062,8 @@ describe('buildPostDraftNarrative — widening_log brief completeness', () => {
     const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, wideningLog });
     expect(result.text).toContain('adding detail on the lighter areas would sharpen the comparison');
     expect(result.telemetry.brief_completeness_surfaced).toBe(true);
+    // The enum value is mapped to a phrase and never emitted verbatim.
+    expect(result.text).not.toMatch(/\bpartial\b/i);
     assertPassesAllGuards(result.text);
   });
 
@@ -1074,6 +1076,8 @@ describe('buildPostDraftNarrative — widening_log brief completeness', () => {
     const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, wideningLog });
     expect(result.text).not.toContain('sharpen the comparison');
     expect(result.text).not.toContain('more reliable');
+    // The enum value is never emitted verbatim (the block is omitted entirely).
+    expect(result.text).not.toMatch(/\bcomplete\b/i);
     expect(result.telemetry.widening_log_present).toBe(true);
     expect(result.telemetry.brief_completeness).toBe('complete');
     expect(result.telemetry.brief_completeness_surfaced).toBe(false);

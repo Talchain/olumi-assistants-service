@@ -1320,9 +1320,15 @@ function composeEvidenceGap(
     );
     if (hasRenderableSecondDriver(analysis)) {
       const second = analysis.top_drivers[1]!.factor_label;
-      gaps.push(
-        `${second} is the next most sensitive factor, so it's the second place where more evidence would help`,
-      );
+      // Defensive: skip the second-driver line when it would name the same
+      // factor twice. The projection sorts distinct factors by |sensitivity|
+      // and should not emit a duplicate label, but two factors can share a
+      // display label — never repeat the same name.
+      if (second !== top) {
+        gaps.push(
+          `${second} is the next most sensitive factor, so it's the second place where more evidence would help`,
+        );
+      }
     }
   }
   if (gaps.length === 0) {
