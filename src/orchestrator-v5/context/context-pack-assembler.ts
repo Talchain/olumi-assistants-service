@@ -33,6 +33,7 @@ import type {
   OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
+import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import {
@@ -539,20 +540,15 @@ function projectAnalysis(
 
   // 2. Top drivers: filter non-finite, sort by |sensitivity| desc, cap at 3.
   //    Upstream `DriverSummary.sensitivity` is already the absolute value
-  //    (Math.abs in deriveTopDrivers); sign is in `direction`. Re-attach
-  //    sign so consumers see a signed magnitude. A `neutral` direction has no
-  //    directional signal, so it projects to 0 → the near-zero band renders
-  //    "has little effect" rather than a strengthen/weaken claim.
+  //    (Math.abs in deriveTopDrivers); sign is in `direction`. Re-attach via
+  //    the shared `toSignedInfluenceValue` rule: `neutral` → 0 (no directional
+  //    signal) → the near-zero band renders "has little effect"; negative →
+  //    negated magnitude; positive → magnitude.
   const topDrivers: ContextPackAnalysisDriver[] = analysis.top_drivers
     .filter((d) => isFiniteSensitivity(d.sensitivity))
     .map((d) => ({
       factor_label: d.factor_label,
-      sensitivity_value:
-        d.direction === 'neutral'
-          ? 0
-          : d.direction === 'negative'
-            ? -d.sensitivity
-            : d.sensitivity,
+      sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
     }))
     .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
     .slice(0, TOP_DRIVER_CAP);

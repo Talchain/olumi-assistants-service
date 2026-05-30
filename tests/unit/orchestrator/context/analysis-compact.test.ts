@@ -158,6 +158,25 @@ describe("compactAnalysis", () => {
     expect(f2!.direction).toBe("positive");
   });
 
+  it("excludes per-result factor sensitivities that are non-finite (NaN, Infinity, -Infinity)", () => {
+    // Matches the top-level fallback's guard so no NaN/Infinity reaches a
+    // DriverSummary shared by downstream consumers that do not re-filter.
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_good", label: "Good", sensitivity: 0.5, direction: "positive" },
+          { node_id: "factor_nan", label: "NaN", sensitivity: Number.NaN, direction: "positive" },
+          { node_id: "factor_inf", label: "Inf", elasticity: Number.POSITIVE_INFINITY, direction: "negative" },
+          { node_id: "factor_ninf", label: "NegInf", elasticity: Number.NEGATIVE_INFINITY, direction: "negative" },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    expect(summary!.top_drivers.map((d) => d.factor_id)).toEqual(["factor_good"]);
+    expect(summary!.top_drivers.every((d) => Number.isFinite(d.sensitivity))).toBe(true);
+  });
+
   it("deduplicates drivers across options (max absolute sensitivity wins)", () => {
     const results = [
       {

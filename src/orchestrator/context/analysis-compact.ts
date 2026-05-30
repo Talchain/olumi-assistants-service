@@ -502,7 +502,10 @@ function deriveTopDrivers(
       const sensitivityRaw = typeof factor.sensitivity === 'number'
         ? factor.sensitivity
         : (typeof factor.elasticity === 'number' ? factor.elasticity : null);
-      if (sensitivityRaw === null) continue;
+      // Drop non-finite magnitudes (NaN / Infinity) so they never reach
+      // DriverSummary — matches deriveTopDriversFromTopLevel's guard, protecting
+      // shared summary consumers that do not re-filter at projection time.
+      if (sensitivityRaw === null || !Number.isFinite(sensitivityRaw)) continue;
 
       const absSensitivity = Math.abs(sensitivityRaw);
       // Honour the authoritative PLoT `direction` enum; only sign-derive when

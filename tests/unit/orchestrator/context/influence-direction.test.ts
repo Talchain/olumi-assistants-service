@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveInfluenceDirection } from '../../../../src/orchestrator/context/influence-direction.js';
+import {
+  resolveInfluenceDirection,
+  toSignedInfluenceValue,
+} from '../../../../src/orchestrator/context/influence-direction.js';
 
 describe('resolveInfluenceDirection', () => {
   describe('authoritative enum wins (magnitude sign is ignored)', () => {
@@ -46,5 +49,23 @@ describe('resolveInfluenceDirection', () => {
       expect(resolveInfluenceDirection('negative', Number.NaN)).toBe('negative');
       expect(resolveInfluenceDirection('positive', Number.POSITIVE_INFINITY)).toBe('positive');
     });
+  });
+});
+
+describe('toSignedInfluenceValue', () => {
+  it.each([
+    ['positive', 0.6, 0.6],
+    ['negative', 0.6, -0.6],
+    ['neutral', 0.6, 0],
+    ['neutral', 0, 0],
+    ['positive', 0, 0],
+  ] as const)('direction=%s, magnitude=%s → %s', (direction, magnitude, expected) => {
+    expect(toSignedInfluenceValue(direction, magnitude)).toBe(expected);
+  });
+
+  it('neutral never falls through to the positive branch, even at high magnitude', () => {
+    // Regression for the bug the contract doc previously implied: a neutral
+    // driver with a large magnitude must still project to 0, not +magnitude.
+    expect(toSignedInfluenceValue('neutral', 0.95)).toBe(0);
   });
 });

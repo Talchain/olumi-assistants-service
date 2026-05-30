@@ -38,3 +38,23 @@ export function resolveInfluenceDirection(
   if (!Number.isFinite(fallbackMagnitude)) return 'neutral';
   return fallbackMagnitude >= 0 ? 'positive' : 'negative';
 }
+
+/**
+ * Re-attach the sign to an unsigned influence magnitude using a resolved
+ * direction — the single rule for projecting a driver's signed display value.
+ *
+ * `neutral` carries no directional signal, so it projects to `0`; downstream
+ * the near-zero influence band renders "has little effect" rather than a
+ * strengthen/weaken claim. `neutral` must NOT fall through to the positive
+ * branch. `magnitude` is expected to be the unsigned (abs) sensitivity per the
+ * `DriverSummary` contract. Used by both sign-reattachment sites
+ * (`projectAnalysis` and the chip-click dispatch) so the rule lives in exactly
+ * one place.
+ */
+export function toSignedInfluenceValue(
+  direction: InfluenceDirection,
+  magnitude: number,
+): number {
+  if (direction === 'neutral') return 0;
+  return direction === 'negative' ? -magnitude : magnitude;
+}

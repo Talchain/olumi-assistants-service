@@ -73,6 +73,7 @@ import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
 import { buildAnalysisProjectionSummary } from '../context/projection-summaries.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
+import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import {
   createRegistry,
   getDefaultPlotClient,
@@ -1055,13 +1056,8 @@ function buildProjectionInputs(
             : null,
         top_drivers: analysisFromPrior.top_drivers.map((d) => ({
           factor_label: d.factor_label,
-          // Mirror projectAnalysis: `neutral` → 0 (no directional claim).
-          sensitivity_value:
-            d.direction === 'neutral'
-              ? 0
-              : d.direction === 'negative'
-                ? -d.sensitivity
-                : d.sensitivity,
+          // Shared rule with projectAnalysis: `neutral` → 0 (no directional claim).
+          sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
         })),
         fragile_edges: (analysisFromPrior.top_fragile_edges ?? []).map((e) => ({
           from_label: e.from_label,

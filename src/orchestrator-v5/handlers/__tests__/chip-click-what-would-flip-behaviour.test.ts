@@ -208,6 +208,13 @@ async function buildFreshFragileContext(opts: {
   readonly leading_prob: number;
   readonly runner_prob: number;
   /**
+   * Optional per-option `results` for the enrichment so the driver-derive
+   * path (`compactAnalysis` → `deriveTopDrivers`) surfaces top drivers.
+   * Default omits it — the existing tests exercise robustness copy, not
+   * driver copy.
+   */
+  readonly results?: ReadonlyArray<Record<string, unknown>>;
+  /**
    * `null` = omit raw `enrichment.robustness` entirely. When set, the
    * `pickLatestRawRobustness` selector will surface
    * `{ level, near_tie_is_tie: false }` and the composer's raw-fragile
@@ -256,6 +263,9 @@ async function buildFreshFragileContext(opts: {
       { factor_id: 'fac_acquisition_cost', sensitivity_value: 0.55 },
     ],
   };
+  if (opts.results !== undefined) {
+    enrichment.results = opts.results;
+  }
   if (opts.raw_robustness_level !== null) {
     enrichment.robustness = { level: opts.raw_robustness_level };
   }
@@ -396,5 +406,55 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     expect(text.toLowerCase()).toMatch(
       /small adjustments to the strongest drivers/,
     );
+  });
+
+  it('neutral driver: deterministic prose says "has little effect" and never strengthen/weaken (end-to-end)', async () => {
+    // A driver PLoT marks `direction: 'neutral'` (with a non-trivial unsigned
+    // magnitude) must reach the user as no clear directional effect — the
+    // reattachment maps it to sensitivity_value 0, so the composer's near-zero
+    // band renders "has little effect" instead of "strengthens"/"weakens".
+    buildTurnContextMock.mockResolvedValueOnce(
+      await buildFreshFragileContext({
+        leading_prob: 0.55,
+        runner_prob: 0.45,
+        margin_pp: 10,
+        raw_robustness_level: null,
+        results: [
+          {
+            option_id: 'opt_freelance',
+            option_label: 'Freelance Consultant + Moderate Ad Spend',
+            win_probability: 0.55,
+            outcome_mean: 1,
+            factor_sensitivity: [
+              // Unsigned magnitude + neutral direction.
+              { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.6, direction: 'neutral' },
+            ],
+          },
+          {
+            option_id: 'opt_hire',
+            option_label: 'Hire Marketing Manager',
+            win_probability: 0.45,
+            outcome_mean: 0.8,
+          },
+        ],
+      }),
+    );
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor(),
+      requestId: 'req-flip-neutral-driver',
+      handlerRegistry: REAL_REGISTRY,
+    });
+
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+    expect(routeWithToolUseSpy).not.toHaveBeenCalled();
+
+    const text = commitedAssistantText();
+    expect(text.toLowerCase()).toContain('has little effect');
+    expect(text.toLowerCase()).not.toMatch(/strengthens|weakens/);
+    // The neutral driver is still named — no raw id leak.
+    expect(text).toContain('Acquisition cost');
   });
 });
