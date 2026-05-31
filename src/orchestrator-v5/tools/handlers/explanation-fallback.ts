@@ -143,24 +143,26 @@ export function composeExplainResultsFallback(
   }
 
   // Stability sentence — plain language only (never the raw band token or the
-  // phrase "robustness band"). The confident "should hold" reassurance is
-  // honest only for genuinely stable bands; a moderate band gets a softer
-  // worth-checking line; fragile / unknown bands omit it rather than overclaim.
-  if (
-    projection.robustness_band === 'stable'
-    || projection.robustness_band === 'highly_stable'
-  ) {
-    const stabilityPhrase = describeRobustnessBand(projection.robustness_band) ?? 'stable';
-    sentences.push(
-      `This result looks ${stabilityPhrase}, so it should hold under reasonable variation.`,
-    );
-  } else if (projection.robustness_band === 'moderate') {
-    // Moderate band: softer worth-checking framing, no overclaim. The phrase
-    // comes from the SSOT describeRobustnessBand; only the reassurance tail
-    // varies per composer — never a local enum→phrase remap.
-    sentences.push(
-      `This result looks ${describeRobustnessBand(projection.robustness_band) ?? 'fairly stable'}, but it is worth checking the main assumptions before deciding.`,
-    );
+  // phrase "robustness band"). The phrase is bound once from the SSOT
+  // describeRobustnessBand and the sentence is omitted if it is unexpectedly
+  // null (so an SSOT regression surfaces rather than being masked by a
+  // hardcoded fallback). The confident "should hold" reassurance is honest only
+  // for genuinely stable bands; a moderate band gets a softer worth-checking
+  // line; fragile / unknown bands produce no sentence here.
+  const stabilityPhrase = describeRobustnessBand(projection.robustness_band);
+  if (stabilityPhrase !== null) {
+    if (
+      projection.robustness_band === 'stable'
+      || projection.robustness_band === 'highly_stable'
+    ) {
+      sentences.push(
+        `This result looks ${stabilityPhrase}, so it should hold under reasonable variation.`,
+      );
+    } else if (projection.robustness_band === 'moderate') {
+      sentences.push(
+        `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
+      );
+    }
   }
 
   sentences.push('Would you like to explore what would change this result?');
@@ -306,10 +308,14 @@ export function composeWhatWouldFlipFallback(
     && projection.robustness_band !== null
     && STABLE_ROBUSTNESS_BANDS.has(projection.robustness_band)
   ) {
-    const stabilityPhrase = describeRobustnessBand(projection.robustness_band) ?? 'stable';
-    sentences.push(
-      `This result looks ${stabilityPhrase}, so smaller changes are less likely to flip the outcome on their own.`,
-    );
+    // Phrase from the SSOT describeRobustnessBand; omit if unexpectedly null
+    // rather than masking an SSOT regression with a hardcoded fallback.
+    const stabilityPhrase = describeRobustnessBand(projection.robustness_band);
+    if (stabilityPhrase !== null) {
+      sentences.push(
+        `This result looks ${stabilityPhrase}, so smaller changes are less likely to flip the outcome on their own.`,
+      );
+    }
   }
   // Moderate, unknown, or null band, or stable with non-finite margin →
   // omit the closing stability sentence so we never overclaim.

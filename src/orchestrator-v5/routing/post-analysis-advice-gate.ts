@@ -1498,19 +1498,23 @@ function composeExplainResults(
     sentences.push(
       'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
     );
-  } else if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
-    // Strong "should hold" reassurance is honest only for genuinely stable
-    // bands. Plain language only.
-    sentences.push(
-      `This result looks ${describeRobustnessBand(analysis.robustness_band) ?? 'stable'}, so this view should hold under reasonable variation.`,
-    );
-  } else if (analysis.robustness_band === 'moderate') {
-    // Moderate band: softer worth-checking framing, no overclaim. The phrase
-    // comes from the SSOT describeRobustnessBand; only the reassurance tail
-    // varies per composer — never a local enum→phrase remap.
-    sentences.push(
-      `This result looks ${describeRobustnessBand(analysis.robustness_band) ?? 'fairly stable'}, but it is worth checking the main assumptions before deciding.`,
-    );
+  } else {
+    // Plain-language stability copy sourced from the SSOT describeRobustnessBand.
+    // Bind once and omit the sentence if it is unexpectedly null, rather than
+    // masking an SSOT regression with a hardcoded fallback; only the reassurance
+    // tail varies. Fragile / unknown bands produce no sentence here.
+    const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
+    if (stabilityPhrase !== null) {
+      if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, so this view should hold under reasonable variation.`,
+        );
+      } else if (analysis.robustness_band === 'moderate') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
+        );
+      }
+    }
   }
 
   // Readability sectioning: the lead paragraph holds the favour/tie
@@ -1597,19 +1601,23 @@ function composeWhatWouldFlip(
     sentences.push(
       'The picture appears fragile, so even small adjustments could flip the leading option.',
     );
-  } else if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
-    // Strong "unlikely to flip" reassurance gated to genuinely stable bands.
-    // Plain language only.
-    sentences.push(
-      `This result looks ${describeRobustnessBand(analysis.robustness_band) ?? 'stable'}, so smaller changes are unlikely to flip the outcome on their own.`,
-    );
-  } else if (analysis.robustness_band === 'moderate') {
-    // Moderate band: softer worth-checking framing, no overclaim. The phrase
-    // comes from the SSOT describeRobustnessBand; only the reassurance tail
-    // varies per composer — never a local enum→phrase remap.
-    sentences.push(
-      `This result looks ${describeRobustnessBand(analysis.robustness_band) ?? 'fairly stable'}, but it is worth checking the main assumptions before deciding.`,
-    );
+  } else {
+    // Plain-language stability copy sourced from the SSOT describeRobustnessBand.
+    // Bind once and omit the sentence if it is unexpectedly null, rather than
+    // masking an SSOT regression with a hardcoded fallback; only the reassurance
+    // tail varies. Fragile / unknown bands produce no sentence here.
+    const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
+    if (stabilityPhrase !== null) {
+      if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, so smaller changes are unlikely to flip the outcome on their own.`,
+        );
+      } else if (analysis.robustness_band === 'moderate') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
+        );
+      }
+    }
   }
   // Readability sectioning: lead paragraph (opener + margin/runner-up +
   // drivers + robustness) joined with spaces, then the closing
