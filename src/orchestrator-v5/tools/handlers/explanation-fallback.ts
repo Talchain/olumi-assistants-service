@@ -34,6 +34,7 @@ import {
 import { bandFromMagnitude } from '../../format/influence-bands.js';
 import { formatSensitivityDirection } from '../../format/sensitivity-phrases.js';
 import {
+  describeRobustnessBand,
   isNearTieByMargin,
   isRawFragile,
   type RawRobustnessSignals,
@@ -141,10 +142,27 @@ export function composeExplainResultsFallback(
     }
   }
 
-  if (projection.robustness_band) {
-    sentences.push(
-      `The robustness band is ${projection.robustness_band}, so this view should hold under reasonable variation.`,
-    );
+  // Stability sentence — plain language only (never the raw band token or the
+  // phrase "robustness band"). The phrase is bound once from the SSOT
+  // describeRobustnessBand and the sentence is omitted if it is unexpectedly
+  // null (so an SSOT regression surfaces rather than being masked by a
+  // hardcoded fallback). The confident "should hold" reassurance is honest only
+  // for genuinely stable bands; a moderate band gets a softer worth-checking
+  // line; fragile / unknown bands produce no sentence here.
+  const stabilityPhrase = describeRobustnessBand(projection.robustness_band);
+  if (stabilityPhrase !== null) {
+    if (
+      projection.robustness_band === 'stable'
+      || projection.robustness_band === 'highly_stable'
+    ) {
+      sentences.push(
+        `This result looks ${stabilityPhrase}, so it should hold under reasonable variation.`,
+      );
+    } else if (projection.robustness_band === 'moderate') {
+      sentences.push(
+        `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
+      );
+    }
   }
 
   sentences.push('Would you like to explore what would change this result?');
@@ -290,12 +308,17 @@ export function composeWhatWouldFlipFallback(
     && projection.robustness_band !== null
     && STABLE_ROBUSTNESS_BANDS.has(projection.robustness_band)
   ) {
-    sentences.push(
-      `The robustness band is currently ${projection.robustness_band}, so smaller changes are less likely to flip the outcome on their own.`,
-    );
+    // Phrase from the SSOT describeRobustnessBand; omit if unexpectedly null
+    // rather than masking an SSOT regression with a hardcoded fallback.
+    const stabilityPhrase = describeRobustnessBand(projection.robustness_band);
+    if (stabilityPhrase !== null) {
+      sentences.push(
+        `This result looks ${stabilityPhrase}, so smaller changes are less likely to flip the outcome on their own.`,
+      );
+    }
   }
   // Moderate, unknown, or null band, or stable with non-finite margin →
-  // omit the closing robustness sentence so we never overclaim.
+  // omit the closing stability sentence so we never overclaim.
 
   sentences.push('Which of those would you like to explore changing?');
 

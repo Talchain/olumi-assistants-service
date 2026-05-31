@@ -59,6 +59,7 @@ import {
 import { formatSensitivityDirection } from '../format/sensitivity-phrases.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import {
+  describeRobustnessBand,
   isNearTieByMargin,
   isRawFragile,
   nearTieReasonByMargin,
@@ -1211,11 +1212,17 @@ function composeImprovement(
   // picture, and the original copy reads as misleading confidence.
   const nearTie = isNearTie(analysis, rawRobustness);
   const rawFragile = isRawFragile(rawRobustness);
+  // Plain-language stability sentence — never the raw band token or the
+  // phrase "robustness band". The hedged "may not move the picture much" line
+  // is acceptable for stable / moderate bands; fragile is handled above and a
+  // canonical fragile band is excluded here so it never reads as a stability
+  // claim.
+  const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
   const robustness =
     nearTie || rawFragile
       ? ' The picture appears fragile, so even small adjustments could shift it.'
-      : analysis.robustness_band
-        ? ` The robustness band is ${analysis.robustness_band}, so smaller adjustments may not move the picture much.`
+      : stabilityPhrase !== null && analysis.robustness_band !== 'fragile'
+        ? ` This result looks ${stabilityPhrase}, so smaller adjustments may not move the picture much.`
         : '';
   const lead = `${opener}${robustness}`;
   const nextStep = topDriverLabel
@@ -1491,10 +1498,23 @@ function composeExplainResults(
     sentences.push(
       'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
     );
-  } else if (analysis.robustness_band) {
-    sentences.push(
-      `The robustness band is ${analysis.robustness_band}, so this view should hold under reasonable variation.`,
-    );
+  } else {
+    // Plain-language stability copy sourced from the SSOT describeRobustnessBand.
+    // Bind once and omit the sentence if it is unexpectedly null, rather than
+    // masking an SSOT regression with a hardcoded fallback; only the reassurance
+    // tail varies. Fragile / unknown bands produce no sentence here.
+    const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
+    if (stabilityPhrase !== null) {
+      if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, so this view should hold under reasonable variation.`,
+        );
+      } else if (analysis.robustness_band === 'moderate') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
+        );
+      }
+    }
   }
 
   // Readability sectioning: the lead paragraph holds the favour/tie
@@ -1581,10 +1601,23 @@ function composeWhatWouldFlip(
     sentences.push(
       'The picture appears fragile, so even small adjustments could flip the leading option.',
     );
-  } else if (analysis.robustness_band) {
-    sentences.push(
-      `The robustness band is currently ${analysis.robustness_band}, so smaller changes are unlikely to flip the outcome on their own.`,
-    );
+  } else {
+    // Plain-language stability copy sourced from the SSOT describeRobustnessBand.
+    // Bind once and omit the sentence if it is unexpectedly null, rather than
+    // masking an SSOT regression with a hardcoded fallback; only the reassurance
+    // tail varies. Fragile / unknown bands produce no sentence here.
+    const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
+    if (stabilityPhrase !== null) {
+      if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, so smaller changes are unlikely to flip the outcome on their own.`,
+        );
+      } else if (analysis.robustness_band === 'moderate') {
+        sentences.push(
+          `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
+        );
+      }
+    }
   }
   // Readability sectioning: lead paragraph (opener + margin/runner-up +
   // drivers + robustness) joined with spaces, then the closing

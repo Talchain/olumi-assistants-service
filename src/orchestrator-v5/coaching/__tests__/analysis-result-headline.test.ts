@@ -36,16 +36,20 @@ const UUID_PATTERN =
 const RAW_DECIMAL_PATTERN = /\d+\.\d+/;
 
 describe('buildAnalysisResultHeadline', () => {
-  it('full data — Case A includes winner, driver, fragility', () => {
+  it('full data — Case A: winner + margin + provisional caution naming the fragile reason (no driver)', () => {
     const out = buildAnalysisResultHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
     expect(out).not.toBeNull();
-    expect(out!).toContain('Hire One Senior Technical Lead currently leads');
-    expect(out!).toContain('Technical Leadership in Place is the strongest driver');
-    expect(out!).toContain('sensitive to Hiring and Salary Cost');
+    expect(out!).toBe(
+      'Hire One Senior Technical Lead currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
+    );
+    // The driver is intentionally NOT named in the caution shape — the fragile
+    // assumption is the single validation reason, so the same factor can never
+    // appear as both the driver and the caveat.
+    expect(out!).not.toContain('is the strongest driver');
     expect(out!.length).toBeLessThanOrEqual(220);
   });
 
@@ -60,11 +64,11 @@ describe('buildAnalysisResultHeadline', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead currently leads because Technical Leadership in Place is the strongest driver.',
+      'Hire One Senior Technical Lead currently leads by 24 percentage points because Technical Leadership in Place is the strongest driver.',
     );
   });
 
-  it('fragility only — Case C (no driver clause)', () => {
+  it('fragility, no driver — caution shape with margin (no driver clause)', () => {
     const enrichment: Record<string, unknown> = {
       results: HIRING_FULL.results,
       robustness: (HIRING_FULL.robustness as Record<string, unknown>),
@@ -75,15 +79,17 @@ describe('buildAnalysisResultHeadline', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead currently leads, but the result is sensitive to Hiring and Salary Cost.',
+      'Hire One Senior Technical Lead currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
     );
+    expect(out!).not.toContain('is the strongest driver');
   });
 
-  it('winner + probability only — Case D renders integer percentage', () => {
+  it('single-option winner, no driver/fragility — Case D renders integer percentage', () => {
+    // Single option: no runner-up means no margin, so the probability
+    // sentence is the most informative honest floor.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
-        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.38 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -478,7 +484,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
     expect(out).not.toMatch(/\d+%/);
   });
 
-  it('weak margin 0.42 / 0.40 (2pp) + driver — falls back to Case E label-only floor (no driver clause)', () => {
+  it('weak margin 0.42 / 0.40 (2pp) + driver — near-tie close-call line, not a confident lead', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
@@ -493,8 +499,10 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A currently leads.');
+    expect(out).toBe('Option A currently leads by 2 percentage points, but the options are close.');
+    // A near-tie never names a driver or implies a strong lead.
     expect(out).not.toContain('because');
+    expect(out).not.toContain('strongest driver');
   });
 
   it('weak winner 0.30 / 0.25 / 0.25 / 0.20 (5pp margin BUT below 40% floor) — falls back to Case E label-only floor', () => {
@@ -560,7 +568,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Option A currently leads because Strong Driver is the strongest driver');
+    expect(out).toContain('Option A currently leads by 20 percentage points because Strong Driver is the strongest driver');
   });
 
   it('boundary: winner exactly at MIN_LEAD_PROBABILITY (0.40) with 5pp margin — emits headline', () => {
@@ -747,7 +755,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       status_kind: 'ok',
     });
     expect(out).not.toBeNull();
-    expect(out!).toContain('Hire X currently leads with 62% probability');
+    expect(out!).toContain('Hire X currently leads by 24 percentage points');
   });
 
   it('runner-up probability comes from the same source as the winner', () => {
@@ -771,7 +779,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       status_kind: 'ok',
     });
     expect(out).not.toBeNull();
-    expect(out!).toContain('Hire X currently leads with 62% probability');
+    expect(out!).toContain('Hire X currently leads by 24 percentage points');
   });
 
   it('first source is a near-tie — guard fires on THAT source; Case E fires on the first source, does NOT silently switch to a later source with a wider margin', () => {
@@ -799,9 +807,9 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // Case E label-only output. Crucially the 80% from option_comparison
-    // must NOT leak into the headline — same-source invariant still holds.
-    expect(out).toBe('Hire X currently leads.');
+    // Near-tie effectively-tied output (1pp). Crucially the 80% from
+    // option_comparison must NOT leak — the same-source invariant still holds.
+    expect(out).toBe('Hire X is currently only fractionally ahead, so the options are effectively tied.');
     expect(out).not.toContain('80%');
     expect(out).not.toMatch(/\d+%/);
   });
@@ -846,9 +854,9 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
     }
   });
 
-  it('returns true for a clean deterministic headline', () => {
+  it('returns true for a clean deterministic headline (caution shape with margin)', () => {
     const headline =
-      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality.';
+      'Hire A currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Quality.';
     expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
   });
 
@@ -858,30 +866,39 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
     expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
   });
 
-  it('returns true for every Case A/B/C/D shape with every status suffix', () => {
-    // Twelve combinations: 4 cases × 3 suffix states (none, partial,
-    // unknown). The predicate must accept all of them — these are the
-    // exact shapes `buildAnalysisResultHeadline` can emit.
-    const acceptedShapes = [
-      // Case A
-      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality.',
-      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality. The run was flagged as partial — treat as provisional.',
-      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality. The analysis engine reported an unfamiliar status — treat the result with caution.',
-      // Case B
+  it('returns true for every emitted headline shape with every status suffix', () => {
+    // Every shape buildAnalysisResultHeadline can emit, crossed with the
+    // three suffix states (none / partial / unknown). The predicate MUST
+    // accept all of them — a regex/allowlist drift here would silently force
+    // the locked-template fallback, making the enriched copy a no-op.
+    const PARTIAL = ' The run was flagged as partial — treat as provisional.';
+    const UNKNOWN =
+      ' The analysis engine reported an unfamiliar status — treat the result with caution.';
+    const baseShapes = [
+      // Case A — caution + margin
+      'Hire A currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Quality.',
+      // Case C — caution, no margin
+      'Hire A currently leads, but treat this as provisional: the result is sensitive to Quality.',
+      // Case B — driver + margin
+      'Hire A currently leads by 24 percentage points because Cost is the strongest driver.',
+      // Case B — driver, no margin
       'Hire A currently leads because Cost is the strongest driver.',
-      'Hire A currently leads because Cost is the strongest driver. The run was flagged as partial — treat as provisional.',
-      'Hire A currently leads because Cost is the strongest driver. The analysis engine reported an unfamiliar status — treat the result with caution.',
-      // Case C
-      'Hire A currently leads, but the result is sensitive to Quality.',
-      'Hire A currently leads, but the result is sensitive to Quality. The run was flagged as partial — treat as provisional.',
-      'Hire A currently leads, but the result is sensitive to Quality. The analysis engine reported an unfamiliar status — treat the result with caution.',
-      // Case D
+      // Case D — margin only
+      'Hire A currently leads by 24 percentage points.',
+      // Case D — probability (single-option)
       'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final.',
-      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final. The run was flagged as partial — treat as provisional.',
-      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      // Case NT — small but real lead, flagged close
+      'Hire A currently leads by 2 percentage points, but the options are close.',
+      // Case NT — effectively tied
+      'Hire A is currently only fractionally ahead, so the options are effectively tied.',
+      // Case E — link-safe floor
+      'Hire A currently leads.',
     ];
-    for (const text of acceptedShapes) {
-      expect(isAllowedRunAnalysisAssistantText(text), `should accept: "${text}"`).toBe(true);
+    for (const base of baseShapes) {
+      for (const suffix of ['', PARTIAL, UNKNOWN]) {
+        const text = base + suffix;
+        expect(isAllowedRunAnalysisAssistantText(text), `should accept: "${text}"`).toBe(true);
+      }
     }
   });
 
@@ -1040,7 +1057,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     expect(out).toBe('Hire X currently leads.');
   });
 
-  it('low margin (0.42 / 0.40, 2pp) + clean label → Case E fires', () => {
+  it('low margin (0.42 / 0.40, 2pp) + clean label → near-tie close-call line', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
@@ -1052,7 +1069,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A currently leads.');
+    expect(out).toBe('Option A currently leads by 2 percentage points, but the options are close.');
   });
 
   it('soft confidence + driver + fragility → still Case E (no overclaim)', () => {
@@ -1189,8 +1206,10 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Hire One Senior Technical Lead currently leads because');
-    expect(out).toContain('the strongest driver');
+    // A clear lead with fragility data produces the rich caution shape
+    // (margin + provisional + fragile reason), never the Case E floor.
+    expect(out).toContain('Hire One Senior Technical Lead currently leads by 24 percentage points');
+    expect(out).toContain('but treat this as provisional: the result is sensitive to');
     // Case E literal form must NOT show up.
     expect(out).not.toBe('Hire One Senior Technical Lead currently leads.');
   });
@@ -1315,7 +1334,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
     expect(descriptor.has_fragility).toBe(false);
   });
 
-  it('Case E from low margin — reason: low_margin', () => {
+  it('near-tie low margin (0.42 / 0.40) — case NT, reason: low_margin', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
@@ -1327,7 +1346,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(descriptor.case).toBe('E');
+    expect(descriptor.case).toBe('NT');
     expect(descriptor.reason).toBe('low_margin');
     expect(descriptor.margin_bucket).toBe('tight');
   });
@@ -1428,5 +1447,330 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
       status_kind: 'ok',
     });
     expect(descriptor.margin_bucket).toBeNull();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Tier 1 enrichment (this workstream): margin, provisional caution,
+// near-tie / close-call branch, driver/fragility de-duplication, single
+// clean fragile label, and the allowlist <-> emission lockstep proof.
+// ════════════════════════════════════════════════════════════════════
+
+describe('buildAnalysisResultHeadline — margin rendering (units)', () => {
+  it('renders the margin as an integer "N percentage points", never a fraction', () => {
+    // 0.70 - 0.08 = 0.62 fraction -> 62 percentage points. 62 must appear as
+    // percentage POINTS; the raw fraction (0.62 / "0.62 points") must never.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.70 },
+        { option_id: 'opt_b', option_label: 'Defer', win_probability: 0.08 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Hire One Tech Lead currently leads by 62 percentage points.');
+    expect(out!).toContain('62 percentage points');
+    expect(out!).not.toContain('0.62');
+    expect(out!).not.toContain('0.62 points');
+    expect(out!).not.toMatch(/\d+\.\d+/);
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+
+  it('caution shape carries the margin and the provisional framing together', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.70 },
+        { option_id: 'opt_b', option_label: 'Defer', win_probability: 0.08 },
+      ],
+      robustness: {
+        level: 'moderate',
+        fragile_edges: [{ from_label: 'Delivery Speed Assumption', switch_probability: 0.5 }],
+      },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe(
+      'Hire One Tech Lead currently leads by 62 percentage points, but treat this as provisional: the result is sensitive to Delivery Speed Assumption.',
+    );
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+});
+
+describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
+  it('1pp lead (0.41 / 0.40) -> effectively tied, no margin number', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.41 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
+      ],
+      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8 }],
+      robustness: { level: 'low', fragile_edges: [{ from_label: 'Risk', switch_probability: 0.5 }] },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Option A is currently only fractionally ahead, so the options are effectively tied.');
+    // No driver / fragility / probability / margin number at a near-tie.
+    expect(out!).not.toContain('because');
+    expect(out!).not.toContain('sensitive to');
+    expect(out!).not.toMatch(/\d/);
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+
+  it('3pp lead (0.45 / 0.42) -> close-call line naming the margin', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.45 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.42 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Option A currently leads by 3 percentage points, but the options are close.');
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+
+  it('near-tie preserves the status suffix', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.45 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.42 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'partial',
+    });
+    expect(out).toBe(
+      'Option A currently leads by 3 percentage points, but the options are close. The run was flagged as partial — treat as provisional.',
+    );
+  });
+
+  it('designated leader not actually ahead (margin <= 0) -> null (locked template), no false lead', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.40 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.45 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('near-tie (<=1pp) with a label too long for the tied sentence returns null, not the Case E confident floor', () => {
+    // PR #223 review blocker regression: a long winner label makes the
+    // effectively-tied sentence exceed MAX_HEADLINE_CHARS while the much
+    // shorter "{label} currently leads." (Case E) still fits (~148-203 chars).
+    // The near-tie branch must return null (-> neutral locked template), NEVER
+    // fall through to the confident Case E floor.
+    const longLabel = 'A'.repeat(180);
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: longLabel, win_probability: 0.41 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('near-tie close-call with a label too long for the close sentence returns null, not the Case E confident floor', () => {
+    const longLabel = 'A'.repeat(180);
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: longLabel, win_probability: 0.45 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.42 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+});
+
+describe('buildAnalysisResultHeadline — driver / fragility de-duplication', () => {
+  it('when the top driver and the fragile assumption are the SAME factor, it is named once (no repetition)', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.62 },
+        { option_id: 'opt_b', option_label: 'Defer', win_probability: 0.38 },
+      ],
+      factor_sensitivity: [{ label: 'Delivery Speed', elasticity: 0.6, confidence: 0.8 }],
+      robustness: {
+        level: 'moderate',
+        fragile_edges: [{ from_label: 'Delivery Speed', switch_probability: 0.5 }],
+      },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    // The caution shape names the fragile reason ONLY — the driver clause is
+    // never added, so "Delivery Speed" appears exactly once.
+    expect(out).toBe(
+      'Hire One Tech Lead currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Delivery Speed.',
+    );
+    const occurrences = out!.split('Delivery Speed').length - 1;
+    expect(occurrences).toBe(1);
+    expect(out!).not.toContain('is the strongest driver');
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+});
+
+describe('buildAnalysisResultHeadline — fragile reason is a single clean label (no arrow/pair leak)', () => {
+  it('renders a single node label, never an edge pair or arrow', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.38 },
+      ],
+      robustness: {
+        level: 'low',
+        fragile_edges: [
+          { from_label: 'Delivery Speed', to_label: 'Revenue Goal', switch_probability: 0.6 },
+        ],
+      },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out!).toContain('the result is sensitive to Delivery Speed.');
+    // No raw edge structure leaks (no arrow, no to-label concatenation).
+    expect(out!).not.toContain('->');
+    expect(out!).not.toContain('→');
+    expect(out!).not.toContain('Revenue Goal');
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+});
+
+describe('isAllowedRunAnalysisAssistantText <-> emission lockstep (allowlist proof)', () => {
+  // The safety gate can silently reject the new headline and force the locked
+  // fallback, making the feature look like it works while doing nothing. These
+  // tests prove BOTH directions: (1) every shape the composer actually emits
+  // across a fixture matrix x suffixes passes the gate; (2) the composer no
+  // longer emits the retired combined driver+caution shape.
+  const SUFFIXES = ['ok', 'partial', 'unknown'] as const;
+
+  const matrix: Array<{ name: string; enrichment: Record<string, unknown>; id: string }> = [
+    { name: 'caution + margin (A)', id: 'opt_a', enrichment: HIRING_FULL },
+    {
+      name: 'driver + margin (B)',
+      id: 'opt_a',
+      enrichment: { ...HIRING_FULL, robustness: { level: 'moderate' } },
+    },
+    {
+      name: 'caution, no margin (C)',
+      id: 'opt_a',
+      enrichment: {
+        results: [{ option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.62 }],
+        robustness: { level: 'low', fragile_edges: [{ from_label: 'Cost', switch_probability: 0.5 }] },
+      },
+    },
+    {
+      name: 'margin only (D)',
+      id: 'opt_a',
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.62 },
+          { option_id: 'opt_b', option_label: 'Defer', win_probability: 0.38 },
+        ],
+      },
+    },
+    {
+      name: 'probability, single-option (D)',
+      id: 'opt_a',
+      enrichment: {
+        results: [{ option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.62 }],
+      },
+    },
+    {
+      name: 'near-tie close (NT)',
+      id: 'opt_a',
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.45 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.42 },
+        ],
+      },
+    },
+    {
+      name: 'near-tie tied (NT)',
+      id: 'opt_a',
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.41 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
+        ],
+      },
+    },
+    {
+      name: 'soft confidence floor (E)',
+      id: 'opt_a',
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
+        ],
+      },
+    },
+  ];
+
+  // The retired combined driver+caution shape must never be emitted.
+  const RETIRED_COMBINED_SHAPE =
+    /currently leads(?: by \d+ percentage points?)? because .+ is the strongest driver, but the result is sensitive to/;
+
+  it('every emitted headline across the fixture matrix x suffixes passes the gate, and never emits the retired combined shape', () => {
+    for (const { name, enrichment, id } of matrix) {
+      for (const status of SUFFIXES) {
+        const out = buildAnalysisResultHeadline({
+          enrichment,
+          leading_option_id: id,
+          status_kind: status,
+        });
+        expect(out, `${name} / ${status} should emit a headline`).not.toBeNull();
+        expect(
+          isAllowedRunAnalysisAssistantText(out!),
+          `${name} / ${status} must pass the allowlist gate: "${out}"`,
+        ).toBe(true);
+        expect(
+          out!,
+          `${name} / ${status} must not emit the retired combined driver+caution shape`,
+        ).not.toMatch(RETIRED_COMBINED_SHAPE);
+      }
+    }
+  });
+
+  it('the retired combined driver+caution shape is no longer accepted by the gate', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality.',
+      ),
+    ).toBe(false);
   });
 });

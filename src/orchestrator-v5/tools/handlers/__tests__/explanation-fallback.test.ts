@@ -94,7 +94,9 @@ describe('composeExplainResultsFallback', () => {
     expect(text).toMatch(/weakens the lead/);     // -0.42 → weakens
     // No raw decimals in user-facing prose.
     expect(text).not.toMatch(/-?\d+\.\d/);
-    expect(text).toContain('robustness');
+    // Humanised stability sentence — plain language, no "robustness" jargon.
+    expect(text).toMatch(/looks stable, so it should hold under reasonable variation/);
+    expect(text).not.toMatch(/robustness/i);
   });
 
   it('handles missing runner-up gracefully', () => {
@@ -150,9 +152,12 @@ describe('composeWhatWouldFlipFallback', () => {
     expect(text).not.toMatch(/\bI'll\s+\b/i);
   });
 
-  it('includes a robustness sentence when projection has a robustness band', () => {
+  it('includes a plain-language stability sentence when projection has a stable band', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS);
-    expect(text.toLowerCase()).toContain('robustness');
+    expect(text).toMatch(/looks stable, so smaller changes are less likely to flip/);
+    // No internal jargon: the raw band token / the phrase "robustness band"
+    // must never reach the user.
+    expect(text).not.toMatch(/robustness/i);
   });
 
   it('returns generic fallback without leading option', () => {
@@ -322,7 +327,8 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
       { level: 'high', near_tie_is_tie: false },
     );
     expectNaturalProse(text);
-    expect(text.toLowerCase()).toContain('robustness');
+    expect(text).toMatch(/looks stable/i);
+    expect(text).not.toMatch(/robustness/i);
     // Softened wording: we say "less likely" not "unlikely".
     expect(text).toMatch(/less likely to flip/i);
     expect(text).not.toMatch(/are unlikely to flip/i);
@@ -339,7 +345,10 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
       { level: 'very_high', near_tie_is_tie: false },
     );
     expect(text).toMatch(/less likely to flip/i);
-    expect(text).toContain('highly_stable');
+    // The raw `highly_stable` token must NOT reach the user — it is humanised
+    // to "very stable".
+    expect(text).not.toContain('highly_stable');
+    expect(text).toContain('very stable');
   });
 
   it('moderate band + wide margin: omits the closing robustness sentence (no overclaim)', () => {

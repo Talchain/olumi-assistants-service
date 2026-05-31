@@ -176,7 +176,8 @@ describe('raw-robustness → gate integration (contract)', () => {
       // Confident-path copy preserved when no raw override is available
       // — regression guard for the helper returning null cleanly.
       expect(out.assistant_text).toContain('meaningful rather than marginal');
-      expect(out.assistant_text).toContain('The robustness band is moderate');
+      expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
+      expect(out.assistant_text).not.toMatch(/robustness band/i);
       expect(out.assistant_text).not.toMatch(/picture appears fragile/i);
     }
   });
@@ -205,7 +206,8 @@ describe('raw-robustness → gate integration (contract)', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain('meaningful rather than marginal');
-      expect(out.assistant_text).toContain('The robustness band is stable');
+      expect(out.assistant_text).toContain('This result looks stable, so this view should hold under reasonable variation');
+      expect(out.assistant_text).not.toMatch(/robustness band/i);
     }
   });
 });

@@ -8,12 +8,18 @@
  * summary from that fact so Sonnet is not blind to prior analysis on
  * conversational follow-up turns.
  *
- * Staleness handling (Approach A from the Phase 0 plan): fallback summaries
- * are ALWAYS flagged `loaded_from_prior_run_freshness_unknown`. The run
- * fact does not currently carry a graph hash, so the freshness of the
- * cached win_probabilities cannot be proven against the current graph.
- * Stamping unknown-freshness is honest; the routing prompt is expected to
- * treat this flag as "reference material, not fresh results".
+ * Staleness handling (V5 state-trust — supersedes the original "Approach A"):
+ * fallback summaries are NOT always freshness-unknown. The run fact now
+ * carries `graph_hash_at_run` (schema 0.10.0+), so freshness is derived
+ * deterministically by comparing it against the current graph hash (see
+ * `deriveAnalysisFreshness` in `freshness.ts`). The legacy
+ * `loaded_from_prior_run_freshness_unknown` reason
+ * ({@link FALLBACK_STALENESS_REASON}) is applied by the turn-executor ONLY
+ * when that structured verdict is `stale` or `unknown` — never when the
+ * fallback analysis is `fresh` (reason `graph_hash_match`). Structured
+ * freshness on TurnOutcome / analysis_ready is the single source of truth for
+ * copy and routing decisions; this module builds the projection only and does
+ * not stamp the reason itself.
  *
  * Enrichment passthrough (V5 post-analysis projection enrichment):
  * The run-analysis handler stores the full V2RunResponseEnvelope verbatim

@@ -9,8 +9,11 @@
  * RUN_ANALYSIS_ASSISTANT_TEMPLATES string.
  *
  * Invariants:
- *  - No LLM call. No I/O. No telemetry side effects. No graph mutation.
- *  - No raw decimals in output (win_probability is rendered as integer %).
+ *  - No LLM call. No I/O. No graph mutation. No telemetry side effects on
+ *    the valid path (margin inputs are pre-validated finite probabilities).
+ *  - No raw decimals. win_probability renders as an integer %; the
+ *    winner->runner-up margin renders as an integer "<N> percentage points"
+ *    via the SSOT formatProbabilityMargin.
  *  - No internal IDs leak (winner / driver / fragility labels are guarded
  *    against ID-shaped strings).
  *  - One short sentence, or one + one status-suffix sentence — never more.
@@ -20,8 +23,12 @@
  *  - "currently leads" is emitted ONLY when the leading option has a
  *    finite win_probability ≥ {@link MIN_LEAD_PROBABILITY} AND, if a
  *    runner-up exists in the same source, the margin is at least
- *    {@link MIN_LEAD_MARGIN}. Near-ties and weak leaders fall back to
- *    the locked template by returning null.
+ *    {@link MIN_LEAD_MARGIN}. A plurality leader with a positive but
+ *    smaller margin gets an explicit near-tie / close-call line; only
+ *    sub-threshold leaders, non-positive margins, and unsanitisable
+ *    labels fall back to the locked template by returning null.
+ *  - When a fragile assumption exists, the caution copy names ONLY that
+ *    reason (never also the driver) so the same factor is never repeated.
  *
  * The registry forwarder ({@link isAllowedRunAnalysisAssistantText})
  * is exported here so the only strings the wire ever sees from
@@ -39,6 +46,8 @@ import {
   readRobustnessLevel,
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
+import { formatProbabilityMargin } from '../format/format-analysis-value.js';
+import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
 
 export const MAX_HEADLINE_CHARS = 220;
 
@@ -82,19 +91,21 @@ export interface AnalysisResultHeadlineInput {
  * Which deterministic case the headline builder picked, or `null` when
  * the locked template is the safe fallback.
  *
- *   A — winner + driver + fragility
- *   B — winner + driver
- *   C — winner + fragility
- *   D — winner + integer-percent probability (strict gates passed)
+ *   A — winner + margin + provisional caution naming the fragile reason
+ *   B — winner (+ margin) + driver, robust (no fragility)
+ *   C — winner + provisional caution (fragile reason), no margin
+ *   D — winner + margin, or integer-percent probability (single-option)
  *   E — minimal floor: `{label} currently leads.`
+ *   NT — near-tie / close-call: a positive margin below the meaningful-
+ *        lead threshold; flags closeness instead of a confident lead
  *   null — fall back to locked template
  *
  * Case E is the link-safe response floor (v5/link-safe). It fires when
  * a clean leading-option label exists but the stronger cases failed
- * because of soft confidence, low margin, or because a length cap
- * forced an A/B/C/D candidate to be dropped.
+ * because of soft confidence or because a length cap forced an
+ * A/B/C/D/NT candidate to be dropped.
  */
-export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | null;
+export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | 'NT' | null;
 
 /**
  * Locked reason class for telemetry. Always present on the descriptor
@@ -192,32 +203,54 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const hasDriver = driverLabel !== null;
   const hasFragility = fragileLabel !== null;
 
+  // Margin fragment (copy priority #2): rendered only when a runner-up
+  // probability exists in the SAME source. Uses the SSOT formatter
+  // (formatProbabilityMargin) — never a hand-rolled multiply, never a raw
+  // decimal. In the meaningful-lead branch the margin is guaranteed
+  // ≥ MIN_LEAD_MARGIN (≥ 5pp), so it always renders as a plural integer
+  // "<N> percentage points".
+  const marginText = marginPointsText(winner);
+  const marginFragment = marginText !== null ? ` by ${marginText}` : '';
+
   // Stronger cases only fire when probability/margin gates pass.
   if (hasMeaningfulLead(winner)) {
-    // Case A: winner + driver + fragility (with length-aware Case-B-shape retry).
-    if (hasDriver && hasFragility) {
-      const caseA =
-        `${winnerLabel} currently leads because ${driverLabel} is the strongest driver,` +
-        ` but the result is sensitive to ${fragileLabel}.${suffix}`;
+    if (hasFragility) {
+      // Caution shapes (priority #3 + #4): a fragile assumption exists, so name
+      // ONLY that one validation reason and frame the result as provisional —
+      // never also the driver. This follows the copy priority order (leading
+      // option, margin, provisional framing, one specific reason) AND makes the
+      // "same factor as both driver and caveat" repetition impossible by
+      // construction. Case A = with margin; Case C = margin shed under length.
+      const cautionTail =
+        `, but treat this as provisional: the result is sensitive to ${fragileLabel}.${suffix}`;
+      const caseA = `${winnerLabel} currently leads${marginFragment}${cautionTail}`;
       if (caseA.length <= MAX_HEADLINE_CHARS) {
         return {
           text: caseA,
           descriptor: buildDescriptor('A', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
-      const caseBRetry =
-        `${winnerLabel} currently leads because ${driverLabel} is the strongest driver.${suffix}`;
-      if (caseBRetry.length <= MAX_HEADLINE_CHARS) {
+      const caseC = `${winnerLabel} currently leads${cautionTail}`;
+      if (caseC.length <= MAX_HEADLINE_CHARS) {
         return {
-          text: caseBRetry,
+          text: caseC,
+          descriptor: buildDescriptor('C', 'unknown', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      // Both caution candidates exceeded the length cap — fall through to Case E.
+    } else if (hasDriver) {
+      // Robust (no fragility): name the driver as the notable factor. Makes no
+      // direction claim — "strongest driver" is a magnitude / salience
+      // statement, so the PR #221 direction-honest path is not engaged here.
+      const driverTail = ` because ${driverLabel} is the strongest driver.${suffix}`;
+      const caseBMargin = `${winnerLabel} currently leads${marginFragment}${driverTail}`;
+      if (caseBMargin.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: caseBMargin,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
-      // Both stronger candidates exceeded length cap — fall through to Case E.
-    } else if (hasDriver) {
-      // Case B: winner + driver, no fragility.
-      const caseB =
-        `${winnerLabel} currently leads because ${driverLabel} is the strongest driver.${suffix}`;
+      const caseB = `${winnerLabel} currently leads${driverTail}`;
       if (caseB.length <= MAX_HEADLINE_CHARS) {
         return {
           text: caseB,
@@ -225,21 +258,22 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         };
       }
       // Length cap exceeded — fall through to Case E.
-    } else if (hasFragility) {
-      // Case C: winner + fragility, no driver.
-      const caseC =
-        `${winnerLabel} currently leads, but the result is sensitive to ${fragileLabel}.${suffix}`;
-      if (caseC.length <= MAX_HEADLINE_CHARS) {
+    } else if (marginText !== null) {
+      // No driver, no fragility, but a margin is available — surface it
+      // (preferred over a bare probability number per the copy priority order).
+      const caseDMargin = `${winnerLabel} currently leads${marginFragment}.${suffix}`;
+      if (caseDMargin.length <= MAX_HEADLINE_CHARS) {
         return {
-          text: caseC,
-          descriptor: buildDescriptor('C', 'unknown', { hasDriver, hasFragility, marginBucket }),
+          text: caseDMargin,
+          descriptor: buildDescriptor('D', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
       // Length cap exceeded — fall through to Case E.
     } else {
-      // Case D: meaningful lead with no driver, no fragility. The
-      // probability guard already enforced ≥ MIN_LEAD_PROBABILITY so
-      // the rendered integer percentage is always ≥ 40%.
+      // No driver, no fragility, no margin (single-option source): keep the
+      // existing probability sentence as the most informative honest floor.
+      // The probability guard already enforced ≥ MIN_LEAD_PROBABILITY so the
+      // rendered integer percentage is always ≥ 40%.
       const pct = Math.round(winnerProbability * 100);
       const caseD =
         `${winnerLabel} currently leads with ${pct}% probability.` +
@@ -252,6 +286,57 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       }
       // Length cap exceeded — fall through to Case E.
     }
+  } else if (winnerProbability >= MIN_LEAD_PROBABILITY && winner.runnerUpProb !== null) {
+    // Near-tie / close-call branch: a plurality leader (≥ MIN_LEAD_PROBABILITY)
+    // whose margin to the runner-up is positive but below the meaningful-lead
+    // threshold (< MIN_LEAD_MARGIN, i.e. < 5pp). Never emit a bare confident
+    // "{label} currently leads." — flag the closeness honestly so a near-tie
+    // does not read as a decisive lead.
+    const marginRaw = winnerProbability - winner.runnerUpProb;
+    if (marginRaw <= 0) {
+      // The designated leading option is not actually ahead of the runner-up —
+      // do not claim a lead at all; fall back to the locked template.
+      return {
+        text: null,
+        descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
+      };
+    }
+    // Compare the ROUNDED pp (matching what would be rendered) against the
+    // near-tie threshold so floating-point noise at the boundary (e.g.
+    // 0.41 - 0.40 = 1.0000000000000009) does not flip the verdict.
+    const marginPpRounded = Math.round(marginRaw * 100);
+    if (marginPpRounded <= NEAR_TIE_PP_THRESHOLD) {
+      // Effectively tied (≤ 1pp): no margin number, no lead-strength claim.
+      const caseTied =
+        `${winnerLabel} is currently only fractionally ahead, so the options are effectively tied.${suffix}`;
+      if (caseTied.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: caseTied,
+          descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+    } else if (marginText !== null) {
+      // 1pp < margin < 5pp: a small but real lead — state it, flag closeness.
+      const caseClose =
+        `${winnerLabel} currently leads${marginFragment}, but the options are close.${suffix}`;
+      if (caseClose.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: caseClose,
+          descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+    }
+    // A near-tie result must NEVER fall through to the Case E confident floor
+    // ("{label} currently leads.") — on a long label the near-tie sentence can
+    // exceed MAX_HEADLINE_CHARS while the much shorter Case E line still fits,
+    // which would turn a genuine ≤5pp near-tie into a confident lead. When the
+    // near-tie copy overflows the cap (pathologically long label) or the margin
+    // text is unrenderable, return null so the handler uses the neutral locked
+    // template (no lead claim) instead of a confident headline.
+    return {
+      text: null,
+      descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
+    };
   }
 
   // Case E (link-safe floor): we have a clean winner label but the
@@ -322,6 +407,30 @@ function computeMarginBucket(
   if (margin < 0.05) return 'tight';
   if (margin < 0.15) return 'moderate';
   return 'comfortable';
+}
+
+/**
+ * Render the winner→runner-up margin as the SSOT "<N> percentage points"
+ * string, or null when no runner-up probability exists in the same source.
+ * Reuses {@link formatProbabilityMargin} (the single source of truth for
+ * margin wording); both inputs are pre-validated finite probabilities in
+ * {@link resolveWinner}, so the formatter's invalid-input telemetry branch is
+ * unreachable on this path. Returns null unless the result matches the
+ * canonical "<int> percentage point(s)" shape — defence so a future formatter
+ * change can never leak "Not available" (or a decimal) into a headline.
+ *
+ * MARGIN-OWNERSHIP CONTRACT (follow-up): this composer receives the RAW PLoT
+ * envelope before the context-projection path exposes `margin_pp`, so it
+ * derives the margin here from same-source PLoT-owned win probabilities. This
+ * is an accepted display-only derivation, but `compactAnalysis` computes its
+ * own `margin_pp` (rounded to 1 decimal) downstream, so the two can disagree
+ * by 1pp at rounding edges. If a canonical `margin_pp` ever becomes available
+ * on THIS path, consume it here instead of recomputing.
+ */
+function marginPointsText(winner: ResolvedWinner): string | null {
+  if (winner.runnerUpProb === null) return null;
+  const text = formatProbabilityMargin(winner.winnerProb, winner.runnerUpProb);
+  return /^\d+ percentage points?$/.test(text) ? text : null;
 }
 
 interface ResolvedWinner {
@@ -637,28 +746,45 @@ const UNKNOWN_SUFFIX_RE_SRC = escapeForRegex(UNKNOWN_SUFFIX);
 const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_SRC})?`;
 
 const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
-  // Case A: winner + driver + fragility.
+  // Case A: winner + margin + provisional caution naming the fragile reason.
   new RegExp(
-    `^.+? currently leads because .+? is the strongest driver, but the result is sensitive to .+?\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads by \\d{1,3} percentage points?, but treat this as provisional: the result is sensitive to .+?\\.${STATUS_SUFFIX_PATTERN}$`,
   ),
-  // Case B: winner + driver.
+  // Case C: provisional caution naming the fragile reason, no margin.
+  new RegExp(
+    `^.+? currently leads, but treat this as provisional: the result is sensitive to .+?\\.${STATUS_SUFFIX_PATTERN}$`,
+  ),
+  // Case B (with margin): winner + margin + driver.
+  new RegExp(
+    `^.+? currently leads by \\d{1,3} percentage points? because .+? is the strongest driver\\.${STATUS_SUFFIX_PATTERN}$`,
+  ),
+  // Case B (no margin): winner + driver.
   new RegExp(
     `^.+? currently leads because .+? is the strongest driver\\.${STATUS_SUFFIX_PATTERN}$`,
   ),
-  // Case C: winner + fragility.
+  // Case D (margin only): winner + margin.
   new RegExp(
-    `^.+? currently leads, but the result is sensitive to .+?\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads by \\d{1,3} percentage points?\\.${STATUS_SUFFIX_PATTERN}$`,
   ),
-  // Case D: winner + integer-percentage probability + follow-up nudge.
+  // Case D (probability): winner + integer-percentage probability + nudge.
   new RegExp(
     `^.+? currently leads with \\d{1,3}% probability\\. Run the follow-up checks before treating this as final\\.${STATUS_SUFFIX_PATTERN}$`,
   ),
+  // Case NT (close): small but real lead, flagged as close.
+  new RegExp(
+    `^.+? currently leads by \\d{1,3} percentage points?, but the options are close\\.${STATUS_SUFFIX_PATTERN}$`,
+  ),
+  // Case NT (tied): effectively tied, no margin number.
+  new RegExp(
+    `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${STATUS_SUFFIX_PATTERN}$`,
+  ),
   // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
   // MUST stay last — the trailing `\\.${STATUS_SUFFIX_PATTERN}$` anchor is
-  // strictly less specific than cases A/B/C/D and would not match their
-  // outputs (those require "because", ", but", or "with N% probability"
-  // before the terminal period), so ordering is for clarity rather than
-  // correctness.
+  // strictly less specific than the other cases and would not match their
+  // outputs (those extend "leads" with " by N percentage points", "because",
+  // ", but", "with N% probability", or " is currently only fractionally
+  // ahead" before the terminal period), so ordering is for clarity rather
+  // than correctness.
   new RegExp(`^.+? currently leads\\.${STATUS_SUFFIX_PATTERN}$`),
 ];
 

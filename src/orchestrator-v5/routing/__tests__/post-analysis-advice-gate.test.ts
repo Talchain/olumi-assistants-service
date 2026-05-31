@@ -803,7 +803,9 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // sensitivity-direction phrases from formatSensitivityDirection
       expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
       expect(out.assistant_text).toMatch(/moderately weakens the lead/);
-      expect(out.assistant_text).toContain('The robustness band is moderate');
+      // Humanised moderate-band copy — plain language, no "robustness band" jargon.
+      expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
+      expect(out.assistant_text).not.toMatch(/robustness band/i);
       // Readability sectioning: closing nudge lives in its own labelled
       // block on the confident path.
       expect(out.assistant_text).toContain('What to check next');
@@ -825,7 +827,8 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toContain('Movement on Delivery risk or Cost overrun risk would shift this result the most');
       expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
       expect(out.assistant_text).toMatch(/moderately weakens the lead/);
-      expect(out.assistant_text).toContain('The robustness band is currently moderate');
+      expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
+      expect(out.assistant_text).not.toMatch(/robustness band/i);
       // Readability sectioning: try-and-rerun nudge lives in its own
       // labelled block.
       expect(out.assistant_text).toContain('What to check next');
@@ -881,7 +884,8 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     if (out.matched) {
       expect(out.assistant_text).toContain('To improve confidence');
       expect(out.assistant_text).toContain('Delivery risk');
-      expect(out.assistant_text).toContain('The robustness band is moderate');
+      expect(out.assistant_text).toContain('This result looks fairly stable, so smaller adjustments may not move the picture much');
+      expect(out.assistant_text).not.toMatch(/robustness band/i);
       // Readability sectioning: "To improve confidence here, the most
       // useful thing to examine is X" is now a bullet under its own
       // labelled block. The robustness sentence stays in the lead.
@@ -1704,7 +1708,8 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain('meaningful rather than marginal');
-      expect(out.assistant_text).toContain('The robustness band is moderate');
+      expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
+      expect(out.assistant_text).not.toMatch(/robustness band/i);
     }
   });
 
