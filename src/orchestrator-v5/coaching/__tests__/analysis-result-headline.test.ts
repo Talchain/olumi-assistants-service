@@ -1572,6 +1572,43 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
     });
     expect(out).toBeNull();
   });
+
+  it('near-tie (<=1pp) with a label too long for the tied sentence returns null, not the Case E confident floor', () => {
+    // PR #223 review blocker regression: a long winner label makes the
+    // effectively-tied sentence exceed MAX_HEADLINE_CHARS while the much
+    // shorter "{label} currently leads." (Case E) still fits (~148-203 chars).
+    // The near-tie branch must return null (-> neutral locked template), NEVER
+    // fall through to the confident Case E floor.
+    const longLabel = 'A'.repeat(180);
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: longLabel, win_probability: 0.41 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('near-tie close-call with a label too long for the close sentence returns null, not the Case E confident floor', () => {
+    const longLabel = 'A'.repeat(180);
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: longLabel, win_probability: 0.45 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.42 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
 });
 
 describe('buildAnalysisResultHeadline — driver / fragility de-duplication', () => {

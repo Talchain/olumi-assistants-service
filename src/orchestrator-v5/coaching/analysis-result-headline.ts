@@ -326,7 +326,17 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         };
       }
     }
-    // Length overflow or odd margin text — fall through to Case E.
+    // A near-tie result must NEVER fall through to the Case E confident floor
+    // ("{label} currently leads.") — on a long label the near-tie sentence can
+    // exceed MAX_HEADLINE_CHARS while the much shorter Case E line still fits,
+    // which would turn a genuine ≤5pp near-tie into a confident lead. When the
+    // near-tie copy overflows the cap (pathologically long label) or the margin
+    // text is unrenderable, return null so the handler uses the neutral locked
+    // template (no lead claim) instead of a confident headline.
+    return {
+      text: null,
+      descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
+    };
   }
 
   // Case E (link-safe floor): we have a clean winner label but the
@@ -408,6 +418,14 @@ function computeMarginBucket(
  * unreachable on this path. Returns null unless the result matches the
  * canonical "<int> percentage point(s)" shape — defence so a future formatter
  * change can never leak "Not available" (or a decimal) into a headline.
+ *
+ * MARGIN-OWNERSHIP CONTRACT (follow-up): this composer receives the RAW PLoT
+ * envelope before the context-projection path exposes `margin_pp`, so it
+ * derives the margin here from same-source PLoT-owned win probabilities. This
+ * is an accepted display-only derivation, but `compactAnalysis` computes its
+ * own `margin_pp` (rounded to 1 decimal) downstream, so the two can disagree
+ * by 1pp at rounding edges. If a canonical `margin_pp` ever becomes available
+ * on THIS path, consume it here instead of recomputing.
  */
 function marginPointsText(winner: ResolvedWinner): string | null {
   if (winner.runnerUpProb === null) return null;

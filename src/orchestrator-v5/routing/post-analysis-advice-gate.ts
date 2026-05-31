@@ -1505,9 +1505,11 @@ function composeExplainResults(
       `This result looks ${describeRobustnessBand(analysis.robustness_band) ?? 'stable'}, so this view should hold under reasonable variation.`,
     );
   } else if (analysis.robustness_band === 'moderate') {
-    // Moderate band: softer worth-checking framing, no overclaim.
+    // Moderate band: softer worth-checking framing, no overclaim. The phrase
+    // comes from the SSOT describeRobustnessBand; only the reassurance tail
+    // varies per composer — never a local enum→phrase remap.
     sentences.push(
-      'This result looks fairly stable, but it is worth checking the main assumptions before deciding.',
+      `This result looks ${describeRobustnessBand(analysis.robustness_band) ?? 'fairly stable'}, but it is worth checking the main assumptions before deciding.`,
     );
   }
 
@@ -1602,9 +1604,11 @@ function composeWhatWouldFlip(
       `This result looks ${describeRobustnessBand(analysis.robustness_band) ?? 'stable'}, so smaller changes are unlikely to flip the outcome on their own.`,
     );
   } else if (analysis.robustness_band === 'moderate') {
-    // Moderate band: softer worth-checking framing, no overclaim.
+    // Moderate band: softer worth-checking framing, no overclaim. The phrase
+    // comes from the SSOT describeRobustnessBand; only the reassurance tail
+    // varies per composer — never a local enum→phrase remap.
     sentences.push(
-      'This result looks fairly stable, but it is worth checking the main assumptions before deciding.',
+      `This result looks ${describeRobustnessBand(analysis.robustness_band) ?? 'fairly stable'}, but it is worth checking the main assumptions before deciding.`,
     );
   }
   // Readability sectioning: lead paragraph (opener + margin/runner-up +
