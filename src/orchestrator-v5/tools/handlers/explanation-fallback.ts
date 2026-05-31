@@ -34,6 +34,7 @@ import {
 import { bandFromMagnitude } from '../../format/influence-bands.js';
 import { formatSensitivityDirection } from '../../format/sensitivity-phrases.js';
 import {
+  describeRobustnessBand,
   isNearTieByMargin,
   isRawFragile,
   type RawRobustnessSignals,
@@ -141,9 +142,21 @@ export function composeExplainResultsFallback(
     }
   }
 
-  if (projection.robustness_band) {
+  // Stability sentence — plain language only (never the raw band token or the
+  // phrase "robustness band"). The confident "should hold" reassurance is
+  // honest only for genuinely stable bands; a moderate band gets a softer
+  // worth-checking line; fragile / unknown bands omit it rather than overclaim.
+  if (
+    projection.robustness_band === 'stable'
+    || projection.robustness_band === 'highly_stable'
+  ) {
+    const stabilityPhrase = describeRobustnessBand(projection.robustness_band) ?? 'stable';
     sentences.push(
-      `The robustness band is ${projection.robustness_band}, so this view should hold under reasonable variation.`,
+      `This result looks ${stabilityPhrase}, so it should hold under reasonable variation.`,
+    );
+  } else if (projection.robustness_band === 'moderate') {
+    sentences.push(
+      'This result looks fairly stable, but it is worth checking the main assumptions before deciding.',
     );
   }
 
@@ -290,12 +303,13 @@ export function composeWhatWouldFlipFallback(
     && projection.robustness_band !== null
     && STABLE_ROBUSTNESS_BANDS.has(projection.robustness_band)
   ) {
+    const stabilityPhrase = describeRobustnessBand(projection.robustness_band) ?? 'stable';
     sentences.push(
-      `The robustness band is currently ${projection.robustness_band}, so smaller changes are less likely to flip the outcome on their own.`,
+      `This result looks ${stabilityPhrase}, so smaller changes are less likely to flip the outcome on their own.`,
     );
   }
   // Moderate, unknown, or null band, or stable with non-finite margin →
-  // omit the closing robustness sentence so we never overclaim.
+  // omit the closing stability sentence so we never overclaim.
 
   sentences.push('Which of those would you like to explore changing?');
 

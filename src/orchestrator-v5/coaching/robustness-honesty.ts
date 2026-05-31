@@ -99,3 +99,30 @@ export function isRawFragile(
   const level = rawRobustness?.level;
   return typeof level === 'string' && RAW_FRAGILE_LEVELS.has(level);
 }
+
+/**
+ * Map a canonical robustness band (`fragile` | `moderate` | `stable` |
+ * `highly_stable`) to a calm, plain-language phrase for USER-FACING copy.
+ * The raw enum value — especially the snake_case `highly_stable` — must
+ * never reach a user; callers interpolate the returned phrase instead of the
+ * band token, and never the words "robustness band". Returns `null` for an
+ * unknown / absent band so callers omit the sentence rather than leak a token.
+ *
+ * Single source of truth — do NOT duplicate this mapping elsewhere.
+ */
+export function describeRobustnessBand(
+  band: string | null | undefined,
+): string | null {
+  switch (band) {
+    case 'highly_stable':
+      return 'very stable';
+    case 'stable':
+      return 'stable';
+    case 'moderate':
+      return 'fairly stable';
+    case 'fragile':
+      return 'fragile';
+    default:
+      return null;
+  }
+}

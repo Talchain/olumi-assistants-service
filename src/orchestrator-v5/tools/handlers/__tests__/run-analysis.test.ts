@@ -126,12 +126,13 @@ describe('run_analysis handler — happy path', () => {
 
     const outcome = await handler(makeInvocation());
 
-    // Headline derived from happy fixture: leader = Option A, top driver =
-    // Price (highest |elasticity| × confidence). No fragility resolvable
-    // (no from_label/to_label/from_node_id/to_node_id on the lone fragile
-    // edge, no graph nodes to map against), so Case B fires.
+    // Headline derived from happy fixture: leader = Option A, margin 24pp to
+    // the runner-up, top driver = Price (highest |elasticity| × confidence).
+    // No fragility resolvable (no from_label/to_label/from_node_id/to_node_id
+    // on the lone fragile edge, no graph nodes to map against), so the
+    // driver-with-margin shape (Case B) fires.
     expect(outcome.assistant_text).toBe(
-      'Option A currently leads because Price is the strongest driver.',
+      'Option A currently leads by 24 percentage points because Price is the strongest driver.',
     );
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');

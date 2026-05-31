@@ -182,35 +182,42 @@ describe('run_analysis confirmation_template forwarder', () => {
 
   it('forwards a well-shaped deterministic headline verbatim', () => {
     const headline =
-      'Hire One Senior Technical Lead currently leads because Technical Leadership in Place is the strongest driver, but the result is sensitive to Hiring and Salary Cost.';
+      'Hire One Senior Technical Lead currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.';
     expect(fwd({ assistant_text: headline })).toBe(headline);
   });
 
-  it('forwards each Case A/B/C/D shape and each status suffix verbatim', () => {
-    // Exact grammar alternatives (post-round-3 tightening). The
-    // forwarder must accept every shape `buildAnalysisResultHeadline`
-    // can emit and every status-suffix combination so a partial /
-    // unknown PLoT run is not silently downgraded to the fallback.
-    const acceptedShapes = [
-      // Case A — winner + driver + fragility
-      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality.',
-      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality. The run was flagged as partial — treat as provisional.',
-      'Hire A currently leads because Cost is the strongest driver, but the result is sensitive to Quality. The analysis engine reported an unfamiliar status — treat the result with caution.',
-      // Case B — winner + driver
+  it('forwards every emitted headline shape and each status suffix verbatim', () => {
+    // Every shape `buildAnalysisResultHeadline` can emit, crossed with the
+    // three suffix states. The forwarder must accept all of them so a
+    // partial / unknown PLoT run is not silently downgraded to the fallback.
+    const PARTIAL = ' The run was flagged as partial — treat as provisional.';
+    const UNKNOWN =
+      ' The analysis engine reported an unfamiliar status — treat the result with caution.';
+    const baseShapes = [
+      // Case A — caution + margin
+      'Hire A currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Quality.',
+      // Case C — caution, no margin
+      'Hire A currently leads, but treat this as provisional: the result is sensitive to Quality.',
+      // Case B — driver + margin
+      'Hire A currently leads by 24 percentage points because Cost is the strongest driver.',
+      // Case B — driver, no margin
       'Hire A currently leads because Cost is the strongest driver.',
-      'Hire A currently leads because Cost is the strongest driver. The run was flagged as partial — treat as provisional.',
-      'Hire A currently leads because Cost is the strongest driver. The analysis engine reported an unfamiliar status — treat the result with caution.',
-      // Case C — winner + fragility
-      'Hire A currently leads, but the result is sensitive to Quality.',
-      'Hire A currently leads, but the result is sensitive to Quality. The run was flagged as partial — treat as provisional.',
-      'Hire A currently leads, but the result is sensitive to Quality. The analysis engine reported an unfamiliar status — treat the result with caution.',
-      // Case D — winner + probability
+      // Case D — margin only
+      'Hire A currently leads by 24 percentage points.',
+      // Case D — probability (single-option)
       'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final.',
-      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final. The run was flagged as partial — treat as provisional.',
-      'Hire A currently leads with 62% probability. Run the follow-up checks before treating this as final. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      // Case NT — small but real lead, flagged close
+      'Hire A currently leads by 2 percentage points, but the options are close.',
+      // Case NT — effectively tied
+      'Hire A is currently only fractionally ahead, so the options are effectively tied.',
+      // Case E — floor
+      'Hire A currently leads.',
     ];
-    for (const text of acceptedShapes) {
-      expect(fwd({ assistant_text: text })).toBe(text);
+    for (const base of baseShapes) {
+      for (const suffix of ['', PARTIAL, UNKNOWN]) {
+        const text = base + suffix;
+        expect(fwd({ assistant_text: text }), `should forward: "${text}"`).toBe(text);
+      }
     }
   });
 

@@ -293,6 +293,43 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
   });
 
+  it('fresh fallback (no request analysis_state, graph_hash_match) emits NO stale/unknown user-facing copy', async () => {
+    // Scope C regression: a follow-up turn with NO request analysis_state
+    // builds the analysis projection from the prior run_analysis fact
+    // (analysis_state_source: 'fallback'). When the persisted graph still
+    // matches graph_hash_at_run the verdict is fresh / graph_hash_match, so
+    // the legacy `loaded_from_prior_run_freshness_unknown` reason must NOT be
+    // stamped and the staleness prefix must NOT be prepended. Guards the
+    // P0-era bug where every fallback turn after run_analysis looked stale,
+    // and the now-fixed stale docblock in analysis-fallback.ts.
+    installPriorRunAnalysisFact(PRE_EDIT_HASH);
+    (global as Record<string, unknown>).__test_persisted_graph = PRE_EDIT_GRAPH;
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkTextResult('Here is a follow-up explanation of the prior analysis.'),
+    );
+
+    const { response } = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'explain the prior results' },
+      'req-fresh-fallback-copy',
+      {
+        routingAdapter,
+        graphState: PRE_EDIT_GRAPH as never,
+      },
+    );
+
+    // Sanity-pin: the scenario IS a fresh fallback verdict.
+    const evt = findPreHandlerFreshnessEvent();
+    expect(evt!.data.freshness).toBe('fresh');
+    expect(evt!.data.reason).toBe('graph_hash_match');
+
+    // The assistant_text must carry NO stale / unknown freshness wording.
+    const text = response.assistant_text ?? '';
+    expect(text).not.toMatch(/these results may be out of date/i);
+    expect(text.toLowerCase()).not.toContain('out of date');
+    expect(text).not.toContain('loaded_from_prior_run_freshness_unknown');
+    expect(text).not.toMatch(/freshness[_\s-]?unknown/i);
+  });
+
   it('returns UNKNOWN (not fresh) when persisted graph exists but fails ingress parse (Codex round-3 P1)', async () => {
     // V5 stale-aware explain recovery — Codex round-3 P1.
     //

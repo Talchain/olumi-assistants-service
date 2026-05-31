@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   NEAR_TIE_PP_THRESHOLD,
   RAW_FRAGILE_LEVELS,
+  describeRobustnessBand,
   isNearTieByMargin,
   isRawFragile,
   nearTieReasonByMargin,
@@ -95,5 +96,31 @@ describe('robustness-honesty SSOT', () => {
       expect(isRawFragile(undefined)).toBe(false);
       expect(isRawFragile({ level: null, near_tie_is_tie: false })).toBe(false);
     });
+  });
+});
+
+describe('describeRobustnessBand — plain-language band phrases', () => {
+  it('maps each canonical band to a calm plain phrase (never the raw token)', () => {
+    expect(describeRobustnessBand('highly_stable')).toBe('very stable');
+    expect(describeRobustnessBand('stable')).toBe('stable');
+    expect(describeRobustnessBand('moderate')).toBe('fairly stable');
+    expect(describeRobustnessBand('fragile')).toBe('fragile');
+  });
+
+  it('never returns the raw snake_case enum token or "robustness band" jargon', () => {
+    for (const band of ['highly_stable', 'stable', 'moderate', 'fragile']) {
+      const phrase = describeRobustnessBand(band);
+      expect(phrase).not.toBeNull();
+      expect(phrase!).not.toContain('_');
+      expect(phrase!.toLowerCase()).not.toContain('robustness');
+      expect(phrase!.toLowerCase()).not.toContain('band');
+    }
+  });
+
+  it('returns null for unknown / absent bands so the caller omits the sentence', () => {
+    expect(describeRobustnessBand(null)).toBeNull();
+    expect(describeRobustnessBand(undefined)).toBeNull();
+    expect(describeRobustnessBand('')).toBeNull();
+    expect(describeRobustnessBand('weird_unknown_band')).toBeNull();
   });
 });
