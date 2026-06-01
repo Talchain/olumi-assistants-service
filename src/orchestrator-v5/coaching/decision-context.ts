@@ -6,8 +6,9 @@
  * canonical, already-structured state:
  *   - `scenarios.brief_text` → monetary figures (via the CQE single-source
  *     currency grammar) + a conservative timeline token;
- *   - `scenarios.graph` (GraphV3) → named entities (option + goal labels) and
- *     goal translation (goal label + raw user-scale threshold).
+ *   - `scenarios.graph` → named entities (option + goal labels) and goal
+ *     translation (goal label + raw user-scale threshold), via a permissive
+ *     node-label read (no strict GraphV3 parse — see `readGraphNodes`).
  *
  * Discipline (F.6 / brief): PROJECTION, NOT INFERENCE. Every field is a
  * verbatim read or a deterministic extraction of an already-structured value.
@@ -29,7 +30,6 @@ import {
   type DecisionContext,
 } from '@talchain/schemas/orchestrator';
 
-import { GraphV3 } from '../../schemas/cee-v3.js';
 import { CURRENCY_SYMBOL_SOURCE, NUMERIC_SUFFIX_SOURCE } from '../context/cqe/rules.js';
 
 // Sensible caps so a pathological brief/graph cannot bloat the projection.
@@ -44,8 +44,12 @@ const TIMELINE_MAX_LEN = 40;
 // suffix. Global + case-insensitive so every occurrence is collected; the
 // matched surface is kept close to verbatim. Conservative by construction —
 // only currency-SYMBOL amounts match, so counts and percentages never do.
+//
+// The integer part is `\d(?:[\d,]*\d)?` — it MUST end on a digit, so a trailing
+// separator from prose ("£2,000, or...") is not captured (the match is
+// "£2,000", not "£2,000,"). This keeps the sanitised-anchor contract intact.
 const MONEY_RE = new RegExp(
-  String.raw`(?:${CURRENCY_SYMBOL_SOURCE})\s?\d[\d,]*(?:\.\d+)?\s?(?:${NUMERIC_SUFFIX_SOURCE})?`,
+  String.raw`(?:${CURRENCY_SYMBOL_SOURCE})\s?\d(?:[\d,]*\d)?(?:\.\d+)?\s?(?:${NUMERIC_SUFFIX_SOURCE})?`,
   'gi',
 );
 
@@ -63,8 +67,11 @@ const LOOKS_LIKE_ID_RE = /^(?:opt|fac|goal|node|edge|risk|con|out|dec|act)_[\w:-
 const TIMELINE_PATTERNS: readonly RegExp[] = [
   // Quarter, optionally with an explicit year: "Q3", "Q3 2026".
   /\bQ[1-4]\b(?:\s*20\d{2})?/i,
-  // Month name, optionally with day and/or explicit year.
-  /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b(?:\s+\d{1,2})?(?:,?\s+20\d{2})?/i,
+  // Month name with an EXPLICIT calendar anchor (a day and/or a year). A bare
+  // month name is NOT matched: "May"/"March"/"August" are ordinary English
+  // words ("we may hire ...") and matching them would invent a timeline.
+  // Matches "March 2026", "March 15", "March 15, 2026".
+  /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}(?:st|nd|rd|th)?(?:,?\s+20\d{2})?|20\d{2})\b/i,
   // Explicit year only in an unambiguous date-cue context: "by 2026".
   /\b(?:by|in|before|after|until|due(?:\s+by)?|end of)\s+20\d{2}\b/i,
   // Explicit duration: "6 months", "2 weeks", "1 year", "3 quarters", "30 days".
@@ -149,6 +156,33 @@ function extractTimeline(briefText: string | null): string | null {
 // Graph-derived anchors (structured labels only)
 // ---------------------------------------------------------------------------
 
+// Permissive, label-only read. A projection of node labels does NOT need full
+// GraphV3 validation, and an all-or-nothing strict parse would drop EVERY
+// graph anchor when a persisted graph carries an otherwise-usable node next to
+// a single nullable/legacy field. We read `nodes[].{kind,label,goal_threshold_*}`
+// defensively from the raw persisted JSON, extracting what is structurally
+// present and degrading to empties otherwise. Still pure projection — these are
+// declared, structured fields, not inferred ones.
+interface RawGraphNode {
+  readonly kind?: unknown;
+  readonly label?: unknown;
+  readonly goal_threshold_raw?: unknown;
+  readonly goal_threshold_unit?: unknown;
+}
+
+function readGraphNodes(rawGraph: unknown | null): RawGraphNode[] {
+  if (!rawGraph || typeof rawGraph !== 'object') return [];
+  const nodes = (rawGraph as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodes)) return [];
+  return nodes.filter((n): n is RawGraphNode => n !== null && typeof n === 'object');
+}
+
+function nodeLabel(node: RawGraphNode): string | null {
+  return typeof node.label === 'string' && node.label.trim() !== ''
+    ? node.label.trim()
+    : null;
+}
+
 function extractGraphAnchors(rawGraph: unknown | null): {
   named_entities: string[];
   user_scale_metric: string | null;
@@ -159,18 +193,15 @@ function extractGraphAnchors(rawGraph: unknown | null): {
     user_scale_metric: null as string | null,
     user_scale_target: null as string | null,
   };
-  if (rawGraph == null) return empty;
+  const nodes = readGraphNodes(rawGraph);
+  if (nodes.length === 0) return empty;
 
-  const parsed = GraphV3.safeParse(rawGraph);
-  if (!parsed.success) return empty;
-
-  const { nodes } = parsed.data;
-  const optionLabels = nodes.filter((n) => n.kind === 'option').map((n) => n.label);
+  const optionLabels = nodes
+    .filter((n) => n.kind === 'option')
+    .map(nodeLabel)
+    .filter((l): l is string => l !== null);
   const goalNode = nodes.find((n) => n.kind === 'goal');
-  const goalLabel =
-    goalNode && typeof goalNode.label === 'string' && goalNode.label.trim() !== ''
-      ? goalNode.label.trim()
-      : null;
+  const goalLabel = goalNode ? nodeLabel(goalNode) : null;
 
   const named_entities = sanitiseList(
     goalLabel ? [...optionLabels, goalLabel] : optionLabels,
@@ -179,7 +210,12 @@ function extractGraphAnchors(rawGraph: unknown | null): {
 
   const user_scale_target =
     goalNode && typeof goalNode.goal_threshold_raw === 'number'
-      ? formatTarget(goalNode.goal_threshold_raw, goalNode.goal_threshold_unit)
+      ? formatTarget(
+          goalNode.goal_threshold_raw,
+          typeof goalNode.goal_threshold_unit === 'string'
+            ? goalNode.goal_threshold_unit
+            : undefined,
+        )
       : null;
 
   return { named_entities, user_scale_metric: goalLabel, user_scale_target };

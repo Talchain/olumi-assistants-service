@@ -88,6 +88,13 @@ describe('monetary figures — currency-symbol projection only', () => {
     expect(figures.length).toBeLessThanOrEqual(8);
     expect(figures.filter((f) => f === '£1')).toHaveLength(1);
   });
+
+  it('does not retain a trailing separator on comma-formatted amounts', () => {
+    const figures = deriveDecisionContext('We can spend £2,000, or maybe more.', null)
+      .domain_anchors.monetary_figures;
+    expect(figures).toContain('£2,000');
+    expect(figures.some((f) => /[,.]$/.test(f))).toBe(false);
+  });
 });
 
 describe('timeline — conservative, explicit tokens only', () => {
@@ -107,6 +114,21 @@ describe('timeline — conservative, explicit tokens only', () => {
     for (const brief of ['This is urgent.', 'We need this soon.', 'A long-term, strategic bet.']) {
       expect(deriveDecisionContext(brief, null).domain_anchors.timeline).toBeNull();
     }
+  });
+
+  it('does NOT match a bare month-name word ("may"/"march"/"august")', () => {
+    for (const brief of [
+      'We may hire a senior engineer.',
+      'The team will march toward the goal.',
+      'It was an august decision.',
+    ]) {
+      expect(deriveDecisionContext(brief, null).domain_anchors.timeline).toBeNull();
+    }
+  });
+
+  it('matches a month only with an explicit day and/or year', () => {
+    expect(deriveDecisionContext('Launch in March 2026.', null).domain_anchors.timeline).toMatch(/March\s*2026/i);
+    expect(deriveDecisionContext('Target 15 March 2026.', null).domain_anchors.timeline).toMatch(/March\s*2026/i);
   });
 });
 
@@ -136,6 +158,22 @@ describe('graph anchors — structured labels only', () => {
     const e = deriveDecisionContext(null, graph).domain_anchors.named_entities;
     expect(e).toContain('Real Option');
     expect(e).not.toContain('opt_secret_id');
+  });
+
+  it('reads labels permissively from a graph that strict GraphV3 would reject', () => {
+    // Invalid id chars, a null legacy threshold field, and a non-array edges
+    // value would all fail GraphV3.safeParse — the permissive label read still
+    // extracts the structured labels rather than dropping every anchor.
+    const graph = {
+      nodes: [
+        { id: 'GOAL!!', kind: 'goal', label: 'Reach £10m ARR', goal_threshold: null },
+        { id: 'opt 1', kind: 'option', label: 'Hire a senior engineer' },
+      ],
+      edges: 'not-an-array',
+    };
+    const e = deriveDecisionContext(null, graph).domain_anchors.named_entities;
+    expect(e).toContain('Hire a senior engineer');
+    expect(e).toContain('Reach £10m ARR');
   });
 });
 

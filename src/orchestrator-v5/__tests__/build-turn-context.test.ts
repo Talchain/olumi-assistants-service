@@ -320,7 +320,7 @@ describe('buildTurnContext — decision_context (V5 Coaching State Spine Stage 1
     expect(ctx.decision_context.goal_translation.user_scale_metric).toBe('Reach £10m ARR');
   });
 
-  it('emits v5.decision_context.derived telemetry with counts/flags only (no raw values)', async () => {
+  it('emits v5.decision_context.derived with correlation IDs + counts/flags only (no raw decision content)', async () => {
     const events: Array<{ name: string; data: Record<string, unknown> }> = [];
     setTestSink((name, data) => events.push({ name, data }));
     const store = createNoopSessionStore({
@@ -336,7 +336,12 @@ describe('buildTurnContext — decision_context (V5 Coaching State Spine Stage 1
     expect(ev!.data.has_timeline).toBe(true);
     expect(typeof ev!.data.entity_count).toBe('number');
     expect(typeof ev!.data.derived_from_graph_hash).toBe('string');
-    // Counts/flags/provenance ONLY — never raw monetary values or entity labels.
+    // Standard correlation IDs are INTENTIONALLY present (every V5 telemetry
+    // event carries them); they are not decision content.
+    expect(ev!.data.request_id).toBe('req-dc-3');
+    expect(typeof ev!.data.scenario_id).toBe('string');
+    // Privacy guarantee: NEVER raw decision content — no monetary values, no
+    // entity labels (and by extension no timeline strings or brief text).
     const serialised = JSON.stringify(ev!.data);
     expect(serialised).not.toContain('£2m');
     expect(serialised).not.toContain('Hire a senior engineer');

@@ -602,8 +602,12 @@ export const TelemetryEvents = {
 
   // V5 Coaching State Spine — Stage 1. Emitted once per turn when the
   // internal DecisionContext projection is derived from canonical state.
-  // Counts/flags/provenance only — never raw monetary values or entity
-  // labels. Fields:
+  // Privacy contract: carries the STANDARD correlation IDs (request_id,
+  // scenario_id — same as every other V5 telemetry event, e.g. .derived /
+  // SessionReadDegraded) plus counts / flags / provenance ONLY. It NEVER
+  // carries raw decision content — no monetary values, entity labels, timeline
+  // strings, or brief text. Fields:
+  //   request_id, scenario_id: string  (correlation only; not decision content)
   //   status: 'not_populated' | 'partial' | 'populated'
   //   monetary_count: number
   //   has_timeline: boolean
