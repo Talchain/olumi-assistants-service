@@ -13,8 +13,9 @@ import { defineConfig } from "vitest/config";
  *      they showed `LLMTimeoutError` / `422` in CI run 26750031968). They run in
  *      `Integration Tests (advisory)` and `Full Test Suite (advisory)`.
  *
- *   2. REQUIRED_GATE_RED_EXCLUSIONS below — the in-process test files that are
- *      currently red (captured from CI run 26750031968). They run in
+ *   2. REQUIRED_GATE_RED_EXCLUSIONS below — the test files that are currently
+ *      red (captured from CI run 26750031968): in-process unit tests, plus one
+ *      tool test that fails to collect (missing tool-local dep). They run in
  *      `Full Test Suite (advisory)`.
  *
  * This is a TEMPORARY required-gate exclusion list, NOT a claim these tests are
@@ -75,6 +76,12 @@ const REQUIRED_GATE_RED_EXCLUSIONS = [
   "tests/unit/v5-journey-replay/explain-leader-stale-chips.test.ts",
   "tests/unit/v5-journey-replay/what-changed-denial.test.ts",
   "tests/utils/telemetry-events.test.ts",
+  // Pre-existing collection error (the 64th reveal file): imports the tool-local
+  // dependency `gray-matter`, which is declared in tools/graph-evaluator/package.json
+  // but not installed in the root CI env. Tool test, not product code. Excluded by
+  // exact path only — do NOT broaden to tools/**. Still runs/fails visibly in
+  // Full Test Suite (advisory).
+  "tools/graph-evaluator/tests/adapters.test.ts",
 ];
 
 export default defineConfig({
