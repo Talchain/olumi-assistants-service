@@ -32,6 +32,8 @@
     "lint:typecheck": "pnpm lint && pnpm typecheck",
     "pretypecheck": "pnpm openapi:generate",
     "typecheck": "tsc --noEmit",
+    "pretypecheck:src": "pnpm openapi:generate",
+    "typecheck:src": "tsc -p tsconfig.build.json --noEmit",
     "perf:baseline": "node tests/perf/run-baseline.js",
     "perf:baseline:prod": "PERF_TARGET_URL=${ASSISTANTS_URL} node tests/perf/run-baseline.js",
     "fixtures:validate": "tsx tests/utils/validate-golden-briefs.ts",
