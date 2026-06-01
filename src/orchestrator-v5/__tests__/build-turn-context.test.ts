@@ -341,9 +341,11 @@ describe('buildTurnContext — decision_context (V5 Coaching State Spine Stage 1
     expect(ev!.data.request_id).toBe('req-dc-3');
     expect(typeof ev!.data.scenario_id).toBe('string');
     // Privacy guarantee: NEVER raw decision content — no monetary values, no
-    // entity labels (and by extension no timeline strings or brief text).
+    // entity labels, no timeline string, no brief text.
     const serialised = JSON.stringify(ev!.data);
-    expect(serialised).not.toContain('£2m');
-    expect(serialised).not.toContain('Hire a senior engineer');
+    expect(serialised).not.toContain('£2m'); // monetary value
+    expect(serialised).not.toContain('Hire a senior engineer'); // entity label
+    expect(serialised).not.toContain('Q3 2026'); // timeline string
+    expect(serialised).not.toContain('spend'); // brief text
   });
 });

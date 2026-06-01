@@ -95,6 +95,19 @@ describe('monetary figures — currency-symbol projection only', () => {
     expect(figures).toContain('£2,000');
     expect(figures.some((f) => /[,.]$/.test(f))).toBe(false);
   });
+
+  it('does NOT drop currency amounts as if they were IDs (letters+digits)', () => {
+    const figures = deriveDecisionContext('We can spend £2m and up to £10m.', null)
+      .domain_anchors.monetary_figures;
+    expect(figures).toContain('£2m');
+    expect(figures).toContain('£10m');
+  });
+
+  it('bounds the length of a single monetary figure', () => {
+    const figures = deriveDecisionContext(`£${'1'.repeat(100)}`, null).domain_anchors.monetary_figures;
+    expect(figures).toHaveLength(1);
+    expect(figures[0].length).toBeLessThanOrEqual(40);
+  });
 });
 
 describe('timeline — conservative, explicit tokens only', () => {
@@ -174,6 +187,38 @@ describe('graph anchors — structured labels only', () => {
     const e = deriveDecisionContext(null, graph).domain_anchors.named_entities;
     expect(e).toContain('Hire a senior engineer');
     expect(e).toContain('Reach £10m ARR');
+  });
+
+  it('drops UUID / compact / separator id-shaped labels from named_entities', () => {
+    const graph = {
+      nodes: [
+        { id: 'n_a', kind: 'option', label: '550e8400-e29b-41d4-a716-446655440000' },
+        { id: 'n_b', kind: 'option', label: 'n1' },
+        { id: 'n_c', kind: 'option', label: 'node:1' },
+        { id: 'n_d', kind: 'option', label: 'factor-2' },
+        { id: 'n_e', kind: 'option', label: 'Real Option' },
+      ],
+      edges: [],
+    };
+    const e = deriveDecisionContext(null, graph).domain_anchors.named_entities;
+    expect(e).toEqual(['Real Option']);
+  });
+
+  it('bounds the length of entity and goal-metric anchors', () => {
+    // Non-hex letters so the values are not treated as hex-blob IDs.
+    const graph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'g'.repeat(200) },
+        { id: 'opt_1', kind: 'option', label: 'x'.repeat(200) },
+      ],
+      edges: [],
+    };
+    const dc = deriveDecisionContext(null, graph);
+    for (const ent of dc.domain_anchors.named_entities) {
+      expect(ent.length).toBeLessThanOrEqual(80);
+    }
+    expect(dc.goal_translation.user_scale_metric).not.toBeNull();
+    expect((dc.goal_translation.user_scale_metric as string).length).toBeLessThanOrEqual(80);
   });
 });
 

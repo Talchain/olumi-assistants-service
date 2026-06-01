@@ -32,10 +32,16 @@ import {
 
 import { CURRENCY_SYMBOL_SOURCE, NUMERIC_SUFFIX_SOURCE } from '../context/cqe/rules.js';
 
-// Sensible caps so a pathological brief/graph cannot bloat the projection.
+// Count caps: how MANY anchors of each kind we retain.
 const MAX_MONETARY_FIGURES = 8;
 const MAX_NAMED_ENTITIES = 12;
-// Defensive length cap on the single timeline surface string.
+// Per-anchor SIZE caps (chars). A single graph label or money match can be
+// arbitrarily long and `DecisionContextSchema` imposes no string limits, so we
+// hard-bound every stored anchor to prevent bloat / prompt-like abuse.
+const MONETARY_MAX_LEN = 40;
+const ENTITY_MAX_LEN = 80;
+const METRIC_MAX_LEN = 80;
+const TARGET_MAX_LEN = 48;
 const TIMELINE_MAX_LEN = 40;
 
 // Money matcher composed from the CQE single-source grammar (imported, never
@@ -53,9 +59,37 @@ const MONEY_RE = new RegExp(
   'gi',
 );
 
-// Defensive guard: entity labels must never be raw internal IDs. Labels should
-// already be human text, but we drop anything id-shaped just in case.
-const LOOKS_LIKE_ID_RE = /^(?:opt|fac|goal|node|edge|risk|con|out|dec|act)_[\w:-]+$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Defensive guard: entity / metric anchors must never be raw internal IDs.
+ * Node labels are human text, but a malformed or abusive graph could place an
+ * id-shaped string in a label field. Intentionally broad — catches UUIDs, long
+ * hex blobs, underscore/colon identifiers, hyphen-number forms, and compact
+ * letter+digit tokens (`n1`, `opt_3`, `node:1`, `factor-2`, `e12`).
+ *
+ * A token containing ANY whitespace is treated as human text (real option /
+ * goal labels are phrases) — that is what keeps legitimate multi-word labels
+ * from being filtered.
+ *
+ * IMPORTANT: applied to entities / metric ONLY, never to `monetary_figures` —
+ * money like `£2m` / `$500k` is legitimately a letters+digits token and must
+ * not be dropped.
+ */
+function looksLikeId(value: string): boolean {
+  if (/\s/.test(value)) return false; // whitespace → human text, not an ID
+  if (UUID_RE.test(value)) return true;
+  if (/^[0-9a-f]{16,}$/i.test(value)) return true; // long hex blob
+  if (/[_:]/.test(value)) return true; // opt_3, node:1
+  if (/-\d/.test(value)) return true; // factor-2
+  if (/[a-z]/i.test(value) && /\d/.test(value)) return true; // n1, opt3, e12
+  return false;
+}
+
+/** Hard length bound for a single stored anchor string. */
+function capLen(value: string, maxLen: number): string {
+  return value.length > maxLen ? value.slice(0, maxLen) : value;
+}
 
 /**
  * Conservative, EXPLICIT timeline tokens only. We deliberately do NOT match a
@@ -70,7 +104,9 @@ const TIMELINE_PATTERNS: readonly RegExp[] = [
   // Month name with an EXPLICIT calendar anchor (a day and/or a year). A bare
   // month name is NOT matched: "May"/"March"/"August" are ordinary English
   // words ("we may hire ...") and matching them would invent a timeline.
-  // Matches "March 2026", "March 15", "March 15, 2026".
+  // Month-first only: "March 2026", "March 15", "March 15, 2026". A day-first
+  // form like "15 March 2026" captures the "March 2026" portion (the leading
+  // day is not part of the surface); "15 March" with no year is NOT matched.
   /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}(?:st|nd|rd|th)?(?:,?\s+20\d{2})?|20\d{2})\b/i,
   // Explicit year only in an unambiguous date-cue context: "by 2026".
   /\b(?:by|in|before|after|until|due(?:\s+by)?|end of)\s+20\d{2}\b/i,
@@ -85,8 +121,8 @@ const TIMELINE_PATTERNS: readonly RegExp[] = [
  *
  * @param briefText persisted `scenarios.brief_text` (null on the first draft
  *   turn — the turn that writes it — or when no brief is persisted).
- * @param rawGraph persisted `scenarios.graph` (parsed defensively as GraphV3;
- *   null / unparseable → no graph-derived anchors).
+ * @param rawGraph persisted `scenarios.graph` (read permissively for node
+ *   labels — see `readGraphNodes`; null / absent → no graph-derived anchors).
  */
 export function deriveDecisionContext(
   briefText: string | null,
@@ -130,9 +166,13 @@ export function deriveDecisionContext(
 function extractMonetaryFigures(briefText: string | null): string[] {
   if (!briefText) return [];
   const matches = briefText.match(MONEY_RE) ?? [];
+  // dropIdLike=false: a currency amount IS a letters+digits token, so the
+  // id-filter must never run on money.
   return sanitiseList(
     matches.map((m) => m.trim()),
     MAX_MONETARY_FIGURES,
+    MONETARY_MAX_LEN,
+    false,
   );
 }
 
@@ -206,19 +246,29 @@ function extractGraphAnchors(rawGraph: unknown | null): {
   const named_entities = sanitiseList(
     goalLabel ? [...optionLabels, goalLabel] : optionLabels,
     MAX_NAMED_ENTITIES,
+    ENTITY_MAX_LEN,
+    true,
   );
+
+  const user_scale_metric =
+    goalLabel !== null && !looksLikeId(goalLabel)
+      ? capLen(goalLabel, METRIC_MAX_LEN)
+      : null;
 
   const user_scale_target =
     goalNode && typeof goalNode.goal_threshold_raw === 'number'
-      ? formatTarget(
-          goalNode.goal_threshold_raw,
-          typeof goalNode.goal_threshold_unit === 'string'
-            ? goalNode.goal_threshold_unit
-            : undefined,
+      ? capLen(
+          formatTarget(
+            goalNode.goal_threshold_raw,
+            typeof goalNode.goal_threshold_unit === 'string'
+              ? goalNode.goal_threshold_unit
+              : undefined,
+          ),
+          TARGET_MAX_LEN,
         )
       : null;
 
-  return { named_entities, user_scale_metric: goalLabel, user_scale_target };
+  return { named_entities, user_scale_metric, user_scale_target };
 }
 
 function formatTarget(raw: number, unit: string | undefined): string {
@@ -256,21 +306,31 @@ function deriveStatus(anchors: {
 }
 
 /**
- * Trim, drop empties + id-shaped tokens, de-duplicate case-insensitively
- * (first occurrence wins — deterministic source order preserved), and cap.
+ * Trim, drop empties, optionally drop id-shaped tokens, hard-bound each value's
+ * length (`maxLen`), de-duplicate case-insensitively (first occurrence wins —
+ * deterministic source order preserved), and cap the count.
+ *
+ * `dropIdLike` is true for entity anchors (IDs must never leak) and false for
+ * monetary figures (a currency amount is itself a letters+digits token).
  */
-function sanitiseList(values: readonly string[], cap: number): string[] {
+function sanitiseList(
+  values: readonly string[],
+  cap: number,
+  maxLen: number,
+  dropIdLike: boolean,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const value of values) {
     if (typeof value !== 'string') continue;
     const trimmed = value.trim();
     if (trimmed === '') continue;
-    if (LOOKS_LIKE_ID_RE.test(trimmed)) continue;
-    const key = trimmed.toLowerCase();
+    if (dropIdLike && looksLikeId(trimmed)) continue;
+    const bounded = capLen(trimmed, maxLen);
+    const key = bounded.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(trimmed);
+    out.push(bounded);
     if (out.length >= cap) break;
   }
   return out;
