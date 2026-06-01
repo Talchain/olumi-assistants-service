@@ -44,6 +44,21 @@ if [[ ! -f "$GENERATED" ]]; then
   exit 1
 fi
 
+# Validate the baseline header UP FRONT — before the ~30s `tsc` run — so a
+# malformed baseline fails fast. Require exactly one `# count=<N>` header
+# (multiple would silently concatenate after whitespace stripping) and a
+# non-negative integer value (empty fails the regex too).
+BASE_COUNT_HEADERS="$(grep -cE '^[[:space:]]*#[[:space:]]*count=' "$BASELINE")"
+if [[ "$BASE_COUNT_HEADERS" -ne 1 ]]; then
+  echo "::error::Baseline must have exactly one '# count=<N>' header line (found $BASE_COUNT_HEADERS)."
+  exit 1
+fi
+BASE_COUNT="$(grep -E '^[[:space:]]*#[[:space:]]*count=' "$BASELINE" | sed -E 's/.*count=//' | tr -d '[:space:]')"
+if [[ ! "$BASE_COUNT" =~ ^[0-9]+$ ]]; then
+  echo "::error::Baseline '# count=' must be a non-negative integer, got: '$BASE_COUNT'"
+  exit 1
+fi
+
 TSC_OUT="$(mktemp)"
 # Use default-expansions so the trap is safe under `set -u` even on the early
 # exit paths below (CUR_FILES/BASE_FILES are not assigned until later).
@@ -72,17 +87,9 @@ grep -E "$ERR_REGEX" "$TSC_OUT" \
   | sed -E 's/\([0-9]+,[0-9]+\): error TS[0-9]+.*$//' \
   | sort -u >"$CUR_FILES"
 
-# Baseline: strip comments / blank lines, sort-unique.
+# Baseline file list (the count header was validated up front). Strip
+# comments / blank lines, sort-unique.
 grep -vE '^[[:space:]]*#' "$BASELINE" | grep -vE '^[[:space:]]*$' | sort -u >"$BASE_FILES"
-BASE_COUNT="$(grep -E '^[[:space:]]*#[[:space:]]*count=' "$BASELINE" | sed -E 's/.*count=//' | tr -d '[:space:]')"
-if [[ -z "${BASE_COUNT:-}" ]]; then
-  echo "::error::Baseline is missing a '# count=<N>' header line."
-  exit 1
-fi
-if [[ ! "$BASE_COUNT" =~ ^[0-9]+$ ]]; then
-  echo "::error::Baseline '# count=' must be a non-negative integer, got: '$BASE_COUNT'"
-  exit 1
-fi
 
 # Regressions.
 NEW_FILES="$(comm -13 "$BASE_FILES" "$CUR_FILES" || true)"
