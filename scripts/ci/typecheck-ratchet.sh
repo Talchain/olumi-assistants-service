@@ -14,6 +14,12 @@
 # cleanup, while making NEW drift block. The src-only gate (`pnpm typecheck:src`)
 # remains the required green check; this ratchet is a separate, non-required job.
 #
+# Known limitation (intentional for Tier-1): detection is file-set + total-count,
+# not per-file counts. Removing an error from one baseline file while adding one
+# to another baseline file (net total unchanged) is NOT caught; any NET increase
+# in total errors, or any error in a non-baseline file, IS caught. Upgrade to
+# per-file counts if tighter intra-baseline drift detection is ever needed.
+#
 # Deterministic and network-free: assumes `pnpm openapi:generate` already ran
 # (the workflow does this in a prior step). Ignores tsc's own non-zero exit code
 # (the baseline guarantees tsc exits non-zero) and decides purely from the diff.
@@ -71,6 +77,10 @@ grep -vE '^[[:space:]]*#' "$BASELINE" | grep -vE '^[[:space:]]*$' | sort -u >"$B
 BASE_COUNT="$(grep -E '^[[:space:]]*#[[:space:]]*count=' "$BASELINE" | sed -E 's/.*count=//' | tr -d '[:space:]')"
 if [[ -z "${BASE_COUNT:-}" ]]; then
   echo "::error::Baseline is missing a '# count=<N>' header line."
+  exit 1
+fi
+if [[ ! "$BASE_COUNT" =~ ^[0-9]+$ ]]; then
+  echo "::error::Baseline '# count=' must be a non-negative integer, got: '$BASE_COUNT'"
   exit 1
 fi
 
