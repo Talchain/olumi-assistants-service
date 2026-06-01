@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { TurnContextSchema, type SessionTurn } from '@talchain/schemas/orchestrator';
+import {
+  EMPTY_DECISION_CONTEXT,
+  TurnContextSchema,
+  type SessionTurn,
+} from '@talchain/schemas/orchestrator';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
@@ -43,6 +47,7 @@ describe('buildTurnContext', () => {
       scenarioBriefText: _sb,
       persistedGraph: _pg,
       most_recent_pending_actions: _mrpa,
+      decision_context: _dc,
       ...base
     } = ctx;
     const parsed = TurnContextSchema.parse(base);
@@ -266,5 +271,74 @@ describe('buildTurnContext — scenarioBriefText (V5 Phase 1 brief persistence)'
     const store = createNoopSessionStore({ loadBriefTextResult: briefText });
     const ctx = await buildTurnContext(BASE, 'req-brief-4', { sessionStore: store });
     expect(ctx.scenarioBriefText).toBe(briefText);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 Coaching State Spine — Stage 1: decision_context on EnrichedTurnContext.
+// ---------------------------------------------------------------------------
+
+const STAGE1_GRAPH = {
+  nodes: [
+    {
+      id: 'goal_1',
+      kind: 'goal',
+      label: 'Reach £10m ARR',
+      goal_threshold_raw: 10,
+      goal_threshold_unit: '£m',
+    },
+    { id: 'opt_hire', kind: 'option', label: 'Hire a senior engineer' },
+    { id: 'opt_outsource', kind: 'option', label: 'Outsource to an agency' },
+  ],
+  edges: [],
+};
+
+describe('buildTurnContext — decision_context (V5 Coaching State Spine Stage 1)', () => {
+  afterEach(() => {
+    setTestSink(null);
+  });
+
+  it('every built context carries decision_context (required field is present)', async () => {
+    const ctx = await buildTurnContext(BASE, 'req-dc-1', OPTS);
+    expect(ctx.decision_context).toBeDefined();
+    // Noop store → null brief + null graph → EMPTY_DECISION_CONTEXT.
+    expect(ctx.decision_context).toEqual(EMPTY_DECISION_CONTEXT);
+  });
+
+  it('populates decision_context from persisted brief + graph', async () => {
+    const store = createNoopSessionStore({
+      loadBriefTextResult: 'We can spend £2m by Q3 2026.',
+      loadGraphResult: STAGE1_GRAPH,
+    });
+    const ctx = await buildTurnContext(BASE, 'req-dc-2', { sessionStore: store });
+    expect(ctx.decision_context.status).toBe('populated');
+    expect(ctx.decision_context.domain_anchors.monetary_figures).toContain('£2m');
+    expect(ctx.decision_context.domain_anchors.timeline).toMatch(/Q3\s*2026/i);
+    expect(ctx.decision_context.domain_anchors.named_entities).toContain(
+      'Hire a senior engineer',
+    );
+    expect(ctx.decision_context.goal_translation.user_scale_metric).toBe('Reach £10m ARR');
+  });
+
+  it('emits v5.decision_context.derived telemetry with counts/flags only (no raw values)', async () => {
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+    const store = createNoopSessionStore({
+      loadBriefTextResult: 'We can spend £2m by Q3 2026.',
+      loadGraphResult: STAGE1_GRAPH,
+    });
+    await buildTurnContext(BASE, 'req-dc-3', { sessionStore: store });
+
+    const ev = events.find((e) => e.name === 'v5.decision_context.derived');
+    expect(ev).toBeDefined();
+    expect(ev!.data.status).toBe('populated');
+    expect(ev!.data.monetary_count).toBe(1);
+    expect(ev!.data.has_timeline).toBe(true);
+    expect(typeof ev!.data.entity_count).toBe('number');
+    expect(typeof ev!.data.derived_from_graph_hash).toBe('string');
+    // Counts/flags/provenance ONLY — never raw monetary values or entity labels.
+    const serialised = JSON.stringify(ev!.data);
+    expect(serialised).not.toContain('£2m');
+    expect(serialised).not.toContain('Hire a senior engineer');
   });
 });

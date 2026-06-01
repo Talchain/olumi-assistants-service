@@ -600,6 +600,19 @@ export const TelemetryEvents = {
    *  shape lands on a session that already has a prior fact. */
   AnalysisFreshnessFirstTurnAssumed: "v5.analysis_freshness.first_turn_assumed",
 
+  // V5 Coaching State Spine — Stage 1. Emitted once per turn when the
+  // internal DecisionContext projection is derived from canonical state.
+  // Counts/flags/provenance only — never raw monetary values or entity
+  // labels. Fields:
+  //   status: 'not_populated' | 'partial' | 'populated'
+  //   monetary_count: number
+  //   has_timeline: boolean
+  //   entity_count: number
+  //   has_goal_metric: boolean
+  //   has_goal_target: boolean
+  //   derived_from_graph_hash: string | null
+  DecisionContextDerived: "v5.decision_context.derived",
+
   // V5 TurnExecutor per-code failure composition.
   // Emitted once per failure path that runs a per-code composer. Fields:
   //   request_id, session_id, stage,
