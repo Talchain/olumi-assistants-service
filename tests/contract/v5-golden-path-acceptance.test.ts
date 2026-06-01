@@ -46,6 +46,9 @@ import type { QuantityExtractionResult } from '../../src/orchestrator-v5/context
 import { findForbiddenMatches } from '../../tools/v5-journey-replay/forbidden-terms.js'
 import type { HandlerInvocation } from '../../src/orchestrator-v5/tools/registry.js'
 import type { AnalysisProjectionSummary } from '../../src/orchestrator-v5/context/projection-summaries.js'
+import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator'
+import { OlumiResponseSchema } from '@talchain/schemas/boundary'
+import { ContextPackSchema } from '../../src/orchestrator-v5/context/context-pack-schema.js'
 
 const SCENARIO_ID = '11111111-1111-4111-8111-111111111111'
 const REQUEST_ID = 'req-acceptance-gate'
@@ -167,6 +170,69 @@ function makeGraph(
     },
   }
 }
+
+// ---------------------------------------------------------------------------
+// Acceptance Gate — decision_context boundary (V5 Coaching State Spine Stage 1)
+//
+// decision_context is an INTERNAL projection carried on EnrichedTurnContext.
+// It must not be a declared field on the LLM-facing ContextPack / routing
+// prompt, must not add a top-level wire field, and must not perturb (or leak
+// into) user-facing handler output.
+// ---------------------------------------------------------------------------
+
+function deepHasKey(value: unknown, key: string): boolean {
+  if (Array.isArray(value)) return value.some((v) => deepHasKey(v, key))
+  if (value !== null && typeof value === 'object') {
+    if (Object.prototype.hasOwnProperty.call(value, key)) return true
+    return Object.values(value as Record<string, unknown>).some((v) => deepHasKey(v, key))
+  }
+  return false
+}
+
+const POPULATED_DECISION_CONTEXT = {
+  domain_anchors: {
+    monetary_figures: ['£2m'],
+    timeline: 'Q3 2026',
+    named_entities: ['Hire a senior engineer'],
+  },
+  goal_translation: { user_scale_metric: 'Reach £10m ARR', user_scale_target: '10 £m' },
+  status: 'populated' as const,
+}
+
+describe('Acceptance Gate — decision_context boundary (Stage 1)', () => {
+  it('is NOT a declared field on the LLM-facing ContextPack (off-prompt)', () => {
+    expect(Object.keys(ContextPackSchema.shape)).not.toContain('decision_context')
+  })
+
+  it('adds no decision_context field to the OlumiResponse wire schema', () => {
+    const shape = (OlumiResponseSchema as { shape?: Record<string, unknown> }).shape
+    expect(shape).toBeDefined()
+    expect(Object.keys(shape ?? {})).not.toContain('decision_context')
+  })
+
+  it('does not perturb handler output and never leaks into it', async () => {
+    const handler = createExplainResultsHandler()
+    // Use the missing-analysis recovery path — a deterministic outcome that is
+    // independent of decision_context. Equivalent fixtures (with vs without a
+    // populated decision_context on the context) must yield identical output.
+    const base = makeInvocation({ priorFacts: [] })
+    const withDc = {
+      ...base,
+      context: { ...base.context, decision_context: POPULATED_DECISION_CONTEXT },
+    } as typeof base
+    const withoutDc = {
+      ...base,
+      context: { ...base.context, decision_context: EMPTY_DECISION_CONTEXT },
+    } as typeof base
+
+    const outWith = await handler(withDc)
+    const outWithout = await handler(withoutDc)
+
+    expect(outWith).toEqual(outWithout)
+    expect(deepHasKey(outWith, 'decision_context')).toBe(false)
+    expect(findForbiddenMatches(outWith.assistant_text)).toEqual([])
+  })
+})
 
 // ---------------------------------------------------------------------------
 // Acceptance Gate 1 — explain_results MUST NOT run without prerequisites.

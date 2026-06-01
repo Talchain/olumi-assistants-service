@@ -22,12 +22,20 @@
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { HandlerFact, SessionTurn, TurnContext } from '@talchain/schemas/orchestrator';
+import type {
+  DecisionContext,
+  HandlerFact,
+  SessionTurn,
+  TurnContext,
+} from '@talchain/schemas/orchestrator';
 import type { HandlerFactWithTurn } from './types/handler-fact.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import { deriveDecisionContext } from './coaching/decision-context.js';
+import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
+import { GraphStateIngressSchema } from './boundary/request-extensions.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
 import { SessionReadError, type SessionStore } from './session/store.js';
@@ -109,6 +117,23 @@ export interface EnrichedTurnContext extends TurnContext {
    * a fixture update. TurnExecutor reads via `?? []`.
    */
   readonly most_recent_pending_actions?: readonly PendingAction[];
+  /**
+   * V5 Coaching State Spine — Stage 1: deterministic projection of canonical
+   * state (`scenarios.brief_text` + `scenarios.graph`) into the already-shipped
+   * `@talchain/schemas` `DecisionContext` shape — domain anchors (monetary
+   * figures, timeline, named entities) + goal translation. INTERNAL ONLY: never
+   * serialised on the wire, never added to the LLM-facing ContextPack or the
+   * routing prompt. Re-derived from persisted state every turn, so it is always
+   * consistent with the current graph; `not_populated` (EMPTY_DECISION_CONTEXT)
+   * on the first draft turn (no brief/graph persisted yet) and populated
+   * thereafter.
+   *
+   * Required (not optional): production `buildTurnContext` populates it on every
+   * turn, so downstream Stage 2 coaching consumers can rely on its presence
+   * without a `?? EMPTY_DECISION_CONTEXT` guard. Tests that hand-construct an
+   * `EnrichedTurnContext` set it explicitly (or cast via `as unknown as`).
+   */
+  readonly decision_context: DecisionContext;
 }
 
 export interface BuildTurnContextOptions {
@@ -221,6 +246,27 @@ export async function buildTurnContext(
     store,
   );
 
+  // V5 Coaching State Spine — Stage 1: derive the DecisionContext projection
+  // deterministically from canonical state (brief_text + graph). Pure + total
+  // (never throws), internal-only — it is attached to EnrichedTurnContext and
+  // never reaches the wire or the LLM prompt. The provenance hash is recorded
+  // in telemetry only; Stage 2 carries it on durable state.
+  const decisionContext = deriveDecisionContext(
+    scenarioState.briefText,
+    scenarioState.graph,
+  );
+  emit(TelemetryEvents.DecisionContextDerived, {
+    request_id: requestId,
+    scenario_id: payload.scenario_id,
+    status: decisionContext.status,
+    monetary_count: decisionContext.domain_anchors.monetary_figures.length,
+    has_timeline: decisionContext.domain_anchors.timeline !== null,
+    entity_count: decisionContext.domain_anchors.named_entities.length,
+    has_goal_metric: decisionContext.goal_translation.user_scale_metric !== null,
+    has_goal_target: decisionContext.goal_translation.user_scale_target !== null,
+    derived_from_graph_hash: deriveDecisionContextGraphHash(scenarioState.graph),
+  });
+
   return {
     ...baseContext,
     prior_turns: priorTurns,
@@ -229,7 +275,26 @@ export async function buildTurnContext(
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
     most_recent_pending_actions: mostRecentPendingActions,
+    decision_context: decisionContext,
   };
+}
+
+/**
+ * Provenance hash for the graph the DecisionContext was derived from, computed
+ * via the same path the turn-executor uses for the current-graph hash
+ * (`GraphStateIngressSchema.safeParse` → `computeAnalysisAffectingGraphHash`)
+ * so the two values are comparable. Telemetry-only in Stage 1; returns null
+ * when no graph is persisted or the parse fails — provenance is diagnostic and
+ * never affects correctness.
+ */
+function deriveDecisionContextGraphHash(graph: unknown | null): string | null {
+  if (graph == null) return null;
+  try {
+    const parsed = GraphStateIngressSchema.safeParse(graph);
+    return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchMostRecentPendingActions(

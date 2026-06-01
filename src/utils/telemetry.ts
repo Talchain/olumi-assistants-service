@@ -600,6 +600,23 @@ export const TelemetryEvents = {
    *  shape lands on a session that already has a prior fact. */
   AnalysisFreshnessFirstTurnAssumed: "v5.analysis_freshness.first_turn_assumed",
 
+  // V5 Coaching State Spine — Stage 1. Emitted once per turn when the
+  // internal DecisionContext projection is derived from canonical state.
+  // Privacy contract: carries the STANDARD correlation IDs (request_id,
+  // scenario_id — same as every other V5 telemetry event, e.g. .derived /
+  // SessionReadDegraded) plus counts / flags / provenance ONLY. It NEVER
+  // carries raw decision content — no monetary values, entity labels, timeline
+  // strings, or brief text. Fields:
+  //   request_id, scenario_id: string  (correlation only; not decision content)
+  //   status: 'not_populated' | 'partial' | 'populated'
+  //   monetary_count: number
+  //   has_timeline: boolean
+  //   entity_count: number
+  //   has_goal_metric: boolean
+  //   has_goal_target: boolean
+  //   derived_from_graph_hash: string | null
+  DecisionContextDerived: "v5.decision_context.derived",
+
   // V5 TurnExecutor per-code failure composition.
   // Emitted once per failure path that runs a per-code composer. Fields:
   //   request_id, session_id, stage,

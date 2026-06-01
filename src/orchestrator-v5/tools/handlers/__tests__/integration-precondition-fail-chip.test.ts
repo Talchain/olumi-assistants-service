@@ -24,6 +24,7 @@ import type { HandlerInvocation } from '../../registry.js';
 import type { EnrichedTurnContext } from '../../../build-turn-context.js';
 import { generateChips } from '../../../compose/chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
+import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator';
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const REQUEST_ID = 'req-precondition-fail-chip';
@@ -46,8 +47,10 @@ function buildEnrichedTurnContext(message: string): EnrichedTurnContext {
     budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
     prior_turns: [],
     prior_facts: [],
+    prior_facts_with_turn: [],
     scenarioBriefText: null,
     persistedGraph: null,
+    decision_context: EMPTY_DECISION_CONTEXT,
   };
 }
 
