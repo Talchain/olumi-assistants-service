@@ -3,6 +3,7 @@ import {
   EMPTY_DECISION_CONTEXT,
   TurnContextSchema,
   type SessionTurn,
+  type HandlerFact,
 } from '@talchain/schemas/orchestrator';
 
 import { setTestSink } from '../../utils/telemetry.js';
@@ -10,6 +11,9 @@ import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-t
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { SessionReadError } from '../session/store.js';
 import { makeMessagePayload } from './fixtures.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { deriveAnalysisFreshness } from '../context/freshness.js';
 
 const BASE = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -38,8 +42,9 @@ describe('buildTurnContext', () => {
     // EnrichedTurnContext is a superset; strip the CEE-internal extensions
     // (prior_turns from Slice B, prior_facts from V5 Group 1,
     // scenarioBriefText + persistedGraph from V5 Phase 1 brief persistence,
-    // most_recent_pending_actions from V5 Wave 2) before asserting schema
-    // parse (TurnContextSchema is strict).
+    // most_recent_pending_actions from V5 Wave 2, decision_context from Coaching
+    // State Spine Stage 1, coaching_state from Stage 2A) before asserting schema
+    // parse (TurnContextSchema is strict — an unstripped internal field throws).
     const {
       prior_turns: _pt,
       prior_facts: _pf,
@@ -48,6 +53,7 @@ describe('buildTurnContext', () => {
       persistedGraph: _pg,
       most_recent_pending_actions: _mrpa,
       decision_context: _dc,
+      coaching_state: _cs,
       ...base
     } = ctx;
     const parsed = TurnContextSchema.parse(base);
@@ -347,5 +353,137 @@ describe('buildTurnContext — decision_context (V5 Coaching State Spine Stage 1
     expect(serialised).not.toContain('Hire a senior engineer'); // entity label
     expect(serialised).not.toContain('Q3 2026'); // timeline string
     expect(serialised).not.toContain('spend'); // brief text
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 Coaching State Spine — Stage 2A: coaching_state on EnrichedTurnContext.
+// Integration-level wiring + telemetry checks; per-kind derivation is unit-tested
+// in coaching/__tests__/coaching-state.test.ts.
+// ---------------------------------------------------------------------------
+
+describe('buildTurnContext — coaching_state (V5 Coaching State Spine Stage 2A)', () => {
+  afterEach(() => {
+    setTestSink(null);
+  });
+
+  it('every built context carries coaching_state (required field present)', async () => {
+    const ctx = await buildTurnContext(BASE, 'req-cs-1', OPTS);
+    expect(ctx.coaching_state).toBeDefined();
+    expect(ctx.coaching_state.version).toBe('v1');
+  });
+
+  it('cold start (noop store: no brief/graph/facts) → active with exactly decision_context_missing + analysis_missing', async () => {
+    const ctx = await buildTurnContext(BASE, 'req-cs-2', OPTS);
+    expect(ctx.coaching_state.status).toBe('active');
+    const ids = ctx.coaching_state.signals.map((s) => s.signal_id).sort();
+    expect(ids).toEqual([
+      'analysis_missing:no_successful_run_analysis_fact',
+      'decision_context_missing:not_populated',
+    ]);
+    expect(ctx.coaching_state.summary).toEqual({
+      active_count: 2,
+      stale_count: 0,
+      unavailable_count: 0,
+    });
+    // Stage 2A statuses only — no cross-turn lifecycle.
+    for (const s of ctx.coaching_state.signals) {
+      expect(['active', 'stale', 'unavailable']).toContain(s.status);
+      expect(s.created_from).toBe('derived_current_turn');
+    }
+  });
+
+  it('emits v5.coaching_state.derived with correlation IDs + counts/closed-enum codes only (no raw decision content)', async () => {
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+    const store = createNoopSessionStore({
+      loadBriefTextResult: 'We can spend £2m by Q3 2026.',
+      loadGraphResult: STAGE1_GRAPH,
+    });
+    await buildTurnContext(BASE, 'req-cs-3', { sessionStore: store });
+
+    const ev = events.find((e) => e.name === 'v5.coaching_state.derived');
+    expect(ev).toBeDefined();
+    expect(ev!.data.request_id).toBe('req-cs-3');
+    expect(typeof ev!.data.scenario_id).toBe('string');
+    expect(typeof ev!.data.status).toBe('string');
+    expect(typeof ev!.data.signal_count).toBe('number');
+    expect(Array.isArray(ev!.data.kinds_present)).toBe(true);
+    expect(Array.isArray(ev!.data.reason_codes)).toBe(true);
+    // Privacy guarantee: never raw decision content.
+    const serialised = JSON.stringify(ev!.data);
+    expect(serialised).not.toContain('£2m');
+    expect(serialised).not.toContain('Hire a senior engineer');
+    expect(serialised).not.toContain('Q3 2026');
+    expect(serialised).not.toContain('spend');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 Coaching State Spine — Stage 2A: freshness-agreement guard.
+// Proves build-time coaching_state freshness uses the SAME single source of
+// truth as the routing/pre-dispatch view: the PERSISTED-graph hash
+// (computeAnalysisAffectingGraphHash) fed to deriveAnalysisFreshness. Fails if a
+// future change hashes a different graph (e.g. inbound graphStateForTurn), swaps
+// the hash helper, or derives a second freshness verdict.
+// ---------------------------------------------------------------------------
+
+describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', () => {
+  afterEach(() => {
+    setTestSink(null);
+  });
+
+  function makeRunAnalysisFact(graphHashAtRun: string): HandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      turn_id: 't1',
+      noop: false,
+      result: {
+        graph_hash_at_run: graphHashAtRun,
+        computed_at: '2026-05-01T00:00:00.000Z',
+        enrichment: { analysis_status: 'computed' },
+      },
+    } as unknown as HandlerFact;
+  }
+
+  it('hashes the PERSISTED graph and reuses deriveAnalysisFreshness (no second freshness truth)', async () => {
+    const parsed = GraphStateIngressSchema.safeParse(STAGE1_GRAPH);
+    expect(parsed.success).toBe(true);
+    const expectedHash = computeAnalysisAffectingGraphHash(parsed.data as never);
+    expect(typeof expectedHash).toBe('string');
+
+    const matchFact = makeRunAnalysisFact(expectedHash as string);
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+    const store = createNoopSessionStore({
+      loadGraphResult: STAGE1_GRAPH,
+      priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
+      facts: [matchFact],
+    });
+    const ctx = await buildTurnContext(BASE, 'req-fa-1', { sessionStore: store });
+
+    const ev = events.find((e) => e.name === 'v5.coaching_state.derived')!;
+    expect(ev).toBeDefined();
+    // The emitted hash IS the persisted-graph hash.
+    expect(ev.data.graph_hash).toBe(expectedHash);
+    // The verdict matches the single-source freshness selector for the same inputs.
+    const routingVerdict = deriveAnalysisFreshness([matchFact], expectedHash);
+    expect(ev.data.freshness).toBe(routingVerdict.freshness);
+    expect(ev.data.freshness).toBe('fresh');
+    expect(ctx.coaching_state.signals.some((s) => s.kind === 'analysis_stale')).toBe(false);
+  });
+
+  it('a diverged analysis hash flips coaching_state to stale (analysis_stale active)', async () => {
+    const diffFact = makeRunAnalysisFact('0000000000000000');
+    const store = createNoopSessionStore({
+      loadGraphResult: STAGE1_GRAPH,
+      priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
+      facts: [diffFact],
+    });
+    const ctx = await buildTurnContext(BASE, 'req-fa-2', { sessionStore: store });
+    const stale = ctx.coaching_state.signals.find((s) => s.kind === 'analysis_stale');
+    expect(stale?.status).toBe('active');
+    expect(stale?.reason_code).toBe('graph_hash_diverged');
   });
 });

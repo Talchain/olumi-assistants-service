@@ -25,6 +25,7 @@ import type { EnrichedTurnContext } from '../../../build-turn-context.js';
 import { generateChips } from '../../../compose/chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator';
+import { EMPTY_COACHING_STATE } from '../../../coaching/coaching-state.js';
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const REQUEST_ID = 'req-precondition-fail-chip';
@@ -51,6 +52,7 @@ function buildEnrichedTurnContext(message: string): EnrichedTurnContext {
     scenarioBriefText: null,
     persistedGraph: null,
     decision_context: EMPTY_DECISION_CONTEXT,
+    coaching_state: EMPTY_COACHING_STATE,
   };
 }
 
