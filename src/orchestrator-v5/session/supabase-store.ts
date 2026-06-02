@@ -44,6 +44,11 @@ import {
 } from './store.js';
 import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
+import {
+  toPreDispatchSnapshot,
+  parseCoachingStateSnapshot,
+  type CoachingStateSnapshot,
+} from '../coaching/coaching-state-snapshot.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
 const V5_CONVERSATION_TURN_COLUMNS =
@@ -96,10 +101,18 @@ export class SupabaseSessionStore implements SessionStore {
     // brief_text writes via its `WHERE brief_text IS NULL OR brief_text = ''`
     // predicate. Future briefText updates after the initial draft turn
     // will not persist. Regenerate semantics are out of scope for Phase 1.
-    // PostgREST overload disambiguation continues post-Wave-0: always pass
-    // all 12 named args. p_pending_actions defaults to an empty array on
-    // omit, both at the wire (here) and the RPC body. The DB column is
-    // NOT NULL with the same default — old rows backfill implicitly.
+    // PostgREST overload disambiguation continues post-2B-1a: always pass all
+    // 13 named args. p_pending_actions defaults to an empty array on omit;
+    // p_coaching_state defaults to null (the column is nullable, no default —
+    // NULL meaningfully = "no coaching state for this turn"). The 2B-1a
+    // migration drops the 12-arg overload so the single 13-arg function is
+    // unambiguous; passing all 13 names is defence-in-depth against any future
+    // overload reintroduction.
+    //
+    // Coaching-state snapshot (2B-1b): the internal Stage-2A coaching_state is
+    // wrapped in a `pre_dispatch` envelope (snapshot_timing + version) before
+    // persistence so the snapshot's derivation point is self-describing for
+    // Stage 2B-2 lifecycle. Content-free — only closed-enum codes + hashes.
     const { data, error } = await this.client.rpc('append_turn_atomic', {
       p_scenario_id: write.scenario_id,
       p_turn_id: write.turn_id,
@@ -113,6 +126,8 @@ export class SupabaseSessionStore implements SessionStore {
       p_graph: write.graph ?? null,
       p_brief_text: write.briefText ?? null,
       p_pending_actions: write.pending_actions ?? [],
+      p_coaching_state:
+        write.coaching_state == null ? null : toPreDispatchSnapshot(write.coaching_state),
     });
 
     if (error) {
@@ -438,6 +453,41 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
     return out;
+  }
+
+  async readMostRecentCoachingState(scenarioId: string): Promise<CoachingStateSnapshot | null> {
+    // Narrow, bounded read: the most recent prior turn whose coaching_state is
+    // non-null. Filtering `coaching_state IS NOT NULL` means system-event /
+    // draft / edit turns that persist NULL do NOT reset the prior snapshot;
+    // ORDER BY created_at DESC + LIMIT 1 avoids any history scan (O(1) on the
+    // existing scenario_id + created_at access pattern).
+    const { data, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('id, coaching_state')
+      .eq('scenario_id', scenarioId)
+      .not('coaching_state', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) {
+      throw new SessionReadError(
+        `readMostRecentCoachingState(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    const rows = (data ?? []) as Array<{ id: string; coaching_state: unknown }>;
+    if (rows.length === 0) return null;
+    const snapshot = parseCoachingStateSnapshot(rows[0]!.coaching_state);
+    if (snapshot === null) {
+      // A non-null coaching_state that failed the defensive parse = data drift.
+      // Degrade to null rather than crash the turn (no telemetry event added in
+      // 2B-1b — the structured log is the operational signal).
+      log.warn(
+        { scenario_id: scenarioId, turn_row_id: rows[0]!.id },
+        'V5 readMostRecentCoachingState — non-null coaching_state failed snapshot parse; degrading to null',
+      );
+      return null;
+    }
+    return snapshot;
   }
 
   async ensureScenarioExists(

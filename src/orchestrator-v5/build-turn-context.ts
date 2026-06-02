@@ -35,6 +35,7 @@ import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
+import type { CoachingStateSnapshot } from './coaching/coaching-state-snapshot.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
@@ -155,6 +156,23 @@ export interface EnrichedTurnContext extends TurnContext {
    * via `as unknown as`).
    */
   readonly coaching_state: CoachingState;
+  /**
+   * V5 Coaching State Spine — Stage 2B-1b: the most recent PRIOR pre-dispatch
+   * coaching-state snapshot for this scenario, read from
+   * `v5_conversation_turns.coaching_state` (non-null, bounded `ORDER BY
+   * created_at DESC LIMIT 1`). `null` when no prior turn persisted a coaching
+   * state, the read degraded, or the snapshot failed the defensive parse.
+   *
+   * Carries the `snapshot_timing: 'pre_dispatch'` envelope so a future Stage
+   * 2B-2 lifecycle can compare like-for-like (pre-dispatch prior vs pre-dispatch
+   * current). 2B-1b ONLY makes it available internally — NO lifecycle is derived
+   * here. INTERNAL ONLY: never on the wire, ContextPack, or routing prompt.
+   *
+   * Required (not optional) with a nullable VALUE: production `buildTurnContext`
+   * always sets it (to a snapshot or `null`). Tests that hand-construct an
+   * `EnrichedTurnContext` set it explicitly (or cast via `as unknown as`).
+   */
+  readonly prior_coaching_state: CoachingStateSnapshot | null;
 }
 
 export interface BuildTurnContextOptions {
@@ -267,6 +285,16 @@ export async function buildTurnContext(
     store,
   );
 
+  // V5 Coaching State Spine — Stage 2B-1b: read the most recent PRIOR pre-dispatch
+  // coaching-state snapshot (non-null, bounded LIMIT 1). Internal-only; attached as
+  // prior_coaching_state for future (Stage 2B-2) lifecycle consumers. Read failures
+  // degrade to null — never fail the turn. No lifecycle is derived here.
+  const priorCoachingState = await fetchMostRecentCoachingState(
+    payload.scenario_id,
+    requestId,
+    store,
+  );
+
   // V5 Coaching State Spine — Stage 1: derive the DecisionContext projection
   // deterministically from canonical state (brief_text + graph). Pure + total
   // (never throws), internal-only — it is attached to EnrichedTurnContext and
@@ -330,6 +358,7 @@ export async function buildTurnContext(
     most_recent_pending_actions: mostRecentPendingActions,
     decision_context: decisionContext,
     coaching_state: coachingState,
+    prior_coaching_state: priorCoachingState,
   };
 }
 
@@ -378,6 +407,34 @@ async function fetchMostRecentPendingActions(
       'V5 build-turn-context — readMostRecentPendingActions failed; degrading to empty list',
     );
     return [];
+  }
+}
+
+/**
+ * V5 Coaching State Spine — Stage 2B-1b: read the most recent prior pre-dispatch
+ * coaching-state snapshot. Returns null when the store doesn't implement the
+ * method (legacy test mocks), when no prior non-null snapshot exists, or when
+ * the read throws. Graceful degradation mirrors `fetchMostRecentPendingActions`
+ * — a read failure never fails the turn.
+ */
+async function fetchMostRecentCoachingState(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<CoachingStateSnapshot | null> {
+  if (!store?.readMostRecentCoachingState) return null;
+  try {
+    return await store.readMostRecentCoachingState(scenarioId);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — readMostRecentCoachingState failed; degrading to null prior_coaching_state',
+    );
+    return null;
   }
 }
 

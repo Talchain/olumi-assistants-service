@@ -299,6 +299,53 @@ describe('Acceptance Gate — coaching_state boundary (Stage 2A)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Acceptance Gate — prior_coaching_state boundary (V5 Coaching State Spine 2B-1b)
+//
+// prior_coaching_state is the durable PRIOR snapshot read back onto
+// EnrichedTurnContext. Like coaching_state, it must stay internal: not a
+// declared ContextPack / wire field, and never perturbing or leaking into
+// handler output.
+// ---------------------------------------------------------------------------
+
+const PRIOR_COACHING_SNAPSHOT = {
+  snapshot_timing: 'pre_dispatch' as const,
+  coaching_state_version: 'v1',
+  coaching_state: POPULATED_COACHING_STATE,
+}
+
+describe('Acceptance Gate — prior_coaching_state boundary (Stage 2B-1b)', () => {
+  it('is NOT a declared field on the LLM-facing ContextPack (off-prompt)', () => {
+    expect(Object.keys(ContextPackSchema.shape)).not.toContain('prior_coaching_state')
+  })
+
+  it('adds no prior_coaching_state field to the OlumiResponse wire schema', () => {
+    const shape = (OlumiResponseSchema as { shape?: Record<string, unknown> }).shape
+    expect(shape).toBeDefined()
+    expect(Object.keys(shape ?? {})).not.toContain('prior_coaching_state')
+  })
+
+  it('does not perturb handler output and never leaks into it', async () => {
+    const handler = createExplainResultsHandler()
+    const base = makeInvocation({ priorFacts: [] })
+    const withPrior = {
+      ...base,
+      context: { ...base.context, prior_coaching_state: PRIOR_COACHING_SNAPSHOT },
+    } as typeof base
+    const withoutPrior = {
+      ...base,
+      context: { ...base.context, prior_coaching_state: null },
+    } as typeof base
+
+    const outWith = await handler(withPrior)
+    const outWithout = await handler(withoutPrior)
+
+    expect(outWith).toEqual(outWithout)
+    expect(deepHasKey(outWith, 'prior_coaching_state')).toBe(false)
+    expect(findForbiddenMatches(outWith.assistant_text)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Acceptance Gate 1 — explain_results MUST NOT run without prerequisites.
 // ---------------------------------------------------------------------------
 

@@ -53,6 +53,7 @@ function buildEnrichedTurnContext(message: string): EnrichedTurnContext {
     persistedGraph: null,
     decision_context: EMPTY_DECISION_CONTEXT,
     coaching_state: EMPTY_COACHING_STATE,
+    prior_coaching_state: null,
   };
 }
 
