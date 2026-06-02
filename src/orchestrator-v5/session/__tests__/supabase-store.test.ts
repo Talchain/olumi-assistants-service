@@ -18,6 +18,8 @@ import {
   StateCommitFailedError,
   type SessionTurnWrite,
 } from '../store.js';
+import { EMPTY_COACHING_STATE } from '../../coaching/coaching-state.js';
+import { toPreDispatchSnapshot } from '../../coaching/coaching-state-snapshot.js';
 
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const USER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -70,6 +72,10 @@ function makeClient(cfg: MockConfig = {}): {
         },
         in: (col: string, vals: unknown[]) => {
           filters[`in:${col}`] = vals;
+          return chain;
+        },
+        not: (col: string, op: string, val: unknown) => {
+          filters[`not:${col}:${op}`] = val;
           return chain;
         },
         order: (col: string, opts: unknown) => {
@@ -131,10 +137,11 @@ describe('SupabaseSessionStore.append', () => {
     expect(args.p_handler_facts).toEqual([]);
     // p_graph and p_brief_text must be sent as `null` (not omitted) when
     // the write has neither. This keeps PostgREST overload resolution
-    // deterministic — see the always-12-args invariant test below and
+    // deterministic — see the always-13-args invariant test below and
     // the comment in supabase-store.ts:append. p_pending_actions
-    // defaults to the empty array so a turn that offers no resumable
-    // actions still produces a deterministic 12-arg shape.
+    // defaults to the empty array and p_coaching_state to null so a turn
+    // that offers no resumable actions and derives no coaching signals
+    // still produces a deterministic 13-arg shape.
     expect(args.p_graph).toBeNull();
     expect(args.p_brief_text).toBeNull();
     expect(args.p_pending_actions).toEqual([]);
@@ -238,7 +245,7 @@ const RUN_ANALYSIS_FACT: HandlerFact = {
 };
 
 describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overload disambiguation)', () => {
-  it('always passes all 12 named args to append_turn_atomic, p_graph & p_brief_text=null + p_pending_actions=[] when absent', async () => {
+  it('always passes all 13 named args to append_turn_atomic, p_graph & p_brief_text=null + p_pending_actions=[] + p_coaching_state=null when absent', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -251,12 +258,14 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     const args = rpcCalls[0].args as Record<string, unknown>;
     const keys = Object.keys(args).sort();
 
-    // The 12-arg invariant (V5 Wave 1 pending-action persistence,
-    // 20260505120000_v5_pending_actions). Drift here = PostgREST
-    // overload ambiguity can re-emerge if a future migration ever adds
-    // another overload.
+    // The 13-arg invariant (V5 Coaching State Spine Stage 2B-1b coaching_state
+    // snapshot persistence, 20260602120000_v5_coaching_state_snapshot, building
+    // on Wave 1 pending-action persistence 20260505120000_v5_pending_actions).
+    // Drift here = PostgREST overload ambiguity can re-emerge if a future
+    // migration ever adds another overload.
     expect(keys).toEqual([
       'p_brief_text',
+      'p_coaching_state',
       'p_duration_ms',
       'p_graph',
       'p_handler_facts',
@@ -272,9 +281,10 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     expect(args.p_graph).toBeNull();
     expect(args.p_brief_text).toBeNull();
     expect(args.p_pending_actions).toEqual([]);
+    expect(args.p_coaching_state).toBeNull();
   });
 
-  it('always passes all 12 named args even when write.graph IS provided', async () => {
+  it('always passes all 13 named args even when write.graph IS provided', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -285,10 +295,11 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, graph });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(12);
+    expect(Object.keys(args)).toHaveLength(13);
     expect(args.p_graph).toEqual(graph);
     expect(args.p_brief_text).toBeNull();
     expect(args.p_pending_actions).toEqual([]);
+    expect(args.p_coaching_state).toBeNull();
   });
 
   it('threads write.briefText to the RPC as p_brief_text (V5 Phase 1)', async () => {
@@ -302,8 +313,25 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, briefText });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(12);
+    expect(Object.keys(args)).toHaveLength(13);
     expect(args.p_brief_text).toBe(briefText);
+  });
+
+  it('threads write.coaching_state to the RPC as a wrapped pre_dispatch p_coaching_state snapshot (Stage 2B-1b)', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await store.append({ ...WRITE, coaching_state: EMPTY_COACHING_STATE });
+
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(Object.keys(args)).toHaveLength(13);
+    // The store wraps the raw Stage-2A container in the typed pre-dispatch
+    // envelope at the (only) RPC call site — never persists it bare.
+    expect(args.p_coaching_state).toEqual(toPreDispatchSnapshot(EMPTY_COACHING_STATE));
+    expect((args.p_coaching_state as { snapshot_timing: string }).snapshot_timing).toBe('pre_dispatch');
   });
 
   it('passes both p_graph and p_brief_text together (initial draft turn shape)', async () => {
@@ -1070,5 +1098,73 @@ describe('SupabaseSessionStore.storeDraftGraph', () => {
     await expect(store.storeDraftGraph(SCENARIO, GRAPH)).rejects.toMatchObject({
       rpc_code: 'P0001',
     });
+  });
+});
+
+describe('SupabaseSessionStore.readMostRecentCoachingState — Stage 2B-1b null-filtered read', () => {
+  const WRAPPED = toPreDispatchSnapshot(EMPTY_COACHING_STATE);
+
+  it('returns the parsed snapshot from the most recent NON-NULL row via a bounded null-filtered query', async () => {
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [{ id: 'row-1', coaching_state: WRAPPED }], error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    const snap = await store.readMostRecentCoachingState(SCENARIO);
+    expect(snap).toEqual(WRAPPED);
+    expect(snap!.snapshot_timing).toBe('pre_dispatch');
+
+    // Query shape: the `coaching_state IS NOT NULL` filter is the load-bearing
+    // correctness property — NULL rows (system-event / route-v2 draft / edit)
+    // must be skipped so they never reset the prior snapshot — plus the bounded
+    // ORDER BY created_at DESC + LIMIT 1 (no history scan).
+    const call = selectCalls.find((c) => c.table === 'v5_conversation_turns');
+    expect(call).toBeDefined();
+    expect(call!.cols).toContain('coaching_state');
+    const f = call!.filters as Record<string, unknown>;
+    expect(f['eq:scenario_id']).toBe(SCENARIO);
+    expect(f['not:coaching_state:is']).toBeNull();
+    expect(f['order:created_at']).toEqual({ ascending: false });
+    expect(f.limit).toBe(1);
+  });
+
+  it('returns null when no non-null coaching_state row exists for the scenario', async () => {
+    const { client } = makeClient({ selectResult: { data: [], error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    expect(await store.readMostRecentCoachingState(SCENARIO)).toBeNull();
+  });
+
+  it('degrades to null (does NOT throw) when a non-null coaching_state fails the defensive parse', async () => {
+    const { client } = makeClient({
+      selectResult: { data: [{ id: 'row-1', coaching_state: { drifted: true } }], error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    expect(await store.readMostRecentCoachingState(SCENARIO)).toBeNull();
+  });
+
+  it('throws SessionReadError when the read fails at the DB layer (build-turn-context degrades it to null)', async () => {
+    const { client } = makeClient({
+      selectResult: { data: null, error: { message: 'boom', code: '42501' } },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.readMostRecentCoachingState(SCENARIO)).rejects.toBeInstanceOf(
+      SessionReadError,
+    );
   });
 });

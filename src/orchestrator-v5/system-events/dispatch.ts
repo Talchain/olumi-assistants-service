@@ -139,6 +139,10 @@ export async function dispatchSystemEvent(
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
+      // V5 Stage 2B-1b: system-event turns have no user turn / coaching context
+      // (no buildTurnContext) — persist NULL explicitly. The most-recent read
+      // filters non-null, so this never resets a prior coaching snapshot.
+      coaching_state: null,
     });
     log.info(
       {

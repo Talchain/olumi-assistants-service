@@ -441,6 +441,9 @@ export async function dispatchDraftGraph(
         handler_facts: [],
         graph: draftResult.graphOutput ?? undefined,
         briefText: briefTextForCommit,
+        // V5 Stage 2B-1b: the route-v2 draft path never runs buildTurnContext,
+        // so no coaching_state is derived for this turn — persist NULL explicitly.
+        coaching_state: null,
       },
     );
     const persistenceMs = Date.now() - commitStartedAt;

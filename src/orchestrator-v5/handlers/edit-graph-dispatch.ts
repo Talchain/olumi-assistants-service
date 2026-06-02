@@ -1892,6 +1892,9 @@ export async function dispatchEditGraph(
       ...(pendingActionsForCommit !== undefined
         ? { pending_actions: pendingActionsForCommit }
         : {}),
+      // V5 Stage 2B-1b: the route-v2 edit path never runs buildTurnContext,
+      // so no coaching_state is derived for this turn — persist NULL explicitly.
+      coaching_state: null,
     });
     log.info(
       {

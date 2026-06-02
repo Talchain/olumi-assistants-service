@@ -632,6 +632,22 @@ export const TelemetryEvents = {
   //   freshness: 'fresh' | 'stale' | 'unknown' | 'none'  (for cross-ref with analysis_freshness.derived)
   V5CoachingStateDerived: "v5.coaching_state.derived",
 
+  // V5 Coaching State Spine — Stage 2B-1b. Emitted once per turn AFTER the turn's
+  // state is successfully persisted (post-append_turn_atomic). Same privacy
+  // contract as V5CoachingStateDerived: correlation IDs + counts / closed-enum
+  // status / SHA-prefix hashes / version / timing / turn_class ONLY — never raw
+  // decision content. `coaching_state_present` distinguishes turns that derived a
+  // snapshot (turn-executor / chip-click) from those that did not (system events,
+  // route-v2 draft/edit) so missed write-site wiring is visible. Fields:
+  //   scenario_id, turn_id, turn_row_id: string  (correlation only)
+  //   turn_class: 'direct_answer' | 'clarify' | 'handler' | 'unhandled'  (closed enum)
+  //   coaching_state_present: boolean
+  //   status: 'empty' | 'active' | 'degraded' | null
+  //   signal_count, active_count, stale_count, unavailable_count: number
+  //   graph_hash, analysis_graph_hash, version: string | null
+  //   snapshot_timing: 'pre_dispatch' | null
+  V5CoachingStatePersisted: "v5.coaching_state.persisted",
+
   // V5 TurnExecutor per-code failure composition.
   // Emitted once per failure path that runs a per-code composer. Fields:
   //   request_id, session_id, stage,

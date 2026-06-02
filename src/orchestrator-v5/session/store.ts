@@ -21,6 +21,8 @@ import type {
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import type { PendingAction } from './pending-action.js';
 import type { HandlerFactWithTurn } from '../types/handler-fact.js';
+import type { CoachingState } from '../coaching/coaching-state.js';
+import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.js';
 
 /**
  * Re-export so existing in-session callers (and `commit.ts` /
@@ -86,6 +88,20 @@ export interface SessionTurnWrite {
    * `chip_metadata.action_type` (which the UI already round-trips).
    */
   readonly pending_actions?: readonly PendingAction[];
+  /**
+   * V5 Coaching State Spine — Stage 2B-1b: the internal Stage-2A `coaching_state`
+   * derived at turn start (pre-dispatch), persisted to
+   * `v5_conversation_turns.coaching_state` atomically with the turn insert via
+   * `append_turn_atomic(p_coaching_state)`. The store wraps it in a
+   * `CoachingStateSnapshot` envelope (`snapshot_timing: 'pre_dispatch'`) before
+   * writing — see `coaching/coaching-state-snapshot.ts`.
+   *
+   * `null`/omitted writes `coaching_state = NULL` (the column is nullable, no
+   * default) — used by paths that never derive a coaching state (system events,
+   * the route-v2 draft/edit dispatch paths). Content-free: only closed-enum
+   * signal codes + SHA-prefix hashes are persisted, never raw user content.
+   */
+  readonly coaching_state?: CoachingState | null;
 }
 
 export interface SessionStore {
@@ -212,6 +228,23 @@ export interface SessionStore {
    * non-resume path rather than failing the turn.
    */
   readMostRecentPendingActions(scenarioId: string): Promise<readonly PendingAction[]>;
+  /**
+   * V5 Coaching State Spine — Stage 2B-1b: load the most recent NON-NULL
+   * coaching-state snapshot for a scenario. Returns the parsed
+   * `CoachingStateSnapshot` envelope, or `null` when no scenario row carries a
+   * coaching state, the JSONB is malformed, or the read degraded.
+   *
+   * Read scope is intentionally narrow + bounded: the query filters
+   * `coaching_state IS NOT NULL` and takes `ORDER BY created_at DESC LIMIT 1`,
+   * so system-event / draft / edit turns that persist NULL do NOT reset the
+   * prior snapshot, and no unbounded history scan occurs. Attached to
+   * `EnrichedTurnContext.prior_coaching_state` by `buildTurnContext`.
+   *
+   * Optional on the interface so existing test mocks need not implement it;
+   * `buildTurnContext` falls back to `null` when absent. Production
+   * (`SupabaseSessionStore`) always implements it.
+   */
+  readMostRecentCoachingState?(scenarioId: string): Promise<CoachingStateSnapshot | null>;
 }
 
 /**

@@ -422,6 +422,19 @@ export async function runTurnExecutor(
   }
   stagesCompleted.push('build_turn_context');
 
+  // V5 Coaching State Spine — Stage 2B-1b: persist the turn-start (pre-dispatch)
+  // coaching_state snapshot on EVERY turn-executor commit. Injected centrally
+  // here so no individual commit site can omit it; `context` is the single turn
+  // context built above. Forwards the optional sessionStore arg unchanged. The
+  // 19 `commitDirectAnswer` call sites in this function were renamed to
+  // `commitTurn` so the snapshot threads uniformly.
+  const commitTurn = (
+    resp: Parameters<typeof commitDirectAnswer>[0],
+    meta: Parameters<typeof commitDirectAnswer>[1],
+    store?: Parameters<typeof commitDirectAnswer>[2],
+  ): ReturnType<typeof commitDirectAnswer> =>
+    commitDirectAnswer(resp, { ...meta, coaching_state: context.coaching_state }, store);
+
   // V5 alpha hardening Phase 2.5: one-query observability. v5_journey_id
   // aliases scenario_id (= context.session_id) per Paul's locked-in
   // decision — no new correlation layer. The lateBound fields get
@@ -1066,7 +1079,7 @@ export async function runTurnExecutor(
         stagesCompleted.push('orient');
         stagesCompleted.push('compose');
         try {
-          const committed = await commitDirectAnswer(recoveryResponse, {
+          const committed = await commitTurn(recoveryResponse, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
             turn_class: 'direct_answer',
@@ -1176,7 +1189,7 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           stagesCompleted.push('compose');
           try {
-            const committed = await commitDirectAnswer(recoveryResponse, {
+            const committed = await commitTurn(recoveryResponse, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
@@ -1364,7 +1377,7 @@ export async function runTurnExecutor(
         stagesCompleted.push('orient');
         stagesCompleted.push('compose');
         try {
-          const committed = await commitDirectAnswer(recoveryResponse, {
+          const committed = await commitTurn(recoveryResponse, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
             turn_class: 'direct_answer',
@@ -1443,7 +1456,7 @@ export async function runTurnExecutor(
         stagesCompleted.push('orient');
         stagesCompleted.push('compose');
         try {
-          const committed = await commitDirectAnswer(recoveryResponse, {
+          const committed = await commitTurn(recoveryResponse, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
             turn_class: 'direct_answer',
@@ -1691,7 +1704,7 @@ export async function runTurnExecutor(
             ...proposalsToRepersist,
             ...chipDerivedForAmbiguous,
           ];
-          const committed = await commitDirectAnswer(ambiguousResponse, {
+          const committed = await commitTurn(ambiguousResponse, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
             turn_class: 'direct_answer',
@@ -1899,7 +1912,7 @@ export async function runTurnExecutor(
               // resolve. Identity preserved: chip_id, proposal_ref,
               // expires_at_iso unchanged; wall-clock TTL still
               // applies.
-              const committed = await commitDirectAnswer(ambiguousResponse, {
+              const committed = await commitTurn(ambiguousResponse, {
                 scenario_id: context.session_id,
                 turn_id: context.request_id,
                 turn_class: 'direct_answer',
@@ -1969,7 +1982,7 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           stagesCompleted.push('compose');
           try {
-            const committed = await commitDirectAnswer(dismissalResponse, {
+            const committed = await commitTurn(dismissalResponse, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
@@ -2265,7 +2278,7 @@ export async function runTurnExecutor(
         stagesCompleted.push('orient');
         stagesCompleted.push('compose');
         try {
-          const committed = await commitDirectAnswer(recoveryResponse, {
+          const committed = await commitTurn(recoveryResponse, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
             turn_class: 'direct_answer',
@@ -2750,7 +2763,7 @@ export async function runTurnExecutor(
           failure_reason: null,
         });
         try {
-          const committed = await commitDirectAnswer(clarifyResponse, {
+          const committed = await commitTurn(clarifyResponse, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
             turn_class: 'direct_answer',
@@ -2864,7 +2877,7 @@ export async function runTurnExecutor(
         stagesCompleted.push('compose');
 
         try {
-          const committed = await commitDirectAnswer(clarifyResponse, {
+          const committed = await commitTurn(clarifyResponse, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
             turn_class: 'direct_answer',
@@ -2973,7 +2986,7 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           stagesCompleted.push('compose');
           try {
-            const committed = await commitDirectAnswer(stateQueryResponse, {
+            const committed = await commitTurn(stateQueryResponse, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
@@ -3049,7 +3062,7 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           stagesCompleted.push('compose');
           try {
-            const committed = await commitDirectAnswer(staleResponse, {
+            const committed = await commitTurn(staleResponse, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
@@ -3236,7 +3249,7 @@ export async function runTurnExecutor(
             originPath: 'advice_gate',
           });
           try {
-            const committed = await commitDirectAnswer(adviceResponse, {
+            const committed = await commitTurn(adviceResponse, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
@@ -3331,7 +3344,7 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           stagesCompleted.push('compose');
           try {
-            const committed = await commitDirectAnswer(freshFollowupResponse, {
+            const committed = await commitTurn(freshFollowupResponse, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
@@ -3412,7 +3425,7 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           stagesCompleted.push('compose');
           try {
-            const committed = await commitDirectAnswer(noAnalysisResponse, {
+            const committed = await commitTurn(noAnalysisResponse, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
@@ -3778,7 +3791,7 @@ export async function runTurnExecutor(
         // are not hidden behind resilience (correction 10 / Part B of
         // the resilience contract).
         try {
-          const committed = await commitDirectAnswer(response, {
+          const committed = await commitTurn(response, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
             turn_class: 'direct_answer',
@@ -4137,7 +4150,7 @@ export async function runTurnExecutor(
           // commit failure are logged as two distinct records so
           // infrastructure issues are not hidden behind resilience.
           try {
-            const committed = await commitDirectAnswer(response, {
+            const committed = await commitTurn(response, {
               scenario_id: context.session_id,
               turn_id: context.request_id,
               turn_class: 'direct_answer',
@@ -4771,7 +4784,7 @@ export async function runTurnExecutor(
       // without briefText (e.g. legacy draft pre-Fix A) — subsequent
       // non-draft turns will backfill the brief from the enriched
       // context if it's still null.
-      const committed = await commitDirectAnswer(composedOk, {
+      const committed = await commitTurn(composedOk, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
         turn_class: resolvedTurnClass ?? 'direct_answer',
@@ -5193,7 +5206,7 @@ export async function runTurnExecutor(
     // recordFailureContext fires at the top of translateRoutingError for
     // every routing-error cause, including this bounded-fallback path.
     try {
-      const committed = await commitDirectAnswer(fallbackResponse, {
+      const committed = await commitTurn(fallbackResponse, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
         turn_class: 'direct_answer',

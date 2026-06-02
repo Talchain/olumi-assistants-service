@@ -54,6 +54,7 @@ describe('buildTurnContext', () => {
       most_recent_pending_actions: _mrpa,
       decision_context: _dc,
       coaching_state: _cs,
+      prior_coaching_state: _pcs,
       ...base
     } = ctx;
     const parsed = TurnContextSchema.parse(base);

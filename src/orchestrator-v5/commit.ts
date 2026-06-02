@@ -35,6 +35,7 @@ import type { SessionStore } from './session/store.js';
 import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
 import type { PendingAction } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
+import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 
 export interface CommitMetadata {
@@ -91,6 +92,19 @@ export interface CommitMetadata {
    * (frame stage, no draft yet).
    */
   readonly graph_hash?: string;
+  /**
+   * V5 Coaching State Spine — Stage 2B-1b: the internal Stage-2A `coaching_state`
+   * derived at turn start (pre-dispatch). Persisted atomically with the turn via
+   * `append_turn_atomic(p_coaching_state)` (the store wraps it in a pre-dispatch
+   * snapshot envelope). Threaded from `EnrichedTurnContext.coaching_state` by the
+   * commit-call sites that have a turn context in scope (turn-executor, chip-click).
+   *
+   * `null`/omitted persists `coaching_state = NULL` — used by paths that never
+   * derive a coaching state (system events; the route-v2 draft/edit dispatch
+   * paths, which skip `buildTurnContext`). The most-recent read filters
+   * non-null, so these rows never reset the prior snapshot. No lifecycle here.
+   */
+  readonly coaching_state?: CoachingState | null;
 }
 
 export interface CommitResult {
@@ -170,30 +184,79 @@ export async function commitDirectAnswer(
     graph: metadata.graph,
     briefText: metadata.briefText,
     pending_actions: chipDerivedPending,
+    coaching_state: metadata.coaching_state,
   });
 
-  // Telemetry fires AFTER write succeeds — never log a "created" event
-  // for a pending action that was rolled back by an RPC failure.
-  for (const pa of chipDerivedPending) {
-    emit(TelemetryEvents.PendingActionCreated, {
-      scenario_id: pa.scenario_id,
+  // Post-success observability. The turn's state is now durably committed; the
+  // telemetry below is best-effort and MUST NOT convert a successful persist
+  // into a turn failure. `emit()`'s pre-Datadog path (sanitize / test sink /
+  // pino) can throw on a pathological payload, and these emits fire AFTER the
+  // irreversible append — so a throw here would invert the persisted-state
+  // invariant (committed write surfaced to the caller as an error). Wrap the
+  // whole block: a telemetry fault degrades to a log, never an error. (Datadog
+  // transport is already independently guarded inside `emit()`.)
+  try {
+    // V5 Coaching State Spine — Stage 2B-1b: post-success persistence telemetry.
+    // Once per commit across the whole turn taxonomy. `coaching_state_present`
+    // distinguishes turns that derived a snapshot (turn-executor / chip-click)
+    // from those that legitimately did not (system events, route-v2 draft/edit)
+    // — making missed write-site wiring visible in staging. Counts / closed-enum
+    // status / SHA-prefix hashes / version / timing / turn_class only — no raw
+    // content.
+    const cs = metadata.coaching_state ?? null;
+    emit(TelemetryEvents.V5CoachingStatePersisted, {
+      scenario_id: metadata.scenario_id,
+      turn_id: metadata.turn_id,
       turn_row_id: persistedRowId,
-      pending_action_id: pa.id,
-      kind: pa.action.kind,
-      chip_id: pa.chip_id,
-      expires_at_turn_count: pa.expires_at_turn_count,
-      expires_at_iso: pa.expires_at_iso,
+      turn_class: metadata.turn_class,
+      coaching_state_present: cs !== null,
+      status: cs?.status ?? null,
+      signal_count: cs?.signals.length ?? 0,
+      active_count: cs?.summary.active_count ?? 0,
+      stale_count: cs?.summary.stale_count ?? 0,
+      unavailable_count: cs?.summary.unavailable_count ?? 0,
+      graph_hash: cs?.graph_hash ?? null,
+      analysis_graph_hash: cs?.analysis_graph_hash ?? null,
+      version: cs?.version ?? null,
+      snapshot_timing: cs !== null ? 'pre_dispatch' : null,
     });
-  }
-  if (chipDerivedPending.length > 0) {
-    log.debug(
+
+    // Telemetry fires AFTER write succeeds — never log a "created" event
+    // for a pending action that was rolled back by an RPC failure.
+    for (const pa of chipDerivedPending) {
+      emit(TelemetryEvents.PendingActionCreated, {
+        scenario_id: pa.scenario_id,
+        turn_row_id: persistedRowId,
+        pending_action_id: pa.id,
+        kind: pa.action.kind,
+        chip_id: pa.chip_id,
+        expires_at_turn_count: pa.expires_at_turn_count,
+        expires_at_iso: pa.expires_at_iso,
+      });
+    }
+    if (chipDerivedPending.length > 0) {
+      log.debug(
+        {
+          scenario_id: metadata.scenario_id,
+          turn_row_id: persistedRowId,
+          pending_action_count: chipDerivedPending.length,
+          kinds: chipDerivedPending.map((pa) => pa.action.kind),
+        },
+        'V5 commit — pending actions persisted with turn',
+      );
+    }
+  } catch (telemetryErr) {
+    // Persisted-state invariant: the turn is already committed. Degrade a
+    // post-success telemetry fault to a warning and continue to the success
+    // return — never rethrow. (Global `emit()` hardening is a separate
+    // telemetry-infra lane; this guards the most sensitive boundary.)
+    log.warn(
       {
         scenario_id: metadata.scenario_id,
         turn_row_id: persistedRowId,
-        pending_action_count: chipDerivedPending.length,
-        kinds: chipDerivedPending.map((pa) => pa.action.kind),
+        err: (telemetryErr as Error)?.message ?? String(telemetryErr),
       },
-      'V5 commit — pending actions persisted with turn',
+      'V5 commit — post-success telemetry failed after a durable persist; continuing',
     );
   }
 
