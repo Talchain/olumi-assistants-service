@@ -617,6 +617,21 @@ export const TelemetryEvents = {
   //   derived_from_graph_hash: string | null
   DecisionContextDerived: "v5.decision_context.derived",
 
+  // V5 Coaching State Spine — Stage 2A. Emitted once per turn when the internal
+  // current-turn CoachingState container is derived from canonical state. Same
+  // privacy contract as DecisionContextDerived / context_readiness: STANDARD
+  // correlation IDs plus counts / flags / closed-enum codes / hashes ONLY — never
+  // raw decision content (no labels, values, node/edge/option/factor/fact ids).
+  // Fields:
+  //   request_id, scenario_id: string  (correlation only)
+  //   status: 'empty' | 'active' | 'degraded'
+  //   signal_count, active_count, stale_count, unavailable_count: number
+  //   kinds_present: string[]    (sorted distinct CoachingStateSignalKind — closed enum)
+  //   reason_codes: string[]     (sorted distinct CoachingStateReasonCode — closed enum)
+  //   graph_hash, analysis_graph_hash: string | null  (SHA-prefix provenance)
+  //   freshness: 'fresh' | 'stale' | 'unknown' | 'none'  (for cross-ref with analysis_freshness.derived)
+  V5CoachingStateDerived: "v5.coaching_state.derived",
+
   // V5 TurnExecutor per-code failure composition.
   // Emitted once per failure path that runs a per-code composer. Fields:
   //   request_id, session_id, stage,

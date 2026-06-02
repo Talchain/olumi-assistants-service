@@ -49,6 +49,7 @@ import type { AnalysisProjectionSummary } from '../../src/orchestrator-v5/contex
 import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator'
 import { OlumiResponseSchema } from '@talchain/schemas/boundary'
 import { ContextPackSchema } from '../../src/orchestrator-v5/context/context-pack-schema.js'
+import { EMPTY_COACHING_STATE } from '../../src/orchestrator-v5/coaching/coaching-state.js'
 
 const SCENARIO_ID = '11111111-1111-4111-8111-111111111111'
 const REQUEST_ID = 'req-acceptance-gate'
@@ -230,6 +231,69 @@ describe('Acceptance Gate — decision_context boundary (Stage 1)', () => {
 
     expect(outWith).toEqual(outWithout)
     expect(deepHasKey(outWith, 'decision_context')).toBe(false)
+    expect(findForbiddenMatches(outWith.assistant_text)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Acceptance Gate — coaching_state boundary (V5 Coaching State Spine Stage 2A)
+//
+// coaching_state is an INTERNAL current-turn signal container carried on
+// EnrichedTurnContext. Same boundary contract as decision_context: not a
+// declared ContextPack/wire field, and never perturbs or leaks into handler
+// output.
+// ---------------------------------------------------------------------------
+
+const POPULATED_COACHING_STATE = {
+  version: 'v1' as const,
+  status: 'active' as const,
+  graph_hash: null,
+  analysis_graph_hash: null,
+  signals: [
+    {
+      signal_id: 'analysis_missing:no_successful_run_analysis_fact',
+      kind: 'analysis_missing' as const,
+      status: 'active' as const,
+      source: 'analysis_freshness' as const,
+      graph_hash: null,
+      analysis_graph_hash: null,
+      reason_code: 'no_successful_run_analysis_fact' as const,
+      created_from: 'derived_current_turn' as const,
+    },
+  ],
+  summary: { active_count: 1, stale_count: 0, unavailable_count: 0 },
+}
+
+describe('Acceptance Gate — coaching_state boundary (Stage 2A)', () => {
+  it('is NOT a declared field on the LLM-facing ContextPack (off-prompt)', () => {
+    expect(Object.keys(ContextPackSchema.shape)).not.toContain('coaching_state')
+  })
+
+  it('adds no coaching_state field to the OlumiResponse wire schema', () => {
+    const shape = (OlumiResponseSchema as { shape?: Record<string, unknown> }).shape
+    expect(shape).toBeDefined()
+    expect(Object.keys(shape ?? {})).not.toContain('coaching_state')
+  })
+
+  it('does not perturb handler output and never leaks into it', async () => {
+    const handler = createExplainResultsHandler()
+    // Missing-analysis recovery path — deterministic and independent of
+    // coaching_state. With vs without a populated coaching_state must match.
+    const base = makeInvocation({ priorFacts: [] })
+    const withCs = {
+      ...base,
+      context: { ...base.context, coaching_state: POPULATED_COACHING_STATE },
+    } as typeof base
+    const withoutCs = {
+      ...base,
+      context: { ...base.context, coaching_state: EMPTY_COACHING_STATE },
+    } as typeof base
+
+    const outWith = await handler(withCs)
+    const outWithout = await handler(withoutCs)
+
+    expect(outWith).toEqual(outWithout)
+    expect(deepHasKey(outWith, 'coaching_state')).toBe(false)
     expect(findForbiddenMatches(outWith.assistant_text)).toEqual([])
   })
 })

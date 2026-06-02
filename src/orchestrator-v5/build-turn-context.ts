@@ -34,6 +34,8 @@ import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
+import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
+import { deriveAnalysisFreshness } from './context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
 
@@ -134,6 +136,25 @@ export interface EnrichedTurnContext extends TurnContext {
    * `EnrichedTurnContext` set it explicitly (or cast via `as unknown as`).
    */
   readonly decision_context: DecisionContext;
+  /**
+   * V5 Coaching State Spine — Stage 2A: deterministic CURRENT-TURN coaching-signal
+   * container, derived from canonical state (decision_context status + the single
+   * analysis-freshness verdict + structural readiness blockers + present `defaulted` /
+   * decision_review `evidence_enhancements` fields). Each signal carries a stable
+   * `signal_id` and a current `active | stale | unavailable` status — NO cross-turn
+   * lifecycle (no `resolved`). INTERNAL ONLY: never serialised on the wire, never added
+   * to the ContextPack or the routing prompt. Re-derived every turn, so it is always
+   * consistent with the current graph.
+   *
+   * Distinct from the durable `v5_coaching_state` table Stage 2B will introduce, and from
+   * the Step-5 coaching-TEXT detector (`../signals/coaching-signals.ts`).
+   *
+   * Required (not optional): production `buildTurnContext` populates it on every turn, so
+   * Stage 2B/3 consumers can rely on its presence without a `?? EMPTY_COACHING_STATE`
+   * guard. Tests that hand-construct an `EnrichedTurnContext` set it explicitly (or cast
+   * via `as unknown as`).
+   */
+  readonly coaching_state: CoachingState;
 }
 
 export interface BuildTurnContextOptions {
@@ -255,6 +276,9 @@ export async function buildTurnContext(
     scenarioState.briefText,
     scenarioState.graph,
   );
+  // Single canonical persisted-graph hash, computed once and reused by both the
+  // DecisionContext provenance telemetry and the Stage-2A coaching-state derivation.
+  const persistedGraphHash = deriveDecisionContextGraphHash(scenarioState.graph);
   emit(TelemetryEvents.DecisionContextDerived, {
     request_id: requestId,
     scenario_id: payload.scenario_id,
@@ -264,7 +288,36 @@ export async function buildTurnContext(
     entity_count: decisionContext.domain_anchors.named_entities.length,
     has_goal_metric: decisionContext.goal_translation.user_scale_metric !== null,
     has_goal_target: decisionContext.goal_translation.user_scale_target !== null,
-    derived_from_graph_hash: deriveDecisionContextGraphHash(scenarioState.graph),
+    derived_from_graph_hash: persistedGraphHash,
+  });
+
+  // V5 Coaching State Spine — Stage 2A: derive the current-turn coaching-signal
+  // container from canonical state. The analysis-freshness verdict is computed here
+  // from the SAME single source of truth (`deriveAnalysisFreshness`) and the SAME
+  // persisted-graph hash the routing path uses — reused internally only, NOT emitted
+  // as freshness telemetry (turn-executor owns that), so there is no second freshness
+  // signal. Pure + total, internal-only — never reaches the wire or the LLM prompt.
+  const coachingFreshness = deriveAnalysisFreshness(priorFacts, persistedGraphHash);
+  const coachingState = deriveCoachingState({
+    decisionContext,
+    freshness: coachingFreshness,
+    priorFacts,
+    graphHash: persistedGraphHash,
+    persistedGraph: scenarioState.graph,
+  });
+  emit(TelemetryEvents.V5CoachingStateDerived, {
+    request_id: requestId,
+    scenario_id: payload.scenario_id,
+    status: coachingState.status,
+    signal_count: coachingState.signals.length,
+    active_count: coachingState.summary.active_count,
+    stale_count: coachingState.summary.stale_count,
+    unavailable_count: coachingState.summary.unavailable_count,
+    kinds_present: distinctSorted(coachingState.signals.map((s) => s.kind)),
+    reason_codes: distinctSorted(coachingState.signals.map((s) => s.reason_code)),
+    graph_hash: coachingState.graph_hash,
+    analysis_graph_hash: coachingState.analysis_graph_hash,
+    freshness: coachingFreshness.freshness,
   });
 
   return {
@@ -276,7 +329,17 @@ export async function buildTurnContext(
     persistedGraph: scenarioState.graph,
     most_recent_pending_actions: mostRecentPendingActions,
     decision_context: decisionContext,
+    coaching_state: coachingState,
   };
+}
+
+/**
+ * Distinct, lexicographically-sorted copy of a string list — used to emit closed-enum
+ * sets (signal kinds / reason codes) on `v5.coaching_state.derived` deterministically and
+ * with bounded cardinality.
+ */
+function distinctSorted(values: readonly string[]): string[] {
+  return Array.from(new Set(values)).sort();
 }
 
 /**
