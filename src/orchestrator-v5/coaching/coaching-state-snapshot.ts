@@ -59,10 +59,19 @@ export function toPreDispatchSnapshot(state: CoachingState): CoachingStateSnapsh
  *   - not an object / wrong `snapshot_timing` / missing version → null;
  *   - inner `coaching_state` not a Stage-2A-shaped object → null.
  *
- * Validation is intentionally lightweight (structural, not full Zod) — it only
- * needs to confirm the envelope is a 2B-1b pre-dispatch snapshot whose inner
- * state has the expected top-level shape. Lifecycle derivation (2B-2) does the
- * deeper reasoning.
+ * Validation is intentionally lightweight (structural, not full Zod): it
+ * confirms the envelope is a 2B-1b pre-dispatch snapshot whose inner state has
+ * the expected TOP-LEVEL shape (status enum; `signals` is an array; `summary`
+ * is an object). It deliberately does NOT deep-validate each `signals[]` entry
+ * or the `summary` counts — 2B-1b only persists + reads the snapshot and no
+ * consumer acts on inner signals yet, so inner drift is harmless at this stage.
+ *
+ * Stage 2B-2 contract (lifecycle): 2B-2 WILL read inner signals by `signal_id`
+ * to compare prior vs current. It must therefore EITHER deepen this validation
+ * (per-signal / per-summary) OR defensively tolerate malformed/missing inner
+ * entries (skip them as absent) — never assume well-formed inner signals just
+ * because the parse returned non-null. Treating inner drift as null-safe
+ * degraded state is the intended default.
  */
 export function parseCoachingStateSnapshot(raw: unknown): CoachingStateSnapshot | null {
   try {

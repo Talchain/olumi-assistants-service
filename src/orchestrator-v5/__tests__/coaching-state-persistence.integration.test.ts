@@ -209,6 +209,21 @@ describe('2B-1b — v5.coaching_state.persisted telemetry (req 10)', () => {
     await expect(commitDirectAnswer(RESPONSE, meta(ACTIVE_STATE), store)).rejects.toThrow(/simulated/);
     expect(events.find((e) => e.name === 'v5.coaching_state.persisted')).toBeUndefined();
   });
+
+  it('does NOT fail the commit when post-success telemetry throws (persisted-state invariant)', async () => {
+    // Force emit() to throw via the test-sink path. The persisted event fires
+    // AFTER the durable append, so a telemetry fault must degrade to a log and
+    // the commit must still resolve successfully — never surface as a turn error.
+    setTestSink((name) => {
+      if (name === 'v5.coaching_state.persisted') throw new Error('simulated telemetry failure');
+    });
+    const { store, snaps } = makeStatefulStore();
+    const result = await commitDirectAnswer(RESPONSE, meta(ACTIVE_STATE), store);
+    expect(result.performed).toBe(true);
+    // State was persisted before telemetry ran — the throw did not roll it back.
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0]).toEqual(toPreDispatchSnapshot(ACTIVE_STATE));
+  });
 });
 
 // EMPTY_COACHING_STATE is a valid input too (cold-start turns derive it).
