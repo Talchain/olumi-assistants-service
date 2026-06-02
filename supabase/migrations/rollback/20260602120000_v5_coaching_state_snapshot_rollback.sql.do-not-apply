@@ -11,13 +11,20 @@
 --   - the column or constraint must be removed for any reason.
 --
 -- Restoration target: the exact 12-arg signature shipped by
--- 20260505120000_v5_pending_actions.sql. The body below is inlined
--- verbatim from that migration so this file can be applied without
--- referring back to it.
+-- 20260505120000_v5_pending_actions.sql. The function below — including
+-- its inline body comments — is reproduced byte-for-byte from that
+-- migration's 12-arg version, so applying this file restores the prior
+-- function definition (prosrc) exactly. The only differences from the
+-- 13-arg version being rolled back are the absent 13th parameter
+-- (p_coaching_state) and its coaching_state INSERT column/value.
 --
 -- Order: drop the 13-arg overload first to eliminate PostgREST ambiguity
 -- before re-issuing the 12-arg version, then drop the column and its
 -- constraint (function restoration before column removal).
+--
+-- After applying: Supabase auto-reloads the PostgREST schema cache on
+-- DDL; if a stale-cache symptom is seen, force a reload with
+--   NOTIFY pgrst, 'reload schema';
 -- ============================================================
 
 -- 1. Drop the 13-arg overload introduced by 20260602120000.
@@ -26,9 +33,9 @@ DROP FUNCTION IF EXISTS public.append_turn_atomic(
 );
 
 -- 2. Re-CREATE the 12-arg version verbatim from 20260505120000. The body
---    matches that migration byte-for-byte; the only difference here is
---    that the 13th parameter and the coaching_state INSERT column/value
---    are removed.
+--    (including inline comments) matches that migration byte-for-byte;
+--    the only differences are the absent 13th parameter (p_coaching_state)
+--    and its coaching_state INSERT column/value.
 CREATE OR REPLACE FUNCTION public.append_turn_atomic(
   p_scenario_id      UUID,
   p_turn_id          TEXT,
@@ -55,6 +62,8 @@ DECLARE
   v_updated   INTEGER;
 BEGIN
   SELECT user_id INTO v_user_id FROM scenarios WHERE id = p_scenario_id;
+  -- Use FOUND (set by SELECT INTO) to distinguish "row absent" from
+  -- "guest row with user_id IS NULL".
   IF NOT FOUND THEN
     RAISE EXCEPTION 'scenario % not found', p_scenario_id;
   END IF;
@@ -72,16 +81,25 @@ BEGIN
   RETURNING id INTO v_turn_id;
 
   IF NOT FOUND THEN
+    -- Conflict replay: deduplicated turn, idempotent return.
+    -- Do NOT write p_graph, p_brief_text, or pending_actions —
+    -- v5_conversation_turns and scenarios must not be mutated on retry.
+    -- This is the load-bearing idempotency invariant.
     SELECT id INTO v_turn_id
       FROM v5_conversation_turns
       WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id;
     RETURN v_turn_id;
   END IF;
 
+  -- New turn inserted. Now write the graph atomically in the same transaction.
+  -- Gating on FOUND (above) ensures this block never runs on conflict replay,
+  -- preserving the idempotency invariant for graph writes.
   IF p_graph IS NOT NULL THEN
     UPDATE scenarios SET graph = p_graph WHERE id = p_scenario_id;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     IF v_updated = 0 THEN
+      -- Should never happen: step 1 confirmed the scenarios row exists.
+      -- Raise so the anomaly surfaces rather than being silently dropped.
       RAISE EXCEPTION 'append_turn_atomic: scenarios row % vanished between SELECT and UPDATE', p_scenario_id;
     END IF;
   END IF;
@@ -104,6 +122,10 @@ BEGIN
     END LOOP;
   END IF;
 
+  -- V5 Phase 1 brief persistence: write user-supplied brief_text once.
+  -- First-write-wins enforced by the WHERE predicate. ROW_COUNT is NOT
+  -- checked here — a "no rows updated" outcome means the brief was
+  -- already set, which is the intended write-once behaviour.
   IF p_brief_text IS NOT NULL THEN
     UPDATE scenarios
        SET brief_text = p_brief_text,

@@ -68,6 +68,11 @@
 --     -- Expected: true.
 --   -- Old-app safety: a 12-named-arg call still resolves (p_coaching_state
 --   -- defaults NULL) and writes NULL coaching_state.
+--   -- PostgREST schema cache: Supabase auto-reloads its schema cache on DDL,
+--   -- so the new 13-arg signature is normally visible immediately. If a
+--   -- stale-cache symptom is observed after apply (PostgREST not yet aware
+--   -- of the new signature / PGRST202), force a reload:
+--   --   NOTIFY pgrst, 'reload schema';
 -- ============================================================
 
 -- 1. Add the column. NULLABLE, NO default — NULL means "no coaching
