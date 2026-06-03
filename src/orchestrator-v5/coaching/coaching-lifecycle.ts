@@ -226,15 +226,35 @@ export function deriveCoachingLifecycle(input: DeriveCoachingLifecycleInput): Co
     }
 
     const priorState = prior?.coaching_state ?? null;
-    const priorExisted = priorState != null;
-    const versionMismatch = priorState != null && prior!.coaching_state_version !== current.version;
 
-    // Usable prior signals only when: a prior exists, its version matches, it was not itself
-    // degraded, and each entry is well-formed (malformed entries are skipped, NOT trusted).
-    const usablePrior: CoachingStateSignal[] =
-      priorState != null && !versionMismatch && priorState.status !== 'degraded'
-        ? toSignalArray(priorState.signals).filter(isWellFormedPriorSignal)
-        : [];
+    // Self-defending prior validation. `deriveCoachingLifecycle` is exported and must NOT
+    // rely solely on the 2B-1b parser: a prior is comparable ONLY if it is a `pre_dispatch`
+    // snapshot (like-for-like with the pre-dispatch current derivation — never mix
+    // post-mutation prior state) whose envelope AND inner-container versions both match the
+    // current version. The `as string` reads compare the RUNTIME value (the static types are
+    // the `'pre_dispatch'` / `'v1'` literals, but JSONB/drift can carry anything).
+    const priorTiming = prior?.snapshot_timing as string | undefined;
+    const versionMismatch =
+      prior != null &&
+      ((prior.coaching_state_version as string) !== (current.version as string) ||
+        (priorState != null && (priorState.version as string) !== (current.version as string)));
+    const priorUsable =
+      prior != null &&
+      priorState != null &&
+      priorTiming === 'pre_dispatch' &&
+      !versionMismatch &&
+      priorState.status !== 'degraded';
+    // A prior ENVELOPE existed but could not be used for comparison (non-pre_dispatch timing,
+    // version incompatibility, or a degraded prior) ⇒ degrade the container but keep current
+    // facts. A genuinely-absent prior (null) does NOT degrade.
+    const priorPresentButUnusable = prior != null && !priorUsable;
+
+    // Usable prior signals: each entry well-formed (valid identity fields) AND deduped by
+    // signal_id — a drifted JSONB prior must not inflate counts. Malformed entries are
+    // skipped, never trusted.
+    const usablePrior: CoachingStateSignal[] = priorUsable
+      ? dedupeBySignalId(toSignalArray(priorState!.signals).filter(isWellFormedPriorSignal))
+      : [];
 
     const priorById = new Map<string, CoachingStateSignal>();
     for (const ps of usablePrior) priorById.set(ps.signal_id, ps);
@@ -291,8 +311,10 @@ export function deriveCoachingLifecycle(input: DeriveCoachingLifecycleInput): Co
     }
 
     const summary = summariseLifecycle(items);
-    const status: CoachingLifecycle['status'] = versionMismatch
-      ? 'degraded' // a prior existed but is version-incompatible — flag, but keep current facts
+    // A prior that existed but was unusable (bad timing / version / degraded) degrades the
+    // container while preserving the current active facts; a genuinely-absent prior does not.
+    const status: CoachingLifecycle['status'] = priorPresentButUnusable
+      ? 'degraded'
       : items.length === 0
         ? 'empty'
         : 'active';
@@ -301,7 +323,7 @@ export function deriveCoachingLifecycle(input: DeriveCoachingLifecycleInput): Co
       version: 'v1',
       snapshot_timing: 'pre_dispatch',
       status,
-      prior_snapshot_available: priorExisted && !versionMismatch && priorState!.status !== 'degraded',
+      prior_snapshot_available: priorUsable,
       version_mismatch: versionMismatch,
       items,
       summary,
@@ -347,6 +369,23 @@ function hasContextMoved(
 /** Defensive: prior `signals` arrives from JSONB and may be any shape. */
 function toSignalArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Dedupe prior signals by `signal_id` (first occurrence wins). The Stage-2A producer is
+ * bounded/deterministic and never emits duplicates, but a drifted/hand-built JSONB prior
+ * could — and a duplicate absent-from-current signal would otherwise inflate the lifecycle
+ * counts. Same "validate prior before use" posture as `isWellFormedPriorSignal`.
+ */
+function dedupeBySignalId(signals: readonly CoachingStateSignal[]): CoachingStateSignal[] {
+  const seen = new Set<string>();
+  const out: CoachingStateSignal[] = [];
+  for (const s of signals) {
+    if (seen.has(s.signal_id)) continue;
+    seen.add(s.signal_id);
+    out.push(s);
+  }
+  return out;
 }
 
 /**

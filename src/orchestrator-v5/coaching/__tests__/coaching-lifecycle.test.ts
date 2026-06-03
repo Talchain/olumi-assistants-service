@@ -288,6 +288,48 @@ describe('coaching-lifecycle — degraded/absent prior handling', () => {
     expect(out.items[0]).toMatchObject({ signal_id: 'readiness_blocker:goal_threshold_missing', lifecycle_status: 'active' });
     expect(out.summary.resolved_count).toBe(0); // no resolved derived from the incompatible prior
   });
+
+  it('non-pre_dispatch prior is unusable: NO resolved/stale, degraded, current-only (timing symmetry guard)', () => {
+    // A post_dispatch prior would mix post-mutation prior state with pre-dispatch current —
+    // the function must reject it itself, not rely on the 2B-1b parser. The prior signal
+    // WOULD resolve if compared (source evaluable), so this proves the guard fires.
+    const postPrior = {
+      snapshot_timing: 'post_dispatch' as unknown as 'pre_dispatch',
+      coaching_state_version: 'v1',
+      coaching_state: current([ANALYSIS_STALE]),
+    };
+    const out = deriveCoachingLifecycle({
+      prior: postPrior,
+      current: current([]),
+      evaluability: evalWith({ analysis_freshness: true }),
+      currentGraphHash: 'h_new',
+    });
+    expect(out.prior_snapshot_available).toBe(false);
+    expect(out.status).toBe('degraded');
+    expect(out.items).toHaveLength(0); // the post_dispatch prior produced NO item
+    expect(out.summary.resolved_count).toBe(0);
+    expect(out.summary.stale_count).toBe(0);
+  });
+
+  it('inner coaching_state.version mismatch (envelope v1, inner v0) → version_mismatch, current-only', () => {
+    const prior = {
+      snapshot_timing: 'pre_dispatch' as const,
+      coaching_state_version: 'v1', // envelope matches current
+      coaching_state: { ...current([ANALYSIS_STALE]), version: 'v0' } as unknown as CoachingState, // inner drifts
+    };
+    const out = deriveCoachingLifecycle({
+      prior,
+      current: current([READINESS]),
+      evaluability: evalWith({ analysis_freshness: true }),
+      currentGraphHash: null,
+    });
+    expect(out.version_mismatch).toBe(true);
+    expect(out.status).toBe('degraded');
+    expect(out.prior_snapshot_available).toBe(false);
+    expect(out.items).toHaveLength(1);
+    expect(out.items[0]).toMatchObject({ signal_id: 'readiness_blocker:goal_threshold_missing', lifecycle_status: 'active' });
+    expect(out.summary.resolved_count).toBe(0);
+  });
 });
 
 // ── 12-14: invariants ─────────────────────────────────────────────────────────
@@ -382,6 +424,24 @@ describe('coaching-lifecycle — source-aware stale, summary, dedup', () => {
     const out = deriveCoachingLifecycle({ prior: priorOf(current([READINESS])), current: current([READINESS]), evaluability: ALL_FALSE, currentGraphHash: null });
     expect(out.items.filter((i) => i.signal_id === READINESS.signal_id)).toHaveLength(1);
     expect(out.items[0].lifecycle_status).toBe('active');
+  });
+
+  it('duplicate well-formed prior signal_ids (absent from current) are deduped — counts not inflated', () => {
+    const dup = sig({ kind: 'analysis_stale', source: 'analysis_freshness', reason_code: 'graph_hash_diverged', analysis_graph_hash: 'a' });
+    const priorWithDups = {
+      snapshot_timing: 'pre_dispatch' as const,
+      coaching_state_version: 'v1',
+      coaching_state: { ...current([]), signals: [dup, { ...dup }, { ...dup }] } as CoachingState,
+    };
+    const out = deriveCoachingLifecycle({
+      prior: priorWithDups,
+      current: current([]),
+      evaluability: evalWith({ analysis_freshness: true }),
+      currentGraphHash: null,
+    });
+    // Three identical prior signal_ids → exactly ONE resolved item, not three.
+    expect(out.items).toHaveLength(1);
+    expect(out.summary.resolved_count).toBe(1);
   });
 
   it('empty prior + empty current → empty container, no items', () => {
