@@ -55,6 +55,7 @@ describe('buildTurnContext', () => {
       decision_context: _dc,
       coaching_state: _cs,
       prior_coaching_state: _pcs,
+      coaching_lifecycle: _cl,
       ...base
     } = ctx;
     const parsed = TurnContextSchema.parse(base);

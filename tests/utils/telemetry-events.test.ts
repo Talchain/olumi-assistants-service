@@ -452,6 +452,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         DecisionContextDerived: "v5.decision_context.derived",
         V5CoachingStateDerived: "v5.coaching_state.derived",
         V5CoachingStatePersisted: "v5.coaching_state.persisted",
+        V5CoachingStateLifecycleDerived: "v5.coaching_state.lifecycle_derived",
         V5CoachingSignalFired: "v5.coaching.signal_fired",
         V5DecisionReviewDegraded: "v5.decision_review_degraded",
         V5DecisionReviewFailed: "v5.decision_review.failed",
@@ -1036,6 +1037,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // container derivation — counts/flags/closed-enum codes/hashes only, no Datadog yet.
         TelemetryEvents.V5CoachingStateDerived,
         TelemetryEvents.V5CoachingStatePersisted,
+        // V5 Coaching State Spine Stage 2B-2: internal lifecycle derivation —
+        // counts/closed-enum codes/hash-availability flags only, no Datadog yet.
+        TelemetryEvents.V5CoachingStateLifecycleDerived,
         // V5 state-trust freshness derivation (debug-only until Datadog
         // alignment lands; structured logs are the source of truth).
         TelemetryEvents.AnalysisFreshnessDerived,
@@ -1542,6 +1546,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.decision_context.derived",
         "v5.coaching_state.derived",
         "v5.coaching_state.persisted",
+        "v5.coaching_state.lifecycle_derived",
         "v5.coaching.signal_fired",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",

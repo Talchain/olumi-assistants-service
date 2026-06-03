@@ -648,6 +648,25 @@ export const TelemetryEvents = {
   //   snapshot_timing: 'pre_dispatch' | null
   V5CoachingStatePersisted: "v5.coaching_state.persisted",
 
+  // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching
+  // LIFECYCLE is derived (prior pre-dispatch snapshot vs current pre-dispatch coaching_state
+  // + per-source evaluability). Same privacy contract as the other coaching events: STANDARD
+  // correlation IDs + counts / closed-enum codes / hash-AVAILABILITY flags / version / timing
+  // ONLY — never raw decision content (no labels, values, node/edge/option/factor ids, brief
+  // text, free text). Internal-only; the emit is guarded so a telemetry fault never fails the
+  // turn. Fields:
+  //   request_id, scenario_id: string  (correlation only)
+  //   status: 'empty' | 'active' | 'degraded'
+  //   prior_snapshot_available, version_mismatch: boolean
+  //   active_count, resolved_count, stale_count, unavailable_count: number
+  //   kinds_present: string[]                 (sorted distinct CoachingStateSignalKind — closed enum)
+  //   reason_codes: string[]                  (sorted distinct CoachingStateReasonCode — closed enum)
+  //   lifecycle_statuses_present: string[]    (sorted distinct 'active'|'resolved'|'stale'|'unavailable')
+  //   prior_graph_hash_present, current_graph_hash_present: boolean  (availability flags — NOT values)
+  //   snapshot_timing: 'pre_dispatch'
+  //   version: 'v1'
+  V5CoachingStateLifecycleDerived: "v5.coaching_state.lifecycle_derived",
+
   // V5 TurnExecutor per-code failure composition.
   // Emitted once per failure path that runs a per-code composer. Fields:
   //   request_id, session_id, stage,

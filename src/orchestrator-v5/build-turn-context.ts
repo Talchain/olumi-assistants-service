@@ -36,6 +36,12 @@ import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from './coaching/coaching-state-snapshot.js';
+import {
+  deriveCoachingEvaluability,
+  deriveCoachingLifecycle,
+  EMPTY_COACHING_LIFECYCLE,
+  type CoachingLifecycle,
+} from './coaching/coaching-lifecycle.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
@@ -173,6 +179,18 @@ export interface EnrichedTurnContext extends TurnContext {
    * `EnrichedTurnContext` set it explicitly (or cast via `as unknown as`).
    */
   readonly prior_coaching_state: CoachingStateSnapshot | null;
+  /**
+   * V5 Coaching State Spine — Stage 2B-2: internal lifecycle facts derived by comparing
+   * `prior_coaching_state` (pre-dispatch) against the current `coaching_state` (pre-dispatch)
+   * with per-source evaluability — each signal labelled `active | resolved | stale |
+   * unavailable`. Pure/total derivation; `resolved` requires POSITIVE evaluability evidence
+   * (never absence alone). NO consumer in 2B-2; NO user-facing surface.
+   *
+   * Required (not optional): production `buildTurnContext` always sets it (to a derived
+   * lifecycle or `EMPTY_COACHING_LIFECYCLE`). INTERNAL ONLY: never on the wire, ContextPack,
+   * routing prompt, or DGAI output. Tests set it explicitly (or cast via `as unknown as`).
+   */
+  readonly coaching_lifecycle: CoachingLifecycle;
 }
 
 export interface BuildTurnContextOptions {
@@ -348,6 +366,59 @@ export async function buildTurnContext(
     freshness: coachingFreshness.freshness,
   });
 
+  // V5 Coaching State Spine — Stage 2B-2: derive internal lifecycle facts by comparing the
+  // prior pre-dispatch snapshot against the current pre-dispatch coaching_state, with
+  // per-source evaluability evidence (shared with the Stage-2A producers). Pure/total and
+  // internal-only — never wire/ContextPack/prompt/DGAI. `resolved` requires POSITIVE
+  // evaluability evidence, never absence alone. Derivation is defensively guarded; the
+  // telemetry emit is separately guarded so a telemetry fault degrades to a warning and
+  // NEVER fails turn construction (this emit path is pre-dispatch). Global emit() hardening
+  // is a separate telemetry-infra lane — out of scope here.
+  let coachingLifecycle: CoachingLifecycle = EMPTY_COACHING_LIFECYCLE;
+  try {
+    const coachingEvaluability = deriveCoachingEvaluability({
+      freshness: coachingFreshness,
+      priorFacts,
+      persistedGraph: scenarioState.graph,
+    });
+    coachingLifecycle = deriveCoachingLifecycle({
+      prior: priorCoachingState,
+      current: coachingState,
+      evaluability: coachingEvaluability,
+      currentGraphHash: persistedGraphHash,
+    });
+  } catch {
+    coachingLifecycle = EMPTY_COACHING_LIFECYCLE;
+  }
+  try {
+    emit(TelemetryEvents.V5CoachingStateLifecycleDerived, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      status: coachingLifecycle.status,
+      prior_snapshot_available: coachingLifecycle.prior_snapshot_available,
+      version_mismatch: coachingLifecycle.version_mismatch,
+      active_count: coachingLifecycle.summary.active_count,
+      resolved_count: coachingLifecycle.summary.resolved_count,
+      stale_count: coachingLifecycle.summary.stale_count,
+      unavailable_count: coachingLifecycle.summary.unavailable_count,
+      kinds_present: distinctSorted(coachingLifecycle.items.map((i) => i.kind)),
+      reason_codes: distinctSorted(coachingLifecycle.items.map((i) => i.reason_code)),
+      lifecycle_statuses_present: distinctSorted(
+        coachingLifecycle.items.map((i) => i.lifecycle_status),
+      ),
+      prior_graph_hash_present: coachingLifecycle.items.some((i) => i.prior_graph_hash !== null),
+      current_graph_hash_present: persistedGraphHash !== null,
+      snapshot_timing: coachingLifecycle.snapshot_timing,
+      version: coachingLifecycle.version,
+    });
+  } catch {
+    // Internal-only observability — a telemetry fault must never fail turn construction.
+    log.warn(
+      { request_id: requestId, scenario_id: payload.scenario_id },
+      'V5 build-turn-context — v5.coaching_state.lifecycle_derived emit failed; continuing',
+    );
+  }
+
   return {
     ...baseContext,
     prior_turns: priorTurns,
@@ -359,6 +430,7 @@ export async function buildTurnContext(
     decision_context: decisionContext,
     coaching_state: coachingState,
     prior_coaching_state: priorCoachingState,
+    coaching_lifecycle: coachingLifecycle,
   };
 }
 
