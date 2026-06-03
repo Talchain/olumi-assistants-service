@@ -367,6 +367,9 @@ describe('coaching-lifecycle — invariants', () => {
     const out = deriveCoachingLifecycle({ prior: priorOf(current([READINESS])), current: current([], { status: 'degraded' }), evaluability: ALL_FALSE, currentGraphHash: null });
     expect(out.status).toBe('degraded');
     expect(out.items).toHaveLength(0);
+    // No comparison happens on the degraded-current path, so the flag is false even though a
+    // prior envelope was supplied (the flag means "a usable prior was compared").
+    expect(out.prior_snapshot_available).toBe(false);
   });
 });
 

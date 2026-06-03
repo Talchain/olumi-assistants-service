@@ -220,9 +220,12 @@ export function deriveCoachingLifecycle(input: DeriveCoachingLifecycleInput): Co
     const { prior, current, evaluability, currentGraphHash } = input;
     const currentAnalysisGraphHash = current.analysis_graph_hash;
 
-    // A degraded CURRENT state is unusable — degrade the whole comparison.
+    // A degraded CURRENT state is unusable — degrade the whole comparison. No prior
+    // comparison happens on this path, so `prior_snapshot_available` is false regardless of
+    // whether an envelope existed (the flag means "a usable prior was compared", not "a prior
+    // row existed").
     if (current.status === 'degraded') {
-      return { ...EMPTY_COACHING_LIFECYCLE, status: 'degraded', prior_snapshot_available: prior != null };
+      return { ...EMPTY_COACHING_LIFECYCLE, status: 'degraded', prior_snapshot_available: false };
     }
 
     const priorState = prior?.coaching_state ?? null;
