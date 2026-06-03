@@ -279,37 +279,68 @@ function deriveReadinessSignals(
   persistedGraph: unknown | null,
   graphHash: string | null,
 ): CoachingStateSignal[] {
+  return evaluateReadiness(persistedGraph, graphHash).signals;
+}
+
+/**
+ * Structural-readiness evaluation — the SINGLE source of truth shared by the Stage-2A
+ * producer (`deriveReadinessSignals`) and the Stage-2B-2 evaluability map
+ * (`deriveCoachingEvaluability`). `evaluable` is true exactly when this producer ran its
+ * full path WITHOUT bailing (graph present, parses, and the structural recompute did not
+ * throw). That makes "readiness evaluable + a prior readiness_blocker absent from current"
+ * honest positive evidence of resolution — never a swallowed error misread as `resolved`.
+ * Pure + total (never throws). Behaviour of the produced `signals` is identical to the
+ * prior inline implementation.
+ */
+export function evaluateReadiness(
+  persistedGraph: unknown | null,
+  graphHash: string | null,
+): { readonly evaluable: boolean; readonly signals: CoachingStateSignal[] } {
   try {
-    if (persistedGraph == null) return [];
+    if (persistedGraph == null) return { evaluable: false, signals: [] };
     const parsed = GraphV3.safeParse(persistedGraph);
-    if (!parsed.success) return []; // unparseable → cannot assess structural readiness
+    // unparseable → cannot assess structural readiness
+    if (!parsed.success) return { evaluable: false, signals: [] };
     const readiness = computeStructuralReadiness(parsed.data);
     if (readiness === undefined) {
       // No goal node — the strongest "not ready" structural blocker, which
       // computeStructuralReadiness reports only by returning undefined.
-      return [
-        makeSignal(
-          'readiness_blocker',
-          'active',
-          'analysis_readiness',
-          'goal_node_missing',
-          graphHash,
-          null,
-        ),
-      ];
+      return {
+        evaluable: true,
+        signals: [
+          makeSignal('readiness_blocker', 'active', 'analysis_readiness', 'goal_node_missing', graphHash, null),
+        ],
+      };
     }
     const { open_items } = summariseReadiness(readiness);
     // Dedupe by kind (option_needs_* can repeat per option) and order deterministically.
     const kinds = new Set<CoachingStateReasonCode>();
     for (const item of open_items) kinds.add(item.kind);
-    return READINESS_REASON_ORDER.filter((reason) => kinds.has(reason)).map((reason) =>
-      makeSignal('readiness_blocker', 'active', 'analysis_readiness', reason, graphHash, null),
-    );
+    return {
+      evaluable: true,
+      signals: READINESS_REASON_ORDER.filter((reason) => kinds.has(reason)).map((reason) =>
+        makeSignal('readiness_blocker', 'active', 'analysis_readiness', reason, graphHash, null),
+      ),
+    };
   } catch {
     // Defence-in-depth: structural readiness is best-effort; never let it degrade the
-    // whole container.
-    return [];
+    // whole container. `evaluable:false` so a prior readiness signal is NOT falsely resolved.
+    return { evaluable: false, signals: [] };
   }
+}
+
+/** True when the analysis-freshness verdict is decisive (`fresh|stale|none`) — i.e. the
+ *  analysis_freshness source was evaluable this turn; false on `unknown` (the comparable
+ *  hash is missing). Shared with `deriveCoachingEvaluability`. */
+export function isAnalysisFreshnessEvaluable(freshness: FreshnessDerivation): boolean {
+  return freshness.freshness !== 'unknown';
+}
+
+/** True when the persisted graph is a readable object carrying an `edges` array — the exact
+ *  gate `deriveDefaultedValueSignals` uses. Shared with `deriveCoachingEvaluability`. */
+export function isGraphProjectionEvaluable(persistedGraph: unknown | null): boolean {
+  if (!persistedGraph || typeof persistedGraph !== 'object') return false;
+  return Array.isArray((persistedGraph as { edges?: unknown }).edges);
 }
 
 function deriveDefaultedValueSignals(
@@ -318,9 +349,9 @@ function deriveDefaultedValueSignals(
 ): CoachingStateSignal[] {
   // Permissive raw read mirroring decision-context.ts readGraphNodes guards. `defaulted`
   // is a genuine structured boolean on edges (z.boolean().optional()); test `=== true`.
-  if (!persistedGraph || typeof persistedGraph !== 'object') return [];
-  const edges = (persistedGraph as { edges?: unknown }).edges;
-  if (!Array.isArray(edges)) return [];
+  // The object + edges-array gate is the shared `isGraphProjectionEvaluable` predicate.
+  if (!isGraphProjectionEvaluable(persistedGraph)) return [];
+  const edges = (persistedGraph as { edges: unknown[] }).edges;
   const hasDefaulted = edges.some(
     (e) => e != null && typeof e === 'object' && (e as { defaulted?: unknown }).defaulted === true,
   );
@@ -437,7 +468,7 @@ function readRecord(value: unknown): Record<string, unknown> | null {
  * run_analysis fact → `result.enrichment.decision_review.evidence_enhancements`,
  * treating `evidence_enhancements` as a Record (its real shape — NOT an array).
  */
-function selectDecisionReview(
+export function selectDecisionReview(
   priorFacts: readonly HandlerFact[],
 ): { readonly evidenceNonEmpty: boolean } | null {
   const selected = selectRunAnalysisFact(priorFacts);
@@ -449,4 +480,15 @@ function selectDecisionReview(
   if (decisionReview === null) return null;
   const evidence = readRecord(decisionReview.evidence_enhancements);
   return { evidenceNonEmpty: evidence !== null && Object.keys(evidence).length > 0 };
+}
+
+/**
+ * True when a structured `decision_review` is genuinely present (the `existing_enrichment`
+ * source is evaluable this turn). Its ABSENCE — the normal staging state (decision_review
+ * autofire disabled) — means NOT evaluable, so a prior `evidence_gap_available` signal that
+ * is absent from the current derivation can never be misread as `resolved`. Shared with
+ * `deriveCoachingEvaluability` (Stage 2B-2) so evaluability cannot drift from emission.
+ */
+export function hasEvaluableDecisionReview(priorFacts: readonly HandlerFact[]): boolean {
+  return selectDecisionReview(priorFacts) !== null;
 }

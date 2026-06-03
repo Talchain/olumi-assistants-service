@@ -50,6 +50,7 @@ import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator'
 import { OlumiResponseSchema } from '@talchain/schemas/boundary'
 import { ContextPackSchema } from '../../src/orchestrator-v5/context/context-pack-schema.js'
 import { EMPTY_COACHING_STATE } from '../../src/orchestrator-v5/coaching/coaching-state.js'
+import { EMPTY_COACHING_LIFECYCLE } from '../../src/orchestrator-v5/coaching/coaching-lifecycle.js'
 
 const SCENARIO_ID = '11111111-1111-4111-8111-111111111111'
 const REQUEST_ID = 'req-acceptance-gate'
@@ -341,6 +342,71 @@ describe('Acceptance Gate — prior_coaching_state boundary (Stage 2B-1b)', () =
 
     expect(outWith).toEqual(outWithout)
     expect(deepHasKey(outWith, 'prior_coaching_state')).toBe(false)
+    expect(findForbiddenMatches(outWith.assistant_text)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Acceptance Gate — coaching_lifecycle boundary (V5 Coaching State Spine 2B-2)
+//
+// coaching_lifecycle is the internal prior-vs-current lifecycle derivation on
+// EnrichedTurnContext. Like coaching_state / prior_coaching_state it must stay
+// internal: not a declared ContextPack field (the LLM-facing routing prompt
+// surface), not on the OlumiResponse wire schema (the CEE→DGAI output surface),
+// and never perturbing or leaking into handler output.
+// ---------------------------------------------------------------------------
+
+const COACHING_LIFECYCLE_SAMPLE = {
+  version: 'v1' as const,
+  snapshot_timing: 'pre_dispatch' as const,
+  status: 'active' as const,
+  prior_snapshot_available: true,
+  version_mismatch: false,
+  items: [
+    {
+      signal_id: 'analysis_missing:no_successful_run_analysis_fact',
+      kind: 'analysis_missing' as const,
+      reason_code: 'no_successful_run_analysis_fact' as const,
+      source: 'analysis_freshness' as const,
+      lifecycle_status: 'resolved' as const,
+      prior_graph_hash: 'h_prior',
+      current_graph_hash: 'h_current',
+      prior_analysis_graph_hash: null,
+      current_analysis_graph_hash: null,
+      reason: 'source_evaluable_condition_absent' as const,
+    },
+  ],
+  summary: { active_count: 0, resolved_count: 1, stale_count: 0, unavailable_count: 0 },
+}
+
+describe('Acceptance Gate — coaching_lifecycle boundary (Stage 2B-2)', () => {
+  it('is NOT a declared field on the LLM-facing ContextPack (off-prompt)', () => {
+    expect(Object.keys(ContextPackSchema.shape)).not.toContain('coaching_lifecycle')
+  })
+
+  it('adds no coaching_lifecycle field to the OlumiResponse wire schema (off wire / DGAI)', () => {
+    const shape = (OlumiResponseSchema as { shape?: Record<string, unknown> }).shape
+    expect(shape).toBeDefined()
+    expect(Object.keys(shape ?? {})).not.toContain('coaching_lifecycle')
+  })
+
+  it('does not perturb handler output and never leaks into it', async () => {
+    const handler = createExplainResultsHandler()
+    const base = makeInvocation({ priorFacts: [] })
+    const withLifecycle = {
+      ...base,
+      context: { ...base.context, coaching_lifecycle: COACHING_LIFECYCLE_SAMPLE },
+    } as typeof base
+    const withoutLifecycle = {
+      ...base,
+      context: { ...base.context, coaching_lifecycle: EMPTY_COACHING_LIFECYCLE },
+    } as typeof base
+
+    const outWith = await handler(withLifecycle)
+    const outWithout = await handler(withoutLifecycle)
+
+    expect(outWith).toEqual(outWithout)
+    expect(deepHasKey(outWith, 'coaching_lifecycle')).toBe(false)
     expect(findForbiddenMatches(outWith.assistant_text)).toEqual([])
   })
 })
