@@ -73,3 +73,62 @@ describe('buildModelReceiptSummary', () => {
     expect(summary).toBeNull();
   });
 });
+
+describe('buildModelReceiptSummary — verdict / confidence / likelihood copy safety', () => {
+  // PR-A review follow-up. The spec forbids "post-analysis verdict language"
+  // and "confidence/likelihood CLAIMS from analysis". Those are CONTEXT bans,
+  // not bare-word bans: this helper's source is pre-analysis draft coaching,
+  // so an analysis-derived verdict / probability claim cannot be the source.
+  // What the gate DOES hard-reject — regression-locked here on the receipt
+  // path — is recommendation / winner / best-option phrasing. Bare dual-use
+  // words ("likely", "confidence") inside a legitimate pre-analysis assumption
+  // are intentionally PRESERVED, so the receipt insight stays consistent with
+  // the chat narrative (both draw from the same gated assumption tier; banning
+  // the bare words would over-reject and diverge the two surfaces).
+
+  it('returns null for best-option verdict phrasing', () => {
+    expect(
+      buildModelReceiptSummary({
+        graph: null,
+        strengthenItems: [{ detail: 'option A is clearly the best choice' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('returns null for explicit winner phrasing', () => {
+    expect(
+      buildModelReceiptSummary({
+        graph: null,
+        strengthenItems: [{ detail: 'option A is the clear winner here' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('returns null for recommendation phrasing', () => {
+    expect(
+      buildModelReceiptSummary({
+        graph: null,
+        strengthenItems: [{ detail: 'I recommend option A over the alternatives' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('preserves a legitimate pre-analysis likelihood assumption (not an analysis-derived claim)', () => {
+    // "likely" flags an input assumption to check, not a computed probability.
+    expect(
+      buildModelReceiptSummary({
+        graph: null,
+        strengthenItems: [{ detail: 'the revenue forecast is likely optimistic' }],
+      }),
+    ).toBe('One assumption worth checking: the revenue forecast is likely optimistic.');
+  });
+
+  it('preserves a legitimate pre-analysis confidence assumption about an input', () => {
+    expect(
+      buildModelReceiptSummary({
+        graph: null,
+        strengthenItems: [{ detail: 'there is low confidence in the delivery estimate' }],
+      }),
+    ).toBe('One assumption worth checking: there is low confidence in the delivery estimate.');
+  });
+});
