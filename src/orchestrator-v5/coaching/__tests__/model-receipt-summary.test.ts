@@ -81,10 +81,11 @@ describe('buildModelReceiptSummary — verdict / confidence / likelihood copy sa
   // so an analysis-derived verdict / probability claim cannot be the source.
   // What the gate DOES hard-reject — regression-locked here on the receipt
   // path — is recommendation / winner / best-option phrasing. Bare dual-use
-  // words ("likely", "confidence") inside a legitimate pre-analysis assumption
-  // are intentionally PRESERVED, so the receipt insight stays consistent with
-  // the chat narrative (both draw from the same gated assumption tier; banning
-  // the bare words would over-reject and diverge the two surfaces).
+  // words ("likely", "confidence", "verdict") inside a legitimate pre-analysis
+  // assumption are intentionally PRESERVED, so the receipt insight stays
+  // consistent with the chat narrative (both draw from the same gated
+  // assumption tier; banning the bare words would over-reject and diverge the
+  // two surfaces).
 
   it('returns null for best-option verdict phrasing', () => {
     expect(
@@ -130,5 +131,19 @@ describe('buildModelReceiptSummary — verdict / confidence / likelihood copy sa
         strengthenItems: [{ detail: 'there is low confidence in the delivery estimate' }],
       }),
     ).toBe('One assumption worth checking: there is low confidence in the delivery estimate.');
+  });
+
+  it('preserves a bare "verdict depends on…" assumption — only post-analysis verdict CLAIMS are forbidden', () => {
+    // Bare "verdict" is dual-use, like "likely"/"confidence": "the verdict
+    // depends on X" flags a sensitivity worth checking (legitimate
+    // pre-analysis), whereas a post-analysis "the verdict is option A" claim
+    // cannot arise from the pre-analysis draft source. So it is preserved,
+    // not bare-word-banned — consistent with the chat narrative.
+    expect(
+      buildModelReceiptSummary({
+        graph: null,
+        strengthenItems: [{ detail: 'the verdict depends on the cost estimate' }],
+      }),
+    ).toBe('One assumption worth checking: the verdict depends on the cost estimate.');
   });
 });

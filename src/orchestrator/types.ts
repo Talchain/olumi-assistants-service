@@ -619,9 +619,14 @@ export interface GraphPatchBlockData {
      * Additive + passthrough-safe — `analysis_ready` is `.passthrough()` at
      * both the CEE schema (`src/schemas/analysis-ready.ts`) and the boundary
      * (`@talchain/schemas` OlumiResponseSchema), so it crosses the wire with
-     * no shared-schema-package change. Understanding / assumption prose ONLY —
-     * never recommendation / winner / verdict language (the analysis has not
-     * run yet). Omitted / null when no signal-backed summary exists; DGAI then
+     * no shared-schema-package change. Understanding / assumption prose only:
+     * the shared copy gate (gateAssumptionFragment) rejects recommendation /
+     * winner / best-option phrasing, and post-analysis verdict / confidence /
+     * likelihood *claims* cannot arise because the source is pre-analysis
+     * draft coaching — bare "likely" / "confidence" / "verdict" may still
+     * appear as legitimate pre-analysis assumptions and are kept consistent
+     * with the chat narrative. Omitted / null when no signal-backed summary
+     * exists; DGAI then
      * renders the receipt without a top-insight. Set by the draft dispatch and
      * stamped by the response finaliser; nothing renders it today (DGAI wiring
      * is PR B).
