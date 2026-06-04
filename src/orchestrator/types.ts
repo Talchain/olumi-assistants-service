@@ -613,6 +613,20 @@ export interface GraphPatchBlockData {
     graph_hash_at_run?: string;
     /** Hash of the analysis-affecting graph fields on this turn. */
     current_graph_hash?: string;
+    /**
+     * F1 model-understanding receipt (PR A): a short, sanitised, pre-analysis
+     * "assumption to check" line for DGAI's ModelReceiptBlock top-insight.
+     * Additive + passthrough-safe — `analysis_ready` is `.passthrough()` at
+     * both the CEE schema (`src/schemas/analysis-ready.ts`) and the boundary
+     * (`@talchain/schemas` OlumiResponseSchema), so it crosses the wire with
+     * no shared-schema-package change. Understanding / assumption prose ONLY —
+     * never recommendation / winner / verdict language (the analysis has not
+     * run yet). Omitted / null when no signal-backed summary exists; DGAI then
+     * renders the receipt without a top-insight. Set by the draft dispatch and
+     * stamped by the response finaliser; nothing renders it today (DGAI wiring
+     * is PR B).
+     */
+    coaching_summary?: string | null;
   };
   /**
    * Explicit intervention updates extracted from edit_graph operations.
