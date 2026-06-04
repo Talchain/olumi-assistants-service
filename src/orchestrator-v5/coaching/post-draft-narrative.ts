@@ -435,6 +435,54 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   };
 }
 
+// ----- F1 model-understanding receipt summary -------------------------------
+
+/**
+ * Input for {@link buildModelReceiptSummary}. A subset of
+ * {@link BuildPostDraftNarrativeInput} — only the fields the gated assumption
+ * tier reads. `coachingSummary` and `wideningLog` are intentionally absent:
+ * the receipt summary is the single "assumption to check" line, not the
+ * whole-narrative replacement.
+ */
+export interface ModelReceiptSummaryInput {
+  readonly graph: GraphV3T | null;
+  readonly analysisReady?: PostDraftAnalysisReadyLite | null;
+  readonly strengthenItems?: ReadonlyArray<unknown> | null;
+  readonly coachingBiasSignals?: ReadonlyArray<unknown> | null;
+}
+
+/**
+ * Derive the short, pre-analysis "assumption to check" sentence for the F1
+ * model-understanding receipt (`analysis_ready.coaching_summary`). Reuses the
+ * SAME gated source-priority chain as the post-draft narrative's assumption
+ * bullet ({@link pickAssumption}: strengthen → bias finding → coaching bias
+ * signal → uncertainty driver), so the structured receipt insight and the
+ * chat narrative stay consistent and copy-safe by construction — every
+ * non-fallback candidate has passed {@link gateAssumptionFragment} (no IDs,
+ * no graph-shape words, no recommendation / winner language).
+ *
+ * Returns `null` when only the deterministic generic fallback applies — the
+ * receipt must not surface a weak, contentless insight. (The chat narrative
+ * still shows the generic assumption bullet; the structured receipt field
+ * stays empty and DGAI renders the card without a top-insight.)
+ *
+ * Pure. Never throws. Callers MUST still apply the egress scrub
+ * (`sanitiseCoachingProse`) before the value ships on the wire — this helper
+ * does not scrub, mirroring how the narrative `text` is scrubbed at the
+ * dispatch site rather than inside the builder.
+ */
+export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): string | null {
+  const nodes = (input.graph?.nodes ?? []) as readonly NodeLite[];
+  const pick = pickAssumption({
+    nodes,
+    analysisReady: input.analysisReady ?? null,
+    strengthenItems: input.strengthenItems,
+    coachingBiasSignals: input.coachingBiasSignals,
+  });
+  if (pick.source === 'deterministic_fallback') return null;
+  return pick.text;
+}
+
 // ----- sentence builders ----------------------------------------------------
 
 function buildConfirmSentence(goalLabel: string | null): string {

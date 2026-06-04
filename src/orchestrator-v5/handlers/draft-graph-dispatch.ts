@@ -64,7 +64,7 @@ import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
-import { buildPostDraftNarrative } from '../coaching/post-draft-narrative.js';
+import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import {
   buildV5DiagnosticTrace,
@@ -453,10 +453,37 @@ export async function dispatchDraftGraph(
     // dispatch result so route-v2.ts can stamp it via finaliseV5Response.
     // Only surface when the graph actually persisted — a non-persisted
     // draft has no canvas state for the UI to apply readiness against.
-    const analysisReady: AnalysisReadyPayload | undefined =
+    const baseAnalysisReady: AnalysisReadyPayload | undefined =
       commitResult.graphPersisted && draftResult.analysisReady
         ? (draftResult.analysisReady as AnalysisReadyPayload)
         : undefined;
+
+    // F1 (PR A): attach a short, sanitised, pre-analysis "assumption to
+    // check" line to analysis_ready as the additive, passthrough-safe
+    // `coaching_summary`. It reuses the post-draft narrative's gated
+    // assumption tier (so the structured receipt insight matches the chat
+    // narrative) and is null when only the generic fallback applies — the
+    // receipt should not surface a weak insight. The central egress sanitiser
+    // (sanitiseOlumiResponseForEgress) does NOT walk analysis_ready, so the
+    // prose is scrubbed here with the same sanitiseCoachingProse guard the
+    // assistant_text narrative uses. DGAI reads this to populate the
+    // already-built ModelReceiptBlock (PR B); nothing renders it today.
+    const receiptSummaryRaw = baseAnalysisReady
+      ? buildModelReceiptSummary({
+          graph: draftResult.graphOutput,
+          analysisReady: draftResult.analysisReady ?? null,
+          strengthenItems: draftResult.strengthenItems,
+          coachingBiasSignals: draftResult.coachingBiasSignals,
+        })
+      : null;
+    const receiptSummary =
+      receiptSummaryRaw !== null
+        ? sanitiseCoachingProse(receiptSummaryRaw, draftResult.graphOutput).text.trim()
+        : '';
+    const analysisReady: AnalysisReadyPayload | undefined =
+      baseAnalysisReady && receiptSummary.length > 0
+        ? { ...baseAnalysisReady, coaching_summary: receiptSummary }
+        : baseAnalysisReady;
 
     // V5 state-trust: derive freshness WITHOUT a session-store read.
     // Draft is the first-turn brief shape — the dispatcher invariant
