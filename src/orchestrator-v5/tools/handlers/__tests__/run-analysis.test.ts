@@ -1149,3 +1149,56 @@ describe('run_analysis handler — numeric integrity guard', () => {
     expect(findInvalidNumericEvent()).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Area D — no verbatim duplication of the run_analysis headline
+// ---------------------------------------------------------------------------
+//
+// FINDING (reported to the DGAI lane): the visible "same headline in both the
+// chat bubble and the result block" duplication observed on staging is DGAI
+// rendering-side. CEE emits the run_analysis headline on the wire ONLY via
+// `assistant_text`; the matching `fact.result.summary` is an INTERNAL persisted
+// fact (DB context / "card-chat parity"), not a wire block, and no emitted wire
+// block (analysis_ready, phase3) carries the headline text.
+//
+// This regression locks the CEE side so it cannot drift into verbatim
+// duplication, WITHOUT banning future structured analysis/result blocks — it
+// only forbids re-emitting THIS headline string verbatim outside the two
+// sanctioned carriers (assistant_text + the persisted fact summary).
+
+describe('run_analysis headline — no verbatim wire-block duplication (Area D)', () => {
+  it('headline lives in assistant_text + the internal persisted fact only; the handler emits no block carrying it verbatim', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+
+    const headline = outcome.assistant_text;
+    expect(headline.length).toBeGreaterThan(0);
+
+    // Sanctioned carrier #1: assistant_text (chat). Sanctioned carrier #2: the
+    // internal persisted run_analysis fact summary (intentional parity, NOT a
+    // wire block).
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(fact.result.summary).toBe(headline);
+
+    // The handler emits NO wire blocks (blocks are assembled downstream); it
+    // therefore cannot duplicate the headline into an emitted block.
+    expect(Object.keys(outcome)).not.toContain('blocks');
+
+    // Future-proof: after removing the two sanctioned carriers, the headline
+    // string must appear NOWHERE ELSE in the outcome. If a future change pipes
+    // the summary into another (block-bound) field, this fails. It does not ban
+    // blocks — only verbatim re-emission of this headline.
+    const stripped = JSON.parse(JSON.stringify(outcome)) as {
+      assistant_text?: unknown;
+      handler_facts?: Array<{ result?: { summary?: unknown } }>;
+    };
+    delete stripped.assistant_text;
+    const strippedResult = stripped.handler_facts?.[0]?.result;
+    if (strippedResult) delete strippedResult.summary;
+    expect(JSON.stringify(stripped)).not.toContain(headline);
+  });
+});

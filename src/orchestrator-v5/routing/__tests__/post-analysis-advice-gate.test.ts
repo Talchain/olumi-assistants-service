@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   tryPostAnalysisAdviceGate,
+  hasRenderableTopDriverLabel,
   type AdviceClass,
   type AdviceGateAnalysis,
 } from '../post-analysis-advice-gate.js';
@@ -2382,5 +2383,40 @@ describe('advice-gate copy-source descriptor (Scope C diagnostics)', () => {
       expect(out.advice_class).toBe('readiness');
       expect(out.copy_source).toBe('readiness');
     }
+  });
+});
+
+describe('hasRenderableTopDriverLabel — projection-shaped top_driver_present source', () => {
+  it('true when the projection has a top driver with a non-empty label', () => {
+    expect(
+      hasRenderableTopDriverLabel({
+        top_drivers: [{ factor_label: 'Overtime Intensity' }],
+      }),
+    ).toBe(true);
+  });
+
+  it('false on an empty / missing top_drivers array', () => {
+    expect(hasRenderableTopDriverLabel({ top_drivers: [] })).toBe(false);
+    expect(hasRenderableTopDriverLabel({})).toBe(false);
+    expect(hasRenderableTopDriverLabel(null)).toBe(false);
+    expect(hasRenderableTopDriverLabel(undefined)).toBe(false);
+  });
+
+  it('false when the first driver label is whitespace-only or null', () => {
+    expect(hasRenderableTopDriverLabel({ top_drivers: [{ factor_label: '   ' }] })).toBe(false);
+    expect(hasRenderableTopDriverLabel({ top_drivers: [{ factor_label: null }] })).toBe(false);
+  });
+
+  it('reports presence from the projection independent of advice-gate matching', () => {
+    // Regression for the telemetry inconsistency: a projection WITH drivers
+    // must report true even on turns where the advice gate would not match a
+    // driver-consuming class. The predicate reads only the projection.
+    const projectionWithDrivers = {
+      top_drivers: [
+        { factor_label: 'Launch Readiness' },
+        { factor_label: 'Cost' },
+      ],
+    };
+    expect(hasRenderableTopDriverLabel(projectionWithDrivers)).toBe(true);
   });
 });

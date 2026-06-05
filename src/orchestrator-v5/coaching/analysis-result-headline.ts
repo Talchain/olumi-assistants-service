@@ -98,14 +98,19 @@ export interface AnalysisResultHeadlineInput {
  *   E — minimal floor: `{label} currently leads.`
  *   NT — near-tie / close-call: a positive margin below the meaningful-
  *        lead threshold; flags closeness instead of a confident lead
+ *   SC — soft-confidence enriched: winner below the absolute confidence
+ *        floor BUT with a real margin (>= MIN_LEAD_MARGIN) and a
+ *        driver/fragility available; emits a CAUTIOUS provisional headline
+ *        (Case A/C copy shapes) instead of collapsing to the bare Case E
+ *        floor. Increases honest caveating rather than suppressing it.
  *   null — fall back to locked template
  *
  * Case E is the link-safe response floor (v5/link-safe). It fires when
  * a clean leading-option label exists but the stronger cases failed
- * because of soft confidence or because a length cap forced an
- * A/B/C/D/NT candidate to be dropped.
+ * because of soft confidence (with no usable margin / driver / fragility)
+ * or because a length cap forced an A/B/C/D/NT/SC candidate to be dropped.
  */
-export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | 'NT' | null;
+export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | 'NT' | 'SC' | null;
 
 /**
  * Locked reason class for telemetry. Always present on the descriptor
@@ -337,6 +342,71 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       text: null,
       descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
     };
+  }
+
+  // Soft-confidence enriched branch (V5 deterministic-copy hardening, Area F).
+  // The winner is below the absolute confidence floor (soft confidence), so the
+  // strong meaningful-lead cases (A/B/C/D) did not fire and — because the
+  // winner is < MIN_LEAD_PROBABILITY — neither did the near-tie branch above
+  // (which only handles plurality leaders >= MIN_LEAD_PROBABILITY). BUT a real
+  // margin (>= MIN_LEAD_MARGIN) over a runner-up exists AND a fragility or
+  // driver is available. Rather than collapse to the bare Case E floor, surface
+  // a CAUTIOUS provisional headline naming the single most-relevant sensitivity
+  // (fragility preferred; never both — preserves the no-repetition invariant).
+  //
+  // Honest by construction: "leads by N percentage points" is a factual
+  // plurality statement and "treat this as provisional" caveats the soft
+  // confidence — this INCREASES honest caveating rather than suppressing the
+  // available ingredients into a bare "currently leads.". Deliberate policy
+  // change from the prior "drop driver/fragility at soft confidence" behaviour.
+  //
+  // Honesty guards retained by the entry condition: near-ties (margin <
+  // MIN_LEAD_MARGIN) and thin data (no driver AND no fragility) fall through to
+  // Case E — a near-tie must never read as a lead, and we never fabricate a
+  // sensitivity reason. Single-option sources (runnerUpProb === null) also fall
+  // through (no margin to honestly state).
+  //
+  // Reuses the Case A (with margin) / Case C (no margin) copy shapes verbatim,
+  // so the emitted text already satisfies the registry grammar allowlist
+  // (isAllowedRunAnalysisAssistantText) with no new pattern.
+  // Compare the ROUNDED pp (matching the rendered "<N> percentage points")
+  // against the threshold so floating-point noise at the boundary does not
+  // flip the verdict — e.g. 0.30 − 0.25 = 0.04999999999999999 in IEEE-754
+  // would spuriously fail a raw `>= 0.05` check while the headline still
+  // renders "5 percentage points". Mirrors the rounded comparison the
+  // near-tie branch uses above.
+  const softConfidenceMarginPp =
+    winner.runnerUpProb !== null
+      ? Math.round((winner.winnerProb - winner.runnerUpProb) * 100)
+      : -1;
+  if (
+    winner.runnerUpProb !== null &&
+    winner.winnerProb < MIN_LEAD_PROBABILITY &&
+    softConfidenceMarginPp >= Math.round(MIN_LEAD_MARGIN * 100) &&
+    (hasFragility || hasDriver)
+  ) {
+    const sensitivityTarget = fragileLabel ?? driverLabel;
+    if (sensitivityTarget !== null) {
+      const cautionTail =
+        `, but treat this as provisional: the result is sensitive to ${sensitivityTarget}.${suffix}`;
+      // Prefer the margin-bearing shape (Case A grammar); shed the margin under
+      // the length cap (Case C grammar) before giving up to Case E.
+      const scWithMargin = `${winnerLabel} currently leads${marginFragment}${cautionTail}`;
+      if (marginText !== null && scWithMargin.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: scWithMargin,
+          descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      const scNoMargin = `${winnerLabel} currently leads${cautionTail}`;
+      if (scNoMargin.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: scNoMargin,
+          descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      // Both shapes overflow the length cap — fall through to Case E below.
+    }
   }
 
   // Case E (link-safe floor): we have a clean winner label but the

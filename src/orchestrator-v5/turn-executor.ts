@@ -63,6 +63,10 @@ import { composeRecoverableValidationResponse } from './compose/recoverable-vali
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
 import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
+import {
+  collectValidEntityLabels,
+  neutraliseUnvalidatedBoldEntities,
+} from './compose/clarify-entity-guard.js';
 import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
@@ -88,7 +92,10 @@ import {
   composeStateQueryChip,
   tryStateQueryGuard,
 } from './routing/state-query-guard.js';
-import { tryPostAnalysisAdviceGate } from './routing/post-analysis-advice-gate.js';
+import {
+  tryPostAnalysisAdviceGate,
+  hasRenderableTopDriverLabel,
+} from './routing/post-analysis-advice-gate.js';
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
@@ -3163,9 +3170,16 @@ export async function runTurnExecutor(
               ? (adviceOutcome.missing_inputs ?? [])
               : null,
           leading_option_present: !!contextPack.analysis?.leading_option,
-          top_driver_present: adviceOutcome.matched
-            ? adviceOutcome.top_driver_label !== null
-            : false,
+          // Read `top_driver_present` from the SAME analysis projection that
+          // powers `leading_option_present` above — NOT from whether the
+          // matched advice copy consumed a driver label. The previous
+          // `adviceOutcome.matched ? top_driver_label !== null : false`
+          // reported `false` on every non-match (and on matched classes that
+          // don't need a driver) even when the projection carried drivers,
+          // diverging from the projection state a dashboard expects. What the
+          // matched copy actually used is still captured by `copy_source` /
+          // `coaching_fields_used`.
+          top_driver_present: hasRenderableTopDriverLabel(contextPack.analysis),
           // Structural-only count of chips threaded to the user (no
           // labels, no message strings). Dashboards can verify that
           // the per-class chip set (1 for explain/meaning/advice
@@ -4511,8 +4525,23 @@ export async function runTurnExecutor(
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
+      // Area C (deterministic-copy hardening): the routing LLM can emphasise a
+      // fragment of the user's question with markdown bold as if it were a
+      // graph entity. Preserve bold ONLY around real graph node / option /
+      // analysis labels (exact match); strip the `**` markers otherwise so the
+      // clarification reads as neutral copy without promoting a fragment to an
+      // entity. Bounded: only `**…**` spans are inspected; no other markdown is
+      // touched; no fuzzy matching.
+      const clarifyValidLabels = collectValidEntityLabels({
+        graphNodes: contextPackForLog?.graph.nodes ?? [],
+        labels: (analysisReadyForTurn?.options ?? []).map((o) => o?.label),
+      });
+      const clarifyGuardedText = neutraliseUnvalidatedBoldEntities(
+        sanitised.output,
+        clarifyValidLabels,
+      ).text;
       composedOk = composeClarifyResponse({
-        assistant_text: sanitised.output,
+        assistant_text: clarifyGuardedText,
         stage: context.stage,
         suggested_actions: clarifyChips,
       });
