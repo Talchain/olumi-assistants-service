@@ -278,3 +278,59 @@ describe('applyPatchOperations', () => {
     });
   });
 });
+
+// ============================================================================
+// Input purity — full-graph invariant.
+//
+// The applier documents purity ("Pure function — no side effects, deep-clones
+// graph before mutation"). Existing cases above spot-check it (node/edge length
+// after add/remove; nested-strength deep-equality after update_edge). This
+// block pins the STRONGER whole-object invariant: after a COMBINED multi-op
+// patch, the entire input graph is byte-identical to a pre-call snapshot — so a
+// future refactor that drops `structuredClone` (or reintroduces a shared nested
+// reference) fails here rather than silently corrupting the caller's graph.
+// ============================================================================
+
+describe('applyPatchOperations — input purity (whole-graph)', () => {
+  it('does not mutate the input graph across a combined add/update/remove patch', () => {
+    const graph = makeGraph();
+    const snapshot = structuredClone(graph);
+
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'fac_y',
+        value: { id: 'fac_y', kind: 'factor', label: 'Competitor response' },
+      },
+      { op: 'update_node', path: 'fac_x', value: { label: 'Updated Market Size' } },
+      { op: 'update_edge', path: 'opt_a::fac_x', value: { strength: { mean: 0.9 } } },
+      { op: 'remove_node', path: 'opt_b' },
+    ];
+
+    const candidate = applyPatchOperations(graph, ops);
+
+    // The candidate genuinely changed (guards against a no-op false positive).
+    expect(candidate).not.toEqual(graph);
+
+    // The input graph is byte-identical to the pre-call snapshot.
+    expect(graph).toEqual(snapshot);
+  });
+
+  it('returns a candidate that shares no nested references with the input', () => {
+    const graph = makeGraph();
+    const ops: PatchOperation[] = [
+      { op: 'update_edge', path: 'opt_a::fac_x', value: { strength: { mean: 0.42 } } },
+    ];
+
+    const candidate = applyPatchOperations(graph, ops);
+
+    const inputEdge = graph.edges.find((e) => e.from === 'opt_a' && e.to === 'fac_x')!;
+    const candidateEdge = candidate.edges.find((e) => e.from === 'opt_a' && e.to === 'fac_x')!;
+
+    // Distinct object identities at the nested `strength` level — mutating the
+    // candidate cannot leak back into the caller's graph.
+    expect(candidateEdge).not.toBe(inputEdge);
+    expect(candidateEdge.strength).not.toBe(inputEdge.strength);
+    expect(inputEdge.strength).toEqual({ mean: 0.5, std: 0.2 });
+  });
+});
