@@ -834,6 +834,16 @@ export const TelemetryEvents = {
   // content_hash, trigger, cache?: 'hit' | 'miss' }.
   V5PromptResolved: "v5.prompt_resolved",
 
+  // Prompt-resolution policy observability (PR1). Fires once per resolution
+  // decision at the routing-snapshot build and the adapter cold-default path.
+  // Payload: { key, outcome, degraded, source: 'pms' | 'default',
+  // fallback_reason, runtime_env, trigger? }. `outcome` (a payload value, not a
+  // frozen event name) is one of pms_success | default_allowed |
+  // default_on_critical_deployed in PR1; PR2 extends it with
+  // lkg_used | emergency_default | fail_closed without re-registration. Loud
+  // signal is the error-level log; no Datadog mapping (see debugOnlyEvents).
+  V5PromptResolutionPolicy: "v5.prompt_resolution_policy",
+
   // V5 decision_review call-site safety net. The enricher itself catches
   // its own failures (see V5DecisionReviewFailed). This event fires only
   // when an exception escaped the enricher and was caught by the

@@ -59,6 +59,11 @@ import {
   resolvePublicVersion,
   type TrackedKey,
 } from '../../prompts/tracked.js';
+import {
+  recordPromptResolutionObservation,
+  type FallbackReason,
+} from '../../prompts/resolution-policy.js';
+import { getRuntimeEnv } from '../../config/env-resolver.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { shouldUseStagingPrompts, config } from '../../config/index.js';
@@ -432,6 +437,24 @@ export async function getSystemPrompt(
         content_hash: promptHash.slice(0, 16),
         trigger: 'runtime',
         cache: 'miss',
+      });
+    }
+
+    // PR1 observability (no behaviour change): loudly flag when a tracked key
+    // is served from the bundled default in staging/prod. Fires only on the
+    // cold-default decision (cache miss → default), not on cache hits.
+    if (isTrackedKey(taskId)) {
+      const fallbackReason: FallbackReason = isTransientFailure
+        ? 'fetch_error'
+        : !isPromptManagementEnabled()
+          ? 'pms_disabled'
+          : 'not_found';
+      recordPromptResolutionObservation({
+        key: taskId,
+        runtimeEnv: getRuntimeEnv(),
+        resolvedSource: 'default',
+        fallbackReason,
+        trigger: 'runtime',
       });
     }
 
