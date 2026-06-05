@@ -26,6 +26,45 @@ describe('formatValueWithUnit', () => {
     expect(formatValueWithUnit(800, 'customers')).toBe('800 customers');
   });
 
+  it('singularises a regular plural unit when the count is exactly 1', () => {
+    expect(formatValueWithUnit(1, 'months')).toBe('1 month');
+    expect(formatValueWithUnit(1, 'weeks')).toBe('1 week');
+    expect(formatValueWithUnit(1, 'days')).toBe('1 day');
+    expect(formatValueWithUnit(1, 'years')).toBe('1 year');
+    expect(formatValueWithUnit(1, 'customers')).toBe('1 customer');
+  });
+
+  it('keeps the plural form for counts other than 1', () => {
+    expect(formatValueWithUnit(12, 'months')).toBe('12 months');
+    expect(formatValueWithUnit(0, 'months')).toBe('0 months');
+    expect(formatValueWithUnit(2, 'months')).toBe('2 months');
+  });
+
+  it('leaves an already-singular unit unchanged at count 1', () => {
+    expect(formatValueWithUnit(1, 'month')).toBe('1 month');
+    expect(formatValueWithUnit(1, 'day')).toBe('1 day');
+  });
+
+  it('does not mangle -ss/-us/-is units or short abbreviations at count 1', () => {
+    expect(formatValueWithUnit(1, 'status')).toBe('1 status');
+    expect(formatValueWithUnit(1, 'bps')).toBe('1 bps');
+  });
+
+  it('does not pluralise symbol / currency units', () => {
+    expect(formatValueWithUnit(1, '%')).toBe('1%');
+    expect(formatValueWithUnit(1, '£')).toBe('£1');
+  });
+
+  it('singularises units inside a constraint confirmation at count 1', () => {
+    const text = formatConstraintAdded({
+      targetLabel: 'Timeline',
+      operator: '>=',
+      value: 1,
+      unit: 'months',
+    });
+    expect(text).toBe('Added constraint: Timeline must be at least 1 month.');
+  });
+
   it('returns the bare number when no unit is given', () => {
     expect(formatValueWithUnit(0.8)).toBe('0.8');
     expect(formatValueWithUnit(5)).toBe('5');

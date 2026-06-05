@@ -134,6 +134,30 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   /\brecommended\b/i,
   /\bthe\s+winners?\b/i,
   /\bwinning\s+(?:option|probability|side|choice|outcome)\b/i,
+  // V5 deterministic-copy hardening (Area A) — internal implementation
+  // vocabulary that must never reach user-facing prose. CONSERVATIVE set:
+  // only multi-word internal phrases + single words with no legitimate
+  // user-domain meaning in CEE decision prose. The egress guard REPLACES the
+  // whole response on a hit, so wider single words like `handler` / `debug`
+  // are INTENTIONALLY excluded here (legitimate-prose false-positive risk —
+  // "I can handle that", "help me debug X"); they are enforced by the
+  // deterministic-copy sweep test instead. Each form tolerates a space or an
+  // underscore so both the prose phrase ("context pack") and the snake_case
+  // identifier ("context_pack") are caught. Only `assistant_text` is scanned,
+  // so structured field names (`graph_hash`, `node_id`) in data payloads are
+  // unaffected. False-positive-swept against user-facing fixtures.
+  /\bcontext[\s_]packs?\b/i,
+  /\bturn[\s_]class(?:es)?\b/i,
+  // `direct answer` (spaced) is legitimate English ("here's a direct answer"),
+  // and the egress guard REPLACES the whole response on a hit — so ONLY the
+  // snake_case turn-class identifier is runtime-blocked. The spaced form is
+  // still enforced against deterministic composer copy by the wider-set sweep
+  // test (it must never appear in CEE-authored prose), just not at runtime.
+  /\bdirect_answers?\b/i,
+  /\bgraph[\s_]hash(?:es)?\b/i,
+  /\bnode[\s_]ids?\b/i,
+  /\b_meta\b/i,
+  /\borchestrator\b/i,
 ];
 
 /**

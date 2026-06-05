@@ -14,7 +14,10 @@ import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
   SUCCESS_CLAIM_PATTERNS,
+  EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
 } from '../forbidden-user-facing-phrases.js';
+import { RUN_ANALYSIS_LOCKED_TEMPLATES } from '../../coaching/analysis-result-headline.js';
+import { composeEditClarifyResponse } from '../edit-clarify-response.js';
 
 describe('FORBIDDEN_USER_FACING_PHRASES — phrase matches', () => {
   const positiveCases: ReadonlyArray<readonly [string, string]> = [
@@ -275,6 +278,125 @@ describe('FORBIDDEN_USER_FACING_PHRASES — jargon defence does NOT false-positi
       expect(findForbiddenPhraseHit(text)).toBeNull();
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// V5 deterministic-copy hardening (Area A) — internal implementation
+// vocabulary defence. CONSERVATIVE runtime set (multi-word internal phrases +
+// clearly-internal single words) is enforced by the egress guard; wider single
+// words (handler, debug) are enforced by the deterministic-copy sweep only,
+// since the egress guard REPLACES the whole response and those words have
+// legitimate user-domain uses.
+// ---------------------------------------------------------------------------
+
+describe('FORBIDDEN_USER_FACING_PHRASES — internal-vocabulary defence (runtime)', () => {
+  const internalPositive: ReadonlyArray<readonly [string, string]> = [
+    ['I assembled the context pack for this turn.', 'context pack (spaced)'],
+    ['The context_pack was truncated.', 'context_pack (snake_case)'],
+    ['This turn class is converse.', 'turn class (spaced)'],
+    ['Routed with turn_class converse.', 'turn_class (snake_case)'],
+    // NOTE: spaced "direct answer" is NOT runtime-blocked (legitimate English);
+    // only the snake_case identifier is. See the negative cases below.
+    ['Classified as direct_answer.', 'direct_answer (snake_case)'],
+    ['The graph hash changed since last run.', 'graph hash (spaced)'],
+    ['Compared graph_hash values.', 'graph_hash (snake_case)'],
+    ['The node id is missing.', 'node id (spaced)'],
+    ['Resolved the node_id.', 'node_id (snake_case)'],
+    ['Dropped the _meta field before emit.', '_meta field'],
+    ['The orchestrator selected this path.', 'orchestrator'],
+    ['The ORCHESTRATOR ran first.', 'shout-cased orchestrator'],
+  ];
+
+  for (const [text, label] of internalPositive) {
+    it(`flags ${label}`, () => {
+      expect(findForbiddenPhraseHit(text)).not.toBeNull();
+    });
+  }
+});
+
+describe('FORBIDDEN_USER_FACING_PHRASES — internal-vocabulary defence does NOT false-positive', () => {
+  const internalNegative: ReadonlyArray<readonly [string, string]> = [
+    ['Here is some helpful context for your decision.', 'bare "context" not flagged'],
+    ['I will answer this directly.', '"answer ... directly" is not "direct answer"'],
+    ["Here's a direct answer to your question.", 'spaced "direct answer" is legitimate prose — runtime-allowed (only snake_case direct_answer is blocked)'],
+    ['This is a strong class of options.', 'bare "class" not flagged'],
+    ['Add a node to represent supplier risk.', 'bare "node" not flagged'],
+    ['We can hash out the trade-offs together.', '"hash out" not flagged'],
+    ['Pack your assumptions into one option.', 'bare "pack" not flagged'],
+    ['It is now your turn to decide.', 'bare "turn" not flagged'],
+    ['The metadata you provided looks complete.', '"metadata" is not "_meta"'],
+    // Wider terms are INTENTIONALLY not runtime-blocked (deterministic-copy
+    // tests only) — they must not nuke legitimate user-facing prose.
+    ['I can handle that for you.', '"handle" not runtime-flagged'],
+    ['The event handler pattern is common.', '"handler" intentionally not runtime-blocked'],
+    ['Let us debug your assumptions together.', '"debug" intentionally not runtime-blocked'],
+  ];
+
+  for (const [text, label] of internalNegative) {
+    it(`does NOT flag ${label}`, () => {
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    });
+  }
+});
+
+describe('deterministic copy is free of internal vocabulary (wider set, composer-level)', () => {
+  // Wider set: conservative runtime terms PLUS handler/debug — which are NOT
+  // runtime-blocked but must never appear in deterministic composer copy.
+  const WIDER_INTERNAL_TERMS: ReadonlyArray<readonly [RegExp, string]> = [
+    [/\bcontext[\s_]packs?\b/i, 'context pack'],
+    [/\bturn[\s_]class(?:es)?\b/i, 'turn class'],
+    [/\bdirect[\s_]answers?\b/i, 'direct answer'],
+    [/\bgraph[\s_]hash(?:es)?\b/i, 'graph hash'],
+    [/\bnode[\s_]ids?\b/i, 'node id'],
+    [/\b_meta\b/i, '_meta'],
+    [/\borchestrator\b/i, 'orchestrator'],
+    [/\bhandlers?\b/i, 'handler'],
+    [/\bdebug\b/i, 'debug'],
+  ];
+
+  function assertClean(text: string, where: string): void {
+    for (const [re, term] of WIDER_INTERNAL_TERMS) {
+      expect(
+        re.test(text),
+        `${where} must not contain internal term "${term}": ${JSON.stringify(text)}`,
+      ).toBe(false);
+    }
+  }
+
+  it('run_analysis locked templates contain no internal vocabulary', () => {
+    for (const tpl of RUN_ANALYSIS_LOCKED_TEMPLATES) {
+      assertClean(tpl, 'RUN_ANALYSIS_LOCKED_TEMPLATES');
+    }
+  });
+
+  it('edit-clarify deterministic copy contains no internal vocabulary', () => {
+    const res = composeEditClarifyResponse({
+      reason: 'vague_edit',
+      stage: 'decide',
+      nodes: [
+        { id: 'fac_cost', kind: 'factor', label: 'Operating Cost' },
+        { id: 'opt_a', kind: 'option', label: 'Hire Contractor' },
+      ],
+      priorAnalysisIsFresh: true,
+    });
+    assertClean(res.assistant_text ?? '', 'composeEditClarifyResponse.assistant_text');
+  });
+});
+
+describe('EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT — graceful generic recovery (Area A amendment 7)', () => {
+  it('is a non-blank, non-trivial generic recovery message', () => {
+    const t = EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT;
+    expect(t.trim().length).toBeGreaterThan(0);
+    // Not jarring / not a dead-end — long enough to read as a real invitation.
+    expect(t.length).toBeGreaterThan(15);
+  });
+
+  it('itself trips no forbidden phrase or internal term (idempotent + clean)', () => {
+    // The replacement must not itself trip the guard (idempotency) nor leak an
+    // internal term — otherwise the "graceful" fallback would be re-nuked or
+    // would itself read as internal jargon.
+    expect(findForbiddenPhraseHit(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT)).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

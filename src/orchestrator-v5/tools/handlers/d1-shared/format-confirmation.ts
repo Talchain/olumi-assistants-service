@@ -28,7 +28,28 @@ export function formatValueWithUnit(value: number, unit?: string): string {
   if (!unit) return numStr;
   if (NO_SPACE_UNITS.has(unit)) return `${numStr}${unit}`;
   if (PREFIX_UNITS.has(unit)) return `${unit}${numStr}`;
-  return `${numStr} ${unit}`;
+  return `${numStr} ${pluraliseUnit(unit, value)}`;
+}
+
+/**
+ * Grammatically agree a space-separated unit with its count: singular form
+ * when |value| === 1 ("1 month", not "1 months"); the supplied plural form
+ * otherwise ("12 months", "0 months", "2 months").
+ *
+ * Conservative by design — only collapses a regular trailing "-s" on an
+ * alphabetic unit of 4+ characters, and never for "-ss"/"-us"/"-is" endings
+ * (e.g. "status", "analysis", "bonus") or abbreviations shorter than 4 chars
+ * (e.g. "bps"). Symbol / no-space / prefix units never reach here (handled by
+ * the caller). Irregular plurals (e.g. "people") are intentionally left
+ * untouched: rare in the decision domain and better readable-but-imperfect
+ * than mangled. Only the documented "1 months" → "1 month" class is fixed.
+ */
+function pluraliseUnit(unit: string, value: number): string {
+  if (Math.abs(value) !== 1) return unit;
+  if (/[a-z]{3,}s$/i.test(unit) && !/(?:ss|us|is)$/i.test(unit)) {
+    return unit.replace(/s$/i, '');
+  }
+  return unit;
 }
 
 function formatNumber(n: number): string {

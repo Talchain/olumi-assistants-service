@@ -150,6 +150,30 @@
       "source": "synthetic",
       "text": "The likelihood divergence is 0.55 across models.",
       "expectations": "unchanged: divergence is a diagnostic statistic"
+    },
+    {
+      "id": "leg-013-currency-decimal",
+      "source": "synthetic",
+      "text": "The annual budget is £1.50 million for the project.",
+      "expectations": "unchanged: currency value, not a probability/sensitivity (Area B amendment 2 — legitimate factual value must not be failed)"
+    },
+    {
+      "id": "leg-014-multiplier",
+      "source": "synthetic",
+      "text": "Revenue grew 1.5x in the first year after launch.",
+      "expectations": "unchanged: multiplier, not a normalised [0,1] value"
+    },
+    {
+      "id": "leg-015-displayed-percent-decimal",
+      "source": "synthetic",
+      "text": "There is a 0.5% processing fee on each transaction.",
+      "expectations": "unchanged: already a displayed percentage, not a raw normalised decimal"
+    },
+    {
+      "id": "leg-016-factual-patch-value",
+      "source": "synthetic",
+      "text": "Set the discount rate to 0.08 in the financial model.",
+      "expectations": "unchanged: factual/structured value stated in prose with no probability/sensitivity context (Area B amendment 2)"
     }
   ]
 }

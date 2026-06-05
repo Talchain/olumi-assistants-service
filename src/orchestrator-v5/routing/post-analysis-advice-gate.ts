@@ -813,7 +813,27 @@ function hasNonEmptyLabel(s: string | undefined | null): boolean {
  * uniform across the file.
  */
 function hasRenderableTopDriver(analysis: AdviceGateAnalysis): boolean {
-  return hasNonEmptyLabel(analysis.top_drivers[0]?.factor_label);
+  return hasRenderableTopDriverLabel(analysis);
+}
+
+/**
+ * Projection-shaped variant of {@link hasRenderableTopDriver}: true when the
+ * supplied analysis projection exposes a renderable top driver
+ * (`top_drivers[0].factor_label` is a non-empty trimmed string). Accepts the
+ * minimal structural shape shared by `AdviceGateAnalysis` and the ContextPack
+ * analysis projection so call sites can report `top_driver_present` from the
+ * SAME projection that powers `leading_option_present` — rather than from
+ * whether a particular advice class happened to consume a driver label (which
+ * left the telemetry reporting `false` on every non-match even when the
+ * projection carried drivers).
+ */
+export function hasRenderableTopDriverLabel(
+  analysis:
+    | { readonly top_drivers?: ReadonlyArray<{ readonly factor_label?: string | null }> }
+    | null
+    | undefined,
+): boolean {
+  return hasNonEmptyLabel(analysis?.top_drivers?.[0]?.factor_label);
 }
 
 /**

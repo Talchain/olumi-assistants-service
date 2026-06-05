@@ -52,14 +52,46 @@ import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
 export const MAX_HEADLINE_CHARS = 220;
 
 /**
- * Minimum win_probability for the leading option before the headline
- * may say "currently leads". A leader below this threshold is treated
- * as too weak to assert a lead, regardless of any margin to the
- * runner-up — fall back to the locked template instead. Calibrated
- * against typical 3-way decision races: 40% is a plausible plurality;
- * anything below would read as "no real leader".
+ * Minimum win_probability for the leading option before the headline may emit a
+ * CONFIDENT "currently leads" (cases A–D). A leader below this threshold is too
+ * weak to assert a confident lead, regardless of margin. Calibrated against
+ * typical 3-way races: 40% is a plausible plurality; below it reads as "no real
+ * leader" for a CONFIDENT claim.
+ *
+ * SOFT-CONFIDENCE BAND (case 'SC', Area F deterministic-copy hardening). The
+ * headline now uses a TWO-FLOOR structure:
+ *   - >= MIN_LEAD_PROBABILITY (0.40): a CONFIDENT lead may be claimed (A–D).
+ *   - [SC_MIN_LEAD_PROBABILITY, MIN_LEAD_PROBABILITY) i.e. [0.30, 0.40): a
+ *     "soft confidence" plurality MAY still be named — but ONLY with explicit
+ *     provisional caveating ("…but treat this as provisional…") AND only when it
+ *     has a real margin (>= MIN_LEAD_MARGIN) AND a driver/fragility. This
+ *     increases honest caveating instead of suppressing the lead entirely.
+ *   - < SC_MIN_LEAD_PROBABILITY (0.30): too weak to enrich at all — fall back to
+ *     the conservative bare Case E floor ("{label} currently leads."), even with
+ *     a real margin + driver/fragility. A very weak fragmented plurality (e.g.
+ *     0.24 in a 5-way race) technically leads but must not get an enriched
+ *     "currently leads by N percentage points" headline.
  */
 const MIN_LEAD_PROBABILITY = 0.4;
+
+/**
+ * Lower floor of the soft-confidence band (case 'SC'). Inclusive: a winner at
+ * exactly 0.30 qualifies; below 0.30 the SC branch is skipped and the headline
+ * falls back to the conservative Case E floor. 0.30 preserves the reviewed
+ * 0.30/0.25 case while excluding weaker plurality leads.
+ */
+const SC_MIN_LEAD_PROBABILITY = 0.3;
+
+/**
+ * Float tolerance for the inclusive {@link SC_MIN_LEAD_PROBABILITY} floor. The
+ * floor is a pure gating threshold with NO displayed probability to match, so —
+ * unlike the margin gate, which rounds to whole percentage points to mirror the
+ * rendered "<N> percentage points" — it uses a small epsilon to make the
+ * `>= 0.30` boundary robust to IEEE-754 representation noise WITHOUT admitting
+ * 0.29x values (the next meaningful step down, 0.299, is ~1e-3 below the floor
+ * and stays excluded; the epsilon only absorbs ~1e-16 representation drift).
+ */
+const SC_PROBABILITY_EPSILON = 1e-9;
 
 /**
  * Minimum margin (winner.win_probability − runner_up.win_probability)
@@ -98,14 +130,19 @@ export interface AnalysisResultHeadlineInput {
  *   E — minimal floor: `{label} currently leads.`
  *   NT — near-tie / close-call: a positive margin below the meaningful-
  *        lead threshold; flags closeness instead of a confident lead
+ *   SC — soft-confidence enriched: winner below the absolute confidence
+ *        floor BUT with a real margin (>= MIN_LEAD_MARGIN) and a
+ *        driver/fragility available; emits a CAUTIOUS provisional headline
+ *        (Case A/C copy shapes) instead of collapsing to the bare Case E
+ *        floor. Increases honest caveating rather than suppressing it.
  *   null — fall back to locked template
  *
  * Case E is the link-safe response floor (v5/link-safe). It fires when
  * a clean leading-option label exists but the stronger cases failed
- * because of soft confidence or because a length cap forced an
- * A/B/C/D/NT candidate to be dropped.
+ * because of soft confidence (with no usable margin / driver / fragility)
+ * or because a length cap forced an A/B/C/D/NT/SC candidate to be dropped.
  */
-export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | 'NT' | null;
+export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | 'NT' | 'SC' | null;
 
 /**
  * Locked reason class for telemetry. Always present on the descriptor
@@ -337,6 +374,85 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       text: null,
       descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
     };
+  }
+
+  // Soft-confidence enriched branch (V5 deterministic-copy hardening, Area F).
+  // The winner sits in the soft-confidence BAND [SC_MIN_LEAD_PROBABILITY,
+  // MIN_LEAD_PROBABILITY) i.e. [0.30, 0.40): too soft for the confident
+  // meaningful-lead cases (A/B/C/D) and below the near-tie branch above (which
+  // only handles plurality leaders >= MIN_LEAD_PROBABILITY), BUT strong enough
+  // to name provisionally. With a real margin (>= MIN_LEAD_MARGIN) over a
+  // runner-up AND a fragility or driver available, surface a CAUTIOUS provisional
+  // headline naming the single most-relevant sensitivity (fragility preferred;
+  // never both — preserves the no-repetition invariant) rather than collapsing
+  // to the bare Case E floor.
+  //
+  // Honest by construction: "leads by N percentage points" is a factual
+  // plurality statement and "treat this as provisional" caveats the soft
+  // confidence — this INCREASES honest caveating rather than suppressing the
+  // available ingredients into a bare "currently leads.". Deliberate policy
+  // change from the prior "drop driver/fragility at soft confidence" behaviour.
+  //
+  // Honesty guards retained by the entry condition: very weak plurality leads
+  // BELOW SC_MIN_LEAD_PROBABILITY (e.g. 0.24 in a fragmented 5-way race),
+  // near-ties (margin < MIN_LEAD_MARGIN), and thin data (no driver AND no
+  // fragility) all fall through to Case E — a weak/near-tie plurality must never
+  // read as an enriched lead, and we never fabricate a sensitivity reason.
+  // Single-option sources (runnerUpProb === null) also fall through (no margin to
+  // honestly state).
+  //
+  // Reuses the Case A (with margin) / Case C (no margin) copy shapes verbatim,
+  // so the emitted text already satisfies the registry grammar allowlist
+  // (isAllowedRunAnalysisAssistantText) with no new pattern.
+  // Compare the ROUNDED pp (matching the rendered "<N> percentage points")
+  // against the threshold so floating-point noise at the boundary does not
+  // flip the verdict — e.g. 0.30 − 0.25 = 0.04999999999999999 in IEEE-754
+  // would spuriously fail a raw `>= 0.05` check while the headline still
+  // renders "5 percentage points". Mirrors the rounded comparison the
+  // near-tie branch uses above.
+  const softConfidenceMarginPp =
+    winner.runnerUpProb !== null
+      ? Math.round((winner.winnerProb - winner.runnerUpProb) * 100)
+      : -1;
+  if (
+    winner.runnerUpProb !== null &&
+    // Soft-confidence BAND: [SC_MIN_LEAD_PROBABILITY, MIN_LEAD_PROBABILITY) i.e.
+    // [0.30, 0.40). The lower floor is INCLUSIVE and uses a tiny epsilon (not
+    // pp-rounding) because it is a pure threshold with no displayed probability:
+    // exactly 0.30 qualifies; 0.29x stays excluded; FP representation noise at
+    // 0.30 cannot flip the verdict.
+    winner.winnerProb >= SC_MIN_LEAD_PROBABILITY - SC_PROBABILITY_EPSILON &&
+    winner.winnerProb < MIN_LEAD_PROBABILITY &&
+    softConfidenceMarginPp >= Math.round(MIN_LEAD_MARGIN * 100) &&
+    (hasFragility || hasDriver)
+  ) {
+    const sensitivityTarget = fragileLabel ?? driverLabel;
+    if (sensitivityTarget !== null) {
+      const cautionTail =
+        `, but treat this as provisional: the result is sensitive to ${sensitivityTarget}.${suffix}`;
+      // Prefer the margin-bearing shape (Case A grammar); shed the margin under
+      // the length cap (Case C grammar) before giving up to Case E.
+      const scWithMargin = `${winnerLabel} currently leads${marginFragment}${cautionTail}`;
+      if (marginText !== null && scWithMargin.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: scWithMargin,
+          descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      // No-margin SC shape (Case C grammar): fires only when the margin-bearing
+      // shape overflowed the length cap (pathologically long label). Even here
+      // the winner is within the soft-confidence band [0.30, 0.40) (the entry
+      // condition's lower floor already excluded the very weak < 0.30 leads), so
+      // it is a caveated, bounded fallback — not a free-for-all sub-40% claim.
+      const scNoMargin = `${winnerLabel} currently leads${cautionTail}`;
+      if (scNoMargin.length <= MAX_HEADLINE_CHARS) {
+        return {
+          text: scNoMargin,
+          descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+      // Both shapes overflow the length cap — fall through to Case E below.
+    }
   }
 
   // Case E (link-safe floor): we have a clean winner label but the
