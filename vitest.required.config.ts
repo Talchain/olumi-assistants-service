@@ -75,7 +75,6 @@ const REQUIRED_GATE_RED_EXCLUSIONS = [
   "tests/unit/unified-pipeline.signal-fix.test.ts",
   "tests/unit/v5-journey-replay/explain-leader-stale-chips.test.ts",
   "tests/unit/v5-journey-replay/what-changed-denial.test.ts",
-  "tests/utils/telemetry-events.test.ts",
   // Pre-existing collection error (the 64th reveal file): imports the tool-local
   // dependency `gray-matter`, which is declared in tools/graph-evaluator/package.json
   // but not installed in the root CI env. Tool test, not product code. Excluded by

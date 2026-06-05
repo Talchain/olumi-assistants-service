@@ -509,6 +509,33 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         OrchestratorXmlParseFallback: "orchestrator.xml_parse_fallback",
         CeeStage2EdgeCountInvariantViolated: "cee.stage2.edge_count_invariant_violated",
         CeePostEnrichInvariantViolation: "cee.post_enrich.invariant_violation",
+        // M3 freeze-gate cleanup (2026-06-05) — register inherited live emit()
+        // sites so drift is enforced again. All diagnostic-only; none have a
+        // Datadog metric mapping (see debugOnlyEvents). No emit-site changes.
+        CeeAutoBaselineDedupApplied: "cee.auto_baseline_dedup.applied",
+        CeeAutoBaselineHeuristicOnlyCollision: "cee.auto_baseline_dedup.heuristic_only_collision",
+        CeeOptionsIdenticalBypass: "cee.options_identical.pre_repair_bypass",
+        CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
+        V5DecisionReviewCompleted: "v5.decision_review.completed",
+        V5EditGraphAnalyticalQuestionSuppressed: "v5.edit_graph.analytical_question_suppressed",
+        V5EditGraphAppliedGraphMissingWithOperations: "v5.edit_graph.applied_graph_missing_with_operations",
+        V5EditGraphAppliedGraphSynthesizedLocally: "v5.edit_graph.applied_graph_synthesized_locally",
+        V5EditGraphFalseSuccessRewritten: "v5.edit_graph.false_success_rewritten",
+        V5InterceptedChipClarify: "v5.edit_graph.intercepted_chip_clarify",
+        V5InterceptedVagueEdit: "v5.edit_graph.intercepted_vague_edit",
+        V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
+        V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
+        V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
+        V5Phase3BlockLifecycle: "v5.phase3.block_lifecycle",
+        V5PostAnalysisAdviceGate: "v5.post_analysis_advice_gate",
+        V5PostAnalysisLabelIntercept: "v5.post_analysis_label_intercept",
+        V5PostDraftCoachingSourceSelected: "v5.post_draft_coaching.source_selected",
+        V5ProposalContinuationCaptured: "v5.proposal_continuation.captured",
+        V5ProposalContinuationInvalidated: "v5.proposal_continuation.invalidated",
+        V5ProposalContinuationResumed: "v5.proposal_continuation.resumed",
+        V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
+        V5RunAnalysisTimings: "v5.run_analysis.timings",
+        V5TurnStageTimings: "v5.turn_executor.stage_timings",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -536,7 +563,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.no_operations$|v5\.(brief_text|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_pack|edit_graph|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.no_operations$|v5\.(brief_text|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_pack|edit_graph|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|egress|frame_stage_no_brief_guard|fresh_analysis_followup_guard|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1141,6 +1168,40 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Prompt-resolution policy observability — loud signal is the
         // error-level log; no Datadog counter mapping yet (follow-up).
         TelemetryEvents.V5PromptResolutionPolicy,
+        // M3 freeze-gate cleanup (2026-06-05) — inherited live emit() sites,
+        // all diagnostic-only (structured logs are the operational signal; no
+        // Datadog metric in emit()). Registered to restore drift enforcement.
+        TelemetryEvents.CeeAutoBaselineDedupApplied,
+        TelemetryEvents.CeeAutoBaselineHeuristicOnlyCollision,
+        TelemetryEvents.CeeOptionsIdenticalBypass,
+        TelemetryEvents.CeeUnifiedPipelineStageTimings,
+        TelemetryEvents.V5DecisionReviewCompleted,
+        TelemetryEvents.V5EditGraphAnalyticalQuestionSuppressed,
+        TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations,
+        TelemetryEvents.V5EditGraphAppliedGraphSynthesizedLocally,
+        TelemetryEvents.V5EditGraphFalseSuccessRewritten,
+        TelemetryEvents.V5InterceptedChipClarify,
+        TelemetryEvents.V5InterceptedVagueEdit,
+        TelemetryEvents.V5EgressForbiddenPhraseDetected,
+        TelemetryEvents.V5FrameStageNoBriefGuard,
+        TelemetryEvents.V5FreshAnalysisFollowupGuard,
+        TelemetryEvents.V5Phase3BlockLifecycle,
+        TelemetryEvents.V5PostAnalysisAdviceGate,
+        TelemetryEvents.V5PostAnalysisLabelIntercept,
+        TelemetryEvents.V5PostDraftCoachingSourceSelected,
+        TelemetryEvents.V5ProposalContinuationCaptured,
+        TelemetryEvents.V5ProposalContinuationInvalidated,
+        TelemetryEvents.V5ProposalContinuationResumed,
+        TelemetryEvents.V5RoutingBoundedFallback,
+        TelemetryEvents.V5RunAnalysisTimings,
+        TelemetryEvents.V5TurnStageTimings,
+        // M3 freeze-gate cleanup (2026-06-05) — pre-existing link-safe response
+        // floor events: already in the frozen list but never datadog-classified.
+        // Diagnostic-only (no Datadog metric in emit()); classify here to close
+        // the gap. Live emit sites: chip-generator.ts, run-analysis.ts.
+        TelemetryEvents.V5HeadlineFellBack,
+        TelemetryEvents.V5ChipsEmptyIntentional,
+        TelemetryEvents.V5ChipsFloorApplied,
       ];
 
       for (const event of allEvents) {
@@ -1623,6 +1684,33 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "orchestrator.xml_parse_fallback",
         "cee.stage2.edge_count_invariant_violated",
         "cee.post_enrich.invariant_violation",
+        // M3 freeze-gate cleanup (2026-06-05) — register inherited live emit()
+        // sites so this frozen list is the hard drift gate again. Test-only;
+        // no emit-site or runtime changes. Preserves #232's prompt_resolution_policy.
+        "cee.auto_baseline_dedup.applied",
+        "cee.auto_baseline_dedup.heuristic_only_collision",
+        "cee.options_identical.pre_repair_bypass",
+        "cee.unified_pipeline.stage_timings",
+        "v5.decision_review.completed",
+        "v5.edit_graph.analytical_question_suppressed",
+        "v5.edit_graph.applied_graph_missing_with_operations",
+        "v5.edit_graph.applied_graph_synthesized_locally",
+        "v5.edit_graph.false_success_rewritten",
+        "v5.edit_graph.intercepted_chip_clarify",
+        "v5.edit_graph.intercepted_vague_edit",
+        "v5.egress.forbidden_phrase_detected",
+        "v5.frame_stage_no_brief_guard",
+        "v5.fresh_analysis_followup_guard",
+        "v5.phase3.block_lifecycle",
+        "v5.post_analysis_advice_gate",
+        "v5.post_analysis_label_intercept",
+        "v5.post_draft_coaching.source_selected",
+        "v5.proposal_continuation.captured",
+        "v5.proposal_continuation.invalidated",
+        "v5.proposal_continuation.resumed",
+        "v5.routing_bounded_fallback",
+        "v5.run_analysis.timings",
+        "v5.turn_executor.stage_timings",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
