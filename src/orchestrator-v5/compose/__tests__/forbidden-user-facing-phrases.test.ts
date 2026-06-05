@@ -295,7 +295,8 @@ describe('FORBIDDEN_USER_FACING_PHRASES — internal-vocabulary defence (runtime
     ['The context_pack was truncated.', 'context_pack (snake_case)'],
     ['This turn class is converse.', 'turn class (spaced)'],
     ['Routed with turn_class converse.', 'turn_class (snake_case)'],
-    ['I produced a direct answer turn.', 'direct answer (spaced)'],
+    // NOTE: spaced "direct answer" is NOT runtime-blocked (legitimate English);
+    // only the snake_case identifier is. See the negative cases below.
     ['Classified as direct_answer.', 'direct_answer (snake_case)'],
     ['The graph hash changed since last run.', 'graph hash (spaced)'],
     ['Compared graph_hash values.', 'graph_hash (snake_case)'],
@@ -317,6 +318,7 @@ describe('FORBIDDEN_USER_FACING_PHRASES — internal-vocabulary defence does NOT
   const internalNegative: ReadonlyArray<readonly [string, string]> = [
     ['Here is some helpful context for your decision.', 'bare "context" not flagged'],
     ['I will answer this directly.', '"answer ... directly" is not "direct answer"'],
+    ["Here's a direct answer to your question.", 'spaced "direct answer" is legitimate prose — runtime-allowed (only snake_case direct_answer is blocked)'],
     ['This is a strong class of options.', 'bare "class" not flagged'],
     ['Add a node to represent supplier risk.', 'bare "node" not flagged'],
     ['We can hash out the trade-offs together.', '"hash out" not flagged'],

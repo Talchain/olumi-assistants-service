@@ -52,12 +52,22 @@ import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
 export const MAX_HEADLINE_CHARS = 220;
 
 /**
- * Minimum win_probability for the leading option before the headline
- * may say "currently leads". A leader below this threshold is treated
- * as too weak to assert a lead, regardless of any margin to the
- * runner-up — fall back to the locked template instead. Calibrated
- * against typical 3-way decision races: 40% is a plausible plurality;
- * anything below would read as "no real leader".
+ * Minimum win_probability for the leading option before the headline may emit a
+ * CONFIDENT "currently leads" (cases A–D). A leader below this threshold is too
+ * weak to assert a confident lead, regardless of margin. Calibrated against
+ * typical 3-way races: 40% is a plausible plurality; below it reads as "no real
+ * leader" for a CONFIDENT claim.
+ *
+ * SOFT-CONFIDENCE EXCEPTION (case 'SC', Area F deterministic-copy hardening): a
+ * sub-threshold plurality MAY still be named — but ONLY with explicit
+ * provisional caveating ("…but treat this as provisional…") AND only when it has
+ * a real margin (>= MIN_LEAD_MARGIN) AND a driver/fragility. This deliberately
+ * increases honest caveating instead of suppressing the lead entirely. NOTE the
+ * SC path currently has NO lower floor: any <40% plurality meeting those
+ * conditions is named provisionally. Whether to add an SC lower floor (e.g.
+ * ~0.30, below which even a caveated SC lead reverts to the bare Case E
+ * "{label} currently leads.") is an open product/copy decision, deliberately
+ * left out of this bounded change.
  */
 const MIN_LEAD_PROBABILITY = 0.4;
 
@@ -398,6 +408,12 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
           descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
         };
       }
+      // No-margin SC shape (Case C grammar): fires only when the margin-bearing
+      // shape overflowed the length cap (pathologically long label). This is the
+      // weakest honesty case — a sub-40% lead named provisionally WITHOUT the
+      // margin shown — but it is still caveated and rare. If an SC lower floor is
+      // later adopted (see MIN_LEAD_PROBABILITY doc), this branch is the first
+      // that should revert to the bare Case E floor.
       const scNoMargin = `${winnerLabel} currently leads${cautionTail}`;
       if (scNoMargin.length <= MAX_HEADLINE_CHARS) {
         return {

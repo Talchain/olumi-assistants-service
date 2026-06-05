@@ -148,7 +148,12 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // unaffected. False-positive-swept against user-facing fixtures.
   /\bcontext[\s_]packs?\b/i,
   /\bturn[\s_]class(?:es)?\b/i,
-  /\bdirect[\s_]answers?\b/i,
+  // `direct answer` (spaced) is legitimate English ("here's a direct answer"),
+  // and the egress guard REPLACES the whole response on a hit — so ONLY the
+  // snake_case turn-class identifier is runtime-blocked. The spaced form is
+  // still enforced against deterministic composer copy by the wider-set sweep
+  // test (it must never appear in CEE-authored prose), just not at runtime.
+  /\bdirect_answers?\b/i,
   /\bgraph[\s_]hash(?:es)?\b/i,
   /\bnode[\s_]ids?\b/i,
   /\b_meta\b/i,
