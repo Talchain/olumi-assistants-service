@@ -1920,3 +1920,113 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
     expect((out as string).length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
   });
 });
+
+describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclusive)', () => {
+  // Two-floor structure: [0.30, 0.40) is the soft-confidence enriched band;
+  // below 0.30 even a real margin + driver/fragility reverts to bare Case E.
+
+  const driver = [{ label: 'Cost', elasticity: 0.6, confidence: 0.8 }];
+
+  it('winner exactly 0.30 (boundary, inclusive) + 5pp margin + driver — qualifies for SC', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.30 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.25 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.25 },
+        { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.20 },
+      ],
+      factor_sensitivity: driver,
+    };
+    const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
+    expect(buildAnalysisResultHeadline(input)).toBe(
+      'Option A currently leads by 5 percentage points, but treat this as provisional: the result is sensitive to Cost.',
+    );
+    expect(describeAnalysisHeadline(input).case).toBe('SC');
+  });
+
+  it('winner 0.29 (below floor) + 5pp margin + driver — falls to conservative Case E, NOT enriched', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.29 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.24 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.24 },
+        { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.23 },
+      ],
+      factor_sensitivity: driver,
+    };
+    const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
+    expect(buildAnalysisResultHeadline(input)).toBe('Option A currently leads.');
+    expect(describeAnalysisHeadline(input).case).toBe('E');
+  });
+
+  it('winner 0.299 (a 0.29x value, below floor) + 6pp margin + driver — falls to Case E (NOT enriched), proving no pp-rounding leak', () => {
+    // 0.299 would round to 30pp; the floor deliberately does NOT pp-round the
+    // probability, so 0.299 stays below 0.30 and is excluded.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.299 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.235 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.233 },
+        { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.233 },
+      ],
+      factor_sensitivity: driver,
+    };
+    const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
+    expect(buildAnalysisResultHeadline(input)).toBe('Option A currently leads.');
+    expect(describeAnalysisHeadline(input).case).toBe('E');
+  });
+
+  it('floor is FP-safe: 0.30 via (0.1 + 0.2) still qualifies; a value 1e-8 below 0.30 does not', () => {
+    // 0.1 + 0.2 === 0.30000000000000004 in IEEE-754 — must qualify (>= 0.30).
+    const above = {
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.1 + 0.2 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.25 },
+          { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.25 },
+          { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.2 },
+        ],
+        factor_sensitivity: driver,
+      },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok' as const,
+    };
+    expect(describeAnalysisHeadline(above).case).toBe('SC');
+
+    // 0.3 - 1e-8 === 0.29999999 — below the floor (epsilon is only 1e-9) → Case E.
+    const below = {
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.3 - 1e-8 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.24 },
+          { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.23 },
+          { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.23 },
+        ],
+        factor_sensitivity: driver,
+      },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok' as const,
+    };
+    expect(describeAnalysisHeadline(below).case).toBe('E');
+  });
+
+  it('winner 0.24 in a fragmented 5-way race (the motivating case) — bare Case E, no enriched margin headline', () => {
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.24 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.19 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.19 },
+        { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.19 },
+        { option_id: 'opt_e', option_label: 'Option E', win_probability: 0.19 },
+      ],
+      factor_sensitivity: driver,
+      robustness: { level: 'low', fragile_edges: [{ from_label: 'Cost', switch_probability: 0.5 }] },
+    };
+    const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
+    const out = buildAnalysisResultHeadline(input);
+    expect(out).toBe('Option A currently leads.');
+    expect(out).not.toContain('percentage points');
+    expect(out).not.toContain('sensitive to');
+    expect(describeAnalysisHeadline(input).case).toBe('E');
+  });
+});
