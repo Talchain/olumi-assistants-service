@@ -122,6 +122,8 @@ import {
   registerDefaultPrompt,
 } from '../../prompts/loader.js';
 import { mapSource, resolvePublicVersion } from '../../prompts/tracked.js';
+import { recordPromptResolutionObservation } from '../../prompts/resolution-policy.js';
+import { getRuntimeEnv } from '../../config/env-resolver.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 
 // Module-init registration: ensure the 'routing' default is always available
@@ -240,6 +242,16 @@ async function doBuildRoutingPromptSnapshot(): Promise<RoutingPromptSnapshot> {
     },
     'routing.prompt_snapshot.built',
   );
+  // PR1 observability (no behaviour change): classify + loudly log/telemeter
+  // when the routing prompt resolves from the bundled default in staging/prod.
+  // The decision is made once here at build time (the snapshot has no TTL).
+  recordPromptResolutionObservation({
+    key: 'routing',
+    runtimeEnv: getRuntimeEnv(),
+    resolvedSource: loaded.source,
+    fallbackReason: loaded.fallbackReason,
+    trigger: 'startup',
+  });
   return snapshot;
 }
 

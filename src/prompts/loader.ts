@@ -17,6 +17,7 @@ import {
   resolvePublicVersion,
   type TrackedKey,
 } from './tracked.js';
+import type { FallbackReason } from './resolution-policy.js';
 
 /** Source of a `loadPrompt()` call. Lets dashboards filter probe noise. */
 export type PromptResolveTrigger =
@@ -102,6 +103,13 @@ export interface LoadedPrompt {
   isStaging?: boolean;
   /** Environment-specific model configuration (if from store and configured) */
   modelConfig?: { staging?: string; production?: string };
+  /**
+   * When `source === 'default'`, why the fallback happened. Additive diagnostic
+   * (PR1) so a critical-key fallback can be told apart from a genuine missing
+   * PMS row. Undefined / 'none' when resolved from store. Load-bearing for PR2's
+   * last-known-good vs fail-closed decision.
+   */
+  fallbackReason?: FallbackReason;
 }
 
 /**
@@ -155,7 +163,14 @@ export async function loadPrompt(
 
   // Check if we should use defaults
   if (forceDefault || !isPromptManagementEnabled()) {
-    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache);
+    return loadDefaultPrompt(
+      taskId,
+      variables,
+      correlationId,
+      trigger,
+      cache,
+      forceDefault ? 'none' : 'pms_disabled',
+    );
   }
 
   try {
@@ -222,7 +237,7 @@ export async function loadPrompt(
 
     // No managed prompt found, fall back to default
     log.debug({ taskId }, 'No managed prompt found, using default');
-    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache);
+    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'not_found');
   } catch (error) {
     // Error loading from store, fall back to default
     log.warn(
@@ -236,7 +251,7 @@ export async function loadPrompt(
       correlationId,
     });
 
-    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache);
+    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'fetch_error');
   }
 }
 
@@ -248,7 +263,8 @@ function loadDefaultPrompt(
   variables: Record<string, string | number>,
   correlationId?: string,
   trigger: PromptResolveTrigger = 'runtime',
-  cache?: 'hit' | 'miss'
+  cache?: 'hit' | 'miss',
+  reason: FallbackReason = 'none'
 ): LoadedPrompt {
   const defaultContent = DEFAULT_PROMPTS[taskId];
 
@@ -279,6 +295,7 @@ function loadDefaultPrompt(
   return {
     content,
     source: 'default',
+    fallbackReason: reason,
   };
 }
 

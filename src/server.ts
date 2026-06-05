@@ -598,8 +598,12 @@ function buildCeeConfig() {
 // /healthz — minimal public probe (load balancers, readiness checks, CI)
 // ---------------------------------------------------------------------------
 app.get("/healthz", async () => {
-  const { arePromptsReady } = await import("./prompts/readiness.js");
+  const { arePromptsReady, getCriticalPromptCoverage } = await import("./prompts/readiness.js");
   const prompts_ready = await arePromptsReady();
+  // Additive honest signal: true iff every critical (tracked) prompt resolves
+  // from PMS. Unlike `prompts_ready`, a bundled default makes this false.
+  // Deliberately does NOT affect `degraded` (avoids load-balancer side effects).
+  const critical_prompts_pms = (await getCriticalPromptCoverage()).all_pms;
   const promptStoreStatus = getPromptStoreStatus();
   const promptStoreHealthy = isPromptStoreHealthy();
   const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
@@ -639,6 +643,7 @@ app.get("/healthz", async () => {
     service: "assistants",
     version: SERVICE_VERSION,
     prompts_ready,
+    critical_prompts_pms,
   };
 });
 
@@ -786,6 +791,11 @@ app.get("/healthz/detail", async (request, reply) => {
   const warmingState = getCacheWarmingState();
   const cacheWarmingHealthy = isCacheWarmingHealthy();
 
+  // Per-key PMS coverage for the critical (tracked) prompts — the rollout gate
+  // signal. all_pms===true means it's safe to consider arming fail-closed (PR2).
+  const { getCriticalPromptCoverage } = await import("./prompts/readiness.js");
+  const criticalPromptCoverage = await getCriticalPromptCoverage('status');
+
   // Determine degradation reasons
   const degradationReasons: string[] = [];
   if (promptStoreStatus.enabled && !promptStoreHealthy) {
@@ -861,6 +871,7 @@ app.get("/healthz/detail", async (request, reply) => {
         failed_count: warmingState.failedCount,
         skipped_count: warmingState.skippedCount,
       },
+      critical_prompt_coverage: criticalPromptCoverage,
     },
   };
 });
@@ -1123,6 +1134,38 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     './orchestrator-v5/routing/prompt-loader.js'
   );
   await buildRoutingPromptSnapshot();
+
+  // PR1 observability: log critical-prompt PMS coverage at startup. Info when
+  // every critical key resolves from PMS; loud warn (listing offenders) when
+  // any is on the bundled default. This is the gate signal for arming
+  // fail-closed (PR2). Non-fatal — never blocks boot.
+  try {
+    const { getCriticalPromptCoverage } = await import(
+      './prompts/readiness.js'
+    );
+    const coverage = await getCriticalPromptCoverage('startup');
+    if (coverage.all_pms) {
+      app.log.info(
+        { event: 'prompt.critical_coverage', all_pms: true, keys: coverage.keys },
+        'Critical prompt coverage: all critical prompts resolve from PMS',
+      );
+    } else {
+      app.log.warn(
+        {
+          event: 'prompt.critical_coverage',
+          all_pms: false,
+          default_or_error: coverage.default_or_error,
+          keys: coverage.keys,
+        },
+        `Critical prompt coverage: ${coverage.default_or_error.join(', ')} NOT on PMS (default/error)`,
+      );
+    }
+  } catch (err) {
+    app.log.warn(
+      { event: 'prompt.critical_coverage', error: String(err) },
+      'Critical prompt coverage check failed (non-fatal)',
+    );
+  }
 
   // Sentry: register Fastify error handler AFTER all routes
   setupSentryFastify(app);

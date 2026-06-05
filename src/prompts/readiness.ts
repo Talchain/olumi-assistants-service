@@ -30,6 +30,11 @@ let cached: { value: boolean; expiresAt: number } | null = null;
 // populates `cached`; subsequent callers within the TTL hit the cache.
 let inflightProbe: Promise<boolean> | null = null;
 
+// Separate cache for the PMS-coverage view. Kept independent of `cached`
+// above so the existing arePromptsReady() path stays byte-for-byte unchanged.
+let coverageCached: { value: CriticalPromptCoverage; expiresAt: number } | null = null;
+let inflightCoverage: Promise<CriticalPromptCoverage> | null = null;
+
 export interface PromptKeyStatus {
   key: TrackedKey;
   source: PublicSource | 'error';
@@ -103,12 +108,68 @@ export async function arePromptsReady(): Promise<boolean> {
 }
 
 /**
+ * Per-key PMS coverage for the critical (tracked) prompt keys. `all_pms` is the
+ * honest "is it safe to arm fail-closed?" signal — true iff every critical key
+ * resolves from PMS (not a bundled default, not an error). Distinct from
+ * `arePromptsReady()`, which counts *any* source as ready.
+ */
+export interface CriticalPromptCoverage {
+  all_pms: boolean;
+  keys: Array<{ key: TrackedKey; source: PublicSource | 'error'; version: string | null }>;
+  /** Critical keys NOT resolving from PMS (default or error) — the offenders. */
+  default_or_error: TrackedKey[];
+}
+
+/**
+ * Cheap critical-prompt coverage for `/healthz` + startup logging. Cached for
+ * 30s with single-flight, mirroring `arePromptsReady()`. Never throws — on
+ * probe failure every key is reported `error` (→ `all_pms:false`).
+ */
+export async function getCriticalPromptCoverage(
+  trigger: PromptResolveTrigger = 'healthz',
+): Promise<CriticalPromptCoverage> {
+  const now = Date.now();
+  if (coverageCached && coverageCached.expiresAt > now) return coverageCached.value;
+  if (inflightCoverage) return inflightCoverage;
+
+  inflightCoverage = (async (): Promise<CriticalPromptCoverage> => {
+    try {
+      const statuses = await probeTrackedPrompts(trigger);
+      const keys = statuses.map((s) => ({ key: s.key, source: s.source, version: s.version }));
+      const default_or_error = statuses
+        .filter((s) => s.source !== 'pms')
+        .map((s) => s.key);
+      const coverage: CriticalPromptCoverage = {
+        all_pms: default_or_error.length === 0,
+        keys,
+        default_or_error,
+      };
+      coverageCached = { value: coverage, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
+      return coverage;
+    } catch (err) {
+      log.warn({ err }, 'critical_prompt_coverage probe failed');
+      const coverage: CriticalPromptCoverage = {
+        all_pms: false,
+        keys: TRACKED_KEYS.map((key) => ({ key, source: 'error' as const, version: null })),
+        default_or_error: [...TRACKED_KEYS],
+      };
+      coverageCached = { value: coverage, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
+      return coverage;
+    } finally {
+      inflightCoverage = null;
+    }
+  })();
+  return inflightCoverage;
+}
+
+/**
  * Drop the readiness cache so the next call re-probes. Used by the admin
  * reload endpoint (so post-reload `/healthz` reflects the new state) and
  * by tests that need a clean slate.
  */
 export function resetPromptsReadyCache(): void {
   cached = null;
+  coverageCached = null;
 }
 
 /** @deprecated use resetPromptsReadyCache() — kept for back-compat. */
