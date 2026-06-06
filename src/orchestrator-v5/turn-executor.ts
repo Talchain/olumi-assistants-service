@@ -97,6 +97,7 @@ import {
   hasRenderableTopDriverLabel,
 } from './routing/post-analysis-advice-gate.js';
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
+import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
 import {
@@ -2918,6 +2919,86 @@ export async function runTurnExecutor(
           );
         }
         return finalizeRun();
+      }
+
+      // V5 P0.2 — run-comparison gate (result-sense "what changed?").
+      //
+      // Runs BEFORE the state-query guard so the result-comparison sense
+      // of "what changed?" / "why did the result change?" is not shadowed
+      // by the graph-edit sense (the state-query guard's recent_changes
+      // readback). It claims the turn only when a genuine prior/current
+      // run comparison exists (>= 2 successful runs) OR the model is stale
+      // (edited after the latest run → lead with re-run guidance, never
+      // present an old comparison as the current model). Otherwise it
+      // declines and the state-query guard keeps its existing behaviour.
+      // 0 LLM calls, 0 new DB reads (reuses prior_facts + freshness).
+      if (routingResult === undefined) {
+        const runComparisonOutcome = tryRunComparisonGate({
+          message: payload.message,
+          priorFacts: context.prior_facts,
+          freshness: freshness?.freshness,
+        });
+        emit(TelemetryEvents.V5RunComparisonGate, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: runComparisonOutcome.matched,
+          mode: runComparisonOutcome.matched ? runComparisonOutcome.mode : null,
+          unmatched_reason: runComparisonOutcome.matched
+            ? null
+            : runComparisonOutcome.reason,
+          leading_option_changed: runComparisonOutcome.matched
+            ? runComparisonOutcome.leading_option_changed
+            : null,
+          freshness: freshness?.freshness ?? null,
+        });
+        if (runComparisonOutcome.matched) {
+          const runComparisonResponse = composeDirectAnswerResponse({
+            assistant_text: runComparisonOutcome.assistant_text,
+            stage: context.stage,
+            suggested_actions: [...runComparisonOutcome.suggested_actions],
+          });
+          sonnetTextForLog = runComparisonResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(runComparisonResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'run_comparison_gate',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on run-comparison gate',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
       }
 
       // V5 product-state continuity (foamy-bee tranche) — deterministic

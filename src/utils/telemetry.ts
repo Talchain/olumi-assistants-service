@@ -966,6 +966,12 @@ export const TelemetryEvents = {
   // copy + action shape. Payload: structural enums + booleans only.
   V5StaleRerunGuard: "v5.stale_rerun_guard",
 
+  // V5 P0.2 — run-comparison gate. Fires on a result-sense "what
+  // changed?" turn. Payload: structural enums + booleans only (gate
+  // mode, matched, unmatched_reason, leading_option_changed) — no
+  // option/factor labels, no copy.
+  V5RunComparisonGate: "v5.run_comparison_gate",
+
   // V5 Context Management v1 — sibling no-analysis guard. Fires when no
   // successful run_analysis fact exists AND the user is asking an
   // analytical question. Short-circuits to a deterministic direct_answer

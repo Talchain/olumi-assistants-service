@@ -190,6 +190,11 @@ export function hasIndependentMutationSignal(message: string): boolean {
  *                          made the result go this way"
  *   - `what_would_flip` — "what would flip this", "what would change
  *                          the result", "what would tip the balance"
+ *   - `what_changed`    — past-tense result comparison: "what changed",
+ *                          "why did the result change", "did the leading
+ *                          option change". Distinct from `what_would_flip`
+ *                          (future/hypothetical) and from the state-query
+ *                          guard's graph-edit sense of "what changed".
  *   - `rerun_question`  — "is this stale", "do I need to re-run", "is
  *                          this still valid", "should I rerun analysis"
  */
@@ -197,6 +202,7 @@ export type AnalyticalIntentClass =
   | 'explain'
   | 'what_drove'
   | 'what_would_flip'
+  | 'what_changed'
   | 'rerun_question';
 
 interface IntentPattern {
@@ -240,6 +246,21 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'what_would_flip', pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i },
   { cls: 'what_would_flip', pattern: /\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i },
+
+  // ── what_changed (past-tense result comparison) ──────────────────
+  // MUST precede what_drove so "why did the result change?" routes to
+  // comparison, not driver-explanation. Disjoint from what_would_flip
+  // above (future/hypothetical "what WOULD change ...") because every
+  // pattern here is anchored on past-tense "changed"/"did ... change".
+  // The bare "what changed" form is shared with the state-query guard's
+  // allowlist by design: run-comparison-gate runs first and claims it
+  // only when a genuine run comparison exists or the model is stale,
+  // otherwise the state-query guard answers the graph-edit sense.
+  { cls: 'what_changed', pattern: /\bwhat(?:'s|\s+(?:has|just))?\s+changed\b/i },
+  { cls: 'what_changed', pattern: /\bwhy\s+(?:did|has|have)\s+(?:the\s+)?(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option|numbers?)\s+chang/i },
+  { cls: 'what_changed', pattern: /\bhow\s+(?:did|has|have)\s+(?:the\s+)?(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option)\s+chang/i },
+  { cls: 'what_changed', pattern: /\bdid\s+(?:the\s+)?(?:result|outcome|ranking|leading\s+option|winner)\s+chang/i },
+  { cls: 'what_changed', pattern: /\bwhat[''']?s\s+different\s+(?:now|in\s+(?:the\s+)?(?:result|results|outcome|analysis|ranking))\b/i },
 
   // ── what_drove ───────────────────────────────────────────────────
   { cls: 'what_drove', pattern: /\bwhat\s+drove\b/i },
