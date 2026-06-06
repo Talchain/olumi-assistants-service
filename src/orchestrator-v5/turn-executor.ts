@@ -4627,6 +4627,26 @@ export async function runTurnExecutor(
             }
           : {}),
       });
+      // V5 P0.2 — resume echo. When this execute turn is a RESUMED
+      // apply_proposed_change (deterministic confirmation, e.g. "do it" /
+      // "make that update"), prepend the proposal's label so the user sees
+      // exactly which proposal is being applied — a safety net against a
+      // wrong-target most-recent-wins resume. Uses the sanctioned
+      // render-safe copy resolver, so unsafe persisted labels are swapped
+      // for the deterministic fallback (no handler-id / JSON / prop_ /
+      // internal / raw-decimal leakage in the "Applying: …" text).
+      if (
+        composedOk !== null &&
+        consumedPendingAction?.action.kind === 'apply_proposed_change'
+      ) {
+        const { label: echoLabel } = resolveProposalRenderCopy(
+          consumedPendingAction.action,
+        );
+        composedOk = {
+          ...composedOk,
+          assistant_text: `Applying: ${echoLabel}. ${composedOk.assistant_text}`,
+        };
+      }
       stagesCompleted.push('compose');
     } else if (
       routingResult.type === 'tool_call' &&

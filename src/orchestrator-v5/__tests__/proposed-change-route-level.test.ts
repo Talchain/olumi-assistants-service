@@ -40,6 +40,8 @@ import type { HandlerRegistry } from '../tools/registry.js';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
+import { buildFlipProposalEmit } from '../compose/flip-proposal.js';
+import { getDefaultRegistry } from '../tools/registry.js';
 
 const SCENARIO_ID = randomUUID();
 const PROPOSAL_ID = 'prop_aaaaaaaaaaaa';
@@ -59,6 +61,15 @@ const STRICT_GRAPH = {
   nodes: [
     { id: 'opt-a', kind: 'option', label: 'Option A' },
     { id: 'goal-g', kind: 'goal', label: 'Goal' },
+    // V5 P0.2 (Seam 1) — a factor node so set_factor_value flip
+    // proposals resolve their target-entity kind during resume
+    // validation (the validator requires the resolved node be 'factor').
+    {
+      id: 'fac-marketing',
+      kind: 'factor',
+      label: 'Marketing',
+      observed_state: { value: 0.1, raw_value: 5, cap: 50 },
+    },
   ],
   edges: [],
 };
@@ -84,6 +95,22 @@ let priorTurnsForRead: ReadonlyArray<Record<string, unknown>> = [];
 let priorFactsForRead: ReadonlyArray<Record<string, unknown>> = [];
 const appendCalls: Array<Record<string, unknown>> = [];
 const addConstraintCalls: Array<Record<string, unknown>> = [];
+const setFactorCalls: Array<Record<string, unknown>> = [];
+
+// Forbidden internal vocabulary that must never reach the "Applying: …"
+// echo / assistant text on a resumed set_factor_value flip proposal.
+const FORBIDDEN_AT_RENDER_FLIP = [
+  'apply_proposed_change',
+  'pending_actions',
+  'proposal_ref',
+  'graph_hash',
+  'set_factor_value',
+  'what_would_flip',
+  'prop_',
+  'chip_',
+  '_meta',
+  '{"',
+];
 
 function applyProposedPendingAction(
   overrides: { graphHash?: string; expiresAtIso?: string } = {},
@@ -210,8 +237,33 @@ function stubbedRegistry(): HandlerRegistry {
       llm_calls_used: 0,
     };
   };
+  // V5 P0.2 (Seam 1) — set_factor_value recording stub. Records the
+  // converted ProposalAction so tests can assert the resumed flip
+  // proposal dispatches with the EXACT numeric value (never a formatted
+  // display string). Returns a canonical set_factor_value fact shape.
+  const setFactorValueStub = async (invocation: { proposal?: unknown }) => {
+    setFactorCalls.push({ proposal: invocation.proposal });
+    return {
+      assistant_text: 'Updated Marketing.',
+      handler_facts: [
+        {
+          fact_type: 'set_factor_value' as const,
+          fact_version: 1,
+          noop: false,
+          result: {
+            target_id: 'fac-marketing',
+            status: 'applied' as const,
+            before: { value: 0.1, raw_value: 5 },
+            after: { value: 0.3, raw_value: 15 },
+          },
+        },
+      ],
+      llm_calls_used: 0,
+    };
+  };
   return new Map([
     ['add_constraint', addConstraintStub as unknown as ReturnType<HandlerRegistry['get']>],
+    ['set_factor_value', setFactorValueStub as unknown as ReturnType<HandlerRegistry['get']>],
   ]) as unknown as HandlerRegistry;
 }
 
@@ -421,7 +473,7 @@ describe('Proposed-change route-level — recovery branches commit deterministic
   });
 });
 
-describe('Proposed-change route-level — two-turn ambiguous → ordinal resolves (P0-1)', () => {
+describe('Proposed-change route-level — bare confirm with multiple proposals resumes the most recent (P0-2 most-recent-wins)', () => {
   beforeEach(() => {
     appendCalls.length = 0;
     addConstraintCalls.length = 0;
@@ -432,18 +484,26 @@ describe('Proposed-change route-level — two-turn ambiguous → ordinal resolve
     vi.clearAllMocks();
   });
 
-  it('Turn 1 ambiguous "yes" re-persists pending actions; Turn 2 "the first one" resolves without LLM', async () => {
-    const proposalA = applyProposedPendingAction();
+  it('bare "yes" with two live proposals dispatches the MOST RECENT (no clarification, no LLM) and echoes its label', async () => {
+    // V5 P0.2 — most-recent-wins replaces the prior recovery_ambiguous
+    // numbered clarification: a bare confirm against multiple live
+    // proposals resumes the most-recently-emitted one. The resume echo
+    // names the chosen proposal so a wrong-target resume stays visible.
+    // (Ordinal resolution — "the first one" — is covered separately by
+    // the deterministic-confirmations describe above.)
+    const proposalA = applyProposedPendingAction(); // EMITTED_AT_ISO, "Add the cost cap"
     const proposalB: PendingAction = {
       ...applyProposedPendingAction(),
       id: `pa-${randomUUID()}`,
       chip_id: 'prop_bbbbbbbbbbbb',
+      // Emitted AFTER proposalA → most-recent-wins selects this one.
+      emitted_at_iso: '2026-05-07T11:05:00.000Z',
       action: {
         kind: 'apply_proposed_change',
         proposal_ref: 'prop_bbbbbbbbbbbb',
         inline_patch: {
           handler_id: 'add_constraint',
-          params: { value: 200, constraint_type: 'at_most', label: 'Time cap' },
+          params: { value: 200, unit: 'GBP', constraint_type: 'at_most', label: 'Time cap' },
           target_entity_ids: ['goal-g'],
         },
         public_label: 'Add the time cap',
@@ -451,44 +511,23 @@ describe('Proposed-change route-level — two-turn ambiguous → ordinal resolve
       },
     };
 
-    // Turn 1: ambiguous "yes" → numbered clarification + re-persist.
     pendingActionsForRead = [proposalA, proposalB];
-    const adapter1 = throwingRoutingAdapter();
-    const turn1Result = await runTurnExecutor(payload('yes'), 'req-turn-1-ambiguous', {
-      routingAdapter: adapter1,
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(payload('yes'), 'req-most-recent-wins', {
+      routingAdapter: adapter,
       handlerRegistry: stubbedRegistry(),
     });
-    expect(adapter1.chatWithTools).not.toHaveBeenCalled();
-    expect(addConstraintCalls).toHaveLength(0);
-    expect(turn1Result.response.assistant_text).toContain('Which one would you like?');
-    // The crucial P0-1 check: Turn 1's commit re-persisted both
-    // proposals into pending_actions.
-    expect(appendCalls).toHaveLength(1);
-    const turn1Commit = appendCalls[0] as {
-      pending_actions?: ReadonlyArray<{ chip_id: string; action: { kind: string } }>;
-    };
-    expect(turn1Commit.pending_actions).toBeDefined();
-    expect(turn1Commit.pending_actions).toHaveLength(2);
-    expect(turn1Commit.pending_actions!.map((p) => p.chip_id).sort()).toEqual(
-      ['prop_aaaaaaaaaaaa', 'prop_bbbbbbbbbbbb'].sort(),
-    );
-
-    // Turn 2: "the first one". The mock store now returns the
-    // re-persisted list (simulating the next turn reading them back).
-    pendingActionsForRead = [proposalA, proposalB];
-    appendCalls.length = 0;
-    const adapter2 = throwingRoutingAdapter();
-    await runTurnExecutor(payload('the first one'), 'req-turn-2-ordinal', {
-      routingAdapter: adapter2,
-      handlerRegistry: stubbedRegistry(),
-    });
-    // Resolved without LLM and dispatched the FIRST proposal's handler.
-    expect(adapter2.chatWithTools).not.toHaveBeenCalled();
+    // Deterministic: no LLM, and NO numbered clarification round-trip.
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.response.assistant_text).not.toContain('Which one would you like?');
+    // Dispatched the most-recently-emitted proposal's handler exactly once.
     expect(addConstraintCalls).toHaveLength(1);
+    // Resume echo names the resumed (most-recent) proposal.
+    expect(result.response.assistant_text).toContain('Applying: Add the time cap.');
   });
 });
 
-describe('Proposed-change route-level — mixed-ambiguity preserves both follow-up paths (P0-3)', () => {
+describe('Proposed-change route-level — mixed-kind bare confirm resumes the most recent (P0-3 most-recent-wins)', () => {
   beforeEach(() => {
     appendCalls.length = 0;
     addConstraintCalls.length = 0;
@@ -499,17 +538,13 @@ describe('Proposed-change route-level — mixed-ambiguity preserves both follow-
     vi.clearAllMocks();
   });
 
-  it('mixed run_analysis + apply_proposed_change ambiguity persists BOTH pending actions on the clarification turn', async () => {
-    // The proposal carries an apply_proposed_change pending action;
-    // the same turn also has a live run_analysis pending action. A
-    // bare "yes" returns recovery_ambiguous with two candidates of
-    // mixed kinds. The clarification commit MUST persist:
-    //   - the apply_proposed_change pending action (server-only,
-    //     re-persisted explicitly)
-    //   - the run_analysis pending action (chip-derivable, derived
-    //     from the run_analysis ambiguous chip)
-    // so the user can resume EITHER path on the next turn.
-    const proposal = applyProposedPendingAction();
+  it('bare "yes" with a newer apply_proposed_change and an older run_analysis resumes the proposal (no LLM, no clarification)', async () => {
+    // V5 P0.2 — most-recent-wins spans kinds: a bare confirm resumes the
+    // most-recently-emitted resumable pending regardless of kind. Here
+    // the apply_proposed_change is newer than the run_analysis, so the
+    // proposal wins and its handler dispatches. (The prior P0-3 behaviour
+    // — emit a clarification and re-persist BOTH candidates — is retired
+    // with the recovery_ambiguous path.)
     const runAnalysis: PendingAction = {
       id: `pa-${randomUUID()}`,
       scenario_id: SCENARIO_ID,
@@ -518,34 +553,28 @@ describe('Proposed-change route-level — mixed-ambiguity preserves both follow-
       preconditions: {},
       expires_at_turn_count: 2,
       expires_at_iso: '2099-12-31T23:59:59.000Z',
-      emitted_at_iso: EMITTED_AT_ISO,
+      emitted_at_iso: '2026-05-07T11:00:00.000Z', // OLDER
     };
-    pendingActionsForRead = [proposal, runAnalysis];
+    const proposal: PendingAction = {
+      ...applyProposedPendingAction(),
+      emitted_at_iso: '2026-05-07T11:05:00.000Z', // NEWER → most-recent-wins
+    };
+    pendingActionsForRead = [runAnalysis, proposal];
 
     const adapter = throwingRoutingAdapter();
-    const result = await runTurnExecutor(payload('yes'), 'req-mixed-ambiguous', {
+    const result = await runTurnExecutor(payload('yes'), 'req-mixed-most-recent', {
       routingAdapter: adapter,
       handlerRegistry: stubbedRegistry(),
     });
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
-    expect(addConstraintCalls).toHaveLength(0);
-    expect(result.response.assistant_text).toContain('Which one would you like?');
-    // The crucial P0-3 assertion: BOTH pending actions are persisted
-    // on the clarification turn.
-    expect(appendCalls).toHaveLength(1);
-    const persisted = (
-      appendCalls[0] as {
-        pending_actions?: ReadonlyArray<{ chip_id: string; action: { kind: string } }>;
-      }
-    ).pending_actions;
-    expect(persisted).toBeDefined();
-    expect(persisted!.length).toBe(2);
-    const persistedKinds = persisted!.map((p) => p.action.kind).sort();
-    expect(persistedKinds).toEqual(['apply_proposed_change', 'run_analysis']);
+    expect(result.response.assistant_text).not.toContain('Which one would you like?');
+    // The newer proposal wins → its handler dispatches exactly once.
+    expect(addConstraintCalls).toHaveLength(1);
+    expect(result.response.assistant_text).toContain('Applying: Add the cost cap.');
   });
 });
 
-describe('Proposed-change route-level — ambiguous clarification text contains numbered labels', () => {
+describe('Proposed-change route-level — bare confirm emits NO numbered clarification (P0-2 most-recent-wins)', () => {
   beforeEach(() => {
     appendCalls.length = 0;
     addConstraintCalls.length = 0;
@@ -556,19 +585,25 @@ describe('Proposed-change route-level — ambiguous clarification text contains 
     vi.clearAllMocks();
   });
 
-  it('typed "yes" with two ambiguous proposals emits a numbered clarification listing each persisted label', async () => {
+  it('typed "yes" with two live proposals resumes the most recent WITHOUT a numbered clarification', async () => {
+    // V5 P0.2 — the numbered-clarification round-trip is retired for bare
+    // confirms; most-recent-wins resumes the latest offer directly.
+    // (Numbered clarification still fires for genuine LABEL-MATCH
+    // ambiguity — see the duplicate-label tests below — and that path's
+    // render-safe sanitisation is pinned there + at the unit level.)
     pendingActionsForRead = [
-      applyProposedPendingAction(),
+      applyProposedPendingAction(), // EMITTED_AT_ISO, "Add the cost cap"
       {
         ...applyProposedPendingAction(),
         id: `pa-${randomUUID()}`,
         chip_id: 'prop_bbbbbbbbbbbb',
+        emitted_at_iso: '2026-05-07T11:05:00.000Z', // NEWER → wins
         action: {
           kind: 'apply_proposed_change',
           proposal_ref: 'prop_bbbbbbbbbbbb',
           inline_patch: {
             handler_id: 'add_constraint',
-            params: { value: 200 },
+            params: { value: 200, unit: 'GBP', constraint_type: 'at_most', label: 'Time cap' },
             target_entity_ids: ['goal-g'],
           },
           public_label: 'Add the time cap',
@@ -577,16 +612,18 @@ describe('Proposed-change route-level — ambiguous clarification text contains 
       },
     ];
     const adapter = throwingRoutingAdapter();
-    const result = await runTurnExecutor(payload('yes'), 'req-ambiguous', {
+    const result = await runTurnExecutor(payload('yes'), 'req-no-clarification', {
       routingAdapter: adapter,
       handlerRegistry: stubbedRegistry(),
     });
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
-    expect(addConstraintCalls).toHaveLength(0);
-    // Numbered label assertion (Improvement: ambiguous-text test).
-    expect(result.response.assistant_text).toContain('1) Add the cost cap');
-    expect(result.response.assistant_text).toContain('2) Add the time cap');
-    expect(result.response.assistant_text).toContain('Which one would you like?');
+    expect(addConstraintCalls).toHaveLength(1);
+    // No numbered clarification list any more.
+    expect(result.response.assistant_text).not.toContain('1) Add the cost cap');
+    expect(result.response.assistant_text).not.toContain('2) Add the time cap');
+    expect(result.response.assistant_text).not.toContain('Which one would you like?');
+    // The most-recent proposal is echoed.
+    expect(result.response.assistant_text).toContain('Applying: Add the time cap.');
   });
 });
 
@@ -978,17 +1015,25 @@ describe('Proposed-change route-level — state-query order regression (P2-1)', 
   });
 });
 
-describe('Proposed-change route-level — render-time sanitisation of unsafe persisted copy (pass-7)', () => {
-  // Pass-7 hardening: the parser already enforces public_label /
-  // public_message presence on new emits, but legacy entries or
-  // direct DB writes could land malformed copy in the JSONB. The
-  // ambiguous-clarification render path re-sanitises and falls back
-  // to safe deterministic copy when an unsafe token is detected.
-  // These tests pin that contract end-to-end through TurnExecutor.
+describe('Proposed-change route-level — render-safe sanitisation of unsafe persisted copy on RESUME ECHO (pass-7 / V5 P0.2)', () => {
+  // V5 P0.2 update: with most-recent-wins, a bare confirm no longer
+  // produces the numbered ambiguous-clarification. The render-safe
+  // sanitisation contract is now pinned here on the RESUME ECHO path
+  // ("Applying: …"), where an unsafe persisted public_label must be
+  // swapped for the deterministic fallback before it reaches the user.
+  // Coverage of the same property elsewhere:
+  //   - Per-token label/message sanitisation: unit-tested exhaustively
+  //     in proposed-change-emit.test.ts (sanitisePublicCopyOrFallback,
+  //     every forbidden category, case-insensitive).
+  //   - Sanitisation inside the numbered clarification (LABEL-MATCH
+  //     ambiguity path, which still exists): the duplicate-label tests
+  //     in the render-vs-raw + pre-route-stack describes above/below.
+  //   - Sanitisation on the resume echo: this describe.
 
   beforeEach(() => {
     appendCalls.length = 0;
     addConstraintCalls.length = 0;
+    setFactorCalls.length = 0;
     priorTurnsForRead = [];
     priorFactsForRead = [];
   });
@@ -1010,7 +1055,7 @@ describe('Proposed-change route-level — render-time sanitisation of unsafe per
         proposal_ref: args.chipId,
         inline_patch: {
           handler_id: 'add_constraint',
-          params: { value: 100, constraint_type: 'at_most', label: 'Cost cap' },
+          params: { value: 100, unit: 'GBP', constraint_type: 'at_most', label: 'Cost cap' },
           target_entity_ids: ['goal-g'],
         },
         public_label: args.label,
@@ -1039,87 +1084,77 @@ describe('Proposed-change route-level — render-time sanitisation of unsafe per
     'invalid_type',
     'prop_',
     'chip_',
+    '_meta',
     '{"',
     '":',
   ];
 
+  // Each case is the ONLY live proposal → most-recent-wins resumes it,
+  // and the resume echo ("Applying: <label>.") must render the SANITISED
+  // label. Unsafe LABELS collapse to the deterministic fallback; an
+  // unsafe MESSAGE is never rendered on the resume turn (the echo uses
+  // the label, and the chip-replay message is consumed, not echoed), so
+  // it cannot leak either way.
   it.each([
     {
-      kind: 'handler-id leak in label only',
+      kind: 'handler-id leak in label',
       label: 'Trigger add_constraint now',
       message: 'Add the cost cap.',
-      expectLabelFallback: true,
-      expectMessageFallback: false,
+      expectEcho: 'Applying: Apply this change.',
     },
     {
-      kind: 'handler-id leak in message only',
-      label: 'Add the cost cap',
-      message: 'set_factor_value via tool',
-      expectLabelFallback: false,
-      expectMessageFallback: true,
-    },
-    {
-      kind: 'raw JSON in label only',
+      kind: 'raw JSON in label',
       label: 'See {"id":"prop_abc"}',
       message: 'Add the cost cap.',
-      expectLabelFallback: true,
-      expectMessageFallback: false,
+      expectEcho: 'Applying: Apply this change.',
     },
     {
-      kind: 'Zod jargon in message only',
-      label: 'Add the cost cap',
-      message: 'invalid_type detected by zod',
-      expectLabelFallback: false,
-      expectMessageFallback: true,
-    },
-    {
-      kind: 'internal field name in label only',
+      kind: 'internal field name in label',
       label: 'Inspect graph_hash',
       message: 'Add the cost cap.',
-      expectLabelFallback: true,
-      expectMessageFallback: false,
+      expectEcho: 'Applying: Apply this change.',
     },
     {
-      kind: 'raw prop_ prefix in label only',
+      kind: 'raw prop_ prefix in label',
       label: 'Apply prop_aaaaaaaaaaaa',
       message: 'Add the cost cap.',
-      expectLabelFallback: true,
-      expectMessageFallback: false,
+      expectEcho: 'Applying: Apply this change.',
+    },
+    {
+      kind: 'safe label but unsafe message',
+      label: 'Add the cost cap',
+      message: 'set_factor_value via tool',
+      expectEcho: 'Applying: Add the cost cap.',
     },
     {
       kind: 'unsafe BOTH label and message',
       label: 'Trigger add_constraint',
       message: 'invalid_type encountered',
-      expectLabelFallback: true,
-      expectMessageFallback: true,
+      expectEcho: 'Applying: Apply this change.',
     },
   ])(
-    '$kind: render-time sanitiser swaps unsafe persisted copy for the deterministic fallback',
-    async ({ label, message, expectLabelFallback, expectMessageFallback }) => {
+    '$kind: resume echo renders the sanitised label, no forbidden token (or raw decimal) leaks',
+    async ({ label, message, expectEcho }) => {
       pendingActionsForRead = [
-        applyProposedWithUnsafePublicCopy({
-          chipId: 'prop_aaaaaaaaaaaa',
-          label,
-          message,
-        }),
-        // Add a second SAFE proposal so the ambiguous flow is triggered.
-        applyProposedWithUnsafePublicCopy({
-          chipId: 'prop_bbbbbbbbbbbb',
-          label: 'Add the time cap',
-          message: 'Add the time cap.',
-        }),
+        applyProposedWithUnsafePublicCopy({ chipId: 'prop_aaaaaaaaaaaa', label, message }),
       ];
       const adapter = throwingRoutingAdapter();
-      const result = await runTurnExecutor(payload('yes'), 'req-render-sanitise', {
+      const result = await runTurnExecutor(payload('do it'), 'req-echo-sanitise', {
         routingAdapter: adapter,
         handlerRegistry: stubbedRegistry(),
       });
-      // recovery_ambiguous path commits clarification; no LLM call.
+      // Deterministic resume: no LLM; the single live proposal dispatched.
       expect(adapter.chatWithTools).not.toHaveBeenCalled();
-      // No forbidden token leaks into assistant_text or any chip.
+      expect(addConstraintCalls).toHaveLength(1);
+      // The "Applying: …" echo shows the SANITISED label.
+      expect(result.response.assistant_text).toContain(expectEcho);
+      // No forbidden token leaks into assistant_text, and the echo line
+      // carries no raw normalised decimal (e.g. "0.3").
       for (const token of FORBIDDEN_AT_RENDER) {
         expect(result.response.assistant_text).not.toContain(token);
       }
+      const echoLine = result.response.assistant_text.split('. ')[0];
+      expect(echoLine).not.toMatch(/\d\.\d/);
       const chips = result.response.suggested_actions ?? [];
       for (const chip of chips) {
         for (const token of FORBIDDEN_AT_RENDER) {
@@ -1127,57 +1162,159 @@ describe('Proposed-change route-level — render-time sanitisation of unsafe per
           expect(chip.message).not.toContain(token);
         }
       }
-      // The malformed-copy chip renders the deterministic fallback
-      // for whichever field was unsafe; safe fields render verbatim.
-      const malformedChip = chips.find((c) => c.id === 'prop_aaaaaaaaaaaa');
-      expect(malformedChip).toBeDefined();
-      if (expectLabelFallback) {
-        expect(malformedChip!.label).toBe('Apply this change');
-      } else {
-        expect(malformedChip!.label).toBe(label);
-      }
-      if (expectMessageFallback) {
-        expect(malformedChip!.message).toBe('Apply the proposed change');
-      } else {
-        expect(malformedChip!.message).toBe(message);
-      }
     },
   );
 
-  it('when ALL candidates have malformed copy, the assistant text falls back to the generic prompt (no numbered list)', async () => {
+  it('all-malformed: most-recent-wins resumes the latest and its unsafe label is sanitised in the echo', async () => {
+    // Two unsafe-label proposals; the NEWER wins. Its unsafe label must
+    // still collapse to the deterministic fallback in "Applying: …".
     pendingActionsForRead = [
       applyProposedWithUnsafePublicCopy({
         chipId: 'prop_aaaaaaaaaaaa',
         label: 'Trigger add_constraint',
         message: 'add_constraint via zod',
       }),
-      applyProposedWithUnsafePublicCopy({
-        chipId: 'prop_bbbbbbbbbbbb',
-        label: 'See {"raw":"json"}',
-        message: 'invalid_type encountered',
-      }),
+      {
+        ...applyProposedWithUnsafePublicCopy({
+          chipId: 'prop_bbbbbbbbbbbb',
+          label: 'See {"raw":"json"}',
+          message: 'invalid_type encountered',
+        }),
+        emitted_at_iso: '2026-05-07T11:05:00.000Z', // NEWER → wins
+      },
     ];
     const adapter = throwingRoutingAdapter();
-    const result = await runTurnExecutor(payload('yes'), 'req-render-all-malformed', {
+    const result = await runTurnExecutor(payload('do it'), 'req-echo-all-malformed', {
       routingAdapter: adapter,
       handlerRegistry: stubbedRegistry(),
     });
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
-    // Both chips render the same fallback; the assistant text falls
-    // back to the generic prompt rather than a numbered list of
-    // identical fallbacks.
-    expect(result.response.assistant_text).toBe(
-      'I had more than one offer open. Which would you like?',
-    );
+    expect(addConstraintCalls).toHaveLength(1);
+    expect(result.response.assistant_text).toContain('Applying: Apply this change.');
     for (const token of FORBIDDEN_AT_RENDER) {
       expect(result.response.assistant_text).not.toContain(token);
     }
-    const chips = result.response.suggested_actions ?? [];
-    expect(chips.length).toBe(2);
-    for (const chip of chips) {
-      expect(chip.label).toBe('Apply this change');
-      expect(chip.message).toBe('Apply the proposed change');
+  });
+});
+
+describe('Proposed-change route-level — flip set_factor_value proposal: emit → resume → execute (V5 P0.2 Seam 1)', () => {
+  // End-to-end consume half of Seam 1: a flip proposal is built by the
+  // REAL producer (buildFlipProposalEmit) from enrichment.flip_thresholds,
+  // persisted as an apply_proposed_change pending, then resumed by a bare
+  // confirm. Proves: (1) "do it" dispatches set_factor_value; (2) the
+  // handler receives the EXACT numeric user-unit value (never a formatted
+  // display string); (3) that value round-trips (15 / cap 50 === flip
+  // 0.3 — the real-normaliser round-trip is proven in flip-proposal.test);
+  // (4) the resume echo "Applying: Test Marketing at 15." is safe (no
+  // decimal, no internal tokens). The PRODUCE half (what_would_flip turn
+  // → emit) is covered by flip-proposal.test.ts + the turn-executor wiring.
+  const FLIP_FACTOR_ID = 'fac-marketing';
+  const FLIP_VALUE = 0.3;
+  const FACTOR_CAP = 50;
+
+  function buildFlipPending(): PendingAction {
+    const enrichment = {
+      flip_thresholds: [
+        {
+          factor_id: FLIP_FACTOR_ID,
+          factor_label: 'Marketing',
+          flip_value: FLIP_VALUE,
+          direction: 'increase',
+          unit: null,
+        },
+      ],
+    };
+    const emit = buildFlipProposalEmit(
+      enrichment,
+      (id) => (id === FLIP_FACTOR_ID ? { cap: FACTOR_CAP, unit: null } : undefined),
+      {
+        scenario_id: SCENARIO_ID,
+        graph_hash: GRAPH_HASH,
+        emitted_at_iso: EMITTED_AT_ISO,
+        registry: getDefaultRegistry(),
+      },
+    );
+    if (emit.status !== 'emitted') {
+      throw new Error(`expected real producer to emit, got ${emit.status}`);
     }
+    // Keep the pending live against the harness's real wall clock; the
+    // producer-computed inline_patch / public copy / preconditions are
+    // preserved exactly (only expiry is relaxed, as other fixtures do).
+    return { ...emit.pending, expires_at_iso: '2099-12-31T23:59:59.000Z' };
+  }
+
+  beforeEach(() => {
+    appendCalls.length = 0;
+    addConstraintCalls.length = 0;
+    setFactorCalls.length = 0;
+    priorTurnsForRead = [];
+    priorFactsForRead = [];
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('"do it" resumes the flip proposal → set_factor_value executes with the EXACT numeric value, echoed safely', async () => {
+    const pending = buildFlipPending();
+    // Sanity: the producer built the expected provenance-safe label and
+    // exact-numeric params (the chip the user actually saw).
+    expect(pending.action.kind).toBe('apply_proposed_change');
+    const patch = (
+      pending.action as unknown as {
+        inline_patch: { handler_id: string; params: Record<string, unknown> };
+      }
+    ).inline_patch;
+    expect(patch.handler_id).toBe('set_factor_value');
+    expect(patch.params).toEqual({ value: { value: 15, cap: FACTOR_CAP } });
+    // Round-trip: the user-unit value divided by the cap is the model
+    // flip value (real-normaliser proof lives in flip-proposal.test.ts).
+    expect(15 / FACTOR_CAP).toBe(FLIP_VALUE);
+
+    pendingActionsForRead = [pending];
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(payload('do it'), 'req-flip-resume', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+
+    // Resumed deterministically into set_factor_value (not add_constraint).
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(0);
+    expect(setFactorCalls).toHaveLength(1);
+
+    // The handler received the EXACT numeric value, NOT a formatted
+    // display string ("15"), and NOT the display label.
+    const dispatched = JSON.stringify(setFactorCalls[0].proposal);
+    expect(dispatched).toContain('"value":15');
+    expect(dispatched).toContain('"cap":50');
+    expect(dispatched).not.toContain('"value":"15"');
+    expect(dispatched).not.toContain('Test Marketing');
+
+    // The resume echo names the proposal exactly as the user saw it, with
+    // no raw decimal and no internal tokens.
+    expect(result.response.assistant_text).toContain('Applying: Test Marketing at 15.');
+    expect(result.response.assistant_text.split('. ')[0]).not.toMatch(/\d\.\d/);
+    for (const token of FORBIDDEN_AT_RENDER_FLIP) {
+      expect(result.response.assistant_text).not.toContain(token);
+    }
+  });
+
+  it('an EXPIRED flip proposal + "do it" does NOT execute set_factor_value', async () => {
+    const expired: PendingAction = {
+      ...buildFlipPending(),
+      expires_at_iso: '2024-01-01T00:00:00.000Z',
+    };
+    pendingActionsForRead = [expired];
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(payload('do it'), 'req-flip-expired', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(setFactorCalls).toHaveLength(0);
+    expect(addConstraintCalls).toHaveLength(0);
+    // No false "Applying: …" claim for a lapsed offer.
+    expect(result.response.assistant_text).not.toContain('Applying:');
   });
 });
 

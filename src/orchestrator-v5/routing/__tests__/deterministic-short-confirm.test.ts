@@ -180,21 +180,60 @@ describe('tryShortConfirmResume — dispatch', () => {
     expect(r).toEqual({ matched: false, skip_reason: 'kind_not_yet_resumable' });
   });
 
-  it('returns recovery_ambiguous (with candidates) when more than one resumable pending action is live', () => {
-    const a = makeRunAnalysisPending({ id: 'pa-1', chip_id: 'c1' });
-    const b = makeRunAnalysisPending({ id: 'pa-2', chip_id: 'c2' });
+  it('picks the MOST RECENTLY EMITTED resumable pending action when more than one is live (V5 P0.2 most-recent-wins)', () => {
+    // V5 P0.2 — deliberate behaviour change: most-recent-wins REPLACES
+    // the prior `recovery_ambiguous` clarification round-trip. A bare
+    // "yes" against multiple live resumable pendings resumes the LATEST
+    // offer rather than asking which one. The turn-executor echoes the
+    // chosen proposal's label so a wrong-target resume stays visible.
+    const older = makeRunAnalysisPending({
+      id: 'pa-1',
+      chip_id: 'c1',
+      emitted_at_iso: '2026-05-05T11:58:00.000Z',
+    });
+    const newer = makeRunAnalysisPending({
+      id: 'pa-2',
+      chip_id: 'c2',
+      emitted_at_iso: '2026-05-05T11:59:30.000Z',
+    });
     const r = tryShortConfirmResume({
       message: 'yes',
-      pendingActions: [a, b],
+      pendingActions: [older, newer],
       currentTurnIndex: 1,
       nowMs: NOW_MS,
     });
     expect(r.matched).toBe(true);
-    if (r.matched && r.dispatch === 'recovery_ambiguous') {
-      expect(r.candidates).toHaveLength(2);
-      expect(r.candidates[0]?.id).toBe('pa-1');
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-2');
     } else {
-      throw new Error(`expected recovery_ambiguous, got ${JSON.stringify(r)}`);
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('most-recent-wins is order-independent: the newest wins even when listed first', () => {
+    // Defence-in-depth: the selection must depend on emitted_at_iso, not
+    // on array position (the read-side order is not guaranteed).
+    const newer = makeRunAnalysisPending({
+      id: 'pa-new',
+      chip_id: 'c-new',
+      emitted_at_iso: '2026-05-05T11:59:30.000Z',
+    });
+    const older = makeRunAnalysisPending({
+      id: 'pa-old',
+      chip_id: 'c-old',
+      emitted_at_iso: '2026-05-05T11:58:00.000Z',
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [newer, older],
+      currentTurnIndex: 1,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-new');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
     }
   });
 
