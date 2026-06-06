@@ -220,7 +220,7 @@ describe('buildFlipProposalEmit — end-to-end emit (chip + apply_proposed_chang
     // chip <-> pending bridge + exact numeric value (not a formatted string)
     expect(res.pending.action.kind).toBe('apply_proposed_change');
     expect(res.pending.chip_id).toBe(res.chip.id);
-    const patch = (res.pending.action as { inline_patch: { handler_id: string; params: Record<string, unknown>; target_entity_ids: string[] } }).inline_patch;
+    const patch = (res.pending.action as unknown as { inline_patch: { handler_id: string; params: Record<string, unknown>; target_entity_ids: string[] } }).inline_patch;
     expect(patch.handler_id).toBe('set_factor_value');
     expect(patch.target_entity_ids).toEqual(['fac_eng']);
     expect(patch.params).toEqual({ value: { value: 20, cap: 50 } }); // exact numeric, model = 20/50 = 0.4
