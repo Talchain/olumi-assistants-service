@@ -54,6 +54,22 @@ export interface EvidenceRow {
    */
   readonly requires_branch_a?: true;
   /**
+   * Marks an evidence row as a Branch-A "pending-scenario" skip: the
+   * `4_flip_proposal_present` step (and its cascade 5-8) was recorded as
+   * `skipped` (not `failed`) because staging produced no live flip-capable
+   * result — the most-recent `run_analysis` fact carried
+   * `flip_thresholds[].flip_value` ALL null (DB-verified), so #236's
+   * deterministic producer correctly emitted no "Test X at N" proposal
+   * chip. This is NOT a harness failure: the emit reachability is enforced
+   * deterministically (with a non-null flip fixture) by
+   * `branch-a-emit-through-executor.test.ts`. Mirrors `requires_branch_a`
+   * (additive, true-only) so downstream tooling can count pending-scenario
+   * skips distinctly from cascade misses and from emit regressions (which
+   * stay `failed`). Gated behind `BRANCH_A_PENDING_SCENARIO` (default true)
+   * and only set when `--db-readback` confirms the all-null state.
+   */
+  readonly pending_scenario?: true;
+  /**
    * Redacted chip details captured per-step. Phase 2.6.4 — added to
    * support triage of staleness-signal-missing failures where the
    * signal may live in a chip's action_type / label / message rather

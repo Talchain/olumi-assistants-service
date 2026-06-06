@@ -53,6 +53,23 @@ export interface EvidenceHeader {
    */
   readonly branch_a_enforced?: boolean;
   /**
+   * Branch A pending-scenario mode observed at run time (env
+   * `BRANCH_A_PENDING_SCENARIO`, default true). When true, a step-4
+   * `branch_a_flip_proposal_chip_absent` failure that a `--db-readback`
+   * confirms is the all-null state is downgraded to a pending-scenario
+   * skip (steps 5-8 cascade as pending-scenario too). When false, that
+   * failure stays red (full enforcement). Optional for backwards-compat.
+   */
+  readonly branch_a_pending_scenario?: boolean;
+  /**
+   * Set when the `branch-a-canonical` step 4 PASSED while pending-scenario
+   * mode was enabled — i.e. staging is NOW emitting a flip-capable
+   * proposal. The renderer surfaces a prominent ACTION callout telling the
+   * operator to unset `BRANCH_A_PENDING_SCENARIO` so steps 5-8 enforce.
+   * Optional for backwards-compat.
+   */
+  readonly branch_a_flip_capable_detected?: boolean;
+  /**
    * Optional Step 1 capture surface. When present, the renderer adds a
    * "Step 1 capture" subsection to the journey block listing the
    * parsed option/factor labels, the resolved factor (with fallback
@@ -248,6 +265,38 @@ export function renderEvidencePack(
       lines.push(
         `- **Branch-A (PR #236)-pending rows:** ${branchARows.length} ` +
           '(re-gated via BRANCH_A_DISABLE)',
+      );
+    }
+  }
+  if (header.branch_a_pending_scenario !== undefined) {
+    lines.push(
+      `- **branch_a_pending_scenario:** ${
+        header.branch_a_pending_scenario
+          ? 'yes (default; BRANCH_A_PENDING_SCENARIO on — a DB-confirmed all-null flip ' +
+            'state downgrades the step-4 chip-absent failure to a pending-scenario skip)'
+          : 'no (BRANCH_A_PENDING_SCENARIO=false — chip-absent stays red; full enforcement)'
+      }`,
+    );
+    const pendingScenarioRows = rows.filter((r) => r.pending_scenario === true);
+    if (pendingScenarioRows.length > 0) {
+      lines.push(
+        `- **Branch-A pending-scenario rows:** ${pendingScenarioRows.length} ` +
+          '(skipped, NOT failed — staging has no live flip-capable result)',
+      );
+      lines.push('');
+      lines.push(
+        '> **Branch A pending-scenario:** staging has no live flip-capable result ' +
+          '(run_analysis `flip_thresholds[].flip_value` all null, DB-verified), ' +
+          'NOT a harness failure — the #236 emit is enforced deterministically by ' +
+          '`branch-a-emit-through-executor.test.ts`.',
+      );
+    }
+    if (header.branch_a_flip_capable_detected === true) {
+      lines.push('');
+      lines.push(
+        '> **ACTION: scenario is now flip-capable** — the step-4 proposal chip ' +
+          'emitted while pending-scenario mode was on. Unset ' +
+          '`BRANCH_A_PENDING_SCENARIO` to enforce steps 5-8.',
       );
     }
   }

@@ -53,7 +53,11 @@ import {
   type AssertionResult,
   type DL7AssertionContext,
 } from './assertions.js';
-import { runSetFactorValueReadback, type DbReadbackExpectation } from './db-readback.js';
+import {
+  readFlipThresholdsNullness,
+  runSetFactorValueReadback,
+  type DbReadbackExpectation,
+} from './db-readback.js';
 import {
   JOURNEY_IDS,
   JOURNEY_REGISTRY,
@@ -421,6 +425,29 @@ function isBranchAEnforced(): boolean {
 }
 
 /**
+ * Branch A pending-scenario split toggle. Default TRUE.
+ *
+ * When ON: a step-4 (`4_flip_proposal_present`) failure whose
+ * `failing_contract === 'branch_a_flip_proposal_chip_absent'` is downgraded
+ * to a pending-scenario SKIP — but ONLY when `--db-readback` confirms the
+ * scenario's most-recent `run_analysis` fact carried
+ * `flip_thresholds[].flip_value` ALL null (staging produced no live
+ * flip-capable result). Steps 5-8 then cascade as pending-scenario. A
+ * non-null flip (emit regression), an inconclusive read-back, a missing
+ * `--db-readback`, or any other step-4 failure stays RED.
+ *
+ * When OFF (`BRANCH_A_PENDING_SCENARIO=false`/`0`/`no`): chip-absent stays
+ * red — full enforcement, no downgrade.
+ *
+ * Returns true unless the env var is explicitly a falsey token; any other
+ * value (including unset) defaults to true.
+ */
+function isBranchAPendingScenario(): boolean {
+  const raw = (process.env.BRANCH_A_PENDING_SCENARIO ?? '').trim().toLowerCase();
+  return !(raw === 'false' || raw === '0' || raw === 'no');
+}
+
+/**
  * Enforce the auth fail-fast gate. Throws an Error with the exact
  * `MISSING_KEY_MESSAGE` string when the brief's condition is met. The
  * error message never contains the key (there is no key to leak here —
@@ -520,6 +547,13 @@ async function run(): Promise<void> {
     console.log(
       `  db_readback      = ${cfg.dbReadback ? 'enabled (--db-readback; staging Supabase)' : 'disabled (pass --db-readback on staging to enable)'}`,
     );
+    console.log(
+      `  pending_scenario = ${
+        isBranchAPendingScenario()
+          ? 'on (default; chip-absent + DB-confirmed all-null flips → pending-scenario skip, not red)'
+          : 'off via BRANCH_A_PENDING_SCENARIO=false (chip-absent stays red — full enforcement)'
+      }`,
+    );
   }
   console.log(`  auth             = ${cfg.apiKey ? 'enabled (key loaded from env)' : 'disabled (localhost or no key)'}`);
   console.log(
@@ -589,6 +623,19 @@ async function run(): Promise<void> {
   // direct prerequisite is in this set — this also handles transitive
   // dependencies because a skipped step adds itself to the set.
   const notPassed = new Set<string>();
+  // Branch A pending-scenario split state.
+  //   - `pendingScenarioMode`   — the BRANCH_A_PENDING_SCENARIO toggle.
+  //   - `flipCapableDetected`   — flips true if step 4 PASSES while the
+  //                               toggle is on (staging is now flip-capable
+  //                               → the evidence pack flags the operator to
+  //                               unset the toggle and enforce steps 5-8).
+  //   - `pendingScenarioSteps`  — steps recorded as a pending-scenario skip
+  //                               (step 4 + the 5-8 cascade). Distinct from
+  //                               the generic cascade so the cascade block
+  //                               can label dependents accurately.
+  const pendingScenarioMode = isBranchAPendingScenario();
+  let flipCapableDetected = false;
+  const pendingScenarioSteps = new Set<string>();
   // Threaded out of the per-journey block so buildEvidenceHeader can
   // surface Step 1 captures (option/factor labels, graph hash,
   // resolved factor + fallback reason) into the evidence pack.
@@ -684,6 +731,28 @@ async function run(): Promise<void> {
       }
 
       if (step.depends_on && notPassed.has(step.depends_on)) {
+        // Pending-scenario-aware cascade: when the prerequisite was itself
+        // downgraded to a pending-scenario skip (step 4 chip-absent +
+        // DB-confirmed all-null flips), this dependent is NOT a regression
+        // either — propagate the pending-scenario marker so the evidence
+        // pack counts it as a pending-scenario skip rather than a generic
+        // prerequisite miss. Otherwise fall back to the generic skip.
+        if (pendingScenarioSteps.has(step.depends_on)) {
+          rows.push({
+            step: step.name,
+            status: 'skipped',
+            evidence:
+              `pending-scenario (cascaded from ${step.depends_on}): no live flip-capable result`,
+            outcome_class: 'skipped',
+            journey_id: cfg.journey,
+            pending_scenario: true,
+            requires_branch_a: true,
+          });
+          console.log(`[PENDING-SCENARIO] ${step.name} (cascaded from ${step.depends_on})`);
+          pendingScenarioSteps.add(step.name);
+          notPassed.add(step.name);
+          continue;
+        }
         rows.push({
           step: step.name,
           status: 'skipped',
@@ -713,6 +782,97 @@ async function run(): Promise<void> {
                 evidence:
                   'the what_would_flip turn was not captured, so the proposal chip cannot be inspected',
               };
+
+        if (assertion.ok) {
+          // Proposal emitted. If pending-scenario mode is on, staging is now
+          // flip-capable — record the row and flag the operator to unset
+          // BRANCH_A_PENDING_SCENARIO so steps 5-8 enforce.
+          pushBranchARow(step.name, assertion);
+          if (pendingScenarioMode) flipCapableDetected = true;
+          continue;
+        }
+
+        // Step-4 failure. ONLY the chip-absent failure is eligible for the
+        // pending-scenario downgrade, and ONLY when pending-scenario mode is
+        // on AND a DB read-back is available to distinguish the all-null
+        // pending-scenario from an emit regression. Every other failure
+        // (no value / non-whole value / no captured response) stays red.
+        if (
+          assertion.failing_contract === 'branch_a_flip_proposal_chip_absent' &&
+          pendingScenarioMode &&
+          cfg.dbReadback
+        ) {
+          const rb = await readFlipThresholdsNullness(scenarioId, { secret: cfg.apiKey });
+          if (rb.status === 'all_null') {
+            // Pending-scenario: staging produced no live flip-capable
+            // result. Downgrade to a skip (not a failure) and cascade
+            // steps 5-8 as pending-scenario.
+            rows.push({
+              step: step.name,
+              status: 'skipped',
+              evidence: redactString(
+                'pending-scenario: staging produced no live flip-capable result — ' +
+                  'run_analysis flip_thresholds[].flip_value all null (DB-verified). ' +
+                  'Not a harness failure; emit reachability is enforced deterministically ' +
+                  `by branch-a-emit-through-executor.test.ts. (${rb.detail})`,
+                cfg.apiKey,
+              ),
+              outcome_class: 'skipped',
+              journey_id: cfg.journey,
+              pending_scenario: true,
+              requires_branch_a: true,
+            });
+            console.log(
+              `[PENDING-SCENARIO] ${step.name}: flip_thresholds[].flip_value all null (DB-verified) — not a regression`,
+            );
+            notPassed.add(step.name);
+            pendingScenarioSteps.add(step.name);
+            continue;
+          }
+          // Any non-all_null status → RED. A non-null flip means the chip
+          // SHOULD have emitted (emit regression); no_facts/empty/error
+          // means we cannot confirm → fail-safe to red.
+          const why =
+            rb.status === 'has_non_null'
+              ? 'emit regression — a non-null flip_value existed but no proposal chip emitted'
+              : `cannot confirm pending-scenario (db read-back status=${rb.status}) — failing safe`;
+          rows.push({
+            step: step.name,
+            status: 'failed',
+            evidence: redactString(
+              `${assertion.evidence} | ${why} (db read-back: ${rb.status}: ${rb.detail})`,
+              cfg.apiKey,
+            ),
+            failing_contract: redactString(assertion.failing_contract, cfg.apiKey),
+            outcome_class: 'v5-runtime',
+            journey_id: cfg.journey,
+          });
+          console.log(
+            `[FAIL] ${step.name}: ${redact(assertion.failing_contract)} | ${why} (db: ${rb.status})`,
+          );
+          notPassed.add(step.name);
+          continue;
+        }
+
+        // Not eligible for the downgrade. Push the normal red row. When the
+        // failure is chip-absent under pending-scenario mode but no
+        // --db-readback was supplied, augment the evidence so the operator
+        // knows how to distinguish a pending-scenario from a regression.
+        if (
+          assertion.failing_contract === 'branch_a_flip_proposal_chip_absent' &&
+          pendingScenarioMode &&
+          !cfg.dbReadback
+        ) {
+          const augmented: AssertionResult = {
+            ok: false,
+            failing_contract: assertion.failing_contract,
+            evidence:
+              `${assertion.evidence} pass --db-readback to distinguish pending-scenario ` +
+              '(run_analysis flip_thresholds[].flip_value all null) from an emit regression.',
+          };
+          pushBranchARow(step.name, augmented);
+          continue;
+        }
         pushBranchARow(step.name, assertion);
         continue;
       }
@@ -895,6 +1055,7 @@ async function run(): Promise<void> {
     healthz.result,
     { status: preflight.status, note: preflight.note },
     step1Capture,
+    flipCapableDetected,
   );
 
   writeEvidencePack(cfg.outPath, header, rows, redact);
@@ -914,6 +1075,7 @@ function buildEvidenceHeader(
   healthz: HealthzResult | undefined,
   preflight: { readonly status: number; readonly note: string },
   step1Capture?: Step1Capture,
+  flipCapableDetected: boolean = false,
 ): EvidenceHeader {
   return {
     branch: safeGit('git rev-parse --abbrev-ref HEAD'),
@@ -929,6 +1091,8 @@ function buildEvidenceHeader(
     journey: cfg.journey,
     dl7_pr_b_landed: isDL7PrBLanded(),
     branch_a_enforced: isBranchAEnforced(),
+    branch_a_pending_scenario: isBranchAPendingScenario(),
+    branch_a_flip_capable_detected: flipCapableDetected,
     step1_capture: step1Capture,
   };
 }

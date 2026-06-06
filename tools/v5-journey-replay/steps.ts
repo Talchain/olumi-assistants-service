@@ -681,7 +681,16 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
     name: '4_flip_proposal_present',
     description:
       'assert the what_would_flip response carried a "Test X at N" set_factor_value ' +
-      'proposal chip whose N is an exact whole user-scale value.',
+      'proposal chip whose N is an exact whole user-scale value. ' +
+      'Pending-scenario split (BRANCH_A_PENDING_SCENARIO, default on): if the chip is ' +
+      'absent (branch_a_flip_proposal_chip_absent) AND a --db-readback confirms the ' +
+      "scenario's most-recent run_analysis fact carried flip_thresholds[].flip_value ALL " +
+      'null, this step is a pending-scenario SKIP (staging produced no live flip-capable ' +
+      'result — not a regression; emit reachability is enforced deterministically by ' +
+      'branch-a-emit-through-executor.test.ts) and steps 5-8 cascade as pending-scenario. ' +
+      'A chip-absent failure where the DB read-back shows a NON-null flip_value (emit ' +
+      'regression), an inconclusive read-back (no_facts/empty/error), no --db-readback, ' +
+      'or any other step-4 failure (no value / non-whole value) stays RED.',
     depends_on: '3_what_would_flip',
     requires_branch_a: true,
     assert_only: true,

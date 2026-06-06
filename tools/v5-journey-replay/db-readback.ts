@@ -293,3 +293,172 @@ export async function runSetFactorValueReadback(
     };
   }
 }
+
+// ===========================================================================
+// Branch A pending-scenario split — flip-thresholds nullness read-back.
+//
+// The `branch-a-canonical` step 4 (`4_flip_proposal_present`) fails with
+// `branch_a_flip_proposal_chip_absent` when no "Test X at N" proposal chip
+// is emitted. That is AMBIGUOUS on its own: it can mean either
+//   (a) staging produced no flip-capable result — PLoT returned
+//       `flip_thresholds[].flip_value` all null, so #236's producer
+//       correctly emitted nothing (a pending-scenario, NOT a regression); or
+//   (b) a real emit regression — PLoT produced a non-null flip_value but
+//       the proposal chip failed to surface on the wire.
+//
+// To distinguish (a) from (b) without weakening the assertion, the harness
+// reads the scenario's most-recent persisted `run_analysis` fact back from
+// staging Supabase and inspects `payload.result.enrichment.flip_thresholds`.
+// The emit reachability itself is enforced deterministically (with a
+// non-null flip fixture) by `branch-a-emit-through-executor.test.ts`; this
+// read-back only classifies the LIVE staging input.
+// ===========================================================================
+
+/**
+ * Pure classifier for the nullness of a `flip_thresholds[]` array (as read
+ * from a persisted `run_analysis` fact's `result.enrichment`).
+ *
+ *   - not an array, or empty array → `'empty'` (no flip evidence either way)
+ *   - any entry whose `flip_value` is a FINITE number → `'has_non_null'`
+ *     (a flip existed; if the chip is absent that is an emit regression)
+ *   - entries exist but NONE carries a finite `flip_value` → `'all_null'`
+ *     (staging produced no flip-capable result — the pending-scenario case)
+ *
+ * `flip_value` is read defensively (entries may be non-objects); only a
+ * `typeof === 'number' && Number.isFinite` value counts as non-null, so a
+ * `null`/`undefined`/string `flip_value` is treated as "no flip".
+ */
+export function classifyFlipThresholdsNullness(
+  flipThresholds: unknown,
+): 'all_null' | 'has_non_null' | 'empty' {
+  if (!Array.isArray(flipThresholds) || flipThresholds.length === 0) {
+    return 'empty';
+  }
+  let sawEntry = false;
+  for (const entry of flipThresholds) {
+    sawEntry = true;
+    if (!isPlainObject(entry)) continue;
+    const flip = entry.flip_value;
+    if (typeof flip === 'number' && Number.isFinite(flip)) {
+      return 'has_non_null';
+    }
+  }
+  // Array had entries but none carried a finite flip_value.
+  return sawEntry ? 'all_null' : 'empty';
+}
+
+/**
+ * Live staging read-back of the scenario's most-recent `run_analysis`
+ * fact's `flip_thresholds[]` nullness. Mirrors
+ * `runSetFactorValueReadback`'s credential handling, lazy supabase-js
+ * import, and service-role-key redaction.
+ *
+ * Returns a coarse status the harness uses to split the
+ * `branch_a_flip_proposal_chip_absent` step-4 failure:
+ *   - `'all_null'`     — most-recent run_analysis fact carried
+ *                        `flip_thresholds[].flip_value` all null → the
+ *                        pending-scenario case (chip-absent is expected).
+ *   - `'has_non_null'` — a finite flip_value existed → chip-absent is an
+ *                        emit regression (do NOT mask).
+ *   - `'empty'`        — `flip_thresholds` absent or `[]` → cannot confirm a
+ *                        flip-capable result; fail-safe to red.
+ *   - `'no_facts'`     — no `run_analysis` fact for the scenario → cannot
+ *                        confirm; fail-safe to red.
+ *   - `'error'`        — missing creds / query error / exception → cannot
+ *                        confirm; fail-safe to red.
+ *
+ * The service-role key is NEVER echoed in `detail`.
+ */
+export async function readFlipThresholdsNullness(
+  scenarioId: string,
+  opts?: { readonly secret?: string },
+): Promise<{
+  status: 'all_null' | 'has_non_null' | 'empty' | 'no_facts' | 'error';
+  detail: string;
+}> {
+  const url = (process.env.SUPABASE_URL ?? '').trim();
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
+  // Redact both the service-role key and the (optional) replay API key from
+  // any surfaced detail string — defence-in-depth, identical to the
+  // set_factor_value read-back wrapper.
+  const scrub = (s: string): string =>
+    redactString(redactString(s, serviceRoleKey), opts?.secret);
+
+  if (url.length === 0 || serviceRoleKey.length === 0) {
+    return {
+      status: 'error',
+      detail:
+        'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set for --db-readback ' +
+        '(see .env.staging.local). Neither value is echoed.',
+    };
+  }
+
+  let client: SupabaseClient;
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    client = createClient(url, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  } catch (err) {
+    return {
+      status: 'error',
+      detail: `client init failed: ${scrub(err instanceof Error ? err.message : String(err))}`,
+    };
+  }
+
+  try {
+    const turns = await client
+      .from('v5_conversation_turns')
+      .select('id')
+      .eq('scenario_id', scenarioId);
+    if (turns.error) {
+      return { status: 'error', detail: `turns query failed: ${scrub(turns.error.message)}` };
+    }
+    const turnIds = (turns.data ?? [])
+      .map((r) => (r as { id?: unknown }).id)
+      .filter((id): id is string => typeof id === 'string');
+    if (turnIds.length === 0) {
+      return {
+        status: 'no_facts',
+        detail: `no v5_conversation_turns rows for scenario ${scenarioId}`,
+      };
+    }
+
+    const facts = await client
+      .from('v5_handler_facts')
+      .select('payload, created_at')
+      .in('v5_conversation_turn_id', turnIds)
+      .eq('action_type', 'run_analysis')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (facts.error) {
+      return { status: 'error', detail: `facts query failed: ${scrub(facts.error.message)}` };
+    }
+    const rows = facts.data ?? [];
+    if (rows.length === 0) {
+      return {
+        status: 'no_facts',
+        detail: `no run_analysis fact for scenario ${scenarioId}`,
+      };
+    }
+
+    const payload = isPlainObject((rows[0] as { payload?: unknown }).payload)
+      ? ((rows[0] as { payload?: Record<string, unknown> }).payload as Record<string, unknown>)
+      : {};
+    const result = isPlainObject(payload.result) ? payload.result : {};
+    const enrichment = isPlainObject(result.enrichment) ? result.enrichment : {};
+    const flipThresholds = (enrichment as Record<string, unknown>).flip_thresholds;
+    const classification = classifyFlipThresholdsNullness(flipThresholds);
+
+    const count = Array.isArray(flipThresholds) ? flipThresholds.length : 0;
+    return {
+      status: classification,
+      detail: `run_analysis fact flip_thresholds classification=${classification} (entries=${count})`,
+    };
+  } catch (err) {
+    return {
+      status: 'error',
+      detail: `query exception: ${scrub(err instanceof Error ? err.message : String(err))}`,
+    };
+  }
+}
