@@ -324,6 +324,9 @@ export function tryShortConfirmResume(
   // wrong-target resume stays visible. Graph-hash divergence, idempotency
   // and stale-proposal recovery remain enforced downstream by
   // `decideProposedChangeSynthesis` before any mutation is applied.
+  // Tie-break: equal `emitted_at_iso` resolves to the first in input
+  // order (Array.prototype.sort is stable) — deterministic, and the
+  // read side already places the freshest proposal first.
   const pending =
     resumable.length === 1
       ? resumable[0]!

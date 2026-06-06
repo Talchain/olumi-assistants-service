@@ -1500,6 +1500,15 @@ export async function runTurnExecutor(
         }
         return finalizeRun();
       } else if (shortConfirmDispatch.dispatch === 'recovery_ambiguous') {
+        // UNREACHABLE since V5 P0.2 most-recent-wins (commit 9aa6e2f5):
+        // `tryShortConfirmResume` no longer returns `recovery_ambiguous`
+        // — a bare confirm with >1 live resumable now resumes the most
+        // recent. Retained (compiles, dead) pending a dedicated cleanup
+        // PR that also drops the union member + `multiple_ambiguous`
+        // skip-reason. NOTE: the numbered-clarification UX for genuine
+        // LABEL-MATCH collisions is unaffected — that path emits
+        // `PendingActionRecoveryAmbiguous` + its own clarification
+        // independently (see the label-pick `ambiguous` branch below).
         emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
           request_id: requestId,
           scenario_id: context.session_id,
@@ -4628,23 +4637,34 @@ export async function runTurnExecutor(
           : {}),
       });
       // V5 P0.2 — resume echo. When this execute turn is a RESUMED
-      // apply_proposed_change (deterministic confirmation, e.g. "do it" /
-      // "make that update"), prepend the proposal's label so the user sees
-      // exactly which proposal is being applied — a safety net against a
-      // wrong-target most-recent-wins resume. Uses the sanctioned
-      // render-safe copy resolver, so unsafe persisted labels are swapped
-      // for the deterministic fallback (no handler-id / JSON / prop_ /
-      // internal / raw-decimal leakage in the "Applying: …" text).
-      if (
-        composedOk !== null &&
-        consumedPendingAction?.action.kind === 'apply_proposed_change'
-      ) {
-        const { label: echoLabel } = resolveProposalRenderCopy(
-          consumedPendingAction.action,
+      // apply_proposed_change that ACTUALLY applied a change, prepend the
+      // proposal's label so the user sees exactly which proposal is being
+      // applied — a safety net against a wrong-target most-recent-wins
+      // resume. Uses the sanctioned render-safe copy resolver, so unsafe
+      // persisted labels are swapped for the deterministic fallback (no
+      // handler-id / JSON / prop_ / internal / raw-decimal leakage in the
+      // "Applying: …" text). GATED on a non-noop mutation fact (mirrors the
+      // canonical mutation-fact predicate used for `priorMutationFactCount`
+      // above): a "set X to its current value" resume returns a successful
+      // outcome with `noop: true`, and must NOT narrate "Applying:" when
+      // nothing changed — honouring "narration must follow persisted state".
+      const resumeAppliedRealMutation =
+        consumedPendingAction?.action.kind === 'apply_proposed_change' &&
+        (handlerOutcome?.handler_facts ?? []).some(
+          (f) =>
+            !f.noop &&
+            (f.fact_type === 'add_constraint' ||
+              f.fact_type === 'set_factor_value' ||
+              f.fact_type === 'adjust_edge_strength'),
         );
+      if (composedOk !== null && resumeAppliedRealMutation) {
+        const { label: echoLabel } = resolveProposalRenderCopy(
+          consumedPendingAction!.action,
+        );
+        const rest = composedOk.assistant_text ? ` ${composedOk.assistant_text}` : '';
         composedOk = {
           ...composedOk,
-          assistant_text: `Applying: ${echoLabel}. ${composedOk.assistant_text}`,
+          assistant_text: `Applying: ${echoLabel}.${rest}`,
         };
       }
       stagesCompleted.push('compose');

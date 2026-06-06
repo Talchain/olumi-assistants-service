@@ -1265,10 +1265,11 @@ describe('Proposed-change route-level — flip set_factor_value proposal: emit �
       }
     ).inline_patch;
     expect(patch.handler_id).toBe('set_factor_value');
+    // Exact numeric user-unit value 15 with cap 50 → model 15/50 = 0.3 ===
+    // FLIP_VALUE. The round-trip through the REAL normaliser is proven in
+    // compose/__tests__/flip-proposal.test.ts (normalise(invert(flip)) ===
+    // flip); here we pin only that the producer emitted the exact numeric.
     expect(patch.params).toEqual({ value: { value: 15, cap: FACTOR_CAP } });
-    // Round-trip: the user-unit value divided by the cap is the model
-    // flip value (real-normaliser proof lives in flip-proposal.test.ts).
-    expect(15 / FACTOR_CAP).toBe(FLIP_VALUE);
 
     pendingActionsForRead = [pending];
     const adapter = throwingRoutingAdapter();
@@ -1314,6 +1315,49 @@ describe('Proposed-change route-level — flip set_factor_value proposal: emit �
     expect(setFactorCalls).toHaveLength(0);
     expect(addConstraintCalls).toHaveLength(0);
     // No false "Applying: …" claim for a lapsed offer.
+    expect(result.response.assistant_text).not.toContain('Applying:');
+  });
+
+  it('a NO-OP apply (proposed value == current) dispatches but does NOT narrate "Applying:"', async () => {
+    // The handler succeeds with noop:true. The echo is gated on a non-noop
+    // mutation fact, so it must stay silent — narration must follow
+    // persisted state (never claim "Applying:" when nothing changed).
+    const noopRegistry = new Map([
+      [
+        'set_factor_value',
+        (async (invocation: { proposal?: unknown }) => {
+          setFactorCalls.push({ proposal: invocation.proposal });
+          return {
+            assistant_text: 'No change — Marketing is already at that value.',
+            handler_facts: [
+              {
+                fact_type: 'set_factor_value' as const,
+                fact_version: 1,
+                noop: true,
+                result: {
+                  target_id: 'fac-marketing',
+                  status: 'noop' as const,
+                  before: { value: 0.3, raw_value: 15 },
+                  after: { value: 0.3, raw_value: 15 },
+                },
+              },
+            ],
+            llm_calls_used: 0,
+          };
+        }) as unknown as ReturnType<HandlerRegistry['get']>,
+      ],
+    ]) as unknown as HandlerRegistry;
+
+    pendingActionsForRead = [buildFlipPending()];
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(payload('do it'), 'req-flip-noop', {
+      routingAdapter: adapter,
+      handlerRegistry: noopRegistry,
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    // The handler still ran (the resume dispatched)…
+    expect(setFactorCalls).toHaveLength(1);
+    // …but no "Applying:" claim, because nothing changed.
     expect(result.response.assistant_text).not.toContain('Applying:');
   });
 });
