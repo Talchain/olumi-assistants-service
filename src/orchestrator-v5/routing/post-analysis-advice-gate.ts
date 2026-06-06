@@ -59,12 +59,15 @@ import {
 import { formatSensitivityDirection } from '../format/sensitivity-phrases.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import {
+  closenessLead,
   describeRobustnessBand,
   isNearTieByMargin,
   isRawFragile,
   nearTieReasonByMargin,
+  quoteLabel,
   type RawRobustnessSignals,
 } from '../coaching/robustness-honesty.js';
+import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -1075,6 +1078,19 @@ function describeCopySource(
     } else {
       copy_source = 'analysis_projection';
     }
+  } else if (cls === 'what_would_flip_free_text') {
+    // Mirror the composer precedence: a named flip threshold (decision_review)
+    // → the fragile edge it points at → the top driver → bare projection.
+    if (deriveFlipStatus(input.decisionReview).kind === 'flip_found') {
+      copy_source = 'decision_review';
+      fields.push('decision_review');
+    } else if (renderableFragileEdges(a).length > 0) {
+      copy_source = 'fragile_edges';
+    } else if (hasRenderableTopDriver(a)) {
+      copy_source = 'top_drivers';
+    } else {
+      copy_source = 'analysis_projection';
+    }
   } else {
     copy_source = 'analysis_projection';
   }
@@ -1151,6 +1167,7 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
         input.leadingLabel,
         input.analysis,
         input.rawRobustness,
+        input.decisionReview,
       );
   }
 }
@@ -1551,99 +1568,161 @@ function composeExplainResults(
   return lead;
 }
 
+/**
+ * Reliable flip signal for the what-would-flip composer.
+ *
+ * `'flip_found'` is the ONLY reliable verdict we can read: a non-empty
+ * `decision_review.flip_thresholds` means the review surfaced at least one
+ * single-factor threshold. We never infer "no flip exists" from an empty /
+ * absent array — empty conflates "no flip in range" with "flip not computed"
+ * (`factor_sensitivity[].flip_threshold` is number-or-absent; the prompt emits
+ * `[]` for both cases). So everything else collapses to `'unknown'` and the
+ * composer stays honest-by-default (no flip claim either way).
+ *
+ * A factor is only named when its label is a clean DISPLAY label
+ * ({@link isCleanFactorLabel}) — the raw `factor_label` on the review payload
+ * is not guaranteed canonical, so an ID-shaped / blank label downgrades to
+ * `'unknown'` (omit the sentence) rather than risk leaking a token.
+ */
+type FlipStatus =
+  | { readonly kind: 'flip_found'; readonly factor_label: string }
+  | { readonly kind: 'unknown' };
+
+function isCleanFactorLabel(label: unknown): label is string {
+  if (typeof label !== 'string') return false;
+  const trimmed = label.trim();
+  if (trimmed.length === 0) return false;
+  if (!/[a-z]/i.test(trimmed)) return false; // must carry an actual word
+  if (isSlugShapedEntityId(trimmed)) return false; // reject ID-shaped tokens
+  return true;
+}
+
+function deriveFlipStatus(
+  decisionReview: Record<string, unknown> | undefined,
+): FlipStatus {
+  if (decisionReview == null) return { kind: 'unknown' };
+  const thresholds = decisionReview['flip_thresholds'];
+  if (!Array.isArray(thresholds) || thresholds.length === 0) {
+    return { kind: 'unknown' };
+  }
+  for (const raw of thresholds) {
+    const entry = readRecord(raw);
+    if (entry === null) continue;
+    const label = entry['factor_label'];
+    if (isCleanFactorLabel(label)) {
+      return { kind: 'flip_found', factor_label: label.trim() };
+    }
+  }
+  // Non-empty but no clean/safe label to name → omit the flip sentence.
+  return { kind: 'unknown' };
+}
+
 function composeWhatWouldFlip(
   leadingLabel: string,
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
+  decisionReview: Record<string, unknown> | undefined,
 ): string {
   // Top driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
-  // margin, robustness and per-driver sensitivity are optional and
-  // degrade gracefully. Numerics pass-through only — F.6 invariant.
+  // margin, robustness and fragile edges are optional and degrade
+  // gracefully. Numerics pass-through only — F.6 invariant.
   //
-  // Near-tie + fragile handling: on a near-tie / raw-fragile result,
-  // suppress "smaller changes are unlikely to flip the outcome on their
-  // own" (a stability claim) and reframe the lead sentence so the user
-  // is not told a near-zero gap "would need to close". The reframe copy
-  // is generic ("effectively tied … could flip with small changes") so
-  // it is numerically true regardless of whether margin or raw override
-  // drove the verdict.
-  const nearTie = isNearTie(analysis, rawRobustness);
+  // Copy shape: (1) closeness/standing → (2) the specific fragile assumption
+  // worth checking → (3) an optional, provenance-safe flip-threshold pointer →
+  // (4) exactly ONE consolidated caveat → (5) a re-run nudge that never
+  // implies a single change flips the result.
+  const tieReason = nearTieReason(analysis, rawRobustness);
+  const nearTie = tieReason !== null;
   const rawFragile = isRawFragile(rawRobustness);
-  const driverA = analysis.top_drivers[0];
-  const driverB = analysis.top_drivers[1];
+  // A canonicalised 'fragile' band is itself the upstream's fragility verdict
+  // even when the raw signal is absent on older facts.
+  const fragileSignal = nearTie || rawFragile || analysis.robustness_band === 'fragile';
   const runnerLabel = analysis.runner_up?.label;
   const margin = marginPpString(analysis.margin_pp);
+  const topEdge = renderableFragileEdges(analysis)[0];
+  const driverA = analysis.top_drivers[0];
+  const flip = deriveFlipStatus(decisionReview);
   const sentences: string[] = [];
-  if (nearTie && runnerLabel) {
-    sentences.push(
-      `${leadingLabel} and ${runnerLabel} are effectively tied, so the outcome could flip with small changes.`,
-    );
+
+  // 1. Closeness / standing — lead with closeness on a near-tie, otherwise a
+  //    quoted clear-lead opener. Option labels are quoted so "and"-containing
+  //    labels stay readable.
+  const closeness = closenessLead({
+    leadingLabel,
+    runnerLabel,
+    tieReason,
+    marginPp: analysis.margin_pp,
+  });
+  if (closeness !== null) {
+    sentences.push(closeness);
   } else {
     sentences.push(
-      `Based on this model, ${leadingLabel} currently appears to be the favoured option${probabilityFragment(analysis.leading_option?.probability)}.`,
+      `Based on this model, ${quoteLabel(leadingLabel)} currently leads${probabilityFragment(analysis.leading_option?.probability)}.`,
     );
     if (runnerLabel && margin) {
       sentences.push(
-        `For ${runnerLabel} to overtake it, the lead of ${margin} would need to close.`,
+        `For ${quoteLabel(runnerLabel)} to overtake it, the lead of ${margin} would need to close.`,
       );
     } else if (runnerLabel) {
       sentences.push(
-        `${runnerLabel} is the most likely contender to overtake it.`,
+        `${quoteLabel(runnerLabel)} is the most likely contender to overtake it.`,
       );
     }
   }
-  if (driverA && driverB) {
-    // 2-driver branch: name both as the highest-leverage levers; the per-
-    // driver sensitivity-direction clauses are appended individually so
-    // a missing sensitivity_value drops cleanly rather than rendering
-    // "has little effect on the lead" when the value is unknown.
-    const directionA = driverDirectionFragment(driverA);
-    const directionB = driverDirectionFragment(driverB);
-    const directionSentence =
-      directionA && directionB
-        ? ` Today ${driverA.factor_label}${directionA}; ${driverB.factor_label}${directionB}.`
-        : directionA
-          ? ` Today ${driverA.factor_label}${directionA}.`
-          : directionB
-            ? ` Today ${driverB.factor_label}${directionB}.`
-            : '';
+
+  // 2. Name the specific fragile assumption when evidence exists. No
+  //    direction/sign claim — `fragile_edges` carries none, so this stays
+  //    direction-honest by construction. Falls back to the single most
+  //    influential factor (top driver is guaranteed by CLASS_REQUIREMENTS)
+  //    with NO flip claim when no fragile edge is available.
+  if (topEdge) {
     sentences.push(
-      `Movement on ${driverA.factor_label} or ${driverB.factor_label} would shift this result the most.${directionSentence}`,
+      `The most useful thing to check is the link from ${quoteLabel(topEdge.from_label)} to ${quoteLabel(topEdge.to_label)}: whether it holds as strongly as the model currently assumes.`,
     );
   } else if (driverA) {
-    // Single-driver branch keeps "the factor most likely to flip" phrasing
-    // so the existing `most\s+(likely|sensitive)` regression test stays green.
     sentences.push(
-      `The factor most likely to flip the analysis is ${driverA.factor_label}${driverDirectionFragment(driverA)}.`,
+      `The factor with the most influence on the result is ${quoteLabel(driverA.factor_label)}.`,
     );
   }
-  if (nearTie || rawFragile) {
+
+  // 3. Optional, provenance-safe flip-threshold pointer — only when the review
+  //    surfaced a named single-factor threshold with a clean label. We never
+  //    assert the result WILL change; we point at a signal to inspect.
+  if (flip.kind === 'flip_found') {
     sentences.push(
-      'The picture appears fragile, so even small adjustments could flip the leading option.',
+      `One threshold signal to inspect is ${quoteLabel(flip.factor_label)}.`,
+    );
+  }
+
+  // 4. Exactly one consolidated caveat. The if/else-if makes stacking
+  //    structurally impossible: a fragile/near-tie result gets the single
+  //    "provisional" caveat; an otherwise-stable result gets the stability
+  //    reassurance; moderate / unknown bands get nothing.
+  if (fragileSignal) {
+    sentences.push(
+      topEdge
+        ? 'Treat the lead as provisional until that assumption is strengthened.'
+        : 'Treat the lead as provisional until the key assumptions are checked.',
     );
   } else {
-    // Plain-language stability copy sourced from the SSOT describeRobustnessBand.
-    // Bind once and omit the sentence if it is unexpectedly null, rather than
-    // masking an SSOT regression with a hardcoded fallback; only the reassurance
-    // tail varies. Fragile / unknown bands produce no sentence here.
     const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
-    if (stabilityPhrase !== null) {
-      if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
-        sentences.push(
-          `This result looks ${stabilityPhrase}, so smaller changes are unlikely to flip the outcome on their own.`,
-        );
-      } else if (analysis.robustness_band === 'moderate') {
-        sentences.push(
-          `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
-        );
-      }
+    if (
+      stabilityPhrase !== null
+      && (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable')
+    ) {
+      sentences.push(
+        `This result looks ${stabilityPhrase}, so smaller changes are unlikely to change which option leads.`,
+      );
     }
   }
-  // Readability sectioning: lead paragraph (opener + margin/runner-up +
-  // drivers + robustness) joined with spaces, then the closing
-  // try-and-rerun nudge as a `What to check next` bullet on its own
-  // line. The closing sentence phrase is unchanged so existing
-  // `.toContain` assertions keep matching.
+
+  // 5. Re-run nudge — reframed so it never implies a single change flips the
+  //    result. Points at strengthening the named link when fragile, otherwise
+  //    a neutral re-run prompt.
   const lead = sentences.join(' ');
-  return `${lead}\n\nWhat to check next\n• Try changing its value or strength and re-running to see where the leading option moves.`;
+  const nextStep =
+    fragileSignal && topEdge
+      ? 'Strengthen the evidence behind that link, then re-run to see whether the lead holds.'
+      : 'Re-run after adjusting the most influential factor to see whether the lead holds.';
+  return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }

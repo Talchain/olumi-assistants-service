@@ -587,3 +587,51 @@ describe('composeExplainFromStructureFallback', () => {
     expect(text).toContain('empty');
   });
 });
+
+// =========================================================================
+// what_would_flip fallback parity (this workstream): the chip-click /
+// LLM-invalid fallback must not reproduce the label-conjunction ambiguity
+// or hedge-stacking the gate composer fixes. Bounded scope: label-quoting +
+// hedge-consolidation + no "performing best"/"best" — no new inputs.
+// =========================================================================
+describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation parity', () => {
+  // Option labels that themselves contain "and".
+  const AND_LABELS: AnalysisProjectionSummary = {
+    status: 'complete',
+    leading_option: { label: 'Hire One Tech Lead and One Developer', probability: 0.45 },
+    runner_up: { label: 'Hire Two Developers', probability: 0.44 },
+    margin_pp: 1.0,
+    robustness_band: 'fragile',
+    top_drivers: [{ factor_label: 'Acquisition Cost', sensitivity_value: 0.5 }],
+  };
+  const RAW_NEAR_TIE_FRAGILE: RawRobustnessSignals = { level: 'fragile', near_tie_is_tie: true };
+
+  it('"and"-containing option labels produce unambiguous quoted comparison copy', () => {
+    const text = composeWhatWouldFlipFallback(AND_LABELS, RAW_NEAR_TIE_FRAGILE);
+    expectNaturalProse(text);
+    // Labels are quoted, so the comparison stays parseable.
+    expect(text).toContain("'Hire One Tech Lead and One Developer'");
+    expect(text).toContain("'Hire Two Developers'");
+    // The ambiguous unquoted run must NOT appear.
+    expect(text).not.toContain(
+      'Hire One Tech Lead and One Developer and Hire Two Developers are effectively tied',
+    );
+  });
+
+  it('no "performing best" / "best" in the opener', () => {
+    const text = composeWhatWouldFlipFallback(ANALYSIS);
+    expect(text).not.toMatch(/performing best/i);
+    expect(text).not.toMatch(/\bbest\b/i);
+    expect(text).toMatch(/currently leads/);
+  });
+
+  it('near-tie + fragile: the lead drops its trailing "could shift" hedge (one caveat only)', () => {
+    const text = composeWhatWouldFlipFallback(AND_LABELS, RAW_NEAR_TIE_FRAGILE);
+    // The effectively-tied lead no longer carries the stacked tail …
+    expect(text).not.toMatch(/effectively tied, so the outcome could shift/i);
+    expect(text).not.toMatch(/could shift with small changes/i);
+    // … and the single fragility caveat is the only one that fires.
+    expect(text.toLowerCase()).toMatch(/picture appears fragile/);
+    expect((text.match(/effectively tied/gi) ?? []).length).toBe(1);
+  });
+});
