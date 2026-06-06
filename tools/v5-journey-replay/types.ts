@@ -45,6 +45,15 @@ export interface EvidenceRow {
    */
   readonly requires_dl7_pr_b?: true;
   /**
+   * Marks an evidence row as a Branch-A-dependent step that is pending
+   * the product emit/consume path in PR #236 (`feat/v5-p0-2-continuity`).
+   * Mirrors `requires_dl7_pr_b`: the harness records the step as
+   * `skipped` (not `failed`) until `BRANCH_A_ENFORCE=true` flips it on
+   * after #236 merges to staging and this harness branch rebases. Lets
+   * downstream tooling count pending-vs-cascade skips distinctly.
+   */
+  readonly requires_branch_a?: true;
+  /**
    * Redacted chip details captured per-step. Phase 2.6.4 — added to
    * support triage of staleness-signal-missing failures where the
    * signal may live in a chip's action_type / label / message rather
@@ -165,4 +174,13 @@ export interface HarnessConfig {
    * for available ids.
    */
   readonly journey?: JourneyId;
+  /**
+   * Staging/integration-only DB read-back opt-in (`--db-readback`).
+   * When set, Branch-A journey steps marked `db_readback` query the
+   * staging Supabase for the persisted `set_factor_value` fact instead
+   * of skipping. Requires `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
+   * in the environment (see `.env.staging.local`). Off by default so
+   * wire-only local runs need no DB credentials.
+   */
+  readonly dbReadback?: boolean;
 }

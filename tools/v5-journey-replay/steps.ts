@@ -33,7 +33,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type { TurnPayload } from './client.js';
+import type { FetchResult, TurnPayload } from './client.js';
 
 export interface JourneyStep {
   readonly name: string;
@@ -41,6 +41,28 @@ export interface JourneyStep {
   readonly buildPayload: (ctx: JourneyContext) => TurnPayload;
   /** If true, step only makes sense after a prior step has completed. */
   readonly depends_on?: string;
+  /**
+   * Branch A (PR #236) dependency marker. When set, the harness records
+   * this step as `skipped` (with `requires_branch_a`) unless
+   * `BRANCH_A_ENFORCE=true` — the product emit/consume path that makes
+   * the step pass does not exist until #236 lands. After #236 merges to
+   * staging and this branch rebases, set the env flag to enforce.
+   */
+  readonly requires_branch_a?: boolean;
+  /**
+   * Assertion-only step: makes NO HTTP call. Asserts over state captured
+   * from an earlier turn (e.g. the `what_would_flip` response stored in
+   * `JourneyContext.branchAFlipResult`). Used for "the proposal chip
+   * appeared on the prior turn" checks where re-POSTing would be wasteful
+   * and non-deterministic (proposal idempotency).
+   */
+  readonly assert_only?: boolean;
+  /**
+   * DB read-back step: makes NO turn POST. Queries the staging Supabase
+   * (gated behind `--db-readback`) to prove a mutation persisted. Skipped
+   * with a clear reason when `--db-readback` is not supplied.
+   */
+  readonly db_readback?: boolean;
 }
 
 /**
@@ -53,6 +75,15 @@ export interface JourneyStep {
 export interface Step1Capture {
   readonly optionLabels: readonly string[];
   readonly factorLabels: readonly string[];
+  /**
+   * Factor node ids parsed from the draft graph. Optional and additive
+   * (pre-Branch-A journeys neither populate nor read it). The Branch A
+   * DB read-back uses this to assert the persisted `set_factor_value`
+   * fact targeted a real factor from the drafted graph — the wire chip
+   * does not surface the proposal's target id, so membership in this set
+   * is the strongest target check the harness can make.
+   */
+  readonly factorIds?: readonly string[];
   readonly graphHashAtDraft: string | null;
   /**
    * Deterministic factor-label resolution result, computed once after
@@ -68,6 +99,14 @@ export interface JourneyContext {
   readonly turn_counter: { value: number };
   /** Populated by the harness after Step 1 succeeds. */
   step1Capture?: Step1Capture;
+  /**
+   * Branch A: the captured `what_would_flip` turn result. The assertion-
+   * only "Test X at N proposal present" step inspects this for the
+   * `set_factor_value` proposal chip, and the DB read-back derives the
+   * proposed display value from the same chip. Populated only when the
+   * Branch A journey runs the flip turn (i.e. `BRANCH_A_ENFORCE=true`).
+   */
+  branchAFlipResult?: FetchResult;
 }
 
 /**
@@ -520,19 +559,185 @@ export const STALENESS_STEPS: readonly JourneyStep[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Branch A canonical journey — `branch-a-canonical`
+//
+// The full proposal loop the Branch A product lane (PR #236,
+// `feat/v5-p0-2-continuity`) unlocks:
+//
+//   draft → run_analysis → what_would_flip → [Test X at N proposal] →
+//   "do it" → set_factor_value applied → DB read-back → stale → what_changed
+//
+// Steps 1–3 run today (draft / run_analysis / what_would_flip prose).
+// Steps 4–8 depend on #236's emit/consume path — they are marked
+// `requires_branch_a` and recorded as `skipped` (pending #236) until
+// `BRANCH_A_ENFORCE=true`. After #236 merges to staging and this branch
+// rebases, set the env flag to enforce them.
+//
+// Per #236: on a `what_would_flip` turn the orchestrator emits a
+// provenance-safe "Test X at N" `set_factor_value` proposal from
+// `enrichment.flip_thresholds[]` (skip-not-round, exact numeric), resumed
+// by a bare confirm ("do it") via the existing short-confirm spine.
+// ---------------------------------------------------------------------------
+
+/** Minimal placeholder payload for steps the harness never POSTs
+ *  (assert-only and DB read-back). buildPayload is required by the
+ *  interface but the loop branches before calling it for these kinds. */
+function nonDispatchPayload(ctx: JourneyContext, message: string): TurnPayload {
+  return {
+    kind: 'message',
+    turn_id: mkTurnId(),
+    scenario_id: ctx.scenario_id,
+    stage: 'decide',
+    message,
+    turn_class: 'decide',
+    source: 'composer',
+  };
+}
+
+export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
+  {
+    name: '1_draft_graph',
+    description:
+      'POST fresh scenario + decision brief → expect draft_graph response with post-draft chips.',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: DECISION_BRIEF,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '2_run_analysis',
+    description:
+      'chip_click run_analysis on the fresh draft graph → 200, PLoT completes, analysis_ready=ready.',
+    depends_on: '1_draft_graph',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'analyse',
+      message: 'Run analysis.',
+      turn_class: 'decide',
+      source: 'chip_click',
+      chip: { action_type: 'run_analysis' },
+    }),
+  },
+  {
+    name: '3_what_would_flip',
+    description:
+      'chip_click what_would_flip ("What could change the result?") → 200, substantive flip prose. ' +
+      'Per #236 this is the turn that emits the "Test X at N" proposal (asserted at step 4).',
+    depends_on: '2_run_analysis',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'What could change the result?',
+      turn_class: 'decide',
+      source: 'chip_click',
+      chip: { action_type: 'what_would_flip' },
+    }),
+  },
+  {
+    // assert-only: inspects the captured step-3 response for the proposal
+    // chip; makes no HTTP call. Pending #236 (the chip does not exist yet).
+    name: '4_flip_proposal_present',
+    description:
+      'PENDING #236 — assert the what_would_flip response carried a "Test X at N" set_factor_value ' +
+      'proposal chip whose N is an exact whole user-scale value.',
+    depends_on: '3_what_would_flip',
+    requires_branch_a: true,
+    assert_only: true,
+    buildPayload: (ctx) => nonDispatchPayload(ctx, '(assert-only: flip proposal present)'),
+  },
+  {
+    name: '5_accept_proposal',
+    description:
+      'PENDING #236 — user says "do it"; the short-confirm spine resumes the proposal and applies ' +
+      'set_factor_value. Assert a mutation acknowledgement (no clarification-back).',
+    depends_on: '4_flip_proposal_present',
+    requires_branch_a: true,
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'do it',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+  {
+    // DB read-back: no turn POST. Skipped unless --db-readback.
+    name: '6_db_readback',
+    description:
+      'PENDING #236 — DB read-back: prove a set_factor_value fact persisted (status=applied, ' +
+      'target is a real factor, before≠after, after value = proposed N). Requires --db-readback.',
+    depends_on: '5_accept_proposal',
+    requires_branch_a: true,
+    db_readback: true,
+    buildPayload: (ctx) => nonDispatchPayload(ctx, '(db read-back: set_factor_value persisted)'),
+  },
+  {
+    name: '7_explain_leader_stale',
+    description:
+      'PENDING #236 — "Why does the leading option win?" after the mutation → expect a staleness ' +
+      'caveat or a rerun chip (the applied change invalidated the prior analysis).',
+    depends_on: '5_accept_proposal',
+    requires_branch_a: true,
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'Why does the leading option win?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '8_what_changed',
+    description:
+      'PENDING #236 — "What changed?" → the deterministic state-query answer reports the accepted ' +
+      'set_factor_value change (references the factor, no internal terms).',
+    depends_on: '5_accept_proposal',
+    requires_branch_a: true,
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: 'What changed?',
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Journey registry — keys are the values accepted by the `--journey` CLI
 // flag. The default is `canonical` so existing invocations stay
 // backwards-compatible. The harness skips `dl7-edit-graph` when
 // `DL7_PR_B_LANDED !== 'true'` (gating logic lives in index.ts).
 // ---------------------------------------------------------------------------
 
-export type JourneyId = 'canonical' | 'dl7-set-factor' | 'dl7-edit-graph' | 'dl7-staleness';
+export type JourneyId =
+  | 'canonical'
+  | 'dl7-set-factor'
+  | 'dl7-edit-graph'
+  | 'dl7-staleness'
+  | 'branch-a-canonical';
 
 export const JOURNEY_IDS: readonly JourneyId[] = [
   'canonical',
   'dl7-set-factor',
   'dl7-edit-graph',
   'dl7-staleness',
+  'branch-a-canonical',
 ];
 
 export const JOURNEY_REGISTRY: Readonly<Record<JourneyId, readonly JourneyStep[]>> = {
@@ -540,6 +745,7 @@ export const JOURNEY_REGISTRY: Readonly<Record<JourneyId, readonly JourneyStep[]
   'dl7-set-factor': SET_FACTOR_STEPS,
   'dl7-edit-graph': EDIT_GRAPH_STEPS,
   'dl7-staleness': STALENESS_STEPS,
+  'branch-a-canonical': BRANCH_A_CANONICAL_STEPS,
 };
 
 /**

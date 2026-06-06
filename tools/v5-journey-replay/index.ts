@@ -42,13 +42,18 @@ import {
   assertEditGraphGeneric,
   assertExplainLeader,
   assertExplainLeaderStale,
+  assertFlipProposalPresent,
   assertProductShape,
+  assertProposalAccepted,
   assertSetFactorValue,
   assertWhatChanged,
   assertWhatWouldFlip,
+  extractWholeUserScaleValue,
+  findSetFactorValueProposalChip,
   type AssertionResult,
   type DL7AssertionContext,
 } from './assertions.js';
+import { runSetFactorValueReadback, type DbReadbackExpectation } from './db-readback.js';
 import {
   JOURNEY_IDS,
   JOURNEY_REGISTRY,
@@ -233,6 +238,9 @@ function parseArgs(): ResolvedHarnessConfig {
   // Default journey is `canonical` so existing CLI invocations and
   // harness self-tests stay backwards-compatible.
   let journey: JourneyId = 'canonical';
+  // Staging/integration-only DB read-back. Off by default so wire-only
+  // local runs need no Supabase credentials.
+  let dbReadback = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -251,11 +259,13 @@ function parseArgs(): ResolvedHarnessConfig {
       journey = parseJourneyArg(args[++i]!);
     } else if (arg.startsWith('--journey=')) {
       journey = parseJourneyArg(arg.slice('--journey='.length));
+    } else if (arg === '--db-readback') {
+      dbReadback = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(
         'Usage: pnpm tsx tools/v5-journey-replay/index.ts \\\n' +
           '         [--base-url URL] [--out PATH] [--scenario-prefix TAG] \\\n' +
-          '         [--expected-build SHA] [--journey ID]\n' +
+          '         [--expected-build SHA] [--journey ID] [--db-readback]\n' +
           '\n' +
           'Auth: set OLUMI_REPLAY_API_KEY env var for remote URLs (required).\n' +
           '\n' +
@@ -267,7 +277,17 @@ function parseArgs(): ResolvedHarnessConfig {
           'DL-7 journeys: dl7-set-factor (V5 set_factor_value mutation handler),\n' +
           'dl7-staleness (post-analysis edit → stale signal), dl7-edit-graph\n' +
           '(generic edit_graph dispatcher — live on staging; emergency rollback\n' +
-          'switch DL7_PR_B_DISABLE=true re-gates the journey).',
+          'switch DL7_PR_B_DISABLE=true re-gates the journey).\n' +
+          '\n' +
+          'branch-a-canonical: the full flip → "Test X at N" proposal → "do it" →\n' +
+          'set_factor_value loop. Steps 4-8 depend on PR #236 and are recorded as\n' +
+          'PENDING (skipped) until BRANCH_A_ENFORCE=true (set after #236 merges to\n' +
+          'staging and this branch rebases).\n' +
+          '\n' +
+          '--db-readback (staging/integration only): for the branch-a-canonical\n' +
+          'DB step, query the staging Supabase to prove the set_factor_value fact\n' +
+          'persisted. Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in the env\n' +
+          '(see .env.staging.local). Off by default.',
       );
       process.exit(0);
     }
@@ -277,7 +297,15 @@ function parseArgs(): ResolvedHarnessConfig {
   // mode (well-formed-only check, no SHA comparison).
   const expectedBuild = expectedBuildCli ?? readExpectedBuildEnv();
 
-  return { baseUrl, outPath, scenarioPrefix, apiKey: readApiKey(), expectedBuild, journey };
+  return {
+    baseUrl,
+    outPath,
+    scenarioPrefix,
+    apiKey: readApiKey(),
+    expectedBuild,
+    journey,
+    dbReadback,
+  };
 }
 
 /**
@@ -308,6 +336,19 @@ function isDL7EditGraphDisabled(): boolean {
  */
 function isDL7PrBLanded(): boolean {
   return !isDL7EditGraphDisabled();
+}
+
+/**
+ * Branch A (PR #236) enforcement switch. The flip → "Test X at N"
+ * proposal → "do it" → set_factor_value loop does not exist until #236
+ * lands, so the `branch-a-canonical` steps marked `requires_branch_a`
+ * are recorded as PENDING (skipped) by default. After #236 merges to
+ * staging and this harness branch rebases onto it, set
+ * `BRANCH_A_ENFORCE=true` to run and enforce those steps.
+ */
+function isBranchAEnforced(): boolean {
+  const raw = (process.env.BRANCH_A_ENFORCE ?? '').trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
 }
 
 /**
@@ -399,6 +440,18 @@ async function run(): Promise<void> {
         : 'live (PR B accepted on staging; pending PR #159 docs merge)'
     }`,
   );
+  if (cfg.journey === 'branch-a-canonical') {
+    console.log(
+      `  branch_a state   = ${
+        isBranchAEnforced()
+          ? 'ENFORCED via BRANCH_A_ENFORCE (PR #236 steps run + assert)'
+          : 'PENDING (PR #236 steps recorded as skipped — set BRANCH_A_ENFORCE=true after #236 merges + rebase)'
+      }`,
+    );
+    console.log(
+      `  db_readback      = ${cfg.dbReadback ? 'enabled (--db-readback; staging Supabase)' : 'disabled (pass --db-readback on staging to enable)'}`,
+    );
+  }
   console.log(`  auth             = ${cfg.apiKey ? 'enabled (key loaded from env)' : 'disabled (localhost or no key)'}`);
   console.log(
     `  expected_build   = ${cfg.expectedBuild ?? 'not set (default: well-formed-only check)'}`,
@@ -499,8 +552,61 @@ async function run(): Promise<void> {
       turn_counter: turnCounter,
     };
     const draftStepName = '1_draft_graph';
+    const flipStepName = '3_what_would_flip';
+    const branchAEnabled = isBranchAEnforced();
+
+    // Push an AssertionResult as an evidence row for the no-HTTP Branch A
+    // steps (assert-only proposal check, DB read-back). Mirrors the
+    // pass/fail row shape used by the normal turn loop below.
+    const pushBranchARow = (stepName: string, assertion: AssertionResult): void => {
+      if (assertion.ok) {
+        rows.push({
+          step: stepName,
+          status: 'passed',
+          evidence: redactString(assertion.evidence, cfg.apiKey),
+          outcome_class: 'v5-runtime',
+          journey_id: cfg.journey,
+        });
+        console.log(`[PASS] ${stepName}: ${redact(assertion.evidence)}`);
+      } else {
+        rows.push({
+          step: stepName,
+          status: 'failed',
+          evidence: redactString(assertion.evidence, cfg.apiKey),
+          failing_contract: redactString(assertion.failing_contract, cfg.apiKey),
+          outcome_class: 'v5-runtime',
+          journey_id: cfg.journey,
+        });
+        console.log(
+          `[FAIL] ${stepName}: ${redact(assertion.failing_contract)} | ${redact(assertion.evidence)}`,
+        );
+        notPassed.add(stepName);
+      }
+    };
 
     for (const step of journeySteps) {
+      // Branch A pending gate — steps that depend on PR #236's product
+      // emit/consume path are recorded as skipped (pending #236) until
+      // BRANCH_A_ENFORCE=true. Placed before the depends_on cascade so
+      // each pending step gets a clear "pending #236" row rather than a
+      // generic "prerequisite did not pass" cascade-skip.
+      if (step.requires_branch_a && !branchAEnabled) {
+        rows.push({
+          step: step.name,
+          status: 'skipped',
+          evidence:
+            'pending Branch A (PR #236, feat/v5-p0-2-continuity) — the "Test X at N" ' +
+            'proposal + apply-on-confirm path does not exist yet. Set BRANCH_A_ENFORCE=true ' +
+            'to enforce after #236 merges to staging and this branch rebases.',
+          outcome_class: 'skipped',
+          journey_id: cfg.journey,
+          requires_branch_a: true,
+        });
+        console.log(`[PENDING #236] ${step.name} (requires_branch_a; BRANCH_A_ENFORCE not set)`);
+        notPassed.add(step.name);
+        continue;
+      }
+
       if (step.depends_on && notPassed.has(step.depends_on)) {
         rows.push({
           step: step.name,
@@ -515,6 +621,52 @@ async function run(): Promise<void> {
       }
 
       turnCounter.value += 1;
+
+      // Branch A assert-only step — inspect the captured what_would_flip
+      // response for the "Test X at N" proposal chip; no HTTP call. Only
+      // reached when BRANCH_A_ENFORCE=true (else the pending gate skipped
+      // it above).
+      if (step.assert_only) {
+        const captured = journeyCtx.branchAFlipResult;
+        const assertion: AssertionResult =
+          captured !== undefined
+            ? assertFlipProposalPresent(captured)
+            : {
+                ok: false,
+                failing_contract: 'branch_a_no_captured_flip_response',
+                evidence:
+                  'the what_would_flip turn was not captured, so the proposal chip cannot be inspected',
+              };
+        pushBranchARow(step.name, assertion);
+        continue;
+      }
+
+      // Branch A DB read-back step — query staging Supabase for the
+      // persisted set_factor_value fact; no turn POST. Skipped with a
+      // clear reason unless --db-readback was supplied.
+      if (step.db_readback) {
+        if (!cfg.dbReadback) {
+          rows.push({
+            step: step.name,
+            status: 'skipped',
+            evidence:
+              'db read-back not enabled — pass --db-readback (staging only) with ' +
+              'SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY to verify the persisted fact',
+            outcome_class: 'skipped',
+            journey_id: cfg.journey,
+            requires_branch_a: true,
+          });
+          console.log(`[SKIP] ${step.name} (db-readback disabled)`);
+          notPassed.add(step.name);
+          continue;
+        }
+        const expected = buildDbReadbackExpectation(journeyCtx);
+        const assertion = await runSetFactorValueReadback(scenarioId, expected, {
+          secret: cfg.apiKey,
+        });
+        pushBranchARow(step.name, assertion);
+        continue;
+      }
 
       // Build the request payload. DL-7 steps may throw
       // JourneyPreconditionError when Step 1 capture is missing data
@@ -582,6 +734,13 @@ async function run(): Promise<void> {
         const assertionCtx = buildAssertionContext(journeyCtx);
         const assertion = pickAssertion(step.name, assertionCtx)(result);
         const outcomeClass = classifyResponse({ status: result.status, body: result.body });
+
+        // Branch A: capture the what_would_flip turn so the assert-only
+        // proposal-present step and the DB read-back can read the
+        // "Test X at N" proposal chip off this response.
+        if (step.name === flipStepName) {
+          journeyCtx.branchAFlipResult = result;
+        }
 
         // Capture chip details per step. Phase 2.6.4: supports triage of
         // staleness-signal-missing and similar chip-based-signal cases
@@ -693,6 +852,7 @@ function buildEvidenceHeader(
     expected_build: cfg.expectedBuild,
     journey: cfg.journey,
     dl7_pr_b_landed: isDL7PrBLanded(),
+    branch_a_enforced: isBranchAEnforced(),
     step1_capture: step1Capture,
   };
 }
@@ -724,11 +884,18 @@ function captureStep1(result: FetchResult): Step1Capture {
 
   const optionLabels: string[] = [];
   const factorLabels: string[] = [];
+  // Factor node ids — used by the Branch A DB read-back to assert the
+  // applied set_factor_value fact targeted a real drafted factor.
+  const factorIds: string[] = [];
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
       if (typeof n !== 'object' || n === null) continue;
       const kind = (n as { kind?: unknown }).kind;
       const label = (n as { label?: unknown }).label;
+      if (kind === 'factor') {
+        const id = (n as { id?: unknown }).id;
+        if (typeof id === 'string' && id.length > 0) factorIds.push(id);
+      }
       if (typeof label !== 'string') continue;
       if (kind === 'option') optionLabels.push(label);
       else if (kind === 'factor') factorLabels.push(label);
@@ -751,9 +918,35 @@ function captureStep1(result: FetchResult): Step1Capture {
   return {
     optionLabels,
     factorLabels,
+    factorIds,
     graphHashAtDraft,
     resolvedFactorLabel,
     factorLabelReason,
+  };
+}
+
+/**
+ * Build the Branch A DB read-back expectation from the journey context:
+ *   - `validTargetIds` — the drafted factor ids (the applied fact must
+ *     have targeted one of them; the wire chip does not expose the exact
+ *     proposal target).
+ *   - `displayValue` — the user-scale value parsed from the captured
+ *     "Test X at N" proposal chip, compared against the persisted `after`.
+ */
+function buildDbReadbackExpectation(journeyCtx: JourneyContext): DbReadbackExpectation {
+  const factorIds = journeyCtx.step1Capture?.factorIds ?? [];
+  let displayValue: number | undefined;
+  const flip = journeyCtx.branchAFlipResult;
+  if (flip !== undefined) {
+    const chip = findSetFactorValueProposalChip(flip.body?.suggested_actions);
+    if (chip !== null) {
+      const parsed = extractWholeUserScaleValue(chip.label);
+      if (parsed !== null) displayValue = parsed.value;
+    }
+  }
+  return {
+    ...(factorIds.length > 0 ? { validTargetIds: factorIds } : {}),
+    ...(displayValue !== undefined ? { displayValue } : {}),
   };
 }
 
@@ -792,15 +985,20 @@ function pickAssertion(
     case '5_explain_leader':
       return (result) => assertExplainLeader(result, ctx);
     case '4_explain_leader_stale':
+    case '7_explain_leader_stale':
       return (result) => assertExplainLeaderStale(result, ctx);
     case '2_set_factor_value':
     case '3_set_factor_value':
       return (result) => assertSetFactorValue(result, ctx);
+    case '5_accept_proposal':
+      return (result) => assertProposalAccepted(result, ctx);
     case '2_edit_graph_generic':
     case '3_edit_graph_generic':
       return (result) => assertEditGraphGeneric(result, ctx);
     case '3_what_changed':
+    case '8_what_changed':
       return (result) => assertWhatChanged(result, ctx);
+    case '3_what_would_flip':
     case '6_what_would_flip':
       return (result) => assertWhatWouldFlip(result, ctx);
     default:

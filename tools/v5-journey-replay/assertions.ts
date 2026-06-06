@@ -13,11 +13,15 @@
  */
 
 import type { FetchResult } from './client.js';
+import type { TurnResponse } from './types.js';
 import { findForbiddenMatches } from './forbidden-terms.js';
 
 export type AssertionResult =
   | { readonly ok: true; readonly evidence: string }
   | { readonly ok: false; readonly failing_contract: string; readonly evidence: string };
+
+/** Wire chip shape (a single `suggested_actions` entry). */
+type WireChip = NonNullable<TurnResponse['suggested_actions']>[number];
 
 function httpOk(result: FetchResult): AssertionResult | null {
   if (result.status !== 200) {
@@ -824,6 +828,181 @@ export function assertExplainLeader(
       `status=200 text_len=${text.length} ` +
       `labels_checked=${labels.length} ` +
       `chip_count=${(result.body?.suggested_actions ?? []).length} ` +
+      `elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+// ===========================================================================
+// Branch A (PR #236) assertions — flip-proposal presence + acceptance.
+//
+// These exercise the "Test X at N" → "do it" → set_factor_value loop the
+// Branch A product lane (PR #236, feat/v5-p0-2-continuity) unlocks. They
+// are wired into the `branch-a-canonical` journey and gated behind
+// `BRANCH_A_ENFORCE` at the orchestration layer — pending until #236 lands.
+// The assertions themselves are pure and unit-tested today against
+// synthetic responses so they are ready to enforce on the day #236 merges.
+// ===========================================================================
+
+/**
+ * Locate a `set_factor_value` proposal chip among a turn's suggested
+ * actions. Per `compose/proposed-change.ts::emitProposedChange`, an
+ * `apply_proposed_change` proposal surfaces on the wire as a chip whose
+ * `action_type` is the boundary literal `set_factor_value` and whose `id`
+ * is a stable `prop_<sha256-12hex>`. We match on either signal so a
+ * future wire-shape tweak (e.g. action_type renamed) still resolves the
+ * chip via its id prefix.
+ */
+export function findSetFactorValueProposalChip(
+  chips: readonly WireChip[] | undefined,
+): WireChip | null {
+  for (const chip of chips ?? []) {
+    if (chip.action_type === 'set_factor_value') return chip;
+    if (typeof chip.id === 'string' && chip.id.startsWith('prop_')) return chip;
+  }
+  return null;
+}
+
+export interface UserScaleValue {
+  /** The numeric token as it appeared in the label (e.g. "£50,000", "15%"). */
+  readonly token: string;
+  /** Parsed numeric value with currency/commas/percent stripped. */
+  readonly value: number;
+  /** True iff `value` is an exact whole number (no fractional part). */
+  readonly isWhole: boolean;
+}
+
+// A user-scale numeric token: optional leading currency symbol, digits
+// with optional thousands separators, optional decimal part, optional
+// trailing percent. The normalised model value (e.g. "0.3") parses as a
+// non-whole number and so fails the whole-value gate by design — the
+// user-facing chip must carry the user-scale value, never the normalised.
+const USER_SCALE_NUMBER = /[£$€¥]?\s?-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|[£$€¥]?\s?-?\d+(?:\.\d+)?%?/g;
+
+/**
+ * Extract the user-scale value from a "Test X at N" proposal label. Takes
+ * the LAST numeric token in the label (the "N" trails the factor name,
+ * which may itself contain digits). Returns null when no number is found.
+ */
+export function extractWholeUserScaleValue(label: string): UserScaleValue | null {
+  const matches = label.match(USER_SCALE_NUMBER);
+  if (matches === null || matches.length === 0) return null;
+  const token = matches[matches.length - 1]!.trim();
+  const cleaned = token.replace(/[£$€¥,%\s]/g, '');
+  const value = Number(cleaned);
+  if (!Number.isFinite(value)) return null;
+  return { token, value, isWhole: Number.isInteger(value) };
+}
+
+/**
+ * Branch A step 4 (assert-only) — the `what_would_flip` turn carried a
+ * "Test X at N" `set_factor_value` proposal chip whose N converts to an
+ * exact whole user-scale value.
+ *
+ * `result` is the CAPTURED step-3 (`what_would_flip`) response, not a
+ * fresh POST — the proposal appears on the flip turn itself (per #236),
+ * and re-POSTing would be non-deterministic (proposal idempotency).
+ */
+export function assertFlipProposalPresent(result: FetchResult): AssertionResult {
+  const body = result.body;
+  if (body == null || body.__body_parse_failed) {
+    return {
+      ok: false,
+      failing_contract: 'branch_a_flip_no_captured_response',
+      evidence: 'no parseable what_would_flip response was captured for the proposal check',
+    };
+  }
+  const chips = body.suggested_actions ?? [];
+  const chip = findSetFactorValueProposalChip(chips);
+  if (chip === null) {
+    const seen = chips
+      .map((c) => c.action_type ?? '(prompt)')
+      .join(', ');
+    return {
+      ok: false,
+      failing_contract: 'branch_a_flip_proposal_chip_absent',
+      evidence:
+        `no set_factor_value proposal chip on the what_would_flip turn ` +
+        `(chip_count=${chips.length} action_types=[${seen}]). ` +
+        `Expected per PR #236 emitProposedChange on the flip turn.`,
+    };
+  }
+  const parsed = extractWholeUserScaleValue(chip.label);
+  if (parsed === null) {
+    return {
+      ok: false,
+      failing_contract: 'branch_a_flip_proposal_no_value',
+      evidence: `proposal chip label carries no numeric value: label="${chip.label}"`,
+    };
+  }
+  if (!parsed.isWhole) {
+    return {
+      ok: false,
+      failing_contract: 'branch_a_flip_proposal_value_not_whole',
+      evidence:
+        `proposal value is not an exact whole user-scale number: ` +
+        `token="${parsed.token}" value=${parsed.value} label="${chip.label}". ` +
+        `A fractional value here usually means the normalised model value leaked ` +
+        `instead of the user-scale value.`,
+    };
+  }
+  return {
+    ok: true,
+    evidence:
+      `set_factor_value proposal present: chip_id=${chip.id} ` +
+      `label="${chip.label}" user_scale_value=${parsed.value} (whole) ` +
+      `token="${parsed.token}"`,
+  };
+}
+
+/**
+ * Branch A step 5 — the user's bare confirm ("do it") resumed the proposal
+ * and the mutation applied. Reuses the DL-7 clarification-back negative
+ * gate + mutation-ack positive gate; also accepts the #236 "Applying: …"
+ * resume echo as a positive acknowledgement signal.
+ */
+export function assertProposalAccepted(
+  result: FetchResult,
+  _ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const body = result.body;
+  const text = body?.assistant_text ?? '';
+  if (text.length === 0) {
+    return {
+      ok: false,
+      failing_contract: 'proposal_accept_empty_text',
+      evidence: `status=200 text_len=0`,
+    };
+  }
+  const clarifyMatch = text.match(CLARIFICATION_BACK_PATTERN);
+  if (clarifyMatch) {
+    return {
+      ok: false,
+      failing_contract: 'proposal_accept_clarification_back_no_mutation',
+      evidence:
+        `status=200 but "do it" produced a clarification, not an applied mutation: ` +
+        `match="${clarifyMatch[0]}". The proposal did not resume — the loop is broken.`,
+    };
+  }
+  // Positive proof: the #236 resume echo ("Applying: <label>. ") OR a
+  // mutation-acknowledgement verb. Either confirms the apply executed.
+  const applyingEcho = /\bApplying:\s/i.test(text);
+  const mutationAck = text.match(MUTATION_ACK_PATTERN);
+  if (!applyingEcho && !mutationAck) {
+    return {
+      ok: false,
+      failing_contract: 'proposal_accept_no_mutation_acknowledgement',
+      evidence:
+        `status=200 but no "Applying:" resume echo and no mutation-ack verb in the response. ` +
+        `text_preview="${text.slice(0, 100)}..."`,
+    };
+  }
+  return {
+    ok: true,
+    evidence:
+      `status=200 text_len=${text.length} ` +
+      `applying_echo=${applyingEcho} mutation_ack="${mutationAck?.[0] ?? ''}" ` +
       `elapsed=${result.elapsed_ms}ms`,
   };
 }

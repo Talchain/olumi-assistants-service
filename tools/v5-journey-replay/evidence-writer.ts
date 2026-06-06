@@ -47,6 +47,12 @@ export interface EvidenceHeader {
    */
   readonly dl7_pr_b_landed?: boolean;
   /**
+   * Branch A (PR #236) enforcement state observed at run time. When
+   * false (default), the `branch-a-canonical` journey's `requires_branch_a`
+   * steps are recorded as pending/skipped. Optional for backwards-compat.
+   */
+  readonly branch_a_enforced?: boolean;
+  /**
    * Optional Step 1 capture surface. When present, the renderer adds a
    * "Step 1 capture" subsection to the journey block listing the
    * parsed option/factor labels, the resolved factor (with fallback
@@ -229,6 +235,22 @@ export function renderEvidencePack(
       );
     }
   }
+  if (header.branch_a_enforced !== undefined) {
+    lines.push(
+      `- **branch_a_enforced:** ${
+        header.branch_a_enforced
+          ? 'yes (BRANCH_A_ENFORCE=true — PR #236 steps run + assert)'
+          : 'no (PR #236 steps recorded as pending/skipped — set BRANCH_A_ENFORCE=true after #236 merges + rebase)'
+      }`,
+    );
+    const branchARows = rows.filter((r) => r.requires_branch_a === true);
+    if (branchARows.length > 0) {
+      lines.push(
+        `- **Branch-A (PR #236)-pending rows:** ${branchARows.length} ` +
+          '(skipped until BRANCH_A_ENFORCE=true)',
+      );
+    }
+  }
   lines.push('');
 
   // ---- Deploy confirmation ----
@@ -370,7 +392,8 @@ export function renderEvidencePack(
     lines.push('6. "Increase the budget factor" → edit proposal or clarifying question');
     lines.push('');
   } else {
-    lines.push(`## DL-7 journey: \`${header.journey}\``);
+    const journeyKind = header.journey === 'branch-a-canonical' ? 'Branch A journey' : 'DL-7 journey';
+    lines.push(`## ${journeyKind}: \`${header.journey}\``);
     lines.push('');
     lines.push(
       'See per-step `description` fields in [tools/v5-journey-replay/steps.ts]' +
