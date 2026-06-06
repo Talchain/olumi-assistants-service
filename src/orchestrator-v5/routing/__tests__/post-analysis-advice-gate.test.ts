@@ -608,7 +608,7 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     }
   });
 
-  it('what_would_flip_free_text composer names the most-sensitive factor', () => {
+  it('what_would_flip_free_text composer names the specific fragile assumption', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What would flip this?',
       analysis: FIXTURE_ANALYSIS,
@@ -616,9 +616,10 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('Hire two senior engineers locally');
-      expect(out.assistant_text).toMatch(/most\s+(likely|sensitive)/i);
-      expect(out.assistant_text).toContain('Delivery risk');
+      expect(out.assistant_text).toContain("'Hire two senior engineers locally'");
+      // Names the fragile edge (fragile_edges[0]) in user-friendly language, no sign claim.
+      expect(out.assistant_text).toContain("the link from 'Delivery risk' to 'Successful launch'");
+      expect(out.assistant_text).toMatch(/whether it holds as strongly as the model currently assumes/);
     }
   });
 
@@ -814,7 +815,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     }
   });
 
-  it('composeWhatWouldFlip: includes probability, margin, drivers with direction, and robustness', () => {
+  it('composeWhatWouldFlip: clear lead → quoted labels, real margin, names the fragile link, no implied flip', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What would flip this?',
       analysis: ENRICHED_ANALYSIS,
@@ -822,18 +823,21 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('Based on this model, Hire two senior engineers locally currently appears to be the favoured option');
-      expect(out.assistant_text).toContain('with a probability of 62%');
-      expect(out.assistant_text).toContain('For Hire one senior engineer overseas to overtake it, the lead of 24 percentage points would need to close');
-      expect(out.assistant_text).toContain('Movement on Delivery risk or Cost overrun risk would shift this result the most');
-      expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
-      expect(out.assistant_text).toMatch(/moderately weakens the lead/);
-      expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
-      expect(out.assistant_text).not.toMatch(/robustness band/i);
-      // Readability sectioning: try-and-rerun nudge lives in its own
-      // labelled block.
-      expect(out.assistant_text).toContain('What to check next');
-      expect(out.assistant_text).toMatch(/^• Try changing its value or strength and re-running/m);
+      const text = out.assistant_text;
+      // Clear-lead opener — quoted label, no "favoured option"/"best".
+      expect(text).toContain("Based on this model, 'Hire two senior engineers locally' currently leads");
+      expect(text).toContain('with a probability of 62%');
+      expect(text).toContain("For 'Hire one senior engineer overseas' to overtake it, the lead of 24 percentage points would need to close");
+      // Names the specific fragile assumption from fragile_edges[0] — no sign/causal claim.
+      expect(text).toContain("The most useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
+      // No decision_review.flip_thresholds present → no flip claim, no "favoured option"/"best".
+      expect(text).not.toMatch(/\bmost likely to flip\b/i);
+      expect(text).not.toMatch(/favoured option|\bbest\b/i);
+      expect(text).not.toMatch(/robustness band/i);
+      // Reframed next step never implies a single change flips the result.
+      expect(text).toContain('What to check next');
+      expect(text).toMatch(/^• Re-run after adjusting the most influential factor to see whether the lead holds\.$/m);
+      expect(text).not.toMatch(/to see where the leading option moves/i);
     }
   });
 
@@ -1005,7 +1009,7 @@ describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () =
     }
   });
 
-  it('what_would_flip: missing margin + missing sensitivity → still names drivers without invented direction', () => {
+  it('what_would_flip: missing margin + missing sensitivity → names fragile link, no invented direction', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What would flip this?',
       analysis: {
@@ -1020,9 +1024,11 @@ describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () =
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('Movement on Delivery risk or Cost overrun risk');
-      // No fabricated "Today X has little effect on the lead" when sensitivity is absent
+      // fragile_edges[0] is named; we never invent a sensitivity-direction clause.
+      expect(out.assistant_text).toContain("the link from 'Delivery risk' to 'Successful launch'");
       expect(out.assistant_text).not.toContain('has little effect on the lead');
+      expect(out.assistant_text).not.toContain('strengthens the lead');
+      expect(out.assistant_text).not.toContain('weakens the lead');
     }
   });
 
@@ -1837,7 +1843,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
   });
 
   // ── 8. Sibling composer: composeWhatWouldFlip on near-tie reframes lead ─
-  it('composeWhatWouldFlip on near-tie → reframes lead + drops stability claim', () => {
+  it('composeWhatWouldFlip on margin near-tie (≤1pp) → effectively tied + one provisional caveat', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What would flip this?',
       analysis: {
@@ -1853,9 +1859,12 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       const text = out.assistant_text;
-      expect(text).toMatch(/effectively tied/i);
-      expect(text).toMatch(/outcome could flip with small changes/i);
+      expect(text).toMatch(/'A' and 'B' are effectively tied/);
+      // Consolidated single caveat — provisional, not the old stacked "could flip" tail.
+      expect(text).toMatch(/treat the lead as provisional/i);
+      expect(text).not.toMatch(/outcome could flip with small changes/i);
       expect(text).not.toMatch(/smaller changes are unlikely to flip the outcome/i);
+      // Numerically honest: never say a near-zero gap "would need to close".
       expect(text).not.toMatch(/the lead of .* would need to close/i);
     }
   });
@@ -2056,11 +2065,11 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       const text = out.assistant_text;
-      // Raw-fragile branch keeps the existing lead-framing (NOT near-tie
-      // reframe) because margin > 1pp, but MUST suppress the stability
-      // claim and emit fragile-aware robustness copy.
-      expect(text).toMatch(/picture appears fragile/i);
-      expect(text).not.toMatch(/smaller changes are unlikely to flip the outcome/i);
+      // Raw-fragile branch keeps the clear-lead framing (NOT near-tie reframe)
+      // because margin > 1pp, but MUST suppress the stability claim and emit
+      // the single fragile-aware caveat instead.
+      expect(text).toMatch(/treat the lead as provisional/i);
+      expect(text).not.toMatch(/smaller changes are unlikely to (flip|change)/i);
       expect(text).not.toContain('The robustness band is currently moderate');
     }
   });
@@ -2418,5 +2427,190 @@ describe('hasRenderableTopDriverLabel — projection-shaped top_driver_present s
       ],
     };
     expect(hasRenderableTopDriverLabel(projectionWithDrivers)).toBe(true);
+  });
+});
+
+// =========================================================================
+// what_would_flip — richer evidence + honest coaching (this workstream).
+// Regression fixture: the hiring near-tie ("Hire One Tech Lead" vs
+// "Hire One Tech Lead and One Developer", ~5pp, flagged a near-tie by the
+// raw override, top fragile cost→risk link, no reliable flip signal).
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honesty', () => {
+  const HIRING_NEAR_TIE: AdviceGateAnalysis = {
+    status: 'success',
+    leading_option: { label: 'Hire One Tech Lead', probability: 0.445 },
+    runner_up: { label: 'Hire One Tech Lead and One Developer', probability: 0.3935 },
+    margin_pp: 5.15,
+    robustness_band: 'fragile',
+    top_drivers: [{ factor_label: 'Hiring and Salary Cost', sensitivity_value: 0.5 }],
+    fragile_edges: [{ from_label: 'Hiring and Salary Cost', to_label: 'Budget Overrun Risk' }],
+  };
+  // Raw override: the ~5pp gap is a near-tie via the upstream flag, not the margin.
+  const RAW_OVERRIDE = { level: 'fragile', near_tie_is_tie: true };
+
+  function flip(
+    analysis: AdviceGateAnalysis,
+    extra: {
+      rawRobustness?: { level: string | null; near_tie_is_tie: boolean };
+      decisionReview?: Record<string, unknown>;
+    } = {},
+  ) {
+    return tryPostAnalysisAdviceGate({
+      message: 'What would flip this?',
+      analysis,
+      freshness: 'fresh',
+      ...extra,
+    });
+  }
+
+  // 1. Lead with near-tie / closeness.
+  it('1. near-tie (raw override, ~5pp) leads with closeness and the real margin', () => {
+    const out = flip(HIRING_NEAR_TIE, { rawRobustness: RAW_OVERRIDE });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      expect(t).toContain(
+        "This is a close call: 'Hire One Tech Lead' is narrowly ahead of 'Hire One Tech Lead and One Developer' by about 5 percentage points",
+      );
+      expect(t).not.toMatch(/effectively tied/i);
+      expect(t).not.toMatch(/favoured option|performing best|\bbest\b/i);
+    }
+  });
+
+  // 2. Option labels containing "and" stay readable.
+  it('2. "and"-containing option labels produce unambiguous quoted comparison copy', () => {
+    const out = flip(HIRING_NEAR_TIE, { rawRobustness: RAW_OVERRIDE });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      expect(t).toContain("'Hire One Tech Lead'");
+      expect(t).toContain("'Hire One Tech Lead and One Developer'");
+      // The ambiguous unquoted run must NOT appear.
+      expect(t).not.toContain('Hire One Tech Lead and Hire One Tech Lead and One Developer');
+    }
+  });
+
+  // 3. Hedge consolidation — exactly one caveat.
+  it('3. near-tie + fragile → exactly one consolidated caveat, no stacked hedges', () => {
+    const out = flip(HIRING_NEAR_TIE, { rawRobustness: RAW_OVERRIDE });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      expect((t.match(/treat the lead as provisional/gi) ?? []).length).toBe(1);
+      expect(t).not.toMatch(/could flip with small changes/i);
+      expect(t).not.toMatch(/picture appears fragile/i);
+    }
+  });
+
+  // 4. Name the fragile assumption only when backed by real evidence.
+  it('4a. names the specific fragile assumption when fragile_edges present', () => {
+    const out = flip(HIRING_NEAR_TIE, { rawRobustness: RAW_OVERRIDE });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain(
+        "The most useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk': whether it holds as strongly as the model currently assumes",
+      );
+    }
+  });
+  it('4b. does NOT invent a fragile assumption when fragile_edges absent', () => {
+    const out = flip({ ...HIRING_NEAR_TIE, fragile_edges: [] }, { rawRobustness: RAW_OVERRIDE });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).not.toContain('the link from');
+    }
+  });
+
+  // 5. Honest flip handling (amendment: empty is ambiguous → never claim no-flip).
+  it('5a. flip_thresholds absent → no flip claim and no implied flip', () => {
+    const out = flip(HIRING_NEAR_TIE, { rawRobustness: RAW_OVERRIDE });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      expect(t).not.toMatch(/most likely to flip|single-factor change that flips|threshold signal/i);
+      expect(t).not.toMatch(/to see where the leading option moves/i);
+      expect(t).toMatch(/treat the lead as provisional/i);
+    }
+  });
+  it('5b. flip_thresholds: [] → no "no-flip" claim and no implied flip (empty is ambiguous)', () => {
+    const out = flip(HIRING_NEAR_TIE, {
+      rawRobustness: RAW_OVERRIDE,
+      decisionReview: { flip_thresholds: [] },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      expect(t).not.toMatch(/threshold signal/i);
+      expect(t).not.toMatch(/does not show a simple|no simple single-factor/i);
+      expect(t).not.toMatch(/most likely to flip/i);
+    }
+  });
+  it('5c. non-empty flip_thresholds with a clean label → provenance-safe threshold sentence', () => {
+    const out = flip(HIRING_NEAR_TIE, {
+      rawRobustness: RAW_OVERRIDE,
+      decisionReview: { flip_thresholds: [{ factor_label: 'Hiring and Salary Cost' }] },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain("One threshold signal to inspect is 'Hiring and Salary Cost'");
+      // Never overstate the source.
+      expect(out.assistant_text).not.toMatch(/the analysis suggests the result could change/i);
+    }
+  });
+  it('5d. non-empty flip_thresholds with unsafe/missing label → omit the threshold sentence', () => {
+    const out = flip(HIRING_NEAR_TIE, {
+      rawRobustness: RAW_OVERRIDE,
+      decisionReview: { flip_thresholds: [{ factor_label: 'fac_cost_01' }, { factor_label: '   ' }] },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).not.toMatch(/threshold signal to inspect/i);
+      expect(out.assistant_text).not.toContain('fac_cost_01');
+    }
+  });
+
+  // 6. Copy safety.
+  it('6. copy is glossary-safe: no raw decimals, IDs, internal vocab, best/recommended/winner', () => {
+    const out = flip(HIRING_NEAR_TIE, {
+      rawRobustness: RAW_OVERRIDE,
+      decisionReview: { flip_thresholds: [{ factor_label: 'Hiring and Salary Cost' }] },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      expect(t).not.toMatch(/\b0\.\d+/); // raw normalised decimals
+      expect(t).not.toMatch(/\b(fac|opt|out|risk|goal|dec|node)_[a-z0-9]/i); // entity IDs
+      expect(t).not.toMatch(/_meta|graph hash|node id/i);
+      expect(t).not.toMatch(/\b(best|recommended|winner)\b/i);
+      expect(findForbiddenPhraseHit(t)).toBeNull();
+    }
+  });
+
+  // 7. Deterministic fast path — no LLM call.
+  it('7. fast path is deterministic and synchronous (no async LLM dispatch)', () => {
+    const out = flip(HIRING_NEAR_TIE, { rawRobustness: RAW_OVERRIDE });
+    // A synchronous result object — not a Promise/thenable — proves no LLM round-trip.
+    expect(typeof (out as { then?: unknown }).then).toBe('undefined');
+    expect(out.matched).toBe(true);
+  });
+
+  // 8. Graceful when richer evidence is absent.
+  it('8. clear-lead answer when fragile_edges, decisionReview and rawRobustness all absent', () => {
+    const out = flip({
+      status: 'success',
+      leading_option: { label: 'Option A', probability: 0.7 },
+      runner_up: { label: 'Option B', probability: 0.3 },
+      margin_pp: 40,
+      robustness_band: 'stable',
+      top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.4 }],
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      expect(t).toContain("Based on this model, 'Option A' currently leads");
+      expect(t).not.toContain('the link from'); // no invented fragile assumption
+      expect(t).not.toMatch(/most likely to flip|threshold signal/i); // no implied flip
+      expect(t).toContain('What to check next');
+    }
   });
 });

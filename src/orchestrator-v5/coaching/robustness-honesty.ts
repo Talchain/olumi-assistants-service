@@ -16,6 +16,8 @@
  * duplicate or redefine them elsewhere.
  */
 
+import { formatPercentagePoints } from '../format/format-analysis-value.js';
+
 import type { RawRobustnessSignals } from './pick-raw-robustness.js';
 
 // Re-export so a single import site (`robustness-honesty.js`) is enough for
@@ -125,4 +127,57 @@ export function describeRobustnessBand(
     default:
       return null;
   }
+}
+
+/**
+ * Wrap a DISPLAY label in straight single quotes so comparative copy stays
+ * readable when option labels themselves contain "and"
+ * (e.g. `'Hire One Tech Lead' and 'Hire One Tech Lead and One Developer'`
+ * instead of the ambiguous `Hire One Tech Lead and Hire One Tech Lead and
+ * One Developer`). DISPLAY COPY ONLY — callers must pass user-facing labels,
+ * never IDs or internal tokens. An apostrophe inside a label is a benign
+ * cosmetic edge; the egress sanitiser remains the ID backstop.
+ */
+export function quoteLabel(label: string): string {
+  return `'${label}'`;
+}
+
+/**
+ * The single comparative "standing / closeness" sentence for post-analysis
+ * coaching copy. Centralised here (the near-tie SSOT) so consumers share one
+ * truth table and one phrasing.
+ *
+ * - `tieReason === 'margin'` (projected gap ≤ {@link NEAR_TIE_PP_THRESHOLD}):
+ *   `'A' and 'B' are effectively tied.`
+ * - `tieReason === 'override'` + finite margin (gap is wider than 1pp but the
+ *   raw signal flags a near-tie): `This is a close call: 'A' is narrowly ahead
+ *   of 'B' by about N percentage points.` — states the REAL margin rather than
+ *   overclaiming "tied".
+ * - `tieReason === 'override'` + non-finite margin: a number-free near-tie line.
+ * - `tieReason === null` (not a near-tie) OR no runner-up label: returns `null`
+ *   so the caller emits its own clear-lead opener.
+ *
+ * Labels are quoted via {@link quoteLabel} (display copy). Numerics are
+ * pass-through only (no recomputation) — F.6.
+ */
+export function closenessLead(args: {
+  readonly leadingLabel: string;
+  readonly runnerLabel: string | null | undefined;
+  readonly tieReason: 'margin' | 'override' | null;
+  readonly marginPp: number | null | undefined;
+}): string | null {
+  const { leadingLabel, runnerLabel, tieReason, marginPp } = args;
+  if (tieReason === null) return null;
+  if (typeof runnerLabel !== 'string' || runnerLabel.trim().length === 0) return null;
+  const lead = quoteLabel(leadingLabel);
+  const runner = quoteLabel(runnerLabel);
+  if (tieReason === 'margin') {
+    return `${lead} and ${runner} are effectively tied.`;
+  }
+  // override: prefer the real margin when finite (honest "narrowly ahead by N"),
+  // otherwise a number-free near-tie line so we never anchor on a phantom gap.
+  if (typeof marginPp === 'number' && Number.isFinite(marginPp)) {
+    return `This is a close call: ${lead} is narrowly ahead of ${runner} by about ${formatPercentagePoints(Math.abs(marginPp))}.`;
+  }
+  return `This is a close call: the analysis treats ${lead} and ${runner} as a near-tie.`;
 }

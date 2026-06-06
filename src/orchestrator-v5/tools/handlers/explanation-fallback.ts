@@ -37,6 +37,7 @@ import {
   describeRobustnessBand,
   isNearTieByMargin,
   isRawFragile,
+  quoteLabel,
   type RawRobustnessSignals,
 } from '../../coaching/robustness-honesty.js';
 
@@ -242,15 +243,16 @@ export function composeWhatWouldFlipFallback(
   // is set on the projection.
 
   sentences.push(
-    `${leading.label} is currently performing best, with a probability of ${formatProbability(leading.probability)}.`,
+    `${quoteLabel(leading.label)} currently leads, with a probability of ${formatProbability(leading.probability)}.`,
   );
 
   if (nearTie && projection.runner_up) {
     // Near-tie: never describe a near-zero gap as "the lead would need to
-    // close". Mirror the free-text composer's effectively-tied phrasing so
-    // the two paths read the same when the truth is the same.
+    // close". Option labels are quoted so "and"-containing labels stay
+    // readable. The caveat is consolidated into the single robustness/near-tie
+    // sentence below — this lead carries no trailing "could shift" hedge.
     sentences.push(
-      `${leading.label} and ${projection.runner_up.label} are effectively tied, so the outcome could shift with small changes.`,
+      `${quoteLabel(leading.label)} and ${quoteLabel(projection.runner_up.label)} are effectively tied.`,
     );
   } else if (projection.runner_up && finiteMargin !== null) {
     // Reuse the finite-margin guard: a `!== null` check on `margin_pp`
@@ -261,13 +263,13 @@ export function composeWhatWouldFlipFallback(
     // ever a finite number when non-null), so TypeScript narrows
     // cleanly here without a cast.
     sentences.push(
-      `For ${projection.runner_up.label} to overtake it, the lead of ${formatPercentagePoints(
+      `For ${quoteLabel(projection.runner_up.label)} to overtake it, the lead of ${formatPercentagePoints(
         finiteMargin,
       )} would need to close.`,
     );
   } else if (projection.runner_up) {
     sentences.push(
-      `${projection.runner_up.label} is the most likely contender to overtake it.`,
+      `${quoteLabel(projection.runner_up.label)} is the most likely contender to overtake it.`,
     );
   }
 
