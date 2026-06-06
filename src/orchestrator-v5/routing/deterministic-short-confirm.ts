@@ -71,11 +71,17 @@ const EDIT_VERB_OR_QUANTITY_PATTERN =
 /**
  * Proposal-targeted confirmation phrases. Match ONLY when at least
  * one live `apply_proposed_change` pending action exists, and override
- * the edit-verb gate. The brief explicitly lists "add that" and
- * "make that change" as required deterministic confirmations.
+ * the edit-verb gate. The brief explicitly lists "add that",
+ * "make that change", and (V5 P0.2) "make that update" as required
+ * deterministic confirmations. The trailing noun is one of
+ * change|update|edit so "make that update" / "apply that update" /
+ * "do that edit" all resolve, while the noun stays optional for the
+ * bare "make that" form. Still anchored ^...$ so any extra content
+ * ("make that change to pricing") disqualifies the match and falls to
+ * the normal edit path.
  */
 export const PROPOSAL_CONFIRM_PATTERN =
-  /^\s*(?:add\s+that|make\s+that(?:\s+change)?|do\s+that\s+change|apply\s+that(?:\s+change)?|let'?s\s+(?:do\s+that|apply\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:add\s+that|make\s+that(?:\s+(?:change|update|edit))?|do\s+that\s+(?:change|update|edit)|apply\s+that(?:\s+(?:change|update|edit))?|let'?s\s+(?:do\s+that|apply\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * Phrasal-ordinal confirmation patterns. When at least one live
