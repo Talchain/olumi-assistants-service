@@ -117,7 +117,6 @@ import {
   PROPOSAL_SUPERSEDED_RESPONSE,
 } from './routing/proposed-change-synthesis.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
-import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
 import {
   RENDER_SAFE_LABEL_FALLBACK,
   resolveProposalRenderCopy,
@@ -526,13 +525,8 @@ export async function runTurnExecutor(
   // to the routing log. Anchoring this at the guard block alone left
   // turns that short-circuit early reporting `prior_mutation_fact_count:
   // 0` even when the conversation had several persisted mutations.
-  const priorMutationFactCountForLog = context.prior_facts.filter(
-    (f) =>
-      !f.noop &&
-      (f.fact_type === 'add_constraint' ||
-        f.fact_type === 'set_factor_value' ||
-        f.fact_type === 'adjust_edge_strength'),
-  ).length;
+  const priorMutationFactCountForLog =
+    context.prior_facts.filter(isAppliedMutationFact).length;
   // V5 state-trust: freshness derivation. The PRE-dispatch derivation
   // (`routingFreshness`) is built from `context.prior_facts` and is used
   // to ground Sonnet's analysis projection. The POST-dispatch derivation
@@ -1499,275 +1493,13 @@ export async function runTurnExecutor(
           );
         }
         return finalizeRun();
-      } else if (shortConfirmDispatch.dispatch === 'recovery_ambiguous') {
-        // UNREACHABLE since V5 P0.2 most-recent-wins (commit 9aa6e2f5):
-        // `tryShortConfirmResume` no longer returns `recovery_ambiguous`
-        // — a bare confirm with >1 live resumable now resumes the most
-        // recent. Retained (compiles, dead) pending a dedicated cleanup
-        // PR that also drops the union member + `multiple_ambiguous`
-        // skip-reason. NOTE: the numbered-clarification UX for genuine
-        // LABEL-MATCH collisions is unaffected — that path emits
-        // `PendingActionRecoveryAmbiguous` + its own clarification
-        // independently (see the label-pick `ambiguous` branch below).
-        emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
-          request_id: requestId,
-          scenario_id: context.session_id,
-          candidate_count: shortConfirmDispatch.candidates.length,
-          kinds: shortConfirmDispatch.candidates.map((c) => c.action.kind),
-        });
-        // Build one chip per candidate so the user can pick the
-        // intended action. Chip messages are kind-specific so the
-        // server can route them deterministically on the follow-up
-        // turn (the chip's action_type carries the intent through
-        // the chip_metadata channel the UI already round-trips).
-        const ambiguousChips: SuggestedAction[] = shortConfirmDispatch.candidates.map(
-          (cand, idx) => {
-            if (cand.action.kind === 'run_analysis') {
-              return {
-                id: `chip_clarify_pending_${idx}`,
-                label: 'Run analysis',
-                message: 'Run the analysis.',
-                action_type: 'run_analysis',
-              };
-            }
-            if (cand.action.kind === 'what_would_flip') {
-              return {
-                id: `chip_clarify_pending_${idx}`,
-                label: 'Explore what would change this',
-                message: 'Explore what would change the result.',
-                action_type: 'what_would_flip',
-              };
-            }
-            // apply_proposed_change — surface the proposal's chip id
-            // (the public proposal_ref) plus the user-facing label,
-            // message and the intended public action_type derived
-            // from the stored `inline_patch.handler_id`. Hard-coding
-            // `add_constraint` would mis-render set_factor_value and
-            // adjust_edge_strength proposals with the wrong wire
-            // action type. Falls back to generic strings only for
-            // legacy entries missing the persisted copy.
-            // Pass-8 P1-1: render-copy resolution goes through ONE
-            // helper so the strings the user sees are identical to
-            // the strings the deterministic label/ordinal pre-route
-            // matches against. Emit-time validation (see
-            // compose/proposed-change.ts::emitProposedChange) is the
-            // primary safety defence; the helper is the belt-and-
-            // braces fallback for malformed, legacy, or pre-
-            // validation entries that bypass the emit helper.
-            const renderCopy = resolveProposalRenderCopy(cand.action);
-            const persistedLabel = renderCopy.label;
-            const persistedMessage = renderCopy.message;
-            const inlineHandlerId =
-              cand.action.kind === 'apply_proposed_change'
-                ? (cand.action.inline_patch as { handler_id?: unknown })?.handler_id
-                : undefined;
-            // Use the shared helper so the ambiguous-chip wire
-            // `action_type` is always one of the proposal-backing
-            // V5ActionType literals. Falls back to add_constraint
-            // only for legacy or malformed entries that lack a
-            // resolvable handler_id (defence-in-depth — emit-time
-            // validation prevents this in practice).
-            const proposalActionType: 'add_constraint' | 'set_factor_value' | 'adjust_edge_strength' =
-              isProposedChangeActionType(inlineHandlerId) ? inlineHandlerId : 'add_constraint';
-            return {
-              id: cand.chip_id,
-              label: persistedLabel,
-              message: persistedMessage,
-              action_type: proposalActionType,
-            };
-          },
-        );
-        // V5 G7/G8: when every candidate is an apply_proposed_change,
-        // try the deterministic ordinal / label pre-route ("the first
-        // one", "option 2", exact label). If it matches, fall through
-        // into the pending_action synthesis path with the resolved
-        // candidate; otherwise emit the numbered clarification below.
-        const allProposals = shortConfirmDispatch.candidates.every(
-          (c) => c.action.kind === 'apply_proposed_change',
-        );
-        if (allProposals) {
-          // Pass-8 P1-1: pass the same render copy the chips show.
-          // The matcher uses both label AND message for exact-match
-          // resolution, and demands an unambiguous unique match.
-          const ordinal = tryProposalOrdinalSelect({
-            message: resumerMessage,
-            candidates: shortConfirmDispatch.candidates,
-            candidateRenderCopy: ambiguousChips.map((c) => ({
-              label: c.label,
-              message: c.message,
-            })),
-          });
-          if (ordinal.matched) {
-            emit(TelemetryEvents.PendingActionMatched, {
-              request_id: requestId,
-              scenario_id: context.session_id,
-              pending_action_id: ordinal.pending.id,
-              kind: ordinal.pending.action.kind,
-              chip_id: ordinal.pending.chip_id,
-              candidate_count: shortConfirmDispatch.candidates.length,
-            });
-            const decision = decideProposedChangeSynthesis({
-              pending: ordinal.pending,
-              currentGraphHash: freshness?.current_graph_hash ?? undefined,
-              priorFactsWithTurn: context.prior_facts_with_turn,
-            });
-            if (decision.status === 'execute') {
-              const fallbackEnt = (() => {
-                if (graphLookupForValidate) {
-                  const opts = graphLookupForValidate.listEntitiesByKind('option');
-                  if (opts.length > 0) {
-                    return { id: opts[0]!.id, kind: 'option' as const, label: opts[0]!.label };
-                  }
-                }
-                return { id: context.session_id, kind: 'option' as const, label: null };
-              })();
-              const proposalForOrdinal = buildApplyProposedChangeProposal(
-                ordinal.pending,
-                fallbackEnt,
-                (id) =>
-                  graphLookupForValidate ? graphLookupForValidate.findEntityById(id) : null,
-              );
-              routingResult = {
-                type: 'tool_call',
-                proposal: { intent_class: 'execute', action: proposalForOrdinal },
-                orientationText: '',
-                rawResult: {
-                  content: [],
-                  stop_reason: 'tool_use',
-                  usage: { input_tokens: 0, output_tokens: 0 },
-                  model: 'deterministic-short-confirm',
-                  latencyMs: 0,
-                },
-                llmCallCount: 0,
-              };
-              llmCallsUsed = 0;
-              sonnetTextForLog = '';
-              stagesCompleted.push('orient');
-              consumedPendingAction = ordinal.pending;
-              // Fall through to the rest of TurnExecutor (validator,
-              // handler dispatch). DO NOT return finalizeRun here.
-            } else {
-              // superseded / already_applied / invalid — emit the
-              // matching deterministic recovery copy and finalise via
-              // the shared helper.
-              return commitProposedChangeRecovery(
-                decision.status,
-                `apply_proposed_change_ordinal_${decision.status}`,
-              );
-            }
-          }
-        }
-        // No ordinal match (or candidates aren't all proposals) —
-        // fall through to the numbered clarification below.
-        // routingResult is `RoutingResult | undefined` (initialised
-        // undefined at the top of the run); the ordinal branch above
-        // only assigns it on a successful execute decision.
-        if (routingResult !== undefined) {
-          // Ordinal matched and synthesised a routing result; skip
-          // the numbered-clarification commit. The handler-dispatch
-          // path picks it up after this if/else block.
-        } else {
-        // V5 G7/G8 P1-1: when every candidate is a proposal with a
-        // persisted public label, render the assistant text as a
-        // numbered list of those labels so the user can read the
-        // options as a list (per the brief: "Which one would you
-        // like? 1) <label> 2) <label>"). Mixed-kind candidates fall
-        // back to the generic prompt.
-        const allCandidatesHaveLabels = ambiguousChips.every(
-          (c) => c.label.length > 0 && c.label !== RENDER_SAFE_LABEL_FALLBACK,
-        );
-        const numberedList = ambiguousChips
-          .map((c, i) => `${i + 1}) ${c.label}`)
-          .join(' ');
-        const ambiguousAssistantText = allCandidatesHaveLabels
-          ? `Which one would you like? ${numberedList}`
-          : 'I had more than one offer open. Which would you like?';
-        const ambiguousResponse = composeDirectAnswerResponse({
-          assistant_text: ambiguousAssistantText,
-          stage: context.stage,
-          suggested_actions: ambiguousChips,
-        });
-        sonnetTextForLog = ambiguousResponse.assistant_text;
-        resolvedTurnClass = 'direct_answer';
-        intentClass = 'converse';
-        responseTypeForObs = 'direct_answer';
-        llmCallsUsed = 0;
-        stagesCompleted.push('orient');
-        stagesCompleted.push('compose');
-        try {
-          // V5 G7/G8 P0-1 + P0-3: re-persist the apply_proposed_change
-          // pending actions on the clarification turn so the
-          // next-turn ordinal resolution ("the first one") has live
-          // offers to match. For mixed ambiguity (a run_analysis or
-          // what_would_flip pending action alongside a proposal), we
-          // ALSO derive pending actions from the run_analysis /
-          // what_would_flip ambiguous chips so those follow-up paths
-          // remain resumable on the next turn — passing only the
-          // proposals would suppress chip-derivation entirely.
-          //
-          // Identity is preserved across the re-persist: each
-          // proposal's chip_id, proposal_ref, expires_at_iso are
-          // unchanged. Wall-clock TTL still applies, so an offer
-          // that would have expired before resume still expires.
-          const proposalsToRepersist = shortConfirmDispatch.candidates.filter(
-            (c) => c.action.kind === 'apply_proposed_change',
-          );
-          const chipDerivedForAmbiguous = derivePendingActionsFromChips(ambiguousChips, {
-            scenario_id: context.session_id,
-            emitted_at_iso: new Date().toISOString(),
-            ...(freshness?.current_graph_hash != null
-              ? { graph_hash: freshness.current_graph_hash }
-              : {}),
-          });
-          const mergedPendingActions = [
-            ...proposalsToRepersist,
-            ...chipDerivedForAmbiguous,
-          ];
-          const committed = await commitTurn(ambiguousResponse, {
-            scenario_id: context.session_id,
-            turn_id: context.request_id,
-            turn_class: 'direct_answer',
-            handler_id: null,
-            request_hash: computeRequestHash(payload),
-            llm_calls_used: 0,
-            duration_ms: Date.now() - startedAt,
-            handler_facts: [],
-            ...(mergedPendingActions.length > 0
-              ? { pending_actions: mergedPendingActions }
-              : {}),
-          });
-          commitPerformed = committed.performed;
-          stagesCompleted.push('commit');
-          response = committed.response;
-        } catch (error) {
-          log.error(
-            {
-              event: 'v5.state_commit_failed',
-              request_id: requestId,
-              session_id: context.session_id,
-              path: 'short_confirm_recovery_ambiguous',
-              err: serialiseError(error),
-            },
-            'V5 TurnExecutor commit failure on ambiguous-recovery',
-          );
-          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
-          response = buildFailureResponse(
-            'STATE_COMMIT_FAILED',
-            context.stage,
-            { phase: 'commit' },
-            recoveryCtx(),
-          );
-        }
-        return finalizeRun();
-        }
       }
 
       // V5 G7/G8 P1-1: live-proposal label/ordinal pre-route. Fires
       // when short-confirm returned matched=false. A user replying
       // with the proposal's exact public label ("Add the cost cap")
       // would otherwise hit the edit-verb gate on short-confirm and
-      // fall through to the LLM, never reaching the recovery_ambiguous
-      // ordinal-select branch. This pre-route runs the same helper
+      // fall through to the LLM. This pre-route runs the same helper
       // against ALL live apply_proposed_change candidates so an
       // exact-label or ordinal pick resolves deterministically
       // regardless of how short-confirm classified the message.
@@ -1876,8 +1608,8 @@ export async function runTurnExecutor(
             });
             // Build chips using the SAME rendered copy the user saw.
             // Each candidate's chip carries its persisted chip_id and
-            // an action_type derived from its handler_id, matching
-            // the format used by the recovery_ambiguous flow.
+            // an action_type derived from its handler_id, so the UI can
+            // round-trip the pick deterministically on the next turn.
             const labelAmbiguousChips: SuggestedAction[] = ambiguousProposals.map(
               (cand, idx) => {
                 const inlineHandlerId =
@@ -4650,13 +4382,7 @@ export async function runTurnExecutor(
       // nothing changed — honouring "narration must follow persisted state".
       const resumeAppliedRealMutation =
         consumedPendingAction?.action.kind === 'apply_proposed_change' &&
-        (handlerOutcome?.handler_facts ?? []).some(
-          (f) =>
-            !f.noop &&
-            (f.fact_type === 'add_constraint' ||
-              f.fact_type === 'set_factor_value' ||
-              f.fact_type === 'adjust_edge_strength'),
-        );
+        (handlerOutcome?.handler_facts ?? []).some(isAppliedMutationFact);
       if (composedOk !== null && resumeAppliedRealMutation) {
         const { label: echoLabel } = resolveProposalRenderCopy(
           consumedPendingAction!.action,
@@ -5945,6 +5671,26 @@ function safeFireRoutingLogWrite(
 }
 
 export type { InternalFailure } from './types.js';
+
+/**
+ * True when a handler fact is a NON-NOOP applied graph mutation. Single
+ * source of truth shared by the prior-mutation-count routing-log field and
+ * the resume-echo gate, so the two cannot drift if a new mutation fact type
+ * becomes a resumable proposal action ("defensive predicates compute once,
+ * apply uniformly"). The param is structural so it accepts both persisted
+ * `prior_facts` entries and `HandlerOutcome.handler_facts` (HandlerFact).
+ */
+function isAppliedMutationFact(f: {
+  readonly noop?: boolean;
+  readonly fact_type?: string;
+}): boolean {
+  return (
+    !f.noop &&
+    (f.fact_type === 'add_constraint' ||
+      f.fact_type === 'set_factor_value' ||
+      f.fact_type === 'adjust_edge_strength')
+  );
+}
 
 /**
  * V5 P0.2 — build a factor_id → {cap, unit} lookup from the persisted

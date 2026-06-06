@@ -1,18 +1,15 @@
 /**
  * V5 G7/G8 — proposal ordinal / label / message select pre-route.
  *
- * Used by TurnExecutor in TWO places:
- *   1. Inside the `recovery_ambiguous` branch of `tryShortConfirmResume`
- *      — when "yes"-style input meets multiple live proposals, this
- *      helper picks ordinal / label / message matches against the
- *      ambiguous chips before the numbered clarification commits.
- *   2. Pass-7 P1-1 live-proposal label/ordinal pre-route — when
- *      short-confirm returned no-match, this helper runs against ALL
- *      live `apply_proposed_change` candidates so an exact-label or
- *      ordinal reply ("Add the cost cap", "the first one") resolves
- *      deterministically without going through the LLM.
+ * Used by TurnExecutor's live-proposal label/ordinal pre-route: when
+ * short-confirm returned no-match, this helper runs against ALL live
+ * `apply_proposed_change` candidates so an exact-label or ordinal reply
+ * ("Add the cost cap", "the first one") resolves deterministically
+ * without going through the LLM. (Until V5 P0.2 most-recent-wins it was
+ * also called inside the now-removed `recovery_ambiguous` branch of
+ * `tryShortConfirmResume`.)
  *
- * Both call sites consume `resolveProposalRenderCopy` from
+ * The call site consumes `resolveProposalRenderCopy` from
  * `compose/proposed-change.ts` so the strings the matcher tests
  * against are exactly the strings the user saw rendered.
  *

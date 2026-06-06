@@ -87,9 +87,9 @@ export const PROPOSAL_CONFIRM_PATTERN =
  * Phrasal-ordinal confirmation patterns. When at least one live
  * `apply_proposed_change` pending action exists and the message is
  * an ordinal pointer ("the first one", "first", "option 2", "#3"),
- * the resumer resolves the indexed proposal directly without
- * routing through `recovery_ambiguous`. The brief lists these as
- * deterministic resolutions.
+ * the resumer resolves the indexed proposal directly, ahead of the
+ * most-recent-wins fallback. The brief lists these as deterministic
+ * resolutions.
  */
 const ORDINAL_WORD_PATTERN =
   /^\s*(?:the\s+)?(first|second|third|fourth|fifth)(?:\s+(?:one|option|choice))?(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?]*$/iu;
@@ -121,8 +121,7 @@ export type ShortConfirmSkipReason =
   | 'no_short_confirm'
   | 'no_pending'
   | 'all_expired'
-  | 'kind_not_yet_resumable'
-  | 'multiple_ambiguous';
+  | 'kind_not_yet_resumable';
 
 /**
  * Coarse summary of analysis state at resume time. Drives the
@@ -144,11 +143,6 @@ export type ShortConfirmDispatch =
       readonly matched: true;
       readonly dispatch: 'recovery_expired';
       readonly expired_count: number;
-    }
-  | {
-      readonly matched: true;
-      readonly dispatch: 'recovery_ambiguous';
-      readonly candidates: readonly PendingAction[];
     }
   | {
       readonly matched: true;
@@ -244,8 +238,8 @@ export function tryShortConfirmResume(
   // two pre-route branches: (1) PROPOSAL_CONFIRM_PATTERN bypasses the
   // edit-verb gate for proposal-targeted phrases ("add that", "make
   // that change"); (2) ordinal pointers ("the first one", "option 2")
-  // resolve directly to the indexed proposal without going through
-  // `recovery_ambiguous`.
+  // resolve directly to the indexed proposal, ahead of the
+  // most-recent-wins fallback.
   const liveApplyProposed = input.pendingActions.filter(
     (pa) =>
       pa.action.kind === 'apply_proposed_change' &&
@@ -255,9 +249,9 @@ export function tryShortConfirmResume(
   // Phrasal-ordinal pre-resolve. Only fires when at least one live
   // apply_proposed_change exists. Single-proposal "the first one"
   // resolves to that one offer; multi-proposal ordinal picks the
-  // indexed candidate. This deliberately short-circuits
-  // `recovery_ambiguous` so deterministic ordinal picks never produce
-  // a clarification round-trip.
+  // indexed candidate. This deliberately short-circuits the
+  // most-recent-wins fallback so an explicit ordinal pick always
+  // selects the indexed proposal (not merely the newest).
   if (liveApplyProposed.length > 0) {
     const ordinalIdx = tryParseOrdinalIndex(input.message);
     if (ordinalIdx !== null && ordinalIdx >= 0 && ordinalIdx < liveApplyProposed.length) {

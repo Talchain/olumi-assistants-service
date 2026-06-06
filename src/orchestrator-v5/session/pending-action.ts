@@ -257,8 +257,7 @@ export type PendingActionInvalidationReason =
 export type PendingActionSkipReason =
   | 'no_short_confirm'
   | 'no_pending'
-  | 'superseded_by_later_turn'
-  | 'multiple_ambiguous';
+  | 'superseded_by_later_turn';
 
 /**
  * Default lifecycle bounds. Conservative; tune later via telemetry on
