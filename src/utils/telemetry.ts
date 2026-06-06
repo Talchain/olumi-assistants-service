@@ -972,6 +972,11 @@ export const TelemetryEvents = {
   // option/factor labels, no copy.
   V5RunComparisonGate: "v5.run_comparison_gate",
 
+  // V5 P0.2 — flip-threshold proposal emitted on a what_would_flip turn.
+  // Content-free: { result: 'emitted'|'no_proposal'|'unsafe_copy'|
+  // 'unknown_intent' } — no factor labels, values, or copy.
+  V5ProposedChangeEmitted: "v5.proposed_change.emitted",
+
   // V5 Context Management v1 — sibling no-analysis guard. Fires when no
   // successful run_analysis fact exists AND the user is asking an
   // analytical question. Short-circuits to a deterministic direct_answer

@@ -170,8 +170,10 @@ import {
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import { buildFlipProposalEmit, type FactorNodeInfo } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { deriveRecentChangesEvidence } from './context/recent-changes.js';
@@ -3682,6 +3684,9 @@ export async function runTurnExecutor(
     let handlerIdForCommit: V5ActionType | null = null;
     let handlerFactsForCommit: readonly HandlerFact[] = [];
     let composedOk: OlumiResponse | null = null;
+    // V5 P0.2 — a flip-threshold proposal's pending action, emitted on a
+    // what_would_flip turn and merged into the committed pending_actions.
+    let flipProposalPending: PendingAction | undefined;
 
     // ==================================================================
     // STEPS 2–4: execute-intent path (VALIDATE → EXECUTE → CONFIRM)
@@ -4543,7 +4548,7 @@ export async function runTurnExecutor(
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop
       // run_analysis fact already exists in the conversation.
-      const executeChips = generateChips({
+      let executeChips = generateChips({
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         priorFacts: context.prior_facts,
@@ -4553,6 +4558,53 @@ export async function runTurnExecutor(
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
+
+      // V5 P0.2 — flip-threshold proposal emission (Seam 1). On a
+      // what_would_flip turn, offer a deterministic, provenance-safe
+      // "Test X at N" set_factor_value proposal when a single-factor flip
+      // exists and inverts to an exact, safely-displayable user-scale
+      // value. Emits NOTHING otherwise (null flip / unrenderable / no cap /
+      // no graph hash). The verified emit logic lives in
+      // compose/flip-proposal.ts (buildFlipProposalEmit).
+      if (
+        proposedHandlerId === 'what_would_flip' &&
+        currentAnalysisGraphHashForTurn !== null
+      ) {
+        const priorRun = selectRunAnalysisFact(context.prior_facts);
+        const priorEnrichment = priorRun
+          ? (priorRun.fact as { result?: { enrichment?: unknown } }).result?.enrichment
+          : undefined;
+        const flipEmit = buildFlipProposalEmit(
+          priorEnrichment,
+          buildFactorNodeLookup(context.persistedGraph),
+          {
+            scenario_id: context.session_id,
+            graph_hash: currentAnalysisGraphHashForTurn,
+            emitted_at_iso: new Date().toISOString(),
+            registry: options.handlerRegistry ?? getDefaultRegistry(),
+          },
+        );
+        emit(TelemetryEvents.V5ProposedChangeEmitted, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: 'what_would_flip',
+          result: flipEmit.status,
+        });
+        if (flipEmit.status === 'emitted') {
+          flipProposalPending = flipEmit.pending;
+          // Protect the proposal chip at the front; dedupe by id; cap at 3.
+          const deduped: SuggestedAction[] = [];
+          const seenChipIds = new Set<string>();
+          for (const chip of [flipEmit.chip, ...executeChips]) {
+            if (seenChipIds.has(chip.id)) continue;
+            seenChipIds.add(chip.id);
+            deduped.push(chip);
+            if (deduped.length >= 3) break;
+          }
+          executeChips = deduped;
+        }
+      }
+
       composedOk = composeToolCallResponse({
         orientation: orientationForCompose,
         confirmation: confirmationText,
@@ -4894,6 +4946,12 @@ export async function runTurnExecutor(
       // without briefText (e.g. legacy draft pre-Fix A) — subsequent
       // non-draft turns will backfill the brief from the enriched
       // context if it's still null.
+      // V5 P0.2 — merge the flip-threshold proposal's pending (most recent
+      // first) ahead of any chip-derived / proposed-concept pendings, capped
+      // at the persisted budget of 3.
+      const pendingForCommit = flipProposalPending
+        ? [flipProposalPending, ...(proposalPendingForCommit ?? [])].slice(0, 3)
+        : proposalPendingForCommit;
       const committed = await commitTurn(composedOk, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
@@ -4905,8 +4963,8 @@ export async function runTurnExecutor(
         handler_facts: handlerFactsForCommit,
         graph: graphForCommit,
         briefText: context.scenarioBriefText ?? undefined,
-        ...(proposalPendingForCommit !== undefined
-          ? { pending_actions: proposalPendingForCommit }
+        ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0
+          ? { pending_actions: pendingForCommit }
           : {}),
       });
       if (timingsEnabled) {
@@ -5847,3 +5905,36 @@ function safeFireRoutingLogWrite(
 }
 
 export type { InternalFailure } from './types.js';
+
+/**
+ * V5 P0.2 — build a factor_id → {cap, unit} lookup from the persisted
+ * (raw ingress) graph's `observed_state`, for the flip-threshold proposal
+ * producer's model→user-scale inversion. Defensive: tolerates an
+ * unknown/partial graph shape and returns undefined for unknown factors.
+ */
+function buildFactorNodeLookup(
+  persistedGraph: unknown,
+): (factorId: string) => FactorNodeInfo | undefined {
+  const map = new Map<string, FactorNodeInfo>();
+  const nodes =
+    persistedGraph && typeof persistedGraph === 'object'
+      ? (persistedGraph as { nodes?: unknown }).nodes
+      : undefined;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      if (!n || typeof n !== 'object') continue;
+      const node = n as Record<string, unknown>;
+      const id = typeof node.id === 'string' ? node.id : null;
+      if (!id) continue;
+      const obs =
+        node.observed_state && typeof node.observed_state === 'object'
+          ? (node.observed_state as Record<string, unknown>)
+          : null;
+      map.set(id, {
+        cap: obs && typeof obs.cap === 'number' ? obs.cap : null,
+        unit: obs && typeof obs.unit === 'string' ? obs.unit : null,
+      });
+    }
+  }
+  return (factorId) => map.get(factorId);
+}
