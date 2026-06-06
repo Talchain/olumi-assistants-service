@@ -106,6 +106,27 @@ function readExpectedBuildEnv(): string | undefined {
   return trimmed;
 }
 
+/**
+ * Parse a boolean-ish CLI/env value. `true`/`1`/`yes` → true,
+ * `false`/`0`/`no` → false, anything else → undefined (caller defaults).
+ */
+function parseBoolish(raw: string | undefined): boolean | undefined {
+  if (raw === undefined) return undefined;
+  const v = raw.trim().toLowerCase();
+  if (v === 'true' || v === '1' || v === 'yes') return true;
+  if (v === 'false' || v === '0' || v === 'no') return false;
+  return undefined;
+}
+
+/**
+ * Resolve the expected `/healthz.critical_prompts_pms` value from the
+ * `OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS` env var. CLI flag takes
+ * precedence — see `parseArgs`. Default (both unset) is `false`.
+ */
+function readExpectedCriticalPromptsPmsEnv(): boolean | undefined {
+  return parseBoolish(process.env.OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS);
+}
+
 export interface DeployGateVerdict {
   readonly halt: boolean;
   readonly reason?: string;
@@ -133,6 +154,7 @@ export function evaluateDeployGate(
   baseUrl: string,
   healthz: HealthzResult | undefined,
   expectedBuild?: string,
+  expectedCriticalPromptsPms: boolean = false,
 ): DeployGateVerdict {
   // Local runs: skip the gate. Local builds use arbitrary SHAs.
   try {
@@ -196,6 +218,25 @@ export function evaluateDeployGate(
     };
   }
 
+  // Preflight assertion: `/healthz.critical_prompts_pms` must equal the
+  // expected value (default false). Asserted only when the field is
+  // present on the wire — an absent field (older deploy / localhost
+  // fixtures) is not treated as a mismatch so the gate stays backwards-
+  // compatible. A present-and-differing value means the deploy is serving
+  // degraded prompt content; halt before burning the replay.
+  const criticalPromptsPms = healthz.body.critical_prompts_pms;
+  if (criticalPromptsPms !== undefined && criticalPromptsPms !== expectedCriticalPromptsPms) {
+    if (override) return { halt: false };
+    return {
+      halt: true,
+      reason:
+        `/healthz reports critical_prompts_pms=${String(criticalPromptsPms)} but the expected ` +
+        `value is ${String(expectedCriticalPromptsPms)} (configure via ` +
+        `--expected-critical-prompts-pms or OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS). ` +
+        'Set OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true to override.',
+    };
+  }
+
   return { halt: false };
 }
 
@@ -241,6 +282,8 @@ function parseArgs(): ResolvedHarnessConfig {
   // Staging/integration-only DB read-back. Off by default so wire-only
   // local runs need no Supabase credentials.
   let dbReadback = false;
+  // Expected /healthz.critical_prompts_pms (default false; CLI wins over env).
+  let expectedCriticalPromptsPmsCli: boolean | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -261,6 +304,12 @@ function parseArgs(): ResolvedHarnessConfig {
       journey = parseJourneyArg(arg.slice('--journey='.length));
     } else if (arg === '--db-readback') {
       dbReadback = true;
+    } else if (arg === '--expected-critical-prompts-pms' && i + 1 < args.length) {
+      expectedCriticalPromptsPmsCli = parseBoolish(args[++i]!);
+    } else if (arg.startsWith('--expected-critical-prompts-pms=')) {
+      expectedCriticalPromptsPmsCli = parseBoolish(
+        arg.slice('--expected-critical-prompts-pms='.length),
+      );
     } else if (arg === '--help' || arg === '-h') {
       console.log(
         'Usage: pnpm tsx tools/v5-journey-replay/index.ts \\\n' +
@@ -279,15 +328,19 @@ function parseArgs(): ResolvedHarnessConfig {
           '(generic edit_graph dispatcher — live on staging; emergency rollback\n' +
           'switch DL7_PR_B_DISABLE=true re-gates the journey).\n' +
           '\n' +
-          'branch-a-canonical: the full flip → "Test X at N" proposal → "do it" →\n' +
-          'set_factor_value loop. Steps 4-8 depend on PR #236 and are recorded as\n' +
-          'PENDING (skipped) until BRANCH_A_ENFORCE=true (set after #236 merges to\n' +
-          'staging and this branch rebases).\n' +
+          'branch-a-canonical: the full flip → "Test X at N" proposal →\n' +
+          '"make that update" → set_factor_value loop. PR #236 is live on staging,\n' +
+          'so steps 4-8 are ENFORCED by default; BRANCH_A_DISABLE=true re-gates them\n' +
+          'to pending (emergency rollback if #236 regresses).\n' +
           '\n' +
           '--db-readback (staging/integration only): for the branch-a-canonical\n' +
           'DB step, query the staging Supabase to prove the set_factor_value fact\n' +
           'persisted. Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in the env\n' +
-          '(see .env.staging.local). Off by default.',
+          '(see .env.staging.local). Off by default.\n' +
+          '\n' +
+          '--expected-critical-prompts-pms <true|false> (default false; or set\n' +
+          'OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS): the deploy gate halts when\n' +
+          '/healthz.critical_prompts_pms is present and differs from this value.',
       );
       process.exit(0);
     }
@@ -296,6 +349,9 @@ function parseArgs(): ResolvedHarnessConfig {
   // CLI flag wins; fall back to env. Both being unset means default
   // mode (well-formed-only check, no SHA comparison).
   const expectedBuild = expectedBuildCli ?? readExpectedBuildEnv();
+  // CLI > env > default(false).
+  const expectedCriticalPromptsPms =
+    expectedCriticalPromptsPmsCli ?? readExpectedCriticalPromptsPmsEnv() ?? false;
 
   return {
     baseUrl,
@@ -305,6 +361,7 @@ function parseArgs(): ResolvedHarnessConfig {
     expectedBuild,
     journey,
     dbReadback,
+    expectedCriticalPromptsPms,
   };
 }
 
@@ -339,16 +396,28 @@ function isDL7PrBLanded(): boolean {
 }
 
 /**
- * Branch A (PR #236) enforcement switch. The flip → "Test X at N"
- * proposal → "do it" → set_factor_value loop does not exist until #236
- * lands, so the `branch-a-canonical` steps marked `requires_branch_a`
- * are recorded as PENDING (skipped) by default. After #236 merges to
- * staging and this harness branch rebases onto it, set
- * `BRANCH_A_ENFORCE=true` to run and enforce those steps.
+ * Branch A emergency rollback switch. PR #236 (feat/v5-p0-2-continuity)
+ * merged to staging as `b8d5bcce`, so the flip → "Test X at N" proposal →
+ * "make that update" → set_factor_value loop is live. `BRANCH_A_DISABLE=true`
+ * re-gates the `branch-a-canonical` `requires_branch_a` steps back to
+ * PENDING (skipped) — use only if #236 regresses on staging.
+ *
+ * Mirrors `DL7_PR_B_DISABLE`. The pre-merge `BRANCH_A_ENFORCE=true` opt-in
+ * is still honoured (as a no-op affirmation) so existing invocations don't
+ * break, but it is now redundant — enforcement is the default.
+ */
+function isBranchADisabled(): boolean {
+  const raw = (process.env.BRANCH_A_DISABLE ?? '').trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
+}
+
+/**
+ * Whether the Branch-A-dependent steps (4-8) run and assert. Enforced by
+ * default now that PR #236 is live on staging; `BRANCH_A_DISABLE=true`
+ * re-gates them to pending.
  */
 function isBranchAEnforced(): boolean {
-  const raw = (process.env.BRANCH_A_ENFORCE ?? '').trim().toLowerCase();
-  return raw === 'true' || raw === '1' || raw === 'yes';
+  return !isBranchADisabled();
 }
 
 /**
@@ -444,8 +513,8 @@ async function run(): Promise<void> {
     console.log(
       `  branch_a state   = ${
         isBranchAEnforced()
-          ? 'ENFORCED via BRANCH_A_ENFORCE (PR #236 steps run + assert)'
-          : 'PENDING (PR #236 steps recorded as skipped — set BRANCH_A_ENFORCE=true after #236 merges + rebase)'
+          ? 'ENFORCED (default; PR #236 live on staging — steps 4-8 run + assert)'
+          : 'PENDING via BRANCH_A_DISABLE (emergency rollback — steps 4-8 skipped)'
       }`,
     );
     console.log(
@@ -456,6 +525,7 @@ async function run(): Promise<void> {
   console.log(
     `  expected_build   = ${cfg.expectedBuild ?? 'not set (default: well-formed-only check)'}`,
   );
+  console.log(`  expected_cpp     = ${String(cfg.expectedCriticalPromptsPms ?? false)} (critical_prompts_pms)`);
   console.log('');
 
   // Fail-fast gate. Throws with MISSING_KEY_MESSAGE for remote+no-key.
@@ -469,7 +539,8 @@ async function run(): Promise<void> {
   if (healthz.result?.body) {
     console.log(
       `  build=${healthz.result.body.build ?? '?'} version=${healthz.result.body.version ?? '?'} ` +
-        `degraded=${healthz.result.body.degraded ?? false}`,
+        `degraded=${healthz.result.body.degraded ?? false} ` +
+        `critical_prompts_pms=${String(healthz.result.body.critical_prompts_pms ?? 'absent')}`,
     );
   }
 
@@ -478,7 +549,12 @@ async function run(): Promise<void> {
   // build mismatches `--expected-build` (when supplied), or the
   // service reports degraded. Operator can override with
   // OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true.
-  const deployGate = evaluateDeployGate(cfg.baseUrl, healthz.result, cfg.expectedBuild);
+  const deployGate = evaluateDeployGate(
+    cfg.baseUrl,
+    healthz.result,
+    cfg.expectedBuild,
+    cfg.expectedCriticalPromptsPms ?? false,
+  );
   if (deployGate.halt) {
     console.error(`[DEPLOY HALT] ${deployGate.reason}`);
     const haltHeader = buildEvidenceHeader(cfg, startedAt, healthz.result, {
@@ -587,22 +663,22 @@ async function run(): Promise<void> {
     for (const step of journeySteps) {
       // Branch A pending gate — steps that depend on PR #236's product
       // emit/consume path are recorded as skipped (pending #236) until
-      // BRANCH_A_ENFORCE=true. Placed before the depends_on cascade so
-      // each pending step gets a clear "pending #236" row rather than a
-      // generic "prerequisite did not pass" cascade-skip.
+      // (default enforced). Placed before the depends_on cascade so each
+      // gated step gets a clear "pending" row rather than a generic
+      // "prerequisite did not pass" cascade-skip. This branch only fires
+      // when BRANCH_A_DISABLE=true re-gates the lane (emergency rollback).
       if (step.requires_branch_a && !branchAEnabled) {
         rows.push({
           step: step.name,
           status: 'skipped',
           evidence:
-            'pending Branch A (PR #236, feat/v5-p0-2-continuity) — the "Test X at N" ' +
-            'proposal + apply-on-confirm path does not exist yet. Set BRANCH_A_ENFORCE=true ' +
-            'to enforce after #236 merges to staging and this branch rebases.',
+            'Branch A (PR #236) steps re-gated to pending via BRANCH_A_DISABLE=true ' +
+            '(emergency rollback). Unset BRANCH_A_DISABLE to enforce — #236 is live on staging.',
           outcome_class: 'skipped',
           journey_id: cfg.journey,
           requires_branch_a: true,
         });
-        console.log(`[PENDING #236] ${step.name} (requires_branch_a; BRANCH_A_ENFORCE not set)`);
+        console.log(`[PENDING] ${step.name} (requires_branch_a; BRANCH_A_DISABLE=true)`);
         notPassed.add(step.name);
         continue;
       }

@@ -134,6 +134,14 @@ export interface HealthzBody {
   readonly service?: string;
   readonly degraded?: boolean;
   readonly degraded_reasons?: ReadonlyArray<string>;
+  /**
+   * Prompt/PMS criticality flag emitted by `/healthz` (PR #236-era). When
+   * `true`, a critical prompt failed to resolve from the PMS — the deploy
+   * is serving degraded prompt content. The replay deploy gate asserts
+   * this equals a configurable expected value (default `false`).
+   */
+  readonly critical_prompts_pms?: boolean;
+  readonly prompts_ready?: boolean;
 }
 
 export interface HealthzResult {
@@ -183,4 +191,11 @@ export interface HarnessConfig {
    * wire-only local runs need no DB credentials.
    */
   readonly dbReadback?: boolean;
+  /**
+   * Expected value of `/healthz.critical_prompts_pms` (default `false`).
+   * The deploy gate halts when the deployed flag is present and differs.
+   * Resolved from `--expected-critical-prompts-pms` (preferred) or
+   * `OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS`.
+   */
+  readonly expectedCriticalPromptsPms?: boolean;
 }

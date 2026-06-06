@@ -239,15 +239,15 @@ export function renderEvidencePack(
     lines.push(
       `- **branch_a_enforced:** ${
         header.branch_a_enforced
-          ? 'yes (BRANCH_A_ENFORCE=true — PR #236 steps run + assert)'
-          : 'no (PR #236 steps recorded as pending/skipped — set BRANCH_A_ENFORCE=true after #236 merges + rebase)'
+          ? 'yes (default — PR #236 live on staging; steps 4-8 run + assert)'
+          : 'no (BRANCH_A_DISABLE=true — steps 4-8 re-gated to pending/skipped)'
       }`,
     );
     const branchARows = rows.filter((r) => r.requires_branch_a === true);
     if (branchARows.length > 0) {
       lines.push(
         `- **Branch-A (PR #236)-pending rows:** ${branchARows.length} ` +
-          '(skipped until BRANCH_A_ENFORCE=true)',
+          '(re-gated via BRANCH_A_DISABLE)',
       );
     }
   }
@@ -265,6 +265,9 @@ export function renderEvidencePack(
     lines.push(`- **version:** \`${escapePipes(redact(b.version ?? 'unknown'))}\``);
     lines.push(`- **service:** \`${escapePipes(redact(b.service ?? 'unknown'))}\``);
     lines.push(`- **degraded:** ${b.degraded ?? false}`);
+    lines.push(
+      `- **critical_prompts_pms:** ${b.critical_prompts_pms === undefined ? '_absent_' : String(b.critical_prompts_pms)}`,
+    );
     if (b.degraded_reasons && b.degraded_reasons.length > 0) {
       lines.push(`- **degraded_reasons:** ${escapePipes(redact(b.degraded_reasons.join(', ')))}`);
     }

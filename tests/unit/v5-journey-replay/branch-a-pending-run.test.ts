@@ -39,8 +39,9 @@ describe('branch-a-canonical pending-path run (BRANCH_A_ENFORCE unset)', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     delete process.env.OLUMI_REPLAY_API_KEY;
-    // Force pending mode regardless of ambient env.
-    vi.stubEnv('BRANCH_A_ENFORCE', '');
+    // Force pending mode: PR #236 is live so enforcement is the default;
+    // BRANCH_A_DISABLE=true re-gates steps 4-8 to pending (what this tests).
+    vi.stubEnv('BRANCH_A_DISABLE', 'true');
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       consoleLogs.push(args.map((a) => String(a)).join(' '));
     });
@@ -122,13 +123,13 @@ describe('branch-a-canonical pending-path run (BRANCH_A_ENFORCE unset)', () => {
       const row = new RegExp(`\`${step}\` \\| \\[SKIP\\] skipped`);
       expect(pack).toMatch(row);
     }
-    expect(pack).toMatch(/pending Branch A \(PR #236/);
+    expect(pack).toMatch(/Branch A \(PR #236\) steps re-gated to pending/);
     expect(pack).toMatch(/branch_a_enforced:\*\* no/);
 
-    // No row is a failure → a pending run is green.
+    // No row is a failure → a pending (re-gated) run is green.
     expect(pack).not.toMatch(/\[FAIL\] failed/);
 
-    // Console announced the pending steps.
-    expect(consoleLogs.some((l) => l.includes('PENDING #236'))).toBe(true);
+    // Console announced the re-gated steps.
+    expect(consoleLogs.some((l) => l.includes('PENDING') && l.includes('BRANCH_A_DISABLE'))).toBe(true);
   });
 });

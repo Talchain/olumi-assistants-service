@@ -562,22 +562,52 @@ export const STALENESS_STEPS: readonly JourneyStep[] = [
 // Branch A canonical journey — `branch-a-canonical`
 //
 // The full proposal loop the Branch A product lane (PR #236,
-// `feat/v5-p0-2-continuity`) unlocks:
+// `feat/v5-p0-2-continuity`, merged to staging as `b8d5bcce`) unlocks:
 //
 //   draft → run_analysis → what_would_flip → [Test X at N proposal] →
-//   "do it" → set_factor_value applied → DB read-back → stale → what_changed
+//   "make that update" → set_factor_value applied → DB read-back →
+//   stale → what_changed
 //
-// Steps 1–3 run today (draft / run_analysis / what_would_flip prose).
-// Steps 4–8 depend on #236's emit/consume path — they are marked
-// `requires_branch_a` and recorded as `skipped` (pending #236) until
-// `BRANCH_A_ENFORCE=true`. After #236 merges to staging and this branch
-// rebases, set the env flag to enforce them.
+// PR #236 is live on staging, so steps 4-8 are ENFORCED by default
+// (`requires_branch_a`); `BRANCH_A_DISABLE=true` re-gates them to pending
+// as an emergency rollback.
 //
 // Per #236: on a `what_would_flip` turn the orchestrator emits a
 // provenance-safe "Test X at N" `set_factor_value` proposal from
-// `enrichment.flip_thresholds[]` (skip-not-round, exact numeric), resumed
-// by a bare confirm ("do it") via the existing short-confirm spine.
+// `enrichment.flip_thresholds[]` (skip-not-round, exact WHOLE user-scale
+// numeric — `compose/format-factor-value.ts` skips non-integers). The
+// proposal is resumed by a bare confirm — "do it" (SHORT_CONFIRM) or
+// "make that update" (PROPOSAL_CONFIRM, added by #236 Option A).
+//
+// `BRANCH_A_BRIEF` is this journey's OWN brief (a copy of the shared
+// DECISION_BRIEF), kept separate so it can be iterated to find a
+// flip-capable scenario (a non-null flip that renders as a whole
+// user-scale value) WITHOUT touching the briefs of existing journeys.
 // ---------------------------------------------------------------------------
+
+// FLIP-CAPABLE SCENARIO SEARCH — 5/5 attempts failed (2026-06-06, staging
+// b8d5bcc). The journey needs a `what_would_flip` turn whose enrichment
+// carries a non-null `flip_value` that #236's producer renders as a WHOLE
+// user-scale value. Across five structurally-different briefs PLoT returned
+// `flip_value: null` ("no_effect_within_bounds") for EVERY factor — the
+// draft-graph analysis produces a robust leader (margin ~0.68) that no
+// single in-bounds factor change flips, so `buildFlipProposalEmit` returns
+// `no_proposal` and no "Test X at N" chip is emitted. Attempts (all null):
+// (1) 15-person team scaling; (2) subscription pricing (produced a
+// continuous £ price factor, still null); (3) launch-now-vs-wait on a 60%
+// demand probability; (4) two near-identical suppliers on a £500/day delay
+// cost; (5) buy-vs-rent break-even at 30 months. The whole-value assertion
+// in `assertFlipProposalPresent` was NOT weakened (and is moot — flip_value
+// is null, not merely non-whole). Per the "stop after five" rule the brief
+// is restored to the documented baseline; steps 4-8 therefore fail/skip on
+// a live enforced run until a flip-capable scenario exists (likely needs
+// option values configured pre-analysis, or a PLoT flip-probe-bounds
+// review — both out of harness scope). See the run report / evidence pack.
+const BRANCH_A_BRIEF =
+  'We are a 15-person engineering team weighing three options for scaling ' +
+  'delivery over the next six months: hire two senior engineers locally, ' +
+  'engage an offshore partner, or introduce tiered pricing to hire more ' +
+  'gradually. Decision matters for Q3 roadmap commitments.';
 
 /** Minimal placeholder payload for steps the harness never POSTs
  *  (assert-only and DB read-back). buildPayload is required by the
@@ -598,13 +628,13 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
   {
     name: '1_draft_graph',
     description:
-      'POST fresh scenario + decision brief → expect draft_graph response with post-draft chips.',
+      'POST fresh scenario + Branch A brief → expect draft_graph response with post-draft chips.',
     buildPayload: (ctx) => ({
       kind: 'message',
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
       stage: 'frame',
-      message: DECISION_BRIEF,
+      message: BRANCH_A_BRIEF,
       turn_class: 'frame',
       source: 'composer',
     }),
@@ -628,8 +658,11 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
   {
     name: '3_what_would_flip',
     description:
-      'chip_click what_would_flip ("What could change the result?") → 200, substantive flip prose. ' +
-      'Per #236 this is the turn that emits the "Test X at N" proposal (asserted at step 4).',
+      'chip_click what_would_flip — resumes the post-run_analysis what_would_flip pending action, ' +
+      'running the handler via the execute-intent path #236 emits the "Test X at N" proposal on ' +
+      '(asserted at step 4). NOTE: a composer flip question is intercepted by the deterministic ' +
+      'post-analysis advice gate (llm_calls=0) and never reaches the emit block, so chip_click is ' +
+      'required. The proposal only emits when PLoT returns a non-null flip that renders whole.',
     depends_on: '2_run_analysis',
     buildPayload: (ctx) => ({
       kind: 'message',
@@ -647,7 +680,7 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
     // chip; makes no HTTP call. Pending #236 (the chip does not exist yet).
     name: '4_flip_proposal_present',
     description:
-      'PENDING #236 — assert the what_would_flip response carried a "Test X at N" set_factor_value ' +
+      'assert the what_would_flip response carried a "Test X at N" set_factor_value ' +
       'proposal chip whose N is an exact whole user-scale value.',
     depends_on: '3_what_would_flip',
     requires_branch_a: true,
@@ -657,8 +690,9 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
   {
     name: '5_accept_proposal',
     description:
-      'PENDING #236 — user says "do it"; the short-confirm spine resumes the proposal and applies ' +
-      'set_factor_value. Assert a mutation acknowledgement (no clarification-back).',
+      'User confirms with "make that update" (the #236 PROPOSAL_CONFIRM variant; "do it" via ' +
+      'SHORT_CONFIRM is the equivalent). The most-recent-wins resume applies set_factor_value. ' +
+      'Assert a mutation acknowledgement / "Applying:" echo (no clarification-back).',
     depends_on: '4_flip_proposal_present',
     requires_branch_a: true,
     buildPayload: (ctx) => ({
@@ -666,7 +700,7 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
       stage: 'decide',
-      message: 'do it',
+      message: 'make that update',
       turn_class: 'decide',
       source: 'composer',
     }),
@@ -675,7 +709,7 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
     // DB read-back: no turn POST. Skipped unless --db-readback.
     name: '6_db_readback',
     description:
-      'PENDING #236 — DB read-back: prove a set_factor_value fact persisted (status=applied, ' +
+      'DB read-back: prove a set_factor_value fact persisted (status=applied, ' +
       'target is a real factor, before≠after, after value = proposed N). Requires --db-readback.',
     depends_on: '5_accept_proposal',
     requires_branch_a: true,
@@ -685,7 +719,7 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
   {
     name: '7_explain_leader_stale',
     description:
-      'PENDING #236 — "Why does the leading option win?" after the mutation → expect a staleness ' +
+      '"Why does the leading option win?" after the mutation → expect a staleness ' +
       'caveat or a rerun chip (the applied change invalidated the prior analysis).',
     depends_on: '5_accept_proposal',
     requires_branch_a: true,
@@ -702,7 +736,7 @@ export const BRANCH_A_CANONICAL_STEPS: readonly JourneyStep[] = [
   {
     name: '8_what_changed',
     description:
-      'PENDING #236 — "What changed?" → the deterministic state-query answer reports the accepted ' +
+      '"What changed?" → the deterministic state-query answer reports the accepted ' +
       'set_factor_value change (references the factor, no internal terms).',
     depends_on: '5_accept_proposal',
     requires_branch_a: true,
