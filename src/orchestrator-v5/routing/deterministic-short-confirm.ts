@@ -71,11 +71,17 @@ const EDIT_VERB_OR_QUANTITY_PATTERN =
 /**
  * Proposal-targeted confirmation phrases. Match ONLY when at least
  * one live `apply_proposed_change` pending action exists, and override
- * the edit-verb gate. The brief explicitly lists "add that" and
- * "make that change" as required deterministic confirmations.
+ * the edit-verb gate. The brief explicitly lists "add that",
+ * "make that change", and (V5 P0.2) "make that update" as required
+ * deterministic confirmations. The trailing noun is one of
+ * change|update|edit so "make that update" / "apply that update" /
+ * "do that edit" all resolve, while the noun stays optional for the
+ * bare "make that" form. Still anchored ^...$ so any extra content
+ * ("make that change to pricing") disqualifies the match and falls to
+ * the normal edit path.
  */
 export const PROPOSAL_CONFIRM_PATTERN =
-  /^\s*(?:add\s+that|make\s+that(?:\s+change)?|do\s+that\s+change|apply\s+that(?:\s+change)?|let'?s\s+(?:do\s+that|apply\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:add\s+that|make\s+that(?:\s+(?:change|update|edit))?|do\s+that\s+(?:change|update|edit)|apply\s+that(?:\s+(?:change|update|edit))?|let'?s\s+(?:do\s+that|apply\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * Phrasal-ordinal confirmation patterns. When at least one live
@@ -225,6 +231,12 @@ function isExpired(pa: PendingAction, nowMs: number, _currentTurnIndex: number):
   return false;
 }
 
+/** Emit timestamp in ms for most-recent-wins ordering; malformed → oldest. */
+function emittedAtMs(pa: PendingAction): number {
+  const ms = Date.parse(pa.emitted_at_iso);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 export function tryShortConfirmResume(
   input: TryShortConfirmResumeInput,
 ): ShortConfirmDispatch {
@@ -301,13 +313,24 @@ export function tryShortConfirmResume(
     // TurnExecutor. Fall through to the LLM rather than misfire.
     return { matched: false, skip_reason: 'kind_not_yet_resumable' };
   }
-  if (resumable.length > 1) {
-    // Multiple resumable pending actions — ask a focused clarification
-    // rather than guessing or letting the LLM see a bare "yes".
-    return { matched: true, dispatch: 'recovery_ambiguous', candidates: resumable };
-  }
-
-  const pending = resumable[0]!;
+  // V5 P0.2 — DELIBERATE behaviour change (replaces the prior
+  // `recovery_ambiguous` clarification round-trip): when multiple live
+  // resumable pendings coexist, the MOST RECENTLY EMITTED relevant pending
+  // wins, so "do it" / "make that update" resumes the latest offer without
+  // a clarification detour. Expired pendings are already filtered out above
+  // (so an expired-newer never wins). Ordinal pointers ("the first one")
+  // are still resolved by index in the pre-resolve block above, and the
+  // turn-executor echoes the chosen proposal's label ("Applying: …") so a
+  // wrong-target resume stays visible. Graph-hash divergence, idempotency
+  // and stale-proposal recovery remain enforced downstream by
+  // `decideProposedChangeSynthesis` before any mutation is applied.
+  // Tie-break: equal `emitted_at_iso` resolves to the first in input
+  // order (Array.prototype.sort is stable) — deterministic, and the
+  // read side already places the freshest proposal first.
+  const pending =
+    resumable.length === 1
+      ? resumable[0]!
+      : [...resumable].sort((a, b) => emittedAtMs(b) - emittedAtMs(a))[0]!;
 
   // Freshness precondition for what_would_flip: if analysis is missing
   // or stale, do not resume. The whole point of "what would flip" is

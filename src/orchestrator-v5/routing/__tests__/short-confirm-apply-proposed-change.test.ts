@@ -56,21 +56,30 @@ describe('tryShortConfirmResume — apply_proposed_change resumable', () => {
     },
   );
 
-  it('returns recovery_ambiguous when two apply_proposed_change are live', () => {
+  it('picks the MOST RECENTLY EMITTED proposal when two apply_proposed_change are live (V5 P0.2 most-recent-wins)', () => {
+    // V5 P0.2 — most-recent-wins replaces the prior recovery_ambiguous
+    // clarification: a bare "yes" against multiple live proposals resumes
+    // the latest offer. The turn-executor echoes its label ("Applying: …").
     const out = tryShortConfirmResume({
       message: 'yes',
       pendingActions: [
-        applyProposed({ id: 'pa1', chipId: 'prop_aaaaaaaaaaaa' }),
-        applyProposed({ id: 'pa2', chipId: 'prop_bbbbbbbbbbbb' }),
+        {
+          ...applyProposed({ id: 'pa1', chipId: 'prop_aaaaaaaaaaaa' }),
+          emitted_at_iso: '2026-05-07T11:58:00.000Z',
+        },
+        {
+          ...applyProposed({ id: 'pa2', chipId: 'prop_bbbbbbbbbbbb' }),
+          emitted_at_iso: '2026-05-07T11:59:30.000Z',
+        },
       ],
       currentTurnIndex: 0,
       nowMs: NOW_MS,
     });
     expect(out.matched).toBe(true);
     if (!out.matched) return;
-    expect(out.dispatch).toBe('recovery_ambiguous');
-    if (out.dispatch !== 'recovery_ambiguous') return;
-    expect(out.candidates).toHaveLength(2);
+    expect(out.dispatch).toBe('pending_action');
+    if (out.dispatch !== 'pending_action') return;
+    expect(out.pending.chip_id).toBe('prop_bbbbbbbbbbbb');
   });
 
   it('returns recovery_expired when the apply_proposed_change is expired', () => {

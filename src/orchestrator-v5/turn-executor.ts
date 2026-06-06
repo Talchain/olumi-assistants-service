@@ -97,6 +97,7 @@ import {
   hasRenderableTopDriverLabel,
 } from './routing/post-analysis-advice-gate.js';
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
+import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
 import {
@@ -169,8 +170,10 @@ import {
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import { buildFlipProposalEmit, type FactorNodeInfo } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { deriveRecentChangesEvidence } from './context/recent-changes.js';
@@ -1497,6 +1500,15 @@ export async function runTurnExecutor(
         }
         return finalizeRun();
       } else if (shortConfirmDispatch.dispatch === 'recovery_ambiguous') {
+        // UNREACHABLE since V5 P0.2 most-recent-wins (commit 9aa6e2f5):
+        // `tryShortConfirmResume` no longer returns `recovery_ambiguous`
+        // — a bare confirm with >1 live resumable now resumes the most
+        // recent. Retained (compiles, dead) pending a dedicated cleanup
+        // PR that also drops the union member + `multiple_ambiguous`
+        // skip-reason. NOTE: the numbered-clarification UX for genuine
+        // LABEL-MATCH collisions is unaffected — that path emits
+        // `PendingActionRecoveryAmbiguous` + its own clarification
+        // independently (see the label-pick `ambiguous` branch below).
         emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
           request_id: requestId,
           scenario_id: context.session_id,
@@ -2920,6 +2932,86 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
 
+      // V5 P0.2 — run-comparison gate (result-sense "what changed?").
+      //
+      // Runs BEFORE the state-query guard so the result-comparison sense
+      // of "what changed?" / "why did the result change?" is not shadowed
+      // by the graph-edit sense (the state-query guard's recent_changes
+      // readback). It claims the turn only when a genuine prior/current
+      // run comparison exists (>= 2 successful runs) OR the model is stale
+      // (edited after the latest run → lead with re-run guidance, never
+      // present an old comparison as the current model). Otherwise it
+      // declines and the state-query guard keeps its existing behaviour.
+      // 0 LLM calls, 0 new DB reads (reuses prior_facts + freshness).
+      if (routingResult === undefined) {
+        const runComparisonOutcome = tryRunComparisonGate({
+          message: payload.message,
+          priorFacts: context.prior_facts,
+          freshness: freshness?.freshness,
+        });
+        emit(TelemetryEvents.V5RunComparisonGate, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: runComparisonOutcome.matched,
+          mode: runComparisonOutcome.matched ? runComparisonOutcome.mode : null,
+          unmatched_reason: runComparisonOutcome.matched
+            ? null
+            : runComparisonOutcome.reason,
+          leading_option_changed: runComparisonOutcome.matched
+            ? runComparisonOutcome.leading_option_changed
+            : null,
+          freshness: freshness?.freshness ?? null,
+        });
+        if (runComparisonOutcome.matched) {
+          const runComparisonResponse = composeDirectAnswerResponse({
+            assistant_text: runComparisonOutcome.assistant_text,
+            stage: context.stage,
+            suggested_actions: [...runComparisonOutcome.suggested_actions],
+          });
+          sonnetTextForLog = runComparisonResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(runComparisonResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'run_comparison_gate',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on run-comparison gate',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
       // V5 product-state continuity (foamy-bee tranche) — deterministic
       // state-query guard. Closes the named "what update did you make?"
       // misroute class where a state-query falls through every other
@@ -3601,6 +3693,9 @@ export async function runTurnExecutor(
     let handlerIdForCommit: V5ActionType | null = null;
     let handlerFactsForCommit: readonly HandlerFact[] = [];
     let composedOk: OlumiResponse | null = null;
+    // V5 P0.2 — a flip-threshold proposal's pending action, emitted on a
+    // what_would_flip turn and merged into the committed pending_actions.
+    let flipProposalPending: PendingAction | undefined;
 
     // ==================================================================
     // STEPS 2–4: execute-intent path (VALIDATE → EXECUTE → CONFIRM)
@@ -4462,7 +4557,7 @@ export async function runTurnExecutor(
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop
       // run_analysis fact already exists in the conversation.
-      const executeChips = generateChips({
+      let executeChips = generateChips({
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         priorFacts: context.prior_facts,
@@ -4472,6 +4567,53 @@ export async function runTurnExecutor(
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
+
+      // V5 P0.2 — flip-threshold proposal emission (Seam 1). On a
+      // what_would_flip turn, offer a deterministic, provenance-safe
+      // "Test X at N" set_factor_value proposal when a single-factor flip
+      // exists and inverts to an exact, safely-displayable user-scale
+      // value. Emits NOTHING otherwise (null flip / unrenderable / no cap /
+      // no graph hash). The verified emit logic lives in
+      // compose/flip-proposal.ts (buildFlipProposalEmit).
+      if (
+        proposedHandlerId === 'what_would_flip' &&
+        currentAnalysisGraphHashForTurn !== null
+      ) {
+        const priorRun = selectRunAnalysisFact(context.prior_facts);
+        const priorEnrichment = priorRun
+          ? (priorRun.fact as { result?: { enrichment?: unknown } }).result?.enrichment
+          : undefined;
+        const flipEmit = buildFlipProposalEmit(
+          priorEnrichment,
+          buildFactorNodeLookup(context.persistedGraph),
+          {
+            scenario_id: context.session_id,
+            graph_hash: currentAnalysisGraphHashForTurn,
+            emitted_at_iso: new Date().toISOString(),
+            registry: options.handlerRegistry ?? getDefaultRegistry(),
+          },
+        );
+        emit(TelemetryEvents.V5ProposedChangeEmitted, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: 'what_would_flip',
+          result: flipEmit.status,
+        });
+        if (flipEmit.status === 'emitted') {
+          flipProposalPending = flipEmit.pending;
+          // Protect the proposal chip at the front; dedupe by id; cap at 3.
+          const deduped: SuggestedAction[] = [];
+          const seenChipIds = new Set<string>();
+          for (const chip of [flipEmit.chip, ...executeChips]) {
+            if (seenChipIds.has(chip.id)) continue;
+            seenChipIds.add(chip.id);
+            deduped.push(chip);
+            if (deduped.length >= 3) break;
+          }
+          executeChips = deduped;
+        }
+      }
+
       composedOk = composeToolCallResponse({
         orientation: orientationForCompose,
         confirmation: confirmationText,
@@ -4494,6 +4636,37 @@ export async function runTurnExecutor(
             }
           : {}),
       });
+      // V5 P0.2 — resume echo. When this execute turn is a RESUMED
+      // apply_proposed_change that ACTUALLY applied a change, prepend the
+      // proposal's label so the user sees exactly which proposal is being
+      // applied — a safety net against a wrong-target most-recent-wins
+      // resume. Uses the sanctioned render-safe copy resolver, so unsafe
+      // persisted labels are swapped for the deterministic fallback (no
+      // handler-id / JSON / prop_ / internal / raw-decimal leakage in the
+      // "Applying: …" text). GATED on a non-noop mutation fact (mirrors the
+      // canonical mutation-fact predicate used for `priorMutationFactCount`
+      // above): a "set X to its current value" resume returns a successful
+      // outcome with `noop: true`, and must NOT narrate "Applying:" when
+      // nothing changed — honouring "narration must follow persisted state".
+      const resumeAppliedRealMutation =
+        consumedPendingAction?.action.kind === 'apply_proposed_change' &&
+        (handlerOutcome?.handler_facts ?? []).some(
+          (f) =>
+            !f.noop &&
+            (f.fact_type === 'add_constraint' ||
+              f.fact_type === 'set_factor_value' ||
+              f.fact_type === 'adjust_edge_strength'),
+        );
+      if (composedOk !== null && resumeAppliedRealMutation) {
+        const { label: echoLabel } = resolveProposalRenderCopy(
+          consumedPendingAction!.action,
+        );
+        const rest = composedOk.assistant_text ? ` ${composedOk.assistant_text}` : '';
+        composedOk = {
+          ...composedOk,
+          assistant_text: `Applying: ${echoLabel}.${rest}`,
+        };
+      }
       stagesCompleted.push('compose');
     } else if (
       routingResult.type === 'tool_call' &&
@@ -4813,6 +4986,12 @@ export async function runTurnExecutor(
       // without briefText (e.g. legacy draft pre-Fix A) — subsequent
       // non-draft turns will backfill the brief from the enriched
       // context if it's still null.
+      // V5 P0.2 — merge the flip-threshold proposal's pending (most recent
+      // first) ahead of any chip-derived / proposed-concept pendings, capped
+      // at the persisted budget of 3.
+      const pendingForCommit = flipProposalPending
+        ? [flipProposalPending, ...(proposalPendingForCommit ?? [])].slice(0, 3)
+        : proposalPendingForCommit;
       const committed = await commitTurn(composedOk, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
@@ -4824,8 +5003,8 @@ export async function runTurnExecutor(
         handler_facts: handlerFactsForCommit,
         graph: graphForCommit,
         briefText: context.scenarioBriefText ?? undefined,
-        ...(proposalPendingForCommit !== undefined
-          ? { pending_actions: proposalPendingForCommit }
+        ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0
+          ? { pending_actions: pendingForCommit }
           : {}),
       });
       if (timingsEnabled) {
@@ -5766,3 +5945,36 @@ function safeFireRoutingLogWrite(
 }
 
 export type { InternalFailure } from './types.js';
+
+/**
+ * V5 P0.2 — build a factor_id → {cap, unit} lookup from the persisted
+ * (raw ingress) graph's `observed_state`, for the flip-threshold proposal
+ * producer's model→user-scale inversion. Defensive: tolerates an
+ * unknown/partial graph shape and returns undefined for unknown factors.
+ */
+function buildFactorNodeLookup(
+  persistedGraph: unknown,
+): (factorId: string) => FactorNodeInfo | undefined {
+  const map = new Map<string, FactorNodeInfo>();
+  const nodes =
+    persistedGraph && typeof persistedGraph === 'object'
+      ? (persistedGraph as { nodes?: unknown }).nodes
+      : undefined;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      if (!n || typeof n !== 'object') continue;
+      const node = n as Record<string, unknown>;
+      const id = typeof node.id === 'string' ? node.id : null;
+      if (!id) continue;
+      const obs =
+        node.observed_state && typeof node.observed_state === 'object'
+          ? (node.observed_state as Record<string, unknown>)
+          : null;
+      map.set(id, {
+        cap: obs && typeof obs.cap === 'number' ? obs.cap : null,
+        unit: obs && typeof obs.unit === 'string' ? obs.unit : null,
+      });
+    }
+  }
+  return (factorId) => map.get(factorId);
+}

@@ -24,6 +24,7 @@ import {
   SAFETY_FORBIDDEN_TOKENS,
   computeProposalId,
   emitProposedChange,
+  resolveProposalRenderCopy,
   sanitisePublicCopyOrFallback,
 } from '../proposed-change.js';
 import {
@@ -448,5 +449,57 @@ describe('sanitisePublicCopyOrFallback — render-time safety hardening (pass-7)
     expect(sanitisePublicCopyOrFallback('add_constraint', RENDER_SAFE_MESSAGE_FALLBACK)).toBe(
       'Apply the proposed change',
     );
+  });
+});
+
+describe('resolveProposalRenderCopy — render-safe label AND message (V5 P0.2 echo + chip coverage)', () => {
+  // The resume echo ("Applying: …") and the chip render both read
+  // resolveProposalRenderCopy. Pin that BOTH fields are sanitised
+  // independently — closes the gap left when the bare-confirm
+  // clarification chip tests were retired: an unsafe persisted
+  // public_message must collapse to the message fallback, an unsafe
+  // public_label to the label fallback.
+  it('swaps an unsafe label AND an unsafe message for their respective fallbacks', () => {
+    const copy = resolveProposalRenderCopy({
+      kind: 'apply_proposed_change',
+      public_label: 'Trigger add_constraint now',
+      public_message: 'invalid_type detected by zod',
+    });
+    expect(copy.label).toBe(RENDER_SAFE_LABEL_FALLBACK);
+    expect(copy.message).toBe(RENDER_SAFE_MESSAGE_FALLBACK);
+  });
+
+  it('sanitises the message even when the label is safe (and vice versa)', () => {
+    const unsafeMessageOnly = resolveProposalRenderCopy({
+      kind: 'apply_proposed_change',
+      public_label: 'Add the cost cap',
+      public_message: 'set_factor_value via tool',
+    });
+    expect(unsafeMessageOnly.label).toBe('Add the cost cap');
+    expect(unsafeMessageOnly.message).toBe(RENDER_SAFE_MESSAGE_FALLBACK);
+
+    const unsafeLabelOnly = resolveProposalRenderCopy({
+      kind: 'apply_proposed_change',
+      public_label: 'See {"id":"prop_abc"}',
+      public_message: 'Add the cost cap.',
+    });
+    expect(unsafeLabelOnly.label).toBe(RENDER_SAFE_LABEL_FALLBACK);
+    expect(unsafeLabelOnly.message).toBe('Add the cost cap.');
+  });
+
+  it('returns safe persisted copy verbatim', () => {
+    const copy = resolveProposalRenderCopy({
+      kind: 'apply_proposed_change',
+      public_label: 'Add the cost cap',
+      public_message: 'Add the cost cap.',
+    });
+    expect(copy.label).toBe('Add the cost cap');
+    expect(copy.message).toBe('Add the cost cap.');
+  });
+
+  it('falls back for a non-apply_proposed_change kind (defensive)', () => {
+    const copy = resolveProposalRenderCopy({ kind: 'run_analysis' });
+    expect(copy.label).toBe(RENDER_SAFE_LABEL_FALLBACK);
+    expect(copy.message).toBe(RENDER_SAFE_MESSAGE_FALLBACK);
   });
 });
