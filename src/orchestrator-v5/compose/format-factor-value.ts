@@ -65,44 +65,39 @@ export function formatFactorValue(
   unit?: string | null,
 ): FormattedFactorValue | null {
   if (!Number.isFinite(value)) return null;
+  // EXACT-only (P0.2 guardrail): display === executed value, and we never
+  // round-and-execute. If the user-scale value is not a whole number we
+  // SKIP rather than round it for display, because the rounded value would
+  // diverge from what gets stored. (This is deliberately conservative and
+  // makes the producer sparse — correctness over coverage.)
+  if (!Number.isInteger(value)) return null;
+  if (Math.abs(value) < 1) return null; // 0 carries no useful "test at" value
 
   const raw = (unit ?? '').trim();
   const u = raw.toLowerCase();
 
-  // Percentage: 0–100 scale, integer display. Reject sub-1 ("0.7%") and
-  // >100 (nonsensical) to avoid ambiguous / mis-scaled percentages.
+  // Percentage: 0–100 scale. >100 is nonsensical.
   if (PERCENT_UNITS.has(u)) {
-    if (value < 1 || value > 100) return null;
-    const r = Math.round(value);
-    if (r < 1) return null;
-    return { display: `${r}%`, value: r };
+    if (value > 100) return null;
+    return { display: `${value}%`, value };
   }
 
   // Currency.
   const symbol = CURRENCY_SYMBOL[u];
   if (symbol) {
-    if (value < 1) return null;
-    const r = Math.round(value);
-    return { display: `${symbol}${thousands(r)}`, value: r };
+    return { display: `${symbol}${thousands(value)}`, value };
   }
 
   // Time units.
   if (TIME_UNITS.has(u)) {
-    if (value < 1) return null;
-    const r = Math.round(value);
-    return { display: `${r} ${singularise(u, r)}`, value: r };
+    return { display: `${value} ${singularise(u, value)}`, value };
   }
 
-  // Any other explicit unit (engineers, people, units, …) — integer-ish, ≥ 1.
+  // Any other explicit unit (engineers, people, units, …).
   if (raw.length > 0) {
-    if (value < 1) return null;
-    const r = Math.round(value);
-    return { display: `${r} ${singularise(raw, r)}`, value: r };
+    return { display: `${value} ${singularise(raw, value)}`, value };
   }
 
-  // No unit: only a plain integer (|v| ≥ 1) is safe; bare decimals skipped.
-  if (Number.isInteger(value) && Math.abs(value) >= 1) {
-    return { display: `${value}`, value };
-  }
-  return null;
+  // No unit: a plain integer is safe; bare decimals were already skipped.
+  return { display: `${value}`, value };
 }

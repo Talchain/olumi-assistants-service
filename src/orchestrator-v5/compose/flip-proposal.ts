@@ -27,7 +27,13 @@
  * "this will flip the result".
  */
 
-import type { ProposedChange } from '../types/proposed-change.js';
+import type {
+  ProposedChange,
+  ProposedChangeContext,
+} from '../types/proposed-change.js';
+import { emitProposedChange } from './proposed-change.js';
+import type { SuggestedAction } from './types.js';
+import type { PendingAction } from '../session/pending-action.js';
 import { formatFactorValue } from './format-factor-value.js';
 
 /** One entry read defensively from `enrichment.flip_thresholds[]`. */
@@ -99,10 +105,13 @@ export function buildFlipProposal(
 
   const rendered = formatFactorValue(rawInput, unit);
   if (rendered === null) {
+    // Includes the non-integer case: the formatter skips rather than
+    // rounding, so a fractional user-scale value never gets emitted.
     return { ok: false, reason: 'unrenderable_value' };
   }
 
-  // Execute the SAME rounded value the user sees (display === execution).
+  // Execute the EXACT value the user sees (display === execution; the
+  // formatter guarantees this is a whole number, never a rounded one).
   const execRaw = rendered.value;
   const params: Readonly<Record<string, unknown>> =
     cap !== null && cap !== undefined
@@ -160,4 +169,36 @@ export function selectFlipProposal(
     if (result.ok) return { proposal: result.proposal, entry };
   }
   return null;
+}
+
+export type FlipEmitResult =
+  | { readonly status: 'emitted'; readonly chip: SuggestedAction; readonly pending: PendingAction }
+  | { readonly status: 'no_proposal' }
+  | { readonly status: 'unsafe_copy' }
+  | { readonly status: 'unknown_intent' };
+
+/**
+ * End-to-end emit orchestration for the `what_would_flip` seam, factored
+ * out of the turn-executor so it is unit-testable WITHOUT the full turn
+ * harness:
+ *   read `enrichment.flip_thresholds[]` → selectFlipProposal →
+ *   emitProposedChange (chip + apply_proposed_change pending).
+ *
+ * Returns a discriminated result the caller turns into telemetry. The
+ * caller merges `chip` into the turn's suggested_actions (deduped, within
+ * the chip budget) and `pending` into the committed pending_actions.
+ */
+export function buildFlipProposalEmit(
+  enrichment: unknown,
+  nodeLookup: (factorId: string) => FactorNodeInfo | undefined,
+  ctx: ProposedChangeContext,
+): FlipEmitResult {
+  const sel = selectFlipProposal(readFlipEntries(enrichment), nodeLookup);
+  if (!sel) return { status: 'no_proposal' };
+  const emitted = emitProposedChange(sel.proposal, ctx);
+  if (emitted.status === 'success') {
+    return { status: 'emitted', chip: emitted.chip, pending: emitted.pending };
+  }
+  if (emitted.status === 'unsafe_copy') return { status: 'unsafe_copy' };
+  return { status: 'unknown_intent' };
 }

@@ -39,6 +39,14 @@ describe('formatFactorValue — conservative, no raw-decimal leakage', () => {
     expect(formatFactorValue(Number.POSITIVE_INFINITY, '£')).toBeNull();
   });
 
+  it('skips non-integer values rather than rounding them (exact-only guardrail)', () => {
+    expect(formatFactorValue(30.5, '%')).toBeNull();
+    expect(formatFactorValue(49999.5, '£')).toBeNull();
+    expect(formatFactorValue(20.5, 'engineers')).toBeNull();
+    expect(formatFactorValue(11.5, 'months')).toBeNull();
+    expect(formatFactorValue(30.7)).toBeNull();
+  });
+
   it('never emits a string containing a raw 0.xx decimal', () => {
     for (const [v, u] of [[30, '%'], [50000, '£'], [12, 'months'], [20, 'engineers'], [30, null]] as const) {
       const out = formatFactorValue(v, u);

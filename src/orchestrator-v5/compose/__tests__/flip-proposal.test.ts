@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest';
 
+import { readFileSync } from 'node:fs';
 import {
   buildFlipProposal,
+  buildFlipProposalEmit,
   readFlipEntries,
   selectFlipProposal,
   type FlipEntry,
   type FactorNodeInfo,
 } from '../flip-proposal.js';
+import { getDefaultRegistry } from '../../tools/registry.js';
+import type { ProposedChangeContext } from '../../types/proposed-change.js';
 // Round-trip is proven against the REAL handler normalisation path.
 import { normaliseFactorValue } from '../../tools/handlers/d1-shared/normalise-factor-value.js';
 import {
@@ -129,6 +133,11 @@ describe('buildFlipProposal — skips rather than improvising', () => {
   it('skips a model value outside [0,1] for a capped factor', () => {
     expect(buildFlipProposal(entry({ flip_value: 1.5 }), { cap: 50 })).toEqual({ ok: false, reason: 'model_value_out_of_range' });
   });
+  it('skips when the inverted user-scale value is not a whole number (no round-and-execute)', () => {
+    // flip 0.41 * cap 50 = 20.5 -> not an integer -> skip rather than round to 20/21.
+    expect(buildFlipProposal(entry({ flip_value: 0.41, unit: 'engineers' }), { cap: 50, unit: 'engineers' }))
+      .toEqual({ ok: false, reason: 'unrenderable_value' });
+  });
   it('skips an unrenderable value — bare decimal under cap=1 unitless', () => {
     expect(buildFlipProposal(entry({ flip_value: 0.7, unit: null }), { cap: 1, unit: null })).toEqual({ ok: false, reason: 'unrenderable_value' });
   });
@@ -182,5 +191,56 @@ describe('readFlipEntries / selectFlipProposal', () => {
   it('selectFlipProposal returns null when nothing is safely proposable', () => {
     const entries: FlipEntry[] = [{ factor_id: 'a', factor_label: 'A', flip_value: null, unit: null }];
     expect(selectFlipProposal(entries, () => ({ cap: 100 }))).toBeNull();
+  });
+});
+
+describe('buildFlipProposalEmit — end-to-end emit (chip + apply_proposed_change pending)', () => {
+  const ctx = (): ProposedChangeContext => ({
+    scenario_id: '11111111-1111-4111-8111-111111111111',
+    graph_hash: 'graphhash1234',
+    emitted_at_iso: '2026-06-06T00:00:00.000Z',
+    registry: getDefaultRegistry(),
+  });
+
+  it('emits a chip + pending storing the EXACT numeric user-unit value', () => {
+    const enrichment = {
+      flip_thresholds: [
+        { factor_id: 'fac_eng', factor_label: 'Engineering Capacity', flip_value: 0.4, direction: 'increase', unit: 'engineers' },
+      ],
+    };
+    const lookup = (id: string): FactorNodeInfo | undefined =>
+      id === 'fac_eng' ? { cap: 50, unit: 'engineers' } : undefined;
+    const res = buildFlipProposalEmit(enrichment, lookup, ctx());
+    expect(res.status).toBe('emitted');
+    if (res.status !== 'emitted') return;
+    expect(res.chip.action_type).toBe('set_factor_value');
+    expect(res.chip.id).toMatch(/^prop_[0-9a-f]{12}$/);
+    expect(res.chip.label).toBe('Test Engineering Capacity at 20 engineers');
+    expect(res.chip.label).not.toMatch(/\d\.\d/);
+    // chip <-> pending bridge + exact numeric value (not a formatted string)
+    expect(res.pending.action.kind).toBe('apply_proposed_change');
+    expect(res.pending.chip_id).toBe(res.chip.id);
+    const patch = (res.pending.action as { inline_patch: { handler_id: string; params: Record<string, unknown>; target_entity_ids: string[] } }).inline_patch;
+    expect(patch.handler_id).toBe('set_factor_value');
+    expect(patch.target_entity_ids).toEqual(['fac_eng']);
+    expect(patch.params).toEqual({ value: { value: 20, cap: 50 } }); // exact numeric, model = 20/50 = 0.4
+  });
+
+  it('emits NOTHING for the real staging envelope (all flip_value: null)', () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL('../../../../tests/fixtures/cross-service/v5-turn.run-analysis.staging.json', import.meta.url),
+        'utf-8',
+      ),
+    ) as { blocks: Array<{ enrichment: unknown }> };
+    const enrichment = fixture.blocks[0].enrichment;
+    // Any lookup — there is nothing to propose because every flip_value is null.
+    const res = buildFlipProposalEmit(enrichment, () => ({ cap: 50, unit: 'engineers' }), ctx());
+    expect(res.status).toBe('no_proposal');
+  });
+
+  it('returns no_proposal when enrichment has no flip_thresholds', () => {
+    expect(buildFlipProposalEmit({}, () => ({ cap: 50 }), ctx()).status).toBe('no_proposal');
+    expect(buildFlipProposalEmit(null, () => ({ cap: 50 }), ctx()).status).toBe('no_proposal');
   });
 });
