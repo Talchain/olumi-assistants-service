@@ -14,8 +14,9 @@
  * `importActual` so the rest of the prompts module graph is real.
  */
 
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeAll, beforeEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import Fastify from 'fastify';
 
 // Hoisted so the (hoisted) vi.mock factory can close over it.
 const { getCompiledMock } = vi.hoisted(() => ({ getCompiledMock: vi.fn() }));
@@ -37,7 +38,11 @@ vi.mock('../../../prompts/store.js', async (importActual) => {
 // Imported after the hoisted mock is registered.
 import { loadPrompt, getDefaultPrompts } from '../../../prompts/index.js';
 import { PMS_TASK_ALIAS, pmsResolveTaskId } from '../../../prompts/tracked.js';
-import { probeTrackedPrompts } from '../../../prompts/readiness.js';
+import {
+  probeTrackedPrompts,
+  getCriticalPromptCoverage,
+  resetPromptsReadyCache,
+} from '../../../prompts/readiness.js';
 import {
   buildRoutingPromptSnapshot,
   refreshRoutingPromptSnapshot,
@@ -46,6 +51,7 @@ import {
   EXPECTED_SYSTEM_CHARS_MIN,
   EXPECTED_SYSTEM_CHARS_MAX,
 } from '../prompt-loader.js';
+import { adminPromptStatusRoutes } from '../../../routes/admin.prompts.status.js';
 
 // A valid, in-guard orchestrator prompt body (no newlines/trailing ws so
 // the snapshot normaliser leaves the length unchanged).
@@ -56,9 +62,15 @@ function orchestratorRow(version = 111, content = ORCH_CONTENT) {
   return { content, promptId: 'orchestrator_default', version };
 }
 
+beforeAll(() => {
+  // Admin-key auth for the /admin/prompts/reload route-level test below.
+  process.env.ADMIN_API_KEY = 'test-admin-key';
+});
+
 beforeEach(() => {
   getCompiledMock.mockReset();
   __resetRoutingPromptSnapshotForTests();
+  resetPromptsReadyCache();
 });
 
 describe('V5 routing prompt resolution → PMS orchestrator alias', () => {
@@ -194,5 +206,84 @@ describe('false-green guard: a rejected oversized reload does not green-light ro
     expect(routing.snapshot_error).toBeUndefined();
     expect(routing.source).toBe('pms');
     expect(routing.version).toBe('113');
+  });
+
+  it('AGGREGATE GATE: a rejected oversized reload flips getCriticalPromptCoverage().all_pms to false (not just the row)', async () => {
+    // Good state: every critical key resolves from PMS → aggregate green.
+    getCompiledMock.mockResolvedValue(orchestratorRow(111, ORCH_CONTENT));
+    await buildRoutingPromptSnapshot();
+    resetPromptsReadyCache();
+    const before = await getCriticalPromptCoverage('healthz');
+    expect(before.all_pms).toBe(true);
+    expect(before.snapshot_errors).toEqual([]);
+
+    // Oversized orchestrator upload + reload is REJECTED (snapshot restored).
+    getCompiledMock.mockResolvedValue(
+      orchestratorRow(112, 'O'.repeat(EXPECTED_SYSTEM_CHARS_MAX + 8_000)),
+    );
+    await expect(refreshRoutingPromptSnapshot()).rejects.toThrow();
+    resetPromptsReadyCache();
+
+    // The operator-facing aggregate gate (what /healthz exposes) is now RED,
+    // and the offender is surfaced — no aggregate false-green.
+    const after = await getCriticalPromptCoverage('healthz');
+    expect(after.all_pms).toBe(false);
+    expect(after.snapshot_errors).toContain('routing');
+    const routingRow = after.keys.find((k) => k.key === 'routing')!;
+    expect(routingRow.source).toBe('pms'); // still serving the old PMS prompt
+    expect(routingRow.snapshot_error).toBeDefined(); // …flagged as stale
+    expect(routingRow.pms_task).toBe('orchestrator');
+    // The other tracked keys are NOT the offenders here.
+    expect(after.default_or_error).not.toContain('routing');
+
+    // A good reload restores the aggregate to green.
+    getCompiledMock.mockResolvedValue(orchestratorRow(113, ORCH_CONTENT));
+    await refreshRoutingPromptSnapshot();
+    resetPromptsReadyCache();
+    const recovered = await getCriticalPromptCoverage('healthz');
+    expect(recovered.all_pms).toBe(true);
+    expect(recovered.snapshot_errors).toEqual([]);
+  });
+
+  it('ROUTE-LEVEL: POST /admin/prompts/reload returns reload_ok:false on an oversized orchestrator; routing row shows the served snapshot + snapshot_error', async () => {
+    // Good snapshot live first.
+    getCompiledMock.mockResolvedValue(orchestratorRow(111, ORCH_CONTENT));
+    await buildRoutingPromptSnapshot();
+
+    // Operator uploads an oversized orchestrator prompt.
+    getCompiledMock.mockResolvedValue(
+      orchestratorRow(112, 'O'.repeat(EXPECTED_SYSTEM_CHARS_MAX + 8_000)),
+    );
+
+    const app = Fastify();
+    await adminPromptStatusRoutes(app);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/prompts/reload',
+      headers: { 'x-admin-key': 'test-admin-key' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      reload_ok: boolean;
+      snapshot_error: string | null;
+      keys: Array<{
+        key: string;
+        source: string;
+        version: string | null;
+        sent_hash?: string;
+        pms_task?: string;
+        snapshot_error?: string;
+      }>;
+    };
+    // The reject is reported at the route level (not just internally).
+    expect(body.reload_ok).toBe(false);
+    expect(body.snapshot_error).toMatch(/outside expected range/);
+    // The routing row reflects the SERVED (old) snapshot + flags the rejection.
+    const routing = body.keys.find((r) => r.key === 'routing')!;
+    expect(routing.source).toBe('pms');
+    expect(routing.version).toBe('111'); // served old, not the rejected '112'
+    expect(routing.pms_task).toBe('orchestrator');
+    expect(routing.snapshot_error).toBeDefined();
+    await app.close();
   });
 });
