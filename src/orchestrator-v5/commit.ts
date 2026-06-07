@@ -32,7 +32,7 @@ import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain
 
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
-import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
+import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import type { PendingAction } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
@@ -152,16 +152,23 @@ export async function commitDirectAnswer(
 
   const store = sessionStore ?? getSessionStore();
 
-  // Atomic-emit contract: every chip whose action_type is in the
-  // resumable set produces exactly one matching pending action, written
-  // in the same `append_turn_atomic` call. If a caller pre-supplied
-  // pending actions (e.g. add-risk clarification — Wave 3), we trust
-  // that list and skip chip-derivation. Otherwise we derive from the
-  // response's chip set so neither chip-only nor pending-only state
-  // is reachable.
+  // Atomic-emit contract: every chip whose action_type is in the resumable
+  // set produces exactly one matching pending action, written in the same
+  // `append_turn_atomic` call.
+  //
+  // When a caller pre-supplied an explicit pending_actions list, we use it as
+  // given — but those sites (proposal-continuation, edit-graph-dispatch,
+  // turn-executor ambiguous short-confirm) derive their chip-pendings via
+  // `derivePendingActionsFromFinalizedChips`, so the list is ALREADY consistent
+  // with the egress-finalised chip set. When no list was supplied we derive
+  // here, also from the finalised set. Either way, a chip dropped at egress
+  // (`sanitiseOlumiResponseForEgress` → `finalizeChips`: unsafe / blank /
+  // duplicate / over-budget) can never leave an orphaned resumable pending that
+  // a later "yes" short-confirm could resume — the "persisted pending ⟹
+  // rendered chip" invariant is structural at every derivation site.
   const chipDerivedPending =
     metadata.pending_actions === undefined
-      ? derivePendingActionsFromChips(
+      ? derivePendingActionsFromFinalizedChips(
           (response.suggested_actions ?? []) as readonly SuggestedAction[],
           {
             scenario_id: metadata.scenario_id,

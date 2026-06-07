@@ -1347,6 +1347,15 @@ export const TelemetryEvents = {
   // events carry only reason classes + booleans/counts — no user text.
   V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
   V5ChipsFloorApplied: "v5.chips.floor_applied",
+
+  // V5 Lane 2 — egress chip-quality finalizer aggregate. Fires from
+  // src/orchestrator-v5/compose/output-safety.ts (the egress chokepoint)
+  // when the deterministic finalizer drops (unsafe/generic), dedupes, or
+  // budget-trims the response's chips. Content-free: scalar counts +
+  // request_id + bounded exit_path only — no user copy. Diagnostic-only
+  // (no Datadog metric); per-chip detail is a separate v5.chip.suppressed
+  // structured log.
+  V5ChipsFinalized: "v5.chips.finalized",
 } as const;
 
 /**
