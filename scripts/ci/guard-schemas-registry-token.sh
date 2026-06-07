@@ -25,7 +25,12 @@
 #
 set -euo pipefail
 
-SPEC="$(node -p "(() => { const p = require('./package.json'); return (p.dependencies && p.dependencies['@talchain/schemas']) || (p.devDependencies && p.devDependencies['@talchain/schemas']) || ''; })()")"
+# Read the spec via node. Wrapped so a malformed package.json yields a tailored
+# ::error:: instead of a raw Node parser stack trace (still fails closed).
+if ! SPEC="$(node -p "(() => { const p = require('./package.json'); return (p.dependencies && p.dependencies['@talchain/schemas']) || (p.devDependencies && p.devDependencies['@talchain/schemas']) || ''; })()" 2>/dev/null)"; then
+  echo "::error::guard-schemas-registry-token: could not parse package.json (invalid JSON?) while reading the @talchain/schemas spec."
+  exit 1
+fi
 
 if [ -z "$SPEC" ]; then
   echo "::error::guard-schemas-registry-token: '@talchain/schemas' not found in package.json dependencies or devDependencies. If it was renamed or removed, update this guard."
@@ -34,15 +39,19 @@ fi
 
 case "$SPEC" in
   file:* | link:* | workspace:*)
+    # Local specs (path / workspace refs) cannot carry registry credentials, so
+    # echoing the value here is safe and confirms which tarball/ref matched.
     echo "✅ @talchain/schemas is local ('$SPEC') — no registry auth required; NPM_PACKAGES_TOKEN not needed."
     exit 0
     ;;
   *)
+    # A registry / URL spec could in principle embed credentials — do NOT echo
+    # the raw spec value here; the exact value is not needed to act on this guard.
     if [ -n "${NPM_PACKAGES_TOKEN:-}" ]; then
-      echo "✅ @talchain/schemas is a registry spec ('$SPEC') and NPM_PACKAGES_TOKEN is set."
+      echo "✅ @talchain/schemas is a registry spec and NPM_PACKAGES_TOKEN is set."
       exit 0
     fi
-    echo "::error::@talchain/schemas is a REGISTRY dependency ('$SPEC') but NPM_PACKAGES_TOKEN is missing or empty."
+    echo "::error::@talchain/schemas is a REGISTRY dependency but NPM_PACKAGES_TOKEN is missing or empty."
     echo "::error::CI 'pnpm install' will 401 against npm.pkg.github.com. Fix: set a read:packages token as the NPM_PACKAGES_TOKEN secret, OR revert to the vendored file: tarball (see vendor/README.md). Context: Docs/v5/v5-schemas-ci-auth-readiness.md."
     exit 1
     ;;
