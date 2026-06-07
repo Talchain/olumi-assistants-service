@@ -21,6 +21,8 @@ import {
   type PublicSource,
 } from './tracked.js';
 import { log } from '../utils/telemetry.js';
+import { getRoutingLiveStatus } from './routing-live-status.js';
+import type { CeeTaskId } from './schema.js';
 
 const READINESS_CACHE_TTL_MS = 30_000;
 
@@ -42,6 +44,15 @@ export interface PromptKeyStatus {
   content_hash: string | null;
   content_chars: number | null;
   error?: string;
+  /** Alias-aware PMS task this key resolves from (e.g. routing→orchestrator). */
+  pms_task?: CeeTaskId;
+  /**
+   * Set on the `routing` row when the LIVE served snapshot is stale because
+   * a later rebuild was rejected (e.g. an oversized PMS prompt) and the
+   * prior snapshot was restored. Surfacing this prevents a false-green where
+   * the raw PMS row reads OK but is NOT what's actually served.
+   */
+  snapshot_error?: string;
 }
 
 function shortSha256(content: string): string {
@@ -57,6 +68,26 @@ export async function probeTrackedPrompts(
 ): Promise<PromptKeyStatus[]> {
   const results = await Promise.all(
     TRACKED_KEYS.map(async (key): Promise<PromptKeyStatus> => {
+      // The `routing` key reports from the LIVE served snapshot
+      // (guard-applied, atomically swapped), NOT a raw unguarded
+      // loadPrompt read of the current PMS row. This closes the
+      // oversized-reload false-green: after a rejected rebuild the live
+      // snapshot is the prior one, and `snapshot_error` flags the staleness.
+      if (key === 'routing') {
+        const live = getRoutingLiveStatus();
+        if (live) {
+          return {
+            key,
+            source: live.source,
+            version: live.version,
+            content_hash: live.content_hash,
+            content_chars: live.content_chars,
+            pms_task: live.pms_task,
+            ...(live.snapshot_error ? { snapshot_error: live.snapshot_error } : {}),
+          };
+        }
+        // No snapshot built yet (pre-boot) → fall through to loadPrompt.
+      }
       try {
         const loaded = await loadPrompt(key, { trigger });
         return {

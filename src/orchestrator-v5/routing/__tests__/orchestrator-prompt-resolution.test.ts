@@ -40,6 +40,9 @@ import { PMS_TASK_ALIAS, pmsResolveTaskId } from '../../../prompts/tracked.js';
 import { probeTrackedPrompts } from '../../../prompts/readiness.js';
 import {
   buildRoutingPromptSnapshot,
+  refreshRoutingPromptSnapshot,
+  getRoutingPromptSnapshot,
+  __resetRoutingPromptSnapshotForTests,
   EXPECTED_SYSTEM_CHARS_MIN,
   EXPECTED_SYSTEM_CHARS_MAX,
 } from '../prompt-loader.js';
@@ -55,6 +58,7 @@ function orchestratorRow(version = 111, content = ORCH_CONTENT) {
 
 beforeEach(() => {
   getCompiledMock.mockReset();
+  __resetRoutingPromptSnapshotForTests();
 });
 
 describe('V5 routing prompt resolution → PMS orchestrator alias', () => {
@@ -134,5 +138,61 @@ describe('V5 routing prompt resolution → PMS orchestrator alias', () => {
     expect(routing).toBeDefined();
     expect(routing!.source).toBe('pms'); // was 'default' before the fix
     expect(routing!.version).toBe('111');
+  });
+});
+
+describe('false-green guard: a rejected oversized reload does not green-light routing', () => {
+  it('reports the OLD served snapshot + snapshot_error after a rejected oversized reload — not the rejected PMS row as green', async () => {
+    // 1. Good state: in-guard orchestrator v111 builds + serves.
+    getCompiledMock.mockResolvedValue(orchestratorRow(111, ORCH_CONTENT));
+    const good = await buildRoutingPromptSnapshot();
+    expect(good.source).toBe('store');
+    expect(good.version).toBe('111');
+    const servedHash = good.raw_hash;
+
+    // 2. Operator uploads an OVERSIZED orchestrator prompt (v112).
+    getCompiledMock.mockResolvedValue(
+      orchestratorRow(112, 'O'.repeat(EXPECTED_SYSTEM_CHARS_MAX + 8_000)),
+    );
+
+    // 3. Reload REJECTS it (size guard) and atomically restores the prior snapshot.
+    await expect(refreshRoutingPromptSnapshot()).rejects.toThrow(/outside expected range/);
+
+    // 4. The live snapshot is STILL v111 — the rejected v112 is never served.
+    const live = getRoutingPromptSnapshot();
+    expect(live.version).toBe('111');
+    expect(live.raw_hash).toBe(servedHash);
+
+    // 5. Health/status report the SERVED old snapshot (not the rejected v112)
+    //    and surface snapshot_error — closing the false-green path.
+    const routing = (await probeTrackedPrompts('healthz')).find((s) => s.key === 'routing')!;
+    expect(routing.source).toBe('pms'); // serving a PMS prompt (the old one)
+    expect(routing.version).toBe('111'); // SERVED version, NOT the rejected '112'
+    expect(routing.content_hash).toBe(servedHash); // served hash, not the oversized one
+    expect(routing.pms_task).toBe('orchestrator');
+    expect(routing.snapshot_error).toBeDefined();
+    expect(routing.snapshot_error).toMatch(/outside expected range/);
+  });
+
+  it('a subsequent SUCCESSFUL reload clears snapshot_error and advances the served version', async () => {
+    getCompiledMock.mockResolvedValue(orchestratorRow(111, ORCH_CONTENT));
+    await buildRoutingPromptSnapshot();
+
+    // Fail a reload → snapshot_error is set, served version stays old.
+    getCompiledMock.mockResolvedValue(
+      orchestratorRow(112, 'O'.repeat(EXPECTED_SYSTEM_CHARS_MAX + 8_000)),
+    );
+    await expect(refreshRoutingPromptSnapshot()).rejects.toThrow();
+    let routing = (await probeTrackedPrompts('healthz')).find((s) => s.key === 'routing')!;
+    expect(routing.snapshot_error).toBeDefined();
+    expect(routing.version).toBe('111');
+
+    // A good reload → snapshot_error cleared, served version advances.
+    getCompiledMock.mockResolvedValue(orchestratorRow(113, ORCH_CONTENT));
+    await refreshRoutingPromptSnapshot();
+    routing = (await probeTrackedPrompts('healthz')).find((s) => s.key === 'routing')!;
+    expect(routing.snapshot_error).toBeUndefined();
+    expect(routing.source).toBe('pms');
+    expect(routing.version).toBe('113');
   });
 });
