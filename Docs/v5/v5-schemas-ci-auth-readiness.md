@@ -4,13 +4,15 @@
 
 **Scope:** This report verifies **CEE only** (`olumi-assistants-service`). DGAI, PLoT and ISL are **not** covered — see "Cross-repo" below.
 
+**Canonical:** This is the single readiness doc for the `@talchain/schemas` package-auth / `NPM_PACKAGES_TOKEN` question. It is part of the canonical **guard + docs** PR (#243) and **supersedes the earlier docs-only readiness PR (#242)**. Keep this one filename; do not spawn competing readiness docs.
+
 ---
 
 ## 1. The 401 diagnosis — disproven for current CEE
 
 The working hypothesis was: GitHub Actions gets a **401 on `@talchain/schemas`** (a GitHub Packages read-token gap) and that red CI class has blocked PRs.
 
-**That 401/token issue may have been real historically, but it is not a blocker for current CEE, because `@talchain/schemas` is now vendored via a local `file:` tarball — there is no registry fetch to authenticate.**
+**That 401/token issue may have been real historically, but it is not a blocker for current CEE, because `@talchain/schemas` is now vendored via a local `file:` tarball — there is no registry fetch to authenticate.** This is disproven for the **current CEE setup** — *not* retroactively for all past states, and *not* for other repos (see §7).
 
 Evidence chain (shortest):
 
@@ -34,12 +36,12 @@ So the contract-guard items (blocking install / schema validation in CI; respons
 
 The missing `NPM_PACKAGES_TOKEN` is currently a no-op. It becomes a **live 401** the moment `@talchain/schemas` (or any future `@talchain/*` schema package) is consumed from the **registry** instead of the vendored tarball — i.e. the `vendor/README.md` "Removal criterion" path.
 
-### Sentinel guard added by this change
+### Sentinel guard — implemented in this PR (#243)
 
-`scripts/ci/guard-schemas-registry-token.sh`, wired as one step in `contract-schemas.yml` (the already-required `check-schemas` job):
+A registry-token sentinel **is implemented in this PR** (it is *not* deferred): `scripts/ci/guard-schemas-registry-token.sh`, wired as one step in `contract-schemas.yml` (the already-required `check-schemas` job), before `pnpm install`:
 
-- While `@talchain/schemas` is `file:`/`link:`/`workspace:` → **PASS** (no-op; this is today's state).
-- If it becomes a registry spec **and** `NPM_PACKAGES_TOKEN` is missing → **FAIL** with a self-explaining `::error::`.
+- **No-op while vendored:** when `@talchain/schemas` is `file:` / `link:` / `workspace:` → **PASS** (this is today's state).
+- **Fails loudly only on a registry regression:** if it moves back to **registry** consumption **and** `NPM_PACKAGES_TOKEN` is missing → **FAIL** with a self-explaining `::error::`.
 
 **This guard is a sentinel, not full coverage.** A real registry switch would fail many install steps across CI; the guard simply guarantees that the *first, clearest* signal is one loud, self-explaining failure on the required `check-schemas` gate rather than a confusing install-time 401. One loud required failure is enough signal — it is not a substitute for actually setting the token.
 
@@ -59,6 +61,8 @@ They remain gated, separately, by:
 - **implementation approval** for the consuming CEE code.
 
 None of those gates is the package-read token.
+
+**Re-characterized hold:** the earlier "no Intent Capsule schema work until schemas CI auth is fixed" rested on the now-disproven 401 premise. Re-read it as: *do not start schema-backed rollout until the re-vendor / local-contract workflow is exercised and reviewed* — not as a package-auth blocker. A local-quarantine precedent already exists (`src/orchestrator-v5/routing/types.ts` defines boundary types locally, "QUARANTINE: These types are local pending `@talchain/schemas` bump"), so new contract types can land with no registry/auth path.
 
 ## 5. Remaining enforcement gap (separate from the 401 issue)
 
@@ -87,6 +91,11 @@ This report covers **CEE only**. Before any cross-repo schema rollout, run a **c
 5. Confirm branch protection + required PR approval on the working branch.
 
 **Only repos consuming `@talchain/*` from the registry have a live 401 risk; vendored repos are insulated.**
+
+## 8. Follow-ups (parked — separate from this PR)
+
+- **Stray-file CI-hygiene:** the pre-push `state-write-invariant` check scans the filesystem and can be tripped by gitignored stray/duplicate files (e.g. `name 2.ts` shadow copies); a future CI-hygiene pass should switch it to scan `git ls-files` instead. Not a package-auth concern.
+- Branch protection on `staging` (§5) and the future registry-switch token (§3) are **Paul actions**; per-repo **DGAI / PLoT / ISL** consumption checks (§7) precede any cross-repo rollout.
 
 ---
 
