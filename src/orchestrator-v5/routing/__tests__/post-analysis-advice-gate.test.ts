@@ -797,21 +797,25 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
+      expect(out.assistant_text).toContain("Based on this model, the analysis currently favours 'Hire two senior engineers locally'");
       expect(out.assistant_text).toContain('with a probability of 62%');
-      expect(out.assistant_text).toContain('That sits ahead of Hire one senior engineer overseas by 24 percentage points');
+      expect(out.assistant_text).toContain("That sits ahead of 'Hire one senior engineer overseas' by 24 percentage points");
       expect(out.assistant_text).toContain('Delivery risk');
       expect(out.assistant_text).toContain('Cost overrun risk');
       // sensitivity-direction phrases from formatSensitivityDirection
       expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
       expect(out.assistant_text).toMatch(/moderately weakens the lead/);
+      // Names the specific fragile assumption from fragile_edges[0] (parity
+      // with what_would_flip) — no sign/causal claim.
+      expect(out.assistant_text).toContain("The most useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
       // Humanised moderate-band copy — plain language, no "robustness band" jargon.
       expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
       expect(out.assistant_text).not.toMatch(/robustness band/i);
-      // Readability sectioning: closing nudge lives in its own labelled
-      // block on the confident path.
+      // Concrete, grounded next action (replaces the old generic "Small changes
+      // to the strongest factor…"): names the most influential factor to revisit.
       expect(out.assistant_text).toContain('What to check next');
-      expect(out.assistant_text).toMatch(/^• Small changes to the strongest factor can shift the picture\.$/m);
+      expect(out.assistant_text).toMatch(/^• Re-run after revisiting 'Delivery risk', the factor with the most influence here, to see whether the lead holds\.$/m);
+      expect(out.assistant_text).not.toMatch(/Small changes to the strongest factor can shift the picture/);
     }
   });
 
@@ -851,10 +855,12 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     if (out.matched) {
       expect(out.assistant_text).toContain('Hire two senior engineers locally');
       expect(out.assistant_text).toContain('with a probability of 62%');
-      expect(out.assistant_text).toContain('It sits ahead of Hire one senior engineer overseas by 24 percentage points');
+      expect(out.assistant_text).toContain("It sits ahead of 'Hire one senior engineer overseas' by 24 percentage points");
+      // Names the specific fragile assumption (parity with explain_results /
+      // what_would_flip) — the sentence is itself the "what to check".
+      expect(out.assistant_text).toContain("The most useful thing to check is the link from 'Delivery risk' to 'Successful launch'");
       expect(out.assistant_text).toMatch(/reflects (?:your current setup|the model you've built so far)/);
-      // Readability sectioning: the meta-statement is its own paragraph.
-      // No `What to check next` block — meaning is interpretive.
+      // Meaning stays interpretive — no `What to check next` action block.
       expect(out.assistant_text).not.toContain('What to check next');
       expect(out.assistant_text).toMatch(/\n\nThe result reflects/);
     }
@@ -967,7 +973,7 @@ describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () =
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('Hire one senior engineer overseas sits in second place');
+      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' sits in second place");
       // Don't claim a margin we don't have
       expect(out.assistant_text).not.toContain('percentage points');
     }
@@ -1949,12 +1955,12 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     }
   });
 
-  // ── 10c. Sibling pin: composeMeaning at the reported 0.05pp case ───────
+  // ── 10c. composeMeaning near-tie honesty: reframes on the 0.05pp case ──
   //
-  // Same policy as 10b: "What does this mean?" gets the existing softer
-  // wording. If product later decides meaning copy should reframe on
-  // near-tie, this test makes that change intentional.
-  it('composeMeaning at reported 0.05pp: existing copy preserved, no escalation to strength claims', () => {
+  // Meaning now shares the interpretation-twin near-tie guard: on a sub-1pp
+  // gap it leads with the closeness line and MUST NOT assert the result is
+  // "driven by" a single factor (a near-tie is not confidently single-driver).
+  it('composeMeaning at reported 0.05pp: reframes honestly on near-tie (no "driven by")', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What does this mean?',
       analysis: {
@@ -1971,11 +1977,15 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     if (out.matched) {
       expect(out.advice_class).toBe('meaning');
       const text = out.assistant_text;
-      // Existing softer opener preserved.
-      expect(text).toContain('currently favours Hire One Tech Lead');
-      // Neutral margin sentence preserved.
-      expect(text).toMatch(/It sits ahead of Hire Two Developers/);
-      // No escalation to strong-claim copy.
+      // Closeness honesty, quoted labels.
+      expect(text).toMatch(/effectively tied/i);
+      expect(text).toContain("'Hire One Tech Lead'");
+      // The honesty fix: never claim a single-factor "driven by" on a near-tie.
+      expect(text).not.toMatch(/driven by/i);
+      // Softened driver framing instead.
+      expect(text).toContain("The order could shift with movement on 'Delivery risk'");
+      // No confident margin/strength escalation.
+      expect(text).not.toMatch(/It sits ahead of/);
       assertNoForbidden(text, FORBIDDEN_STRENGTH_PHRASES);
       assertNoForbidden(text, FORBIDDEN_INTERNAL_TERMS);
     }
@@ -2611,6 +2621,181 @@ describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honest
       expect(t).not.toContain('the link from'); // no invented fragile assumption
       expect(t).not.toMatch(/most likely to flip|threshold signal/i); // no implied flip
       expect(t).toContain('What to check next');
+    }
+  });
+});
+
+// ===========================================================================
+// Slice 1 — GQPV parity for the interpretation twins (explain_results + meaning)
+//
+// These lock the user-visible uplift: quoted labels, the named fragile
+// assumption (drawn from fragile_edges already on the projection), a concrete
+// next action on every path, and near-tie honesty in composeMeaning — all
+// deterministic, no new LLM call, no decision_review dependency.
+// ===========================================================================
+
+describe('interpretation twins — GQPV parity (explain_results + meaning)', () => {
+  const FRAGILE_EDGE = { from_label: 'Hiring and Salary Cost', to_label: 'Budget Overrun Risk' };
+
+  const CONFIDENT_WITH_EDGE: AdviceGateAnalysis = {
+    status: 'success',
+    // Runner-up label contains "and" — the readability case quoting fixes.
+    leading_option: { label: 'Hire One Tech Lead', probability: 0.62 },
+    runner_up: { label: 'Hire One Tech Lead and One Developer', probability: 0.38 },
+    margin_pp: 24,
+    robustness_band: 'moderate',
+    top_drivers: [
+      { factor_label: 'Delivery risk', sensitivity_value: 0.45 },
+      { factor_label: 'Cost overrun risk', sensitivity_value: -0.32 },
+    ],
+    fragile_edges: [FRAGILE_EDGE],
+  };
+
+  const MINIMAL_NO_EDGE: AdviceGateAnalysis = {
+    status: 'success',
+    leading_option: { label: 'Option A', probability: 0.7 },
+    runner_up: { label: 'Option B', probability: 0.3 },
+    margin_pp: 40,
+    robustness_band: 'stable',
+    top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.4 }],
+    // no fragile_edges, no rawRobustness
+  };
+
+  const explain = (analysis: AdviceGateAnalysis, extra: Record<string, unknown> = {}) =>
+    tryPostAnalysisAdviceGate({ message: 'Explain the results.', analysis, freshness: 'fresh', ...extra });
+  const meaning = (analysis: AdviceGateAnalysis, extra: Record<string, unknown> = {}) =>
+    tryPostAnalysisAdviceGate({ message: 'What does this mean?', analysis, freshness: 'fresh', ...extra });
+
+  // ── Quoted "and"-containing labels stay readable (both twins) ──────────
+  it('quotes "and"-containing option labels so the comparison is unambiguous', () => {
+    for (const out of [explain(CONFIDENT_WITH_EDGE), meaning(CONFIDENT_WITH_EDGE)]) {
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        const t = out.assistant_text;
+        expect(t).toContain("'Hire One Tech Lead'");
+        expect(t).toContain("'Hire One Tech Lead and One Developer'");
+        // The ambiguous unquoted run must NOT appear.
+        expect(t).not.toContain('Hire One Tech Lead and Hire One Tech Lead and One Developer');
+      }
+    }
+  });
+
+  // ── Fragile assumption named when present; never invented when absent ──
+  it('names the specific fragile assumption when fragile_edges present (both twins)', () => {
+    for (const out of [explain(CONFIDENT_WITH_EDGE), meaning(CONFIDENT_WITH_EDGE)]) {
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.assistant_text).toContain(
+          "The most useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk': whether it holds as strongly as the model currently assumes",
+        );
+      }
+    }
+  });
+
+  it('does NOT invent a fragile assumption when fragile_edges absent (both twins)', () => {
+    for (const out of [explain(MINIMAL_NO_EDGE), meaning(MINIMAL_NO_EDGE)]) {
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.assistant_text).not.toContain('the link from');
+      }
+    }
+  });
+
+  // ── explain_results gives a concrete next action on EVERY path ─────────
+  it('explain_results emits a concrete next action on the confident path (names the driver)', () => {
+    const out = explain(CONFIDENT_WITH_EDGE);
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('What to check next');
+      expect(out.assistant_text).toMatch(
+        /^• Re-run after revisiting 'Delivery risk', the factor with the most influence here, to see whether the lead holds\.$/m,
+      );
+    }
+  });
+
+  it('explain_results emits a concrete next action on the fragile path (strengthen the named link)', () => {
+    const out = explain(CONFIDENT_WITH_EDGE, { rawRobustness: { level: 'fragile', near_tie_is_tie: false } });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      // Fragile signal present → strengthen-the-link Propose, not the generic one.
+      expect(t).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
+      // Single robustness caveat — no stacked hedges.
+      expect((t.match(/picture appears fragile/gi) ?? []).length).toBe(1);
+    }
+  });
+
+  // ── Amendment 2: combined near-tie + fragile for composeMeaning ───────
+  it('composeMeaning near-tie + fragile: closeness honesty, named assumption, one caveat, no "driven by"', () => {
+    const out = meaning({
+      status: 'success',
+      leading_option: { label: 'Hire One Tech Lead', probability: 0.5025 },
+      runner_up: { label: 'Hire Two Developers', probability: 0.4975 },
+      margin_pp: 0.5, // sub-1pp near-tie
+      robustness_band: 'moderate',
+      top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.45 }],
+      fragile_edges: [FRAGILE_EDGE],
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      // Closeness honesty.
+      expect(t).toMatch(/effectively tied/i);
+      // Never assert a single-factor "driven by" on a near-tie.
+      expect(t).not.toMatch(/driven by/i);
+      expect(t).toContain("The order could shift with movement on 'Delivery risk'");
+      // Fragile assumption composes coherently — named exactly once.
+      expect(
+        (t.match(/The most useful thing to check is the link from/g) ?? []).length,
+      ).toBe(1);
+      // Exactly one caveat: meaning adds neither "treat as provisional" nor
+      // "picture appears fragile" on top of the named assumption.
+      expect(t).not.toMatch(/treat the lead as provisional/i);
+      expect(t).not.toMatch(/picture appears fragile/i);
+      // No contradictory confidence.
+      expect(t).not.toMatch(/meaningful rather than marginal/i);
+      expect(t).not.toMatch(/It sits ahead of/);
+    }
+  });
+
+  // ── Absent-signal fallback: safe, sensible, no crash (both twins) ──────
+  it('absent fragile/raw signals → safe fallback copy (explain_results keeps an action; meaning stays interpretive)', () => {
+    const ex = explain(MINIMAL_NO_EDGE);
+    expect(ex.matched).toBe(true);
+    if (ex.matched) {
+      expect(ex.assistant_text).toContain('What to check next');
+      expect(ex.assistant_text).not.toContain('the link from');
+    }
+    const me = meaning(MINIMAL_NO_EDGE);
+    expect(me.matched).toBe(true);
+    if (me.matched) {
+      expect(me.assistant_text).not.toContain('What to check next'); // interpretive
+      expect(me.assistant_text).toMatch(/\n\nThe result reflects/);
+      expect(me.assistant_text).not.toContain('the link from');
+    }
+  });
+
+  // ── Copy safety: no raw decimals / IDs / banned vocab (both twins) ─────
+  it('copy is glossary-safe across both twins (no raw decimals, IDs, banned vocab)', () => {
+    for (const out of [explain(CONFIDENT_WITH_EDGE), meaning(CONFIDENT_WITH_EDGE)]) {
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        const t = out.assistant_text;
+        expect(t).not.toMatch(/\b0\.\d+/); // raw normalised decimals
+        expect(t).not.toMatch(/\b(fac|opt|out|risk|goal|dec|node)_[a-z0-9]/i); // entity IDs
+        expect(t).not.toMatch(/_meta|graph hash|node id/i);
+        expect(t).not.toMatch(/\b(best|recommended|winner)\b/i);
+        expect(findForbiddenPhraseHit(t)).toBeNull();
+      }
+    }
+  });
+
+  // ── Deterministic fast path — no LLM round-trip (both twins) ───────────
+  it('both twins resolve synchronously with no LLM dispatch', () => {
+    for (const out of [explain(CONFIDENT_WITH_EDGE), meaning(CONFIDENT_WITH_EDGE)]) {
+      // A synchronous result object — not a Promise/thenable — proves no LLM call.
+      expect(typeof (out as { then?: unknown }).then).toBe('undefined');
+      expect(out.matched).toBe(true);
     }
   });
 });
