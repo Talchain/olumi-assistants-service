@@ -25,10 +25,10 @@
 #
 set -euo pipefail
 
-# Read the spec via node. Wrapped so a malformed package.json yields a tailored
-# ::error:: instead of a raw Node parser stack trace (still fails closed).
+# Read the spec via node. Wrapped so a missing or malformed package.json yields a
+# tailored ::error:: instead of a raw Node error/stack (still fails closed).
 if ! SPEC="$(node -p "(() => { const p = require('./package.json'); return (p.dependencies && p.dependencies['@talchain/schemas']) || (p.devDependencies && p.devDependencies['@talchain/schemas']) || ''; })()" 2>/dev/null)"; then
-  echo "::error::guard-schemas-registry-token: could not parse package.json (invalid JSON?) while reading the @talchain/schemas spec."
+  echo "::error::guard-schemas-registry-token: could not read or parse package.json while reading the @talchain/schemas spec (is it present and valid JSON?)."
   exit 1
 fi
 
