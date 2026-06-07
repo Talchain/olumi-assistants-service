@@ -812,9 +812,11 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
       expect(out.assistant_text).not.toMatch(/robustness band/i);
       // Concrete, grounded next action (replaces the old generic "Small changes
-      // to the strongest factor…"): names the most influential factor to revisit.
+      // to the strongest factor…"). A fragile link was named above, so the next
+      // step strengthens THAT link — coherent priorities, not a split with the
+      // top driver.
       expect(out.assistant_text).toContain('What to check next');
-      expect(out.assistant_text).toMatch(/^• Re-run after revisiting 'Delivery risk', the factor with the most influence here, to see whether the lead holds\.$/m);
+      expect(out.assistant_text).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
       expect(out.assistant_text).not.toMatch(/Small changes to the strongest factor can shift the picture/);
     }
   });
@@ -2701,27 +2703,59 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
     }
   });
 
-  // ── explain_results gives a concrete next action on EVERY path ─────────
-  it('explain_results emits a concrete next action on the confident path (names the driver)', () => {
+  // ── explain_results gives a concrete next action on EVERY path, and the
+  //    action points at whatever the body emphasised (coherent priorities) ──
+  it('explain_results next step strengthens the named fragile link when one exists (coherent priorities, even on a clear lead)', () => {
+    // Clear lead (no near-tie / raw-fragile) but a fragile edge IS present, and
+    // its endpoints differ from the top driver. The body names the link, so the
+    // next step must point at THAT link — not split off to the top driver.
     const out = explain(CONFIDENT_WITH_EDGE);
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('What to check next');
-      expect(out.assistant_text).toMatch(
-        /^• Re-run after revisiting 'Delivery risk', the factor with the most influence here, to see whether the lead holds\.$/m,
+      const t = out.assistant_text;
+      expect(t).toContain(
+        "The most useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk'",
       );
+      expect(t).toContain('What to check next');
+      expect(t).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
+      // Not the driver-named fallback — priorities are coherent.
+      expect(t).not.toMatch(/Re-run after revisiting/);
     }
   });
 
-  it('explain_results emits a concrete next action on the fragile path (strengthen the named link)', () => {
+  it('explain_results next step names the most influential factor when there is no fragile link', () => {
+    const out = explain(MINIMAL_NO_EDGE);
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const t = out.assistant_text;
+      expect(t).not.toContain('the link from'); // nothing to strengthen
+      expect(t).toContain('What to check next');
+      expect(t).toMatch(/^• Re-run after revisiting 'Delivery risk', the factor with the most influence here, to see whether the lead holds\.$/m);
+    }
+  });
+
+  it('explain_results on a raw-fragile result keeps exactly one robustness caveat', () => {
     const out = explain(CONFIDENT_WITH_EDGE, { rawRobustness: { level: 'fragile', near_tie_is_tie: false } });
     expect(out.matched).toBe(true);
     if (out.matched) {
       const t = out.assistant_text;
-      // Fragile signal present → strengthen-the-link Propose, not the generic one.
       expect(t).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
-      // Single robustness caveat — no stacked hedges.
       expect((t.match(/picture appears fragile/gi) ?? []).length).toBe(1);
+    }
+  });
+
+  // ── Blank/malformed fragile-edge endpoints are filtered for the twins ──
+  it('blank fragile-edge endpoints are not surfaced by the twins (renderableFragileEdges filter)', () => {
+    const blankEdge: AdviceGateAnalysis = {
+      ...MINIMAL_NO_EDGE,
+      fragile_edges: [{ from_label: '   ', to_label: 'Budget Overrun Risk' }],
+    };
+    for (const out of [explain(blankEdge), meaning(blankEdge)]) {
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        // No fragile-assumption sentence; falls back cleanly to the driver path.
+        expect(out.assistant_text).not.toContain('the link from');
+      }
     }
   });
 

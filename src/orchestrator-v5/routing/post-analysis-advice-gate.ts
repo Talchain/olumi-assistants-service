@@ -1662,14 +1662,14 @@ function composeExplainResults(
   }
 
   // 5. A concrete re-run Propose on EVERY path — previously the near-tie /
-  //    fragile path emitted no next step at all. Strengthen the named link when
-  //    fragile, otherwise revisit the most influential factor; never implies a
-  //    single change flips the result.
+  //    fragile path emitted no next step at all. Point the next step at whatever
+  //    the body emphasised: when a fragile link was NAMED above
+  //    (describeFragileAssumption fires on any path with a renderable edge),
+  //    strengthen THAT link so priorities don't read split ("check the link …
+  //    but revisit the driver"); otherwise revisit the most influential factor.
+  //    Never implies a single change flips the result.
   const lead = sentences.join(' ');
-  const nextStep = interpretationNextStep(
-    (nearTie || rawFragile) && topEdge != null,
-    topDriverLabel,
-  );
+  const nextStep = interpretationNextStep(topEdge != null, topDriverLabel);
   return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }
 
