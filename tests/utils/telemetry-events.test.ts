@@ -501,6 +501,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5HeadlineFellBack: "v5.headline.fell_back",
         V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
         V5ChipsFloorApplied: "v5.chips.floor_applied",
+        V5ChipsFinalized: "v5.chips.finalized",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites.
         EditGraphNoOperations: "edit_graph.no_operations",
         StreamingGeneratorPreflightFailure: "streaming.generator_preflight_failure",
@@ -1206,6 +1207,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5HeadlineFellBack,
         TelemetryEvents.V5ChipsEmptyIntentional,
         TelemetryEvents.V5ChipsFloorApplied,
+        // V5 Lane 2 — egress chip-quality finalizer aggregate (diagnostic-only).
+        TelemetryEvents.V5ChipsFinalized,
       ];
 
       for (const event of allEvents) {
@@ -1680,6 +1683,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.headline.fell_back",
         "v5.chips.empty_intentional",
         "v5.chips.floor_applied",
+        "v5.chips.finalized",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites
         "edit_graph.no_operations",
         "streaming.generator_preflight_failure",

@@ -54,7 +54,8 @@
 
 import type { OlumiResponse, Action, Insight, Block } from '@talchain/schemas/boundary';
 import type { GraphV3T } from '../../orchestrator/types.js';
-import { log } from '../../utils/telemetry.js';
+import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
+import { finalizeChips } from './chip-finalizer.js';
 
 // ----------------------------------------------------------------------------
 // Per-string scrubber — moved to neutral location so V4 + CEE pipeline can
@@ -109,11 +110,21 @@ export function sanitiseOlumiResponseForEgress(
     return r.text;
   };
 
+  // Per-string entity-id scrub FIRST, so the chip-quality finalizer
+  // classifies on already-cleaned text (a leaked id is replaced with a
+  // human label before the leakage classifier runs).
+  const scrubbedActions = response.suggested_actions.map((a) => sanitiseAction(a, collect));
+  // V5 Lane 2 — deterministic chip-quality finalizer (classify, drop
+  // unsafe/generic, dedupe exact + near, proposal-protected budget). Pure
+  // and idempotent; the chokepoint runs this up to 4× per response.
+  const finalized = finalizeChips(scrubbedActions);
+
   const sanitised: OlumiResponse = {
     ...response,
     assistant_text: collect(response.assistant_text),
     blocks: response.blocks.map((b) => sanitiseBlock(b, collect)),
-    suggested_actions: response.suggested_actions.map((a) => sanitiseAction(a, collect)),
+    // Spread the finalizer's readonly result into the mutable wire array.
+    suggested_actions: [...finalized.chips],
     insights: response.insights.map((i) => sanitiseInsight(i, collect)),
   };
 
@@ -130,6 +141,32 @@ export function sanitiseOlumiResponseForEgress(
       },
       'V5 egress: entity-id leak caught and replaced',
     );
+  }
+
+  // V5 Lane 2 — aggregate chip-finalizer telemetry, content-free (scalar
+  // counts + routing ids only). Guarded so idempotent re-runs of this
+  // chokepoint (sendFinalised200 calls it up to 4×) emit at most once per
+  // response in the common case.
+  const r = finalized.report;
+  if (
+    r.input !== r.output ||
+    r.dropped_unsafe > 0 ||
+    r.dropped_generic > 0 ||
+    r.deduped > 0 ||
+    r.over_budget_trimmed > 0
+  ) {
+    emit(TelemetryEvents.V5ChipsFinalized, {
+      request_id: opts.requestId,
+      exit_path: opts.exitPath,
+      input: r.input,
+      output: r.output,
+      dropped_unsafe: r.dropped_unsafe,
+      dropped_raw_decimal: r.dropped_raw_decimal,
+      dropped_generic: r.dropped_generic,
+      deduped: r.deduped,
+      proposal_protected: r.proposal_protected,
+      over_budget_trimmed: r.over_budget_trimmed,
+    });
   }
 
   return sanitised;
