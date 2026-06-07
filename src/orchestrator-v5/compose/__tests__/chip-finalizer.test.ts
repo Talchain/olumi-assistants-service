@@ -108,6 +108,29 @@ describe('finalizeChips — drop unsafe', () => {
     expect(report.dropped_raw_decimal).toBe(1);
   });
 
+  it('drops a raw decimal that appears only in the MESSAGE — #239 re-review', () => {
+    // message is emitted in suggested_actions, so a leak there must drop too.
+    const dec: SuggestedAction = {
+      id: 'chip_action_run_analysis',
+      label: 'Run analysis',
+      message: 'Use 0.4732',
+      action_type: 'run_analysis',
+    };
+    const { chips, report } = finalizeChips([dec]);
+    expect(chips).toEqual([]);
+    expect(report.dropped_raw_decimal).toBe(1);
+  });
+
+  it('keeps an embedded low-precision decimal in the message (route-v2 "= 0.8" case)', () => {
+    const chip: SuggestedAction = {
+      id: 'chip_action_run_analysis',
+      label: 'Re-run with Delivery Cost',
+      message: 'Re-run with Delivery Cost = 0.8',
+      action_type: 'run_analysis',
+    };
+    expect(ids(finalizeChips([chip]).chips)).toEqual(['chip_action_run_analysis']);
+  });
+
   it('drops an unsafe proposal label (prop_ id does not rescue it)', () => {
     const unsafeProp: SuggestedAction = {
       id: 'prop_bbbbbbbbbbbb',
@@ -313,6 +336,70 @@ describe('finalizeChips — proposal protection & budget', () => {
     // 3 of 4 suggestions kept (1 trimmed); all 4 candidates kept.
     expect(chips.length).toBe(7);
     expect(report.over_budget_trimmed).toBe(1);
+  });
+});
+
+describe('finalizeChips — pending-bearing protection (#239 re-review)', () => {
+  it('keeps a pending-bearing run_analysis chip over a same-label prompt-only duplicate placed first', () => {
+    const promptDup: SuggestedAction = {
+      id: 'chip_prompt_rerun',
+      label: 'Re-run analysis',
+      message: 'Re-run analysis.',
+    };
+    const resumable: SuggestedAction = {
+      id: 'chip_action_rerun_analysis',
+      label: 'Re-run analysis',
+      message: 'Re-run analysis.',
+      action_type: 'run_analysis',
+    };
+    const { chips, report } = finalizeChips([promptDup, resumable]);
+    expect(ids(chips)).toEqual(['chip_action_rerun_analysis']);
+    expect(report.deduped).toBe(1);
+  });
+
+  it('keeps a pending-bearing what_would_flip chip over a same-label prompt-only duplicate', () => {
+    const promptDup: SuggestedAction = {
+      id: 'chip_prompt_flip',
+      label: 'What could change the outcome?',
+      message: 'What could change the outcome of this analysis?',
+    };
+    const resumable: SuggestedAction = {
+      id: 'chip_action_what_would_flip',
+      label: 'What could change the outcome?',
+      message: 'What could change the outcome of this analysis?',
+      action_type: 'what_would_flip',
+    };
+    expect(ids(finalizeChips([promptDup, resumable]).chips)).toEqual(['chip_action_what_would_flip']);
+  });
+
+  it('does not budget-trim a pending-bearing chip behind 3 generic suggestions', () => {
+    const s1: SuggestedAction = { id: 'chip_prompt_a', label: 'A', message: 'Alpha' };
+    const s2: SuggestedAction = { id: 'chip_prompt_b', label: 'B', message: 'Bravo' };
+    const s3: SuggestedAction = { id: 'chip_prompt_c', label: 'C', message: 'Charlie' };
+    const resumable: SuggestedAction = {
+      id: 'chip_action_run_analysis',
+      label: 'Run analysis',
+      message: 'Run analysis.',
+      action_type: 'run_analysis',
+    };
+    const { chips, report } = finalizeChips([s1, s2, s3, resumable]);
+    expect(ids(chips)).toContain('chip_action_run_analysis');
+    expect(chips.length).toBe(3);
+    expect(report.over_budget_trimmed).toBe(1);
+  });
+
+  it('does NOT pull a candidate-list pending-bearing chip into the budget (stays a never-trimmed candidate)', () => {
+    // chip_clarify_pending_* carries action_type run_analysis but a
+    // candidate-class id — a full pick-list that must never be budget-trimmed.
+    const four: SuggestedAction[] = [0, 1, 2, 3].map((i): SuggestedAction => ({
+      id: `chip_clarify_pending_${i}`,
+      label: `Run the ${i} analysis`,
+      message: `Run the ${i} analysis.`,
+      action_type: 'run_analysis',
+    }));
+    const { chips, report } = finalizeChips(four);
+    expect(chips.length).toBe(4);
+    expect(report.over_budget_trimmed).toBe(0);
   });
 });
 

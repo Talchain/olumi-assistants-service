@@ -19,18 +19,22 @@
  * removals are genuinely safe:
  *
  *   1. UNSAFE — a leakage token (handler id / schema term / `prop_`/`chip_`/
- *      `graph_hash`/`{"`) in the visible label or message, or a non-exempt
- *      raw-decimal leak. (NOT em dash — see chip-safety.ts.)
+ *      `graph_hash`/`{"`) in the visible label OR message, or a non-exempt
+ *      raw-decimal leak in the label OR message. (NOT em dash — see
+ *      chip-safety.ts.)
  *   2. BLANK — empty label or message after scrub (genuinely unusable).
  *   3. EXACT or NEAR DUPLICATE — same id, or normalized-equal label, or
- *      normalized-equal message (keep first; proposals partitioned first so a
- *      generic near-duplicate can never dedupe a proposal away).
+ *      normalized-equal message (keep first; PROTECTED chips win collisions so
+ *      a generic near-duplicate can never dedupe a proposal or pending-bearing
+ *      chip away, even when the duplicate appears first).
  *
- * Budget: only the SUGGESTION family (`chip_action_*` / `chip_prompt_*`) plus
+ * Budget: the SUGGESTION family (`chip_action_*` / `chip_prompt_*`) plus
  * validated proposals (`prop_`) share the ≤{@link MAX_CHIPS} budget — the
- * Lane 2 "2–3 useful suggestions" target. Proposals are kept first and
- * survive the budget unless unsafe. Candidate / clarification chips are NOT
- * counted and are never trimmed (their own composers already size them).
+ * Lane 2 "2–3 useful suggestions" target. PROTECTED chips (validated proposals
+ * AND pending-bearing `run_analysis` / `what_would_flip` chips) claim slots
+ * first and survive trimming unless unsafe; the rest of the suggestion family
+ * fills the remainder. Candidate / clarification chips are NOT counted and are
+ * never trimmed (their own composers already size them).
  *
  * Never pads: an empty safe set yields no chips. Idempotent: a second pass
  * drops/dedupes/trims nothing (the chokepoint runs this up to 4× per
@@ -42,6 +46,7 @@
 import { log } from '../../utils/telemetry.js';
 import type { SuggestedAction } from './types.js';
 import { findChipLeakToken, findChipRawDecimalLeak } from './chip-safety.js';
+import { CHIP_DERIVABLE_ACTION_TYPES } from '../session/pending-action.js';
 
 /** The useful 2–3 chip budget cap for the SUGGESTION family (mirrors chip-generator). */
 const MAX_CHIPS = 3;
@@ -69,8 +74,18 @@ export type ChipCategory =
   | 'generic'
   | 'unsafe';
 
-/** Budget cohort: the ≤MAX_CHIPS pool covers `proposal` + `suggestion`; `candidate` is never trimmed. */
-type BudgetClass = 'proposal' | 'suggestion' | 'candidate';
+/**
+ * Budget / protection cohort.
+ *   - `protected` — validated proposals AND suggestion-family pending-bearing
+ *     chips (`run_analysis` / `what_would_flip`, which seed a resumable pending).
+ *     They win dedupe against non-protected duplicates and claim the budget pool
+ *     first, so deterministic resumability is never deduped or trimmed away.
+ *   - `suggestion` — the rest of the `chip_action_*` / `chip_prompt_*` family;
+ *     fill the remaining ≤MAX_CHIPS slots after protected.
+ *   - `candidate` — everything else (clarification / pick-lists / coaching);
+ *     never counted or trimmed.
+ */
+type BudgetTier = 'protected' | 'suggestion' | 'candidate';
 
 export interface ChipFinalizeReport {
   readonly input: number;
@@ -104,6 +119,7 @@ interface MutableReport {
 interface ClassifiedChip {
   readonly chip: SuggestedAction;
   readonly cat: ChipCategory;
+  readonly tier: BudgetTier;
 }
 
 function strField(chip: SuggestedAction, key: 'id' | 'label' | 'message'): string {
@@ -143,9 +159,26 @@ function isSuggestionId(id: string): boolean {
   return SUGGESTION_ID_PREFIXES.some((p) => id.startsWith(p));
 }
 
-function budgetClass(chip: SuggestedAction): BudgetClass {
-  if (isValidatedProposalChip(chip)) return 'proposal';
-  if (isSuggestionId(strField(chip, 'id'))) return 'suggestion';
+/**
+ * Pending-bearing = a chip whose `action_type` seeds a resumable pending action
+ * (`run_analysis` / `what_would_flip`, per `CHIP_DERIVABLE_ACTION_TYPES`). These
+ * carry deterministic resumability ("yes" short-confirm), so they must not be
+ * deduped or trimmed away by generic suggestions.
+ */
+function isPendingBearing(chip: SuggestedAction): boolean {
+  const at = actionTypeOf(chip);
+  return at !== null && (CHIP_DERIVABLE_ACTION_TYPES as ReadonlySet<string>).has(at);
+}
+
+function budgetTier(chip: SuggestedAction): BudgetTier {
+  // Protected: validated proposals + suggestion-family pending-bearing chips.
+  if (isValidatedProposalChip(chip)) return 'protected';
+  if (isSuggestionId(strField(chip, 'id'))) {
+    return isPendingBearing(chip) ? 'protected' : 'suggestion';
+  }
+  // Candidate-class ids (edit_clarify_*, chip_clarify_*, chip_proposal_*, …)
+  // stay candidate even when their action_type is pending-bearing — they are
+  // deliberate full pick-lists their own composer sized, never trimmed.
   return 'candidate';
 }
 
@@ -162,14 +195,13 @@ function classify(chip: SuggestedAction): ChipCategory {
   if (findChipLeakToken(label) !== null || findChipLeakToken(message) !== null) {
     return 'unsafe';
   }
-  // 2. Unsafe — non-exempt raw-decimal leak in the VISIBLE button LABEL only.
-  //    A bare/high-precision decimal in a label (e.g. "Re-run 0.4732") is
-  //    display noise. The `message` is the submit prompt rather than a display
-  //    surface and far more likely to carry a legitimately value-bearing
-  //    sentence, so a decimal there does NOT drop the chip — leak tokens
-  //    (handler ids / schema terms / raw ids), which are never legitimate, are
-  //    still checked in both fields above.
-  if (findChipRawDecimalLeak(label, '', { isValidatedProposal: validatedProposal })) {
+  // 2. Unsafe — non-exempt raw-decimal leak in EITHER the label or the message
+  //    (both reach the wire in `suggested_actions`). Safe to scan both because
+  //    the rule only flags a STANDALONE bare decimal or a HIGH-precision (≥3dp)
+  //    decimal: an embedded low-precision value in a sentence (e.g. "Re-run with
+  //    Delivery Cost = 0.8", "Plan 2.5") is kept, while a leak like message
+  //    "Use 0.4732" is dropped.
+  if (findChipRawDecimalLeak(label, message, { isValidatedProposal: validatedProposal })) {
     return 'unsafe';
   }
   // 3. Generic/noisy — blank after scrub is the ONLY drop-as-generic reason.
@@ -219,12 +251,31 @@ function unsafeDropReason(chip: SuggestedAction): 'egress_leak_token' | 'raw_dec
 }
 
 /**
- * Dedupe by exact id, normalized label, and normalized message (keep first).
- * NO `action_type` collapse — two distinct chips that merely share a handler
- * id (e.g. ambiguous short-confirm candidates both routing to `run_analysis`)
- * are legitimately different choices and BOTH survive.
+ * Dedupe by exact id, normalized label, and normalized message (keep first),
+ * with PROTECTED chips winning collisions against non-protected duplicates so a
+ * prompt-only chip can never dedupe a resumable / proposal chip away — even if
+ * the prompt-only chip appears first. Order is otherwise preserved.
+ *
+ * NO `action_type` collapse — two distinct chips that merely share a handler id
+ * (e.g. ambiguous short-confirm candidates both routing to `run_analysis`) are
+ * legitimately different choices and BOTH survive.
  */
 function dedupe(items: readonly ClassifiedChip[], report: MutableReport): ClassifiedChip[] {
+  // Keys owned by protected chips. A non-protected chip colliding with one of
+  // these loses regardless of position.
+  const protIds = new Set<string>();
+  const protLabels = new Set<string>();
+  const protMessages = new Set<string>();
+  for (const item of items) {
+    if (item.tier !== 'protected') continue;
+    const id = strField(item.chip, 'id');
+    const nLabel = normalizeText(strField(item.chip, 'label'));
+    const nMessage = normalizeText(strField(item.chip, 'message'));
+    if (id !== '') protIds.add(id);
+    if (nLabel !== '') protLabels.add(nLabel);
+    if (nMessage !== '') protMessages.add(nMessage);
+  }
+
   const out: ClassifiedChip[] = [];
   const seenIds = new Set<string>();
   const seenLabels = new Set<string>();
@@ -234,6 +285,17 @@ function dedupe(items: readonly ClassifiedChip[], report: MutableReport): Classi
     const id = strField(item.chip, 'id');
     const nLabel = normalizeText(strField(item.chip, 'label'));
     const nMessage = normalizeText(strField(item.chip, 'message'));
+
+    // Non-protected chip colliding with a protected chip's key → drop it.
+    if (
+      item.tier !== 'protected' &&
+      ((id !== '' && protIds.has(id)) ||
+        (nLabel !== '' && protLabels.has(nLabel)) ||
+        (nMessage !== '' && protMessages.has(nMessage)))
+    ) {
+      report.deduped++;
+      continue;
+    }
 
     if (id !== '' && seenIds.has(id)) {
       report.deduped++;
@@ -258,25 +320,37 @@ function dedupe(items: readonly ClassifiedChip[], report: MutableReport): Classi
 }
 
 /**
- * Proposal-protected budget. The `proposal` + `suggestion` cohort shares a
- * pool of {@link MAX_CHIPS}; proposals (partitioned first) consume it first so
- * they survive while excess generated suggestions are trimmed. `candidate`
- * chips are never counted or trimmed — their composers size them and the user
- * must see every option.
+ * Protected-first budget over the ≤{@link MAX_CHIPS} pool. Protected chips
+ * (proposals + pending-bearing) claim slots first — so a resumable chip survives
+ * even when it appears after generic suggestions — then the suggestion cohort
+ * fills the remaining slots in order. `candidate` chips are never counted or
+ * trimmed. Order is preserved (no reordering); only excess is dropped.
  */
 function applyBudget(items: readonly ClassifiedChip[], report: MutableReport): ClassifiedChip[] {
+  const protectedInPool = items.reduce((n, i) => (i.tier === 'protected' ? n + 1 : n), 0);
+  let suggestionSlots = Math.max(0, MAX_CHIPS - Math.min(protectedInPool, MAX_CHIPS));
+  let protectedKept = 0;
+
   const out: ClassifiedChip[] = [];
-  let pooledUsed = 0;
   for (const item of items) {
-    const bc = budgetClass(item.chip);
-    if (bc === 'candidate') {
+    if (item.tier === 'candidate') {
       out.push(item);
       continue;
     }
-    if (pooledUsed < MAX_CHIPS) {
+    if (item.tier === 'protected') {
+      if (protectedKept < MAX_CHIPS) {
+        out.push(item);
+        protectedKept++;
+        if (item.cat === 'proposal') report.proposal_protected++;
+      } else {
+        report.over_budget_trimmed++;
+      }
+      continue;
+    }
+    // suggestion
+    if (suggestionSlots > 0) {
       out.push(item);
-      pooledUsed++;
-      if (bc === 'proposal') report.proposal_protected++;
+      suggestionSlots--;
     } else {
       report.over_budget_trimmed++;
     }
@@ -344,21 +418,15 @@ export function finalizeChips(
       }
       continue;
     }
-    kept.push({ chip, cat });
+    kept.push({ chip, cat, tier: budgetTier(chip) });
   }
 
-  // Phase B — partition proposals to the front (stable) so a generic
-  // near-duplicate can never dedupe a proposal away, and proposals consume the
-  // budget pool first.
-  const proposalsFirst: ClassifiedChip[] = [
-    ...kept.filter((i) => i.cat === 'proposal'),
-    ...kept.filter((i) => i.cat !== 'proposal'),
-  ];
+  // Phase B — dedupe (exact id + near-duplicate, keep first; protected chips
+  // win collisions against non-protected duplicates). Order preserved.
+  const deduped = dedupe(kept, report);
 
-  // Phase C — dedupe (exact id + near-duplicate, keep first).
-  const deduped = dedupe(proposalsFirst, report);
-
-  // Phase D — proposal-protected budget over the suggestion cohort only.
+  // Phase C — protected-first budget: proposals + pending-bearing survive; the
+  // suggestion cohort fills the remaining ≤MAX_CHIPS slots; candidates untouched.
   const finalItems = applyBudget(deduped, report);
 
   const out = finalItems.map((i) => i.chip);
