@@ -4,11 +4,13 @@
  * Proves the run-level gating of the `pending-scenario` downgrade on the
  * `branch-a-canonical` journey's step 4 (`4_flip_proposal_present`):
  *
- *   - chip ABSENT + --db-readback confirms flip_thresholds[].flip_value
- *     ALL NULL  → step 4 is a `pending-scenario` SKIP (not red); steps 5-8
- *     cascade as pending-scenario; the run is GREEN (exit 0).
- *   - chip ABSENT + DB shows a NON-null flip_value (emit regression) → step
- *     4 stays RED (exit 1). The pending-scenario mode must NOT mask this.
+ *   - chip ABSENT + --db-readback confirms no usable flip (flip_thresholds
+ *     ALL NULL, or an empty `[]` array) → step 4 is a `pending-scenario`
+ *     SKIP (not red); steps 5-8 cascade as pending-scenario; GREEN (exit 0).
+ *   - chip ABSENT + DB shows a NON-null flip_value (emit regression), or an
+ *     `absent`/`no_facts`/`error` read (cannot confirm) → step 4 stays RED
+ *     (exit 1). The pending-scenario mode must NOT mask a regression, and
+ *     must fail safe when it cannot confirm "no flip".
  *
  * `readFlipThresholdsNullness` is mocked so the DB read-back result is
  * deterministic; the rest of `db-readback.js` is preserved. The
@@ -154,6 +156,20 @@ describe('branch-a-canonical pending-scenario split (enforced + --db-readback)',
     expect(consoleLogs.some((l) => l.includes('PENDING-SCENARIO'))).toBe(true);
   });
 
+  it('chip absent + DB-confirmed EMPTY flip_thresholds ([]) → step 4 pending-scenario (green, exit 0)', async () => {
+    // An empty array = PLoT found no flip-threshold factors = no usable flip,
+    // the same conclusion as all-null. Common on staging (~2/3 of scenarios).
+    ctl.flip = { status: 'empty', detail: 'classification=empty (entries=0)' };
+    stubChipAbsent();
+    await run(); // pending-scenario skip, not a failure
+
+    const pack = writes[0]!.content;
+    expect(pack).toMatch(/`4_flip_proposal_present` \| \[SKIP\] skipped/);
+    expect(pack).toMatch(/pending-scenario: staging produced no live flip-capable result/);
+    expect(pack).not.toMatch(/\[FAIL\] failed/);
+    expect(consoleLogs.some((l) => l.includes('PENDING-SCENARIO') && l.includes('empty'))).toBe(true);
+  });
+
   it('chip absent + DB shows a NON-null flip (emit regression) → step 4 RED (exit 1, NOT masked)', async () => {
     ctl.flip = { status: 'has_non_null', detail: 'entries=2 one finite flip_value' };
     stubChipAbsent();
@@ -163,6 +179,19 @@ describe('branch-a-canonical pending-scenario split (enforced + --db-readback)',
     expect(pack).toMatch(/`4_flip_proposal_present` \| \[FAIL\] failed/);
     expect(pack).toMatch(/emit regression/);
     // The downgrade did NOT fire.
+    expect(pack).not.toMatch(/`4_flip_proposal_present` \| \[SKIP\]/);
+  });
+
+  it('chip absent + DB read-back absent (cannot confirm) → step 4 RED (fail-safe, exit 1)', async () => {
+    // `absent` = flip_thresholds missing / not an array → cannot confirm "no
+    // flip"; must fail safe to red, NOT downgrade to pending-scenario.
+    ctl.flip = { status: 'absent', detail: 'flip_thresholds not an array' };
+    stubChipAbsent();
+    await expect(run()).rejects.toMatchObject({ name: 'ProcessExitError', code: 1 });
+
+    const pack = writes[0]!.content;
+    expect(pack).toMatch(/`4_flip_proposal_present` \| \[FAIL\] failed/);
+    expect(pack).toMatch(/cannot confirm pending-scenario/);
     expect(pack).not.toMatch(/`4_flip_proposal_present` \| \[SKIP\]/);
   });
 });

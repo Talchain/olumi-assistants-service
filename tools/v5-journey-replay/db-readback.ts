@@ -318,11 +318,19 @@ export async function runSetFactorValueReadback(
  * Pure classifier for the nullness of a `flip_thresholds[]` array (as read
  * from a persisted `run_analysis` fact's `result.enrichment`).
  *
- *   - not an array, or empty array → `'empty'` (no flip evidence either way)
+ *   - not an array (field missing / wrong shape) → `'absent'` (cannot
+ *     confirm flip-capability either way → caller fails safe to red)
+ *   - empty array `[]` → `'empty'` (PLoT computed no flip-threshold factors:
+ *     a genuine "no flip-capable result", same conclusion as all-null → the
+ *     pending-scenario case, NOT a regression)
  *   - any entry whose `flip_value` is a FINITE number → `'has_non_null'`
  *     (a flip existed; if the chip is absent that is an emit regression)
  *   - entries exist but NONE carries a finite `flip_value` → `'all_null'`
  *     (staging produced no flip-capable result — the pending-scenario case)
+ *
+ * `'empty'` and `'all_null'` are both "no usable flip exists" (pending);
+ * only `'absent'` is "cannot tell" (red). They are split so an empty array
+ * (common on staging) is not conflated with a missing field.
  *
  * `flip_value` is read defensively (entries may be non-objects); only a
  * `typeof === 'number' && Number.isFinite` value counts as non-null, so a
@@ -330,21 +338,29 @@ export async function runSetFactorValueReadback(
  */
 export function classifyFlipThresholdsNullness(
   flipThresholds: unknown,
-): 'all_null' | 'has_non_null' | 'empty' {
-  if (!Array.isArray(flipThresholds) || flipThresholds.length === 0) {
+): 'all_null' | 'has_non_null' | 'empty' | 'absent' {
+  // Not an array (field missing / wrong shape) → cannot confirm anything
+  // about flip-capability; the caller fails safe to red.
+  if (!Array.isArray(flipThresholds)) {
+    return 'absent';
+  }
+  // Present but zero entries → PLoT computed NO flip-threshold factors. That
+  // is a genuine "no flip-capable result", the SAME conclusion as all-null
+  // (no factor carries a usable flip), so the caller treats it as a
+  // pending-scenario, not a regression. Observed on staging ~2/3 of draft
+  // scenarios (the rest carry one all-null entry).
+  if (flipThresholds.length === 0) {
     return 'empty';
   }
-  let sawEntry = false;
   for (const entry of flipThresholds) {
-    sawEntry = true;
     if (!isPlainObject(entry)) continue;
     const flip = entry.flip_value;
     if (typeof flip === 'number' && Number.isFinite(flip)) {
       return 'has_non_null';
     }
   }
-  // Array had entries but none carried a finite flip_value.
-  return sawEntry ? 'all_null' : 'empty';
+  // Entries exist but none carried a finite flip_value.
+  return 'all_null';
 }
 
 /**
@@ -355,25 +371,30 @@ export function classifyFlipThresholdsNullness(
  *
  * Returns a coarse status the harness uses to split the
  * `branch_a_flip_proposal_chip_absent` step-4 failure:
- *   - `'all_null'`     — most-recent run_analysis fact carried
- *                        `flip_thresholds[].flip_value` all null → the
- *                        pending-scenario case (chip-absent is expected).
+ *   - `'all_null'`     — run_analysis fact carried `flip_thresholds[]`
+ *                        entries, all null → no usable flip → pending-scenario
+ *                        (chip-absent is expected).
+ *   - `'empty'`        — `flip_thresholds` is `[]` (zero entries) → PLoT found
+ *                        no flip-threshold factors → no usable flip →
+ *                        pending-scenario (same conclusion as all-null;
+ *                        common on staging).
  *   - `'has_non_null'` — a finite flip_value existed → chip-absent is an
- *                        emit regression (do NOT mask).
- *   - `'empty'`        — `flip_thresholds` absent or `[]` → cannot confirm a
- *                        flip-capable result; fail-safe to red.
+ *                        emit regression (do NOT mask) → red.
+ *   - `'absent'`       — `flip_thresholds` missing / not an array → cannot
+ *                        confirm a flip-capable result; fail-safe to red.
  *   - `'no_facts'`     — no `run_analysis` fact for the scenario → cannot
  *                        confirm; fail-safe to red.
  *   - `'error'`        — missing creds / query error / exception → cannot
  *                        confirm; fail-safe to red.
  *
- * The service-role key is NEVER echoed in `detail`.
+ * `'all_null'` and `'empty'` are the pending-scenario statuses; the rest are
+ * red. The service-role key is NEVER echoed in `detail`.
  */
 export async function readFlipThresholdsNullness(
   scenarioId: string,
   opts?: { readonly secret?: string },
 ): Promise<{
-  status: 'all_null' | 'has_non_null' | 'empty' | 'no_facts' | 'error';
+  status: 'all_null' | 'has_non_null' | 'empty' | 'absent' | 'no_facts' | 'error';
   detail: string;
 }> {
   const url = (process.env.SUPABASE_URL ?? '').trim();

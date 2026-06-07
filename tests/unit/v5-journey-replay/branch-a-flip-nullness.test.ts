@@ -6,10 +6,12 @@
  * `run_analysis` fact's `flip_thresholds[]` carried a live (finite)
  * `flip_value` (`has_non_null` → an emit regression if the chip is absent),
  * carried only null/absent flips (`all_null` → the pending-scenario case),
- * or carried no entries at all (`empty` → inconclusive, fail-safe to red).
- * The live wrapper `readFlipThresholdsNullness` delegates to this; it needs
- * staging Supabase credentials and is exercised on the `--db-readback` path
- * (and indirectly by the run-level test).
+ * carried no entries at all (`empty` → PLoT found no flip-threshold factors,
+ * ALSO the pending-scenario case — common on staging), or was not an array
+ * (`absent` → inconclusive, fail-safe to red). The live wrapper
+ * `readFlipThresholdsNullness` delegates to this; it needs staging Supabase
+ * credentials and is exercised on the `--db-readback` path (and indirectly by
+ * the run-level test).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -52,15 +54,15 @@ describe('classifyFlipThresholdsNullness', () => {
     ).toBe('has_non_null');
   });
 
-  it('classifies an empty array as empty', () => {
+  it('classifies an empty array as empty (a pending-scenario status, like all_null)', () => {
     expect(classifyFlipThresholdsNullness([])).toBe('empty');
   });
 
-  it('classifies a non-array (object / undefined / null / string) as empty', () => {
-    expect(classifyFlipThresholdsNullness({})).toBe('empty');
-    expect(classifyFlipThresholdsNullness(undefined)).toBe('empty');
-    expect(classifyFlipThresholdsNullness(null)).toBe('empty');
-    expect(classifyFlipThresholdsNullness('flip_thresholds')).toBe('empty');
+  it('classifies a non-array (object / undefined / null / string) as absent (fail-safe to red)', () => {
+    expect(classifyFlipThresholdsNullness({})).toBe('absent');
+    expect(classifyFlipThresholdsNullness(undefined)).toBe('absent');
+    expect(classifyFlipThresholdsNullness(null)).toBe('absent');
+    expect(classifyFlipThresholdsNullness('flip_thresholds')).toBe('absent');
   });
 
   it('does NOT count a non-finite numeric (NaN / Infinity) or string flip_value as non-null', () => {

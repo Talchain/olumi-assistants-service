@@ -811,16 +811,18 @@ async function run(): Promise<void> {
           cfg.dbReadback
         ) {
           const rb = await readFlipThresholdsNullness(scenarioId, { secret: cfg.apiKey });
-          if (rb.status === 'all_null') {
-            // Pending-scenario: staging produced no live flip-capable
-            // result. Downgrade to a skip (not a failure) and cascade
-            // steps 5-8 as pending-scenario.
+          if (rb.status === 'all_null' || rb.status === 'empty') {
+            // Pending-scenario: staging produced no live flip-capable result —
+            // the run_analysis flip_thresholds are all-null, or an empty array
+            // (PLoT found no flip-threshold factors). Both mean no usable flip
+            // exists, so no "Test X at N" chip is expected. Downgrade to a skip
+            // (not a failure) and cascade steps 5-8 as pending-scenario.
             rows.push({
               step: step.name,
               status: 'skipped',
               evidence: redactString(
                 'pending-scenario: staging produced no live flip-capable result — ' +
-                  'run_analysis flip_thresholds[].flip_value all null (DB-verified). ' +
+                  'run_analysis flip_thresholds carry no usable flip (DB-verified). ' +
                   'Not a harness failure; emit reachability is enforced deterministically ' +
                   `by branch-a-emit-through-executor.test.ts. (${rb.detail})`,
                 cfg.apiKey,
@@ -831,15 +833,15 @@ async function run(): Promise<void> {
               requires_branch_a: true,
             });
             console.log(
-              `[PENDING-SCENARIO] ${step.name}: flip_thresholds[].flip_value all null (DB-verified) — not a regression`,
+              `[PENDING-SCENARIO] ${step.name}: flip_thresholds carry no usable flip (DB-verified, ${rb.status}) — not a regression`,
             );
             notPassed.add(step.name);
             pendingScenarioSteps.add(step.name);
             continue;
           }
-          // Any non-all_null status → RED. A non-null flip means the chip
-          // SHOULD have emitted (emit regression); no_facts/empty/error
-          // means we cannot confirm → fail-safe to red.
+          // Remaining statuses → RED. A non-null flip means the chip SHOULD
+          // have emitted (emit regression); absent/no_facts/error mean we
+          // cannot confirm a flip-capable result → fail-safe to red.
           const why =
             rb.status === 'has_non_null'
               ? 'emit regression — a non-null flip_value existed but no proposal chip emitted'
