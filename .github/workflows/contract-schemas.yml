@@ -12,6 +12,13 @@ jobs:
         with:
           node-version: 20
           cache: 'pnpm'
+      - name: Guard — registry @talchain/schemas requires package-read token
+        # Sentinel: passes as a no-op while @talchain/schemas is vendored (file:);
+        # fails loudly only if it switches to a registry spec while
+        # NPM_PACKAGES_TOKEN is missing. See Docs/v5/v5-schemas-ci-auth-readiness.md.
+        run: bash scripts/ci/guard-schemas-registry-token.sh
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
       - run: pnpm install --frozen-lockfile
         env:
           NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
