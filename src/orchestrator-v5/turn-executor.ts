@@ -117,7 +117,7 @@ import {
   PROPOSAL_SUPERSEDED_RESPONSE,
 } from './routing/proposed-change-synthesis.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
-import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
+import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import {
   RENDER_SAFE_LABEL_FALLBACK,
   resolveProposalRenderCopy,
@@ -1712,7 +1712,7 @@ export async function runTurnExecutor(
           const proposalsToRepersist = shortConfirmDispatch.candidates.filter(
             (c) => c.action.kind === 'apply_proposed_change',
           );
-          const chipDerivedForAmbiguous = derivePendingActionsFromChips(ambiguousChips, {
+          const chipDerivedForAmbiguous = derivePendingActionsFromFinalizedChips(ambiguousChips, {
             scenario_id: context.session_id,
             emitted_at_iso: new Date().toISOString(),
             ...(freshness?.current_graph_hash != null

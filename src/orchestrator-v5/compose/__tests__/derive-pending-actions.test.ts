@@ -22,7 +22,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { derivePendingActionsFromChips } from '../derive-pending-actions.js';
+import {
+  derivePendingActionsFromChips,
+  derivePendingActionsFromFinalizedChips,
+} from '../derive-pending-actions.js';
 import {
   PENDING_ACTIONS_PER_TURN_CAP,
   RESUMABLE_ACTION_TYPES,
@@ -179,5 +182,34 @@ describe('derivePendingActionsFromChips — atomic-emit contract', () => {
     expect(out).toHaveLength(1);
     expect(out[0]?.action.kind).toBe('run_analysis');
     expect(out[0]?.chip_id).toBe('c1');
+  });
+});
+
+// #239 review (finding 2): the canonical chip → pending derivation must use the
+// egress-finalised chip set so a chip the finalizer drops can never leave an
+// orphaned resumable pending. Used at EVERY derivation site (commit implicit
+// path + explicit precompute sites: proposal-continuation, edit-graph-dispatch,
+// turn-executor ambiguous short-confirm).
+describe('derivePendingActionsFromFinalizedChips — pendings track the finalised chip set', () => {
+  it('derives a pending for a chip that survives finalization (parity with raw)', () => {
+    const chips: SuggestedAction[] = [
+      chip({ id: 'chip_action_run_analysis', label: 'Run analysis', message: 'Run analysis.', action_type: 'run_analysis' }),
+    ];
+    const out = derivePendingActionsFromFinalizedChips(chips, ctx());
+    expect(out.map((p) => p.chip_id)).toEqual(['chip_action_run_analysis']);
+  });
+
+  it('does NOT derive a pending for a chip the finalizer drops (blank label)', () => {
+    const chips: SuggestedAction[] = [
+      chip({ id: 'chip_action_run_analysis_blank', label: '   ', message: 'Run analysis.', action_type: 'run_analysis' }),
+    ];
+    expect(derivePendingActionsFromFinalizedChips(chips, ctx())).toEqual([]);
+  });
+
+  it('does NOT derive a pending for a chip the finalizer drops (unsafe leak token)', () => {
+    const chips: SuggestedAction[] = [
+      chip({ id: 'chip_action_x', label: 'Run run_analysis now', message: 'go', action_type: 'run_analysis' }),
+    ];
+    expect(derivePendingActionsFromFinalizedChips(chips, ctx())).toEqual([]);
   });
 });

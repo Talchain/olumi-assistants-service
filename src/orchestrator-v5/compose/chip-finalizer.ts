@@ -284,12 +284,29 @@ function applyBudget(items: readonly ClassifiedChip[], report: MutableReport): C
   return out;
 }
 
+/** Options for {@link finalizeChips}. */
+export interface FinalizeChipsOptions {
+  /**
+   * Emit a per-chip `v5.chip.suppressed` `log.warn` for each dropped chip.
+   * Defaults to `true` for the egress call (the canonical observability
+   * point). The pending-derivation pre-pass
+   * (`derivePendingActionsFromFinalizedChips`) passes `false` so a chip drop
+   * is logged once, at egress, not also before commit.
+   */
+  readonly logSuppressions?: boolean;
+}
+
 /**
  * Deterministic chip-quality finalizer. See module header for the ordered
  * guarantees. Pure: no I/O beyond a structured `log.warn` per dropped chip
- * (no user copy logged — chip ids and a reason class only).
+ * (no user copy logged — chip ids and a reason class only), which the caller
+ * can silence via `opts.logSuppressions = false`.
  */
-export function finalizeChips(chips: readonly SuggestedAction[]): ChipFinalizeResult {
+export function finalizeChips(
+  chips: readonly SuggestedAction[],
+  opts: FinalizeChipsOptions = {},
+): ChipFinalizeResult {
+  const logSuppressions = opts.logSuppressions !== false;
   const report: MutableReport = {
     input: chips.length,
     output: 0,
@@ -309,18 +326,22 @@ export function finalizeChips(chips: readonly SuggestedAction[]): ChipFinalizeRe
       report.dropped_unsafe++;
       const reason = unsafeDropReason(chip);
       if (reason === 'raw_decimal') report.dropped_raw_decimal++;
-      log.warn(
-        { event: 'v5.chip.suppressed', reason, chip_id: strField(chip, 'id') || null },
-        'V5 egress chip-finalizer: chip dropped (unsafe)',
-      );
+      if (logSuppressions) {
+        log.warn(
+          { event: 'v5.chip.suppressed', reason, chip_id: strField(chip, 'id') || null },
+          'V5 egress chip-finalizer: chip dropped (unsafe)',
+        );
+      }
       continue;
     }
     if (cat === 'generic') {
       report.dropped_generic++;
-      log.warn(
-        { event: 'v5.chip.suppressed', reason: 'blank', chip_id: strField(chip, 'id') || null },
-        'V5 egress chip-finalizer: chip dropped (blank)',
-      );
+      if (logSuppressions) {
+        log.warn(
+          { event: 'v5.chip.suppressed', reason: 'blank', chip_id: strField(chip, 'id') || null },
+          'V5 egress chip-finalizer: chip dropped (blank)',
+        );
+      }
       continue;
     }
     kept.push({ chip, cat });

@@ -5,7 +5,7 @@ import {
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
 } from '../session/pending-action.js';
-import { derivePendingActionsFromChips } from '../compose/derive-pending-actions.js';
+import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
@@ -1019,7 +1019,7 @@ export function buildPendingActionsWithProposalCapture(
       emitted_at_iso: emittedAtIso,
       ...(input.graphHash ? { graph_hash: input.graphHash } : {}),
     });
-    const chipDerived = derivePendingActionsFromChips(input.chips, {
+    const chipDerived = derivePendingActionsFromFinalizedChips(input.chips, {
       scenario_id: input.scenarioId,
       emitted_at_iso: emittedAtIso,
       ...(input.graphHash ? { graph_hash: input.graphHash } : {}),

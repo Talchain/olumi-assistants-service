@@ -34,6 +34,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { SuggestedAction } from './types.js';
+import { finalizeChips } from './chip-finalizer.js';
 import {
   CHIP_DERIVABLE_ACTION_TYPES,
   PENDING_ACTIONS_PER_TURN_CAP,
@@ -158,4 +159,33 @@ export function derivePendingActionsFromChips(
     if (out.length >= PENDING_ACTIONS_PER_TURN_CAP) break;
   }
   return out;
+}
+
+/**
+ * Derive pending actions from the EGRESS-FINALISED chip set. This is the
+ * canonical chip → pending derivation: it applies the same deterministic
+ * `finalizeChips` transform that runs at egress
+ * (`sanitiseOlumiResponseForEgress`) and can drop a chip (unsafe / blank /
+ * duplicate / over-budget). Deriving pendings from the survivors keeps the
+ * "persisted pending ⟹ rendered chip" invariant structural: a chip dropped
+ * from the wire can never leave an orphaned resumable pending that a later
+ * "yes" short-confirm could resume.
+ *
+ * Use this at EVERY chip → pending derivation site — the implicit commit path
+ * AND every site that precomputes an explicit `CommitMetadata.pending_actions`
+ * list (those bypass the commit-time pre-pass, so they must finalise here).
+ * Never call the raw {@link derivePendingActionsFromChips} from a derivation
+ * site. The chip-derivable subset (`run_analysis` / `what_would_flip`) carries
+ * no entity ids or decimals, so its surviving set is identical here (pre-scrub)
+ * and at egress (post-scrub). `finalizeChips` runs with `logSuppressions:
+ * false` so a chip drop is logged exactly once, at egress.
+ */
+export function derivePendingActionsFromFinalizedChips(
+  chips: readonly SuggestedAction[],
+  ctx: DerivePendingActionsContext,
+): readonly PendingAction[] {
+  return derivePendingActionsFromChips(
+    finalizeChips(chips, { logSuppressions: false }).chips,
+    ctx,
+  );
 }

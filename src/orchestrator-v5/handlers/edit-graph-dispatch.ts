@@ -70,7 +70,7 @@ import {
   findProposedConceptAction,
   resolveProposalResume,
 } from '../coaching/proposal-continuation.js';
-import { derivePendingActionsFromChips } from '../compose/derive-pending-actions.js';
+import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
@@ -1856,7 +1856,7 @@ export async function dispatchEditGraph(
       | readonly import('../session/pending-action.js').PendingAction[]
       | undefined = undefined;
     if (proposalPendingForCommit !== null) {
-      const chipDerived = derivePendingActionsFromChips(
+      const chipDerived = derivePendingActionsFromFinalizedChips(
         (response.suggested_actions ?? []) as readonly BoundarySuggestedAction[],
         {
           scenario_id: payload.scenario_id,
