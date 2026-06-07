@@ -125,7 +125,10 @@ function parseBoolish(raw: string | undefined): boolean | undefined {
 /**
  * Resolve the expected `/healthz.critical_prompts_pms` value from the
  * `OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS` env var. CLI flag takes
- * precedence — see `parseArgs`. Default (both unset) is `false`.
+ * precedence — see `parseArgs`. Default (both unset) is `true` — the
+ * post-#241 healthy state (routing prompt resolved from the PMS
+ * orchestrator + honest health reporting). `false` is now treated as a
+ * regression unless explicitly testing an unusual state.
  */
 function readExpectedCriticalPromptsPmsEnv(): boolean | undefined {
   return parseBoolish(process.env.OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS);
@@ -158,7 +161,7 @@ export function evaluateDeployGate(
   baseUrl: string,
   healthz: HealthzResult | undefined,
   expectedBuild?: string,
-  expectedCriticalPromptsPms: boolean = false,
+  expectedCriticalPromptsPms: boolean = true,
 ): DeployGateVerdict {
   // Local runs: skip the gate. Local builds use arbitrary SHAs.
   try {
@@ -223,11 +226,13 @@ export function evaluateDeployGate(
   }
 
   // Preflight assertion: `/healthz.critical_prompts_pms` must equal the
-  // expected value (default false). Asserted only when the field is
-  // present on the wire — an absent field (older deploy / localhost
-  // fixtures) is not treated as a mismatch so the gate stays backwards-
-  // compatible. A present-and-differing value means the deploy is serving
-  // degraded prompt content; halt before burning the replay.
+  // expected value (default TRUE — the post-#241 healthy state: routing
+  // prompt resolved from the PMS orchestrator). Asserted only when the
+  // field is present on the wire — an absent field (older deploy /
+  // localhost fixtures) is not treated as a mismatch so the gate stays
+  // backwards-compatible. A present-and-differing value (e.g. `false` now)
+  // means the deploy is NOT serving the healthy PMS-resolved prompts; halt
+  // before burning the replay.
   const criticalPromptsPms = healthz.body.critical_prompts_pms;
   if (criticalPromptsPms !== undefined && criticalPromptsPms !== expectedCriticalPromptsPms) {
     if (override) return { halt: false };
@@ -286,7 +291,9 @@ function parseArgs(): ResolvedHarnessConfig {
   // Staging/integration-only DB read-back. Off by default so wire-only
   // local runs need no Supabase credentials.
   let dbReadback = false;
-  // Expected /healthz.critical_prompts_pms (default false; CLI wins over env).
+  // Expected /healthz.critical_prompts_pms (default TRUE — post-#241 healthy
+  // state; CLI wins over env). Pass `--expected-critical-prompts-pms false`
+  // only to deliberately test the pre-#241 / unusual state.
   let expectedCriticalPromptsPmsCli: boolean | undefined;
 
   for (let i = 0; i < args.length; i++) {
@@ -342,7 +349,8 @@ function parseArgs(): ResolvedHarnessConfig {
           'persisted. Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in the env\n' +
           '(see .env.staging.local). Off by default.\n' +
           '\n' +
-          '--expected-critical-prompts-pms <true|false> (default false; or set\n' +
+          '--expected-critical-prompts-pms <true|false> (default true — post-#241\n' +
+          'healthy state; or set\n' +
           'OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS): the deploy gate halts when\n' +
           '/healthz.critical_prompts_pms is present and differs from this value.',
       );
@@ -355,7 +363,7 @@ function parseArgs(): ResolvedHarnessConfig {
   const expectedBuild = expectedBuildCli ?? readExpectedBuildEnv();
   // CLI > env > default(false).
   const expectedCriticalPromptsPms =
-    expectedCriticalPromptsPmsCli ?? readExpectedCriticalPromptsPmsEnv() ?? false;
+    expectedCriticalPromptsPmsCli ?? readExpectedCriticalPromptsPmsEnv() ?? true;
 
   return {
     baseUrl,
@@ -559,7 +567,7 @@ async function run(): Promise<void> {
   console.log(
     `  expected_build   = ${cfg.expectedBuild ?? 'not set (default: well-formed-only check)'}`,
   );
-  console.log(`  expected_cpp     = ${String(cfg.expectedCriticalPromptsPms ?? false)} (critical_prompts_pms)`);
+  console.log(`  expected_cpp     = ${String(cfg.expectedCriticalPromptsPms ?? true)} (critical_prompts_pms; default true post-#241)`);
   console.log('');
 
   // Fail-fast gate. Throws with MISSING_KEY_MESSAGE for remote+no-key.
@@ -587,7 +595,7 @@ async function run(): Promise<void> {
     cfg.baseUrl,
     healthz.result,
     cfg.expectedBuild,
-    cfg.expectedCriticalPromptsPms ?? false,
+    cfg.expectedCriticalPromptsPms ?? true,
   );
   if (deployGate.halt) {
     console.error(`[DEPLOY HALT] ${deployGate.reason}`);

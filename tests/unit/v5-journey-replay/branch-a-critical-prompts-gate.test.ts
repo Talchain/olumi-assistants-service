@@ -3,7 +3,8 @@
  *
  * Pins the preflight assertion added for the Branch A enforcement pass:
  * the deploy gate halts when the deployed `critical_prompts_pms` is present
- * and differs from the configurable expected value (default false). Absent
+ * and differs from the configurable expected value (default true — the
+ * post-#241 healthy state; `false` is now treated as a regression). Absent
  * field (older deploy / localhost) is tolerated; localhost skips the gate;
  * the stale-deploy override bypasses the halt.
  */
@@ -32,16 +33,21 @@ describe('evaluateDeployGate — critical_prompts_pms assertion', () => {
     vi.unstubAllEnvs();
   });
 
-  it('passes when deployed value equals the expected default (false)', () => {
-    expect(evaluateDeployGate(REMOTE, healthz({ critical_prompts_pms: false }), undefined, false).halt).toBe(
-      false,
-    );
+  it('passes when deployed matches the new default (true) with no explicit expected', () => {
+    // No 4th arg → uses the post-#241 default (true).
+    expect(evaluateDeployGate(REMOTE, healthz({ critical_prompts_pms: true })).halt).toBe(false);
   });
 
-  it('halts when deployed value differs from expected false', () => {
+  it('halts when deployed is false and no explicit expected (default true → regression)', () => {
+    const v = evaluateDeployGate(REMOTE, healthz({ critical_prompts_pms: false }));
+    expect(v.halt).toBe(true);
+    expect(v.reason).toMatch(/critical_prompts_pms=false/);
+    expect(v.reason).toMatch(/expected value is true/);
+  });
+
+  it('explicitly expecting false (unusual-state test) halts on deployed=true', () => {
     const v = evaluateDeployGate(REMOTE, healthz({ critical_prompts_pms: true }), undefined, false);
     expect(v.halt).toBe(true);
-    expect(v.reason).toMatch(/critical_prompts_pms=true/);
     expect(v.reason).toMatch(/expected value is false/);
   });
 

@@ -151,10 +151,12 @@ export interface HealthzBody {
   readonly degraded?: boolean;
   readonly degraded_reasons?: ReadonlyArray<string>;
   /**
-   * Prompt/PMS criticality flag emitted by `/healthz` (PR #236-era). When
-   * `true`, a critical prompt failed to resolve from the PMS — the deploy
-   * is serving degraded prompt content. The replay deploy gate asserts
-   * this equals a configurable expected value (default `false`).
+   * Prompt/PMS health flag emitted by `/healthz`. Post-#241 (routing prompt
+   * resolved from the PMS orchestrator + honest health/status), `true` is
+   * the expected HEALTHY state. The replay deploy gate asserts this equals a
+   * configurable expected value (default `true`); a differing value (e.g.
+   * `false`) is treated as a regression unless explicitly testing an unusual
+   * state.
    */
   readonly critical_prompts_pms?: boolean;
   readonly prompts_ready?: boolean;
@@ -208,9 +210,10 @@ export interface HarnessConfig {
    */
   readonly dbReadback?: boolean;
   /**
-   * Expected value of `/healthz.critical_prompts_pms` (default `false`).
-   * The deploy gate halts when the deployed flag is present and differs.
-   * Resolved from `--expected-critical-prompts-pms` (preferred) or
+   * Expected value of `/healthz.critical_prompts_pms` (default `true` — the
+   * post-#241 healthy state). The deploy gate halts when the deployed flag
+   * is present and differs (e.g. `false`, now a regression). Resolved from
+   * `--expected-critical-prompts-pms` (preferred) or
    * `OLUMI_REPLAY_EXPECTED_CRITICAL_PROMPTS_PMS`.
    */
   readonly expectedCriticalPromptsPms?: boolean;
