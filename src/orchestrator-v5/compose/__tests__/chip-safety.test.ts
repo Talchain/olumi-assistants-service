@@ -77,8 +77,17 @@ describe('findChipRawDecimalLeak — narrow heuristic', () => {
   const NON_PROPOSAL = { isValidatedProposal: false } as const;
   const VALIDATED_PROPOSAL = { isValidatedProposal: true } as const;
 
-  it('flags a bare unitless decimal (non-proposal)', () => {
-    expect(findChipRawDecimalLeak('Confidence is 0.5', '', NON_PROPOSAL)).toBe(true);
+  it('flags a STANDALONE bare decimal (non-proposal)', () => {
+    expect(findChipRawDecimalLeak('0.5', '', NON_PROPOSAL)).toBe(true);
+    expect(findChipRawDecimalLeak('= 0.8', '', NON_PROPOSAL)).toBe(true);
+  });
+
+  it('KEEPS a low-precision decimal embedded in a user-authored name', () => {
+    // #239 review: user-authored candidate/option labels like `Plan 2.5` must
+    // NOT be dropped solely for a decimal.
+    expect(findChipRawDecimalLeak('Plan 2.5', 'Use Plan 2.5', NON_PROPOSAL)).toBe(false);
+    expect(findChipRawDecimalLeak('Option 3.5', '', NON_PROPOSAL)).toBe(false);
+    expect(findChipRawDecimalLeak('Confidence is 0.5', '', NON_PROPOSAL)).toBe(false);
   });
 
   it('flags a high-precision bare decimal (non-proposal)', () => {
@@ -115,8 +124,12 @@ describe('findChipRawDecimalLeak — narrow heuristic', () => {
     expect(findChipRawDecimalLeak('Set rate to 12.567%', '', VALIDATED_PROPOSAL)).toBe(false);
   });
 
-  it('does NOT exempt a validated proposal carrying a BARE unitless decimal', () => {
+  it('does NOT exempt a validated proposal carrying an UNFORMATTED high-precision decimal', () => {
     expect(findChipRawDecimalLeak('Set rate to 0.4732', '', VALIDATED_PROPOSAL)).toBe(true);
+  });
+
+  it('does NOT exempt a validated proposal carrying a STANDALONE bare decimal', () => {
+    expect(findChipRawDecimalLeak('0.8', '', VALIDATED_PROPOSAL)).toBe(true);
   });
 
   it('returns false when there is no decimal at all', () => {

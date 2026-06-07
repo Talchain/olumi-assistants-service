@@ -33,6 +33,7 @@ import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
 import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
+import { finalizeChips } from './compose/chip-finalizer.js';
 import type { PendingAction } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
@@ -159,10 +160,21 @@ export async function commitDirectAnswer(
   // that list and skip chip-derivation. Otherwise we derive from the
   // response's chip set so neither chip-only nor pending-only state
   // is reachable.
+  //
+  // Derive from the EGRESS-FINALISED chip set (`finalizeChips`), not the raw
+  // `suggested_actions`: the same finalizer runs at egress
+  // (`sanitiseOlumiResponseForEgress`) and can drop a chip (unsafe / blank /
+  // duplicate / over-budget). Deriving pendings from the surviving set keeps
+  // the "persisted pending ⟹ rendered chip" invariant structural — a chip
+  // dropped from the wire can never leave an orphaned resumable pending that
+  // a later "yes" short-confirm could resume. `finalizeChips` is pure +
+  // idempotent, and the chip-derivable subset (`run_analysis` /
+  // `what_would_flip`) carries no entity ids or decimals, so its surviving
+  // set is identical here (pre-scrub) and at egress (post-scrub).
   const chipDerivedPending =
     metadata.pending_actions === undefined
       ? derivePendingActionsFromChips(
-          (response.suggested_actions ?? []) as readonly SuggestedAction[],
+          finalizeChips((response.suggested_actions ?? []) as readonly SuggestedAction[]).chips,
           {
             scenario_id: metadata.scenario_id,
             emitted_at_iso: new Date().toISOString(),

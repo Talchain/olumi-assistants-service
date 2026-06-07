@@ -94,6 +94,15 @@ const RECOGNISED_DECIMAL_RE =
 /** Any decimal number; the capture group is the fractional part incl. the dot. */
 const ANY_DECIMAL_RE = /\b\d+(\.\d+)\b/g;
 
+/**
+ * The WHOLE string is essentially just a bare decimal (optionally a leading
+ * `=`), e.g. `0.8`, `= 0.8`, `0.4732`. This shape is an internal value leak —
+ * a chip whose label/message is nothing but a number. A decimal EMBEDDED in a
+ * phrase (`Plan 2.5`, `2.5 days`) is NOT matched, so user-authored
+ * candidate/option names survive.
+ */
+const STANDALONE_BARE_DECIMAL_RE = /^[\s=]*\d+\.\d+\s*$/;
+
 /** A decimal is "high precision" — internal numeric precision — at ≥3 dp. */
 const HIGH_PRECISION_FRACTION_DIGITS = 3;
 
@@ -121,18 +130,23 @@ function withinAnySpan(spans: readonly DecimalSpan[], start: number, end: number
 
 /**
  * Detect a "raw decimal" leak in chip copy per the approved Lane 2 rule
- * (narrow heuristic, validated-proposal exempt):
+ * (narrow heuristic, validated-proposal exempt). A decimal is leaky when:
  *
- *   A decimal is leaky when it is **bare-unitless** (not inside a
- *   recognised currency/percent display) OR **high-precision** (≥3 fractional
- *   digits, e.g. `0.4732`).
+ *   1. the WHOLE string is a **standalone bare decimal** (`0.8`, `= 0.8`,
+ *      `0.4732`) — a chip whose copy is nothing but a number; OR
+ *   2. it is **high-precision** (≥3 fractional digits, e.g. `0.4732`) — a
+ *      signal of internal numeric precision regardless of surrounding text.
+ *
+ * A LOW-precision decimal embedded in a phrase is NOT leaky: user-authored
+ * candidate/option names (`Plan 2.5`, `2.5 days`) and display values
+ * (`12.5%`, `£1.50`) must survive. (This is the refinement that closed the
+ * `Plan 2.5` false-positive raised in the #239 review.)
  *
  *   Exemption: a **validated proposal-backed chip** (`prop_` id + a proposal
  *   `action_type`, asserted by the caller via `isValidatedProposal`) is
- *   allowed to keep a leaky decimal ONLY when that decimal carries a
- *   recognised unit/format. A `prop_` chip with a bare unitless decimal is
- *   NOT exempt — the exemption is for pre-vetted display values, not for
- *   anything that merely looks like a proposal.
+ *   allowed to keep a high-precision decimal ONLY when it carries a recognised
+ *   currency/percent format (a pre-vetted display value, e.g. a `12.567%`
+ *   threshold). A standalone bare decimal is never exempt.
  *
  * Returns true when a non-exempt leaky decimal is present in either field.
  */
@@ -143,18 +157,20 @@ export function findChipRawDecimalLeak(
 ): boolean {
   for (const text of [label, message]) {
     if (text.length === 0) continue;
+    // 1. The whole string is just a bare decimal → leak (never exempt).
+    if (STANDALONE_BARE_DECIMAL_RE.test(text)) return true;
+    // 2. High-precision decimals anywhere in the text.
     const recognised = recognisedDecimalSpans(text);
     const re = new RegExp(ANY_DECIMAL_RE.source, 'g');
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
+      const fractionDigits = m[1].length - 1; // m[1] is ".ddd"
+      if (fractionDigits < HIGH_PRECISION_FRACTION_DIGITS) continue; // low-precision embedded → kept
       const start = m.index;
       const end = m.index + m[0].length;
-      const fractionDigits = m[1].length - 1; // m[1] is ".ddd"
       const formatted = withinAnySpan(recognised, start, end);
-      const highPrecision = fractionDigits >= HIGH_PRECISION_FRACTION_DIGITS;
-      const leaky = !formatted || highPrecision;
-      if (!leaky) continue;
-      // Validated proposal carrying a recognised display value → exempt.
+      // A validated proposal may carry a high-precision FORMATTED display
+      // value (currency/percent) — exempt only those.
       if (opts.isValidatedProposal && formatted) continue;
       return true;
     }

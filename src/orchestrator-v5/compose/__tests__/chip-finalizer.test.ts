@@ -178,6 +178,15 @@ describe('finalizeChips — preserves clarification / candidate chips (regressio
     ]);
   });
 
+  it('keeps a candidate chip with a user-authored decimal label (Plan 2.5) — #239 review', () => {
+    const planChip: SuggestedAction = {
+      id: 'edit_clarify_plan_25',
+      label: 'Plan 2.5',
+      message: 'Use Plan 2.5',
+    };
+    expect(ids(finalizeChips([planChip]).chips)).toEqual(['edit_clarify_plan_25']);
+  });
+
   it('keeps proposal-continuation and factor-affect and coaching-prefill chips', () => {
     const proposalRisk: SuggestedAction = { id: 'chip_proposal_apply_risk', label: 'Add as risk', message: 'Add this as a risk.' };
     const factorAffect: SuggestedAction = { id: 'chip_factor_affect_revenue', label: 'Revenue', message: 'How does Revenue affect this decision?' };

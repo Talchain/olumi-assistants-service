@@ -3,6 +3,7 @@ import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { composeDirectAnswerResponse } from '../compose.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import type { SessionStore, SessionTurnWrite } from '../session/store.js';
+import type { SuggestedAction } from '../compose/types.js';
 
 const META = {
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -111,6 +112,45 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       );
       expect(appendCalls[0].graph).toEqual(graph);
       expect(appendCalls[0].briefText).toBe('brief');
+    });
+  });
+
+  // #239 review (finding 2): pendings must derive from the EGRESS-FINALISED
+  // chip set, so a chip the finalizer drops cannot leave an orphaned resumable
+  // pending that a later "yes" short-confirm could resume.
+  describe('atomic-emit — pendings derive from the egress-finalised chip set', () => {
+    it('does not persist a pending for a chip that egress finalization drops', async () => {
+      const appendCalls: Array<SessionTurnWrite> = [];
+      const store = createNoopSessionStore({ appendId: 'row-spy' });
+      vi.spyOn(store, 'append').mockImplementation(async (write) => {
+        appendCalls.push(write);
+        return { id: 'row-spy' };
+      });
+      // A run_analysis chip with a blank label is dropped by the finalizer; a
+      // sibling valid run_analysis chip survives. Only the survivor may yield a
+      // resumable pending.
+      const dropped: SuggestedAction = {
+        id: 'chip_action_run_analysis_blank',
+        label: '   ',
+        message: 'Analyse the model now.',
+        action_type: 'run_analysis',
+      };
+      const kept: SuggestedAction = {
+        id: 'chip_action_run_analysis',
+        label: 'Run analysis',
+        message: 'Run analysis.',
+        action_type: 'run_analysis',
+      };
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'done',
+        stage: 'analyse',
+        suggested_actions: [dropped, kept],
+      });
+      await commitDirectAnswer(composed, META, store);
+      expect(appendCalls).toHaveLength(1);
+      const chipIds = (appendCalls[0].pending_actions ?? []).map((p) => p.chip_id);
+      expect(chipIds).toContain('chip_action_run_analysis');
+      expect(chipIds).not.toContain('chip_action_run_analysis_blank');
     });
   });
 });
