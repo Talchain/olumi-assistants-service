@@ -1091,6 +1091,18 @@ function describeCopySource(
     } else {
       copy_source = 'analysis_projection';
     }
+  } else if (cls === 'explain_results_free_text' || cls === 'meaning') {
+    // The interpretation twins now name the specific fragile assumption when
+    // fragile_edges are renderable, then fall back to the top driver, then bare
+    // projection. Mirror that precedence so the diagnostic reports the richest
+    // structured source the copy drew from (content-free; no labels/values).
+    if (renderableFragileEdges(a).length > 0) {
+      copy_source = 'fragile_edges';
+    } else if (hasRenderableTopDriver(a)) {
+      copy_source = 'top_drivers';
+    } else {
+      copy_source = 'analysis_projection';
+    }
   } else {
     copy_source = 'analysis_projection';
   }
@@ -1151,7 +1163,12 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
         input.rawRobustness,
       );
     case 'meaning':
-      return composeMeaning(input.leadingLabel, input.topDriverLabel, input.analysis);
+      return composeMeaning(
+        input.leadingLabel,
+        input.topDriverLabel,
+        input.analysis,
+        input.rawRobustness,
+      );
     case 'readiness':
       return composeReadiness(input.analysisReady);
     case 'evidence_gap':
@@ -1203,6 +1220,64 @@ function marginPpString(margin: number | null | undefined): string | null {
 function driverDirectionFragment(d: AdviceGateAnalysisDriver): string {
   if (typeof d.sensitivity_value !== 'number' || !Number.isFinite(d.sensitivity_value)) return '';
   return `, which ${formatSensitivityDirection(d.sensitivity_value)}`;
+}
+
+/**
+ * The single fragile-assumption sentence shared by the post-analysis composers
+ * (`explain_results` / `meaning` / `what_would_flip`). Quotes both endpoint
+ * labels; makes NO causal/sign claim — `fragile_edges` carry no direction, so
+ * this stays direction-honest by construction. The sentence is itself the
+ * "what to check", so `meaning` can name the assumption without a separate
+ * action block. Single source of truth so the three composers never drift.
+ */
+function describeFragileAssumption(edge: AdviceGateAnalysisFragileEdge): string {
+  return `The most useful thing to check is the link from ${quoteLabel(edge.from_label)} to ${quoteLabel(edge.to_label)}: whether it holds as strongly as the model currently assumes.`;
+}
+
+/**
+ * Near-tie / closeness standing line shared by the interpretation twins
+ * (`explain_results` / `meaning`) so both read identically. Preserves the
+ * established `explain_results` wording (now with quoted labels): the margin
+ * path states the inclusive sub-1pp phrasing; the raw-override path stays
+ * generic ("treats them as a near-tie") because the margin may be wider than
+ * 1pp. Returns null when the result is not a near-tie or there is no runner-up
+ * to compare, so the caller emits its own clear-lead opener.
+ */
+function interpretationCloseness(
+  leadingLabel: string,
+  runnerLabel: string | null | undefined,
+  tieReason: 'margin' | 'override' | null,
+): string | null {
+  if (tieReason === null) return null;
+  if (typeof runnerLabel !== 'string' || runnerLabel.trim().length === 0) return null;
+  const lead = quoteLabel(leadingLabel);
+  const runner = quoteLabel(runnerLabel);
+  return tieReason === 'margin'
+    ? `The result is effectively tied: ${lead} and ${runner} are separated by one percentage point or less.`
+    : `The result is effectively tied: the analysis treats ${lead} and ${runner} as a near-tie.`;
+}
+
+/**
+ * Concrete "what to check next" Propose line shared across the post-analysis
+ * composers. The fragile path strengthens the named link; otherwise it names
+ * the most influential factor (the projection's top driver) when available,
+ * falling back to a neutral re-run prompt. Never implies that a single change
+ * will flip the result. The two constants are also reused verbatim by
+ * `composeWhatWouldFlip` so the phrasing has one home.
+ */
+const STRENGTHEN_LINK_NEXT_STEP =
+  'Strengthen the evidence behind that link, then re-run to see whether the lead holds.';
+const RERUN_INFLUENTIAL_NEXT_STEP =
+  'Re-run after adjusting the most influential factor to see whether the lead holds.';
+
+function interpretationNextStep(
+  hasNamedFragileEdge: boolean,
+  topDriverLabel: string | null,
+): string {
+  if (hasNamedFragileEdge) return STRENGTHEN_LINK_NEXT_STEP;
+  return topDriverLabel !== null
+    ? `Re-run after revisiting ${quoteLabel(topDriverLabel)}, the factor with the most influence here, to see whether the lead holds.`
+    : RERUN_INFLUENTIAL_NEXT_STEP;
 }
 
 function composeAdvice(
@@ -1274,31 +1349,58 @@ function composeMeaning(
   leadingLabel: string,
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
 ): string {
   // Vocabulary aligns with the workstream brief — "currently favours"
   // opener and "appears to be driven by" attribution avoid the
-  // winner/leader-adjacent framing the previous wording carried
-  // ("doing most of the work to make it the leader"). The downstream
-  // "reflects the model you've built so far" sentence is preserved so
-  // existing regression tests continue to match.
+  // winner/leader-adjacent framing the previous wording carried.
   //
-  // Readability sectioning: the closing meta-statement
-  // ("The result reflects … not a forecast.") moves to its own paragraph
-  // separated by a blank line. No `What to check next` block here —
-  // meaning is interpretive prose, not an action item.
+  // Near-tie honesty (shared with explain_results): on a sub-1pp margin OR a
+  // raw near_tie override, lead with the closeness line and DO NOT assert the
+  // result is "driven by" a single factor — a near-tie is not confidently
+  // single-driver. Off near-tie, the interpretive attribution is preserved.
+  //
+  // Grounding: when a specific fragile assumption exists it is named (that
+  // sentence is itself the "what to check"), so `meaning` stays interpretive —
+  // no `What to check next` action block. The closing meta-statement remains
+  // its own paragraph.
+  const tieReason = nearTieReason(analysis, rawRobustness);
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
-  const marginSentence =
-    margin && runnerLabel
-      ? ` It sits ahead of ${runnerLabel} by ${margin}.`
-      : '';
-  if (topDriverLabel) {
-    const lead = `Based on this model, the analysis currently favours ${leadingLabel}${probability}, and the result appears to be driven by ${topDriverLabel}.${marginSentence}`;
-    return `${lead}\n\nThe result reflects the model you've built so far, not a forecast.`;
+  const topEdge = renderableFragileEdges(analysis)[0];
+  const sentences: string[] = [];
+
+  const closeness = interpretationCloseness(leadingLabel, runnerLabel, tieReason);
+  if (closeness !== null) {
+    sentences.push(closeness);
+    if (topDriverLabel) {
+      sentences.push(`The order could shift with movement on ${quoteLabel(topDriverLabel)}.`);
+    }
+  } else {
+    const marginSentence =
+      margin && runnerLabel ? ` It sits ahead of ${quoteLabel(runnerLabel)} by ${margin}.` : '';
+    if (topDriverLabel) {
+      sentences.push(
+        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, and the result appears to be driven by ${quoteLabel(topDriverLabel)}.${marginSentence}`,
+      );
+    } else {
+      sentences.push(
+        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, given the model you've built so far.${marginSentence}`,
+      );
+    }
   }
-  const lead = `Based on this model, the analysis currently favours ${leadingLabel}${probability}, given the model you've built so far.${marginSentence}`;
-  return `${lead}\n\nThe result reflects your current setup, not a forecast.`;
+
+  if (topEdge) {
+    sentences.push(describeFragileAssumption(topEdge));
+  }
+
+  const lead = sentences.join(' ');
+  const closer =
+    topDriverLabel !== null || closeness !== null
+      ? "The result reflects the model you've built so far, not a forecast."
+      : 'The result reflects your current setup, not a forecast.';
+  return `${lead}\n\n${closer}`;
 }
 
 function composeReadiness(
@@ -1467,24 +1569,21 @@ function composeExplainResults(
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
 ): string {
-  // Driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
-  // margin, robustness and per-driver sensitivity are all optional and
-  // degrade gracefully (composer omits the surrounding clause when
-  // missing). Numerics are pass-through only — F.6 invariant.
+  // Driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up, margin,
+  // robustness, per-driver sensitivity and fragile edges are optional and
+  // degrade gracefully. Numerics are pass-through only — F.6 invariant.
   //
-  // Near-tie + fragile handling: when |margin_pp| <= 1.0 OR raw
-  // near_tie.is_tie is true, we MUST suppress the "meaningful rather than
-  // marginal" assertion and the moderate/stable robustness claim. Same
-  // when raw robustness.level is in {very_low, low, fragile} — the
-  // projection may have already canonicalised that to a band the
-  // composer would otherwise read as confident copy.
+  // GQPV shape (parity with composeWhatWouldFlip): Ground (standing + drivers +
+  // the specific fragile assumption when present) → Quantify (probability,
+  // margin, robustness band — display-ready) → one robustness caveat → a
+  // concrete re-run Propose on EVERY path. Option/driver labels are quoted so
+  // "and"-containing labels stay readable.
   //
-  // Numeric correctness: the "one percentage point or less" phrasing
-  // (true at the inclusive 1.0pp threshold) is only emitted when the
-  // projected margin drove the decision. When the raw `near_tie.is_tie`
-  // override drove it (margin may be wider, null, or absent), copy stays
-  // generic — "the analysis treats them as a near-tie" — so we never claim a sub-1pp gap
-  // we cannot back from the projection.
+  // Near-tie honesty (shared interpretationCloseness): on |margin_pp| <= 1.0 OR
+  // a raw near_tie override, suppress the "meaningful rather than marginal"
+  // assertion and the confident stability claim. The margin path states the
+  // inclusive sub-1pp phrasing; the override path stays generic ("treats them
+  // as a near-tie") so we never claim a sub-1pp gap we cannot back.
   const tieReason = nearTieReason(analysis, rawRobustness);
   const nearTie = tieReason !== null;
   const rawFragile = isRawFragile(rawRobustness);
@@ -1492,54 +1591,62 @@ function composeExplainResults(
   const driverB = analysis.top_drivers[1];
   const runnerLabel = analysis.runner_up?.label;
   const margin = marginPpString(analysis.margin_pp);
+  const topEdge = renderableFragileEdges(analysis)[0];
+  const topDriverLabel = hasNonEmptyLabel(driverA?.factor_label)
+    ? driverA.factor_label
+    : null;
   const sentences: string[] = [];
 
-  if (nearTie && runnerLabel) {
-    sentences.push(
-      tieReason === 'margin'
-        ? `The result is effectively tied: ${leadingLabel} and ${runnerLabel} are separated by one percentage point or less.`
-        : `The result is effectively tied: the analysis treats ${leadingLabel} and ${runnerLabel} as a near-tie.`,
-    );
+  // 1. Standing — shared near-tie honesty (quoted), else a quoted clear lead.
+  const closeness = interpretationCloseness(leadingLabel, runnerLabel, tieReason);
+  if (closeness !== null) {
+    sentences.push(closeness);
   } else {
     sentences.push(
-      `Based on this model, the analysis currently favours ${leadingLabel}${probabilityFragment(analysis.leading_option?.probability)}.`,
+      `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probabilityFragment(analysis.leading_option?.probability)}.`,
     );
     if (runnerLabel && margin) {
       sentences.push(
-        `That sits ahead of ${runnerLabel} by ${margin}, so the lead is meaningful rather than marginal.`,
+        `That sits ahead of ${quoteLabel(runnerLabel)} by ${margin}, so the lead is meaningful rather than marginal.`,
       );
     } else if (runnerLabel) {
       sentences.push(
-        `${runnerLabel} sits in second place${probabilityFragment(analysis.runner_up?.probability)}.`,
+        `${quoteLabel(runnerLabel)} sits in second place${probabilityFragment(analysis.runner_up?.probability)}.`,
       );
     }
   }
 
+  // 2. Drivers (quoted). Near-tie softens "driven by" to "could shift".
   if (driverA && driverB) {
     sentences.push(
       nearTie
-        ? `The order could shift with movement on ${driverA.factor_label}${driverDirectionFragment(driverA)}, or on ${driverB.factor_label}${driverDirectionFragment(driverB)}.`
-        : `The result appears to be driven by ${driverA.factor_label}${driverDirectionFragment(driverA)}, and ${driverB.factor_label}${driverDirectionFragment(driverB)}.`,
+        ? `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, or on ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`
+        : `The result appears to be driven by ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, and ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`,
     );
   } else if (driverA) {
     sentences.push(
       nearTie
-        ? `The order could shift with movement on ${driverA.factor_label}${driverDirectionFragment(driverA)}.`
-        : `The result appears to be driven by ${driverA.factor_label}${driverDirectionFragment(driverA)}.`,
+        ? `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`
+        : `The result appears to be driven by ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`,
     );
   }
 
-  // Robustness sentence: prefer the raw fragile signal over the projected
-  // band; suppress confident stability copy on near-tie / raw-fragile.
+  // 3. Name the specific fragile assumption when evidence exists (shared with
+  //    what_would_flip / meaning). No sign/causal claim — direction-honest.
+  if (topEdge) {
+    sentences.push(describeFragileAssumption(topEdge));
+  }
+
+  // 4. Robustness caveat: prefer the raw fragile signal over the projected
+  //    band; suppress confident stability copy on near-tie / raw-fragile.
   if (nearTie || rawFragile) {
     sentences.push(
       'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
     );
   } else {
     // Plain-language stability copy sourced from the SSOT describeRobustnessBand.
-    // Bind once and omit the sentence if it is unexpectedly null, rather than
-    // masking an SSOT regression with a hardcoded fallback; only the reassurance
-    // tail varies. Fragile / unknown bands produce no sentence here.
+    // Bind once and omit the sentence if it is unexpectedly null. Fragile /
+    // unknown bands produce no sentence here.
     const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
     if (stabilityPhrase !== null) {
       if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
@@ -1554,18 +1661,16 @@ function composeExplainResults(
     }
   }
 
-  // Readability sectioning: the lead paragraph holds the favour/tie
-  // opener, margin, drivers and robustness sentences (joined with spaces
-  // as before). The closing nudge is split out into a `What to check
-  // next` block when present so it lands on its own line. On the
-  // fragile/near-tie path no nudge exists and no block is appended —
-  // the fragility sentence inside the lead paragraph already conveys
-  // "small changes matter".
+  // 5. A concrete re-run Propose on EVERY path — previously the near-tie /
+  //    fragile path emitted no next step at all. Point the next step at whatever
+  //    the body emphasised: when a fragile link was NAMED above
+  //    (describeFragileAssumption fires on any path with a renderable edge),
+  //    strengthen THAT link so priorities don't read split ("check the link …
+  //    but revisit the driver"); otherwise revisit the most influential factor.
+  //    Never implies a single change flips the result.
   const lead = sentences.join(' ');
-  if (!nearTie && !rawFragile) {
-    return `${lead}\n\nWhat to check next\n• Small changes to the strongest factor can shift the picture.`;
-  }
-  return lead;
+  const nextStep = interpretationNextStep(topEdge != null, topDriverLabel);
+  return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }
 
 /**
@@ -1676,9 +1781,7 @@ function composeWhatWouldFlip(
   //    influential factor (top driver is guaranteed by CLASS_REQUIREMENTS)
   //    with NO flip claim when no fragile edge is available.
   if (topEdge) {
-    sentences.push(
-      `The most useful thing to check is the link from ${quoteLabel(topEdge.from_label)} to ${quoteLabel(topEdge.to_label)}: whether it holds as strongly as the model currently assumes.`,
-    );
+    sentences.push(describeFragileAssumption(topEdge));
   } else if (driverA) {
     sentences.push(
       `The factor with the most influence on the result is ${quoteLabel(driverA.factor_label)}.`,
@@ -1721,8 +1824,6 @@ function composeWhatWouldFlip(
   //    a neutral re-run prompt.
   const lead = sentences.join(' ');
   const nextStep =
-    fragileSignal && topEdge
-      ? 'Strengthen the evidence behind that link, then re-run to see whether the lead holds.'
-      : 'Re-run after adjusting the most influential factor to see whether the lead holds.';
+    fragileSignal && topEdge ? STRENGTHEN_LINK_NEXT_STEP : RERUN_INFLUENTIAL_NEXT_STEP;
   return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }
