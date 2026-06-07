@@ -29,6 +29,13 @@
  *                          The earlier `DL7_PR_B_LANDED` env gate has
  *                          been replaced with `DL7_PR_B_DISABLE` (an
  *                          emergency rollback switch, default off).
+ *
+ * QUARANTINE (task_9ff7378f): the dl7 frame-stage mutation probes are
+ * triaged as an isolated issue, NOT a broad staging blocker. They do not
+ * gate `canonical` or `branch-a-canonical` acceptance — `CANONICAL_STEPS`
+ * has no mutation step, and the branch-a green path (steps 1-3) is
+ * non-mutating (its only mutation, step 5 apply, is pending-scenario and
+ * not live-exercised). Replay acceptance stays separate from this path.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -585,24 +592,37 @@ export const STALENESS_STEPS: readonly JourneyStep[] = [
 // user-scale value) WITHOUT touching the briefs of existing journeys.
 // ---------------------------------------------------------------------------
 
-// FLIP-CAPABLE SCENARIO SEARCH — 5/5 attempts failed (2026-06-06, staging
-// b8d5bcc). The journey needs a `what_would_flip` turn whose enrichment
-// carries a non-null `flip_value` that #236's producer renders as a WHOLE
-// user-scale value. Across five structurally-different briefs PLoT returned
-// `flip_value: null` ("no_effect_within_bounds") for EVERY factor — the
-// draft-graph analysis produces a robust leader (margin ~0.68) that no
-// single in-bounds factor change flips, so `buildFlipProposalEmit` returns
-// `no_proposal` and no "Test X at N" chip is emitted. Attempts (all null):
-// (1) 15-person team scaling; (2) subscription pricing (produced a
-// continuous £ price factor, still null); (3) launch-now-vs-wait on a 60%
-// demand probability; (4) two near-identical suppliers on a £500/day delay
-// cost; (5) buy-vs-rent break-even at 30 months. The whole-value assertion
-// in `assertFlipProposalPresent` was NOT weakened (and is moot — flip_value
-// is null, not merely non-whole). Per the "stop after five" rule the brief
-// is restored to the documented baseline; steps 4-8 therefore fail/skip on
-// a live enforced run until a flip-capable scenario exists (likely needs
-// option values configured pre-analysis, or a PLoT flip-probe-bounds
-// review — both out of harness scope). See the run report / evidence pack.
+// FLIP-CAPABLE SCENARIO SEARCH — historical: 5/5 NL-brief attempts all
+// returned `flip_value: null` ("no_effect_within_bounds") (2026-06-06,
+// staging b8d5bcc; team-scaling / subscription-price / launch-probability /
+// supplier-knife-edge / buy-vs-rent). The journey needs a `what_would_flip`
+// turn whose enrichment carries a non-null `flip_value` that #236's producer
+// renders as a WHOLE user-scale value, else `buildFlipProposalEmit` returns
+// `no_proposal` and no "Test X at N" chip is emitted.
+//
+// ROOT CAUSE (superseded — task_f6573ff1, read-only, ACCEPTED): the universal
+// null is NOT "robust decisions" and NOT a CEE/harness bug. #236 reads the
+// authoritative field `enrichment.flip_thresholds[].flip_value`. The null was
+// PREDOMINANTLY a PLoT flip-threshold SELECTION inversion (it probed factors
+// every option overrides — which structurally can't move a background value,
+// max_probe_delta=0 — while omitting the non-overridden material-elasticity
+// background factors that are the real flip candidates), plus a residual
+// valued-factor probe-mechanics subset. The selection inversion was found and
+// fixed on the PLoT side; the residual probe-mechanics belongs to the PLoT
+// workstream, NOT this harness. Do NOT re-run that discriminator here.
+//
+// FOLLOW-UP (separate, PLoT-owned): validate a flip-capable brief once PLoT
+// emits a usable non-null flip. Target fixture (per review) = a `delivery_gap`
+// near-tie that yields a flip of ~6.055 story_points rendering as a whole
+// `6.1 story points` proposal — which must then enforce the FULL chain:
+// proposal chip -> apply ("make that update") -> set_factor_value DB
+// read-back -> explain-leader-stale -> what-changed. The harness needs NO
+// change for this: the pending-scenario split + flip-candidate auto-detection
+// flip steps 4-8 to enforced the moment a non-null flip appears (and flag that
+// the pending scenario should be removed). The whole-value assertion in
+// `assertFlipProposalPresent` was NOT weakened. See the run report / evidence
+// pack. `delivery_gap`/`6.055` do not exist in this repo today — they name the
+// PLoT-side target, not an existing harness fixture.
 const BRANCH_A_BRIEF =
   'We are a 15-person engineering team weighing three options for scaling ' +
   'delivery over the next six months: hire two senior engineers locally, ' +

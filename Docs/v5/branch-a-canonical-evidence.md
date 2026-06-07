@@ -16,17 +16,16 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 ## Run metadata
 
 - **Branch:** `claude/charming-sinoussi-7ce0c7`
-- **Harness code SHA at run time:** `383d3502619b02d197770f41de55dededf9b27a9` (the SHA the replay harness was built from when this pack was produced; the commit that lands this pack into git history is typically one commit ahead — see the committed-by SHA in `git log` for that)
+- **Harness code SHA at run time:** `bb2dece2566088e08770797f6f35f16a96139428` (the SHA the replay harness was built from when this pack was produced; the commit that lands this pack into git history is typically one commit ahead — see the committed-by SHA in `git log` for that)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-06-07T22:52:25.691Z
+- **Started at:** 2026-06-07T23:26:59.885Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
-- **Expected build:** `f78755a`
+- **Expected build:** `9f04975`
 - **Journey:** `branch-a-canonical`
 - **edit_graph_journey_active:** yes (edit_graph dispatch live on staging; assertions active)
 - **branch_a_enforced:** yes (default — PR #236 live on staging; steps 4-8 run + assert)
-- **Branch-A (PR #236)-pending rows:** 5 (re-gated via BRANCH_A_DISABLE)
 - **branch_a_pending_scenario:** yes (default; BRANCH_A_PENDING_SCENARIO on — a DB-confirmed all-null flip state downgrades the step-4 chip-absent failure to a pending-scenario skip)
 - **Branch-A pending-scenario rows:** 5 (skipped, NOT failed — staging has no live flip-capable result)
 
@@ -35,14 +34,14 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 ## Deploy confirmation (Phase 2)
 
 - **GET /healthz status:** 200
-- **build (commit short):** `f78755a`
+- **build (commit short):** `9f04975`
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
 - **critical_prompts_pms:** true
-- **elapsed:** 327ms
+- **elapsed:** 284ms
 
-Deploy confirmed: `/healthz` build `f78755a` matches `--expected-build f78755a`.
+Deploy confirmed: `/healthz` build `9f04975` matches `--expected-build 9f04975`.
 
 **Per-turn prompt evidence:** not capturable from the current response envelope. The runtime emits `prompt_version` / `system_chars` to structured telemetry at server startup, but the `/orchestrate/v2/turn` response payload does not surface them. Deploy confirmation relies on `/healthz.build` + Render dashboard as the externally-verifiable signal.
 
@@ -56,9 +55,9 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=3 first_chip_label="Run analysis" elapsed=52991ms draft={total:52374,parse:52197,parse_llm:52181,normalise:1,enrich:3,repair:71,repair_fired:false,repair_attempts:0,validation:0,threshold:0,package:9,boundary:90} | — |
-| `2_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=138 chip_count=2 analysis_ready=ready options=4 elapsed=3186ms | — |
-| `3_what_would_flip` | [PASS] passed | v5-runtime | 200 | status=200 text_len=543 labels_checked=4 option_referenced=true elapsed=919ms | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=3 first_chip_label="Run analysis" elapsed=55933ms draft={total:55445,parse:55398,parse_llm:55377,normalise:1,enrich:4,repair:22,repair_fired:false,repair_attempts:0,validation:0,threshold:0,package:8,boundary:9} | — |
+| `2_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=134 chip_count=2 analysis_ready=ready options=4 elapsed=3884ms | — |
+| `3_what_would_flip` | [PASS] passed | v5-runtime | 200 | status=200 text_len=543 labels_checked=4 option_referenced=true elapsed=965ms | — |
 | `4_flip_proposal_present` | [SKIP] skipped | skipped | — | pending-scenario: staging produced no live flip-capable result — run_analysis flip_thresholds[].flip_value all null (DB-verified). Not a harness failure; emit reachability is enforced deterministically by branch-a-emit-through-executor.test.ts. (run_analysis fact flip_thresholds classification=all_null (entries=1)) | — |
 | `5_accept_proposal` | [SKIP] skipped | skipped | — | pending-scenario (cascaded from 4_flip_proposal_present): no live flip-capable result | — |
 | `6_db_readback` | [SKIP] skipped | skipped | — | pending-scenario (cascaded from 5_accept_proposal): no live flip-capable result | — |
@@ -70,7 +69,7 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 #### `1_draft_graph`
 
 ```
-I've built a first decision model for "Successfully Deliver Q3 Roadmap Commitments".
+I've built a first decision model for "Deliver Q3 Roadmap Commitments on Time and Within Budget".
 
 Options compared
 • Hire Two Senior Engineers Locally
@@ -79,9 +78,9 @@ Options compared
 • Introduce Tiered Pricing to Fund
 
 What the model is weighing
-• Main trade-off: Upfront Hiring Cost balanced against Local Senior Headcount Addition
-• Assumption to check: Offshore cost not modelled
-• Worth a look: Hybrid hire-plus-offshore option
+• Main trade-off: Incremental Hiring Cost balanced against Local Senior Hire Programme
+• Assumption to check: Hybrid hire-plus-offshore pilot
+• Worth a look: Roadmap scope as a lever
 
 Your brief covered the main points; adding detail on the lighter areas would sharpen the comparison.
 
@@ -95,7 +94,7 @@ Chips:
 #### `2_run_analysis`
 
 ```
-Hire Two Senior Engineers Locally currently leads by 78 percentage points because Local Senior Headcount Addition is the strongest driver.
+Hire Two Senior Engineers Locally currently leads by 77 percentage points because Local Senior Hire Programme is the strongest driver.
 ```
 Chips:
 - `chip_action_explain_results` — **Explain the result** — "Please explain the analysis result in plain language." action_type=`explain_results`
@@ -104,7 +103,7 @@ Chips:
 #### `3_what_would_flip`
 
 ```
-'Hire Two Senior Engineers Locally' currently leads, with a probability of 84%. For 'Engage Offshore Partner' to overtake it, the lead of 78 percentage points would need to close. Movement on Local Senior Headcount Addition or Upfront Hiring Cost would shift this result the most. Local Senior Headcount Addition very strongly strengthens the lead; Upfront Hiring Cost moderately weakens the lead. This result looks stable, so smaller changes are less likely to flip the outcome on their own. Which of those would you like to explore changing?
+'Hire Two Senior Engineers Locally' currently leads, with a probability of 84%. For 'Engage Offshore Partner' to overtake it, the lead of 77 percentage points would need to close. Movement on Local Senior Hire Programme or Incremental Hiring Cost would shift this result the most. Local Senior Hire Programme very strongly strengthens the lead; Incremental Hiring Cost moderately weakens the lead. This result looks stable, so smaller changes are less likely to flip the outcome on their own. Which of those would you like to explore changing?
 ```
 
 ## Branch A journey: `branch-a-canonical`
@@ -114,8 +113,8 @@ See per-step `description` fields in [tools/v5-journey-replay/steps.ts](../../to
 ### Step 1 capture
 
 - **Option labels parsed:** `Hire Two Senior Engineers Locally`, `Engage Offshore Partner`, `Continue with Current Team (Status Quo)`, `Introduce Tiered Pricing to Fund Gradual Hiring`
-- **Factor labels parsed:** `Upfront Hiring Cost`, `Local Senior Headcount Addition`, `Offshore Partner Engagement`, `Current Team Size`, `Tiered Pricing Introduction`
-- **Resolved factor for Step 2:** `Upfront Hiring Cost` _(fallback reason: `first_label`)_
+- **Factor labels parsed:** `Incremental Hiring Cost`, `Local Senior Hire Programme`, `Market Demand for Product`, `Offshore Partner Engagement`, `Current Engineering Team Size`, `Tiered Pricing Introduction`
+- **Resolved factor for Step 2:** `Incremental Hiring Cost` _(fallback reason: `first_label`)_
 - **Graph hash at draft (post-Step 1):** _not surfaced on wire envelope_
 
 ### 4b — pinned unit regression (handler-level)

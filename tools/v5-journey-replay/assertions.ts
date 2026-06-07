@@ -835,12 +835,13 @@ export function assertExplainLeader(
 // ===========================================================================
 // Branch A (PR #236) assertions — flip-proposal presence + acceptance.
 //
-// These exercise the "Test X at N" → "do it" → set_factor_value loop the
-// Branch A product lane (PR #236, feat/v5-p0-2-continuity) unlocks. They
-// are wired into the `branch-a-canonical` journey and gated behind
-// `BRANCH_A_ENFORCE` at the orchestration layer — pending until #236 lands.
-// The assertions themselves are pure and unit-tested today against
-// synthetic responses so they are ready to enforce on the day #236 merges.
+// These exercise the "Test X at N" → "do it"/"make that update" →
+// set_factor_value loop the Branch A product lane (PR #236,
+// feat/v5-p0-2-continuity) unlocks. #236 is LIVE on staging, so they are
+// ENFORCED by default in the `branch-a-canonical` journey (opt-out via
+// `BRANCH_A_DISABLE`). The assertions are pure and unit-tested against
+// synthetic responses, and run live on staging when a flip-capable scenario
+// exists — else downgraded to a pending-scenario skip (never weakened).
 // ===========================================================================
 
 /**

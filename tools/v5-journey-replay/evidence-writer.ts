@@ -260,12 +260,17 @@ export function renderEvidencePack(
           : 'no (BRANCH_A_DISABLE=true — steps 4-8 re-gated to pending/skipped)'
       }`,
     );
-    const branchARows = rows.filter((r) => r.requires_branch_a === true);
-    if (branchARows.length > 0) {
-      lines.push(
-        `- **Branch-A (PR #236)-pending rows:** ${branchARows.length} ` +
-          '(re-gated via BRANCH_A_DISABLE)',
-      );
+    // Only label rows "re-gated via BRANCH_A_DISABLE" when branch-a is
+    // actually disabled. When enforced, these rows are passing or
+    // pending-scenario skips — the accurate pending-scenario count below is
+    // the source of truth, so don't print a misleading re-gated line.
+    if (header.branch_a_enforced === false) {
+      const branchARows = rows.filter((r) => r.requires_branch_a === true);
+      if (branchARows.length > 0) {
+        lines.push(
+          `- **Branch-A (PR #236) rows re-gated via BRANCH_A_DISABLE:** ${branchARows.length}`,
+        );
+      }
     }
   }
   if (header.branch_a_pending_scenario !== undefined) {

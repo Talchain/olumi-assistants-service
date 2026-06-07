@@ -45,12 +45,13 @@ export interface EvidenceRow {
    */
   readonly requires_dl7_pr_b?: true;
   /**
-   * Marks an evidence row as a Branch-A-dependent step that is pending
-   * the product emit/consume path in PR #236 (`feat/v5-p0-2-continuity`).
-   * Mirrors `requires_dl7_pr_b`: the harness records the step as
-   * `skipped` (not `failed`) until `BRANCH_A_ENFORCE=true` flips it on
-   * after #236 merges to staging and this harness branch rebases. Lets
-   * downstream tooling count pending-vs-cascade skips distinctly.
+   * Marks an evidence row as a Branch-A step that depends on the product
+   * emit/consume path from PR #236 (`feat/v5-p0-2-continuity`). Mirrors
+   * `requires_dl7_pr_b`. #236 is live on staging, so these steps are now
+   * ENFORCED by default (opt-out via `BRANCH_A_DISABLE`); a row is recorded
+   * as `skipped` (not `failed`) only when disabled or downgraded to a
+   * pending-scenario skip. Lets downstream tooling count pending-vs-cascade
+   * skips distinctly.
    */
   readonly requires_branch_a?: true;
   /**
