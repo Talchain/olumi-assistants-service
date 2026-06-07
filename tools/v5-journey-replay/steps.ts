@@ -49,11 +49,11 @@ export interface JourneyStep {
   /** If true, step only makes sense after a prior step has completed. */
   readonly depends_on?: string;
   /**
-   * Branch A (PR #236) dependency marker. When set, the harness records
-   * this step as `skipped` (with `requires_branch_a`) unless
-   * `BRANCH_A_ENFORCE=true` — the product emit/consume path that makes
-   * the step pass does not exist until #236 lands. After #236 merges to
-   * staging and this branch rebases, set the env flag to enforce.
+   * Branch A (PR #236) dependency marker. #236 is live on staging, so these
+   * steps are ENFORCED by default; the harness records the step as `skipped`
+   * (with `requires_branch_a`) only when `BRANCH_A_DISABLE=true` (emergency
+   * opt-out) or when downgraded to a pending-scenario skip (chip-absent +
+   * DB-confirmed all-null flips).
    */
   readonly requires_branch_a?: boolean;
   /**
@@ -110,8 +110,8 @@ export interface JourneyContext {
    * Branch A: the captured `what_would_flip` turn result. The assertion-
    * only "Test X at N proposal present" step inspects this for the
    * `set_factor_value` proposal chip, and the DB read-back derives the
-   * proposed display value from the same chip. Populated only when the
-   * Branch A journey runs the flip turn (i.e. `BRANCH_A_ENFORCE=true`).
+   * proposed display value from the same chip. Populated when the Branch A
+   * journey runs the flip turn (enforced by default; unless `BRANCH_A_DISABLE`).
    */
   branchAFlipResult?: FetchResult;
 }
@@ -611,18 +611,24 @@ export const STALENESS_STEPS: readonly JourneyStep[] = [
 // fixed on the PLoT side; the residual probe-mechanics belongs to the PLoT
 // workstream, NOT this harness. Do NOT re-run that discriminator here.
 //
-// FOLLOW-UP (separate, PLoT-owned): validate a flip-capable brief once PLoT
-// emits a usable non-null flip. Target fixture (per review) = a `delivery_gap`
-// near-tie that yields a flip of ~6.055 story_points rendering as a whole
-// `6.1 story points` proposal — which must then enforce the FULL chain:
-// proposal chip -> apply ("make that update") -> set_factor_value DB
-// read-back -> explain-leader-stale -> what-changed. The harness needs NO
-// change for this: the pending-scenario split + flip-candidate auto-detection
-// flip steps 4-8 to enforced the moment a non-null flip appears (and flag that
-// the pending scenario should be removed). The whole-value assertion in
-// `assertFlipProposalPresent` was NOT weakened. See the run report / evidence
-// pack. `delivery_gap`/`6.055` do not exist in this repo today — they name the
-// PLoT-side target, not an existing harness fixture.
+// FOLLOW-UP (separate; PLoT-owned + an OWED harness fixture change): once PLoT
+// emits a usable non-null flip, validate a flip-capable brief end-to-end.
+// Target (per review) = a `delivery_gap` near-tie that yields a flip of ~6.055
+// story_points rendering as a whole `6.1 story points` proposal, which must
+// enforce the FULL chain: proposal chip -> apply ("make that update") ->
+// set_factor_value DB read-back -> explain-leader-stale -> what-changed.
+//
+// Two parts — do NOT read this as "the current brief is enough":
+//   (a) HARNESS (owed, NOT done here): the hardcoded hiring `BRANCH_A_BRIEF`
+//       below is NOT flip-capable. Driving the chain deterministically needs a
+//       harness change — add a dedicated `branch-a-flip` journey, or swap this
+//       brief for the exact `delivery_gap` near-tie fixture.
+//   (b) AUTO-DETECT (already in place, no change): IF a live flip ever appears,
+//       the pending-scenario split + flip-candidate detection flip steps 4-8 to
+//       enforced and flag that the pending scenario should be removed.
+// The whole-value assertion in `assertFlipProposalPresent` was NOT weakened.
+// `delivery_gap`/`6.055` name the PLoT-side target, not an existing harness
+// fixture (grep-absent from this repo today). See the run report / evidence pack.
 const BRANCH_A_BRIEF =
   'We are a 15-person engineering team weighing three options for scaling ' +
   'delivery over the next six months: hire two senior engineers locally, ' +

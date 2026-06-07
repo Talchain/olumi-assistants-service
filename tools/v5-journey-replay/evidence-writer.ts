@@ -130,19 +130,28 @@ function computeExecutiveSummary(
   const anyInternalTerm = rows.some((r) =>
     r.failing_contract?.toLowerCase().includes('forbidden term'),
   );
-  const step4 = rows.find((r) => r.step === '4_run_analysis');
-  const step5 = rows.find((r) => r.step === '5_explain_leader');
+  // Match by ROLE, not the canonical step index, so the summary doesn't
+  // under-report a passing chain on a non-canonical journey. run_analysis is
+  // `4_run_analysis` on canonical/dl7 but `2_run_analysis` on
+  // branch-a-canonical; the analysis-consuming follow-up is `5_explain_leader`
+  // on canonical, `6_what_would_flip` on dl7, and `3_what_would_flip` /
+  // `7_explain_leader_stale` on branch-a.
+  const runAnalysisPassed = rows.some(
+    (r) => /(?:^|_)run_analysis$/.test(r.step) && r.status === 'passed',
+  );
+  const analysisConsumedPassed = rows.some(
+    (r) => /(?:explain_leader|what_would_flip)/.test(r.step) && r.status === 'passed',
+  );
 
-  // Step 4 only proves run_analysis end-to-end if it passes. A failure
-  // mode like `chip_click_run_analysis_commit_failed` happens AFTER
-  // the handler returns and (likely) after PLoT was called — so
-  // reporting "PLoT = no" on a commit failure would be misleading. We
-  // deliberately collapse to "not externally verified" unless the row
-  // passes.
+  // We only claim run_analysis end-to-end / persisted when a qualifying row
+  // PASSES. A failure mode like `chip_click_run_analysis_commit_failed`
+  // happens AFTER the handler returns and (likely) after PLoT was called — so
+  // reporting "PLoT = no" on a commit failure would be misleading. Collapse to
+  // "not externally verified" unless a qualifying row passes.
   const step4Endtoend: boolean | 'not externally verified' =
-    step4?.status === 'passed' ? true : 'not externally verified';
+    runAnalysisPassed ? true : 'not externally verified';
   const step5Persisted: boolean | 'not externally verified' =
-    step5?.status === 'passed' ? true : 'not externally verified';
+    analysisConsumedPassed ? true : 'not externally verified';
 
   // Deploy confirmation. Three states:
   //   - 'unverifiable' — healthz returned no build field
