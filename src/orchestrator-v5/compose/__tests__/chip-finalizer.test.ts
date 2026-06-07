@@ -1,11 +1,11 @@
 /**
  * V5 Lane 2 — deterministic chip-quality finalizer.
  *
- * Covers classification-driven drops (unsafe / generic), the conservative
- * generic rule (any valid action_type is grounded), exact + near-duplicate
- * dedupe, the safer singleton-only action_type collapse (amendment 3),
- * proposal protection (partition-before-dedupe + budget), the no-filler /
- * empty-safe contract, the 2–3 budget, the em-dash regression, and
+ * Covers the SAFE-BY-DEFAULT contract: drops only unsafe (leak/raw-decimal)
+ * and blank chips; never drops on an unfamiliar id; never collapses distinct
+ * chips by action_type; budget-trims only the suggestion family while
+ * preserving every clarification / candidate-pick chip. Plus proposal
+ * protection, exact + near-duplicate dedupe, the em-dash regression, and
  * idempotency.
  */
 
@@ -61,17 +61,16 @@ describe('finalizeChips — positive (grounded chips pass unchanged)', () => {
     expect(report.over_budget_trimmed).toBe(0);
   });
 
-  it('keeps a chip with a valid action_type even when its id is unfamiliar (conservative)', () => {
+  it('keeps a chip with a valid action_type even when its id is unfamiliar', () => {
     // Mirrors the route-v2-output-safety fixture: id `chip_explain`,
-    // action_type `explain_result` — grounded by action_type, never generic.
+    // action_type `explain_result`.
     const chip: SuggestedAction = {
       id: 'chip_explain',
       label: 'Explain',
       message: 'Explain the decision.',
       action_type: 'explain_result',
     };
-    const { chips } = finalizeChips([chip]);
-    expect(ids(chips)).toEqual(['chip_explain']);
+    expect(ids(finalizeChips([chip]).chips)).toEqual(['chip_explain']);
   });
 });
 
@@ -139,25 +138,85 @@ describe('finalizeChips — drop unsafe', () => {
   });
 });
 
-describe('finalizeChips — drop generic / no-filler', () => {
-  it('drops an unrecognised chip with no action_type', () => {
-    const filler: SuggestedAction = { id: 'random_filler', label: 'Continue', message: 'Continue' };
-    const { chips, report } = finalizeChips([filler]);
-    expect(chips).toEqual([]);
-    expect(report.dropped_generic).toBe(1);
-  });
-
-  it('returns no chips when nothing is safely grounded (never pads)', () => {
-    const unsafe: SuggestedAction = { id: 'chip_prompt_a', label: 'run_analysis', message: 'x' };
-    const generic: SuggestedAction = { id: 'mystery', label: 'Hmm', message: 'Hmm' };
-    expect(finalizeChips([unsafe, generic]).chips).toEqual([]);
-  });
-
+describe('finalizeChips — generic is BLANK-only / no-filler', () => {
   it('drops a chip that is blank after scrub', () => {
     const blank: SuggestedAction = { id: 'chip_prompt_a', label: '   ', message: 'x' };
     const { chips, report } = finalizeChips([blank]);
     expect(chips).toEqual([]);
     expect(report.dropped_generic).toBe(1);
+  });
+
+  it('does NOT drop a non-blank chip just because its id is unfamiliar', () => {
+    const unfamiliar: SuggestedAction = { id: 'random_filler', label: 'Continue', message: 'Continue' };
+    const { chips, report } = finalizeChips([unfamiliar]);
+    expect(ids(chips)).toEqual(['random_filler']);
+    expect(report.dropped_generic).toBe(0);
+  });
+
+  it('returns no chips when all are unsafe or blank (never pads)', () => {
+    const unsafe: SuggestedAction = { id: 'chip_prompt_a', label: 'run_analysis', message: 'x' };
+    const blank: SuggestedAction = { id: 'chip_prompt_b', label: '   ', message: '   ' };
+    expect(finalizeChips([unsafe, blank]).chips).toEqual([]);
+  });
+});
+
+describe('finalizeChips — preserves clarification / candidate chips (regression)', () => {
+  it('keeps edit-clarify Cancel + label chips (no action_type, edit_clarify_ ids)', () => {
+    const cancel: SuggestedAction = {
+      id: 'edit_clarify_cancel',
+      label: 'Cancel — keep model unchanged',
+      message: 'Cancel that change — keep the model as it is.',
+    };
+    const label: SuggestedAction = {
+      id: 'edit_clarify_fac_delivery',
+      label: 'Change Delivery cost',
+      message: 'For Delivery cost, what value should we use?',
+    };
+    expect(ids(finalizeChips([label, cancel]).chips)).toEqual([
+      'edit_clarify_fac_delivery',
+      'edit_clarify_cancel',
+    ]);
+  });
+
+  it('keeps proposal-continuation and factor-affect and coaching-prefill chips', () => {
+    const proposalRisk: SuggestedAction = { id: 'chip_proposal_apply_risk', label: 'Add as risk', message: 'Add this as a risk.' };
+    const factorAffect: SuggestedAction = { id: 'chip_factor_affect_revenue', label: 'Revenue', message: 'How does Revenue affect this decision?' };
+    const coachingPrefill: SuggestedAction = { id: 'chip_3f8a9c1d2e4b', label: 'Add evidence', message: 'What evidence would strengthen this factor?' };
+    expect(ids(finalizeChips([proposalRisk, factorAffect, coachingPrefill]).chips)).toEqual([
+      'chip_proposal_apply_risk',
+      'chip_factor_affect_revenue',
+      'chip_3f8a9c1d2e4b',
+    ]);
+  });
+
+  it('does NOT count-trim a candidate-pick list beyond 3', () => {
+    const labelChips: SuggestedAction[] = [0, 1, 2, 3].map((i) => ({
+      id: `edit_clarify_node${i}`,
+      label: `Change Factor ${i}`,
+      message: `For Factor ${i}, what value should we use?`,
+    }));
+    const { chips, report } = finalizeChips(labelChips);
+    expect(chips.length).toBe(4);
+    expect(report.over_budget_trimmed).toBe(0);
+  });
+
+  it('keeps two ambiguous short-confirm candidates that share an action_type', () => {
+    const p0: SuggestedAction = {
+      id: 'chip_clarify_pending_0',
+      label: 'Run the budget analysis',
+      message: 'Run the budget analysis.',
+      action_type: 'run_analysis',
+    };
+    const p1: SuggestedAction = {
+      id: 'chip_clarify_pending_1',
+      label: 'Run the headcount analysis',
+      message: 'Run the headcount analysis.',
+      action_type: 'run_analysis',
+    };
+    const { chips, report } = finalizeChips([p0, p1]);
+    expect(ids(chips)).toEqual(['chip_clarify_pending_0', 'chip_clarify_pending_1']);
+    expect(report.deduped).toBe(0);
+    expect(report.over_budget_trimmed).toBe(0);
   });
 });
 
@@ -176,7 +235,7 @@ describe('finalizeChips — dedupe', () => {
     expect(report.deduped).toBe(1);
   });
 
-  it('collapses a SINGLETON action_type duplicate (run_analysis)', () => {
+  it('does NOT collapse two distinct chips that merely share an action_type', () => {
     const a: SuggestedAction = {
       id: 'chip_action_run_analysis',
       label: 'Run analysis',
@@ -190,31 +249,13 @@ describe('finalizeChips — dedupe', () => {
       action_type: 'run_analysis',
     };
     const { chips, report } = finalizeChips([a, b]);
-    expect(ids(chips)).toEqual(['chip_action_run_analysis']);
-    expect(report.deduped).toBe(1);
-  });
-
-  it('KEEPS two distinct grounded chips sharing a NON-singleton action_type (different targets) — amendment 3', () => {
-    const setPrice: SuggestedAction = {
-      id: 'chip_action_set_price',
-      label: 'Set price to £50',
-      message: 'Set price to £50.',
-      action_type: 'set_factor_value',
-    };
-    const setMargin: SuggestedAction = {
-      id: 'chip_action_set_margin',
-      label: 'Set margin to 30%',
-      message: 'Set margin to 30%.',
-      action_type: 'set_factor_value',
-    };
-    const { chips, report } = finalizeChips([setPrice, setMargin]);
-    expect(ids(chips)).toEqual(['chip_action_set_price', 'chip_action_set_margin']);
+    expect(ids(chips)).toEqual(['chip_action_run_analysis', 'chip_action_run_more']);
     expect(report.deduped).toBe(0);
   });
 });
 
-describe('finalizeChips — proposal protection', () => {
-  it('keeps the proposal when the budget is exceeded', () => {
+describe('finalizeChips — proposal protection & budget', () => {
+  it('keeps the proposal when the suggestion budget is exceeded', () => {
     const c1: SuggestedAction = { id: 'chip_prompt_a', label: 'A', message: 'Alpha' };
     const c2: SuggestedAction = { id: 'chip_prompt_b', label: 'B', message: 'Bravo' };
     const c3: SuggestedAction = { id: 'chip_prompt_c', label: 'C', message: 'Charlie' };
@@ -236,10 +277,8 @@ describe('finalizeChips — proposal protection', () => {
     expect(report.proposal_protected).toBe(1);
     expect(report.deduped).toBe(1);
   });
-});
 
-describe('finalizeChips — budget and em-dash regression', () => {
-  it('caps at 3 useful chips and counts the trim', () => {
+  it('caps the suggestion family at 3 and counts the trim', () => {
     const five: SuggestedAction[] = ['a', 'b', 'c', 'd', 'e'].map((k) => ({
       id: `chip_prompt_${k}`,
       label: `Option ${k.toUpperCase()}`,
@@ -250,6 +289,25 @@ describe('finalizeChips — budget and em-dash regression', () => {
     expect(report.over_budget_trimmed).toBe(2);
   });
 
+  it('budget counts only the suggestion family, never candidate chips', () => {
+    const suggestions: SuggestedAction[] = ['a', 'b', 'c', 'd'].map((k) => ({
+      id: `chip_prompt_${k}`,
+      label: `Suggestion ${k.toUpperCase()}`,
+      message: `Suggestion message ${k}`,
+    }));
+    const candidates: SuggestedAction[] = [0, 1, 2, 3].map((i) => ({
+      id: `edit_clarify_node${i}`,
+      label: `Change Factor ${i}`,
+      message: `For Factor ${i}, what value should we use?`,
+    }));
+    const { chips, report } = finalizeChips([...suggestions, ...candidates]);
+    // 3 of 4 suggestions kept (1 trimmed); all 4 candidates kept.
+    expect(chips.length).toBe(7);
+    expect(report.over_budget_trimmed).toBe(1);
+  });
+});
+
+describe('finalizeChips — em-dash regression & edge cases', () => {
   it('does NOT drop a legitimate em-dash chip (pre-mortem)', () => {
     const preMortem: SuggestedAction = {
       id: 'chip_prompt_run_pre_mortem',
@@ -259,17 +317,6 @@ describe('finalizeChips — budget and em-dash regression', () => {
     expect(ids(finalizeChips([preMortem]).chips)).toEqual(['chip_prompt_run_pre_mortem']);
   });
 
-  it('does NOT drop the edit-clarify Cancel chip (em dash)', () => {
-    const cancel: SuggestedAction = {
-      id: 'chip_prompt_cancel',
-      label: 'Cancel — keep model unchanged',
-      message: 'Cancel that change — keep the model as it is.',
-    };
-    expect(ids(finalizeChips([cancel]).chips)).toEqual(['chip_prompt_cancel']);
-  });
-});
-
-describe('finalizeChips — edge cases', () => {
   it('handles empty input', () => {
     const { chips, report } = finalizeChips([]);
     expect(chips).toEqual([]);
