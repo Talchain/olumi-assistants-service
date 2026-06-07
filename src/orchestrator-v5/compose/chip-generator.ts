@@ -141,7 +141,6 @@ export function validateAndFilterChips(
           event: 'v5.chip.suppressed',
           action_type: null,
           reason: 'null_action_type',
-          chip_label: (chip as { label?: unknown }).label ?? null,
         },
         'V5 chip suppression — chip dropped because action_type was literally null',
       );
@@ -153,7 +152,6 @@ export function validateAndFilterChips(
           event: 'v5.chip.suppressed',
           action_type: typeof at,
           reason: 'null_action_type',
-          chip_label: (chip as { label?: unknown }).label ?? null,
         },
         'V5 chip suppression — chip dropped because action_type was not a string',
       );
@@ -165,7 +163,6 @@ export function validateAndFilterChips(
           event: 'v5.chip.suppressed',
           action_type: at,
           reason: 'unregistered_handler',
-          chip_label: (chip as { label?: unknown }).label ?? null,
         },
         'V5 chip suppression — chip dropped because action_type points at an unregistered handler',
       );

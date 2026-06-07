@@ -142,6 +142,7 @@ Held. When it resumes, use a **delta-refresh** of the handler map's constituent 
 
 ## References
 
+- [`v5-chip-curation.md`](./v5-chip-curation.md) — Lane 2 deterministic chip curation at the egress finaliser (in flight on `feat/v5-cee-chip-grounding`). Single pure `curateChips` pass: copy-safety + exact/near dedupe + budget with proposal/disambiguation protection, content-free telemetry; live-path proven via the canonical replay against `/orchestrate/v2/turn`.
 - [`v5-handler-coverage-map.md`](./v5-handler-coverage-map.md) — authoritative static audit (PR #220).
 - [`v5-phase3-input-contract.md`](./v5-phase3-input-contract.md) — Phase 3 block input contract and `decision_review` density telemetry.
 - [`v5-analysis-tab-data-contract-v1_3.md`](./v5-analysis-tab-data-contract-v1_3.md) — V5 / Analysis-tab data contract (references this file).

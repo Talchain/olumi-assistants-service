@@ -32,9 +32,9 @@ import {
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
 import { composeUnsupportedActionResponse } from '../compose/unsupported-action-response.js';
 import { composeValidationFailure } from '../compose/validation-failure-responses.js';
-import { finaliseV5Response } from '../response-finaliser.js';
+import { finaliseV5Response, isFinalisedV5Response } from '../response-finaliser.js';
 import type { ValidationError } from '../routing/validator.js';
-import type { ComposeContext } from '../compose/types.js';
+import type { ComposeContext, SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────
@@ -189,6 +189,95 @@ describe('finaliseV5Response — behaviour', () => {
     const tsA = (a.analysis_ready as { computed_at?: string }).computed_at!;
     const tsB = (b.analysis_ready as { computed_at?: string }).computed_at!;
     expect(new Date(tsB).getTime()).toBeGreaterThan(new Date(tsA).getTime());
+  });
+});
+
+// ─── Group 2b: chip curation at egress ────────────────────────────────────
+//
+// The finaliser is the universal egress chokepoint, so chip curation runs here
+// for every dispatch path. These assert the curation is wired, idempotent (the
+// route finalises 2-3× per request), and protects proposal / disambiguation
+// chips — without disturbing the analysis_ready stamping above.
+
+describe('finaliseV5Response — chip curation at egress', () => {
+  const envWith = (chips: SuggestedAction[]) =>
+    composeDirectAnswerResponse({ assistant_text: 'x', stage: 'analyse', suggested_actions: chips });
+  const plain = (n: number): SuggestedAction => ({
+    id: `chip_prompt_${n}`,
+    label: `Option ${n}`,
+    message: `Option ${n}.`,
+  });
+
+  it('trims an over-budget next-action set to 3 on the wire', () => {
+    const finalised = finaliseV5Response(envWith([1, 2, 3, 4].map(plain)), {});
+    expect(finalised.suggested_actions).toHaveLength(3);
+    OlumiResponseSchema.parse(finalised);
+  });
+
+  it('keeps a legitimate em-dash chip (regression guard)', () => {
+    const cancel: SuggestedAction = {
+      id: 'edit_clarify_cancel',
+      label: 'Cancel — keep model unchanged',
+      message: 'Cancel that change — keep the model as it is.',
+    };
+    const finalised = finaliseV5Response(envWith([cancel]), {});
+    expect(finalised.suggested_actions.map((c) => c.id)).toEqual(['edit_clarify_cancel']);
+  });
+
+  it('drops a duplicate-id chip pair to a single chip', () => {
+    const finalised = finaliseV5Response(
+      envWith([
+        { id: 'chip_prompt_a', label: 'A', message: 'A.' },
+        { id: 'chip_prompt_a', label: 'A again', message: 'A again.' },
+      ]),
+      {},
+    );
+    expect(finalised.suggested_actions).toHaveLength(1);
+  });
+
+  it('protects a proposal chip while trimming plain chips to budget', () => {
+    const proposalChip: SuggestedAction = {
+      id: 'prop_x',
+      label: 'Test budget at £100',
+      message: 'Test budget at £100.',
+      action_type: 'set_factor_value',
+    };
+    const finalised = finaliseV5Response(envWith([plain(1), plain(2), plain(3), proposalChip]), {});
+    const out = finalised.suggested_actions.map((c) => c.id);
+    expect(out).toHaveLength(3);
+    expect(out).toContain('prop_x');
+  });
+
+  it('does not truncate a disambiguation choice-set of 5', () => {
+    const chips: SuggestedAction[] = [0, 1, 2, 3, 4].map((i) => ({
+      id: `chip_entity_opt-${i}`,
+      label: `Option ${i}`,
+      message: `I meant Option ${i}.`,
+    }));
+    const finalised = finaliseV5Response(envWith(chips), {});
+    expect(finalised.suggested_actions).toHaveLength(5);
+  });
+
+  it('empty-in → empty-out (no filler)', () => {
+    const finalised = finaliseV5Response(envWith([]), {});
+    expect(finalised.suggested_actions).toEqual([]);
+  });
+
+  it('the branded / WeakSet-registered object carries the curated chips', () => {
+    const finalised = finaliseV5Response(envWith([1, 2, 3, 4].map(plain)), {});
+    expect(isFinalisedV5Response(finalised)).toBe(true);
+    expect(finalised.suggested_actions).toHaveLength(3);
+  });
+
+  it('is idempotent: re-finalising curated chips changes nothing (mirrors route 2-3× finalise)', () => {
+    const chips: SuggestedAction[] = [
+      { id: 'chip_prompt_a', label: 'A', message: 'A.' },
+      { id: 'chip_prompt_a', label: 'dup', message: 'dup.' },
+      ...[1, 2, 3].map(plain),
+    ];
+    const first = finaliseV5Response(envWith(chips), {});
+    const second = finaliseV5Response(first, {});
+    expect(second.suggested_actions).toEqual(first.suggested_actions);
   });
 });
 

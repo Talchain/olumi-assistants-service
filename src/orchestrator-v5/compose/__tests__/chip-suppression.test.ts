@@ -118,8 +118,9 @@ describe('validateAndFilterChips — V5 chip-suppression contract', () => {
       event: 'v5.chip.suppressed',
       action_type: null,
       reason: 'null_action_type',
-      chip_label: 'Mystery chip',
     });
+    // Content-free telemetry: no user-facing chip copy in logs.
+    expect(meta).not.toHaveProperty('chip_label');
   });
 
   it('emits structured telemetry for unregistered-handler drops (reason=unregistered_handler)', () => {
@@ -130,8 +131,9 @@ describe('validateAndFilterChips — V5 chip-suppression contract', () => {
       event: 'v5.chip.suppressed',
       action_type: 'edit_factor',
       reason: 'unregistered_handler',
-      chip_label: 'Edit factor',
     });
+    // Content-free telemetry: no user-facing chip copy in logs.
+    expect(meta).not.toHaveProperty('chip_label');
   });
 
   it('does NOT emit telemetry when prompt chips or registered chips pass through', () => {

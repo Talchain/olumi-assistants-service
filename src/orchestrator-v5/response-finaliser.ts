@@ -81,11 +81,13 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { config } from '../config/index.js';
+import { log } from '../utils/telemetry.js';
 
 import {
   attachComputedAt,
   type AnalysisReadyPayload,
 } from './compose/analysis-ready-emit.js';
+import { curateChips } from './compose/chip-curation.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
@@ -166,6 +168,13 @@ export interface FinaliserContext {
    * `optional` in the schema for forward-compat.
    */
   readonly freshness?: import('./context/freshness.js').FreshnessDerivation;
+  /**
+   * Optional scenario id, threaded only for content-free chip-curation
+   * suppression telemetry correlation. Safe to log — an internal UUID, never
+   * user content. Omitted by paths that don't carry it; the log field is then
+   * absent. No chip label/message/user/graph text is ever logged.
+   */
+  readonly scenarioId?: string;
 }
 
 // ─── The finaliser ────────────────────────────────────────────────────────
@@ -215,9 +224,33 @@ export function finaliseV5Response(
   const scrubbed = debugEnabled
     ? ceeTraceClean
     : sanitiseEnrichmentBlocks(ceeTraceClean, ctx.analysisReady ?? null);
+  // V5 Lane 2 — deterministic chip curation. This is the universal egress
+  // chokepoint (every 200-OK V5 dispatch path converges here), so curating
+  // `suggested_actions` once here guarantees the wire chip set is grounded,
+  // safe, de-duplicated and budgeted, with proposal / disambiguation
+  // protection — regardless of which composer produced it. Pure + idempotent:
+  // the route finalises 2-3× per request, but the second pass sees already-
+  // curated chips and produces zero suppressions, so the suppression log fires
+  // at most once per turn. Telemetry is CONTENT-FREE — reason / category /
+  // closed-enum action_type only; no chip label, message, user-authored, or
+  // graph-derived text is ever logged. See compose/chip-curation.ts.
+  const curation = curateChips(scrubbed.suggested_actions);
+  for (const dropped of curation.suppressions) {
+    log.warn(
+      {
+        event: 'v5.chip.suppressed',
+        reason: dropped.reason,
+        category: dropped.category,
+        ...(dropped.action_type !== undefined ? { action_type: dropped.action_type } : {}),
+        ...(ctx.scenarioId !== undefined ? { scenario_id: ctx.scenarioId } : {}),
+      },
+      'V5 chip suppression — egress curation dropped a chip',
+    );
+  }
+  const curatedBase: OlumiResponse = { ...scrubbed, suggested_actions: [...curation.chips] };
   const stamped: OlumiResponse = ctx.analysisReady
-    ? { ...scrubbed, analysis_ready: attachComputedAt(ctx.analysisReady, ctx.freshness) }
-    : { ...scrubbed };
+    ? { ...curatedBase, analysis_ready: attachComputedAt(ctx.analysisReady, ctx.freshness) }
+    : curatedBase;
   FINALISED_RESPONSES.add(stamped);
   return stamped as FinalisedV5Response;
 }
