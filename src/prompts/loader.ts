@@ -14,6 +14,7 @@ import { config } from '../config/index.js';
 import {
   isTrackedKey,
   mapSource,
+  pmsResolveTaskId,
   resolvePublicVersion,
   type TrackedKey,
 } from './tracked.js';
@@ -174,9 +175,14 @@ export async function loadPrompt(
   }
 
   try {
-    // Try to load from store
+    // Try to load from store. PMS lookup is alias-aware: a logical key
+    // (e.g. `routing`) may resolve a DIFFERENT operator-managed PMS task
+    // (e.g. `orchestrator`) via PMS_TASK_ALIAS. The DEFAULT fallback below
+    // still uses the original `taskId`, so a PMS miss serves the logical
+    // key's own guard-safe default (routing → v40), not the aliased task's.
+    const pmsTaskId = pmsResolveTaskId(taskId);
     const store = getPromptStore();
-    const compiled = await store.getCompiled(taskId, variables, {
+    const compiled = await store.getCompiled(pmsTaskId, variables, {
       version,
       useStaging,
     });

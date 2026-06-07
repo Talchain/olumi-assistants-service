@@ -1150,14 +1150,19 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
         'Critical prompt coverage: all critical prompts resolve from PMS',
       );
     } else {
+      // `all_pms` is false when a critical key is on a bundled default/error
+      // OR serving a STALE snapshot (a later rebuild was rejected, e.g. an
+      // oversized PMS prompt). Surface both causes so the warn line is never
+      // an empty/misleading list when the offender is a stale snapshot.
       app.log.warn(
         {
           event: 'prompt.critical_coverage',
           all_pms: false,
           default_or_error: coverage.default_or_error,
+          snapshot_errors: coverage.snapshot_errors,
           keys: coverage.keys,
         },
-        `Critical prompt coverage: ${coverage.default_or_error.join(', ')} NOT on PMS (default/error)`,
+        `Critical prompt coverage NOT all-current — default/error: [${coverage.default_or_error.join(', ')}]; stale/rejected snapshot: [${coverage.snapshot_errors.join(', ')}]`,
       );
     }
   } catch (err) {

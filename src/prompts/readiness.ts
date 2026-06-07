@@ -21,6 +21,8 @@ import {
   type PublicSource,
 } from './tracked.js';
 import { log } from '../utils/telemetry.js';
+import { getRoutingLiveStatus } from './routing-live-status.js';
+import type { CeeTaskId } from './schema.js';
 
 const READINESS_CACHE_TTL_MS = 30_000;
 
@@ -42,6 +44,15 @@ export interface PromptKeyStatus {
   content_hash: string | null;
   content_chars: number | null;
   error?: string;
+  /** Alias-aware PMS task this key resolves from (e.g. routing→orchestrator). */
+  pms_task?: CeeTaskId;
+  /**
+   * Set on the `routing` row when the LIVE served snapshot is stale because
+   * a later rebuild was rejected (e.g. an oversized PMS prompt) and the
+   * prior snapshot was restored. Surfacing this prevents a false-green where
+   * the raw PMS row reads OK but is NOT what's actually served.
+   */
+  snapshot_error?: string;
 }
 
 function shortSha256(content: string): string {
@@ -57,6 +68,26 @@ export async function probeTrackedPrompts(
 ): Promise<PromptKeyStatus[]> {
   const results = await Promise.all(
     TRACKED_KEYS.map(async (key): Promise<PromptKeyStatus> => {
+      // The `routing` key reports from the LIVE served snapshot
+      // (guard-applied, atomically swapped), NOT a raw unguarded
+      // loadPrompt read of the current PMS row. This closes the
+      // oversized-reload false-green: after a rejected rebuild the live
+      // snapshot is the prior one, and `snapshot_error` flags the staleness.
+      if (key === 'routing') {
+        const live = getRoutingLiveStatus();
+        if (live) {
+          return {
+            key,
+            source: live.source,
+            version: live.version,
+            content_hash: live.content_hash,
+            content_chars: live.content_chars,
+            pms_task: live.pms_task,
+            ...(live.snapshot_error ? { snapshot_error: live.snapshot_error } : {}),
+          };
+        }
+        // No snapshot built yet (pre-boot) → fall through to loadPrompt.
+      }
       try {
         const loaded = await loadPrompt(key, { trigger });
         return {
@@ -115,9 +146,26 @@ export async function arePromptsReady(): Promise<boolean> {
  */
 export interface CriticalPromptCoverage {
   all_pms: boolean;
-  keys: Array<{ key: TrackedKey; source: PublicSource | 'error'; version: string | null }>;
+  keys: Array<{
+    key: TrackedKey;
+    source: PublicSource | 'error';
+    version: string | null;
+    /** Alias-aware PMS task (e.g. routing→orchestrator). */
+    pms_task?: CeeTaskId;
+    /** Set when this key serves a STALE snapshot (a later rebuild was rejected). */
+    snapshot_error?: string;
+  }>;
   /** Critical keys NOT resolving from PMS (default or error) — the offenders. */
   default_or_error: TrackedKey[];
+  /**
+   * Critical keys serving a STALE snapshot: resolved from PMS, but a later
+   * rebuild was REJECTED (e.g. an oversized prompt) and the prior snapshot was
+   * restored. These ALSO fail `all_pms` — `all_pms===true` must mean the
+   * LATEST PMS prompt is live (the fail-closed-arming contract), not merely
+   * "some PMS prompt is served". Without this, a rejected oversized routing
+   * reload would leave the operator health gate falsely green.
+   */
+  snapshot_errors: TrackedKey[];
 }
 
 /**
@@ -135,14 +183,27 @@ export async function getCriticalPromptCoverage(
   inflightCoverage = (async (): Promise<CriticalPromptCoverage> => {
     try {
       const statuses = await probeTrackedPrompts(trigger);
-      const keys = statuses.map((s) => ({ key: s.key, source: s.source, version: s.version }));
+      const keys = statuses.map((s) => ({
+        key: s.key,
+        source: s.source,
+        version: s.version,
+        ...(s.pms_task ? { pms_task: s.pms_task } : {}),
+        ...(s.snapshot_error ? { snapshot_error: s.snapshot_error } : {}),
+      }));
       const default_or_error = statuses
         .filter((s) => s.source !== 'pms')
         .map((s) => s.key);
+      // A STALE snapshot (PMS-resolved, but a later rebuild was rejected and the
+      // prior snapshot restored) must also fail coverage: `all_pms` is the
+      // "latest PMS prompt is live" gate, not "some PMS prompt is served".
+      const snapshot_errors = statuses
+        .filter((s) => s.snapshot_error != null)
+        .map((s) => s.key);
       const coverage: CriticalPromptCoverage = {
-        all_pms: default_or_error.length === 0,
+        all_pms: default_or_error.length === 0 && snapshot_errors.length === 0,
         keys,
         default_or_error,
+        snapshot_errors,
       };
       coverageCached = { value: coverage, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
       return coverage;
@@ -152,6 +213,7 @@ export async function getCriticalPromptCoverage(
         all_pms: false,
         keys: TRACKED_KEYS.map((key) => ({ key, source: 'error' as const, version: null })),
         default_or_error: [...TRACKED_KEYS],
+        snapshot_errors: [],
       };
       coverageCached = { value: coverage, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
       return coverage;

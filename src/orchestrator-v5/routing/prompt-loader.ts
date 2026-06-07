@@ -121,7 +121,8 @@ import {
   getDefaultPrompts,
   registerDefaultPrompt,
 } from '../../prompts/loader.js';
-import { mapSource, resolvePublicVersion } from '../../prompts/tracked.js';
+import { mapSource, pmsResolveTaskId, resolvePublicVersion } from '../../prompts/tracked.js';
+import { registerRoutingLiveStatusProvider } from '../../prompts/routing-live-status.js';
 import { recordPromptResolutionObservation } from '../../prompts/resolution-policy.js';
 import { getRuntimeEnv } from '../../config/env-resolver.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
@@ -164,6 +165,28 @@ let cachedSnapshot: RoutingPromptSnapshot | null = null;
 // fire `loadPrompt('routing')` multiple times under request burst (which
 // would also produce duplicate `v5.prompt_resolved` startup telemetry).
 let inflightBuild: Promise<RoutingPromptSnapshot> | null = null;
+// Last build/reload error. Set when a rebuild is REJECTED (e.g. oversized
+// PMS prompt) and the previous snapshot is restored, so health/status can
+// flag that the live snapshot is stale; cleared on every successful build.
+let lastSnapshotError: string | null = null;
+
+// Dependency inversion: publish the LIVE served snapshot to the lower
+// prompts/ readiness + status layer (which must not import this module).
+// Reporting then derives the routing key from what is ACTUALLY served —
+// the guard-applied, atomically-swapped snapshot — instead of a raw,
+// unguarded `loadPrompt('routing')` read of the current PMS row (which
+// would false-green after an oversized-reload rejection).
+registerRoutingLiveStatusProvider(() => {
+  if (!cachedSnapshot) return null;
+  return {
+    source: mapSource(cachedSnapshot.source),
+    version: cachedSnapshot.version,
+    content_hash: cachedSnapshot.raw_hash,
+    content_chars: cachedSnapshot.systemChars,
+    pms_task: pmsResolveTaskId('routing'),
+    snapshot_error: lastSnapshotError,
+  };
+});
 
 /**
  * Same content-preserving normalisation applied by `loadRoutingPrompt`:
@@ -231,9 +254,14 @@ async function doBuildRoutingPromptSnapshot(): Promise<RoutingPromptSnapshot> {
     systemBytes,
   };
   cachedSnapshot = snapshot;
+  lastSnapshotError = null; // successful build → live snapshot is current
   log.info(
     {
       key: 'routing',
+      // The operator-managed PMS task this snapshot resolves from
+      // (alias-aware): `orchestrator`, not a separate `routing` row.
+      // Makes the PMS-backed orchestrator source explicit in ops logs.
+      pms_task: pmsResolveTaskId('routing'),
       source: snapshot.source,
       version: snapshot.version,
       raw_hash: snapshot.raw_hash,
@@ -315,12 +343,17 @@ export async function refreshRoutingPromptSnapshot(): Promise<RoutingPromptSnaps
     const next = await buildRoutingPromptSnapshot();
     return next;
   } catch (err) {
+    // Atomic: restore the prior snapshot AND record why the live snapshot
+    // is now stale, so health/status flag the rejected rebuild instead of
+    // false-greening on the (unguarded) PMS row that was refused here.
     cachedSnapshot = previous;
+    lastSnapshotError = err instanceof Error ? err.message : String(err);
     throw err;
   }
 }
 
-/** Test-only — clears the in-memory snapshot. */
+/** Test-only — clears the in-memory snapshot + stale-error state. */
 export function __resetRoutingPromptSnapshotForTests(): void {
   cachedSnapshot = null;
+  lastSnapshotError = null;
 }
