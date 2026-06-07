@@ -121,7 +121,7 @@ import {
   getDefaultPrompts,
   registerDefaultPrompt,
 } from '../../prompts/loader.js';
-import { mapSource, resolvePublicVersion } from '../../prompts/tracked.js';
+import { mapSource, pmsResolveTaskId, resolvePublicVersion } from '../../prompts/tracked.js';
 import { recordPromptResolutionObservation } from '../../prompts/resolution-policy.js';
 import { getRuntimeEnv } from '../../config/env-resolver.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
@@ -234,6 +234,10 @@ async function doBuildRoutingPromptSnapshot(): Promise<RoutingPromptSnapshot> {
   log.info(
     {
       key: 'routing',
+      // The operator-managed PMS task this snapshot resolves from
+      // (alias-aware): `orchestrator`, not a separate `routing` row.
+      // Makes the PMS-backed orchestrator source explicit in ops logs.
+      pms_task: pmsResolveTaskId('routing'),
       source: snapshot.source,
       version: snapshot.version,
       raw_hash: snapshot.raw_hash,

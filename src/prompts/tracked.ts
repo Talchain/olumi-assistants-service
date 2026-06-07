@@ -68,3 +68,28 @@ export function resolvePublicVersion(
 export function isTrackedKey(key: string): key is TrackedKey {
   return (TRACKED_KEYS as readonly string[]).includes(key);
 }
+
+/**
+ * PMS task-id alias for prompt RESOLUTION (the store lookup key).
+ *
+ * The CEE/V5 routing prompt IS the operator-managed `orchestrator` system
+ * prompt (`olumi_orchestrator_system_prompt_v…`) — not a separate
+ * user-managed prompt. The runtime logical key stays `routing` (so its
+ * bundled default, size guard, and tracked-key reporting are unchanged),
+ * but its PMS lookup resolves the `orchestrator` task so CEE serves the
+ * prompt Paul manages. This mirrors the routing path's MODEL resolution,
+ * which already uses `task_id='orchestrator'` (route-with-tool-use.ts).
+ *
+ * Resolution-only: the DEFAULT fallback deliberately stays the aliased
+ * key's own registered default (`routing` → guard-safe v40), NEVER the
+ * ~57k `orchestrator` v28 default, so a PMS-unavailable boot still passes
+ * the routing [18.5k–22k] size guard.
+ */
+export const PMS_TASK_ALIAS: Partial<Record<CeeTaskId, CeeTaskId>> = {
+  routing: 'orchestrator',
+};
+
+/** The PMS task id used to RESOLVE a prompt for `key` (alias-aware). */
+export function pmsResolveTaskId(key: CeeTaskId): CeeTaskId {
+  return PMS_TASK_ALIAS[key] ?? key;
+}
