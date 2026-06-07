@@ -355,6 +355,11 @@ describe('finalizeChips — pending-bearing protection (#239 re-review)', () => 
     const { chips, report } = finalizeChips([promptDup, resumable]);
     expect(ids(chips)).toEqual(['chip_action_rerun_analysis']);
     expect(report.deduped).toBe(1);
+    // Full-object equality pins that the SURVIVOR is the exact protected chip
+    // (action_type + copy preserved, not rewritten or swapped for the prompt-only
+    // dup) — the pure pass-through contract that
+    // `derivePendingActionsFromFinalizedChips` relies on to read `action_type`.
+    expect(chips).toEqual([resumable]);
   });
 
   it('keeps a pending-bearing what_would_flip chip over a same-label prompt-only duplicate', () => {
@@ -369,7 +374,10 @@ describe('finalizeChips — pending-bearing protection (#239 re-review)', () => 
       message: 'What could change the outcome of this analysis?',
       action_type: 'what_would_flip',
     };
-    expect(ids(finalizeChips([promptDup, resumable]).chips)).toEqual(['chip_action_what_would_flip']);
+    const { chips } = finalizeChips([promptDup, resumable]);
+    expect(ids(chips)).toEqual(['chip_action_what_would_flip']);
+    // Survivor is the exact protected object, action_type intact (see above).
+    expect(chips).toEqual([resumable]);
   });
 
   it('does not budget-trim a pending-bearing chip behind 3 generic suggestions', () => {
