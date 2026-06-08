@@ -307,6 +307,27 @@ describe('buildFlipProposal — PLoT display-scale fixture (Branch A)', () => {
     const res = buildFlipProposal(entries[0]!, DELIVERY_GAP_NODE);
     expect(res.ok).toBe(true);
   });
+
+  it('round-trips the EXACT display-scale payload through the real normaliser (6.055 → model 0.6055)', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry(), DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // The handler applies the exact stored user value, normalising model = raw / cap.
+    const out = replayThroughRealNormaliser(res.proposal.params, 10, 'story_points');
+    expect(out.raw_value).toBeCloseTo(6.055, 6); // exact user value, NOT rounded 6.1
+    expect(out.value).toBeCloseTo(0.6055, 6); // model = 6.055 / cap 10
+  });
+
+  it('display-scale uncapped: stores the exact value as both raw and model (no × cap)', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry({ unit: 'widgets' }), { cap: null, unit: 'widgets' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.proposal.label).toContain('around 6.1 widgets');
+    expect(res.proposal.params).toEqual({ value: 6.055000000000001 });
+    const out = replayThroughRealNormaliser(res.proposal.params, undefined, 'widgets');
+    expect(out.raw_value).toBeCloseTo(6.055, 6);
+    expect(out.value).toBeCloseTo(6.055, 6); // uncapped: model === user
+  });
 });
 
 describe('buildFlipProposal — display/executed invariant', () => {
@@ -387,6 +408,14 @@ describe('buildFlipProposal — display-scale safety', () => {
   it('fails closed when a display value exceeds the cap (would be rejected at execute)', () => {
     expect(buildFlipProposal(plotDeliveryGapEntry({ flip_value: 15 }), DELIVERY_GAP_NODE))
       .toEqual({ ok: false, reason: 'display_value_exceeds_cap' });
+  });
+
+  it('accepts a display value exactly AT the cap (inclusive [0, cap] boundary)', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry({ flip_value: 10 }), DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.proposal.label).toBe('Test Delivery gap (demand minus capacity) at 10 story points');
+    expect(res.proposal.params).toEqual({ value: { value: 10, cap: 10 } });
   });
 
   it('fails closed for a malformed (non-finite) value regardless of scale', () => {
