@@ -16,9 +16,9 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 ## Run metadata
 
 - **Branch:** `claude/charming-sinoussi-7ce0c7`
-- **Harness code SHA at run time:** `6b88e0c9ce6ca21ebc67cedead8e78df7f33b531` (the SHA the replay harness was built from when this pack was produced; the commit that lands this pack into git history is typically one commit ahead — see the committed-by SHA in `git log` for that)
+- **Harness code SHA at run time:** `2e3ecdcbe353e018875e724b4139a51d1c093050` (the SHA the replay harness was built from when this pack was produced; the commit that lands this pack into git history is typically one commit ahead — see the committed-by SHA in `git log` for that)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-06-07T23:52:42.324Z
+- **Started at:** 2026-06-08T09:03:25.744Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
@@ -26,10 +26,10 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 - **Journey:** `branch-a-canonical`
 - **edit_graph_journey_active:** yes (edit_graph dispatch live on staging; assertions active)
 - **branch_a_enforced:** yes (default — PR #236 live on staging; steps 4-8 run + assert)
-- **branch_a_pending_scenario:** yes (default; BRANCH_A_PENDING_SCENARIO on — a DB-confirmed all-null flip state downgrades the step-4 chip-absent failure to a pending-scenario skip)
+- **branch_a_pending_scenario:** yes (default; BRANCH_A_PENDING_SCENARIO on — a DB-confirmed no-usable-flip state (flip_thresholds all-null OR an empty array) downgrades the step-4 chip-absent failure to a pending-scenario skip)
 - **Branch-A pending-scenario rows:** 5 (skipped, NOT failed — staging has no live flip-capable result)
 
-> **Branch A pending-scenario:** staging has no live flip-capable result (run_analysis `flip_thresholds[].flip_value` all null, DB-verified), NOT a harness failure — the #236 emit is enforced deterministically by `branch-a-emit-through-executor.test.ts`.
+> **Branch A pending-scenario:** staging has no live flip-capable result (run_analysis `flip_thresholds` carry no usable flip — all-null or an empty array, DB-verified), NOT a harness failure — the #236 emit is enforced deterministically by `branch-a-emit-through-executor.test.ts`.
 
 ## Deploy confirmation (Phase 2)
 
@@ -39,7 +39,7 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 - **service:** `assistants`
 - **degraded:** false
 - **critical_prompts_pms:** true
-- **elapsed:** 374ms
+- **elapsed:** 243ms
 
 Deploy confirmed: `/healthz` build `9f04975` matches `--expected-build 9f04975`.
 
@@ -55,10 +55,10 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=3 first_chip_label="Run analysis" elapsed=54975ms draft={total:54575,parse:54499,parse_llm:54486,normalise:1,enrich:3,repair:18,repair_fired:false,repair_attempts:0,validation:0,threshold:0,package:44,boundary:8} | — |
-| `2_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=162 chip_count=2 analysis_ready=ready options=4 elapsed=2806ms | — |
-| `3_what_would_flip` | [PASS] passed | v5-runtime | 200 | status=200 text_len=502 labels_checked=4 option_referenced=true elapsed=1046ms | — |
-| `4_flip_proposal_present` | [SKIP] skipped | skipped | — | pending-scenario: staging produced no live flip-capable result — run_analysis flip_thresholds carry no usable flip (DB-verified). Not a harness failure; emit reachability is enforced deterministically by branch-a-emit-through-executor.test.ts. (run_analysis fact flip_thresholds classification=empty (entries=0)) | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=3 first_chip_label="Run analysis" elapsed=58790ms draft={total:58196,parse:58094,parse_llm:56099,normalise:0,enrich:4,repair:80,repair_fired:false,repair_attempts:0,validation:0,threshold:0,package:8,boundary:9} | — |
+| `2_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=161 chip_count=2 analysis_ready=ready options=4 elapsed=4113ms | — |
+| `3_what_would_flip` | [PASS] passed | v5-runtime | 200 | status=200 text_len=566 labels_checked=4 option_referenced=true elapsed=1067ms | — |
+| `4_flip_proposal_present` | [SKIP] skipped | skipped | — | pending-scenario: staging produced no live flip-capable result — run_analysis flip_thresholds carry no usable flip (DB-verified). Not a harness failure; emit reachability is enforced deterministically by branch-a-emit-through-executor.test.ts. (run_analysis fact flip_thresholds classification=all_null (entries=1)) | — |
 | `5_accept_proposal` | [SKIP] skipped | skipped | — | pending-scenario (cascaded from 4_flip_proposal_present): no live flip-capable result | — |
 | `6_db_readback` | [SKIP] skipped | skipped | — | pending-scenario (cascaded from 5_accept_proposal): no live flip-capable result | — |
 | `7_explain_leader_stale` | [SKIP] skipped | skipped | — | pending-scenario (cascaded from 5_accept_proposal): no live flip-capable result | — |
@@ -69,7 +69,7 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 #### `1_draft_graph`
 
 ```
-I've built a first decision model for "Meet Q3 Roadmap Commitments with Scaled Delivery".
+I've built a first decision model for "Deliver Q3 Roadmap Commitments on Time and Within Budget".
 
 Options compared
 • Hire Two Senior Engineers Locally
@@ -78,9 +78,8 @@ Options compared
 • Introduce Tiered Pricing to Fund
 
 What the model is weighing
-• Main trade-off: Hiring and Scaling Budget Allocated balanced against Local Senior Headcount Added
-• Assumption to check: Hybrid local plus offshore pilot
-• Worth a look: Tiered pricing revenue timing
+• Main trade-off: Incremental Hiring Cost balanced against Local Senior Hire Programme
+• Assumption to check: One local senior hire combined with a scoped offshore engagement could balance capacity speed and cost, reducing single-path risk before Q3
 
 Your brief covered the main points; adding detail on the lighter areas would sharpen the comparison.
 
@@ -94,7 +93,7 @@ Chips:
 #### `2_run_analysis`
 
 ```
-Hire Two Senior Engineers Locally currently leads by 65 percentage points, but treat this as provisional: the result is sensitive to Local Senior Headcount Added.
+Hire Two Senior Engineers Locally currently leads by 55 percentage points, but treat this as provisional: the result is sensitive to Local Senior Hire Programme.
 ```
 Chips:
 - `chip_action_explain_results` — **Explain the result** — "Please explain the analysis result in plain language." action_type=`explain_results`
@@ -103,7 +102,7 @@ Chips:
 #### `3_what_would_flip`
 
 ```
-'Hire Two Senior Engineers Locally' currently leads, with a probability of 77%. For 'Continue with Current Team (Status Quo)' to overtake it, the lead of 65 percentage points would need to close. Movement on Local Senior Headcount Added or Local Engineering Talent Market Tightness would shift this result the most. Local Senior Headcount Added very strongly strengthens the lead; Local Engineering Talent Market Tightness moderately weakens the lead. Which of those would you like to explore changing?
+'Hire Two Senior Engineers Locally' currently leads, with a probability of 68%. For 'Engage Offshore Partner' to overtake it, the lead of 55 percentage points would need to close. Movement on Local Senior Hire Programme or Offshore Partner Engagement would shift this result the most. Local Senior Hire Programme very strongly strengthens the lead; Offshore Partner Engagement strongly weakens the lead. The picture appears fragile, so even small adjustments to the strongest drivers could shift which option leads. Which of those would you like to explore changing?
 ```
 
 ## Branch A journey: `branch-a-canonical`
@@ -113,8 +112,8 @@ See per-step `description` fields in [tools/v5-journey-replay/steps.ts](../../to
 ### Step 1 capture
 
 - **Option labels parsed:** `Hire Two Senior Engineers Locally`, `Engage Offshore Partner`, `Continue with Current Team (Status Quo)`, `Introduce Tiered Pricing to Fund Gradual Hiring`
-- **Factor labels parsed:** `Hiring and Scaling Budget Allocated`, `Local Senior Headcount Added`, `Offshore Partner Engaged`, `Local Engineering Talent Market Tightness`, `Current Team Size`
-- **Resolved factor for Step 2:** `Hiring and Scaling Budget Allocated` _(fallback reason: `budget_match`)_
+- **Factor labels parsed:** `Incremental Hiring Cost`, `Local Senior Hire Programme`, `Market Demand for Product`, `Offshore Partner Engagement`, `Current Team Size`, `Tiered Pricing Introduction`
+- **Resolved factor for Step 2:** `Incremental Hiring Cost` _(fallback reason: `first_label`)_
 - **Graph hash at draft (post-Step 1):** _not surfaced on wire envelope_
 
 ### 4b — pinned unit regression (handler-level)
