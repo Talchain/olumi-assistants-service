@@ -325,20 +325,23 @@ export async function runSetFactorValueReadback(
  *     pending-scenario case, NOT a regression)
  *   - any entry whose `flip_value` is a FINITE number → `'has_non_null'`
  *     (a flip existed; if the chip is absent that is an emit regression)
- *   - entries exist but NONE carries a finite `flip_value` → `'all_null'`
- *     (staging produced no flip-capable result — the pending-scenario case)
+ *   - a non-object entry, or a `flip_value` that is PRESENT but neither a
+ *     finite number nor null/undefined (a numeric-looking string `"0.4"`,
+ *     boolean, object, NaN, Infinity) → `'malformed'` (an unexpected shape —
+ *     a real flip may be serialised in a form we don't recognise, so fail
+ *     safe to red; do NOT mask possible PLoT contract drift as "no flip")
+ *   - every entry is a well-formed object with a null/absent `flip_value`
+ *     → `'all_null'` (no flip-capable result — the pending-scenario case)
  *
- * `'empty'` and `'all_null'` are both "no usable flip exists" (pending);
- * only `'absent'` is "cannot tell" (red). They are split so an empty array
- * (common on staging) is not conflated with a missing field.
- *
- * `flip_value` is read defensively (entries may be non-objects); only a
- * `typeof === 'number' && Number.isFinite` value counts as non-null, so a
- * `null`/`undefined`/string `flip_value` is treated as "no flip".
+ * Pending (no usable flip): `'empty'`, `'all_null'`. Red (cannot confirm a
+ * "no flip" verdict): `'absent'`, `'malformed'` (plus `'has_non_null'`,
+ * which is a positive emit-regression signal). Only an explicit
+ * null/undefined `flip_value` on a well-formed entry counts as "no flip"; a
+ * numeric STRING is treated as an unexpected shape, NOT as "no flip".
  */
 export function classifyFlipThresholdsNullness(
   flipThresholds: unknown,
-): 'all_null' | 'has_non_null' | 'empty' | 'absent' {
+): 'all_null' | 'has_non_null' | 'empty' | 'absent' | 'malformed' {
   // Not an array (field missing / wrong shape) → cannot confirm anything
   // about flip-capability; the caller fails safe to red.
   if (!Array.isArray(flipThresholds)) {
@@ -353,13 +356,28 @@ export function classifyFlipThresholdsNullness(
     return 'empty';
   }
   for (const entry of flipThresholds) {
-    if (!isPlainObject(entry)) continue;
+    // A non-object entry is an unexpected shape — a real flip might be hiding
+    // in a form we don't recognise. Fail safe (possible PLoT contract drift);
+    // do NOT silently treat it as "no flip".
+    if (!isPlainObject(entry)) {
+      return 'malformed';
+    }
     const flip = entry.flip_value;
+    // Explicit "no flip for this factor": the key is null or absent/undefined.
+    if (flip === null || flip === undefined) {
+      continue;
+    }
+    // A finite number is a real flip → emit-regression signal if no chip.
     if (typeof flip === 'number' && Number.isFinite(flip)) {
       return 'has_non_null';
     }
+    // Anything else PRESENT — a numeric-looking string ("0.4"), boolean,
+    // object, NaN or Infinity — is an unexpected shape. A real flip may be
+    // serialised in a form we don't recognise (PLoT contract drift), so fail
+    // safe to red rather than mask it as "no flip".
+    return 'malformed';
   }
-  // Entries exist but none carried a finite flip_value.
+  // Every entry was a well-formed object with a null/absent flip_value.
   return 'all_null';
 }
 
@@ -380,6 +398,10 @@ export function classifyFlipThresholdsNullness(
  *                        common on staging).
  *   - `'has_non_null'` — a finite flip_value existed → chip-absent is an
  *                        emit regression (do NOT mask) → red.
+ *   - `'malformed'`    — a non-object entry, or a flip_value that is neither a
+ *                        finite number nor null/undefined (numeric string,
+ *                        boolean, NaN/Infinity, object) → unexpected shape /
+ *                        possible PLoT contract drift → fail-safe to red.
  *   - `'absent'`       — `flip_thresholds` missing / not an array → cannot
  *                        confirm a flip-capable result; fail-safe to red.
  *   - `'no_facts'`     — no `run_analysis` fact for the scenario → cannot
@@ -387,14 +409,15 @@ export function classifyFlipThresholdsNullness(
  *   - `'error'`        — missing creds / query error / exception → cannot
  *                        confirm; fail-safe to red.
  *
- * `'all_null'` and `'empty'` are the pending-scenario statuses; the rest are
- * red. The service-role key is NEVER echoed in `detail`.
+ * `'all_null'` and `'empty'` are the pending-scenario statuses (no usable
+ * flip); the rest (`'has_non_null'`, `'malformed'`, `'absent'`, `'no_facts'`,
+ * `'error'`) are red. The service-role key is NEVER echoed in `detail`.
  */
 export async function readFlipThresholdsNullness(
   scenarioId: string,
   opts?: { readonly secret?: string },
 ): Promise<{
-  status: 'all_null' | 'has_non_null' | 'empty' | 'absent' | 'no_facts' | 'error';
+  status: 'all_null' | 'has_non_null' | 'empty' | 'absent' | 'malformed' | 'no_facts' | 'error';
   detail: string;
 }> {
   const url = (process.env.SUPABASE_URL ?? '').trim();

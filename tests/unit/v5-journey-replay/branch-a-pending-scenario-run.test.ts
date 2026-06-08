@@ -194,4 +194,19 @@ describe('branch-a-canonical pending-scenario split (enforced + --db-readback)',
     expect(pack).toMatch(/cannot confirm pending-scenario/);
     expect(pack).not.toMatch(/`4_flip_proposal_present` \| \[SKIP\]/);
   });
+
+  it('chip absent + DB read-back malformed (unexpected shape) → step 4 RED (fail-safe, exit 1)', async () => {
+    // `malformed` = a non-object entry or a non-number/non-null flip_value
+    // (e.g. numeric-string "0.4") → possible PLoT contract drift; a real flip
+    // may be hiding in an unrecognised shape. Must fail safe to red, NOT mask
+    // as a pending-scenario.
+    ctl.flip = { status: 'malformed', detail: 'unexpected entry shape (numeric-string flip_value)' };
+    stubChipAbsent();
+    await expect(run()).rejects.toMatchObject({ name: 'ProcessExitError', code: 1 });
+
+    const pack = writes[0]!.content;
+    expect(pack).toMatch(/`4_flip_proposal_present` \| \[FAIL\] failed/);
+    expect(pack).toMatch(/unexpected flip_thresholds entry shape/);
+    expect(pack).not.toMatch(/`4_flip_proposal_present` \| \[SKIP\]/);
+  });
 });

@@ -53,7 +53,7 @@ export interface JourneyStep {
    * steps are ENFORCED by default; the harness records the step as `skipped`
    * (with `requires_branch_a`) only when `BRANCH_A_DISABLE=true` (emergency
    * opt-out) or when downgraded to a pending-scenario skip (chip-absent +
-   * DB-confirmed all-null flips).
+   * DB-confirmed no usable flip — flip_thresholds all-null or empty).
    */
   readonly requires_branch_a?: boolean;
   /**

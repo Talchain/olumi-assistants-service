@@ -56,9 +56,10 @@ export interface EvidenceHeader {
    * Branch A pending-scenario mode observed at run time (env
    * `BRANCH_A_PENDING_SCENARIO`, default true). When true, a step-4
    * `branch_a_flip_proposal_chip_absent` failure that a `--db-readback`
-   * confirms is the all-null state is downgraded to a pending-scenario
-   * skip (steps 5-8 cascade as pending-scenario too). When false, that
-   * failure stays red (full enforcement). Optional for backwards-compat.
+   * confirms is a no-usable-flip state (flip_thresholds all-null or empty)
+   * is downgraded to a pending-scenario skip (steps 5-8 cascade as
+   * pending-scenario too). When false, that failure stays red (full
+   * enforcement). Optional for backwards-compat.
    */
   readonly branch_a_pending_scenario?: boolean;
   /**
@@ -286,8 +287,9 @@ export function renderEvidencePack(
     lines.push(
       `- **branch_a_pending_scenario:** ${
         header.branch_a_pending_scenario
-          ? 'yes (default; BRANCH_A_PENDING_SCENARIO on — a DB-confirmed all-null flip ' +
-            'state downgrades the step-4 chip-absent failure to a pending-scenario skip)'
+          ? 'yes (default; BRANCH_A_PENDING_SCENARIO on — a DB-confirmed ' +
+            'no-usable-flip state (flip_thresholds all-null OR an empty array) ' +
+            'downgrades the step-4 chip-absent failure to a pending-scenario skip)'
           : 'no (BRANCH_A_PENDING_SCENARIO=false — chip-absent stays red; full enforcement)'
       }`,
     );
@@ -300,9 +302,9 @@ export function renderEvidencePack(
       lines.push('');
       lines.push(
         '> **Branch A pending-scenario:** staging has no live flip-capable result ' +
-          '(run_analysis `flip_thresholds[].flip_value` all null, DB-verified), ' +
-          'NOT a harness failure — the #236 emit is enforced deterministically by ' +
-          '`branch-a-emit-through-executor.test.ts`.',
+          '(run_analysis `flip_thresholds` carry no usable flip — all-null or an ' +
+          'empty array, DB-verified), NOT a harness failure — the #236 emit is ' +
+          'enforced deterministically by `branch-a-emit-through-executor.test.ts`.',
       );
     }
     if (header.branch_a_flip_capable_detected === true) {

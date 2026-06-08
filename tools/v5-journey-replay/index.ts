@@ -558,7 +558,7 @@ async function run(): Promise<void> {
     console.log(
       `  pending_scenario = ${
         isBranchAPendingScenario()
-          ? 'on (default; chip-absent + DB-confirmed all-null flips → pending-scenario skip, not red)'
+          ? 'on (default; chip-absent + DB-confirmed no usable flip (all-null or empty) → pending-scenario skip, not red)'
           : 'off via BRANCH_A_PENDING_SCENARIO=false (chip-absent stays red — full enforcement)'
       }`,
     );
@@ -741,7 +741,7 @@ async function run(): Promise<void> {
       if (step.depends_on && notPassed.has(step.depends_on)) {
         // Pending-scenario-aware cascade: when the prerequisite was itself
         // downgraded to a pending-scenario skip (step 4 chip-absent +
-        // DB-confirmed all-null flips), this dependent is NOT a regression
+        // DB-confirmed no usable flip — all-null or empty), this dependent is NOT a regression
         // either — propagate the pending-scenario marker so the evidence
         // pack counts it as a pending-scenario skip rather than a generic
         // prerequisite miss. Otherwise fall back to the generic skip.
@@ -802,9 +802,10 @@ async function run(): Promise<void> {
 
         // Step-4 failure. ONLY the chip-absent failure is eligible for the
         // pending-scenario downgrade, and ONLY when pending-scenario mode is
-        // on AND a DB read-back is available to distinguish the all-null
-        // pending-scenario from an emit regression. Every other failure
-        // (no value / non-whole value / no captured response) stays red.
+        // on AND a DB read-back is available to distinguish the no-usable-flip
+        // (all-null or empty) pending-scenario from an emit regression. Every
+        // other failure (no value / non-whole value / no captured response)
+        // stays red.
         if (
           assertion.failing_contract === 'branch_a_flip_proposal_chip_absent' &&
           pendingScenarioMode &&
@@ -839,13 +840,17 @@ async function run(): Promise<void> {
             pendingScenarioSteps.add(step.name);
             continue;
           }
-          // Remaining statuses → RED. A non-null flip means the chip SHOULD
-          // have emitted (emit regression); absent/no_facts/error mean we
-          // cannot confirm a flip-capable result → fail-safe to red.
+          // Remaining statuses → RED. has_non_null = a flip existed but no
+          // chip (emit regression); malformed = an unexpected flip_thresholds
+          // entry shape (possible PLoT contract drift — a real flip may be
+          // serialised in a form we don't recognise); absent/no_facts/error =
+          // we cannot confirm a "no flip" verdict → fail-safe to red.
           const why =
             rb.status === 'has_non_null'
               ? 'emit regression — a non-null flip_value existed but no proposal chip emitted'
-              : `cannot confirm pending-scenario (db read-back status=${rb.status}) — failing safe`;
+              : rb.status === 'malformed'
+                ? 'unexpected flip_thresholds entry shape (possible PLoT contract drift) — failing safe'
+                : `cannot confirm pending-scenario (db read-back status=${rb.status}) — failing safe`;
           rows.push({
             step: step.name,
             status: 'failed',
@@ -878,7 +883,8 @@ async function run(): Promise<void> {
             failing_contract: assertion.failing_contract,
             evidence:
               `${assertion.evidence} pass --db-readback to distinguish pending-scenario ` +
-              '(run_analysis flip_thresholds[].flip_value all null) from an emit regression.',
+              '(run_analysis flip_thresholds carry no usable flip — all-null or empty) ' +
+              'from an emit regression.',
           };
           pushBranchARow(step.name, augmented);
           continue;

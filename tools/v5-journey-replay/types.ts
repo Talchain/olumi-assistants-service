@@ -67,7 +67,8 @@ export interface EvidenceRow {
    * (additive, true-only) so downstream tooling can count pending-scenario
    * skips distinctly from cascade misses and from emit regressions (which
    * stay `failed`). Gated behind `BRANCH_A_PENDING_SCENARIO` (default true)
-   * and only set when `--db-readback` confirms the all-null state.
+   * and only set when `--db-readback` confirms a no-usable-flip state
+   * (flip_thresholds all-null or empty).
    */
   readonly pending_scenario?: true;
   /**
