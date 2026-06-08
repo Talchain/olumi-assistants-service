@@ -9,6 +9,7 @@ import {
   type FlipEntry,
   type FactorNodeInfo,
 } from '../flip-proposal.js';
+import { finalizeChips } from '../chip-finalizer.js';
 import { getDefaultRegistry } from '../../tools/registry.js';
 import type { ProposedChangeContext } from '../../types/proposed-change.js';
 // Round-trip is proven against the REAL handler normalisation path.
@@ -130,8 +131,13 @@ describe('buildFlipProposal — skips rather than improvising', () => {
   it('skips a non-positive cap (real data had cap=0)', () => {
     expect(buildFlipProposal(entry(), { cap: 0 })).toEqual({ ok: false, reason: 'cap_non_positive' });
   });
-  it('skips a model value outside [0,1] for a capped factor', () => {
-    expect(buildFlipProposal(entry({ flip_value: 1.5 }), { cap: 50 })).toEqual({ ok: false, reason: 'model_value_out_of_range' });
+  it('skips an EXPLICIT model value outside [0,1] for a capped factor', () => {
+    expect(buildFlipProposal(entry({ flip_value: 1.5, value_scale: 'model' }), { cap: 50 })).toEqual({ ok: false, reason: 'model_value_out_of_range' });
+  });
+  it('fails closed (ambiguous_scale) for a capped value outside [0,1] with NO value_scale', () => {
+    // Pre-contract data omitted value_scale; a capped value >1 could be an
+    // unsignalled display value, so we refuse to guess the scale.
+    expect(buildFlipProposal(entry({ flip_value: 1.5 }), { cap: 50 })).toEqual({ ok: false, reason: 'ambiguous_scale' });
   });
   it('skips when the inverted user-scale value is not a whole number (no round-and-execute)', () => {
     // flip 0.41 * cap 50 = 20.5 -> not an integer -> skip rather than round to 20/21.
@@ -242,5 +248,241 @@ describe('buildFlipProposalEmit — end-to-end emit (chip + apply_proposed_chang
   it('returns no_proposal when enrichment has no flip_thresholds', () => {
     expect(buildFlipProposalEmit({}, () => ({ cap: 50 }), ctx()).status).toBe('no_proposal');
     expect(buildFlipProposalEmit(null, () => ({ cap: 50 }), ctx()).status).toBe('no_proposal');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Branch A value-scale fix: consume PLoT display-scale flip values.
+// PLoT 964fa37 emits flip_value in user/display units (e.g. 6.055 story_points,
+// value_scale "display") — not the legacy model-scale [0,1].
+// ---------------------------------------------------------------------------
+
+/** The real PLoT delivery_gap flip-threshold entry (build 964fa37) shape. */
+function plotDeliveryGapEntry(over: Partial<FlipEntry> = {}): FlipEntry {
+  return {
+    factor_id: 'delivery_gap',
+    factor_label: 'Delivery gap (demand minus capacity)',
+    flip_value: 6.055000000000001,
+    direction: 'increase',
+    unit: 'story_points',
+    value_scale: 'display',
+    ...over,
+  };
+}
+const DELIVERY_GAP_NODE: FactorNodeInfo = { cap: 10, unit: 'story_points' };
+
+describe('buildFlipProposal — PLoT display-scale fixture (Branch A)', () => {
+  it('emits a proposal for flip_value 6.055 story_points (value_scale display, cap 10)', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry(), DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Chip copy: approximate, honest "around" wording, humanised unit.
+    expect(res.proposal.label).toBe(
+      'Test Delivery gap (demand minus capacity) at around 6.1 story points',
+    );
+    expect(res.proposal.message).toBe(
+      'Check whether Delivery gap (demand minus capacity) at around 6.1 story points changes the result.',
+    );
+    // Action payload stores the EXACT numeric value (not the rounded 6.1).
+    expect(res.proposal.params).toEqual({ value: { value: 6.055000000000001, cap: 10 } });
+    expect(res.proposal.target_entity_ids).toEqual(['delivery_gap']);
+  });
+
+  it('reads value_scale from the nested margin_sensitivity.value_scale (current PLoT shape)', () => {
+    const enrichment = {
+      flip_thresholds: [
+        {
+          factor_id: 'delivery_gap',
+          factor_label: 'Delivery gap (demand minus capacity)',
+          flip_value: 6.055000000000001,
+          direction: 'increase',
+          unit: 'story_points',
+          margin_sensitivity: { movement: 'flipped', value_scale: 'display' },
+        },
+      ],
+    };
+    const entries = readFlipEntries(enrichment);
+    expect(entries[0]?.value_scale).toBe('display');
+    // …and that scale flows through to a successful build.
+    const res = buildFlipProposal(entries[0]!, DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+  });
+
+  it('round-trips the EXACT display-scale payload through the real normaliser (6.055 → model 0.6055)', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry(), DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // The handler applies the exact stored user value, normalising model = raw / cap.
+    const out = replayThroughRealNormaliser(res.proposal.params, 10, 'story_points');
+    expect(out.raw_value).toBeCloseTo(6.055, 6); // exact user value, NOT rounded 6.1
+    expect(out.value).toBeCloseTo(0.6055, 6); // model = 6.055 / cap 10
+  });
+
+  it('display-scale uncapped: stores the exact value as both raw and model (no × cap)', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry({ unit: 'widgets' }), { cap: null, unit: 'widgets' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.proposal.label).toContain('around 6.1 widgets');
+    expect(res.proposal.params).toEqual({ value: 6.055000000000001 });
+    const out = replayThroughRealNormaliser(res.proposal.params, undefined, 'widgets');
+    expect(out.raw_value).toBeCloseTo(6.055, 6);
+    expect(out.value).toBeCloseTo(6.055, 6); // uncapped: model === user
+  });
+});
+
+describe('buildFlipProposal — display/executed invariant', () => {
+  it('uses "around" only when the display rounds away from the exact payload value', () => {
+    // 6.055 rounds to 6.1 → approximate wording, exact payload preserved.
+    const approxRes = buildFlipProposal(plotDeliveryGapEntry(), DELIVERY_GAP_NODE);
+    expect(approxRes.ok).toBe(true);
+    if (!approxRes.ok) return;
+    expect(approxRes.proposal.label).toContain('around 6.1 story points');
+    expect((approxRes.proposal.params as { value: { value: number } }).value.value).toBeCloseTo(6.055, 6);
+
+    // A display value that needs no rounding is stated EXACTLY (no "around").
+    const exactRes = buildFlipProposal(plotDeliveryGapEntry({ flip_value: 6 }), DELIVERY_GAP_NODE);
+    expect(exactRes.ok).toBe(true);
+    if (!exactRes.ok) return;
+    expect(exactRes.proposal.label).toBe('Test Delivery gap (demand minus capacity) at 6 story points');
+    expect(exactRes.proposal.label).not.toContain('around');
+    expect(exactRes.proposal.params).toEqual({ value: { value: 6, cap: 10 } });
+  });
+
+  it('never shows the rounded number as if exact while applying a different value', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry(), DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const payload = (res.proposal.params as { value: { value: number } }).value.value;
+    // Displayed 6.1 ≠ executed 6.055 → the copy MUST carry the "around" hedge.
+    expect(res.proposal.label).toMatch(/around 6\.1/);
+    expect(payload).not.toBe(6.1);
+    expect(payload).toBeCloseTo(6.055, 6);
+  });
+});
+
+describe('buildFlipProposal — legacy/model-scale compatibility', () => {
+  it('keeps explicit model-scale values working (0.4 × cap 50 = 20)', () => {
+    const res = buildFlipProposal(
+      { factor_id: 'fac_x', factor_label: 'Engineering Capacity', flip_value: 0.4, unit: 'engineers', value_scale: 'model' },
+      { cap: 50, unit: 'engineers' },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.proposal.label).toBe('Test Engineering Capacity at 20 engineers');
+    expect(res.proposal.params).toEqual({ value: { value: 20, cap: 50 } });
+  });
+
+  it('treats an absent value_scale in [0,1] as legacy model-scale (backward compatible)', () => {
+    const res = buildFlipProposal({ factor_id: 'f', factor_label: 'Cap', flip_value: 0.3, unit: '%' }, { cap: 100, unit: '%' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.proposal.label).toContain('30%');
+  });
+
+  it('fails closed for an unrecognised value_scale', () => {
+    expect(buildFlipProposal(plotDeliveryGapEntry({ value_scale: 'percentage_points' }), DELIVERY_GAP_NODE))
+      .toEqual({ ok: false, reason: 'ambiguous_scale' });
+  });
+});
+
+describe('buildFlipProposal — display-scale safety', () => {
+  it('never leaks the raw model-scale decimal into the copy', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry(), DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    for (const s of [res.proposal.label, res.proposal.message]) {
+      // model value would be 6.055/10 = 0.6055 — must NOT appear.
+      expect(s).not.toContain('0.6');
+      expect(s).not.toMatch(/0\.\d/); // no bare normalised decimal
+    }
+  });
+
+  it('renders story_points as a unit, never as a percentage', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry(), DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.proposal.label).toContain('story points');
+    expect(res.proposal.label).not.toContain('%');
+  });
+
+  it('fails closed when a display value exceeds the cap (would be rejected at execute)', () => {
+    expect(buildFlipProposal(plotDeliveryGapEntry({ flip_value: 15 }), DELIVERY_GAP_NODE))
+      .toEqual({ ok: false, reason: 'display_value_exceeds_cap' });
+  });
+
+  it('accepts a display value exactly AT the cap (inclusive [0, cap] boundary)', () => {
+    const res = buildFlipProposal(plotDeliveryGapEntry({ flip_value: 10 }), DELIVERY_GAP_NODE);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.proposal.label).toBe('Test Delivery gap (demand minus capacity) at 10 story points');
+    expect(res.proposal.params).toEqual({ value: { value: 10, cap: 10 } });
+  });
+
+  it('fails closed for a malformed (non-finite) value regardless of scale', () => {
+    expect(buildFlipProposal(plotDeliveryGapEntry({ flip_value: Number.NaN }), DELIVERY_GAP_NODE))
+      .toEqual({ ok: false, reason: 'no_flip_value' });
+  });
+});
+
+describe('buildFlipProposalEmit — display-scale chip survives #239 finalisation', () => {
+  const emitCtx = (): ProposedChangeContext => ({
+    scenario_id: '22222222-2222-4222-8222-222222222222',
+    graph_hash: 'graphhashabcd',
+    emitted_at_iso: '2026-06-08T00:00:00.000Z',
+    registry: getDefaultRegistry(),
+  });
+
+  it('emits a pending-bearing proposal chip with the exact payload, preserved by finalizeChips', () => {
+    const enrichment = {
+      flip_thresholds: [
+        {
+          factor_id: 'delivery_gap',
+          factor_label: 'Delivery gap (demand minus capacity)',
+          flip_value: 6.055000000000001,
+          direction: 'increase',
+          unit: 'story_points',
+          margin_sensitivity: { value_scale: 'display' },
+        },
+      ],
+    };
+    const lookup = (id: string): FactorNodeInfo | undefined =>
+      id === 'delivery_gap' ? DELIVERY_GAP_NODE : undefined;
+    const res = buildFlipProposalEmit(enrichment, lookup, emitCtx());
+    expect(res.status).toBe('emitted');
+    if (res.status !== 'emitted') return;
+
+    // Exact value lives in the pending payload (NOT the rounded display).
+    const patch = (res.pending.action as unknown as { inline_patch: { params: Record<string, unknown> } }).inline_patch;
+    expect(patch.params).toEqual({ value: { value: 6.055000000000001, cap: 10 } });
+    expect(res.chip.label).toContain('around 6.1 story points');
+
+    // #239 finaliser: the validated proposal chip must survive untouched —
+    // not dropped, deduped, trimmed, or rewritten.
+    const { chips } = finalizeChips([res.chip]);
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toEqual(res.chip); // id + label + message + action_type intact
+    expect(chips[0]!.id).toBe(res.chip.id);
+  });
+
+  it('emits NO pending when the factor label carries an unsafe decimal (egress would drop the chip)', () => {
+    // A high-precision decimal interpolated from the factor label would be
+    // dropped at egress by the #239 raw-decimal rule; the emit must fail closed
+    // so no orphan apply_proposed_change pending is persisted without a chip.
+    const enrichment = {
+      flip_thresholds: [
+        {
+          factor_id: 'fac_conf',
+          factor_label: 'Confidence 0.4732',
+          flip_value: 6.055000000000001,
+          direction: 'increase',
+          unit: 'story_points',
+          margin_sensitivity: { value_scale: 'display' },
+        },
+      ],
+    };
+    const lookup = (): FactorNodeInfo => DELIVERY_GAP_NODE;
+    const res = buildFlipProposalEmit(enrichment, lookup, emitCtx());
+    expect(res.status).toBe('unsafe_copy');
+    expect(res.status).not.toBe('emitted'); // no chip AND no pending materialised
   });
 });
