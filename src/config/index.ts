@@ -372,6 +372,14 @@ const ConfigSchema = z.object({
     // the deterministic PLoT analysis immediately and `v5.decision_review.skipped`
     // fires with reason `autofire_disabled`. Env: V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW.
     runAnalysisAwaitDecisionReview: booleanString.default(false),
+    // Fixture-only deterministic analysis settings (Branch A acceptance lane).
+    // When set, run_analysis forwards `seed` / `n_samples` to PLoT `/v2/run`
+    // so a known flip can be reproduced deterministically. When UNSET (the
+    // production default — unchanged), the `/v2/run` body omits both and PLoT
+    // uses its own random seed. No graph-derived production seed here.
+    // Env: CEE_ANALYSIS_SEED / CEE_ANALYSIS_N_SAMPLES.
+    analysisSeed: z.coerce.number().int().optional(),
+    analysisNSamples: z.coerce.number().int().positive().optional(),
     optionsFeatureVersion: z.string().optional(),
     explainFeatureVersion: z.string().optional(),
     evidenceHelperFeatureVersion: z.string().optional(),
@@ -764,6 +772,9 @@ function parseConfig(): Config {
       decisionReviewEnabled: env.CEE_DECISION_REVIEW_ENABLED,
       decisionReviewRateLimitRpm: env.CEE_DECISION_REVIEW_RATE_LIMIT_RPM,
       runAnalysisAwaitDecisionReview: env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW,
+      // Fixture-only deterministic analysis settings (omitted in production).
+      analysisSeed: env.CEE_ANALYSIS_SEED,
+      analysisNSamples: env.CEE_ANALYSIS_N_SAMPLES,
       optionsFeatureVersion: env.CEE_OPTIONS_FEATURE_VERSION,
       explainFeatureVersion: env.CEE_EXPLAIN_FEATURE_VERSION,
       evidenceHelperFeatureVersion: env.CEE_EVIDENCE_HELPER_FEATURE_VERSION,

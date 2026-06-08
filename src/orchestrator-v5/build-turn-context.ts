@@ -45,6 +45,7 @@ import {
 import { deriveAnalysisFreshness } from './context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
+import { config } from '../config/index.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
 import { SessionReadError, type SessionStore } from './session/store.js';
@@ -220,6 +221,16 @@ export interface RunAnalysisScenarioSnapshot {
    * so `runAnalysisHandler` can attach without a second graph parse.
    */
   readonly goal_constraints?: unknown;
+  /**
+   * Branch A fixture lane: deterministic analysis settings. Populated ONLY
+   * when `CEE_ANALYSIS_SEED` / `CEE_ANALYSIS_N_SAMPLES` are set; the handler
+   * forwards them to the PLoT `/v2/run` body so a known flip can be
+   * reproduced. Absent in production — omitted from the request, PLoT keeps
+   * its own random seed. (Mirrors the `seed?`/`n_samples?` passthrough on the
+   * handler's RunAnalysisScenarioSnapshot.)
+   */
+  readonly seed?: number;
+  readonly n_samples?: number;
   /**
    * V5 state-trust: the RAW persisted graph as stored in
    * `scenarios.graph` BEFORE GraphV3.safeParse. This is the same shape
@@ -920,6 +931,17 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // run-analysis can use the existing optional-field idiom.
     ...(parsedGraph.data.goal_constraints !== undefined
       ? { goal_constraints: parsedGraph.data.goal_constraints }
+      : {}),
+    // Branch A fixture lane: forward deterministic analysis settings ONLY when
+    // explicitly configured (CEE_ANALYSIS_SEED / CEE_ANALYSIS_N_SAMPLES). When
+    // unset (the production default), both stay absent so the handler omits
+    // them from the PLoT `/v2/run` body — request shape is byte-identical to
+    // today and PLoT keeps its own random seed. The requested values then
+    // round-trip into evidence via `enrichment.meta.seed_used` / `n_samples`,
+    // which the persisted run_analysis fact carries verbatim.
+    ...(config.cee.analysisSeed !== undefined ? { seed: config.cee.analysisSeed } : {}),
+    ...(config.cee.analysisNSamples !== undefined
+      ? { n_samples: config.cee.analysisNSamples }
       : {}),
   };
 }

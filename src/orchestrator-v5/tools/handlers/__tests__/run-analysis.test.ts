@@ -864,6 +864,42 @@ describe('run_analysis handler — PLoT payload construction', () => {
     expect(payload.n_samples).toBe(2000);
     expect(payload.goal_constraints).toEqual({ threshold: 0.5 });
   });
+
+  it('records the requested seed in evidence — requested seed matches the echoed enrichment.meta.seed_used', async () => {
+    // Fixture lane: the snapshot carries seed/n_samples (set via config), the
+    // handler forwards them to /v2/run, and the (mock) PLoT echoes seed_used +
+    // n_samples. The handler persists `enrichment` byte-for-byte, so the
+    // run_analysis fact's enrichment.meta.seed_used IS the recorded
+    // requested-and-used seed — provable against the forwarded request.
+    const echoed = JSON.parse(JSON.stringify(happyFixture)) as Record<string, unknown>;
+    echoed.meta = {
+      ...((echoed.meta as Record<string, unknown> | undefined) ?? {}),
+      seed_used: '4242',
+      n_samples: 1500,
+    };
+    const plotClient = makePlotClient(echoed as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(makeScenarioSnapshot({ seed: 4242, n_samples: 1500 })),
+    });
+    const outcome = await handler(makeInvocation());
+
+    // 1. requested settings were forwarded to the /v2/run body
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(payload.seed).toBe(4242);
+    expect(payload.n_samples).toBe(1500);
+
+    // 2. evidence: the persisted run_analysis fact carries the echoed
+    //    seed_used / n_samples (round-trip into enrichment.meta)
+    const fact = outcome.handler_facts[0]! as {
+      result: { enrichment: { meta?: { seed_used?: unknown; n_samples?: unknown } } };
+    };
+    expect(fact.result.enrichment.meta?.seed_used).toBe('4242');
+    expect(fact.result.enrichment.meta?.n_samples).toBe(1500);
+
+    // 3. requested seed matches the echoed seed_used (the provable round-trip)
+    expect(String(payload.seed)).toBe(fact.result.enrichment.meta?.seed_used);
+  });
 });
 
 // ---------------------------------------------------------------------------
