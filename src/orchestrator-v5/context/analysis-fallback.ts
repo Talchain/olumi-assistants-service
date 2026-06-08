@@ -234,12 +234,16 @@ function deriveTopFragileEdgesFromTopLevel(
     ranked.push({ edge: { from_label: fromLabel, to_label: toLabel }, score });
   }
 
-  ranked.sort(
-    (a, b) =>
-      b.score - a.score ||
+  // Explicit comparator (NOT `b.score - a.score`): scores can be -Infinity
+  // when switch_probability is absent, and `-Infinity - -Infinity` is NaN.
+  // Compare scores directly, then fall back to a deterministic label tiebreak.
+  ranked.sort((a, b) => {
+    if (a.score !== b.score) return a.score > b.score ? -1 : 1;
+    return (
       a.edge.from_label.localeCompare(b.edge.from_label) ||
-      a.edge.to_label.localeCompare(b.edge.to_label),
-  );
+      a.edge.to_label.localeCompare(b.edge.to_label)
+    );
+  });
   return ranked.slice(0, 3).map((r) => r.edge);
 }
 

@@ -29,13 +29,14 @@ vi.mock('../../../config/index.js', async () => {
   };
 });
 
-import type { SessionTurn } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, SessionTurn } from '@talchain/schemas/orchestrator';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 import { log } from '../../../utils/telemetry.js';
 
 import type { AnalysisResponseSummary } from '../../../orchestrator/context/analysis-compact.js';
+import { buildAnalysisFromPriorFacts } from '../analysis-fallback.js';
 import {
   assembleContextPack,
   CONTEXT_PACK_RECENT_TURNS_CAP,
@@ -140,6 +141,48 @@ describe('assembleContextPack', () => {
     // projection at all (not "present and null") so Sonnet's context
     // doesn't carry the legacy fallback semantic.
     expect('staleness_reason' in (pack.analysis as object)).toBe(false);
+  });
+
+  it('end-to-end seam: TOP-LEVEL staging fragile edges flow through buildAnalysisFromPriorFacts into pack.analysis.fragile_edges', () => {
+    // Guards the WHOLE fresh-path chain — derive (buildAnalysisFromPriorFacts)
+    // → project (projectAnalysis inside assembleContextPack) — against the real
+    // staging V2 shape: robustness.fragile_edges at the envelope top level,
+    // `option_comparison` (no `results`), inline labels, no top-level graph.
+    const stagingFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-0000000000fe',
+        leading_option_id: 'opt_hire_local',
+        win_probabilities: { opt_hire_local: 0.763, opt_status_quo: 0.115 },
+        summary: 'Prior run',
+        enrichment: {
+          meta: { seed_used: 7, n_samples: 1500, response_hash: 'h-seam' },
+          option_comparison: [
+            { option_id: 'opt_hire_local', option_label: 'Hire Two Senior Engineers Locally', win_probability: 0.763 },
+            { option_id: 'opt_status_quo', option_label: 'Continue with Current Team (Status Quo)', win_probability: 0.115 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { edge_id: 'out_delivery_capacity->goal_q3_delivery', from_id: 'out_delivery_capacity', to_id: 'goal_q3_delivery', from_label: 'Q3 Roadmap Delivery Capacity', to_label: 'Deliver Q3 Roadmap Commitments on Time and Within Budget', switch_probability: 0.228, severity: 'warning' },
+              { edge_id: 'fac_local_hire->out_delivery_capacity', from_id: 'fac_local_hire', to_id: 'out_delivery_capacity', from_label: 'Local Senior Hire', to_label: 'Q3 Roadmap Delivery Capacity', switch_probability: 0.24, severity: 'warning' },
+            ],
+          },
+          analysis_status: 'complete',
+        },
+      },
+    } as unknown as HandlerFact;
+
+    const summary = buildAnalysisFromPriorFacts([stagingFact]);
+    expect(summary).not.toBeNull();
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], analysis: summary });
+    // Highest switch_probability edge (0.24) leads — parity with m1_coaching.
+    expect(pack.analysis?.fragile_edges?.[0]).toEqual({
+      from_label: 'Local Senior Hire',
+      to_label: 'Q3 Roadmap Delivery Capacity',
+    });
   });
 
   it('returns null analysis when the caller passes null explicitly', () => {
