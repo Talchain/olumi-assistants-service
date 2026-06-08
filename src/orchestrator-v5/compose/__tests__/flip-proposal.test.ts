@@ -434,4 +434,26 @@ describe('buildFlipProposalEmit — display-scale chip survives #239 finalisatio
     expect(chips[0]).toEqual(res.chip); // id + label + message + action_type intact
     expect(chips[0]!.id).toBe(res.chip.id);
   });
+
+  it('emits NO pending when the factor label carries an unsafe decimal (egress would drop the chip)', () => {
+    // A high-precision decimal interpolated from the factor label would be
+    // dropped at egress by the #239 raw-decimal rule; the emit must fail closed
+    // so no orphan apply_proposed_change pending is persisted without a chip.
+    const enrichment = {
+      flip_thresholds: [
+        {
+          factor_id: 'fac_conf',
+          factor_label: 'Confidence 0.4732',
+          flip_value: 6.055000000000001,
+          direction: 'increase',
+          unit: 'story_points',
+          margin_sensitivity: { value_scale: 'display' },
+        },
+      ],
+    };
+    const lookup = (): FactorNodeInfo => DELIVERY_GAP_NODE;
+    const res = buildFlipProposalEmit(enrichment, lookup, emitCtx());
+    expect(res.status).toBe('unsafe_copy');
+    expect(res.status).not.toBe('emitted'); // no chip AND no pending materialised
+  });
 });

@@ -206,6 +206,37 @@ describe('emitProposedChange — safety filter', () => {
     );
     expect(out.status).toBe('unsafe_copy');
   });
+
+  // Raw-decimal parity with the egress chip-finaliser: a proposal whose copy
+  // carries an unsafe decimal must be REFUSED here so the egress chip-drop can
+  // never leave an explicit apply_proposed_change pending without a chip.
+  it('refuses to emit a high-precision raw decimal in the label (egress would drop the chip → orphan pending)', () => {
+    const out = emitProposedChange(
+      makeProposal({ label: 'Test Confidence 0.4732 at around 6.1 story points' }),
+      makeCtx(),
+    );
+    expect(out.status).toBe('unsafe_copy');
+    if (out.status !== 'unsafe_copy') return;
+    expect(out.field).toBe('label');
+  });
+
+  it('refuses to emit a standalone raw decimal in the message', () => {
+    const out = emitProposedChange(makeProposal({ message: '0.62' }), makeCtx());
+    expect(out.status).toBe('unsafe_copy');
+    if (out.status !== 'unsafe_copy') return;
+    expect(out.field).toBe('message');
+  });
+
+  it('STILL emits when the copy carries only a low-precision embedded decimal (around 6.1)', () => {
+    const out = emitProposedChange(
+      makeProposal({
+        label: 'Test Delivery gap at around 6.1 story points',
+        message: 'Check whether Delivery gap at around 6.1 story points changes the result.',
+      }),
+      makeCtx(),
+    );
+    expect(out.status).toBe('success');
+  });
 });
 
 describe('emitProposedChange — unknown intent gating', () => {

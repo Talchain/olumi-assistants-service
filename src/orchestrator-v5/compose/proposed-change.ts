@@ -49,6 +49,7 @@ import type {
 } from '../types/proposed-change.js';
 import { intentToActionType } from '../types/proposed-change.js';
 import type { SuggestedAction } from './types.js';
+import { findChipRawDecimalLeak } from './chip-safety.js';
 
 /** Length of the sha256-derived suffix on the proposal id. */
 const PROPOSAL_ID_HEX_LENGTH = 12;
@@ -133,6 +134,13 @@ function findForbiddenToken(value: string): string | null {
 }
 
 /**
+ * `forbidden_token` sentinel reported when a proposal is refused for a
+ * raw-decimal leak (rather than a `SAFETY_FORBIDDEN_TOKENS` match). Kept
+ * distinct so telemetry can tell the two unsafe-copy causes apart.
+ */
+const RAW_DECIMAL_UNSAFE_MARKER = '<raw-decimal>';
+
+/**
  * Inputs the proposal id is computed from. Single source of truth so
  * the emit path and tests share the exact set of canonicalised fields.
  * Adding a new field here is a deliberate change that should ship
@@ -187,6 +195,22 @@ export function emitProposedChange(
   const messageForbidden = findForbiddenToken(proposal.message);
   if (messageForbidden !== null) {
     return { status: 'unsafe_copy', field: 'message', forbidden_token: messageForbidden };
+  }
+
+  // Raw-decimal safety. SAFETY_FORBIDDEN_TOKENS does NOT catch a high-precision
+  // or standalone raw decimal (e.g. a `0.4732` interpolated from a factor
+  // label). The egress chip-finaliser DOES drop such chips
+  // (`chip-finalizer.ts` → `findChipRawDecimalLeak`, validated-proposal
+  // treatment), so without this gate a proposal could emit a chip plus an
+  // explicit `apply_proposed_change` pending, then lose only the chip at
+  // egress — orphaning the pending (persisted pending, no rendered chip). Run
+  // the SAME predicate here, with the SAME validated-proposal treatment the
+  // finaliser applies, so emit ⟺ egress agree and chip+pending stay atomic.
+  if (findChipRawDecimalLeak(proposal.label, '', { isValidatedProposal: true })) {
+    return { status: 'unsafe_copy', field: 'label', forbidden_token: RAW_DECIMAL_UNSAFE_MARKER };
+  }
+  if (findChipRawDecimalLeak('', proposal.message, { isValidatedProposal: true })) {
+    return { status: 'unsafe_copy', field: 'message', forbidden_token: RAW_DECIMAL_UNSAFE_MARKER };
   }
 
   // Handler resolution gate. If no handler is registered for this
