@@ -610,6 +610,35 @@ describe('buildAnalysisFromPriorFacts', () => {
         ]);
       });
 
+      it('an empty-string node id does not shadow a valid one (resolves via the real id)', () => {
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-emptyid' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          graph: {
+            nodes: [
+              { id: 'fac_speed', label: 'Speed' },
+              { id: 'opt_premium', label: 'Premium plan' },
+            ],
+          },
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              // from_node_id/to_node_id are empty strings; the real ids live in
+              // from_id/to_id. The empty strings must not mask them.
+              { from_node_id: '', from_id: 'fac_speed', to_node_id: '', to_id: 'opt_premium', switch_probability: 0.2 },
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'Speed', to_label: 'Premium plan' },
+        ]);
+      });
+
       it('skips edges whose endpoint has no inline label and no resolvable node id (no raw-id leak)', () => {
         const fact = runAnalysisFactWithEnrichment({
           meta: { seed_used: 1, n_samples: 100, response_hash: 'h-skip' },

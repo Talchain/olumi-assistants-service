@@ -16,8 +16,9 @@
  * This module has NO runtime dependencies on purpose — keep it that way.
  *
  * Note: this is the two-argument label guard `sanitiseLabel(raw, idGuess)`
- * used inside CEE — it is distinct from the single-argument question-stripping
- * `sanitiseLabel` in `src/utils/label-sanitiser.ts`.
+ * used by the V5 advice/coaching projection — it is DISTINCT from the
+ * single-argument question-stripping `sanitiseLabel` in
+ * `src/utils/label-sanitiser.ts` (the one CEE uses).
  */
 
 function readRecord(value: unknown): Record<string, unknown> | null {

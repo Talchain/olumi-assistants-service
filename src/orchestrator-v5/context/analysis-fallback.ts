@@ -211,7 +211,11 @@ function deriveTopFragileEdgesFromTopLevel(
     inline: unknown,
     idCandidates: readonly unknown[],
   ): string | null => {
-    const id = idCandidates.find((c): c is string => typeof c === 'string') ?? null;
+    // Non-empty strings only: an empty-string id must not shadow a later valid
+    // candidate (e.g. `from_node_id: ''` masking a real `from_id`), nor become
+    // an idGuess that no node label could match.
+    const id =
+      idCandidates.find((c): c is string => typeof c === 'string' && c.length > 0) ?? null;
     const candidate =
       typeof inline === 'string' && inline.trim().length > 0
         ? inline
@@ -233,7 +237,9 @@ function deriveTopFragileEdgesFromTopLevel(
     const fromLabel = resolveEndpoint(e.from_label, [e.from_node_id, e.from_id, e.from]);
     const toLabel = resolveEndpoint(e.to_label, [e.to_node_id, e.to_id, e.to]);
     if (fromLabel === null || toLabel === null) continue;
-    const key = `${fromLabel}→${toLabel}`;
+    // Collision-proof key — a label could in principle contain the arrow
+    // separator, so key on the structured pair rather than a joined string.
+    const key = JSON.stringify([fromLabel, toLabel]);
     const score =
       typeof e.switch_probability === 'number' && Number.isFinite(e.switch_probability)
         ? e.switch_probability
