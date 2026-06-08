@@ -132,7 +132,11 @@ type NoOpRecoveryBranch =
   | 'explore_factor_stale'
   | 'proposal_stage_one'
   | 'proposal_stage_two'
-  | 'ambiguous';
+  | 'ambiguous'
+  // R10 — no-op clarification-preservation outcomes. Feed the R7 event's
+  // `branch` field so the preservation-vs-fallback rate is measurable.
+  | 'noop_clarification_preserved'
+  | 'noop_fallback_copy';
 
 interface NoOpRecoveryDecision {
   readonly branch: NoOpRecoveryBranch;
@@ -185,6 +189,12 @@ interface DecideNoOpRecoveryInput {
    * The flag is set by the dispatch call site, not by the resumer.
    */
   readonly proposalAlreadyEmittedInThisTurn?: boolean;
+  /**
+   * R10 — set when the V4 no-op branch already preserved a scrubbed LLM
+   * clarifying question. When true, `decideNoOpRecovery` returns a fully inert
+   * decision so no branch (notably vague-edit) can clobber the preserved text.
+   */
+  readonly noOpClarificationPreserved?: boolean;
   /**
    * Current graph nodes — used by:
    *   1. the `explore_factor` safety-net branch to detect a no-op message
@@ -384,6 +394,23 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
   if (input.proposalAlreadyEmittedInThisTurn === true) {
     return {
       branch: 'ambiguous',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: null,
+      suggestedActions: [],
+    };
+  }
+
+  // R10 — no-op clarification-preservation authority guard. When the V4 no-op
+  // branch already preserved a scrubbed LLM clarifying question
+  // (`noOpClarificationPreserved === true`), that question is authoritative for
+  // this turn. Return a fully INERT decision (assistantText: null = keep the
+  // upstream text) so no recovery branch — in particular the vague-edit branch,
+  // which fires precisely on the ambiguous-target messages that PRODUCE a
+  // clarifying question — can overwrite it. Mirrors the early-emit guard above.
+  if (input.noOpClarificationPreserved === true) {
+    return {
+      branch: 'noop_clarification_preserved',
       intent_class: null,
       has_run_analysis_fact: hasRunAnalysisFact,
       assistantText: null,
@@ -1574,6 +1601,9 @@ export async function dispatchEditGraph(
         // this guard both layers fire and the wire response carries
         // 6 chips instead of 3.
         proposalAlreadyEmittedInThisTurn: proposalEarlyEmitted,
+        // R10 — when the V4 no-op branch preserved a scrubbed clarifying
+        // question, the recovery layer must stay inert (no vague-edit clobber).
+        noOpClarificationPreserved: editResult.noOpClarificationPreserved === true,
       });
       // V5 P0 — surface stage outcome telemetry independently of the
       // existing V5EditGraphNoOpRecovery event so dashboards can track
@@ -1701,7 +1731,13 @@ export async function dispatchEditGraph(
       // true}` event already records the early-emit outcome.
       // R7: the recovery branch is the user-visible no-op outcome; surface it
       // on the per-turn event. R10 (task 7) adds the preserve/fallback values.
-      ev.branch = recoveryOutcome.branch;
+      // R10 — `noop_clarification_preserved` when the question was kept,
+      // `noop_fallback_copy` when the V4 no-op fell back and recovery did not
+      // upgrade the copy, otherwise the recovery branch that rewrote the text.
+      ev.branch =
+        recoveryOutcome.assistantText === null && editResult.noOpClarificationPreserved !== true
+          ? 'noop_fallback_copy'
+          : recoveryOutcome.branch;
       if (!proposalEarlyEmitted) {
         emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
           request_id: requestId,

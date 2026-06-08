@@ -66,6 +66,11 @@ import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
+import {
+  findSuccessClaimHit,
+  findForbiddenPhraseHit,
+  findEditInternalsHit,
+} from "../../orchestrator-v5/compose/forbidden-user-facing-phrases.js";
 import { TOKEN_OVERLAP_STOPWORDS, hasTokenOverlap } from "./token-overlap.js";
 import { STRUCTURAL_EDGE_DEFAULTS } from "../context/constants.js";
 import { enforceProposalLanguage } from "../deterministic/proposal-language-guard.js";
@@ -115,6 +120,13 @@ export interface EditGraphResult {
    * fallback). Absent on rejected edits.
    */
   operation_meta?: EditGraphOperationMeta[];
+  /**
+   * R10 — true when the no-op branch preserved a scrubbed LLM clarifying
+   * question instead of substituting the deterministic fallback copy. Read by
+   * the V5 dispatcher's no-op recovery so its vague-edit branch stays inert
+   * and cannot clobber the preserved question.
+   */
+  noOpClarificationPreserved?: boolean;
 }
 
 export interface EditGraphOpts {
@@ -1868,31 +1880,44 @@ export async function handleEditGraph(
     if (llmResult.operations.length === 0) {
       const latencyMs = Date.now() - startTime;
 
-      // Determinism gap closed: previously, BOTH `coaching.summary`
-      // AND `warnings.join(' ')` were forwarded to `assistantText` on
-      // the empty-operations path. Both are LLM-authored strings (the
-      // `EditGraphLLMResult` types `warnings: string[]` and
-      // `coaching.summary: string` — neither is a structured code).
-      // The LLM can put "Updated Price." or "Done — value set."
-      // (terse commit claims a regex set will struggle to fully cover)
-      // into either field while emitting zero operations.
+      // R10 — preserve a scrubbed clarifying question on the no-op path.
+      // When the LLM returns zero operations with a question in
+      // `coaching.summary` (its mandated behaviour for an ambiguous edit
+      // target), the user should keep that specific, useful question instead of
+      // a generic dead-end. We scrub it with the SAME stack as the success
+      // path, then a conservative trip test DECLINES preservation — falling
+      // back to the deterministic NO_OP_FALLBACK_TEXT — whenever the candidate
+      // is empty, makes a success/mutation claim, carries a denial/jargon
+      // phrase, internal vocabulary, or a raw id/path. A preserved question
+      // never contains a success claim by construction, so the V5 false-success
+      // rewrite stays disjoint and untouched.
       //
-      // The fix is to drop BOTH sources on no-op paths and always emit
-      // the deterministic forward-looking NO_OP_FALLBACK_TEXT. Useful
-      // warning content (e.g. "edge already exists") is information we
-      // would like to preserve, but cannot safely while warnings is
-      // free prose. A follow-up workstream may introduce a
-      // warning-code allowlist + deterministic mapping; until then,
-      // safety beats UX richness.
-      //
-      // The default text is forward-looking ("Tell me…") rather than a
-      // denial ("No changes were needed…"). Denial phrasing matches
-      // FORBIDDEN_USER_FACING_PHRASES at the V5 egress and would be
-      // rewritten to the generic neutral fallback — costing the user
-      // the chance to know what to do next. Forward-looking copy is
-      // consistent with the Mode A propose-and-confirm fallback and
-      // gives the user an obvious next action.
-      const assistantText = NO_OP_FALLBACK_TEXT;
+      // Scope: ONLY `coaching.summary` is preserved. `warnings` remain dropped
+      // (the established Codex-P0 Mode-B contract): warnings are free prose that
+      // can carry the same false-success / jargon vectors, and the clarifying
+      // question the prompt mandates lives in coaching.summary, not warnings.
+      // Trip-testing the un-prefixed summary also keeps the line-anchored
+      // success-claim patterns effective (a "Note: " prefix would defeat them).
+      const scrubGraph = context.graph ?? null;
+      let noOpCandidate = llmResult.coaching?.summary
+        ? sanitiseUserFacingText(llmResult.coaching.summary, scrubGraph).text
+        : '';
+      if (noOpCandidate) {
+        // Same transforming guards as the success path, before the trip test.
+        noOpCandidate = enforceRepairVocabularyDenylist(noOpCandidate).text;
+        const proposalGuard = enforceProposalLanguage(noOpCandidate, 'edit_graph');
+        if (proposalGuard.leaked && proposalGuard.suffixed) {
+          noOpCandidate = proposalGuard.suffixed;
+        }
+      }
+      const noOpClarificationPreserved =
+        noOpCandidate.trim().length > 0 &&
+        findSuccessClaimHit(noOpCandidate) === null &&
+        findForbiddenPhraseHit(noOpCandidate) === null &&
+        findEditInternalsHit(noOpCandidate) === null;
+      const assistantText = noOpClarificationPreserved
+        ? noOpCandidate
+        : NO_OP_FALLBACK_TEXT;
 
       // V5 edit lifecycle recovery v1 — deterministic chips for the
       // no-op branch. Source: validator referential errors only (the
@@ -1914,7 +1939,8 @@ export async function handleEditGraph(
           warnings: llmResult.warnings.length,
           warnings_dropped: llmResult.warnings.length > 0,
           has_coaching: !!llmResult.coaching,
-          coaching_dropped: !!llmResult.coaching?.summary,
+          coaching_dropped: !!llmResult.coaching?.summary && !noOpClarificationPreserved,
+          clarification_preserved: noOpClarificationPreserved,
           preceded_by_plot_rejection: !!lastPlotErrors,
           preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
           deterministic_chips_emitted: recoveryChips.length,
@@ -1932,7 +1958,8 @@ export async function handleEditGraph(
         scenario_id: context.scenario_id,
         attempt,
         warnings_dropped: llmResult.warnings.length > 0,
-        coaching_dropped: !!llmResult.coaching?.summary,
+        coaching_dropped: !!llmResult.coaching?.summary && !noOpClarificationPreserved,
+        clarification_preserved: noOpClarificationPreserved,
         preceded_by_plot_rejection: !!lastPlotErrors,
         preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
         deterministic_chips_emitted: recoveryChips.length,
@@ -1949,6 +1976,7 @@ export async function handleEditGraph(
         latencyMs,
         appliedGraph: null,
         wasRejected: false,
+        noOpClarificationPreserved,
         ...(recoveryChips.length > 0 ? { suggestedActions: [...recoveryChips] } : {}),
         diagnostics: diagnostics(),
       };
