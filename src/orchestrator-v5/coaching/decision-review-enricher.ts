@@ -31,6 +31,10 @@ import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
 import { config } from '../../config/index.js';
 import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
+// Graph-label readers relocated to a lean, dependency-free context module so
+// the projection layer (`analysis-fallback`) can reuse them without importing
+// this heavy enricher. Re-exported below to keep existing consumers stable.
+import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 
 import type { DecisionReviewOutput } from './types.js';
@@ -536,12 +540,8 @@ function projectOptionAsWinner(r: Record<string, unknown>): DecisionReviewInvoke
   };
 }
 
-export function readGraph(enrichment: Record<string, unknown>): Record<string, unknown> {
-  const raw = enrichment.graph;
-  return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>)
-    : {};
-}
+// `readGraph` is relocated to ../context/enrichment-graph-labels.ts and
+// re-exported below.
 
 function readIslResults(
   enrichment: Record<string, unknown>,
@@ -905,23 +905,9 @@ function countArray(value: unknown): number {
   return Array.isArray(value) ? value.length : 0;
 }
 
-/**
- * Build factor_id → display label map from `enrichment.graph.nodes[]`.
- * Defensive: returns an empty Map when the graph shape isn't recognisable.
- */
-export function buildNodeLabelMap(graph: Record<string, unknown>): Map<string, string> {
-  const map = new Map<string, string>();
-  const nodes = graph.nodes;
-  if (!Array.isArray(nodes)) return map;
-  for (const raw of nodes) {
-    const n = readRecord(raw);
-    if (!n) continue;
-    const id = typeof n.id === 'string' ? n.id : null;
-    const label = typeof n.label === 'string' ? n.label : null;
-    if (id && label) map.set(id, label);
-  }
-  return map;
-}
+// `buildNodeLabelMap` is relocated to ../context/enrichment-graph-labels.ts
+// and re-exported below.
+export { readGraph, buildNodeLabelMap };
 
 /**
  * Build factor_id → unit map from `enrichment.graph.nodes[]` reading

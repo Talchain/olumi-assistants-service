@@ -485,5 +485,334 @@ describe('buildAnalysisFromPriorFacts', () => {
       // Winner gets the relabel too (when winner is the relabelled option).
       expect(summary.winner.option_label).toBe('Plan A: Ship This Quarter');
     });
+
+    describe('top-level robustness.fragile_edges (staging shape)', () => {
+      // Golden fixture derived from the REAL staging run_analysis payload for
+      // smoke scenario 504ee700-efb3-44b3-9ed6-8fcd04773a16 (captured
+      // 2026-06-08). The real PLoT V2 envelope carries fragile edges at the
+      // TOP LEVEL (enrichment.robustness.fragile_edges), with inline
+      // from_label/to_label and from_id/to_id (NOT from_node_id/to_node_id);
+      // `enrichment.results` is absent — only `option_comparison` — and there
+      // is NO top-level `enrichment.graph`. compactAnalysis's
+      // deriveTopFragileEdges walks per-option results[].robustness only and
+      // finds nothing, so without the top-level override the advice-gate
+      // projection that composeExplainResults/composeMeaning read is empty.
+      // Edge subset preserves the real field shape and the top-3 by
+      // switch_probability (the most fragile is 'Local Senior Hire' →
+      // 'Q3 Roadmap Delivery Capacity' at 0.24, matching m1_coaching).
+      const GOLDEN_504_ENRICHMENT: Record<string, unknown> = {
+        meta: { seed_used: 7, n_samples: 1500, response_hash: 'h-504' },
+        option_comparison: [
+          { option_id: 'opt_hire_local', option_label: 'Hire Two Senior Engineers Locally', win_probability: 0.763 },
+          { option_id: 'opt_status_quo', option_label: 'Continue with Current Team (Status Quo)', win_probability: 0.115 },
+          { option_id: 'opt_offshore', option_label: 'Engage Offshore Partner', win_probability: 0.069 },
+          { option_id: 'opt_tiered_pricing', option_label: 'Introduce Tiered Pricing to Fund Gradual Hiring', win_probability: 0.052 },
+        ],
+        robustness: {
+          level: 'moderate',
+          is_robust: true,
+          recommendation_stability: 0.763,
+          recommended_option_label: 'Hire Two Senior Engineers Locally',
+          fragile_edges: [
+            { edge_id: 'out_delivery_capacity->goal_q3_delivery', from_id: 'out_delivery_capacity', to_id: 'goal_q3_delivery', from_label: 'Q3 Roadmap Delivery Capacity', to_label: 'Deliver Q3 Roadmap Commitments on Time and Within Budget', switch_probability: 0.228, severity: 'warning', marginal_switch_probability: 0.05, alternative_winner_id: 'opt_status_quo', alternative_winner_label: 'Continue with Current Team (Status Quo)' },
+            { edge_id: 'fac_local_hire->out_delivery_capacity', from_id: 'fac_local_hire', to_id: 'out_delivery_capacity', from_label: 'Local Senior Hire', to_label: 'Q3 Roadmap Delivery Capacity', switch_probability: 0.24, severity: 'warning', marginal_switch_probability: 0.23, alternative_winner_id: 'opt_status_quo', alternative_winner_label: 'Continue with Current Team (Status Quo)' },
+            { edge_id: 'fac_local_hire->out_team_quality', from_id: 'fac_local_hire', to_id: 'out_team_quality', from_label: 'Local Senior Hire', to_label: 'Team Capability and Cohesion', switch_probability: 0.176, severity: 'warning', marginal_switch_probability: 0, alternative_winner_id: 'opt_status_quo', alternative_winner_label: 'Continue with Current Team (Status Quo)' },
+            { edge_id: 'out_team_quality->goal_q3_delivery', from_id: 'out_team_quality', to_id: 'goal_q3_delivery', from_label: 'Team Capability and Cohesion', to_label: 'Deliver Q3 Roadmap Commitments on Time and Within Budget', switch_probability: 0.156, severity: 'warning', marginal_switch_probability: 0, alternative_winner_id: 'opt_status_quo', alternative_winner_label: 'Continue with Current Team (Status Quo)' },
+            { edge_id: 'fac_local_hire->risk_time_to_productivity', from_id: 'fac_local_hire', to_id: 'risk_time_to_productivity', from_label: 'Local Senior Hire', to_label: 'Time to Productive Contribution', switch_probability: 0.056, severity: 'warning', marginal_switch_probability: 0, alternative_winner_id: 'opt_status_quo', alternative_winner_label: 'Continue with Current Team (Status Quo)' },
+          ],
+        },
+        m1_coaching: {
+          top_fragile_edge: { label: 'Local Senior Hire → Q3 Roadmap Delivery Capacity', edge_id: 'fac_local_hire->out_delivery_capacity', alternative_winner: 'Continue with Current Team (Status Quo)', switch_probability: 0.24 },
+        },
+        analysis_status: 'complete',
+      };
+
+      it('GOLDEN (real 504ee700 staging payload): projects renderable fragile edges from the top-level array', () => {
+        const fact = runAnalysisFactWithEnrichment(GOLDEN_504_ENRICHMENT);
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        // Proves the real PLoT V2 envelope yields at least one renderable
+        // fragile edge — the open Coaching Slice 1 caveat.
+        expect(summary.top_fragile_edges).toBeDefined();
+        expect(summary.top_fragile_edges!.length).toBeGreaterThan(0);
+        // Capped at 3 (5 edges in, 3 out).
+        expect(summary.top_fragile_edges!.length).toBe(3);
+        // fragile_edge_count stays consistent with the top-level projection:
+        // uncapped distinct renderable edges (5), not the per-option count (0).
+        expect(summary.fragile_edge_count).toBe(5);
+      });
+
+      it('GOLDEN: ranks by switch_probability so [0] names the MOST fragile link (parity with m1_coaching)', () => {
+        const fact = runAnalysisFactWithEnrichment(GOLDEN_504_ENRICHMENT);
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges![0]).toEqual({
+          from_label: 'Local Senior Hire',
+          to_label: 'Q3 Roadmap Delivery Capacity',
+        });
+      });
+
+      it('GOLDEN: projected labels never leak a raw id (slug-prefix or UUID)', () => {
+        const fact = runAnalysisFactWithEnrichment(GOLDEN_504_ENRICHMENT);
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        for (const edge of summary.top_fragile_edges!) {
+          for (const label of [edge.from_label, edge.to_label]) {
+            expect(label.length).toBeGreaterThan(0);
+            expect(label).not.toMatch(/^(opt_|goal_|fac_|node_|edge_|n_|e_)/i);
+            expect(label).not.toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/i);
+          }
+        }
+      });
+
+      it('resolves labels from inline from_label/to_label (no graph needed)', () => {
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-inline' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_label: 'Marketing Spend', to_label: 'Revenue', switch_probability: 0.3 },
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'Marketing Spend', to_label: 'Revenue' },
+        ]);
+      });
+
+      it('resolves labels from node ids via the graph node-label map when inline labels are absent', () => {
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-nodeid' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          graph: {
+            nodes: [
+              { id: 'fac_speed', label: 'Speed' },
+              { id: 'opt_premium', label: 'Premium plan' },
+            ],
+          },
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_node_id: 'fac_speed', to_node_id: 'opt_premium', switch_probability: 0.2 },
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'Speed', to_label: 'Premium plan' },
+        ]);
+      });
+
+      it('an empty-string node id does not shadow a valid one (resolves via the real id)', () => {
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-emptyid' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          graph: {
+            nodes: [
+              { id: 'fac_speed', label: 'Speed' },
+              { id: 'opt_premium', label: 'Premium plan' },
+            ],
+          },
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              // from_node_id/to_node_id are empty strings; the real ids live in
+              // from_id/to_id. The empty strings must not mask them.
+              { from_node_id: '', from_id: 'fac_speed', to_node_id: '', to_id: 'opt_premium', switch_probability: 0.2 },
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'Speed', to_label: 'Premium plan' },
+        ]);
+      });
+
+      it('skips edges whose endpoint has no inline label and no resolvable node id (no raw-id leak)', () => {
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-skip' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          // No graph → node ids cannot resolve; these edges must be dropped.
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_node_id: 'fac_unmapped', to_node_id: 'goal_unmapped', switch_probability: 0.4 },
+              { from_label: '   ', to_label: 'Revenue', switch_probability: 0.3 },
+              { from_label: 'Cost', to_label: '', switch_probability: 0.2 },
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact]);
+        // Every edge is unrenderable → top_fragile_edges stays absent.
+        expect(summary!.top_fragile_edges).toBeUndefined();
+      });
+
+      it('skips edges whose inline label is itself an id-shaped or UUID string', () => {
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-idlabel' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_label: 'fac_speed', to_label: 'Revenue', switch_probability: 0.4 },
+              { from_label: 'Cost', to_label: '550e8400-e29b-41d4-a716-446655440000', switch_probability: 0.3 },
+              { from_label: 'Headcount', to_label: 'Delivery', switch_probability: 0.2 },
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        // Only the clean edge survives.
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'Headcount', to_label: 'Delivery' },
+        ]);
+      });
+
+      it('deduplicates by resolved from -> to and caps at 3', () => {
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-dedupe' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_label: 'A1', to_label: 'B1', switch_probability: 0.5 },
+              { from_label: 'A1', to_label: 'B1', switch_probability: 0.49 }, // dup
+              { from_label: 'A2', to_label: 'B2', switch_probability: 0.4 },
+              { from_label: 'A3', to_label: 'B3', switch_probability: 0.3 },
+              { from_label: 'A4', to_label: 'B4', switch_probability: 0.2 }, // dropped by cap
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'A1', to_label: 'B1' },
+          { from_label: 'A2', to_label: 'B2' },
+          { from_label: 'A3', to_label: 'B3' },
+        ]);
+        // fragile_edge_count is the DISTINCT (post-dedupe) count, UNCAPPED:
+        // 5 raw - 1 duplicate = 4 distinct, even though only 3 edges render.
+        expect(summary.fragile_edge_count).toBe(4);
+      });
+
+      it('dedupe retains the MAX switch_probability per label pair (a later, more-fragile duplicate wins the ranking)', () => {
+        // Edge A->B appears twice: first weak (0.1), then strong (0.5). C->D
+        // once (0.3). First-wins would rank [C->D, A->B] (A->B stuck at 0.1);
+        // max-wins ranks [A->B, C->D] because A->B's true fragility (0.5)
+        // exceeds C->D's 0.3 — matching the "rank by most fragile" contract.
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-maxdup' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_label: 'A', to_label: 'B', switch_probability: 0.1 },
+              { from_label: 'C', to_label: 'D', switch_probability: 0.3 },
+              { from_label: 'A', to_label: 'B', switch_probability: 0.5 }, // more-fragile dup
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'A', to_label: 'B' },
+          { from_label: 'C', to_label: 'D' },
+        ]);
+      });
+
+      it('sets fragile_edge_count to the distinct top-level edge count (not the inherited 0) when projecting from the top level', () => {
+        // compactAnalysis only counts per-option results[].robustness, so for a
+        // top-level-only payload it leaves fragile_edge_count at 0. The summary
+        // must stay self-consistent: GOLDEN has 5 distinct edges, so the count
+        // is 5 (uncapped) even though only the top 3 surface in top_fragile_edges.
+        const fact = runAnalysisFactWithEnrichment(GOLDEN_504_ENRICHMENT);
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges!.length).toBe(3);
+        expect(summary.fragile_edge_count).toBe(5);
+      });
+
+      it('edges missing switch_probability rank deterministically by label (no NaN from the -Infinity tiebreak)', () => {
+        // Both edges omit switch_probability → both score -Infinity. The
+        // explicit comparator must fall through to label ordering (Alpha before
+        // Zebra), never NaN-arithmetic. Pins the comparator-cleanup behaviour.
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-tie' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_label: 'Zebra link', to_label: 'Outcome' },
+              { from_label: 'Alpha link', to_label: 'Outcome' },
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'Alpha link', to_label: 'Outcome' },
+          { from_label: 'Zebra link', to_label: 'Outcome' },
+        ]);
+      });
+
+      it('legacy per-result fragile_edges still win when present (top-level override is fallback only)', () => {
+        // RICH_ENRICHMENT carries per-result results[].robustness.fragile_edges
+        // (Marketing Spend -> Revenue). Add a DIFFERENT top-level array and
+        // confirm the per-result projection is preserved, not overridden.
+        const fact = runAnalysisFactWithEnrichment({
+          ...RICH_ENRICHMENT,
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_label: 'Top Level Only', to_label: 'Should Not Appear', switch_probability: 0.99 },
+            ],
+          },
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'Marketing Spend', to_label: 'Revenue' },
+        ]);
+      });
+
+      it('no fragile edges anywhere → top_fragile_edges stays absent (advice gate falls back to top driver)', () => {
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-none' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          robustness: { level: 'moderate' },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toBeUndefined();
+      });
+    });
   });
 });
