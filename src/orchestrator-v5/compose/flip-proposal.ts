@@ -6,21 +6,25 @@
  * skips it. NEVER improvises: when the value cannot be inverted to a
  * user-scale number AND displayed safely, it returns a typed skip.
  *
- * SCALE / INVERSION (verified against the real normaliser + a real
- * staging envelope, 2026-06-06):
- *   - `flip_thresholds[].flip_value` / `current_value` are MODEL-scale
- *     (confirmed: a real `current_value` of 0.3 equalled the factor's
- *     `observed_state.value` 0.3, whose `raw_value` was 15 at cap 50).
+ * SCALE / INVERSION — governed by the PLoT `value_scale` boundary signal
+ * (see `Docs/v5/cee-plot-flip-value-scale-contract.md`):
+ *   - `value_scale: "display"` — `flip_value` is ALREADY a user-unit value
+ *     (e.g. `6.055 story_points`, build `964fa37`). The user-scale value is
+ *     `flip_value` itself; we do NOT multiply by `cap`. The action payload
+ *     stores the EXACT value; the chip copy may round to one decimal for
+ *     readability and MUST then say "around …" (honest-approximate), so
+ *     display === meaning while the executed threshold stays exact.
+ *   - `value_scale: "model"` (or absent-but-unambiguous: uncapped, or a
+ *     capped value in `[0,1]`) — legacy MODEL-scale. Invert to user-scale
+ *     via `rawInput = flip_value * cap` (capped) / `rawInput = flip_value`
+ *     (uncapped). Here display === executed EXACTLY (whole numbers only;
+ *     no rounding), proven against the real `normaliseFactorValue`.
+ *   - absent-and-ambiguous (a capped value outside `[0,1]` with no signal)
+ *     or an unrecognised scale → FAIL CLOSED (`ambiguous_scale`): we never
+ *     guess whether an out-of-`[0,1]` capped number is model or display.
  *   - `set_factor_value` normalises USER-scale input to model via
  *     `value = rawInput / cap` (capped) or `value = rawInput` (uncapped)
  *     — see `d1-shared/normalise-factor-value.ts`.
- *   - Therefore the inverse (user-scale value to replay) is:
- *        capped:   rawInput = flip_value * cap
- *        uncapped: rawInput = flip_value
- *   - We DISPLAY and EXECUTE the same rounded user-scale value, so the
- *     user sees exactly what gets set (no raw decimal, no double-
- *     normalisation). Round-trip correctness is proven against the real
- *     `normaliseFactorValue` in the unit tests.
  *
  * COPY is provenance-safe: a threshold TEST, never a guarantee. We emit
  * "Test X at N" / "Check whether X at N changes the result." — never
@@ -34,16 +38,30 @@ import type {
 import { emitProposedChange } from './proposed-change.js';
 import type { SuggestedAction } from './types.js';
 import type { PendingAction } from '../session/pending-action.js';
-import { formatFactorValue } from './format-factor-value.js';
+import { formatFactorValue, formatFactorValueApprox } from './format-factor-value.js';
 
 /** One entry read defensively from `enrichment.flip_thresholds[]`. */
 export interface FlipEntry {
   readonly factor_id: string;
   readonly factor_label: string;
-  /** MODEL-scale value at which the result flips. `null` ⇒ no flip found. */
+  /**
+   * The value at which the result flips. `null` ⇒ no flip found. The SCALE of
+   * this number is governed by {@link FlipEntry.value_scale}: when `"display"`
+   * it is already a user-unit value (e.g. `6.055 story_points`); when `"model"`
+   * or absent-but-in-`[0,1]` it is the legacy model-scale value.
+   */
   readonly flip_value: number | null | undefined;
   readonly direction?: string | null;
   readonly unit?: string | null;
+  /**
+   * PLoT's authoritative scale signal for `flip_value` / `current_value`:
+   *   - `"display"` — already a user-unit value; do NOT multiply by `cap`.
+   *   - `"model"`   — normalised `[0,1]`; invert via `× cap` (legacy).
+   *   - absent      — legacy; treated as model-scale only when unambiguous
+   *                   (uncapped, or capped value in `[0,1]`).
+   * See `Docs/v5/cee-plot-flip-value-scale-contract.md`.
+   */
+  readonly value_scale?: string | null;
 }
 
 /** The factor's graph node info needed to invert + display safely. */
@@ -58,6 +76,8 @@ export type FlipProposalSkipReason =
   | 'empty_label'
   | 'cap_non_positive'
   | 'model_value_out_of_range'
+  | 'display_value_exceeds_cap'
+  | 'ambiguous_scale'
   | 'unrenderable_value';
 
 export type FlipProposalResult =
@@ -89,43 +109,151 @@ export function buildFlipProposal(
 
   const unit = entry.unit ?? node.unit ?? null;
   const cap = node.cap ?? null;
+  // Cap-positivity is scale-independent and must hold for either path.
+  if (cap !== null && !(cap > 0)) {
+    return { ok: false, reason: 'cap_non_positive' };
+  }
 
+  const scale = classifyValueScale(entry.value_scale, flip, cap);
+  if (scale === 'ambiguous') {
+    return { ok: false, reason: 'ambiguous_scale' };
+  }
+  return scale === 'display'
+    ? buildFromDisplayScale(flip, unit, cap, label, entry.factor_id)
+    : buildFromModelScale(flip, unit, cap, label, entry.factor_id);
+}
+
+/**
+ * Decide whether `flip_value` is on the user-display scale or the legacy
+ * model scale. `value_scale` is authoritative; when absent we fall back to
+ * the only unambiguous legacy case (uncapped, where model === user, or a
+ * capped value already inside `[0,1]`). Anything else fails closed.
+ */
+function classifyValueScale(
+  valueScale: string | null | undefined,
+  flip: number,
+  cap: number | null,
+): 'display' | 'model' | 'ambiguous' {
+  const s = typeof valueScale === 'string' ? valueScale.trim().toLowerCase() : '';
+  if (s === 'display') return 'display';
+  if (s === 'model') return 'model';
+  if (s.length > 0) return 'ambiguous'; // present but unrecognised → fail closed
+  // Absent (legacy / pre-contract). Uncapped: model === user, so the value is
+  // unambiguous. Capped: legacy model values live in [0,1]; a capped value
+  // outside [0,1] with no signal could be an unsignalled display value, so we
+  // refuse to guess.
+  if (cap === null) return 'model';
+  return flip >= 0 && flip <= 1 ? 'model' : 'ambiguous';
+}
+
+/**
+ * Legacy MODEL-scale path. `flip` is normalised `[0,1]` for a capped factor;
+ * invert to user-scale and render EXACTLY (whole numbers only — never round).
+ */
+function buildFromModelScale(
+  flip: number,
+  unit: string | null,
+  cap: number | null,
+  label: string,
+  factorId: string,
+): FlipProposalResult {
   let rawInput: number;
-  if (cap !== null && cap !== undefined) {
-    if (!(cap > 0)) return { ok: false, reason: 'cap_non_positive' };
-    // A capped factor's model value lives in [0, 1]; anything else means
-    // the flip value is not on the scale we expect — skip rather than
-    // invert into an out-of-range raw value.
+  if (cap !== null) {
+    // A capped factor's model value lives in [0, 1]; anything else is not on
+    // the scale we expect — skip rather than invert into an out-of-range raw.
     if (flip < 0 || flip > 1) return { ok: false, reason: 'model_value_out_of_range' };
     rawInput = flip * cap;
   } else {
-    // Uncapped factor: model value === user value.
-    rawInput = flip;
+    rawInput = flip; // uncapped: model value === user value
   }
 
   const rendered = formatFactorValue(rawInput, unit);
   if (rendered === null) {
-    // Includes the non-integer case: the formatter skips rather than
-    // rounding, so a fractional user-scale value never gets emitted.
+    // Includes the non-integer case: the exact formatter skips rather than
+    // rounding, so a fractional user-scale value never gets emitted here.
     return { ok: false, reason: 'unrenderable_value' };
   }
 
   // Execute the EXACT value the user sees (display === execution; the
-  // formatter guarantees this is a whole number, never a rounded one).
+  // formatter guarantees a whole number, never a rounded one).
   const execRaw = rendered.value;
   const params: Readonly<Record<string, unknown>> =
-    cap !== null && cap !== undefined
+    cap !== null
       ? { value: { value: execRaw, cap } } // capped: handler stores model = execRaw / cap
       : { value: execRaw }; // uncapped: handler stores model = execRaw
 
-  const proposal: ProposedChange = {
-    intent: 'set_factor_value',
-    label: `Test ${label} at ${rendered.display}`,
-    message: `Check whether ${label} at ${rendered.display} changes the result.`,
-    params,
-    target_entity_ids: [entry.factor_id],
+  return {
+    ok: true,
+    proposal: {
+      intent: 'set_factor_value',
+      label: `Test ${label} at ${rendered.display}`,
+      message: `Check whether ${label} at ${rendered.display} changes the result.`,
+      params,
+      target_entity_ids: [factorId],
+    },
   };
-  return { ok: true, proposal };
+}
+
+/**
+ * DISPLAY-scale path (PLoT `value_scale: "display"`). `flip` is ALREADY the
+ * user-unit value (e.g. `6.055 story_points`) — do NOT multiply by `cap`. The
+ * action payload stores the EXACT value; the chip copy rounds to one decimal
+ * for readability and says "around …" whenever rounding changed it, so the
+ * executed threshold stays precise while the wording is honest.
+ */
+function buildFromDisplayScale(
+  flip: number,
+  unit: string | null,
+  cap: number | null,
+  label: string,
+  factorId: string,
+): FlipProposalResult {
+  if (cap !== null) {
+    // The exact user value must round-trip through the handler's cap-range
+    // guard (user ∈ [0, cap] ⟺ model ∈ [0,1]); a display value above cap would
+    // be rejected at execute, so skip it now rather than emit an un-appliable
+    // proposal.
+    if (flip < 0 || flip > cap) return { ok: false, reason: 'display_value_exceeds_cap' };
+  } else if (flip < 0) {
+    return { ok: false, reason: 'unrenderable_value' };
+  }
+
+  const approx = formatFactorValueApprox(flip, unit);
+  if (approx === null) {
+    return { ok: false, reason: 'unrenderable_value' };
+  }
+
+  // Store the EXACT (unrounded) user value; the displayed value is only copy.
+  const params: Readonly<Record<string, unknown>> =
+    cap !== null ? { value: { value: flip, cap } } : { value: flip };
+
+  const phrase = approx.approximate ? `around ${approx.display}` : approx.display;
+  return {
+    ok: true,
+    proposal: {
+      intent: 'set_factor_value',
+      label: `Test ${label} at ${phrase}`,
+      message: `Check whether ${label} at ${phrase} changes the result.`,
+      params,
+      target_entity_ids: [factorId],
+    },
+  };
+}
+
+/**
+ * Read PLoT's `value_scale` from a flip-threshold row. The contract permits it
+ * at the row top level; the current PLoT build (`964fa37`) nests it under
+ * `margin_sensitivity.value_scale`, so we check both. Top level wins.
+ * Returns null when neither is a string.
+ */
+function readValueScale(r: Record<string, unknown>): string | null {
+  if (typeof r.value_scale === 'string') return r.value_scale;
+  const ms = r.margin_sensitivity;
+  if (ms && typeof ms === 'object') {
+    const nested = (ms as Record<string, unknown>).value_scale;
+    if (typeof nested === 'string') return nested;
+  }
+  return null;
 }
 
 /**
@@ -149,6 +277,7 @@ export function readFlipEntries(enrichment: unknown): FlipEntry[] {
       flip_value: typeof r.flip_value === 'number' ? r.flip_value : null,
       direction: typeof r.direction === 'string' ? r.direction : null,
       unit: typeof r.unit === 'string' ? r.unit : null,
+      value_scale: readValueScale(r),
     });
   }
   return out;

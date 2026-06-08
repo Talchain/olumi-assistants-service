@@ -55,6 +55,15 @@ function singularise(unit: string, n: number): string {
 }
 
 /**
+ * Render an underscored machine unit as human words: `story_points` →
+ * `story points`. Case is preserved. Recognised symbol/percent/time units
+ * never carry underscores, so this only affects the free-text-unit branch.
+ */
+function humaniseUnit(unit: string): string {
+  return unit.replace(/_/g, ' ');
+}
+
+/**
  * Render a user-scale value + optional unit, or null when it cannot be
  * rendered without leaking a raw decimal. Sub-1 values are only allowed
  * for the plain-integer case (which excludes them), so no `0.xx` ever
@@ -93,11 +102,102 @@ export function formatFactorValue(
     return { display: `${value} ${singularise(u, value)}`, value };
   }
 
-  // Any other explicit unit (engineers, people, units, …).
+  // Any other explicit unit (engineers, people, units, story_points, …).
+  // Underscored machine units render with spaces.
   if (raw.length > 0) {
-    return { display: `${value} ${singularise(raw, value)}`, value };
+    return { display: `${value} ${singularise(humaniseUnit(raw), value)}`, value };
   }
 
   // No unit: a plain integer is safe; bare decimals were already skipped.
   return { display: `${value}`, value };
+}
+
+/** Round to one decimal place — the readable-approximate display precision. */
+function roundToTenth(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * Stringify a one-decimal-place value, dropping a trailing `.0` and (optionally)
+ * grouping thousands. `rounded` is assumed already 1-dp.
+ */
+function approxNumberString(rounded: number, group: boolean): string {
+  const sign = rounded < 0 ? '-' : '';
+  const abs = Math.abs(rounded);
+  const intPart = Math.trunc(abs);
+  const tenths = Math.round((abs - intPart) * 10); // 0–9 (abs is already 1-dp)
+  const intStr = group ? thousands(intPart) : `${intPart}`;
+  return sign + intStr + (tenths > 0 ? `.${tenths}` : '');
+}
+
+export interface ApproxFactorValue {
+  /** Readable display string, e.g. "6.1 story points", "£20,000". */
+  readonly display: string;
+  /** The 1-dp rounded number shown — NOT necessarily what gets executed. */
+  readonly rounded: number;
+  /**
+   * True when `rounded` differs from the exact input. The caller MUST prefix
+   * "around" (honest-approximate wording) and store the EXACT input value in
+   * the action payload so display === meaning while the executed value stays
+   * the precise scientific threshold.
+   */
+  readonly approximate: boolean;
+}
+
+/**
+ * DISPLAY-scale formatter for chip copy. The input is ALREADY a user-unit value
+ * (PLoT `value_scale: "display"`), so — unlike {@link formatFactorValue} — this
+ * MAY round to one decimal place for readability. It NEVER mutates the value the
+ * caller executes; it only produces the string shown to the user plus the
+ * `approximate` flag that forces honest "around …" wording.
+ *
+ * Returns null for shapes we cannot present safely: non-finite, a value that
+ * rounds to 0 (no useful "test at" threshold), a percentage outside 0–100, or a
+ * bare fractional value with no unit (which would read as a raw normalised
+ * decimal). Mirrors {@link formatFactorValue}'s unit-awareness.
+ */
+export function formatFactorValueApprox(
+  value: number,
+  unit?: string | null,
+): ApproxFactorValue | null {
+  if (!Number.isFinite(value)) return null;
+  const rounded = roundToTenth(value);
+  if (rounded === 0) return null; // 0 carries no useful "test at" value
+  const approximate = rounded !== value;
+
+  const raw = (unit ?? '').trim();
+  const u = raw.toLowerCase();
+
+  if (PERCENT_UNITS.has(u)) {
+    if (rounded < 0 || rounded > 100) return null;
+    return { display: `${approxNumberString(rounded, false)}%`, rounded, approximate };
+  }
+
+  const symbol = CURRENCY_SYMBOL[u];
+  if (symbol) {
+    return { display: `${symbol}${approxNumberString(rounded, true)}`, rounded, approximate };
+  }
+
+  if (TIME_UNITS.has(u)) {
+    return {
+      display: `${approxNumberString(rounded, false)} ${singularise(u, rounded)}`,
+      rounded,
+      approximate,
+    };
+  }
+
+  if (raw.length > 0) {
+    return {
+      display: `${approxNumberString(rounded, false)} ${singularise(humaniseUnit(raw), rounded)}`,
+      rounded,
+      approximate,
+    };
+  }
+
+  // No unit: only a plain integer is safe; a bare fractional value could be
+  // mistaken for a raw normalised decimal, so SKIP rather than show it.
+  if (Number.isInteger(rounded)) {
+    return { display: `${rounded}`, rounded, approximate };
+  }
+  return null;
 }
