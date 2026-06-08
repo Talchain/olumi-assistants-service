@@ -76,6 +76,17 @@ describe('CEE fixture analysis-seed pass-through — config + reader', () => {
       expect(config.cee.analysisSeed).toBeUndefined();
       expect(config.cee.analysisNSamples).toBeUndefined();
     });
+
+    it('treats a blank / whitespace env value as UNSET (NOT coerced to 0)', () => {
+      // Some deploy systems materialise an unset var as "". z.coerce.number()
+      // would turn "" into 0 and silently send seed:0 in production — the
+      // preprocess guard maps blanks back to undefined so it stays omitted.
+      process.env.CEE_ANALYSIS_SEED = '';
+      process.env.CEE_ANALYSIS_N_SAMPLES = '   ';
+      _resetConfigCache();
+      expect(config.cee.analysisSeed).toBeUndefined();
+      expect(config.cee.analysisNSamples).toBeUndefined();
+    });
   });
 
   describe('reader populates snapshot from config', () => {

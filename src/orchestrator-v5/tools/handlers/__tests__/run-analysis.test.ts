@@ -849,6 +849,10 @@ describe('run_analysis handler — PLoT payload construction', () => {
     await handler(makeInvocation());
     const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(payload.seed).toBeUndefined();
+    // True omission, not present-as-undefined: the JSON.stringify'd /v2/run body
+    // must not carry the keys at all, so production stays byte-identical.
+    expect('seed' in payload).toBe(false);
+    expect('n_samples' in payload).toBe(false);
   });
 
   it('forwards n_samples and goal_constraints when present on the snapshot', async () => {

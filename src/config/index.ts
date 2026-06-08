@@ -378,8 +378,20 @@ const ConfigSchema = z.object({
     // production default — unchanged), the `/v2/run` body omits both and PLoT
     // uses its own random seed. No graph-derived production seed here.
     // Env: CEE_ANALYSIS_SEED / CEE_ANALYSIS_N_SAMPLES.
-    analysisSeed: z.coerce.number().int().optional(),
-    analysisNSamples: z.coerce.number().int().positive().optional(),
+    //
+    // Blank/whitespace strings are treated as UNSET. Some deploy systems
+    // materialise an "unset" var as "" — and `z.coerce.number()` turns "" into
+    // 0, so an empty CEE_ANALYSIS_SEED would otherwise silently send seed:0 in
+    // production (a deterministic seed — the exact production-behaviour change
+    // this lane must NOT make). Preprocess blanks to undefined before coercion.
+    analysisSeed: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.coerce.number().int().optional(),
+    ),
+    analysisNSamples: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.coerce.number().int().positive().optional(),
+    ),
     optionsFeatureVersion: z.string().optional(),
     explainFeatureVersion: z.string().optional(),
     evidenceHelperFeatureVersion: z.string().optional(),
