@@ -183,19 +183,25 @@ function deriveTopDriversFromTopLevel(
  * label or a raw id (slug-prefix or UUID) is dropped rather than emitted —
  * an unresolvable endpoint skips the whole edge (no half-rendered "from X to ").
  *
- * Ranked by `switch_probability` descending so the first entry names the MOST
- * fragile link (parity with `m1_coaching.top_fragile_edge`, which the upstream
- * picks the same way). `switch_probability` is used ONLY for ranking — it is
- * never emitted, so no raw decimal can leak. Capped at 3 (parity with
- * `deriveTopFragileEdges`).
+ * Deduped by resolved label pair, retaining the MOST fragile (max
+ * `switch_probability`) per pair, then ranked by `switch_probability`
+ * descending so the first entry names the MOST fragile link (parity with
+ * `m1_coaching.top_fragile_edge`, which the upstream picks the same way).
+ * `switch_probability` is used ONLY for ranking — it is never emitted, so no
+ * raw decimal can leak.
+ *
+ * Returns `{ edges, count }`: `edges` is the top 3 (parity with
+ * `deriveTopFragileEdges`); `count` is the total distinct renderable fragile
+ * edges (uncapped — parity with `deriveFragileEdgeCount`) so the caller can
+ * keep `fragile_edge_count` consistent when it projects from the top level.
  */
 function deriveTopFragileEdgesFromTopLevel(
   enrichment: Record<string, unknown>,
-): FragileEdge[] {
+): { edges: FragileEdge[]; count: number } {
   const rob = enrichment.robustness;
-  if (rob === null || typeof rob !== 'object' || Array.isArray(rob)) return [];
+  if (rob === null || typeof rob !== 'object' || Array.isArray(rob)) return { edges: [], count: 0 };
   const raw = (rob as Record<string, unknown>).fragile_edges;
-  if (!Array.isArray(raw) || raw.length === 0) return [];
+  if (!Array.isArray(raw) || raw.length === 0) return { edges: [], count: 0 };
 
   const labelMap = buildNodeLabelMap(readGraph(enrichment));
 
@@ -216,8 +222,11 @@ function deriveTopFragileEdgesFromTopLevel(
     return sanitiseLabel(candidate, id ?? '');
   };
 
-  const seen = new Set<string>();
-  const ranked: Array<{ edge: FragileEdge; score: number }> = [];
+  // Dedupe by resolved label pair, retaining the MOST fragile (max score) per
+  // pair — so ranking matches the "rank by most fragile" contract even when a
+  // duplicate edge pair arrives later in the array with a higher
+  // switch_probability (first-wins would otherwise keep the less-fragile one).
+  const byKey = new Map<string, { edge: FragileEdge; score: number }>();
   for (const item of raw) {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) continue;
     const e = item as Record<string, unknown>;
@@ -225,15 +234,17 @@ function deriveTopFragileEdgesFromTopLevel(
     const toLabel = resolveEndpoint(e.to_label, [e.to_node_id, e.to_id, e.to]);
     if (fromLabel === null || toLabel === null) continue;
     const key = `${fromLabel}→${toLabel}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
     const score =
       typeof e.switch_probability === 'number' && Number.isFinite(e.switch_probability)
         ? e.switch_probability
         : -Infinity;
-    ranked.push({ edge: { from_label: fromLabel, to_label: toLabel }, score });
+    const existing = byKey.get(key);
+    if (existing === undefined || score > existing.score) {
+      byKey.set(key, { edge: { from_label: fromLabel, to_label: toLabel }, score });
+    }
   }
 
+  const ranked = Array.from(byKey.values());
   // Explicit comparator (NOT `b.score - a.score`): scores can be -Infinity
   // when switch_probability is absent, and `-Infinity - -Infinity` is NaN.
   // Compare scores directly, then fall back to a deterministic label tiebreak.
@@ -244,7 +255,10 @@ function deriveTopFragileEdgesFromTopLevel(
       a.edge.to_label.localeCompare(b.edge.to_label)
     );
   });
-  return ranked.slice(0, 3).map((r) => r.edge);
+  // `edges`: top 3 (parity with deriveTopFragileEdges). `count`: total distinct
+  // renderable fragile edges (uncapped — parity with deriveFragileEdgeCount) so
+  // the caller can keep `fragile_edge_count` consistent on the top-level path.
+  return { edges: ranked.slice(0, 3).map((r) => r.edge), count: ranked.length };
 }
 
 /**
@@ -319,16 +333,28 @@ export function buildAnalysisFromPriorFacts(
       // composeExplainResults / composeMeaning read. Derive from the top-level
       // array when the per-option path produced nothing, so the deterministic
       // fragile-assumption branch can fire. Per-option result wins when present.
-      const topFragileEdges =
-        fromEnrichment.top_fragile_edges && fromEnrichment.top_fragile_edges.length > 0
-          ? fromEnrichment.top_fragile_edges
+      const perOptionFragile = fromEnrichment.top_fragile_edges ?? [];
+      const fromTopLevel =
+        perOptionFragile.length > 0
+          ? null
           : deriveTopFragileEdgesFromTopLevel(enrichment as Record<string, unknown>);
+      const topFragileEdges = fromTopLevel ? fromTopLevel.edges : perOptionFragile;
+
+      // compactAnalysis's `fragile_edge_count` only counts per-option
+      // results[].robustness.fragile_edges, so it stays 0 when the fragile
+      // edges came from the TOP LEVEL. Keep the summary self-consistent: when
+      // we projected from the top level, use that path's distinct edge count.
+      const fragileEdgeCount =
+        fromTopLevel && fromTopLevel.count > 0
+          ? fromTopLevel.count
+          : fromEnrichment.fragile_edge_count;
 
       return {
         ...fromEnrichment,
         options: relabelled,
         winner,
         top_drivers: topDrivers,
+        fragile_edge_count: fragileEdgeCount,
         // Only set when non-empty so the field stays absent (not []) on the
         // genuinely-no-fragile-edges path — downstream `?? []` handles either.
         ...(topFragileEdges.length > 0 ? { top_fragile_edges: topFragileEdges } : {}),

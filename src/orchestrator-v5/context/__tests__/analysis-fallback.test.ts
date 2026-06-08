@@ -536,6 +536,9 @@ describe('buildAnalysisFromPriorFacts', () => {
         expect(summary.top_fragile_edges!.length).toBeGreaterThan(0);
         // Capped at 3 (5 edges in, 3 out).
         expect(summary.top_fragile_edges!.length).toBe(3);
+        // fragile_edge_count stays consistent with the top-level projection:
+        // uncapped distinct renderable edges (5), not the per-option count (0).
+        expect(summary.fragile_edge_count).toBe(5);
       });
 
       it('GOLDEN: ranks by switch_probability so [0] names the MOST fragile link (parity with m1_coaching)', () => {
@@ -678,6 +681,71 @@ describe('buildAnalysisFromPriorFacts', () => {
           { from_label: 'A1', to_label: 'B1' },
           { from_label: 'A2', to_label: 'B2' },
           { from_label: 'A3', to_label: 'B3' },
+        ]);
+      });
+
+      it('dedupe retains the MAX switch_probability per label pair (a later, more-fragile duplicate wins the ranking)', () => {
+        // Edge A->B appears twice: first weak (0.1), then strong (0.5). C->D
+        // once (0.3). First-wins would rank [C->D, A->B] (A->B stuck at 0.1);
+        // max-wins ranks [A->B, C->D] because A->B's true fragility (0.5)
+        // exceeds C->D's 0.3 — matching the "rank by most fragile" contract.
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-maxdup' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_label: 'A', to_label: 'B', switch_probability: 0.1 },
+              { from_label: 'C', to_label: 'D', switch_probability: 0.3 },
+              { from_label: 'A', to_label: 'B', switch_probability: 0.5 }, // more-fragile dup
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'A', to_label: 'B' },
+          { from_label: 'C', to_label: 'D' },
+        ]);
+      });
+
+      it('sets fragile_edge_count to the distinct top-level edge count (not the inherited 0) when projecting from the top level', () => {
+        // compactAnalysis only counts per-option results[].robustness, so for a
+        // top-level-only payload it leaves fragile_edge_count at 0. The summary
+        // must stay self-consistent: GOLDEN has 5 distinct edges, so the count
+        // is 5 (uncapped) even though only the top 3 surface in top_fragile_edges.
+        const fact = runAnalysisFactWithEnrichment(GOLDEN_504_ENRICHMENT);
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges!.length).toBe(3);
+        expect(summary.fragile_edge_count).toBe(5);
+      });
+
+      it('edges missing switch_probability rank deterministically by label (no NaN from the -Infinity tiebreak)', () => {
+        // Both edges omit switch_probability → both score -Infinity. The
+        // explicit comparator must fall through to label ordering (Alpha before
+        // Zebra), never NaN-arithmetic. Pins the comparator-cleanup behaviour.
+        const fact = runAnalysisFactWithEnrichment({
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-tie' },
+          option_comparison: [
+            { option_id: 'opt-a', option_label: 'A', win_probability: 0.6 },
+            { option_id: 'opt-b', option_label: 'B', win_probability: 0.4 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              { from_label: 'Zebra link', to_label: 'Outcome' },
+              { from_label: 'Alpha link', to_label: 'Outcome' },
+            ],
+          },
+          analysis_status: 'complete',
+        });
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        expect(summary.top_fragile_edges).toEqual([
+          { from_label: 'Alpha link', to_label: 'Outcome' },
+          { from_label: 'Zebra link', to_label: 'Outcome' },
         ]);
       });
 
