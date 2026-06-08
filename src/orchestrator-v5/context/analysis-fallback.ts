@@ -190,10 +190,13 @@ function deriveTopDriversFromTopLevel(
  * `switch_probability` is used ONLY for ranking — it is never emitted, so no
  * raw decimal can leak.
  *
- * Returns `{ edges, count }`: `edges` is the top 3 (parity with
- * `deriveTopFragileEdges`); `count` is the total distinct renderable fragile
- * edges (uncapped — parity with `deriveFragileEdgeCount`) so the caller can
- * keep `fragile_edge_count` consistent when it projects from the top level.
+ * Returns `{ edges, count }`: `edges` is the top 3 (cap parity with
+ * `deriveTopFragileEdges`); `count` is the UNCAPPED number of distinct
+ * renderable edges. NOTE this is not the same measure as compactAnalysis's
+ * `deriveFragileEdgeCount` (which counts per-option edges by `edge_id` with no
+ * renderability filter) — it is the top-level analogue, deduped by resolved
+ * label pair and renderability-filtered, so the caller can keep
+ * `fragile_edge_count` non-zero/consistent when it projects from the top level.
  */
 function deriveTopFragileEdgesFromTopLevel(
   enrichment: Record<string, unknown>,
@@ -261,9 +264,10 @@ function deriveTopFragileEdgesFromTopLevel(
       a.edge.to_label.localeCompare(b.edge.to_label)
     );
   });
-  // `edges`: top 3 (parity with deriveTopFragileEdges). `count`: total distinct
-  // renderable fragile edges (uncapped — parity with deriveFragileEdgeCount) so
-  // the caller can keep `fragile_edge_count` consistent on the top-level path.
+  // `edges`: top 3 (cap parity with deriveTopFragileEdges). `count`: UNCAPPED
+  // distinct renderable edges — the top-level analogue of (not identical to)
+  // deriveFragileEdgeCount, so the caller can keep `fragile_edge_count`
+  // non-zero/consistent on the top-level path.
   return { edges: ranked.slice(0, 3).map((r) => r.edge), count: ranked.length };
 }
 

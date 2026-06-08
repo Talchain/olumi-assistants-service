@@ -711,6 +711,9 @@ describe('buildAnalysisFromPriorFacts', () => {
           { from_label: 'A2', to_label: 'B2' },
           { from_label: 'A3', to_label: 'B3' },
         ]);
+        // fragile_edge_count is the DISTINCT (post-dedupe) count, UNCAPPED:
+        // 5 raw - 1 duplicate = 4 distinct, even though only 3 edges render.
+        expect(summary.fragile_edge_count).toBe(4);
       });
 
       it('dedupe retains the MAX switch_probability per label pair (a later, more-fragile duplicate wins the ranking)', () => {
