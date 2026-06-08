@@ -48,6 +48,10 @@ import {
 } from './decision-review-enricher.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
 import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
+// Two-argument label guard relocated to the lean context module (single
+// source of truth, shared with the projection layer). Distinct from the
+// one-argument `sanitiseLabel` in src/utils/label-sanitiser.ts.
+import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 
 export const MAX_HEADLINE_CHARS = 220;
 
@@ -108,10 +112,6 @@ const PARTIAL_SUFFIX =
   ' The run was flagged as partial — treat as provisional.';
 const UNKNOWN_SUFFIX =
   ' The analysis engine reported an unfamiliar status — treat the result with caution.';
-
-const ID_PREFIX_PATTERN = /^(opt_|goal_|fac_|node_|edge_|n_|e_)/i;
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface AnalysisResultHeadlineInput {
   readonly enrichment: Record<string, unknown>;
@@ -757,15 +757,7 @@ function pickFragileEdgeLabel(
   return cleanTo;
 }
 
-function sanitiseLabel(rawLabel: string, idGuess: string): string | null {
-  if (typeof rawLabel !== 'string') return null;
-  const trimmed = rawLabel.trim();
-  if (trimmed.length === 0) return null;
-  if (idGuess.length > 0 && trimmed === idGuess) return null;
-  if (ID_PREFIX_PATTERN.test(trimmed)) return null;
-  if (UUID_PATTERN.test(trimmed)) return null;
-  return trimmed;
-}
+// `sanitiseLabel` is imported from ../context/enrichment-graph-labels.ts.
 
 // ============================================================================
 // Registry-side allowlist for run_analysis assistant_text

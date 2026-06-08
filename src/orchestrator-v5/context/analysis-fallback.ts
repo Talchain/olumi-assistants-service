@@ -47,8 +47,14 @@ import {
   compactAnalysis,
   type AnalysisResponseSummary,
   type DriverSummary,
+  type FragileEdge,
   type OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
+import {
+  buildNodeLabelMap,
+  readGraph,
+  sanitiseLabel,
+} from './enrichment-graph-labels.js';
 import {
   resolveInfluenceDirection,
   type InfluenceDirection,
@@ -157,6 +163,87 @@ function deriveTopDriversFromTopLevel(
 }
 
 /**
+ * Derive renderable fragile edges from a TOP-LEVEL
+ * `enrichment.robustness.fragile_edges[]` — the shape PLoT actually returns
+ * on staging (robustness sits at the envelope top level, NOT per option;
+ * `enrichment.results` is often absent — only `option_comparison`, whose
+ * entries carry no `.robustness`). `compactAnalysis`'s `deriveTopFragileEdges`
+ * only walks per-option `results[].robustness.fragile_edges`, so it misses
+ * these entirely. This is the SAME gap `deriveTopDriversFromTopLevel` closes
+ * for top_drivers — the override was simply never applied to fragile edges.
+ *
+ * Label resolution, in priority order:
+ *   1. inline `from_label` / `to_label` (present on staging — the renderable
+ *      source; the staging envelope usually has NO top-level `enrichment.graph`,
+ *      so the map below is empty there),
+ *   2. graph node-label map (`buildNodeLabelMap(readGraph(...))`) keyed by the
+ *      edge's node id (`from_node_id` / `from_id` / `from`, and the `to_*`
+ *      equivalents) — covers node-id-only shapes.
+ * Every resolved label is run through `sanitiseLabel` so a blank/missing
+ * label or a raw id (slug-prefix or UUID) is dropped rather than emitted —
+ * an unresolvable endpoint skips the whole edge (no half-rendered "from X to ").
+ *
+ * Ranked by `switch_probability` descending so the first entry names the MOST
+ * fragile link (parity with `m1_coaching.top_fragile_edge`, which the upstream
+ * picks the same way). `switch_probability` is used ONLY for ranking — it is
+ * never emitted, so no raw decimal can leak. Capped at 3 (parity with
+ * `deriveTopFragileEdges`).
+ */
+function deriveTopFragileEdgesFromTopLevel(
+  enrichment: Record<string, unknown>,
+): FragileEdge[] {
+  const rob = enrichment.robustness;
+  if (rob === null || typeof rob !== 'object' || Array.isArray(rob)) return [];
+  const raw = (rob as Record<string, unknown>).fragile_edges;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
+  const labelMap = buildNodeLabelMap(readGraph(enrichment));
+
+  // Resolve one endpoint: inline label first, then node-id → label map.
+  // Returns a clean human label or null (blank / unresolved / id-shaped).
+  const resolveEndpoint = (
+    inline: unknown,
+    idCandidates: readonly unknown[],
+  ): string | null => {
+    const id = idCandidates.find((c): c is string => typeof c === 'string') ?? null;
+    const candidate =
+      typeof inline === 'string' && inline.trim().length > 0
+        ? inline
+        : id !== null
+          ? labelMap.get(id) ?? null
+          : null;
+    if (candidate === null) return null;
+    return sanitiseLabel(candidate, id ?? '');
+  };
+
+  const seen = new Set<string>();
+  const ranked: Array<{ edge: FragileEdge; score: number }> = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) continue;
+    const e = item as Record<string, unknown>;
+    const fromLabel = resolveEndpoint(e.from_label, [e.from_node_id, e.from_id, e.from]);
+    const toLabel = resolveEndpoint(e.to_label, [e.to_node_id, e.to_id, e.to]);
+    if (fromLabel === null || toLabel === null) continue;
+    const key = `${fromLabel}→${toLabel}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const score =
+      typeof e.switch_probability === 'number' && Number.isFinite(e.switch_probability)
+        ? e.switch_probability
+        : -Infinity;
+    ranked.push({ edge: { from_label: fromLabel, to_label: toLabel }, score });
+  }
+
+  ranked.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.edge.from_label.localeCompare(b.edge.from_label) ||
+      a.edge.to_label.localeCompare(b.edge.to_label),
+  );
+  return ranked.slice(0, 3).map((r) => r.edge);
+}
+
+/**
  * Scan prior facts (newest-first, same order as `readRecent`) for the most
  * recent non-noop `run_analysis` fact and project it into an
  * `AnalysisResponseSummary`. Returns null when no usable prior analysis
@@ -221,11 +308,26 @@ export function buildAnalysisFromPriorFacts(
           ? fromEnrichment.top_drivers
           : deriveTopDriversFromTopLevel(enrichment as Record<string, unknown>);
 
+      // Same gap as top_drivers above: compactAnalysis's deriveTopFragileEdges
+      // only walks per-option results[].robustness.fragile_edges. On staging
+      // the fragile edges live at the TOP LEVEL (enrichment.robustness.
+      // fragile_edges) and never reach the advice-gate projection that
+      // composeExplainResults / composeMeaning read. Derive from the top-level
+      // array when the per-option path produced nothing, so the deterministic
+      // fragile-assumption branch can fire. Per-option result wins when present.
+      const topFragileEdges =
+        fromEnrichment.top_fragile_edges && fromEnrichment.top_fragile_edges.length > 0
+          ? fromEnrichment.top_fragile_edges
+          : deriveTopFragileEdgesFromTopLevel(enrichment as Record<string, unknown>);
+
       return {
         ...fromEnrichment,
         options: relabelled,
         winner,
         top_drivers: topDrivers,
+        // Only set when non-empty so the field stays absent (not []) on the
+        // genuinely-no-fragile-edges path — downstream `?? []` handles either.
+        ...(topFragileEdges.length > 0 ? { top_fragile_edges: topFragileEdges } : {}),
       };
     }
   }

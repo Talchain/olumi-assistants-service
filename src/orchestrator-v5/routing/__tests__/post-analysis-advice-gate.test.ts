@@ -773,6 +773,100 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
 // when present. Each test pins both the "full data" path AND the
 // degrade-gracefully behaviour when individual fields are missing.
 // =========================================================================
+// Fragile-edge liveness — proves the projection→composer boundary using the
+// labels the real staging payload (smoke scenario 504ee700) now yields after
+// the top-level fragile-edge projection fix. Closes the open Coaching Slice 1
+// caveat that the fragile-assumption branch was live-untested.
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging labels', () => {
+  // Shape produced by projectAnalysis(buildAnalysisFromPriorFacts(...)) for the
+  // 504ee700 fixture: the top fragile edge by switch_probability is
+  // 'Local Senior Hire' → 'Q3 Roadmap Delivery Capacity'.
+  const REAL_STAGING_ANALYSIS: AdviceGateAnalysis = {
+    status: 'success',
+    leading_option: { label: 'Hire Two Senior Engineers Locally', probability: 0.763 },
+    runner_up: { label: 'Continue with Current Team (Status Quo)', probability: 0.115 },
+    margin_pp: 64.8,
+    robustness_band: 'moderate',
+    top_drivers: [{ factor_label: 'Local Senior Hire', sensitivity_value: 0.45 }],
+    fragile_edges: [
+      { from_label: 'Local Senior Hire', to_label: 'Q3 Roadmap Delivery Capacity' },
+      { from_label: 'Q3 Roadmap Delivery Capacity', to_label: 'Deliver Q3 Roadmap Commitments on Time and Within Budget' },
+    ],
+  };
+
+  it('composeExplainResults names the real fragile link and the next action strengthens THAT link', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: REAL_STAGING_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain(
+        "The most useful thing to check is the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity': whether it holds as strongly as the model currently assumes",
+      );
+      // Next action aligns to the SAME named link (not the top driver).
+      expect(out.assistant_text).toMatch(
+        /^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m,
+      );
+      // No raw ids / decimals / internal vocabulary / arrows or em dashes leak.
+      expect(out.assistant_text).not.toMatch(/\b0\.\d/);
+      expect(out.assistant_text).not.toMatch(/(opt_|fac_|goal_|node_|edge_)/i);
+      expect(out.assistant_text).not.toMatch(/_meta|fragile_edge|switch_probability|node_id|handler|context_pack/i);
+      expect(out.assistant_text).not.toMatch(/[—→]/);
+    }
+  });
+
+  it('composeMeaning names the real fragile link', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What does this mean?',
+      analysis: REAL_STAGING_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain(
+        "The most useful thing to check is the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity'",
+      );
+    }
+  });
+
+  it('fallback: no fragile edges → top-driver branch, next action revisits the driver (not a link)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: { ...REAL_STAGING_ANALYSIS, fragile_edges: [] },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // No fragile-link sentence.
+      expect(out.assistant_text).not.toContain('The most useful thing to check is the link from');
+      // Falls back to the top-driver next step.
+      expect(out.assistant_text).toMatch(
+        /^• Re-run after revisiting 'Local Senior Hire', the factor with the most influence here, to see whether the lead holds\.$/m,
+      );
+    }
+  });
+
+  it('renderability: fragile edges with a blank endpoint label are dropped → top-driver fallback', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        ...REAL_STAGING_ANALYSIS,
+        fragile_edges: [{ from_label: '   ', to_label: 'Q3 Roadmap Delivery Capacity' }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).not.toContain('The most useful thing to check is the link from');
+      expect(out.assistant_text).toMatch(/the factor with the most influence here/);
+    }
+  });
+});
+
+// =========================================================================
 describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', () => {
   const ENRICHED_ANALYSIS: AdviceGateAnalysis = {
     status: 'success',
