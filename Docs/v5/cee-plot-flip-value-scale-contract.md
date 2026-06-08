@@ -57,6 +57,12 @@ hedge.
   the result.` — never "this will flip the result".
 - No raw normalised decimals, no `%` for non-percent units, no values that cannot round-trip
   through the handler's cap-range guard (a display value above `cap` fails closed).
+- **Emit ⟺ egress safety parity.** `emitProposedChange` runs the same raw-decimal predicate the
+  egress chip-finaliser uses (`findChipRawDecimalLeak`, validated-proposal treatment) on the
+  chip label and message. A proposal whose copy carries a non-exempt raw decimal — e.g. a
+  high-precision value interpolated from a `factor_label` like `Confidence 0.4732` — is refused
+  at emit (`unsafe_copy`: no chip **and** no pending), so an egress-only chip drop can never
+  orphan an `apply_proposed_change` pending (persisted pending ⟹ rendered chip).
 
 ## Out of scope
 
