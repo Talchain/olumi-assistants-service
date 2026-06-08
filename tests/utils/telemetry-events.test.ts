@@ -497,6 +497,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ProposedChangeEmitted: "v5.proposed_change.emitted",
         V5NoAnalysisGuard: "v5.no_analysis_guard",
         V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
+        V5EditGraphTurn: "v5.edit_graph.turn",
         // V5 link-safe response floor — headline Case-E + chip floor.
         V5HeadlineFellBack: "v5.headline.fell_back",
         V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
@@ -1157,6 +1158,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5ProposedChangeEmitted,
         TelemetryEvents.V5NoAnalysisGuard,
         TelemetryEvents.V5EditGraphNoOpRecovery,
+        TelemetryEvents.V5EditGraphTurn,
         // CI hygiene baseline (Tranche B) — pre-existing live emit() sites
         // registered to unblock telemetry validation. All diagnostic-only;
         // structured logs are the operational signal until Datadog mappings
@@ -1679,6 +1681,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.proposed_change.emitted",
         "v5.no_analysis_guard",
         "v5.edit_graph.no_op_recovery",
+        "v5.edit_graph.turn",
         // V5 link-safe response floor — headline Case-E + chip floor
         "v5.headline.fell_back",
         "v5.chips.empty_intentional",

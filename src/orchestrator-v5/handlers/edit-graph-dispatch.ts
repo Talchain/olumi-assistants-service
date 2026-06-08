@@ -37,6 +37,13 @@ import {
   findSuccessClaimHit,
 } from '../compose/forbidden-user-facing-phrases.js';
 import { getAdapter } from '../../adapters/llm/router.js';
+import { getSystemPromptMeta } from '../../adapters/llm/prompt-loader.js';
+import {
+  classifyThrownFailureCode,
+  deriveEditTurnFieldsFromResult,
+  finaliseEditTurnEvent,
+  type EditTurnEventAccumulator,
+} from './edit-graph-turn-event.js';
 import type {
   ConversationContext,
   DecisionStage,
@@ -1013,6 +1020,50 @@ export async function dispatchEditGraph(
   let proposalPendingForCommit:
     | import('../session/pending-action.js').PendingAction
     | null = null;
+
+  // R7 — single per-turn observability event. Each branch fills the accumulator
+  // as it resolves; `emitEditTurnEventOnce` is invoked from the commit-try
+  // `finally` (covers both returns) and from the handler-threw catch (covers the
+  // rethrow), guarded so it fires exactly once. The emit is isolated in its own
+  // try/catch so a telemetry fault can never mask the handler's return/error.
+  const ev: EditTurnEventAccumulator = {
+    scenario_id: payload.scenario_id,
+    turn_id: payload.turn_id,
+    graph_nodes_before: parsedGraph.nodes.length,
+    graph_edges_before: parsedGraph.edges.length,
+  };
+  try {
+    const meta = getSystemPromptMeta('edit_graph');
+    ev.prompt_source = meta.source;
+    ev.prompt_key = meta.promptId ?? null;
+    ev.prompt_task_id = meta.taskId;
+    ev.prompt_version = meta.version ?? null;
+    ev.prompt_hash = meta.prompt_hash ?? null;
+    ev.prompt_fallback_used = meta.source === 'default';
+  } catch {
+    // Prompt-meta is best-effort; leave the prompt_* fields at their defaults.
+  }
+  let eventEmitted = false;
+  const emitEditTurnEventOnce = (): void => {
+    if (eventEmitted) return;
+    eventEmitted = true;
+    try {
+      ev.latency_ms = Date.now() - startedAt;
+      emit(TelemetryEvents.V5EditGraphTurn, finaliseEditTurnEvent(ev));
+    } catch (telemetryErr) {
+      // R7: a telemetry fault must never replace the handler's original return
+      // or rethrown error — swallow locally and degrade to a log.
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          err: telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr),
+        },
+        'V5 edit_graph turn-event emit failed; continuing',
+      );
+    }
+  };
+
   try {
     // V5 A4 — deterministic clarification intercept. Pre-LLM classifier
     // catches high-confidence bare "add X as a risk" patterns, but the
@@ -1248,6 +1299,12 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch — handler threw',
     );
+    // R7: the handler-threw path is the only exit that does not reach the
+    // commit-try `finally`. Record the structured failure code (no message
+    // parsing — see classifyThrownFailureCode) and emit before rethrowing.
+    ev.outcome = 'error';
+    ev.failure_code = classifyThrownFailureCode(err);
+    emitEditTurnEventOnce();
     throw err;
   }
 
@@ -1267,6 +1324,19 @@ export async function dispatchEditGraph(
   // against the unpersisted graph, response.graph returned to
   // route-v2).
   const successfulAppliedMutation = isSuccessfulAppliedMutation(editResult);
+
+  // R7: populate the per-turn event from the completed handler result. The
+  // no-op recovery layer below refines `ev.branch`; the commit-try `finally`
+  // emits exactly once.
+  Object.assign(
+    ev,
+    deriveEditTurnFieldsFromResult(editResult, {
+      successfulAppliedMutation,
+      graphNodesBefore: ev.graph_nodes_before,
+      graphEdgesBefore: ev.graph_edges_before,
+      proposalEarlyEmitted,
+    }),
+  );
 
   // V5 Context Management v1 — derive freshness + load prior facts
   // EARLIER than the original (Codex round-2 P1) position, so the no-op
@@ -1629,6 +1699,9 @@ export async function dispatchEditGraph(
       // "recovery ran and did nothing" with "early-emit was
       // authoritative". The `V5ProposalContinuationResumed{pre_llm:
       // true}` event already records the early-emit outcome.
+      // R7: the recovery branch is the user-visible no-op outcome; surface it
+      // on the per-turn event. R10 (task 7) adds the preserve/fallback values.
+      ev.branch = recoveryOutcome.branch;
       if (!proposalEarlyEmitted) {
         emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
           request_id: requestId,
@@ -1940,5 +2013,11 @@ export async function dispatchEditGraph(
       graph: null,
       freshness,
     };
+  } finally {
+    // R7: emit the single per-turn event exactly once. This finally covers both
+    // the success return and the commit-failure return; the handler-threw
+    // rethrow is covered by the catch above. `emitEditTurnEventOnce` is
+    // idempotent and self-isolating, so it never alters the returned value.
+    emitEditTurnEventOnce();
   }
 }

@@ -1584,6 +1584,8 @@ ${brief}
         content,
         model: this.model,
         latencyMs,
+        // R7: surface the raw provider finish reason for per-turn observability.
+        stopReason: response.choices[0]?.finish_reason ?? null,
         usage: {
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,

@@ -220,6 +220,18 @@ export interface EditGraphTraceDiagnostics {
   failure_branch: string | null;
   failure_code: string | null;
   failure_message: string | null;
+  // R7 — per-turn LLM call diagnostics. Optional so the existing partial
+  // constructors (dispatch preflight, test fixtures) stay valid; the main
+  // `diagnostics()` closure always populates them. `model`/`stop_reason` are
+  // null and tokens are 0 on deterministic (no-LLM) returns. Tokens are summed
+  // across repair attempts (= total turn cost); `stop_reason` is the final
+  // decisive attempt's value. `plot_outcome` describes the PLoT verdict only.
+  model?: string | null;
+  input_tokens_est?: number;
+  output_tokens?: number;
+  stop_reason?: string | null;
+  repair_attempts?: number;
+  plot_outcome?: 'pass' | 'rejected' | 'unavailable' | 'skipped';
 }
 
 // ============================================================================
@@ -1544,6 +1556,14 @@ export async function handleEditGraph(
   let failureBranch: string | null = null;
   let failureCode: string | null = null;
   let failureMessage: string | null = null;
+  // R7 — per-turn LLM diagnostics accumulators. Tokens summed across repair
+  // attempts; model/stop_reason reflect the final decisive attempt.
+  let lastModel: string | null = null;
+  let inputTokensSum = 0;
+  let outputTokensSum = 0;
+  let lastStopReason: string | null = null;
+  let repairAttempts = 0;
+  let plotOutcome: EditGraphTraceDiagnostics['plot_outcome'] = 'skipped';
 
   const setViolationCodes = (codes: string[]): void => {
     validationViolationCodes = [...new Set(codes.filter((code) => code.length > 0))];
@@ -1572,6 +1592,12 @@ export async function handleEditGraph(
     failure_branch: failureBranch,
     failure_code: failureCode,
     failure_message: failureMessage,
+    model: lastModel,
+    input_tokens_est: inputTokensSum,
+    output_tokens: outputTokensSum,
+    stop_reason: lastStopReason,
+    repair_attempts: repairAttempts,
+    plot_outcome: plotOutcome,
   });
 
   // ── Constraint shortcut ────────────────────────────────────────────────
@@ -1720,6 +1746,8 @@ export async function handleEditGraph(
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     const isRepair = attempt > 1;
+    // R7: repair_attempts = repairs beyond the first try (0 on first attempt).
+    repairAttempts = attempt - 1;
 
     // Build the user message
     let userMessage: string;
@@ -1781,7 +1809,10 @@ export async function handleEditGraph(
           recoverable: true,
           suggested_retry: 'Try describing the edit again.',
         };
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err });
+        // R7: structured discriminator read by the dispatch turn-event so
+        // failure_code distinguishes an LLM-call failure from a parse failure
+        // without parsing the message string.
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err, editTurnFailureCode: 'llm_call_failed' as const });
       }
       log.warn(
         { request_id: requestId, attempt, error: error instanceof Error ? error.message : String(error) },
@@ -1789,6 +1820,16 @@ export async function handleEditGraph(
       );
       continue;
     }
+
+    // R7: accumulate per-call LLM diagnostics (summed across attempts;
+    // model/stop_reason reflect the final decisive attempt). `usage` is
+    // optional-guarded: production adapters always populate it, but the
+    // contract allows its absence (and test adapters omit it) — a missing
+    // usage must never crash a successful edit.
+    lastModel = chatResult.model;
+    inputTokensSum += chatResult.usage?.input_tokens ?? 0;
+    outputTokensSum += chatResult.usage?.output_tokens ?? 0;
+    lastStopReason = chatResult.stopReason ?? null;
 
     // Bidirected edges: the edit_graph prompt (v6) constrains output to directional
     // from/to operations only. Bidirected edge references in the schema are for
@@ -1808,7 +1849,8 @@ export async function handleEditGraph(
           recoverable: true,
           suggested_retry: 'Try describing the edit more clearly.',
         };
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err });
+        // R7: structured discriminator (see the LLM-call throw above).
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err, editTurnFailureCode: 'parse_fail' as const });
       }
       log.warn(
         { request_id: requestId, attempt, error: error instanceof Error ? error.message : String(error) },
@@ -2270,9 +2312,13 @@ export async function handleEditGraph(
         };
 
         const plotResult: ValidatePatchResult = await plotClient.validatePatch(plotPayload, requestId, opts?.plotOpts);
+        // R7: PLoT responded — tentatively a pass; overridden below for the
+        // feature-disabled (skipped) and rejection branches.
+        plotOutcome = 'pass';
 
         // FEATURE_DISABLED (501) → skip semantic validation with warning (same as PLoT not configured)
         if (plotResult.kind === 'feature_disabled') {
+          plotOutcome = 'skipped';
           log.info(
             { request_id: requestId, attempt },
             "edit_graph PLoT validate-patch FEATURE_DISABLED — skipping semantic validation",
@@ -2284,6 +2330,7 @@ export async function handleEditGraph(
           const reason = plotResult.message ?? 'Semantic validation rejected by PLoT';
           const plotCode = plotResult.code;
           const plotViolations = plotResult.violations;
+          plotOutcome = 'rejected';
           validationOutcome = 'plot_semantic_rejected';
           setViolationCodes([plotCode ?? 'plot_semantic_rejected']);
           recoveryPathChosen = 'repair_retry';
@@ -2338,6 +2385,7 @@ export async function handleEditGraph(
             const reason = (plotResponse.reason as string) ?? 'Semantic validation rejected by PLoT';
             const plotCode = typeof plotResponse.code === 'string' ? plotResponse.code : undefined;
             const plotViolations = Array.isArray(plotResponse.violations) ? plotResponse.violations : undefined;
+            plotOutcome = 'rejected';
             validationOutcome = 'plot_semantic_rejected';
             setViolationCodes([plotCode ?? 'plot_semantic_rejected']);
             recoveryPathChosen = 'repair_retry';
@@ -2422,6 +2470,7 @@ export async function handleEditGraph(
       } catch (plotError) {
         // PLoT configured but failed — hard reject (CEE must not propose semantically unvalidated patches)
         const errorMessage = plotError instanceof Error ? plotError.message : String(plotError);
+        plotOutcome = 'unavailable';
 
         log.error(
           {

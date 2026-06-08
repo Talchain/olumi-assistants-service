@@ -2469,6 +2469,8 @@ export async function chatWithAnthropic(
       content: content.text,
       model,
       latencyMs,
+      // R7: surface the raw provider stop reason for per-turn observability.
+      stopReason: (response as { stop_reason?: string | null })?.stop_reason ?? null,
       usage: {
         input_tokens: response.usage.input_tokens,
         output_tokens: response.usage.output_tokens,
