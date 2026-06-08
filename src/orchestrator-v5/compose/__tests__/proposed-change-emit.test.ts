@@ -237,6 +237,23 @@ describe('emitProposedChange — safety filter', () => {
     );
     expect(out.status).toBe('success');
   });
+
+  // Blank copy parity with the egress chip-finaliser (it drops blank chips):
+  // refuse blank/whitespace label or message so a blank proposal can't orphan
+  // an explicit apply_proposed_change pending after its chip is egress-dropped.
+  it('refuses to emit a whitespace-only label', () => {
+    const out = emitProposedChange(makeProposal({ label: '   ' }), makeCtx());
+    expect(out.status).toBe('unsafe_copy');
+    if (out.status !== 'unsafe_copy') return;
+    expect(out.field).toBe('label');
+  });
+
+  it('refuses to emit an empty message', () => {
+    const out = emitProposedChange(makeProposal({ message: '' }), makeCtx());
+    expect(out.status).toBe('unsafe_copy');
+    if (out.status !== 'unsafe_copy') return;
+    expect(out.field).toBe('message');
+  });
 });
 
 describe('emitProposedChange — unknown intent gating', () => {

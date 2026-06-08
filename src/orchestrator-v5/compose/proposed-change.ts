@@ -141,6 +141,13 @@ function findForbiddenToken(value: string): string | null {
 const RAW_DECIMAL_UNSAFE_MARKER = '<raw-decimal>';
 
 /**
+ * `forbidden_token` sentinel reported when a proposal is refused because its
+ * label/message is blank or whitespace-only. The egress chip-finaliser drops
+ * blank chips, so refusing here keeps chip + pending atomic.
+ */
+const BLANK_UNSAFE_MARKER = '<blank>';
+
+/**
  * Inputs the proposal id is computed from. Single source of truth so
  * the emit path and tests share the exact set of canonicalised fields.
  * Adding a new field here is a deliberate change that should ship
@@ -186,6 +193,19 @@ export function emitProposedChange(
   proposal: ProposedChange,
   ctx: ProposedChangeContext,
 ): ProposedChangeEmitResult {
+  // Blank / whitespace-only copy is unusable, and the egress chip-finaliser
+  // drops blank chips (`isBlank(label) || isBlank(message)`). Refuse here so a
+  // blank proposal cannot emit a chip + explicit pending and then lose only
+  // the chip at egress, orphaning the pending. (The flip-proposal builder
+  // already guarantees non-blank copy; this completes the emit ⟺ egress parity
+  // for ALL proposal emitters.)
+  if (proposal.label.trim().length === 0) {
+    return { status: 'unsafe_copy', field: 'label', forbidden_token: BLANK_UNSAFE_MARKER };
+  }
+  if (proposal.message.trim().length === 0) {
+    return { status: 'unsafe_copy', field: 'message', forbidden_token: BLANK_UNSAFE_MARKER };
+  }
+
   // Safety-string filter on user-facing copy. Refuse to emit rather
   // than leaking internal vocabulary into a chip we will persist.
   const labelForbidden = findForbiddenToken(proposal.label);
