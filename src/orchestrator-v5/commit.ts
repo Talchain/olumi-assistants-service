@@ -105,6 +105,40 @@ export interface CommitMetadata {
    * non-null, so these rows never reset the prior snapshot. No lifecycle here.
    */
   readonly coaching_state?: CoachingState | null;
+  /**
+   * V5 Conversation Context Reliability: the user's verbatim turn message
+   * (boundary `payload.message`). Threaded by every commit call site that has
+   * the payload in scope so the next turn's ContextPack can project it into
+   * `conversation.recent_turns[].user_message` and the LLM can resolve
+   * follow-ups. Capped here (`commitDirectAnswer`) before write. Omit for
+   * turns with no user text (system / internal-event turns) — persists NULL.
+   *
+   * The assistant side is derived inside `commitDirectAnswer` from the composed
+   * `response.assistant_text` (single source of truth = the egress-validated
+   * public answer), so no commit path needs per-site assistant wiring.
+   */
+  readonly userMessage?: string;
+}
+
+/**
+ * Durable per-message length cap for persisted conversation content
+ * (`user_message` / `assistant_message`). Bounds storage and the prompt-token
+ * cost of projecting up to `CONTEXT_PACK_RECENT_TURNS_CAP` turns; the cap is
+ * generous enough to preserve the meaning a follow-up needs ("Why?" referring
+ * to the prior answer). Enforced APP-SIDE (no DB CHECK), so an over-long value
+ * is truncated rather than failing the turn commit.
+ */
+export const CONVERSATION_TEXT_CAP = 2000;
+
+/**
+ * Cap durable conversation text app-side. Returns `undefined` for nullish or
+ * empty/whitespace-only input (→ persists NULL, never an empty string) and a
+ * length-bounded string otherwise. Pure; no trimming of interior content.
+ */
+function capConversationText(text: string | undefined | null): string | undefined {
+  if (text == null) return undefined;
+  if (text.trim().length === 0) return undefined;
+  return text.length > CONVERSATION_TEXT_CAP ? text.slice(0, CONVERSATION_TEXT_CAP) : text;
 }
 
 export interface CommitResult {
@@ -178,6 +212,18 @@ export async function commitDirectAnswer(
         )
       : metadata.pending_actions;
 
+  // V5 Conversation Context Reliability: capture this turn's conversation
+  // content for the next turn's ContextPack. user_message comes from the call
+  // site (boundary payload.message via metadata.userMessage); assistant_message
+  // is derived HERE from the composed response so every commit path captures it
+  // uniformly — `response.assistant_text` is the egress-validated, public,
+  // user-visible answer (never raw LLM output / hidden text). Both are
+  // length-capped; nullish/empty → NULL (system-event turns, blank answers, and
+  // the draft_graph path whose provisional response carries empty assistant_text
+  // — its narrative is reconstructable from the persisted graph in context).
+  const userMessage = capConversationText(metadata.userMessage);
+  const assistantMessage = capConversationText(response.assistant_text);
+
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
@@ -192,6 +238,8 @@ export async function commitDirectAnswer(
     briefText: metadata.briefText,
     pending_actions: chipDerivedPending,
     coaching_state: metadata.coaching_state,
+    userMessage,
+    assistantMessage,
   });
 
   // Post-success observability. The turn's state is now durably committed; the

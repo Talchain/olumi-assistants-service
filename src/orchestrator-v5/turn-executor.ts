@@ -440,12 +440,23 @@ export async function runTurnExecutor(
   // context built above. Forwards the optional sessionStore arg unchanged. The
   // 19 `commitDirectAnswer` call sites in this function were renamed to
   // `commitTurn` so the snapshot threads uniformly.
+  // V5 Conversation Context Reliability: also inject userMessage centrally so
+  // EVERY turn-executor commit (all 19 sites: happy path, recoveries,
+  // clarifications, guards) persists the user's turn text uniformly. The
+  // assistant side is derived inside commitDirectAnswer from the composed
+  // response. Message-kind turns carry payload.message; system-event-kind
+  // turns carry no user text and persist NULL.
+  const userMessageForTurn = payload.kind === 'message' ? payload.message : undefined;
   const commitTurn = (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
     store?: Parameters<typeof commitDirectAnswer>[2],
   ): ReturnType<typeof commitDirectAnswer> =>
-    commitDirectAnswer(resp, { ...meta, coaching_state: context.coaching_state }, store);
+    commitDirectAnswer(
+      resp,
+      { ...meta, coaching_state: context.coaching_state, userMessage: userMessageForTurn },
+      store,
+    );
 
   // V5 alpha hardening Phase 2.5: one-query observability. v5_journey_id
   // aliases scenario_id (= context.session_id) per Paul's locked-in

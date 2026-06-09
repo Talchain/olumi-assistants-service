@@ -29,6 +29,7 @@ import type {
   TurnContext,
 } from '@talchain/schemas/orchestrator';
 import type { HandlerFactWithTurn } from './types/handler-fact.js';
+import type { SessionTurnWithContent } from './session/conversation-content.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
@@ -58,8 +59,13 @@ export interface EnrichedTurnContext extends TurnContext {
    * most recent first. Empty array means either "no prior history" or
    * "persistence read degraded"; disambiguate via the
    * `session.read_degraded` telemetry event.
+   *
+   * V5 Conversation Context Reliability: carries the content-bearing superset
+   * (user_message / assistant_message) so the ContextPack conversation
+   * projection can surface prior turn text to the LLM. Superset of SessionTurn,
+   * so fact-loading and other consumers that read only metadata are unaffected.
    */
-  readonly prior_turns: readonly SessionTurn[];
+  readonly prior_turns: readonly SessionTurnWithContent[];
   /**
    * Handler facts for prior_turns (V5 Group 1: used by coaching-cache
    * reader to resolve decision_review enrichment and last coaching signal).
@@ -277,6 +283,39 @@ export async function buildTurnContext(
 
   const store = options.sessionStore ?? tryGetSessionStore(requestId, payload.scenario_id);
   const priorTurns = await fetchPriorTurns(payload.scenario_id, requestId, store);
+  // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
+  // turn PROVABLY continues a prior conversation — the chip can only exist if a
+  // prior assistant turn rendered it — so zero prior turns under this scenario_id
+  // means the conversation was fragmented across scenario_ids (UI did not hold a
+  // stable scenario_id). CEE cannot repair the id (it takes ingress.scenario_id
+  // verbatim and the payload carries no history), but it must not silently accept
+  // a blank context. Emit a content-free warning so the gap is observable rather
+  // than surfacing as a baffling "the AI forgot everything". Guard is gated to
+  // store-present so a degraded read (already telemetered as session.read_degraded)
+  // is not double-counted as a fragmentation gap.
+  if (
+    store !== undefined &&
+    priorTurns.length === 0 &&
+    (payload.source === 'chip_click' || payload.source === 'chip')
+  ) {
+    log.warn(
+      {
+        event: 'v5_session_continuity_gap',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        source: payload.source,
+        stage: payload.stage,
+        prior_turn_count: 0,
+      },
+      'V5 buildTurnContext: continuity gap — chip-sourced turn arrived with zero prior turns (likely scenario-id fragmentation)',
+    );
+    emit(TelemetryEvents.V5SessionContinuityGap, {
+      scenario_id: payload.scenario_id,
+      source: payload.source,
+      stage: payload.stage,
+      prior_turn_count: 0,
+    });
+  }
   const { facts: priorFacts, factsWithTurn: priorFactsWithTurn } = await fetchPriorFacts(
     priorTurns,
     requestId,
@@ -605,7 +644,7 @@ async function fetchPriorTurns(
   scenarioId: string,
   requestId: string,
   store: SessionStore | undefined,
-): Promise<readonly SessionTurn[]> {
+): Promise<readonly SessionTurnWithContent[]> {
   if (!store) return [];
   try {
     return await store.readRecent(scenarioId);

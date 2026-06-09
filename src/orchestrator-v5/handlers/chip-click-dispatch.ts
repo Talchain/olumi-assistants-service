@@ -598,6 +598,9 @@ export async function dispatchChipClickRunAnalysis(
         handler_facts: enrichedFacts,
         // V5 Stage 2B-1b: persist the turn-start (pre-dispatch) coaching snapshot.
         coaching_state: context.coaching_state,
+        // V5 Conversation Context Reliability: persist the user's turn text;
+        // the assistant answer auto-derives from `response.assistant_text`.
+        userMessage: payload.message,
       });
       // V5 finaliser contract: derive readiness from the SAME GraphV3T
       // reference the run_analysis handler operated on (the cached
@@ -918,6 +921,9 @@ async function dispatchChipClickNoopExplanation(
         handler_facts: outcome.handler_facts,
         // V5 Stage 2B-1b: persist the turn-start (pre-dispatch) coaching snapshot.
         coaching_state: context.coaching_state,
+        // V5 Conversation Context Reliability: persist the user's turn text;
+        // the assistant answer auto-derives from `response.assistant_text`.
+        userMessage: payload.message,
       });
 
       // Telemetry parity with run_analysis: emit freshness so dashboards
