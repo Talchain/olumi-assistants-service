@@ -105,6 +105,26 @@ describe('deriveEditTurnFieldsFromResult', () => {
     expect(f.outcome).toBe('proposal');
   });
 
+  it('clarify: deterministicClarify + zero operations → outcome=clarify (not no_op)', () => {
+    const r = makeResult({ wasRejected: false });
+    const f = deriveEditTurnFieldsFromResult(r, {
+      ...base,
+      successfulAppliedMutation: false,
+      deterministicClarify: true,
+    });
+    expect(f.outcome).toBe('clarify');
+  });
+
+  it('clarify flag does NOT override a rejection — wasRejected wins (add-risk preflight)', () => {
+    const r = makeResult({ wasRejected: true });
+    const f = deriveEditTurnFieldsFromResult(r, {
+      ...base,
+      successfulAppliedMutation: false,
+      deterministicClarify: true,
+    });
+    expect(f.outcome).toBe('rejected');
+  });
+
   it('threads tokens / stop_reason / model / repair_attempts / plot_outcome / branch from diagnostics', () => {
     const r = makeResult({
       appliedGraph: GRAPH_2N_1E,

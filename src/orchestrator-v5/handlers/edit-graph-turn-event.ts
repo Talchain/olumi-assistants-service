@@ -93,10 +93,13 @@ export function classifyThrownFailureCode(err: unknown): string {
  * Derive the content-free per-turn fields from a completed `EditGraphResult`.
  *
  * `successfulAppliedMutation` is the dispatcher's single mutation predicate.
- * `proposalEarlyEmitted` flags the deterministic Stage 1/2 proposal shape that
- * would otherwise read as a plain no-op. Tokens / stop_reason / model /
- * repair_attempts / plot_outcome come straight from the tool's threaded
- * diagnostics (null/0/'unknown'/'skipped' on deterministic no-LLM returns).
+ * `proposalEarlyEmitted` flags the deterministic Stage 1/2 proposal shape, and
+ * `deterministicClarify` the deterministic add-risk clarification shape — both
+ * of which would otherwise read as a plain no-op. (`wasRejected` is checked
+ * before `deterministicClarify`, so the add-risk preflight *rejection* — which
+ * also sets the clarify flag — is still classified `rejected`.) Tokens /
+ * stop_reason / model / repair_attempts / plot_outcome come straight from the
+ * tool's threaded diagnostics (null/0/'unknown'/'skipped' on no-LLM returns).
  */
 export function deriveEditTurnFieldsFromResult(
   editResult: EditGraphResult,
@@ -105,6 +108,7 @@ export function deriveEditTurnFieldsFromResult(
     graphNodesBefore: number;
     graphEdgesBefore: number;
     proposalEarlyEmitted?: boolean;
+    deterministicClarify?: boolean;
   },
 ): Partial<EditTurnEventFields> {
   const d = editResult.diagnostics;
@@ -115,6 +119,7 @@ export function deriveEditTurnFieldsFromResult(
   if (opts.proposalEarlyEmitted) outcome = 'proposal';
   else if (opts.successfulAppliedMutation) outcome = 'success';
   else if (editResult.wasRejected) outcome = 'rejected';
+  else if (opts.deterministicClarify && operationsCount === 0) outcome = 'clarify';
   else if (operationsCount === 0) outcome = 'no_op';
   else outcome = 'success';
 

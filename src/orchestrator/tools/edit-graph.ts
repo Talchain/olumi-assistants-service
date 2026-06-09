@@ -2030,6 +2030,13 @@ export async function handleEditGraph(
         validationOutcome = 'max_operations_exceeded';
         setViolationCodes(['max_operations_exceeded']);
         recoveryPathChosen = 'rejection_block';
+        // R7 (NB-2): label the diagnostics failure_code so this cap rejection is
+        // distinct (not null) in the turn event — the highest-frequency cap path
+        // R7 needs to measure across R1/R2. Label only; mirrors the trio the
+        // sibling rejections set (e.g. budget_exceeded). No cap behaviour change.
+        failureBranch = 'max_operations';
+        failureCode = 'max_operations_exceeded';
+        failureMessage = msg;
         return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, 'MAX_OPERATIONS_EXCEEDED', undefined, attempt, diagnostics());
       }
       validationOutcome = 'max_operations_exceeded';

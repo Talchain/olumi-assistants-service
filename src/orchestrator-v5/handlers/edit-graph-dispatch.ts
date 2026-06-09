@@ -1335,6 +1335,17 @@ export async function dispatchEditGraph(
     throw err;
   }
 
+  // R7 (NB-1): outer guard around the whole response-assembly + commit region.
+  // The handler-threw path is covered by the catch above; the success/commit
+  // returns are covered by the commit-try `finally` below. This outer `finally`
+  // closes the remaining gap — an unexpected throw in the assembly region
+  // (editResultToOlumiResponse / no-op recovery / computeStructuralReadiness)
+  // before the commit-try runs — so a turn still emits exactly one event before
+  // the exception propagates. There is intentionally NO catch here: the
+  // original error is never caught or masked. `eventEmitted` makes the emit
+  // idempotent, so the success path (inner commit-`finally`, then this outer
+  // `finally`) emits once, not twice.
+  try {
   let response = editResultToOlumiResponse(editResult, payload);
 
   // V5 H5 (Codex round-2 P1) — unified mutation predicate.
@@ -1362,6 +1373,10 @@ export async function dispatchEditGraph(
       graphNodesBefore: ev.graph_nodes_before,
       graphEdgesBefore: ev.graph_edges_before,
       proposalEarlyEmitted,
+      // R7 (NB-2 follow-on): the deterministic add-risk path is either a
+      // preflight rejection (→ 'rejected', wasRejected wins) or a clarification
+      // (→ 'clarify'); both set this flag, distinguished by wasRejected.
+      deterministicClarify: deterministicAddRiskAttempted,
     }),
   );
 
@@ -2054,6 +2069,14 @@ export async function dispatchEditGraph(
     // the success return and the commit-failure return; the handler-threw
     // rethrow is covered by the catch above. `emitEditTurnEventOnce` is
     // idempotent and self-isolating, so it never alters the returned value.
+    emitEditTurnEventOnce();
+  }
+  } finally {
+    // R7 (NB-1): outer guard closing the assembly-region gap. Reached when the
+    // response-assembly code above threw before the commit-try ran. Idempotent
+    // via `eventEmitted`, so the normal success path (inner finally already
+    // emitted) is a no-op here. No catch — the original exception still
+    // propagates out of dispatchEditGraph unchanged.
     emitEditTurnEventOnce();
   }
 }
