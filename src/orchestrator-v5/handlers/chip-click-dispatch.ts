@@ -601,6 +601,9 @@ export async function dispatchChipClickRunAnalysis(
         // V5 Conversation Context Reliability: persist the user's turn text;
         // the assistant answer auto-derives from `response.assistant_text`.
         userMessage: payload.message,
+        // Same GraphV3T the egress sanitiser uses for this turn — resolves
+        // entity-id labels in the stored assistant answer so stored == wire.
+        contentGraph: snapshotGraph,
       });
       // V5 finaliser contract: derive readiness from the SAME GraphV3T
       // reference the run_analysis handler operated on (the cached
@@ -924,6 +927,10 @@ async function dispatchChipClickNoopExplanation(
         // V5 Conversation Context Reliability: persist the user's turn text;
         // the assistant answer auto-derives from `response.assistant_text`.
         userMessage: payload.message,
+        // Same GraphV3T the egress sanitiser uses for this exit
+        // (`projectionInputs.graph`) — resolves entity-id labels in the stored
+        // assistant answer so stored == wire.
+        contentGraph: projectionInputs.graph,
       });
 
       // Telemetry parity with run_analysis: emit freshness so dashboards

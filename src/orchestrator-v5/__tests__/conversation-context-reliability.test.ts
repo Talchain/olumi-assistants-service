@@ -193,6 +193,53 @@ describe('write side — stored assistant text equals the durable public (egress
     await commitDirectAnswer(makeResponse(clean), { ...META, userMessage: 'Which wins?' }, store);
     expect(last()?.assistantMessage).toBe(clean);
   });
+
+  // An ambiguous-prefix single-segment id (goal_revenue) is confirmed ONLY via
+  // graph label resolution — the scrubber can't tell it from a legitimate
+  // English compound (goal_setting) without the graph. So commit threads the
+  // SAME graph the egress sanitiser uses (contentGraph).
+  const GRAPH_WITH_GOAL = {
+    nodes: [{ id: 'goal_revenue', kind: 'goal', label: 'Revenue' }],
+    edges: [],
+  };
+
+  it('resolves an ambiguous-prefix id to its graph label when contentGraph is threaded (stored == wire)', async () => {
+    const { store, last } = makeCapturingStore();
+    await commitDirectAnswer(
+      makeResponse('goal_revenue is most sensitive.'),
+      { ...META, userMessage: 'What is most sensitive?', contentGraph: GRAPH_WITH_GOAL },
+      store,
+    );
+    const stored = last()?.assistantMessage ?? '';
+    // Matches the graph-aware route egress: raw id replaced by the human label.
+    expect(stored).not.toContain('goal_revenue');
+    expect(stored).toContain('Revenue');
+  });
+
+  it('documents the graph-free residual: an ambiguous-prefix id is retained without a graph (avoids corrupting goal_setting-style English)', async () => {
+    const { store, last } = makeCapturingStore();
+    await commitDirectAnswer(
+      makeResponse('goal_revenue is most sensitive.'),
+      { ...META, userMessage: 'What is most sensitive?' }, // no contentGraph
+      store,
+    );
+    // Intentional, documented limitation: with no graph the scrubber cannot
+    // distinguish goal_revenue (id) from goal_setting (English), so it leaves
+    // it intact. A turn with no graph in scope cannot reference graph entities
+    // anyway; threading contentGraph (above) closes this for real turns.
+    expect(last()?.assistantMessage).toContain('goal_revenue');
+  });
+
+  it('still catches an unambiguous-prefix id even without a graph', async () => {
+    const { store, last } = makeCapturingStore();
+    await commitDirectAnswer(
+      makeResponse('The driver fac_delivery_cost dominates.'),
+      { ...META, userMessage: 'Why?' }, // no contentGraph
+      store,
+    );
+    // fac_/opt_ are unambiguous short prefixes — redacted graph-free.
+    expect(last()?.assistantMessage).not.toContain('fac_delivery_cost');
+  });
 });
 
 // ---------------------------------------------------------------------------

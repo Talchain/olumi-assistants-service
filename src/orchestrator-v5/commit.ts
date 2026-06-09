@@ -35,6 +35,7 @@ import type { SessionStore } from './session/store.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
+import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type { PendingAction } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
@@ -120,6 +121,25 @@ export interface CommitMetadata {
    * public answer), so no commit path needs per-site assistant wiring.
    */
   readonly userMessage?: string;
+  /**
+   * V5 Conversation Context Reliability: the scenario graph used to resolve
+   * entity-id labels when reducing `assistant_text` to its durable public form
+   * (see `durablePublicAssistantText`). Pass the SAME graph the route egress
+   * sanitiser uses for this turn so the stored copy equals the wire copy —
+   * `context.persistedGraph` (turn-executor), the run_analysis snapshot graph
+   * (chip-click), or the edit `appliedGraph`/ingress graph (edit-graph).
+   *
+   * Accepted as `unknown` and `GraphV3.safeParse`d inside `commitDirectAnswer`
+   * (callers pass either a parsed `GraphV3T` or the raw persisted graph). When
+   * omitted or unparseable the entity scrub runs graph-free: it still strips
+   * the unambiguous / digit / multi-segment id shapes, but CANNOT distinguish
+   * an ambiguous-prefix single-segment id (`goal_revenue`) from a legitimate
+   * English compound (`goal_setting`) — so those are LEFT INTACT to avoid
+   * corrupting prose. A turn with no graph in scope cannot reference graph
+   * entity ids anyway, so this graph-free residual is low-risk; threading the
+   * graph here closes it for every turn that operates on a graph.
+   */
+  readonly contentGraph?: unknown;
 }
 
 /**
@@ -162,22 +182,44 @@ function capConversationText(text: string | undefined | null): string | undefine
  *
  * We apply both transforms here in WIRE ORDER (forbidden-phrase guard →
  * entity-id scrub) so the stored value equals the wire value on the common
- * egress-ok path and can never contain a forbidden phrase or a raw entity id.
- * Both helpers are pure and idempotent; the entity scrub runs graph-free
- * (`null`) — sufficient for the leak-safety guarantee (a missed id is replaced
- * with a generic label rather than the graph-resolved one). Telemetry for
- * either rewrite is emitted on the wire path, NOT here (both helpers are
- * deliberately telemetry-free), so we don't double-count or mis-attribute.
+ * egress-ok path and can never contain a forbidden phrase. Both helpers are
+ * pure and idempotent; telemetry for either rewrite is emitted on the wire
+ * path, NOT here (both helpers are deliberately telemetry-free), so we don't
+ * double-count or mis-attribute.
  *
- * Residual (documented limitation): in the rare egress HARD-validation-failure
- * path the route ships a typed fallback envelope while this stores the composed
- * answer — a different, but still leak-safe and forbidden-phrase-safe, string.
+ * The entity-id scrub uses `graph` for label resolution — passing the SAME
+ * graph the route egress uses makes the stored copy equal the wire copy AND
+ * catches ambiguous-prefix single-segment ids (`goal_revenue` → its label),
+ * which the scrubber confirms ONLY via `resolveLabel(graph, …)`. With a null
+ * graph those ambiguous ids are left intact (they are indistinguishable from
+ * English compounds like `goal_setting` without the graph) — so callers should
+ * thread `contentGraph` wherever a graph is in scope; see CommitMetadata.
+ *
+ * Residual (documented): (a) a turn committed with NO graph in scope can retain
+ * an ambiguous-prefix single-segment raw id — but such a turn cannot reference
+ * graph entities anyway, so the realistic risk is closed by threading the
+ * graph; (b) in the rare egress HARD-validation-failure path the route ships a
+ * typed fallback while this stores the composed answer — a different, but still
+ * forbidden-phrase-safe (and, with a graph, leak-safe) string.
  */
 function durablePublicAssistantText(
   text: string | undefined | null,
+  graph: GraphV3T | null,
 ): string | undefined | null {
   if (typeof text !== 'string' || text.trim().length === 0) return text;
-  return sanitiseUserFacingText(applyEgressForbiddenPhraseGuard(text).text, null).text;
+  return sanitiseUserFacingText(applyEgressForbiddenPhraseGuard(text).text, graph).text;
+}
+
+/**
+ * Parse the optional caller-supplied `contentGraph` (a parsed `GraphV3T` or the
+ * raw persisted graph) into a `GraphV3T | null` for entity-id label resolution.
+ * Never throws — an unparseable / absent graph degrades to `null` (graph-free
+ * scrub), never a commit failure.
+ */
+function parseContentGraph(graph: unknown): GraphV3T | null {
+  if (graph == null) return null;
+  const parsed = GraphV3.safeParse(graph);
+  return parsed.success ? parsed.data : null;
 }
 
 export interface CommitResult {
@@ -264,7 +306,9 @@ export async function commitDirectAnswer(
   // provisional response carries empty assistant_text — its narrative is
   // reconstructable from the persisted graph in context).
   const userMessage = capConversationText(metadata.userMessage);
-  const assistantMessage = capConversationText(durablePublicAssistantText(response.assistant_text));
+  const assistantMessage = capConversationText(
+    durablePublicAssistantText(response.assistant_text, parseContentGraph(metadata.contentGraph)),
+  );
 
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,

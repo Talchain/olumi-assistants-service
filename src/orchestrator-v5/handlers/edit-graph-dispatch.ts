@@ -2025,6 +2025,11 @@ export async function dispatchEditGraph(
       // preflight rejections — so a rejected "add a risk" and its rejection
       // reply are both available when the next turn asks "why did that fail?".
       userMessage: payload.message,
+      // Resolve entity-id labels in the stored assistant answer against the
+      // SAME graph the route egress uses for this exit — `graphForCommit` (the
+      // post-edit appliedGraph on a successful mutation, else undefined → the
+      // egress is graph-free too), keeping stored == wire.
+      contentGraph: graphForCommit,
     });
     log.info(
       {

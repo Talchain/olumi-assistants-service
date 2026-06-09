@@ -454,7 +454,16 @@ export async function runTurnExecutor(
   ): ReturnType<typeof commitDirectAnswer> =>
     commitDirectAnswer(
       resp,
-      { ...meta, coaching_state: context.coaching_state, userMessage: userMessageForTurn },
+      {
+        ...meta,
+        coaching_state: context.coaching_state,
+        userMessage: userMessageForTurn,
+        // V5 Conversation Context Reliability: thread the persisted scenario
+        // graph so the durable assistant-text scrub resolves entity-id labels
+        // (e.g. `goal_revenue` → "Revenue") exactly as the route egress does,
+        // keeping the stored copy equal to the wire copy.
+        contentGraph: context.persistedGraph,
+      },
       store,
     );
 
