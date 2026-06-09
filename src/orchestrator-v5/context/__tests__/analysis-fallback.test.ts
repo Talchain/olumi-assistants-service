@@ -7,9 +7,11 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
+  applyTopLevelFragileEdgeOverride,
   buildAnalysisFromPriorFacts,
   FALLBACK_STALENESS_REASON,
 } from '../analysis-fallback.js';
+import { compactAnalysis } from '../../../orchestrator/context/analysis-compact.js';
 
 function runAnalysisFact(overrides: {
   leadingOptionId?: string | null;
@@ -814,5 +816,173 @@ describe('buildAnalysisFromPriorFacts', () => {
         expect(summary.top_fragile_edges).toBeUndefined();
       });
     });
+  });
+});
+
+describe('applyTopLevelFragileEdgeOverride — shared ingress/fallback seam', () => {
+  // Minimal staging-shape enrichment: top-level robustness.fragile_edges with
+  // inline labels + option_comparison, NO per-option `results`. This is the
+  // shape BOTH the body analysis_state ingress path (after coerceIngressAnalysis
+  // sets results: []) and the prior-facts fallback see.
+  const STAGING_ENRICHMENT: Record<string, unknown> = {
+    meta: { seed_used: 1, n_samples: 100, response_hash: 'h-staging' },
+    option_comparison: [
+      { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.62 },
+      { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.38 },
+    ],
+    robustness: {
+      level: 'moderate',
+      fragile_edges: [
+        { from_label: 'Local Senior Hire', to_label: 'Q3 Delivery Capacity', switch_probability: 0.24 },
+        { from_label: 'Budget', to_label: 'Hiring Speed', switch_probability: 0.10 },
+      ],
+    },
+    analysis_status: 'complete',
+  };
+
+  // Same shape but robustness carries NO fragile_edges — yields a real,
+  // type-correct base summary with no fragile edges to build other cases on.
+  const NO_FRAGILE_ENRICHMENT: Record<string, unknown> = {
+    meta: { seed_used: 1, n_samples: 100, response_hash: 'h-none' },
+    option_comparison: [
+      { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.62 },
+      { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.38 },
+    ],
+    robustness: { level: 'moderate' },
+    analysis_status: 'complete',
+  };
+
+  function runFact(enrichment: Record<string, unknown>): HandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.62, 'opt-b': 0.38 },
+        summary: 'Prior run',
+        enrichment,
+      },
+    } as unknown as HandlerFact;
+  }
+
+  // Simulate the turn-executor body-analysis_state path: coerceIngressAnalysis
+  // adds meta + sets results: [] (the UI sends option_comparison, not results)
+  // while preserving top-level robustness; then compactAnalysis + the shared
+  // override run — exactly what turn-executor now does on options.analysisState.
+  function projectViaIngress(analysisState: Record<string, unknown>) {
+    const coerced = {
+      ...analysisState,
+      meta: analysisState.meta ?? { seed_used: 0, n_samples: 0, response_hash: '' },
+      results: [],
+    };
+    const summary = compactAnalysis(coerced as unknown as Parameters<typeof compactAnalysis>[0]);
+    if (!summary) return { summary: null as never, source: 'none' as const };
+    return applyTopLevelFragileEdgeOverride(summary, coerced);
+  }
+
+  const baseSummary = () =>
+    compactAnalysis({ ...NO_FRAGILE_ENRICHMENT, results: [] } as unknown as Parameters<typeof compactAnalysis>[0])!;
+
+  it('body analysis_state path: rescues the top-level fragile edges compactAnalysis alone drops', () => {
+    // Pre-fix behaviour: compactAnalysis on the coerced ingress shape sees NO
+    // fragile edges (it walks per-option results[].robustness only).
+    const bare = compactAnalysis(
+      { ...STAGING_ENRICHMENT, results: [] } as unknown as Parameters<typeof compactAnalysis>[0],
+    )!;
+    expect(bare.top_fragile_edges ?? []).toEqual([]);
+
+    // With the shared override the ingress path now names the link.
+    const { summary, source } = projectViaIngress(STAGING_ENRICHMENT);
+    expect(source).toBe('top_level');
+    expect(summary!.top_fragile_edges).toEqual([
+      { from_label: 'Local Senior Hire', to_label: 'Q3 Delivery Capacity' },
+      { from_label: 'Budget', to_label: 'Hiring Speed' },
+    ]);
+    expect(summary!.fragile_edge_count).toBe(2);
+  });
+
+  it('ingress vs fallback parity: identical fragile-edge projection for the same enrichment', () => {
+    const fallback = buildAnalysisFromPriorFacts([runFact(STAGING_ENRICHMENT)])!;
+    const ingress = projectViaIngress(STAGING_ENRICHMENT).summary!;
+    expect(ingress.top_fragile_edges).toEqual(fallback.top_fragile_edges);
+    expect(ingress.fragile_edge_count).toBe(fallback.fragile_edge_count);
+  });
+
+  it('per-option fragile edges win over the top-level override (source: per_option)', () => {
+    const summary = {
+      ...baseSummary(),
+      top_fragile_edges: [{ from_label: 'Per-Option From', to_label: 'Per-Option To' }],
+      fragile_edge_count: 1,
+    };
+    const out = applyTopLevelFragileEdgeOverride(summary, {
+      robustness: { fragile_edges: [{ from_label: 'Top From', to_label: 'Top To', switch_probability: 0.9 }] },
+    });
+    expect(out.source).toBe('per_option');
+    expect(out.summary).toBe(summary); // returned unchanged
+    expect(out.summary.top_fragile_edges).toEqual([
+      { from_label: 'Per-Option From', to_label: 'Per-Option To' },
+    ]);
+  });
+
+  it('no fragile edges anywhere: summary unchanged, base projection intact (source: none)', () => {
+    const summary = baseSummary();
+    const out = applyTopLevelFragileEdgeOverride(summary, { robustness: { level: 'moderate' } });
+    expect(out.source).toBe('none');
+    expect(out.summary).toBe(summary);
+    expect(out.summary.top_fragile_edges).toBeUndefined();
+    expect(out.summary.fragile_edge_count).toBe(0);
+    expect(out.summary.winner).toEqual(summary.winner); // winner/options untouched
+  });
+
+  it('fail-closed: id/UUID endpoints with no inline label drop the edge (no raw-id leak, source: none)', () => {
+    const out = applyTopLevelFragileEdgeOverride(baseSummary(), {
+      robustness: {
+        fragile_edges: [
+          // both endpoints id-shaped, no inline label, no graph → unresolvable
+          { from_node_id: 'fac_local_hire', to_node_id: '550e8400-e29b-41d4-a716-446655440000', switch_probability: 0.5 },
+          // half-resolvable (one good label, one unresolvable id) → whole edge dropped
+          { from_label: 'Good Label', to_node_id: 'node_unresolved', switch_probability: 0.4 },
+        ],
+      },
+    });
+    expect(out.source).toBe('none');
+    expect(out.summary.top_fragile_edges).toBeUndefined();
+  });
+
+  it('fail-closed: inline labels that are internal id-tokens are dropped (no internal-term leak)', () => {
+    // The realistic "forbidden internal term" leak class for fragile-edge
+    // labels is an id-token shape (a leaked node/factor id surfaced as a
+    // label), which `sanitiseLabel` drops. Free-text term scrubbing is NOT
+    // this id-shape projection layer's job (see the next test).
+    const out = applyTopLevelFragileEdgeOverride(baseSummary(), {
+      robustness: {
+        fragile_edges: [
+          { from_label: 'node_meta', to_label: 'Revenue', switch_probability: 0.5 },
+          { from_label: 'fac_internal_state', to_label: 'goal_q3_delivery', switch_probability: 0.4 },
+        ],
+      },
+    });
+    expect(out.source).toBe('none');
+    expect(out.summary.top_fragile_edges).toBeUndefined();
+  });
+
+  it('preserves a genuine human label that merely contains an internal-sounding word ("Metadata")', () => {
+    // Over-filtering guard: this id-shape projection layer must NOT drop a real
+    // display label just because it contains a substring like "meta". The label
+    // is rendered verbatim; any free-text forbidden-term scrub, if ever needed,
+    // belongs at the egress sanitiser, not in this shared id-shape helper.
+    const out = applyTopLevelFragileEdgeOverride(baseSummary(), {
+      robustness: {
+        fragile_edges: [
+          { from_label: 'Customer Metadata Quality', to_label: 'Revenue', switch_probability: 0.5 },
+        ],
+      },
+    });
+    expect(out.source).toBe('top_level');
+    expect(out.summary.top_fragile_edges).toEqual([
+      { from_label: 'Customer Metadata Quality', to_label: 'Revenue' },
+    ]);
   });
 });

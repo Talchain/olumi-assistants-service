@@ -272,6 +272,68 @@ function deriveTopFragileEdgesFromTopLevel(
 }
 
 /**
+ * Which shape produced the fragile-edge projection, surfaced to telemetry so
+ * we can tell — per turn — whether the deterministic fragile-assumption branch
+ * fired from the per-option `results[].robustness.fragile_edges` shape, the
+ * top-level `enrichment.robustness.fragile_edges` shape (staging / body
+ * `analysis_state`), or nothing.
+ */
+export type FragileEdgeSource = 'per_option' | 'top_level' | 'none';
+
+/**
+ * Reconcile an `AnalysisResponseSummary`'s fragile-edge fields against the
+ * TOP-LEVEL `enrichment.robustness.fragile_edges` shape.
+ *
+ * `compactAnalysis`'s `deriveTopFragileEdges` only walks per-option
+ * `results[].robustness.fragile_edges`. On staging — and on the body
+ * `analysis_state` ingress path, where `coerceIngressAnalysis` leaves
+ * `results` empty because the UI sends `option_comparison` rather than
+ * `results` — the fragile edges live at the top level and are otherwise
+ * dropped, so the deterministic fragile-assumption branch never fires. This
+ * helper closes that gap for BOTH the prior-facts fallback
+ * (`buildAnalysisFromPriorFacts`) and the ingress path (turn-executor) from a
+ * single place, so the two project identically.
+ *
+ * Rules (additive, fail-closed):
+ *   - Per-option edges present → returned unchanged (`'per_option'` wins; the
+ *     established Slice-1 precedence).
+ *   - Per-option empty + top-level renderable edges present → fill
+ *     `top_fragile_edges` and keep `fragile_edge_count` self-consistent from
+ *     the top level (`'top_level'`). `deriveTopFragileEdgesFromTopLevel`
+ *     already sanitises labels and drops id / UUID / blank endpoints, so
+ *     nothing unsafe leaks and an unresolvable edge is simply omitted.
+ *   - Neither present → unchanged (`'none'`).
+ *
+ * Never consults `m1_coaching.top_fragile_edge`; `robustness.fragile_edges` is
+ * the renderable source of truth.
+ */
+export function applyTopLevelFragileEdgeOverride(
+  summary: AnalysisResponseSummary,
+  enrichment: Record<string, unknown>,
+): { summary: AnalysisResponseSummary; source: FragileEdgeSource } {
+  const perOptionFragile = summary.top_fragile_edges ?? [];
+  if (perOptionFragile.length > 0) {
+    return { summary, source: 'per_option' };
+  }
+  const fromTopLevel = deriveTopFragileEdgesFromTopLevel(enrichment);
+  if (fromTopLevel.edges.length === 0) {
+    return { summary, source: 'none' };
+  }
+  return {
+    summary: {
+      ...summary,
+      // compactAnalysis's per-option `fragile_edge_count` stays 0 on this
+      // shape; use the top-level path's distinct renderable edge count so the
+      // summary stays self-consistent.
+      fragile_edge_count:
+        fromTopLevel.count > 0 ? fromTopLevel.count : summary.fragile_edge_count,
+      top_fragile_edges: fromTopLevel.edges,
+    },
+    source: 'top_level',
+  };
+}
+
+/**
  * Scan prior facts (newest-first, same order as `readRecent`) for the most
  * recent non-noop `run_analysis` fact and project it into an
  * `AnalysisResponseSummary`. Returns null when no usable prior analysis
@@ -340,35 +402,20 @@ export function buildAnalysisFromPriorFacts(
       // only walks per-option results[].robustness.fragile_edges. On staging
       // the fragile edges live at the TOP LEVEL (enrichment.robustness.
       // fragile_edges) and never reach the advice-gate projection that
-      // composeExplainResults / composeMeaning read. Derive from the top-level
-      // array when the per-option path produced nothing, so the deterministic
-      // fragile-assumption branch can fire. Per-option result wins when present.
-      const perOptionFragile = fromEnrichment.top_fragile_edges ?? [];
-      const fromTopLevel =
-        perOptionFragile.length > 0
-          ? null
-          : deriveTopFragileEdgesFromTopLevel(enrichment as Record<string, unknown>);
-      const topFragileEdges = fromTopLevel ? fromTopLevel.edges : perOptionFragile;
-
-      // compactAnalysis's `fragile_edge_count` only counts per-option
-      // results[].robustness.fragile_edges, so it stays 0 when the fragile
-      // edges came from the TOP LEVEL. Keep the summary self-consistent: when
-      // we projected from the top level, use that path's distinct edge count.
-      const fragileEdgeCount =
-        fromTopLevel && fromTopLevel.count > 0
-          ? fromTopLevel.count
-          : fromEnrichment.fragile_edge_count;
-
-      return {
-        ...fromEnrichment,
-        options: relabelled,
-        winner,
-        top_drivers: topDrivers,
-        fragile_edge_count: fragileEdgeCount,
-        // Only set when non-empty so the field stays absent (not []) on the
-        // genuinely-no-fragile-edges path — downstream `?? []` handles either.
-        ...(topFragileEdges.length > 0 ? { top_fragile_edges: topFragileEdges } : {}),
-      };
+      // composeExplainResults / composeMeaning read. Reconcile through the
+      // SHARED override helper so this prior-facts fallback and the body
+      // `analysis_state` ingress path (turn-executor) project identically;
+      // per-option result wins when present.
+      const { summary: reconciled } = applyTopLevelFragileEdgeOverride(
+        {
+          ...fromEnrichment,
+          options: relabelled,
+          winner,
+          top_drivers: topDrivers,
+        },
+        enrichment as Record<string, unknown>,
+      );
+      return reconciled;
     }
   }
 

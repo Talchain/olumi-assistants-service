@@ -159,8 +159,10 @@ import {
 } from './context/context-pack-assembler.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import {
+  applyTopLevelFragileEdgeOverride,
   buildAnalysisFromPriorFacts,
   FALLBACK_STALENESS_REASON,
+  type FragileEdgeSource,
 } from './context/analysis-fallback.js';
 import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import {
@@ -804,8 +806,29 @@ export async function runTurnExecutor(
     let analysisSummary: AnalysisResponseSummary | null = null;
     let analysisStalenessReason: string | null = null;
     let analysisStateSource: 'request' | 'fallback' | 'absent' = 'absent';
+    // Which shape produced the fragile edges, for telemetry. Set on the
+    // request path (below); null on the fallback/absent paths — the fallback
+    // already reconciles top-level edges inside buildAnalysisFromPriorFacts.
+    let fragileEdgeSource: FragileEdgeSource | null = null;
     if (options.analysisState) {
-      analysisSummary = compactAnalysis(coerceIngressAnalysis(options.analysisState));
+      // The body-supplied analysis_state arrives in the V2RunResponse shape:
+      // top-level `robustness`, `option_comparison`, and NO per-option
+      // `results` (coerceIngressAnalysis leaves results empty). compactAnalysis
+      // therefore misses the top-level `robustness.fragile_edges`; apply the
+      // SAME override the prior-facts fallback uses so fragile-edge coaching
+      // projects identically on both paths. coerceIngressAnalysis preserves
+      // top-level robustness, so the coerced envelope doubles as the enrichment
+      // source. Per-option edges still win when the request carries them.
+      const coercedIngress = coerceIngressAnalysis(options.analysisState);
+      const ingressSummary = compactAnalysis(coercedIngress);
+      if (ingressSummary) {
+        const reconciled = applyTopLevelFragileEdgeOverride(
+          ingressSummary,
+          coercedIngress as unknown as Record<string, unknown>,
+        );
+        analysisSummary = reconciled.summary;
+        fragileEdgeSource = reconciled.source;
+      }
       analysisStateSource = 'request';
       // Freshness verdict is independent of whether the request carries
       // analysis_state — it is always derived from the prior-fact chain.
@@ -864,6 +887,12 @@ export async function runTurnExecutor(
       {
         prior_fact_count: context.prior_facts.length,
         analysis_state_source: analysisStateSource,
+        // Confirms the body-analysis_state fragile-edge fix in real traffic:
+        // `analysis_state_source: 'request'` + `fragile_edge_source:
+        // 'top_level'` means a request-supplied analysis_state had its fragile
+        // edges rescued from the top-level shape — the path that previously
+        // dropped them. Null off the request path.
+        fragile_edge_source: fragileEdgeSource,
       },
     );
     try {
