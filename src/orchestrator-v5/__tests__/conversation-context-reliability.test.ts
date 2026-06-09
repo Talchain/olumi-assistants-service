@@ -19,7 +19,11 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { commitDirectAnswer, CONVERSATION_TEXT_CAP } from '../commit.js';
-import { EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT } from '../compose/forbidden-user-facing-phrases.js';
+import {
+  EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
+  applyEgressForbiddenPhraseGuard,
+} from '../compose/forbidden-user-facing-phrases.js';
+import { sanitiseOlumiResponseForEgress } from '../compose/output-safety.js';
 import { buildTurnContext } from '../build-turn-context.js';
 import { assembleContextPack } from '../context/context-pack-assembler.js';
 import { ContextPackSchema } from '../context/context-pack-schema.js';
@@ -238,6 +242,34 @@ describe('write side — stored assistant text equals the durable public (egress
       store,
     );
     // fac_/opt_ are unambiguous short prefixes — redacted graph-free.
+    expect(last()?.assistantMessage).not.toContain('fac_delivery_cost');
+  });
+
+  // Parity invariant: the stored assistant text must equal what the REAL route
+  // egress (`sanitiseOlumiResponseForEgress`) produces for the same response +
+  // graph, after the turn-executor forbidden-phrase guard. Asserting against
+  // the actual egress helper (not a re-implementation) catches drift if egress
+  // sanitisation changes. The turn-executor path threads the SAME graph
+  // (`effectiveTurnGraph` → contentGraph here; `run.effectiveGraph` → route
+  // egress), so stored == wire by construction — this locks that in.
+  it('stored assistant text equals the route egress output for the same graph (stored == wire)', async () => {
+    const { store, last } = makeCapturingStore();
+    const text = 'goal_revenue is most sensitive; fac_delivery_cost is the runner-up.';
+    await commitDirectAnswer(
+      makeResponse(text),
+      { ...META, userMessage: 'What matters?', contentGraph: GRAPH_WITH_GOAL },
+      store,
+    );
+    // Reproduce the wire transform: forbidden-phrase guard (turn-executor
+    // finalise) THEN entity-id egress scrub (route chokepoint), same graph.
+    const wireResponse = sanitiseOlumiResponseForEgress(
+      makeResponse(applyEgressForbiddenPhraseGuard(text).text),
+      { graph: GRAPH_WITH_GOAL as never, requestId: 'test', exitPath: 'turn_executor' },
+    );
+    expect(last()?.assistantMessage).toBe(wireResponse.assistant_text);
+    // And concretely: the graph-resolved label is present, the raw ids are not.
+    expect(last()?.assistantMessage).toContain('Revenue');
+    expect(last()?.assistantMessage).not.toContain('goal_revenue');
     expect(last()?.assistantMessage).not.toContain('fac_delivery_cost');
   });
 });

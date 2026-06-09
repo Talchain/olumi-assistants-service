@@ -1758,16 +1758,25 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(500).send(boundaryError);
     }
 
-    // Safe-parse the ingress graphState into a strict GraphV3T for the
-    // egress sanitiser's label resolution. Parse failure (or absent
-    // graphState) → null; the sanitiser falls back to prefix-aware
-    // generic wording without throwing.
-    const turnGraph: GraphV3T | null = extensions.graphState
-      ? (() => {
-          const parsed = GraphV3.safeParse(extensions.graphState);
-          return parsed.success ? parsed.data : null;
-        })()
-      : null;
+    // Egress label-resolution graph. Prefer the AUTHORITATIVE graph the turn
+    // actually reasoned over (`run.effectiveGraph` = request graphState parsed,
+    // or the persisted-graph fallback the executor loaded when the request
+    // omitted graphState) so the wire egress sanitiser resolves entity-id
+    // labels against the SAME graph the durable assistant-text scrub used at
+    // commit — stored text and wire text cannot diverge. Fall back to a local
+    // parse of the ingress graphState only if the executor surfaced nothing
+    // (defensive; `effectiveGraph` is always set by `finalizeRun`). Parse
+    // failure / no graph → null; the sanitiser uses prefix-aware generic
+    // wording without throwing.
+    const turnGraph: GraphV3T | null =
+      run.effectiveGraph !== undefined
+        ? run.effectiveGraph
+        : extensions.graphState
+          ? (() => {
+              const parsed = GraphV3.safeParse(extensions.graphState);
+              return parsed.success ? parsed.data : null;
+            })()
+          : null;
     return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
       analysisReady: run.analysisReady,
       graph: turnGraph,
