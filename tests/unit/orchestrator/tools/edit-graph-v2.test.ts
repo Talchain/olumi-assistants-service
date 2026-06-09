@@ -639,16 +639,19 @@ describe("envelope and coaching wiring", () => {
     expect(result.assistantText).not.toContain("fac_competitor");
   });
 
-  // Test 10: Empty operations → assistant_text is deterministic
-  // NO_OP_FALLBACK_TEXT only. V5 H5 update (Codex round-1 P0): both
-  // `coaching.summary` AND `warnings.join(' ')` are dropped on the
-  // no-op path. Both are LLM-authored strings — `warnings` is typed
-  // `string[]`, not structured codes — and the LLM could put terse
-  // commit claims ("Updated Price.", "Done — value set.") into
-  // either field. The success-claim detector at the V5 dispatcher
-  // helps but cannot enumerate every variant, so the safety
-  // invariant is enforced at the source instead.
-  it("sets assistant_text to deterministic NO_OP_FALLBACK_TEXT on empty ops (V5 H5 Mode B fix; Codex P0)", async () => {
+  // Test 10: Empty operations → R10 preserves a CLEAN clarifying question.
+  // V5 H5 Mode B (Codex round-1 P0) drops LLM-authored strings on the
+  // no-op path because they can carry terse false-success claims. PR #249
+  // R10 (edit-graph.ts ~1879–1980) carves out one narrow exception: when
+  // `coaching.summary` is a clarifying question that passes ALL THREE trip
+  // tests — no success claim, no forbidden user-facing phrase, no edit-
+  // internals/raw-id leak — it is preserved (the user keeps the specific,
+  // useful question instead of a generic dead-end). Scope is deliberately
+  // narrow: ONLY `coaching.summary` is eligible; `warnings` are STILL
+  // dropped (free prose, same false-success vector, no mandated question).
+  // The `V2_EMPTY_OPS_RESPONSE` summary is exactly such a clean question.
+  // The unsafe-summary fallback path is asserted by the sibling test below.
+  it("preserves a clean clarifying question in coaching.summary on empty ops (R10); warnings still dropped", async () => {
     const adapter = makeAdapter(V2_EMPTY_OPS_RESPONSE);
     const result = await handleEditGraph(
       makeContext(),
@@ -659,12 +662,51 @@ describe("envelope and coaching wiring", () => {
     );
 
     expect(result.assistantText).not.toBeNull();
-    // Warnings content ("already exists (mean=0.5...)") is dropped —
-    // was free LLM prose, not structured codes.
+    // The clean clarifying question is PRESERVED verbatim (R10).
+    expect(result.assistantText).toContain(V2_EMPTY_OPS_RESPONSE.coaching.summary);
+    expect(result.noOpClarificationPreserved).toBe(true);
+    // Warnings remain dropped — R10 preserves coaching.summary only, not
+    // the free-prose warning string from the fixture.
+    expect(result.assistantText).not.toContain(V2_EMPTY_OPS_RESPONSE.warnings[0]);
     expect(result.assistantText).not.toContain("already exists");
-    // Coaching content also dropped.
-    expect(result.assistantText).not.toContain("already in your model");
-    expect(result.assistantText).not.toContain("Want me to adjust");
+    expect(result.assistantText).not.toContain("exists_probability");
+  });
+
+  // Test 10b (R10 safety sibling): an UNSAFE no-op summary that makes a
+  // terse false-success claim must NOT be preserved — it falls back to the
+  // deterministic NO_OP_FALLBACK_TEXT. This retains the Codex-P0 Mode-B
+  // safety coverage the old Test 10 enforced. Note: a sentence-leading
+  // "Updated X to Y" is INLINE-rewritten into a safe proposal frame by
+  // enforceProposalLanguage *before* the trip test (so that path is safely
+  // transformed, not dropped). To exercise the DROP path we use a terse
+  // "Done — …" acknowledgement, which survives the inline rewrites and
+  // still trips SUCCESS_CLAIM_PATTERNS (`/^\s*Done\b[.!\s—-]/m`), so the
+  // clarification-preservation gate declines and the user never reads a
+  // false claim of a mutation that did not happen (operations is empty).
+  it("does NOT preserve a false-success coaching.summary on empty ops; falls back to NO_OP_FALLBACK_TEXT (R10 safety)", async () => {
+    const unsafeNoOp = {
+      operations: [],
+      removed_edges: [],
+      warnings: [],
+      coaching: {
+        summary: "Done — value set.",
+        rerun_recommended: false,
+      },
+    };
+    const adapter = makeAdapter(unsafeNoOp);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Set price to 100",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    expect(result.assistantText).not.toBeNull();
+    expect(result.noOpClarificationPreserved).toBe(false);
+    // The false-success claim must not reach the user.
+    expect(result.assistantText).not.toContain("Done — value set");
+    expect(result.assistantText).not.toContain("value set");
     // Deterministic forward-looking copy used instead.
     expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
   });
