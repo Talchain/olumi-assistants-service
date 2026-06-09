@@ -15,7 +15,6 @@
 import type {
   ConversationTurnClass,
   HandlerFact,
-  SessionTurn,
   V5ActionType,
 } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';

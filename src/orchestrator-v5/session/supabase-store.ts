@@ -30,7 +30,6 @@ import {
   HandlerFactSchema,
   SessionTurnSchema,
   type HandlerFact,
-  type SessionTurn,
   type V5ActionType,
 } from '@talchain/schemas/orchestrator';
 

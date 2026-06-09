@@ -25,7 +25,7 @@
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { HandlerFact, SessionTurn } from '@talchain/schemas/orchestrator';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { SessionTurnWithContent } from '../session/conversation-content.js';
 import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
