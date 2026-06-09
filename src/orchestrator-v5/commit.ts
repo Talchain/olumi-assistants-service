@@ -33,6 +33,8 @@ import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
+import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
+import { sanitiseUserFacingText } from './compose/output-safety.js';
 import type { PendingAction } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
@@ -141,6 +143,43 @@ function capConversationText(text: string | undefined | null): string | undefine
   return text.length > CONVERSATION_TEXT_CAP ? text.slice(0, CONVERSATION_TEXT_CAP) : text;
 }
 
+/**
+ * Reduce a composed `assistant_text` to the DURABLE PUBLIC form, so the
+ * persisted `assistant_message` can never carry content the user never saw.
+ *
+ * COMMIT runs inside the dispatch handlers; TWO egress transforms then run
+ * AFTER commit and can diverge the wire text from `response.assistant_text`:
+ *   1. the turn-executor finaliser's forbidden-phrase guard
+ *      (`applyEgressForbiddenPhraseGuard`) — rewrites denial / false-success
+ *      copy to a neutral fallback; and
+ *   2. the route chokepoint's entity-id leak scrub
+ *      (`sanitiseUserFacingText`, inside `sanitiseOlumiResponseForEgress`) —
+ *      replaces any raw internal id (e.g. `fac_delivery_cost`) that the
+ *      handler-local Layer-1 scrub missed.
+ * Persisting the raw `assistant_text` would therefore store text that is
+ * potentially LESS leak-safe than what shipped — directly contradicting the
+ * privacy contract ("stored assistant text is the final public answer").
+ *
+ * We apply both transforms here in WIRE ORDER (forbidden-phrase guard →
+ * entity-id scrub) so the stored value equals the wire value on the common
+ * egress-ok path and can never contain a forbidden phrase or a raw entity id.
+ * Both helpers are pure and idempotent; the entity scrub runs graph-free
+ * (`null`) — sufficient for the leak-safety guarantee (a missed id is replaced
+ * with a generic label rather than the graph-resolved one). Telemetry for
+ * either rewrite is emitted on the wire path, NOT here (both helpers are
+ * deliberately telemetry-free), so we don't double-count or mis-attribute.
+ *
+ * Residual (documented limitation): in the rare egress HARD-validation-failure
+ * path the route ships a typed fallback envelope while this stores the composed
+ * answer — a different, but still leak-safe and forbidden-phrase-safe, string.
+ */
+function durablePublicAssistantText(
+  text: string | undefined | null,
+): string | undefined | null {
+  if (typeof text !== 'string' || text.trim().length === 0) return text;
+  return sanitiseUserFacingText(applyEgressForbiddenPhraseGuard(text).text, null).text;
+}
+
 export interface CommitResult {
   readonly response: OlumiResponse;
   readonly performed: true;
@@ -214,15 +253,18 @@ export async function commitDirectAnswer(
 
   // V5 Conversation Context Reliability: capture this turn's conversation
   // content for the next turn's ContextPack. user_message comes from the call
-  // site (boundary payload.message via metadata.userMessage); assistant_message
-  // is derived HERE from the composed response so every commit path captures it
-  // uniformly — `response.assistant_text` is the egress-validated, public,
-  // user-visible answer (never raw LLM output / hidden text). Both are
-  // length-capped; nullish/empty → NULL (system-event turns, blank answers, and
-  // the draft_graph path whose provisional response carries empty assistant_text
-  // — its narrative is reconstructable from the persisted graph in context).
+  // site verbatim (boundary payload.message via metadata.userMessage — the
+  // user's own words, not something we generated, so it is NOT egress-scrubbed,
+  // only capped). assistant_message is derived HERE from the composed response
+  // so every commit path captures it uniformly, then reduced to its DURABLE
+  // PUBLIC form (`durablePublicAssistantText`) — the forbidden-phrase guard +
+  // entity-id scrub the wire applies post-commit — so the stored copy is never
+  // less leak-safe than what shipped. Both are length-capped; nullish/empty →
+  // NULL (system-event turns, blank answers, and the draft_graph path whose
+  // provisional response carries empty assistant_text — its narrative is
+  // reconstructable from the persisted graph in context).
   const userMessage = capConversationText(metadata.userMessage);
-  const assistantMessage = capConversationText(response.assistant_text);
+  const assistantMessage = capConversationText(durablePublicAssistantText(response.assistant_text));
 
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,

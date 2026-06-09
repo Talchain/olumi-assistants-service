@@ -56,18 +56,36 @@ export type SessionTurnWithContent = SessionTurn & Partial<ConversationContent>;
  * a normalised {@link ConversationContent}. Unknown/odd shapes collapse to
  * `null` — never throws. Empty / whitespace-only strings normalise to `null`
  * so the projection never carries a content-free string as if it were content.
+ *
+ * Each field is parsed INDEPENDENTLY: a malformed value on one side (e.g. a
+ * non-string anomaly in `user_message`) collapses only that field to `null` and
+ * preserves a valid value on the other side. (An earlier single-`safeParse`
+ * approach dropped BOTH fields when either was malformed — a needless loss of
+ * good content.)
  */
 export function parseConversationContent(raw: {
   user_message?: unknown;
   assistant_message?: unknown;
 }): ConversationContent {
-  const parsed = ConversationContentSchema.safeParse(raw);
-  if (!parsed.success) return { user_message: null, assistant_message: null };
   return {
-    user_message: normalise(parsed.data.user_message),
-    assistant_message: normalise(parsed.data.assistant_message),
+    user_message: parseContentField(raw.user_message),
+    assistant_message: parseContentField(raw.assistant_message),
   };
 }
+
+/**
+ * Parse a single content field in isolation. Accepts string / null / undefined
+ * (via {@link ConversationContentSchema}'s `.nullish()` element); any other
+ * shape (number, object, …) fails the parse and collapses to `null`. Result is
+ * {@link normalise}d so empty / whitespace-only strings become `null`.
+ */
+function parseContentField(value: unknown): string | null {
+  const parsed = CONTENT_FIELD_SCHEMA.safeParse(value);
+  if (!parsed.success) return null;
+  return normalise(parsed.data);
+}
+
+const CONTENT_FIELD_SCHEMA = z.string().nullish();
 
 function normalise(value: string | null | undefined): string | null {
   if (value == null) return null;

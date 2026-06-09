@@ -19,6 +19,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { commitDirectAnswer, CONVERSATION_TEXT_CAP } from '../commit.js';
+import { EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT } from '../compose/forbidden-user-facing-phrases.js';
 import { buildTurnContext } from '../build-turn-context.js';
 import { assembleContextPack } from '../context/context-pack-assembler.js';
 import { ContextPackSchema } from '../context/context-pack-schema.js';
@@ -134,6 +135,63 @@ describe('write side — commitDirectAnswer captures conversation content', () =
     await commitDirectAnswer(makeResponse(huge), { ...META, userMessage: huge }, store);
     expect(last()?.userMessage?.length).toBe(CONVERSATION_TEXT_CAP);
     expect(last()?.assistantMessage?.length).toBe(CONVERSATION_TEXT_CAP);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Write side — stored assistant text is the DURABLE PUBLIC form (egress parity)
+// ---------------------------------------------------------------------------
+//
+// COMMIT runs before two post-commit egress transforms (the route entity-id
+// scrub + the turn-executor forbidden-phrase guard). The stored assistant_text
+// must be reduced to the same public form so persisted history can NEVER carry
+// a raw entity id or a forbidden phrase the user never saw — the privacy
+// contract for stored assistant content.
+
+describe('write side — stored assistant text equals the durable public (egress) form', () => {
+  const META = {
+    scenario_id: SCENARIO,
+    turn_id: 'turn-1',
+    turn_class: 'direct_answer' as const,
+    handler_id: null,
+    request_hash: 'sha256:x',
+    llm_calls_used: 1,
+    duration_ms: 10,
+    handler_facts: [],
+  };
+
+  it('scrubs a raw internal entity id out of the stored assistant_message', async () => {
+    const { store, last } = makeCapturingStore();
+    await commitDirectAnswer(
+      makeResponse('The biggest driver is fac_delivery_cost in your model.'),
+      { ...META, userMessage: 'What matters most?' },
+      store,
+    );
+    const stored = last()?.assistantMessage ?? '';
+    // The raw id is replaced (generic label) — it must never be persisted, even
+    // if a Layer-1 handler scrub missed it before commit.
+    expect(stored).not.toContain('fac_delivery_cost');
+    expect(stored.length).toBeGreaterThan(0);
+  });
+
+  it('rewrites a forbidden contradiction phrase to the neutral fallback before storing', async () => {
+    const { store, last } = makeCapturingStore();
+    await commitDirectAnswer(
+      makeResponse("I haven't applied any changes to the model."),
+      { ...META, userMessage: 'Add a risk' },
+      store,
+    );
+    // The wire path rewrites this to the neutral fallback post-commit; the
+    // stored copy must match so a follow-up never reads a contradiction the
+    // user never saw.
+    expect(last()?.assistantMessage).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+  });
+
+  it('leaves clean public prose unchanged', async () => {
+    const { store, last } = makeCapturingStore();
+    const clean = 'Option B leads Option A by 6 points.';
+    await commitDirectAnswer(makeResponse(clean), { ...META, userMessage: 'Which wins?' }, store);
+    expect(last()?.assistantMessage).toBe(clean);
   });
 });
 
@@ -394,5 +452,22 @@ describe('parseConversationContent', () => {
       user_message: null,
       assistant_message: null,
     });
+  });
+
+  it('parses each field independently — a bad side does not drop the good side', () => {
+    // A malformed user_message must NOT take a valid assistant_message down
+    // with it (and vice versa).
+    expect(
+      parseConversationContent({
+        user_message: { not: 'a string' } as unknown as string,
+        assistant_message: 'Option B leads by 6 points.',
+      }),
+    ).toEqual({ user_message: null, assistant_message: 'Option B leads by 6 points.' });
+    expect(
+      parseConversationContent({
+        user_message: 'Which option wins?',
+        assistant_message: [1, 2, 3] as unknown as string,
+      }),
+    ).toEqual({ user_message: 'Which option wins?', assistant_message: null });
   });
 });

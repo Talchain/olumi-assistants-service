@@ -195,6 +195,12 @@ export class SupabaseSessionStore implements SessionStore {
       .select(V5_CONVERSATION_TURN_COLUMNS)
       .eq('scenario_id', scenarioId)
       .order('created_at', { ascending: false })
+      // Deterministic tiebreak: two turns can share a `created_at` (same-ms
+      // commits, or fixtures with identical timestamps). Without a secondary
+      // key their relative order is undefined, so the "most recent" turn the
+      // ContextPack projects could flip between reads. `turn_id` is unique
+      // per (scenario_id, turn_id), giving a stable total order.
+      .order('turn_id', { ascending: false })
       .limit(limit);
 
     if (error) {

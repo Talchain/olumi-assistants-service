@@ -516,6 +516,55 @@ describe('SupabaseSessionStore.readRecent', () => {
     const filters = selectCalls[0].filters as Record<string, unknown>;
     expect(filters.limit).toBe(7);
   });
+
+  it('selects the content columns and re-attaches user_message / assistant_message from the row', async () => {
+    // V5 Conversation Context Reliability: the two content columns are stripped
+    // before the vendored strict parse, then re-attached. Prove a DB row's
+    // content survives the strip-before-parse round-trip onto the read result.
+    const rowWithContent = {
+      ...validRow('t1'),
+      user_message: 'Which option is best?',
+      assistant_message: 'Option B leads Option A by 6 points.',
+    };
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [rowWithContent], error: null },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+
+    const got = await store.readRecent(SCENARIO);
+    expect(got).toHaveLength(1);
+    expect(got[0].user_message).toBe('Which option is best?');
+    expect(got[0].assistant_message).toBe('Option B leads Option A by 6 points.');
+    // The strict SessionTurn core still parsed alongside the content.
+    expect(got[0].turn_id).toBe('t1');
+    // The SELECT must request the two content columns.
+    expect(selectCalls[0].cols).toContain('user_message');
+    expect(selectCalls[0].cols).toContain('assistant_message');
+  });
+
+  it('projects null content for a legacy row missing the content columns', async () => {
+    // A pre-migration row (no content columns) must read back null content,
+    // never undefined or a throw — backward compatibility.
+    const { client } = makeClient({ selectResult: { data: [validRow('t1')], error: null } });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+
+    const got = await store.readRecent(SCENARIO);
+    expect(got).toHaveLength(1);
+    expect(got[0].user_message).toBeNull();
+    expect(got[0].assistant_message).toBeNull();
+  });
+
+  it('issues a deterministic secondary sort on turn_id (tiebreak for equal created_at)', async () => {
+    const { client, selectCalls } = makeClient({ selectResult: { data: [], error: null } });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    await store.readRecent(SCENARIO);
+    const filters = selectCalls[0].filters as Record<string, unknown>;
+    expect(filters['order:created_at']).toEqual({ ascending: false });
+    expect(filters['order:turn_id']).toEqual({ ascending: false });
+  });
 });
 
 describe('SupabaseSessionStore.readFactsFor', () => {
