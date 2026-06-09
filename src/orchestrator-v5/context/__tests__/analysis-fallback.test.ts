@@ -950,4 +950,39 @@ describe('applyTopLevelFragileEdgeOverride — shared ingress/fallback seam', ()
     expect(out.source).toBe('none');
     expect(out.summary.top_fragile_edges).toBeUndefined();
   });
+
+  it('fail-closed: inline labels that are internal id-tokens are dropped (no internal-term leak)', () => {
+    // The realistic "forbidden internal term" leak class for fragile-edge
+    // labels is an id-token shape (a leaked node/factor id surfaced as a
+    // label), which `sanitiseLabel` drops. Free-text term scrubbing is NOT
+    // this id-shape projection layer's job (see the next test).
+    const out = applyTopLevelFragileEdgeOverride(baseSummary(), {
+      robustness: {
+        fragile_edges: [
+          { from_label: 'node_meta', to_label: 'Revenue', switch_probability: 0.5 },
+          { from_label: 'fac_internal_state', to_label: 'goal_q3_delivery', switch_probability: 0.4 },
+        ],
+      },
+    });
+    expect(out.source).toBe('none');
+    expect(out.summary.top_fragile_edges).toBeUndefined();
+  });
+
+  it('preserves a genuine human label that merely contains an internal-sounding word ("Metadata")', () => {
+    // Over-filtering guard: this id-shape projection layer must NOT drop a real
+    // display label just because it contains a substring like "meta". The label
+    // is rendered verbatim; any free-text forbidden-term scrub, if ever needed,
+    // belongs at the egress sanitiser, not in this shared id-shape helper.
+    const out = applyTopLevelFragileEdgeOverride(baseSummary(), {
+      robustness: {
+        fragile_edges: [
+          { from_label: 'Customer Metadata Quality', to_label: 'Revenue', switch_probability: 0.5 },
+        ],
+      },
+    });
+    expect(out.source).toBe('top_level');
+    expect(out.summary.top_fragile_edges).toEqual([
+      { from_label: 'Customer Metadata Quality', to_label: 'Revenue' },
+    ]);
+  });
 });
