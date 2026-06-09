@@ -25,7 +25,8 @@
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { HandlerFact, SessionTurn } from '@talchain/schemas/orchestrator';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type { SessionTurnWithContent } from '../session/conversation-content.js';
 import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
 import type {
@@ -131,6 +132,15 @@ export interface ContextPackConversationTurn {
   readonly turn_class: string;
   readonly handler_id: string | null;
   readonly created_at: string;
+  /**
+   * V5 Conversation Context Reliability: the user's verbatim message for this
+   * prior turn. Null when none was persisted (system-event turns, pre-migration
+   * rows). The LLM reads this (and `assistant_message`) to resolve ordinary
+   * follow-ups like "Why?", "do that", "the second one".
+   */
+  readonly user_message: string | null;
+  /** The final public assistant answer for this prior turn; null when none. */
+  readonly assistant_message: string | null;
 }
 
 export interface ContextPackConversation {
@@ -244,7 +254,10 @@ export interface AssembleContextPackInput {
   // v0.7.0: assembler only operates on message-kind turns (system events
   // take a deterministic pre-TurnExecutor path in route-v2.ts).
   readonly payload: MessageTurnPayload;
-  readonly priorTurns: readonly SessionTurn[];
+  // V5 Conversation Context Reliability: the content-bearing superset so
+  // projectConversation can surface user_message / assistant_message to the
+  // LLM. SessionTurnWithContent ⊇ SessionTurn.
+  readonly priorTurns: readonly SessionTurnWithContent[];
   /**
    * Prior handler facts (newest-first), used to project the
    * `recent_changes` summary into the LLM-facing ContextPack. Optional
@@ -601,18 +614,29 @@ function isFiniteSensitivity(value: unknown): value is number {
 }
 
 function projectConversation(
-  priorTurns: readonly SessionTurn[],
+  priorTurns: readonly SessionTurnWithContent[],
   pendingConfirmation: boolean,
 ): ContextPackConversation {
   // priorTurns arrives ordered by created_at DESC (most recent first) from
   // SessionStore.readRecent. We cap at five. `last_tool_used` is the most
   // recent handler invocation — scan the full prior_turns to find it even
   // when it falls outside the five-turn window.
+  //
+  // V5 Conversation Context Reliability: project the per-turn conversation
+  // content (user_message / assistant_message) so the LLM sees the actual
+  // words of recent turns, not content-free stubs. This flows into the prompt
+  // automatically via route-with-tool-use's `JSON.stringify(contextPack)` —
+  // no prompt-template change needed. Null stays null.
   const recent = priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP).map((turn) => ({
     turn_id: turn.turn_id,
     turn_class: turn.turn_class,
     handler_id: turn.handler_id,
     created_at: turn.created_at,
+    // `?? null`: content is optional on SessionTurnWithContent for fixture
+    // assignability; the DB read path always sets a string|null, so this only
+    // normalises legacy/test turns that omit the fields.
+    user_message: turn.user_message ?? null,
+    assistant_message: turn.assistant_message ?? null,
   }));
 
   const lastTool = priorTurns.find((t) => t.turn_class === 'handler' && t.handler_id !== null);

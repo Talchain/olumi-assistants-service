@@ -700,6 +700,19 @@ export const TelemetryEvents = {
   // { scenario_id, error_code, severity: 'warning' }.
   SessionReadDegraded: "session.read_degraded",
 
+  // V5 Conversation Context Reliability: continuity-gap detector. Emits when a
+  // turn that PROVABLY continues a prior conversation (source 'chip'/'chip_click'
+  // — a chip can only exist if a prior assistant turn rendered it) arrives with
+  // ZERO prior turns under its scenario_id. The strongest server-observable
+  // signal of UI scenario-id fragmentation (the conversation was split across
+  // scenario_ids), which CEE cannot repair but must not silently accept. CEE
+  // takes ingress.scenario_id verbatim; the payload carries no conversation
+  // history, so a fragmented scenario looks (correctly) empty here. Content-free
+  // payload: { scenario_id, source, stage, prior_turn_count: 0 } — never message
+  // text. See the V5 Conversation Context Reliability lane + the UI scenario-id
+  // follow-up.
+  V5SessionContinuityGap: "v5.session.continuity_gap",
+
   // V5 Group 1 Task B: decision_review auto-fire after successful
   // run_analysis. Invoked emits once the enricher decides to fire. Skipped
   // emits with a reason when the prerequisite data is absent. Failed emits

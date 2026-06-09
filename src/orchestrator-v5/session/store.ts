@@ -15,7 +15,6 @@
 import type {
   ConversationTurnClass,
   HandlerFact,
-  SessionTurn,
   V5ActionType,
 } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
@@ -23,6 +22,7 @@ import type { PendingAction } from './pending-action.js';
 import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import type { CoachingState } from '../coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.js';
+import type { SessionTurnWithContent } from './conversation-content.js';
 
 /**
  * Re-export so existing in-session callers (and `commit.ts` /
@@ -102,11 +102,38 @@ export interface SessionTurnWrite {
    * signal codes + SHA-prefix hashes are persisted, never raw user content.
    */
   readonly coaching_state?: CoachingState | null;
+  /**
+   * V5 Conversation Context Reliability: the user's verbatim turn message
+   * (boundary `payload.message`), persisted to
+   * `v5_conversation_turns.user_message` via `append_turn_atomic_v2`
+   * (`p_user_message`). The next turn's ContextPack projects it into
+   * `conversation.recent_turns[].user_message` so the LLM can resolve
+   * follow-ups ("Why?", "the second one"). Length-capped by the caller
+   * (`commitDirectAnswer`) before write — there is no DB CHECK, so an
+   * over-long value can never fail the commit. `undefined`/omitted writes
+   * NULL (system / internal-event turns that carry no user text).
+   */
+  readonly userMessage?: string;
+  /**
+   * V5 Conversation Context Reliability: the FINAL public assistant answer
+   * for this turn (`OlumiResponse.assistant_text` — the egress-validated,
+   * user-visible prose), persisted to `v5_conversation_turns.assistant_message`
+   * via `append_turn_atomic_v2` (`p_assistant_message`). NEVER raw LLM output,
+   * hidden summaries, or blocked content — `assistant_text` is what the user
+   * saw. Derived inside `commitDirectAnswer` from the composed response and
+   * length-capped there. `undefined`/omitted writes NULL.
+   */
+  readonly assistantMessage?: string;
 }
 
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<{ id: string }>;
-  readRecent(scenarioId: string, limit?: number): Promise<readonly SessionTurn[]>;
+  // V5 Conversation Context Reliability: returns the content-bearing superset
+  // (user_message / assistant_message re-attached after the vendored strict
+  // parse). SessionTurnWithContent ⊇ SessionTurn, so existing consumers that
+  // treat the result as SessionTurn[] are unaffected; only the ContextPack
+  // conversation projection reads the new fields.
+  readRecent(scenarioId: string, limit?: number): Promise<readonly SessionTurnWithContent[]>;
   /**
    * Load handler facts for a set of prior conversation turns.
    *

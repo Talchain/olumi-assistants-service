@@ -124,7 +124,9 @@ describe('SupabaseSessionStore.append', () => {
     );
     await store.append(WRITE);
     expect(rpcCalls).toHaveLength(1);
-    expect(rpcCalls[0].fn).toBe('append_turn_atomic');
+    // V5 Conversation Context Reliability: the store now calls the additive
+    // append_turn_atomic_v2 (legacy append_turn_atomic left intact in the DB).
+    expect(rpcCalls[0].fn).toBe('append_turn_atomic_v2');
     const args = rpcCalls[0].args as Record<string, unknown>;
     expect(args.p_scenario_id).toBe(SCENARIO);
     expect(args.p_turn_id).toBe('turn-xyz');
@@ -136,15 +138,15 @@ describe('SupabaseSessionStore.append', () => {
     expect(args.p_duration_ms).toBe(40);
     expect(args.p_handler_facts).toEqual([]);
     // p_graph and p_brief_text must be sent as `null` (not omitted) when
-    // the write has neither. This keeps PostgREST overload resolution
-    // deterministic — see the always-13-args invariant test below and
-    // the comment in supabase-store.ts:append. p_pending_actions
-    // defaults to the empty array and p_coaching_state to null so a turn
-    // that offers no resumable actions and derives no coaching signals
-    // still produces a deterministic 13-arg shape.
+    // the write has neither. p_pending_actions defaults to the empty array,
+    // p_coaching_state to null, and the two content params (p_user_message /
+    // p_assistant_message) to null so a turn with no content still produces a
+    // deterministic 15-arg shape.
     expect(args.p_graph).toBeNull();
     expect(args.p_brief_text).toBeNull();
     expect(args.p_pending_actions).toEqual([]);
+    expect(args.p_user_message).toBeNull();
+    expect(args.p_assistant_message).toBeNull();
   });
 
   it('passes p_graph when write.graph is provided (atomic graph commit)', async () => {
@@ -245,7 +247,7 @@ const RUN_ANALYSIS_FACT: HandlerFact = {
 };
 
 describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overload disambiguation)', () => {
-  it('always passes all 13 named args to append_turn_atomic, p_graph & p_brief_text=null + p_pending_actions=[] + p_coaching_state=null when absent', async () => {
+  it('always passes all 15 named args to append_turn_atomic_v2, p_graph & p_brief_text=null + p_pending_actions=[] + p_coaching_state/p_user_message/p_assistant_message=null when absent', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -258,12 +260,14 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     const args = rpcCalls[0].args as Record<string, unknown>;
     const keys = Object.keys(args).sort();
 
-    // The 13-arg invariant (V5 Coaching State Spine Stage 2B-1b coaching_state
-    // snapshot persistence, 20260602120000_v5_coaching_state_snapshot, building
-    // on Wave 1 pending-action persistence 20260505120000_v5_pending_actions).
-    // Drift here = PostgREST overload ambiguity can re-emerge if a future
-    // migration ever adds another overload.
+    // The 15-arg invariant (V5 Conversation Context Reliability content params
+    // p_user_message / p_assistant_message, 20260609120000_v5_conversation_content,
+    // building on coaching_state 20260602120000 + pending-actions 20260505120000).
+    // Because append_turn_atomic_v2 is a DISTINCTLY NAMED function (not a same-name
+    // overload), PostgREST candidate ambiguity cannot re-emerge — but always
+    // passing the full named-arg set keeps the call shape explicit and drift-proof.
     expect(keys).toEqual([
+      'p_assistant_message',
       'p_brief_text',
       'p_coaching_state',
       'p_duration_ms',
@@ -277,14 +281,17 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
       'p_scenario_id',
       'p_turn_class',
       'p_turn_id',
+      'p_user_message',
     ]);
     expect(args.p_graph).toBeNull();
     expect(args.p_brief_text).toBeNull();
     expect(args.p_pending_actions).toEqual([]);
     expect(args.p_coaching_state).toBeNull();
+    expect(args.p_user_message).toBeNull();
+    expect(args.p_assistant_message).toBeNull();
   });
 
-  it('always passes all 13 named args even when write.graph IS provided', async () => {
+  it('always passes all 15 named args even when write.graph IS provided', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -295,7 +302,7 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, graph });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(13);
+    expect(Object.keys(args)).toHaveLength(15);
     expect(args.p_graph).toEqual(graph);
     expect(args.p_brief_text).toBeNull();
     expect(args.p_pending_actions).toEqual([]);
@@ -313,8 +320,23 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, briefText });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(13);
+    expect(Object.keys(args)).toHaveLength(15);
     expect(args.p_brief_text).toBe(briefText);
+  });
+
+  it('threads write.userMessage / write.assistantMessage to the RPC as p_user_message / p_assistant_message (V5 Conversation Context Reliability)', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await store.append({ ...WRITE, userMessage: 'Why is B ahead?', assistantMessage: 'B leads A by 6 points.' });
+
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(Object.keys(args)).toHaveLength(15);
+    expect(args.p_user_message).toBe('Why is B ahead?');
+    expect(args.p_assistant_message).toBe('B leads A by 6 points.');
   });
 
   it('threads write.coaching_state to the RPC as a wrapped pre_dispatch p_coaching_state snapshot (Stage 2B-1b)', async () => {
@@ -327,7 +349,7 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, coaching_state: EMPTY_COACHING_STATE });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(13);
+    expect(Object.keys(args)).toHaveLength(15);
     // The store wraps the raw Stage-2A container in the typed pre-dispatch
     // envelope at the (only) RPC call site — never persists it bare.
     expect(args.p_coaching_state).toEqual(toPreDispatchSnapshot(EMPTY_COACHING_STATE));
@@ -493,6 +515,55 @@ describe('SupabaseSessionStore.readRecent', () => {
     // Check the limit filter ended up as 7
     const filters = selectCalls[0].filters as Record<string, unknown>;
     expect(filters.limit).toBe(7);
+  });
+
+  it('selects the content columns and re-attaches user_message / assistant_message from the row', async () => {
+    // V5 Conversation Context Reliability: the two content columns are stripped
+    // before the vendored strict parse, then re-attached. Prove a DB row's
+    // content survives the strip-before-parse round-trip onto the read result.
+    const rowWithContent = {
+      ...validRow('t1'),
+      user_message: 'Which option is best?',
+      assistant_message: 'Option B leads Option A by 6 points.',
+    };
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [rowWithContent], error: null },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+
+    const got = await store.readRecent(SCENARIO);
+    expect(got).toHaveLength(1);
+    expect(got[0].user_message).toBe('Which option is best?');
+    expect(got[0].assistant_message).toBe('Option B leads Option A by 6 points.');
+    // The strict SessionTurn core still parsed alongside the content.
+    expect(got[0].turn_id).toBe('t1');
+    // The SELECT must request the two content columns.
+    expect(selectCalls[0].cols).toContain('user_message');
+    expect(selectCalls[0].cols).toContain('assistant_message');
+  });
+
+  it('projects null content for a legacy row missing the content columns', async () => {
+    // A pre-migration row (no content columns) must read back null content,
+    // never undefined or a throw — backward compatibility.
+    const { client } = makeClient({ selectResult: { data: [validRow('t1')], error: null } });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+
+    const got = await store.readRecent(SCENARIO);
+    expect(got).toHaveLength(1);
+    expect(got[0].user_message).toBeNull();
+    expect(got[0].assistant_message).toBeNull();
+  });
+
+  it('issues a deterministic secondary sort on turn_id (tiebreak for equal created_at)', async () => {
+    const { client, selectCalls } = makeClient({ selectResult: { data: [], error: null } });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    await store.readRecent(SCENARIO);
+    const filters = selectCalls[0].filters as Record<string, unknown>;
+    expect(filters['order:created_at']).toEqual({ ascending: false });
+    expect(filters['order:turn_id']).toEqual({ ascending: false });
   });
 });
 

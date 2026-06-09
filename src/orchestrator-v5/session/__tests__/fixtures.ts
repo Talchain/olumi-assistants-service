@@ -31,7 +31,6 @@
 
 import type {
   HandlerFact,
-  SessionTurn,
   V5ActionType,
 } from '@talchain/schemas/orchestrator';
 
@@ -41,10 +40,14 @@ import type {
 } from '../invalidation.js';
 import type { SessionStore, SessionTurnWrite } from '../store.js';
 import type { PendingAction } from '../pending-action.js';
+import type { SessionTurnWithContent } from '../conversation-content.js';
 
 export interface NoopSessionStoreOptions {
   readonly appendId?: string;
-  readonly priorTurns?: readonly SessionTurn[];
+  // V5 Conversation Context Reliability: accept the content-bearing superset so
+  // tests can inject user_message / assistant_message. Plain SessionTurn[] is
+  // still assignable (content fields are optional).
+  readonly priorTurns?: readonly SessionTurnWithContent[];
   readonly facts?: readonly HandlerFact[];
   readonly loadGraphResult?: unknown | null;
   /**
@@ -81,7 +84,10 @@ export function createNoopSessionStore(
       if (opts.throwOnAppend) throw opts.throwOnAppend;
       return { id: opts.appendId ?? 'noop-row-id' };
     },
-    async readRecent(_scenarioId: string, _limit?: number): Promise<readonly SessionTurn[]> {
+    async readRecent(
+      _scenarioId: string,
+      _limit?: number,
+    ): Promise<readonly SessionTurnWithContent[]> {
       if (opts.throwOnRead) throw opts.throwOnRead;
       return opts.priorTurns ?? [];
     },

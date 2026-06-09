@@ -30,7 +30,6 @@ import {
   HandlerFactSchema,
   SessionTurnSchema,
   type HandlerFact,
-  type SessionTurn,
   type V5ActionType,
 } from '@talchain/schemas/orchestrator';
 
@@ -45,14 +44,25 @@ import {
 import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
 import {
+  parseConversationContent,
+  type SessionTurnWithContent,
+} from './conversation-content.js';
+import {
   toPreDispatchSnapshot,
   parseCoachingStateSnapshot,
   type CoachingStateSnapshot,
 } from '../coaching/coaching-state-snapshot.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
+// V5 Conversation Context Reliability: user_message / assistant_message added
+// by migration 20260609120000. They are SELECTed here but parsed OUTSIDE the
+// vendored `.strict()` SessionTurnSchema (see readRecent) and re-attached as
+// SessionTurnWithContent. NOTE: this SELECT requires the migration to be live
+// in the target DB — querying a column that does not exist is a hard Postgres
+// error, so this build must not run against a pre-migration database (the
+// migration ships first; see 20260609120000_v5_conversation_content.sql).
 const V5_CONVERSATION_TURN_COLUMNS =
-  'id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at';
+  'id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at, user_message, assistant_message';
 
 interface SupabaseErrorLike {
   message?: string;
@@ -113,7 +123,17 @@ export class SupabaseSessionStore implements SessionStore {
     // wrapped in a `pre_dispatch` envelope (snapshot_timing + version) before
     // persistence so the snapshot's derivation point is self-describing for
     // Stage 2B-2 lifecycle. Content-free — only closed-enum codes + hashes.
-    const { data, error } = await this.client.rpc('append_turn_atomic', {
+    // V5 Conversation Context Reliability: persist via append_turn_atomic_v2,
+    // which is append_turn_atomic + two trailing content params
+    // (p_user_message / p_assistant_message). It is a DISTINCTLY NAMED
+    // function (not a same-name overload), so there is zero PostgREST
+    // candidate ambiguity with the legacy append_turn_atomic — the two
+    // coexist. The v2 RPC MUST be live in the target DB before this build
+    // deploys (migration 20260609120000 ships first); calling it where the
+    // migration is absent surfaces as StateCommitFailedError, never silent
+    // data loss. Content columns are nullable and meaningfully NULL: write
+    // NULL when the turn carried no user/assistant text.
+    const { data, error } = await this.client.rpc('append_turn_atomic_v2', {
       p_scenario_id: write.scenario_id,
       p_turn_id: write.turn_id,
       p_turn_class: write.turn_class,
@@ -128,17 +148,19 @@ export class SupabaseSessionStore implements SessionStore {
       p_pending_actions: write.pending_actions ?? [],
       p_coaching_state:
         write.coaching_state == null ? null : toPreDispatchSnapshot(write.coaching_state),
+      p_user_message: write.userMessage ?? null,
+      p_assistant_message: write.assistantMessage ?? null,
     });
 
     if (error) {
       throw new StateCommitFailedError(
-        `append_turn_atomic RPC failed: ${errMsg(error)}`,
+        `append_turn_atomic_v2 RPC failed: ${errMsg(error)}`,
         { cause: error, rpc_code: errCode(error) },
       );
     }
     if (typeof data !== 'string') {
       throw new StateCommitFailedError(
-        `append_turn_atomic returned non-string id: ${JSON.stringify(data)}`,
+        `append_turn_atomic_v2 returned non-string id: ${JSON.stringify(data)}`,
       );
     }
 
@@ -157,7 +179,7 @@ export class SupabaseSessionStore implements SessionStore {
   async readRecent(
     scenarioId: string,
     limit: number = this.options.defaultReadLimit,
-  ): Promise<readonly SessionTurn[]> {
+  ): Promise<readonly SessionTurnWithContent[]> {
     // Cache hit iff: we have enough cached turns OR the cache holds the
     // complete (exhausted) history for this scenario. Without the
     // `complete` check, a short-history scenario (DB has 2 turns) would
@@ -172,6 +194,12 @@ export class SupabaseSessionStore implements SessionStore {
       .select(V5_CONVERSATION_TURN_COLUMNS)
       .eq('scenario_id', scenarioId)
       .order('created_at', { ascending: false })
+      // Deterministic tiebreak: two turns can share a `created_at` (same-ms
+      // commits, or fixtures with identical timestamps). Without a secondary
+      // key their relative order is undefined, so the "most recent" turn the
+      // ContextPack projects could flip between reads. `turn_id` is unique
+      // per (scenario_id, turn_id), giving a stable total order.
+      .order('turn_id', { ascending: false })
       .limit(limit);
 
     if (error) {
@@ -181,12 +209,19 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
 
-    const rows = (data ?? []) as unknown[];
-    const turns: SessionTurn[] = [];
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const turns: SessionTurnWithContent[] = [];
     for (const row of rows) {
-      const parsed = SessionTurnSchema.safeParse(row);
+      // V5 Conversation Context Reliability: strip the two content columns
+      // BEFORE the vendored strict parse. SessionTurnSchema is `.strict()` and
+      // rejects unknown keys — feeding user_message / assistant_message to it
+      // would fail every row. Parse the core row strictly, then re-attach the
+      // content (tolerant parser; bad/absent content → null, never a throw).
+      const { user_message, assistant_message, ...core } = row;
+      const parsed = SessionTurnSchema.safeParse(core);
       if (parsed.success) {
-        turns.push(parsed.data);
+        const content = parseConversationContent({ user_message, assistant_message });
+        turns.push({ ...parsed.data, ...content });
       } else {
         // Row shape drift — throw so the caller (build-turn-context) can
         // emit session.read_degraded telemetry and continue with empty

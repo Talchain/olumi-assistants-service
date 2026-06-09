@@ -113,6 +113,12 @@ const ContextPackConversationTurnSchema = z
     turn_class: z.string(),
     handler_id: z.string().nullable(),
     created_at: z.string(),
+    // V5 Conversation Context Reliability: the verbatim user message and final
+    // public assistant answer for this prior turn, so the LLM can resolve
+    // follow-ups ("Why?", "the second one"). Null when no content was persisted
+    // (system-event turns, pre-migration rows).
+    user_message: z.string().nullable(),
+    assistant_message: z.string().nullable(),
   })
   .strict();
 

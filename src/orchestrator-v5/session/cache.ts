@@ -15,8 +15,12 @@
  * corrupt the cache.
  */
 
-import type { SessionTurn } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
+// V5 Conversation Context Reliability: the cache stores the content-bearing
+// superset so user_message / assistant_message survive cache hits (a plain
+// SessionTurn cache would silently drop content on every hit). Content-agnostic
+// otherwise — every cache op keys on turn_id.
+import type { SessionTurnWithContent } from './conversation-content.js';
 
 export interface LRUCacheConfig {
   readonly maxScenarios: number;
@@ -24,7 +28,7 @@ export interface LRUCacheConfig {
 }
 
 interface ScenarioEntry {
-  turns: SessionTurn[]; // sorted by created_at DESC
+  turns: SessionTurnWithContent[]; // sorted by created_at DESC
   staleTurnIds: Set<string>;
   /**
    * True when the cache entry holds EVERY turn that exists for this
@@ -43,7 +47,7 @@ export interface PopulateOptions {
 }
 
 export interface CacheSnapshot {
-  readonly turns: readonly SessionTurn[];
+  readonly turns: readonly SessionTurnWithContent[];
   readonly complete: boolean;
 }
 
@@ -84,7 +88,7 @@ export class SessionLRUCache {
    */
   populate(
     scenarioId: string,
-    turns: readonly SessionTurn[],
+    turns: readonly SessionTurnWithContent[],
     opts: PopulateOptions = { complete: false },
   ): void {
     // If we had to bound by maxTurnsPerScenario, we can never claim
@@ -109,7 +113,7 @@ export class SessionLRUCache {
    * Pressure-test commit ordering: RPC success → prepend → return. Never
    * prepend before the RPC confirms.
    */
-  prepend(scenarioId: string, turn: SessionTurn): void {
+  prepend(scenarioId: string, turn: SessionTurnWithContent): void {
     const entry = this.map.get(scenarioId);
     if (!entry) return;
     entry.turns.unshift(turn);

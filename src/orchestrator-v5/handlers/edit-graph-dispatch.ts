@@ -2019,6 +2019,17 @@ export async function dispatchEditGraph(
       // V5 Stage 2B-1b: the route-v2 edit path never runs buildTurnContext,
       // so no coaching_state is derived for this turn — persist NULL explicitly.
       coaching_state: null,
+      // V5 Conversation Context Reliability: persist the user's turn text; the
+      // assistant answer auto-derives from `response.assistant_text`. This path
+      // covers successful mutations, no-ops, add-risk clarifications AND
+      // preflight rejections — so a rejected "add a risk" and its rejection
+      // reply are both available when the next turn asks "why did that fail?".
+      userMessage: payload.message,
+      // Resolve entity-id labels in the stored assistant answer against the
+      // SAME graph the route egress uses for this exit — `graphForCommit` (the
+      // post-edit appliedGraph on a successful mutation, else undefined → the
+      // egress is graph-free too), keeping stored == wire.
+      contentGraph: graphForCommit,
     });
     log.info(
       {

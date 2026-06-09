@@ -429,6 +429,18 @@ export async function dispatchDraftGraph(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
       // sent to the client (the caller uses the response we return).
+      //
+      // V5 Conversation Context Reliability: the draft turn's assistant
+      // narrative is built AFTER this commit (it needs graphPersisted, and
+      // building it has a telemetry side-effect — V5PostDraftCoachingSource
+      // Selected — that must only fire once persistence has SUCCEEDED; see the
+      // "does NOT emit … when graph persistence fails" regression test). We
+      // therefore do NOT capture assistant_message on the draft turn (it stays
+      // null); the draft narrative is reconstructable from the persisted graph,
+      // which IS projected into the next turn's ContextPack. We DO capture the
+      // user brief (userMessage) — it is graphPersisted-independent and
+      // side-effect-free. Capturing the draft narrative without a second write
+      // or breaking the telemetry-after-persistence invariant is a follow-up.
       { response_version: 2, assistant_text: '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
@@ -444,6 +456,8 @@ export async function dispatchDraftGraph(
         // V5 Stage 2B-1b: the route-v2 draft path never runs buildTurnContext,
         // so no coaching_state is derived for this turn — persist NULL explicitly.
         coaching_state: null,
+        // V5 Conversation Context Reliability: persist the user's brief.
+        userMessage: payload.message,
       },
     );
     const persistenceMs = Date.now() - commitStartedAt;

@@ -68,7 +68,7 @@ import {
   neutraliseUnvalidatedBoldEntities,
 } from './compose/clarify-entity-guard.js';
 import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
-import { GraphV3 } from '../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
 import type { ComposeContext, SuggestedAction } from './compose/types.js';
@@ -274,6 +274,15 @@ export interface TurnExecutorRunResult {
    * every other path. Never reaches the wire body directly.
    */
   coachingDelivery?: V5CoachingDelivery;
+  /**
+   * V5 Conversation Context Reliability: the authoritative graph this turn
+   * reasoned over (request graphState parsed, or the persisted-graph fallback).
+   * route-v2 passes this to `sendFinalised200`'s egress sanitiser so the WIRE
+   * resolves entity-id labels against the SAME graph the durable-text scrub
+   * used at commit — stored text and wire text cannot diverge. Null when the
+   * turn had no graph (egress + storage both run graph-free, consistently).
+   */
+  effectiveGraph?: GraphV3T | null;
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -440,12 +449,37 @@ export async function runTurnExecutor(
   // context built above. Forwards the optional sessionStore arg unchanged. The
   // 19 `commitDirectAnswer` call sites in this function were renamed to
   // `commitTurn` so the snapshot threads uniformly.
+  // V5 Conversation Context Reliability: also inject userMessage centrally so
+  // EVERY turn-executor commit (all 19 sites: happy path, recoveries,
+  // clarifications, guards) persists the user's turn text uniformly. The
+  // assistant side is derived inside commitDirectAnswer from the composed
+  // response. Message-kind turns carry payload.message; system-event-kind
+  // turns carry no user text and persist NULL.
+  const userMessageForTurn = payload.kind === 'message' ? payload.message : undefined;
   const commitTurn = (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
     store?: Parameters<typeof commitDirectAnswer>[2],
   ): ReturnType<typeof commitDirectAnswer> =>
-    commitDirectAnswer(resp, { ...meta, coaching_state: context.coaching_state }, store);
+    commitDirectAnswer(
+      resp,
+      {
+        ...meta,
+        coaching_state: context.coaching_state,
+        userMessage: userMessageForTurn,
+        // V5 Conversation Context Reliability: scrub the durable assistant text
+        // against `effectiveTurnGraph` — the SAME graph this turn reasoned over
+        // and the SAME graph surfaced to the route egress sanitiser (below) —
+        // so the stored copy resolves entity-id labels (e.g. `goal_revenue` →
+        // "Revenue") identically to the wire copy and the two cannot diverge,
+        // even when the request graphState is stale relative to, or absent
+        // alongside, the persisted graph. (Earlier this used
+        // `context.persistedGraph`, which could differ from the request graph
+        // the wire egress used.)
+        contentGraph: effectiveTurnGraph,
+      },
+      store,
+    );
 
   // V5 alpha hardening Phase 2.5: one-query observability. v5_journey_id
   // aliases scenario_id (= context.session_id) per Paul's locked-in
@@ -586,6 +620,14 @@ export async function runTurnExecutor(
   let analysisReadyForTurn:
     | NonNullable<GraphPatchBlockData['analysis_ready']>
     | undefined;
+  // V5 Conversation Context Reliability: the single authoritative graph this
+  // turn reasoned over (`graphStateForTurn` parsed = the request graphState, or
+  // the persisted-graph fallback when the request omitted it). Used for BOTH
+  // the durable assistant-text scrub (commitTurn → contentGraph) AND the wire
+  // egress sanitiser (surfaced on the run result → route-v2), so stored text
+  // and wire text resolve entity-id labels against the SAME graph and cannot
+  // diverge. Null until the graph is parsed below / when the turn has no graph.
+  let effectiveTurnGraph: GraphV3T | null = null;
 
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
@@ -672,6 +714,9 @@ export async function runTurnExecutor(
     if (graphStateForTurn) {
       const parsedGraphForReadiness = GraphV3.safeParse(graphStateForTurn);
       if (parsedGraphForReadiness.success) {
+        // Capture the authoritative per-turn graph (same parse the readiness
+        // gate uses) for the durable-text scrub + wire egress — one source.
+        effectiveTurnGraph = parsedGraphForReadiness.data;
         analysisReadyForTurn = computeStructuralReadiness(
           parsedGraphForReadiness.data,
         );
@@ -5314,6 +5359,9 @@ export async function runTurnExecutor(
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),
       ...(coachingDelivery ? { coachingDelivery } : {}),
+      // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
+      // so wire label resolution matches the durable-text scrub at commit.
+      effectiveGraph: effectiveTurnGraph,
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,
