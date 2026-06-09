@@ -8,7 +8,7 @@
  * specific recovery copy and executable chips.
  */
 
-import { beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
 
@@ -54,6 +54,7 @@ vi.mock('../../build-turn-context.js', () => ({
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
+import { setTestSink } from '../../../utils/telemetry.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -112,10 +113,16 @@ function makeAtLimitGraph(extraFactors: number, extraEdges: number): GraphStateI
 
 const STUB_REQUEST = {} as FastifyRequest;
 
+let capturedEvents: Array<{ event: string; data: Record<string, unknown> }> = [];
+const editGraphTurnEvents = () => capturedEvents.filter((e) => e.event === 'v5.edit_graph.turn');
+
 describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    capturedEvents = [];
+    setTestSink((event, data) => capturedEvents.push({ event, data }));
   });
+  afterEach(() => setTestSink(null));
 
   it('at node-limit, "add X as a risk" returns a preflight rejection without calling handleEditGraph', async () => {
     // 20-node graph: 4 base + 16 factors → next add would be 21 > 20 limit.
@@ -191,5 +198,38 @@ describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
       analysisState: null,
     });
     expect(handleEditGraph as MockedFunction<typeof handleEditGraph>).toHaveBeenCalled();
+  });
+
+  // R7 dispatcher-wiring coverage (review follow-up): the helper unit tests pin
+  // the outcome classification + precedence; these drive the REAL add-risk
+  // branches through dispatchEditGraph and assert the emitted turn-event outcome.
+  it('R7: edge-limit add-risk preflight emits one turn event with outcome=rejected + the cap failure_code', async () => {
+    await dispatchEditGraph({
+      payload: makePayload('Please add team dynamics as a risk'),
+      requestId: 'req-ev-edge',
+      request: STUB_REQUEST,
+      graphState: makeAtLimitGraph(5, 25),
+      analysisState: null,
+    });
+    const te = editGraphTurnEvents();
+    expect(te).toHaveLength(1);
+    expect(te[0]!.data.outcome).toBe('rejected');
+    expect(te[0]!.data.failure_code).toBe('EDGE_LIMIT_EXCEEDED_PREFLIGHT');
+  });
+
+  it('R7 (NB-3): under-limit add-risk clarification emits one turn event with outcome=clarify', async () => {
+    const result = await dispatchEditGraph({
+      payload: makePayload('Add cultural cohesion as a risk'),
+      requestId: 'req-ev-clarify',
+      request: STUB_REQUEST,
+      graphState: makeAtLimitGraph(3, 3),
+      analysisState: null,
+    });
+    // Confirms the deterministic add-risk clarification branch actually ran
+    // (not the LLM path or a no-op), so outcome='clarify' is the wired result.
+    expect(result.response.assistant_text).toContain('What factor drives it most');
+    const te = editGraphTurnEvents();
+    expect(te).toHaveLength(1);
+    expect(te[0]!.data.outcome).toBe('clarify');
   });
 });

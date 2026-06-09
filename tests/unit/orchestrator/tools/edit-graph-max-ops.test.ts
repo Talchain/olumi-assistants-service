@@ -220,4 +220,27 @@ describe("Configurable MAX_PATCH_OPERATIONS (C.2)", () => {
     expect(data.status).toBe("proposed");
     expect(data.operations).toHaveLength(15);
   });
+
+  it("R7 (NB-2): labels diagnostics.failure_code so the cap rejection is distinct (not null) in the turn event", async () => {
+    mockMaxPatchOperations = 15;
+    const ops = Array.from({ length: 16 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const result = await handleEditGraph(
+      makeContext(),
+      "Bulk edit",
+      makeAdapter(ops),
+      "req-r7-nb2",
+      "turn-r7-nb2",
+      { maxRetries: 0 },
+    );
+
+    expect(result.wasRejected).toBe(true);
+    // Previously null → the highest-frequency cap rejection was unmeasurable.
+    expect(result.diagnostics?.failure_code).toBe("max_operations_exceeded");
+    // Distinct from the other structural rejection codes.
+    expect(result.diagnostics?.failure_code).not.toBe("graph_structure_invalid");
+  });
 });

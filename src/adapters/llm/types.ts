@@ -334,6 +334,13 @@ export interface ChatResult {
   model: string;
   /** Provider-side latency in milliseconds */
   latencyMs: number;
+  /**
+   * Raw provider stop/finish reason for the terminal completion (Anthropic
+   * `stop_reason`, OpenAI `finish_reason`). Additive and optional — `null`
+   * when the provider/path does not expose it. Surfaced for per-turn
+   * observability (R7 edit_graph turn event); existing consumers ignore it.
+   */
+  stopReason?: string | null;
 }
 
 /**

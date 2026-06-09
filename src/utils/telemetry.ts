@@ -1002,6 +1002,9 @@ export const TelemetryEvents = {
   // exploration chips so users never get an analysis-grounded nudge
   // against an out-of-date result.
   V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
+  // R7 — one structured event per edit_graph turn (content-free; pino /
+  // Datadog-log only, registered debug-only in the freeze-gate).
+  V5EditGraphTurn: "v5.edit_graph.turn",
 
   // V5 edit lifecycle recovery v1 — pre-LLM intercept for the legacy
   // V4 "Simplify the change" facilitator chip (edit-graph.ts:2096,

@@ -286,3 +286,52 @@ export function findSuccessClaimHit(text: string): string | null {
   }
   return null;
 }
+
+/**
+ * R10 — internal-vocabulary / raw-identifier patterns used ONLY by the
+ * edit_graph no-op clarification-preservation gate.
+ *
+ * Deliberately NOT part of {@link FORBIDDEN_USER_FACING_PHRASES}: the global
+ * egress guard replaces the WHOLE response on a forbidden hit, and bare words
+ * like `node`, `edge`, `path`, `graph`, `operation` have legitimate English /
+ * decision-domain uses that would erase ordinary responses. Here a hit merely
+ * DECLINES preservation of the LLM's clarifying question and falls back to the
+ * deterministic copy — so the gate is intentionally aggressive (false-positive
+ * cost is a safe deterministic message, never an erased response).
+ *
+ * Covers the residual terms the success-claim / forbidden-phrase detectors do
+ * not: the bare structural words, the internal nouns, and raw id / path / edge
+ * shapes the LLM might echo. The id/path/arrow patterns require an
+ * internal-looking token shape (snake_case, `word.word`, or `a->b`) so prose
+ * punctuation ("e.g.", a sentence-ending period) does not trip them.
+ */
+export const EDIT_INTERNALS_PATTERNS: readonly RegExp[] = [
+  /\bhandler\b/i,
+  /\bschema\b/i,
+  /\bvalidator\b/i,
+  /\bJSON\b/,
+  /\boperations?\b/i,
+  /\bgraph\b/i,
+  /\b(?:node|edge)s?\b/i,
+  /\bpath\b/i,
+  // snake_case internal ids: fac_price, dec_launch, opt_hire_local
+  /\b[a-z]+_[a-z0-9_]+\b/i,
+  // dotted internal paths: operations.path, node.id (≥2 chars each side so
+  // "e.g."/"i.e."/sentence boundaries do not match)
+  /[a-z_]{2,}\.[a-z_]{2,}/i,
+  // raw ascii edge arrows: fac_x->goal_revenue
+  /->/,
+];
+
+/**
+ * Return the first internal-vocabulary / raw-identifier hit in `text`, or null
+ * when clean. Used by the no-op preservation gate (see EDIT_INTERNALS_PATTERNS).
+ */
+export function findEditInternalsHit(text: string): string | null {
+  if (!text || text.length === 0) return null;
+  for (const re of EDIT_INTERNALS_PATTERNS) {
+    const m = re.exec(text);
+    if (m) return m[0];
+  }
+  return null;
+}

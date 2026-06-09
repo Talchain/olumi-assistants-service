@@ -66,6 +66,11 @@ import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
+import {
+  findSuccessClaimHit,
+  findForbiddenPhraseHit,
+  findEditInternalsHit,
+} from "../../orchestrator-v5/compose/forbidden-user-facing-phrases.js";
 import { TOKEN_OVERLAP_STOPWORDS, hasTokenOverlap } from "./token-overlap.js";
 import { STRUCTURAL_EDGE_DEFAULTS } from "../context/constants.js";
 import { enforceProposalLanguage } from "../deterministic/proposal-language-guard.js";
@@ -115,6 +120,13 @@ export interface EditGraphResult {
    * fallback). Absent on rejected edits.
    */
   operation_meta?: EditGraphOperationMeta[];
+  /**
+   * R10 — true when the no-op branch preserved a scrubbed LLM clarifying
+   * question instead of substituting the deterministic fallback copy. Read by
+   * the V5 dispatcher's no-op recovery so its vague-edit branch stays inert
+   * and cannot clobber the preserved question.
+   */
+  noOpClarificationPreserved?: boolean;
 }
 
 export interface EditGraphOpts {
@@ -220,6 +232,18 @@ export interface EditGraphTraceDiagnostics {
   failure_branch: string | null;
   failure_code: string | null;
   failure_message: string | null;
+  // R7 — per-turn LLM call diagnostics. Optional so the existing partial
+  // constructors (dispatch preflight, test fixtures) stay valid; the main
+  // `diagnostics()` closure always populates them. `model`/`stop_reason` are
+  // null and tokens are 0 on deterministic (no-LLM) returns. Tokens are summed
+  // across repair attempts (= total turn cost); `stop_reason` is the final
+  // decisive attempt's value. `plot_outcome` describes the PLoT verdict only.
+  model?: string | null;
+  input_tokens_est?: number;
+  output_tokens?: number;
+  stop_reason?: string | null;
+  repair_attempts?: number;
+  plot_outcome?: 'pass' | 'rejected' | 'unavailable' | 'skipped';
 }
 
 // ============================================================================
@@ -1544,6 +1568,14 @@ export async function handleEditGraph(
   let failureBranch: string | null = null;
   let failureCode: string | null = null;
   let failureMessage: string | null = null;
+  // R7 — per-turn LLM diagnostics accumulators. Tokens summed across repair
+  // attempts; model/stop_reason reflect the final decisive attempt.
+  let lastModel: string | null = null;
+  let inputTokensSum = 0;
+  let outputTokensSum = 0;
+  let lastStopReason: string | null = null;
+  let repairAttempts = 0;
+  let plotOutcome: EditGraphTraceDiagnostics['plot_outcome'] = 'skipped';
 
   const setViolationCodes = (codes: string[]): void => {
     validationViolationCodes = [...new Set(codes.filter((code) => code.length > 0))];
@@ -1572,6 +1604,12 @@ export async function handleEditGraph(
     failure_branch: failureBranch,
     failure_code: failureCode,
     failure_message: failureMessage,
+    model: lastModel,
+    input_tokens_est: inputTokensSum,
+    output_tokens: outputTokensSum,
+    stop_reason: lastStopReason,
+    repair_attempts: repairAttempts,
+    plot_outcome: plotOutcome,
   });
 
   // ── Constraint shortcut ────────────────────────────────────────────────
@@ -1720,6 +1758,8 @@ export async function handleEditGraph(
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     const isRepair = attempt > 1;
+    // R7: repair_attempts = repairs beyond the first try (0 on first attempt).
+    repairAttempts = attempt - 1;
 
     // Build the user message
     let userMessage: string;
@@ -1781,7 +1821,10 @@ export async function handleEditGraph(
           recoverable: true,
           suggested_retry: 'Try describing the edit again.',
         };
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err });
+        // R7: structured discriminator read by the dispatch turn-event so
+        // failure_code distinguishes an LLM-call failure from a parse failure
+        // without parsing the message string.
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err, editTurnFailureCode: 'llm_call_failed' as const });
       }
       log.warn(
         { request_id: requestId, attempt, error: error instanceof Error ? error.message : String(error) },
@@ -1789,6 +1832,16 @@ export async function handleEditGraph(
       );
       continue;
     }
+
+    // R7: accumulate per-call LLM diagnostics (summed across attempts;
+    // model/stop_reason reflect the final decisive attempt). `usage` is
+    // optional-guarded: production adapters always populate it, but the
+    // contract allows its absence (and test adapters omit it) — a missing
+    // usage must never crash a successful edit.
+    lastModel = chatResult.model;
+    inputTokensSum += chatResult.usage?.input_tokens ?? 0;
+    outputTokensSum += chatResult.usage?.output_tokens ?? 0;
+    lastStopReason = chatResult.stopReason ?? null;
 
     // Bidirected edges: the edit_graph prompt (v6) constrains output to directional
     // from/to operations only. Bidirected edge references in the schema are for
@@ -1808,7 +1861,8 @@ export async function handleEditGraph(
           recoverable: true,
           suggested_retry: 'Try describing the edit more clearly.',
         };
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err });
+        // R7: structured discriminator (see the LLM-call throw above).
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { orchestratorError: err, editTurnFailureCode: 'parse_fail' as const });
       }
       log.warn(
         { request_id: requestId, attempt, error: error instanceof Error ? error.message : String(error) },
@@ -1826,31 +1880,44 @@ export async function handleEditGraph(
     if (llmResult.operations.length === 0) {
       const latencyMs = Date.now() - startTime;
 
-      // Determinism gap closed: previously, BOTH `coaching.summary`
-      // AND `warnings.join(' ')` were forwarded to `assistantText` on
-      // the empty-operations path. Both are LLM-authored strings (the
-      // `EditGraphLLMResult` types `warnings: string[]` and
-      // `coaching.summary: string` — neither is a structured code).
-      // The LLM can put "Updated Price." or "Done — value set."
-      // (terse commit claims a regex set will struggle to fully cover)
-      // into either field while emitting zero operations.
+      // R10 — preserve a scrubbed clarifying question on the no-op path.
+      // When the LLM returns zero operations with a question in
+      // `coaching.summary` (its mandated behaviour for an ambiguous edit
+      // target), the user should keep that specific, useful question instead of
+      // a generic dead-end. We scrub it with the SAME stack as the success
+      // path, then a conservative trip test DECLINES preservation — falling
+      // back to the deterministic NO_OP_FALLBACK_TEXT — whenever the candidate
+      // is empty, makes a success/mutation claim, carries a denial/jargon
+      // phrase, internal vocabulary, or a raw id/path. A preserved question
+      // never contains a success claim by construction, so the V5 false-success
+      // rewrite stays disjoint and untouched.
       //
-      // The fix is to drop BOTH sources on no-op paths and always emit
-      // the deterministic forward-looking NO_OP_FALLBACK_TEXT. Useful
-      // warning content (e.g. "edge already exists") is information we
-      // would like to preserve, but cannot safely while warnings is
-      // free prose. A follow-up workstream may introduce a
-      // warning-code allowlist + deterministic mapping; until then,
-      // safety beats UX richness.
-      //
-      // The default text is forward-looking ("Tell me…") rather than a
-      // denial ("No changes were needed…"). Denial phrasing matches
-      // FORBIDDEN_USER_FACING_PHRASES at the V5 egress and would be
-      // rewritten to the generic neutral fallback — costing the user
-      // the chance to know what to do next. Forward-looking copy is
-      // consistent with the Mode A propose-and-confirm fallback and
-      // gives the user an obvious next action.
-      const assistantText = NO_OP_FALLBACK_TEXT;
+      // Scope: ONLY `coaching.summary` is preserved. `warnings` remain dropped
+      // (the established Codex-P0 Mode-B contract): warnings are free prose that
+      // can carry the same false-success / jargon vectors, and the clarifying
+      // question the prompt mandates lives in coaching.summary, not warnings.
+      // Trip-testing the un-prefixed summary also keeps the line-anchored
+      // success-claim patterns effective (a "Note: " prefix would defeat them).
+      const scrubGraph = context.graph ?? null;
+      let noOpCandidate = llmResult.coaching?.summary
+        ? sanitiseUserFacingText(llmResult.coaching.summary, scrubGraph).text
+        : '';
+      if (noOpCandidate) {
+        // Same transforming guards as the success path, before the trip test.
+        noOpCandidate = enforceRepairVocabularyDenylist(noOpCandidate).text;
+        const proposalGuard = enforceProposalLanguage(noOpCandidate, 'edit_graph');
+        if (proposalGuard.leaked && proposalGuard.suffixed) {
+          noOpCandidate = proposalGuard.suffixed;
+        }
+      }
+      const noOpClarificationPreserved =
+        noOpCandidate.trim().length > 0 &&
+        findSuccessClaimHit(noOpCandidate) === null &&
+        findForbiddenPhraseHit(noOpCandidate) === null &&
+        findEditInternalsHit(noOpCandidate) === null;
+      const assistantText = noOpClarificationPreserved
+        ? noOpCandidate
+        : NO_OP_FALLBACK_TEXT;
 
       // V5 edit lifecycle recovery v1 — deterministic chips for the
       // no-op branch. Source: validator referential errors only (the
@@ -1872,7 +1939,8 @@ export async function handleEditGraph(
           warnings: llmResult.warnings.length,
           warnings_dropped: llmResult.warnings.length > 0,
           has_coaching: !!llmResult.coaching,
-          coaching_dropped: !!llmResult.coaching?.summary,
+          coaching_dropped: !!llmResult.coaching?.summary && !noOpClarificationPreserved,
+          clarification_preserved: noOpClarificationPreserved,
           preceded_by_plot_rejection: !!lastPlotErrors,
           preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
           deterministic_chips_emitted: recoveryChips.length,
@@ -1890,7 +1958,8 @@ export async function handleEditGraph(
         scenario_id: context.scenario_id,
         attempt,
         warnings_dropped: llmResult.warnings.length > 0,
-        coaching_dropped: !!llmResult.coaching?.summary,
+        coaching_dropped: !!llmResult.coaching?.summary && !noOpClarificationPreserved,
+        clarification_preserved: noOpClarificationPreserved,
         preceded_by_plot_rejection: !!lastPlotErrors,
         preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
         deterministic_chips_emitted: recoveryChips.length,
@@ -1907,6 +1976,7 @@ export async function handleEditGraph(
         latencyMs,
         appliedGraph: null,
         wasRejected: false,
+        noOpClarificationPreserved,
         ...(recoveryChips.length > 0 ? { suggestedActions: [...recoveryChips] } : {}),
         diagnostics: diagnostics(),
       };
@@ -1960,6 +2030,13 @@ export async function handleEditGraph(
         validationOutcome = 'max_operations_exceeded';
         setViolationCodes(['max_operations_exceeded']);
         recoveryPathChosen = 'rejection_block';
+        // R7 (NB-2): label the diagnostics failure_code so this cap rejection is
+        // distinct (not null) in the turn event — the highest-frequency cap path
+        // R7 needs to measure across R1/R2. Label only; mirrors the trio the
+        // sibling rejections set (e.g. budget_exceeded). No cap behaviour change.
+        failureBranch = 'max_operations';
+        failureCode = 'max_operations_exceeded';
+        failureMessage = msg;
         return buildRejectionResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, 'MAX_OPERATIONS_EXCEEDED', undefined, attempt, diagnostics());
       }
       validationOutcome = 'max_operations_exceeded';
@@ -2270,9 +2347,13 @@ export async function handleEditGraph(
         };
 
         const plotResult: ValidatePatchResult = await plotClient.validatePatch(plotPayload, requestId, opts?.plotOpts);
+        // R7: PLoT responded — tentatively a pass; overridden below for the
+        // feature-disabled (skipped) and rejection branches.
+        plotOutcome = 'pass';
 
         // FEATURE_DISABLED (501) → skip semantic validation with warning (same as PLoT not configured)
         if (plotResult.kind === 'feature_disabled') {
+          plotOutcome = 'skipped';
           log.info(
             { request_id: requestId, attempt },
             "edit_graph PLoT validate-patch FEATURE_DISABLED — skipping semantic validation",
@@ -2284,6 +2365,7 @@ export async function handleEditGraph(
           const reason = plotResult.message ?? 'Semantic validation rejected by PLoT';
           const plotCode = plotResult.code;
           const plotViolations = plotResult.violations;
+          plotOutcome = 'rejected';
           validationOutcome = 'plot_semantic_rejected';
           setViolationCodes([plotCode ?? 'plot_semantic_rejected']);
           recoveryPathChosen = 'repair_retry';
@@ -2338,6 +2420,7 @@ export async function handleEditGraph(
             const reason = (plotResponse.reason as string) ?? 'Semantic validation rejected by PLoT';
             const plotCode = typeof plotResponse.code === 'string' ? plotResponse.code : undefined;
             const plotViolations = Array.isArray(plotResponse.violations) ? plotResponse.violations : undefined;
+            plotOutcome = 'rejected';
             validationOutcome = 'plot_semantic_rejected';
             setViolationCodes([plotCode ?? 'plot_semantic_rejected']);
             recoveryPathChosen = 'repair_retry';
@@ -2422,6 +2505,7 @@ export async function handleEditGraph(
       } catch (plotError) {
         // PLoT configured but failed — hard reject (CEE must not propose semantically unvalidated patches)
         const errorMessage = plotError instanceof Error ? plotError.message : String(plotError);
+        plotOutcome = 'unavailable';
 
         log.error(
           {
