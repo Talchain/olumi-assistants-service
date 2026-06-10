@@ -246,19 +246,71 @@ describe('POST /orchestrate/v2/turn — V5 Signature Loop guards', () => {
     },
   );
 
-  // ── amendment #3: no-live-proposal clarification (no edit no-op dead-end) ─
-  it('amendment #3: "make that update" with NO live proposal returns the clarification, not edit no-op', async () => {
-    pendingActionsForRead = [];
+  // ── amendment #3 / no-live-proposal boundary: BOTH phrases get the helpful
+  // clarification, NOT an edit no-op dead-end. Behaviour is identical for the
+  // two phrases (both confirmation-shaped → resolver → clarify_none); note
+  // "update the model" would otherwise be claimed by tryVagueEditGuard, but the
+  // hoisted resolver returns the no-live-proposal clarification first.
+  it.each(['make that update', 'update the model'])(
+    'no live proposal + "%s" → no-pending clarification (clarify_none), NOT edit no-op',
+    async (message) => {
+      pendingActionsForRead = [];
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({ message, turn_id: '22222222-2222-4222-8222-2222222222a1' }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      expect(findEvent('v5.edit_graph.proposal_confirm_resolved')!.outcome).toBe('clarify_none');
+      const body = JSON.parse(res.body) as { assistant_text?: string };
+      expect(body.assistant_text ?? '').toContain("I don't have a pending suggested update");
+      // It must NOT have been claimed by the vague-edit intercept.
+      expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_vague_edit');
+    },
+  );
+
+  // ── concrete-edit negative control: "update market demand to 20" stays a
+  // concrete edit (value-update gate) and is NEVER a proposal confirmation —
+  // even when a live proposal exists it must not apply it or clarify-as-proposal.
+  it.each([
+    { label: 'no live proposal', pendings: [] as PendingAction[] },
+    { label: 'with a live proposal', pendings: [liveProposal()] },
+  ])('concrete edit "update market demand to 20" ($label) stays concrete, not a proposal confirmation', async ({ pendings }) => {
+    pendingActionsForRead = pendings;
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: payload({ message: 'make that update' }),
+      payload: payload({ message: 'update market demand to 20', turn_id: '22222222-2222-4222-8222-2222222222a2' }),
     });
     expect(res.statusCode).toBe(200);
-    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
-    expect(findEvent('v5.edit_graph.proposal_confirm_resolved')!.outcome).toBe('clarify_none');
-    const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain("I don't have a pending suggested update");
+    // The proposal-confirm resolver never runs (value-update gate → not a
+    // confirmation), so no resolution event and no no-live-proposal clarification.
+    expect(emittedNames()).not.toContain('v5.edit_graph.proposal_confirm_resolved');
+    const body = JSON.parse(res.body) as { assistant_text?: string };
+    expect(body.assistant_text ?? '').not.toContain("I don't have a pending suggested update");
+  });
+
+  // ── genuine vague-edit negative control: a real vague edit ("make the model
+  // better") is NOT confirmation-shaped, so bypassEditHandling does NOT fire and
+  // it still reaches the vague-edit clarification — even with a live proposal it
+  // must NOT bypass into the proposal path (proves the bypass is gated on
+  // confirmation shape, not merely on a proposal existing).
+  it.each([
+    { label: 'no live proposal', pendings: [] as PendingAction[] },
+    { label: 'with a live proposal', pendings: [liveProposal()] },
+  ])('genuine vague edit "make the model better" ($label) reaches vague-edit handling, not the proposal bypass', async ({ pendings }) => {
+    pendingActionsForRead = pendings;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: 'make the model better', turn_id: '22222222-2222-4222-8222-2222222222a3' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(findEvent('v5.edit_graph.intercepted_vague_edit')).toBeDefined();
+    expect(emittedNames()).not.toContain('v5.edit_graph.proposal_confirm_resolved');
+    const body = JSON.parse(res.body) as { assistant_text?: string };
+    expect(body.assistant_text ?? '').not.toContain("I don't have a pending suggested update");
   });
 
   // ── amendment #4: pending-read failure is observable + degrades safely ───
