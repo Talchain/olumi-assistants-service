@@ -575,6 +575,65 @@ export async function loadMostRecentPendingActions(
   return fetchMostRecentPendingActions(scenarioId, requestId, store);
 }
 
+/**
+ * V5 Signature Loop — STRICT variant of {@link loadMostRecentPendingActions}.
+ *
+ * Unlike the swallowing variant (which returns `[]` on any failure and so
+ * conflates "no pending proposal" with "read failed"), this one PROPAGATES a
+ * read failure: a store-factory failure or a `SessionReadError` from the DB
+ * surfaces as a throw. The caller (the route-level proposal-confirm suppressor)
+ * needs that distinction to emit observable telemetry — a transient read
+ * failure must not silently look like "no proposal" with no trace (amendment
+ * #4). Parse-failures / empty results still resolve to `[]` (genuinely
+ * no-proposal), with read-degradation telemetry emitted at the store layer.
+ *
+ * Mirrors `loadPersistedGraphStrict`'s strict/swallowing split and keeps the
+ * SessionStore import surface bounded to this module.
+ */
+export async function loadMostRecentPendingActionsStrict(
+  scenarioId: string,
+  requestId: string,
+): Promise<readonly PendingAction[]> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store) {
+    throw new SessionReadError(
+      `loadMostRecentPendingActionsStrict(${scenarioId}): session store unavailable`,
+      {},
+    );
+  }
+  return store.readMostRecentPendingActions(scenarioId);
+}
+
+/**
+ * V5 Signature Loop — bounded "does this scenario already have committed turns?"
+ * read for the route-level refresh-continuation guard. Degrades to `false` on
+ * a missing store, an unimplemented method (legacy mocks), or a read failure —
+ * an uncertain read must NOT suppress the draft / frame-no-brief shortcut (a
+ * false negative just keeps today's behaviour; a false positive would strand a
+ * genuine new decision). Resolves the store inline via `tryGetSessionStore` to
+ * keep the SessionStore import surface bounded to this module.
+ */
+export async function loadHasPriorTurns(
+  scenarioId: string,
+  requestId: string,
+): Promise<boolean> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store?.hasPriorTurns) return false;
+  try {
+    return await store.hasPriorTurns(scenarioId);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — hasPriorTurns failed; degrading to false (do not suppress draft/frame)',
+    );
+    return false;
+  }
+}
+
 async function fetchPersistedScenarioState(
   scenarioId: string,
   requestId: string,

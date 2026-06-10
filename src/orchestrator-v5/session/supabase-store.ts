@@ -490,6 +490,23 @@ export class SupabaseSessionStore implements SessionStore {
     return out;
   }
 
+  async hasPriorTurns(scenarioId: string): Promise<boolean> {
+    // V5 Signature Loop — cheapest existence read: select a single id, limit 1.
+    // No data transfer beyond a row id; O(1) on the scenario_id access pattern.
+    const { data, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('id')
+      .eq('scenario_id', scenarioId)
+      .limit(1);
+    if (error) {
+      throw new SessionReadError(
+        `hasPriorTurns(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    return (data ?? []).length > 0;
+  }
+
   async readMostRecentCoachingState(scenarioId: string): Promise<CoachingStateSnapshot | null> {
     // Narrow, bounded read: the most recent prior turn whose coaching_state is
     // non-null. Filtering `coaching_state IS NOT NULL` means system-event /

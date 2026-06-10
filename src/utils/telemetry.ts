@@ -1067,6 +1067,47 @@ export const TelemetryEvents = {
   V5EditGraphAnalyticalQuestionSuppressed:
     "v5.edit_graph.analytical_question_suppressed",
 
+  // V5 Signature Loop — route-level proposal-confirmation guard. Emitted when
+  // a confirmation-shaped, edit-verb-bearing message ("make that update",
+  // "make that change", "update the model") reaches the edit_graph intent
+  // gate. Resolves the proposal-vs-edit ambiguity BEFORE edit routing so a
+  // confirmation can never no-op into edit_graph and wipe the pending
+  // proposal. Diagnostic-only; the operational outcome is the suppressed edit
+  // dispatch / the no-live-proposal clarification.
+  //
+  // Payload:
+  //   - outcome: 'suppressed_live'        — ≥1 live, graph-safe proposal → edit
+  //              routing suppressed; falls through to TurnExecutor to apply.
+  //            | 'clarify_none'           — read OK, no pending proposal at all.
+  //            | 'clarify_expired'        — read OK, only wall/turn-expired ones.
+  //            | 'clarify_hash_mismatch'  — read OK, only graph-hash-stale ones.
+  //            | 'suppressed_read_failed' — pending read THREW; degrade safely
+  //              by suppressing edit routing (do NOT silently look like "none").
+  //   - live_candidate_count: number      — live, graph-safe apply_proposed_change.
+  // The three `clarify_*` outcomes drive the deterministic no-live-proposal
+  // response; `suppressed_read_failed` is the distinct read-failure trace.
+  V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
+
+  // V5 Signature Loop — route-level state-query guard. Emitted when a question
+  // phrase that contains an edit verb ("what did you just change?", "what did
+  // that update do?") is recognised at the edit_graph intent gate and edit
+  // routing is suppressed, so the turn falls through to TurnExecutor where the
+  // recent-changes-grounded `tryStateQueryGuard` answers it instead of a
+  // mutating edit. Diagnostic-only. Payload: request_id, scenario_id.
+  V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
+
+  // V5 Signature Loop — refresh-continuation guard. Emitted when a turn arrives
+  // at frame stage with no request graph but the scenario already has committed
+  // turns (refresh / reconnection). The guard suppresses the draft_graph /
+  // frame-no-brief "start over" shortcuts so the turn reaches TurnExecutor,
+  // which reconstructs memory from server-side state (persisted graph + recent
+  // turns) instead of re-asking for the brief. Diagnostic-only.
+  //
+  // Payload:
+  //   - guard: 'draft_graph' | 'frame_no_brief' — which shortcut was skipped.
+  //   - prior_turns_present: true                — the discriminator that fired.
+  V5ContinuationGuardApplied: "v5.continuation.guard_applied",
+
   // V5 product-state continuity (foamy-bee tranche) — emitted by the
   // deterministic state-query guard. Closes the named misroute class
   // where "what update did you make?" routes to legacy edit_graph and

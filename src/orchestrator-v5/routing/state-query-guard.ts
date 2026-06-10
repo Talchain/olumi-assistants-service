@@ -87,13 +87,20 @@ export type StateQueryGuardOutcome =
 const STATE_QUERY_PATTERNS: readonly RegExp[] = [
   // "what changed", "what's changed", "what has changed", "what just changed"
   /\bwhat(?:'s|\s+(?:has|just))?\s+changed\b/i,
+  // "what was updated", "what were changed", "what got applied" — passive
+  // readback of a prior mutation. Change-word anchored.
+  /\bwhat\s+(?:was|were|got)\s+(?:changed|updated|added|applied)\b/i,
   // "what update did you make", "what updates did you make",
   // "what change did you make", "what changes did you make"
   /\bwhat\s+(?:update|change)s?\s+did\s+you\s+make\b/i,
-  // "what did you change/update/add" — change-word required.
-  // Generic "what did you do" deliberately excluded so generic
-  // session questions ("What did you do?") fall through to the LLM.
-  /\bwhat\s+did\s+you\s+(?:change|update|add)\b/i,
+  // "what did you change/update/add" and "what did you JUST change/update/add"
+  // — change-word required. Generic "what did you do" deliberately excluded so
+  // generic session questions ("What did you do?") fall through to the LLM.
+  /\bwhat\s+did\s+you\s+(?:just\s+)?(?:change|update|add)\b/i,
+  // "what did that update do", "what did the change do", "what did that
+  // edit do" — asks the effect of a just-applied mutation. The trailing
+  // "do" disambiguates from a fresh imperative.
+  /\bwhat\s+did\s+(?:that|the|this|your)\s+(?:update|change|edit|adjustment)\s+do\b/i,
   // "did you change/update/apply/add" — change-word required.
   /\bdid\s+you\s+(?:change|update|apply|add)\b/i,
   // "I can't see it", "I cannot see this", "I can't see this constraint",
@@ -228,6 +235,34 @@ const FRESH_EDIT_BAIL_OUT_PATTERNS: readonly RegExp[] = [
  */
 const EDIT_VERB_PATTERN =
   /\b(?:increase|decrease|reduce|raise|lower|set|adjust|replace|simplif|rebuild|remove)\b/i;
+
+/**
+ * Pure route-level predicate: does this message have the shape of a named
+ * state-query follow-up ("what changed?", "what did you just change?",
+ * "what was updated?", "what did that update do?")?
+ *
+ * Used by `route-v2` to SUPPRESS `edit_graph` routing for question phrases
+ * that contain an edit verb (e.g. "what did you just change?" matches
+ * `EDIT_GRAPH_POSITIVE_REGEX` on "change") so they fall through to
+ * TurnExecutor, where `tryStateQueryGuard` (below) produces the authoritative
+ * answer grounded in `recent_changes`. This predicate is intentionally
+ * INDEPENDENT of `recent_changes`: at the route the ContextPack is not built
+ * yet, and the route's only job is "do not hijack a question into an edit".
+ *
+ * It mirrors the legacy `STATE_QUERY_PATTERNS` arm of `tryStateQueryGuard`
+ * exactly — the imperative-edit-verb negative gate first, the named-pattern
+ * allowlist, then the compound fresh-edit bail-out — so the route never
+ * suppresses a turn the in-executor guard would not itself claim. The
+ * `POST_MUTATION_COMPLAINT_PATTERNS` arm is deliberately excluded here: those
+ * require non-empty `recent_changes` and none of them contain an edit verb,
+ * so they are never hijacked by edit routing and need no route suppression.
+ */
+export function isStateQueryQuestionShape(message: string): boolean {
+  if (EDIT_VERB_PATTERN.test(message)) return false;
+  if (!STATE_QUERY_PATTERNS.some((pat) => pat.test(message))) return false;
+  if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(message))) return false;
+  return true;
+}
 
 export interface TryStateQueryGuardInput {
   readonly message: string;
