@@ -60,7 +60,17 @@ export interface TryProposalDismissalInput {
 }
 
 export type ProposalDismissalResult =
-  | { readonly matched: true; readonly dismissed_count: number }
+  | {
+      readonly matched: true;
+      readonly dismissed_count: number;
+      /**
+       * Proposal refs (== chip_id) of the dismissed proposals. The dismissal
+       * commit threads these as `consumedPendingRefs` so a REJECTED proposal is
+       * excluded from carry-forward and can never reappear as a zombie on a
+       * later turn (V5 Signature Loop, behaviour #2 / consumption-path #1).
+       */
+      readonly dismissed_refs: readonly string[];
+    }
   | { readonly matched: false };
 
 /**
@@ -86,5 +96,10 @@ export function tryProposalDismissal(
 
   if (!DISMISSAL_PATTERN.test(input.message)) return { matched: false };
 
-  return { matched: true, dismissed_count: liveProposals.length };
+  // proposal_ref == chip_id for apply_proposed_change (the filtered kind); the
+  // ternary keeps the type-narrowing explicit and falls back to chip_id.
+  const dismissed_refs = liveProposals.map((pa) =>
+    pa.action.kind === 'apply_proposed_change' ? pa.action.proposal_ref : pa.chip_id,
+  );
+  return { matched: true, dismissed_count: liveProposals.length, dismissed_refs };
 }

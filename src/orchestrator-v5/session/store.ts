@@ -272,6 +272,23 @@ export interface SessionStore {
    * (`SupabaseSessionStore`) always implements it.
    */
   readMostRecentCoachingState?(scenarioId: string): Promise<CoachingStateSnapshot | null>;
+  /**
+   * V5 Signature Loop — refresh-continuation discriminator. Returns `true` iff
+   * the scenario already has at least one committed turn. Cheapest possible
+   * read: `SELECT 1 ... LIMIT 1` (existence only, no data transfer). Used by the
+   * route-level continuation guard to distinguish a refresh / reconnection of an
+   * existing decision (same scenario_id, prior turns exist → treat as
+   * continuation, read server-side memory) from a brand-new decision (fresh
+   * scenario_id, 0 prior turns → draft / frame as before).
+   *
+   * Read failures throw `SessionReadError`; the bounded loader degrades to
+   * `false` (do NOT suppress the draft/frame shortcut on an uncertain read).
+   *
+   * Optional on the interface so existing test mocks need not implement it; the
+   * bounded loader falls back to `false` when absent. Production
+   * (`SupabaseSessionStore`) always implements it.
+   */
+  hasPriorTurns?(scenarioId: string): Promise<boolean>;
 }
 
 /**

@@ -197,6 +197,23 @@ function throwingRoutingAdapter() {
   };
 }
 
+/** Calling adapter that returns a bland text-only response (no tool call). Used
+ * for follow-up turns that legitimately reach the LLM (e.g. a confirmation with
+ * no live proposal left to resume). */
+function callingTextAdapter() {
+  return {
+    chatWithTools: vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockResolvedValue({
+        content: [{ type: 'text', text: 'Generic LLM response.' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 5 },
+        model: 'mock',
+        latencyMs: 0,
+      }),
+  };
+}
+
 /**
  * Stubbed registry with an `add_constraint` handler that records every
  * invocation. Production handler reads the live graph and dispatches
@@ -393,6 +410,128 @@ describe('Proposed-change route-level — deterministic confirmations dispatch t
     });
     // Crucially: handler was NOT called a second time.
     expect(addConstraintCalls).toHaveLength(1);
+  });
+});
+
+describe('Proposed-change route-level — V5 Signature Loop (apply / carry-forward / dismiss)', () => {
+  beforeEach(() => {
+    appendCalls.length = 0;
+    addConstraintCalls.length = 0;
+    pendingActionsForRead = [applyProposedPendingAction()];
+    priorTurnsForRead = [];
+    priorFactsForRead = [];
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // behaviour #2 / test 2 — the REAL contract: a confirmation with a live,
+  // graph-safe proposal APPLIES that proposal and CONSUMES it (it must not
+  // reappear next turn). Proven for BOTH "make that update" and "update the
+  // model" — not weakened to "edit_graph was not called".
+  it.each(['make that update', 'update the model'])(
+    '"%s" + live proposal applies it, consumes it, and it does NOT reappear next turn',
+    async (msg) => {
+      // Turn 1: live proposal + confirmation → deterministic apply (no LLM).
+      pendingActionsForRead = [applyProposedPendingAction()];
+      const adapter1 = throwingRoutingAdapter();
+      await runTurnExecutor(payload(msg), `req-apply1-${msg.replace(/\s+/g, '-')}`, {
+        routingAdapter: adapter1,
+        handlerRegistry: stubbedRegistry(),
+      });
+      // (1)+(2)+(3): a live proposal existed and the confirmation APPLIED it —
+      // the proposal's handler ran exactly once, with zero LLM calls.
+      expect(adapter1.chatWithTools).not.toHaveBeenCalled();
+      expect(addConstraintCalls).toHaveLength(1);
+      expect(appendCalls).toHaveLength(1);
+      // (4a) CONSUMED: the applied proposal is NOT carried into the committed
+      // pending set (consumedPendingRefs excludes it from carry-forward).
+      const committedPendings = (appendCalls[0]!.pending_actions ?? []) as PendingAction[];
+      expect(committedPendings.some((p) => p.chip_id === PROPOSAL_ID)).toBe(false);
+
+      // Turn 2: the next turn reads EXACTLY what turn 1 committed (the proposal
+      // is gone), so the same confirmation finds nothing to resume — no
+      // re-apply, no zombie.
+      pendingActionsForRead = committedPendings;
+      const adapter2 = callingTextAdapter();
+      await runTurnExecutor(payload(msg), `req-apply2-${msg.replace(/\s+/g, '-')}`, {
+        routingAdapter: adapter2,
+        handlerRegistry: stubbedRegistry(),
+      });
+      // (4b) DOES NOT REAPPEAR: still exactly one handler invocation in total.
+      expect(addConstraintCalls).toHaveLength(1);
+    },
+  );
+
+  // Negative control for the anchored-phrase rule: a CONCRETE edit is NOT a
+  // confirmation of the pending proposal — it must NOT apply that proposal even
+  // when one is live (it takes the concrete value-update path instead).
+  it('concrete edit "update market demand to 20" does NOT apply the pending proposal', async () => {
+    pendingActionsForRead = [applyProposedPendingAction()];
+    const adapter = callingTextAdapter();
+    await runTurnExecutor(payload('update market demand to 20'), 'req-concrete-not-proposal', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    // The proposal's add_constraint handler was NOT invoked.
+    expect(addConstraintCalls).toHaveLength(0);
+  });
+
+  // behaviour #2 / test 3 — a non-consuming committed turn carries the proposal
+  // forward (does NOT wipe it), decrementing the turn-count TTL 2 → 1.
+  it('a non-consuming committed turn carries the proposal forward (turn TTL 2 → 1)', async () => {
+    const adapter = throwingRoutingAdapter(); // "what changed?" is deterministic — no LLM
+    await runTurnExecutor(payload('what changed?'), 'req-nonconsuming', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(addConstraintCalls).toHaveLength(0); // proposal NOT consumed
+    expect(appendCalls).toHaveLength(1);
+    const written = appendCalls[0]!.pending_actions as ReadonlyArray<{
+      chip_id: string;
+      expires_at_turn_count: number;
+    }>;
+    expect(written).toHaveLength(1);
+    expect(written[0]!.chip_id).toBe(PROPOSAL_ID);
+    expect(written[0]!.expires_at_turn_count).toBe(1);
+  });
+
+  // consumption-path #1 / behaviour #8 — a dismissal commits WITHOUT carrying
+  // the rejected proposal forward (no zombie) and WITHOUT mutating the graph.
+  it('a dismissal does not carry the proposal forward and does not mutate the graph', async () => {
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('no thanks'), 'req-dismiss', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(addConstraintCalls).toHaveLength(0); // not applied
+    expect(appendCalls).toHaveLength(1);
+    const written = (appendCalls[0]!.pending_actions ?? []) as ReadonlyArray<unknown>;
+    expect(written).toHaveLength(0); // dismissed → excluded from carry-forward
+    // No graph mutation on a rejection turn.
+    expect(appendCalls[0]!.graph).toBeUndefined();
+  });
+
+  // behaviour #4 — a stale (hash-invalid) proposal is NOT applied even on an
+  // explicit confirmation; the synthesis hash check supersedes it.
+  it('a hash-stale proposal + "make that update" does NOT dispatch the handler', async () => {
+    pendingActionsForRead = [applyProposedPendingAction({ graphHash: 'stale_hash_xyz' })];
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValue({
+          content: [{ type: 'text', text: 'fallback' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'mock',
+          latencyMs: 0,
+        }),
+    };
+    await runTurnExecutor(payload('make that update'), 'req-stale', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(addConstraintCalls).toHaveLength(0); // superseded — never applied
   });
 });
 

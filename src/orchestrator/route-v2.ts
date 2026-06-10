@@ -113,11 +113,21 @@ import {
   GraphStateIngressSchema,
   type GraphStateIngress,
 } from '../orchestrator-v5/boundary/request-extensions.js';
-import { loadPersistedGraphStrict } from '../orchestrator-v5/build-turn-context.js';
+import {
+  loadHasPriorTurns,
+  loadMostRecentPendingActionsStrict,
+  loadPersistedGraphStrict,
+} from '../orchestrator-v5/build-turn-context.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
+import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
+import {
+  PROPOSAL_CONFIRM_PATTERN,
+  SHORT_CONFIRM_PATTERN,
+} from '../orchestrator-v5/routing/deterministic-short-confirm.js';
+import { isStateQueryQuestionShape } from '../orchestrator-v5/routing/state-query-guard.js';
 import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
 import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
 import {
@@ -827,6 +837,108 @@ const EDIT_GRAPH_NEGATIVE_REGEX =
 // table-driven so future edits are localised, and is wired here via
 // `isValueUpdatePhrasing` below.
 
+// ────────────────────────────────────────────────────────────────────
+// V5 Signature Loop — route-level proposal-confirmation resolution.
+// ────────────────────────────────────────────────────────────────────
+//
+// A confirmation-shaped, edit-verb-bearing message ("make that update",
+// "make that change", "update the model") matches EDIT_GRAPH_POSITIVE_REGEX
+// and would dispatch to edit_graph, which no-ops and WIPES the pending
+// proposal. This resolves the proposal-vs-edit ambiguity at the route, before
+// edit routing, against the most-recent pending actions.
+
+type ProposalConfirmResolution =
+  | {
+      readonly kind: 'suppress';
+      readonly outcome: 'suppressed_live' | 'suppressed_read_failed';
+      readonly liveCount: number;
+    }
+  | {
+      readonly kind: 'clarify';
+      readonly outcome: 'clarify_none' | 'clarify_expired' | 'clarify_hash_mismatch';
+    };
+
+/**
+ * Resolve whether a confirmation-shaped message should SUPPRESS edit routing
+ * (a live, graph-safe proposal exists → TurnExecutor will apply it; or the
+ * read failed → degrade safely) or trigger the no-live-proposal CLARIFY copy.
+ *
+ * Graph-safe = `preconditions.graph_hash === requestGraphHash` when the request
+ * graph can be hashed. With no request graphState the route cannot hash, so it
+ * suppresses conservatively and defers the authoritative hash/idempotency
+ * decision to `decideProposedChangeSynthesis` inside TurnExecutor.
+ */
+async function resolveProposalConfirmAtRoute(
+  scenarioId: string,
+  requestId: string,
+  requestGraphState: GraphStateIngress | null,
+): Promise<ProposalConfirmResolution> {
+  let pendings: readonly PendingAction[];
+  try {
+    pendings = await loadMostRecentPendingActionsStrict(scenarioId, requestId);
+  } catch (err) {
+    // Read failed — degrade safely by SUPPRESSING edit routing. A transient
+    // read error must never silently look like "no proposal" + edit no-op
+    // (amendment #4). The distinct `suppressed_read_failed` outcome is the
+    // observable trace; the executor re-reads pending state downstream.
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 proposal-confirm suppressor — pending read failed; suppressing edit routing (degraded)',
+    );
+    return { kind: 'suppress', outcome: 'suppressed_read_failed', liveCount: 0 };
+  }
+  const proposals = pendings.filter((pa) => pa.action.kind === 'apply_proposed_change');
+  if (proposals.length === 0) {
+    return { kind: 'clarify', outcome: 'clarify_none' };
+  }
+  const nowMs = Date.now();
+  const notExpired = proposals.filter((pa) => {
+    const expiresMs = Date.parse(pa.expires_at_iso);
+    const wallValid = Number.isFinite(expiresMs) && nowMs <= expiresMs;
+    // Mirror TurnExecutor's `isExpired` (wall AND turn-count) for the
+    // route-visible expiry check. `suppressed_live` does NOT guarantee a
+    // mutation: it means route-visible expiry passed and edit handling is safely
+    // bypassed so TurnExecutor can make the AUTHORITATIVE apply / supersede /
+    // idempotency decision (graph-hash validity is still deferred downstream
+    // when the request carried no graphState; already-applied, validator
+    // failure, and handler failure can also prevent the mutation). Carry-forward
+    // already drops `expires_at_turn_count <= 0` before persistence, so this
+    // turn-count check is defence-in-depth + telemetry accuracy: a turn-count-
+    // exhausted proposal that ever reached the read is treated as expired
+    // (→ `clarify_expired`) rather than a misleading `suppressed_live`.
+    const turnValid = pa.expires_at_turn_count > 0;
+    return wallValid && turnValid;
+  });
+  if (notExpired.length === 0) {
+    return { kind: 'clarify', outcome: 'clarify_expired' };
+  }
+  const requestGraphHash =
+    requestGraphState != null ? computeAnalysisAffectingGraphHash(requestGraphState) : null;
+  const graphSafe =
+    requestGraphHash == null
+      ? notExpired
+      : notExpired.filter((pa) => pa.preconditions.graph_hash === requestGraphHash);
+  if (graphSafe.length === 0) {
+    return { kind: 'clarify', outcome: 'clarify_hash_mismatch' };
+  }
+  return { kind: 'suppress', outcome: 'suppressed_live', liveCount: graphSafe.length };
+}
+
+/**
+ * Deterministic copy for a confirmation-shaped message that has NO live,
+ * graph-safe pending proposal to apply (amendment #3) — replaces the legacy
+ * edit_graph no-op dead-end. British English; concrete next steps. Applies
+ * only to anchored confirmation phrases, never to concrete edits like
+ * "update market demand to 20" (those reach the value-update path).
+ */
+const NO_LIVE_PROPOSAL_TEXT =
+  "I don't have a pending suggested update to apply. " +
+  'Tell me what you want to change, or ask what could change the outcome.';
+
 /**
  * V5 status-keyed Reply contract — the type-system half of the response
  * finaliser's defence in depth (mechanism A in
@@ -1136,9 +1248,47 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //     per the matrix. False positives would mis-invoke the pipeline
     //     on a conversational message, so we err on the side of NOT
     //     dispatching.
+    // ────────────────────────────────────────────────────────────────────
+    // V5 Signature Loop — refresh-continuation guard.
+    // ────────────────────────────────────────────────────────────────────
+    // A turn at frame stage with no request graph that nonetheless belongs to a
+    // scenario WITH committed turns is a refresh / reconnection of an existing
+    // decision, not a fresh brief. After a UI refresh the request carries the
+    // same scenario_id but (often) stage='frame' and no graph_state; without
+    // this guard it is misclassified as draft_graph (below) or frame-no-brief
+    // (further down) and the assistant "starts over" instead of reading
+    // server-side memory. Suppress BOTH shortcuts here so the turn falls through
+    // to TurnExecutor, which reconstructs memory from server-side state
+    // (persisted graph + recent turns via readRecent) — CEE memory does NOT
+    // depend on the UI replaying conversation history.
+    //
+    // The existence read is gated on the ONLY state in which those shortcuts can
+    // fire (frame stage + no request graph), so the hot path is unchanged. A
+    // brand-new decision uses a fresh scenario_id (0 prior turns →
+    // isContinuationScenario=false → draft / frame as before); explicit
+    // new-decision / reset / template / import flows likewise allocate a fresh
+    // scenario_id, so they are unaffected.
+    const frameStageNoGraph = ingress.stage === 'frame' && extensions.graphState == null;
+    const isContinuationScenario = frameStageNoGraph
+      ? await loadHasPriorTurns(ingress.scenario_id, requestId)
+      : false;
+    if (isContinuationScenario) {
+      const wouldDraft =
+        ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
+        DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
+      emit(TelemetryEvents.V5ContinuationGuardApplied, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        guard: wouldDraft ? 'draft_graph' : 'frame_no_brief',
+        prior_turns_present: true,
+      });
+    }
     const isDraftGraphShape =
       ingress.stage === 'frame' &&
       extensions.graphState == null &&
+      // V5 Signature Loop — a scenario with prior committed turns is a
+      // continuation, not a first brief; let it reach TurnExecutor's memory.
+      !isContinuationScenario &&
       ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
       DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
     if (isDraftGraphShape) {
@@ -1355,8 +1505,94 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     );
     const interceptNodes = extensions.graphState?.nodes ?? null;
 
+    // ────────────────────────────────────────────────────────────────
+    // V5 Signature Loop — resolve confirmation / state-query intent BEFORE the
+    // Stage-4A edit intercepts AND the edit dispatch. Ordering is load-bearing:
+    // `tryVagueEditGuard` matches "update the model" (and similar), so without
+    // resolving here a confirmation phrase with a LIVE proposal would be claimed
+    // as a vague edit and never applied. Resolving first lets a confirmation
+    // bypass the intercepts and fall through to TurnExecutor (which applies the
+    // proposal), and lets an edit-verb-bearing state-query fall through to the
+    // recent-changes-grounded state-query guard.
+    // ────────────────────────────────────────────────────────────────
+    const analyticalQuestionDetected = isAnalyticalQuestion(ingress.message);
+    const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
+    const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
+    const valueUpdatePhrasingHit = isValueUpdatePhrasing(ingress.message);
+    // State-query suppressor (behaviour #3): a question containing an edit verb
+    // ("what did you just change?", "what did that update do?") must NOT edit.
+    const stateQuerySuppressed = isStateQueryQuestionShape(ingress.message);
+    if (
+      stateQuerySuppressed
+      && positiveEditRegexHit
+      && !negativeEditRegexHit
+      && !valueUpdatePhrasingHit
+      && !analyticalQuestionDetected
+    ) {
+      emit(TelemetryEvents.V5EditGraphStateQuerySuppressed, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+      });
+    }
+    // Base edit-verb candidate: a positive edit verb with NONE of the negative
+    // gates (negative regex / value-update / analytical / state-query). The
+    // value-update gate keeps `set X to Y` / `increase X by N` on the
+    // deterministic D1 path (value-update-gate.ts).
+    const editVerbCandidate =
+      positiveEditRegexHit &&
+      !negativeEditRegexHit &&
+      !valueUpdatePhrasingHit &&
+      !analyticalQuestionDetected &&
+      !stateQuerySuppressed;
+    // Proposal-confirmation suppressor (behaviour #1) + no-live-proposal
+    // clarification (amendment #3). Only a confirmation-shaped, edit-verb-bearing
+    // message pays the pending-actions read (hot path unchanged). Live graph-safe
+    // proposal → suppress (TurnExecutor's tryShortConfirmResume applies it); no
+    // proposal → return the no-live-proposal clarification (not the legacy edit
+    // no-op dead-end); read failure → suppress (degraded, distinct trace).
+    let proposalConfirmSuppressed = false;
+    const isConfirmationShaped =
+      SHORT_CONFIRM_PATTERN.test(ingress.message) ||
+      PROPOSAL_CONFIRM_PATTERN.test(ingress.message);
+    if (editVerbCandidate && isConfirmationShaped) {
+      const resolution = await resolveProposalConfirmAtRoute(
+        ingress.scenario_id,
+        requestId,
+        extensions.graphState ?? null,
+      );
+      emit(TelemetryEvents.V5EditGraphProposalConfirmResolved, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        outcome: resolution.outcome,
+        live_candidate_count: resolution.kind === 'suppress' ? resolution.liveCount : 0,
+      });
+      if (resolution.kind === 'suppress') {
+        proposalConfirmSuppressed = true;
+      } else {
+        // No live, graph-safe proposal — return the deterministic
+        // no-live-proposal clarification rather than dispatching an edit that
+        // would no-op. This turn does NOT mutate the graph.
+        const noProposalResponse = composeDirectAnswerResponse({
+          assistant_text: NO_LIVE_PROPOSAL_TEXT,
+          stage: ingress.stage,
+          suggested_actions: [],
+        });
+        return sendFinalised200(reply, requestId, 'edit_graph', noProposalResponse, {
+          graph: null,
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+        });
+      }
+    }
+    // A confirmation routed to apply, or a state-query question, must bypass the
+    // Stage-4A edit intercepts below — otherwise tryVagueEditGuard /
+    // chip-simplify / label-intercept would claim the turn before it can be
+    // applied (proposal) or answered (state-query guard in TurnExecutor).
+    const bypassEditHandling = proposalConfirmSuppressed || stateQuerySuppressed;
+
     const chipSimplify = tryChipSimplifyIntercept(ingress.message);
-    if (chipSimplify.matched) {
+    if (chipSimplify.matched && !bypassEditHandling) {
       emit(TelemetryEvents.V5InterceptedChipClarify, {
         request_id: requestId,
         scenario_id: ingress.scenario_id,
@@ -1402,7 +1638,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       interceptNodes,
       priorAnalysisIsFresh,
     );
-    if (labelIntercept.matched) {
+    if (labelIntercept.matched && !bypassEditHandling) {
       emit(TelemetryEvents.V5PostAnalysisLabelIntercept, {
         request_id: requestId,
         scenario_id: ingress.scenario_id,
@@ -1424,7 +1660,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
 
     const vague = tryVagueEditGuard(ingress.message, interceptNodes);
-    if (vague.matched) {
+    if (vague.matched && !bypassEditHandling) {
       const response = composeEditClarifyResponse({
         reason: 'vague_edit',
         stage: ingress.stage,
@@ -1445,34 +1681,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
     }
 
-    // V5 edit lifecycle recovery v1 — analytical-question guard. The
-    // existing `EDIT_GRAPH_NEGATIVE_REGEX` catches `what would` but
-    // not `what could` / `what might` / `how could the outcome
-    // change`, so analytical questions about the model's outcome
-    // currently slip through and dispatch to edit_graph. This guard
-    // closes that hole BEFORE editIntentDetected fires. The guard
-    // delegates to `classifyAnalyticalIntent` (the canonical
-    // analytical taxonomy) and adds the narrow modal-cousin
-    // variants. See src/orchestrator-v5/routing/analytical-question-guard.ts
-    // for the predicate and its scope contract.
-    const analyticalQuestionDetected = isAnalyticalQuestion(ingress.message);
-    const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
-    const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
-    const valueUpdatePhrasingHit = isValueUpdatePhrasing(ingress.message);
-    const editIntentDetected =
-      positiveEditRegexHit &&
-      !negativeEditRegexHit &&
-      // P0 fix (2026-05): suppress dispatch when the message is a clear
-      // value/factor update (`set X to Y`, `increase X by N`, etc.). These
-      // belong on the deterministic D1 / Sonnet tool-use path, not the
-      // fragile edit_graph LLM JSON path. The narrow gate is documented at
-      // src/orchestrator/routing/value-update-gate.ts (preserves
-      // structural edits like "update the model to include market
-      // dynamics", kind changes like "set goal to be a factor", and A4
-      // requests like "Add team dynamics as a risk").
-      !valueUpdatePhrasingHit &&
-      // V5 edit lifecycle recovery v1 — analytical-question suppression.
-      !analyticalQuestionDetected;
+    // Predicates, state-query suppression, and the proposal-confirmation
+    // resolution were computed ABOVE (hoisted before the Stage-4A intercepts so
+    // a confirmation / state-query cannot be claimed by tryVagueEditGuard et al.
+    // before it is applied / answered). Edit intent is the candidate minus a
+    // suppressed proposal confirmation.
+    const editIntentDetected = editVerbCandidate && !proposalConfirmSuppressed;
     // Emit ONLY when the analytical-question guard is THE deciding
     // factor — i.e. the message WOULD have dispatched to edit_graph
     // had the guard not fired. The earlier loose condition (emit on
@@ -1645,6 +1859,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isFrameNoBriefShape =
       ingress.stage === 'frame' &&
       extensions.graphState == null &&
+      // V5 Signature Loop — a continuation (prior committed turns) must NOT get
+      // the "start over" framing prompt; let it reach TurnExecutor's memory.
+      !isContinuationScenario &&
       !isDraftGraphShape;
     if (isFrameNoBriefShape) {
       log.info(
