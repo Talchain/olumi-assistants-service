@@ -806,6 +806,10 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
       expect(out.assistant_text).toContain(
         "The most useful thing to check is the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity': whether it holds as strongly as the model currently assumes",
       );
+      // Beat 5 — validation priority points at the SAME named link.
+      expect(out.assistant_text).toContain(
+        'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome',
+      );
       // Next action aligns to the SAME named link (not the top driver).
       expect(out.assistant_text).toMatch(
         /^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m,
@@ -842,6 +846,12 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
     if (out.matched) {
       // No fragile-link sentence.
       expect(out.assistant_text).not.toContain('The most useful thing to check is the link from');
+      // Beat 5 — validation falls back to the most-weighted factor, not the
+      // fragile-link phrasing.
+      expect(out.assistant_text).not.toContain('real-world support for that link');
+      expect(out.assistant_text).toContain(
+        "The evidence that would most improve confidence is firmer support for 'Local Senior Hire', since it carries the most weight in this result",
+      );
       // Falls back to the top-driver next step.
       expect(out.assistant_text).toMatch(
         /^• Re-run after revisiting 'Local Senior Hire', the factor with the most influence here, to see whether the lead holds\.$/m,
@@ -909,6 +919,12 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // to the strongest factor…"). A fragile link was named above, so the next
       // step strengthens THAT link — coherent priorities, not a split with the
       // top driver.
+      // Beat 5 — "what to validate": names the priority evidence (the named
+      // fragile link) and why it matters, distinct from the diagnosis sentence
+      // (beat 4) and the re-run action (beat 6).
+      expect(out.assistant_text).toContain(
+        'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome',
+      );
       expect(out.assistant_text).toContain('What to check next');
       expect(out.assistant_text).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
       expect(out.assistant_text).not.toMatch(/Small changes to the strongest factor can shift the picture/);
@@ -1026,6 +1042,154 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
         expect(lower).not.toMatch(/\bthe\s+winners?\b/);
         expect(lower).not.toMatch(/\bwinning\s+(option|probability|side|choice|outcome)\b/);
       }
+    }
+  });
+});
+
+// =========================================================================
+// V5 Post-Analysis Explanation Slice v1 — the "what to validate" beat.
+// composeExplainResults now states the single piece of evidence that would
+// most improve confidence (beat 5), sitting between the fragility diagnosis
+// (beat 4) and the re-run action (beat 6). It points at the named fragile
+// link when one exists, else the most-weighted factor, and is omitted when
+// neither is renderable. Uses existing fragile-edge / top-driver signals
+// only — no new metric, no invented certainty (F.6).
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — validation-priority beat (what to validate)', () => {
+  const VALIDATE_LINK =
+    'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome';
+
+  // Decision-style fixture so the prose reads as a real coaching answer.
+  const FULL: AdviceGateAnalysis = {
+    status: 'success',
+    leading_option: { label: 'Hire a senior engineer', probability: 0.62 },
+    runner_up: { label: 'Upskill the current team', probability: 0.38 },
+    margin_pp: 24,
+    robustness_band: 'moderate',
+    top_drivers: [
+      { factor_label: 'Engineering capacity', sensitivity_value: 0.45 },
+      { factor_label: 'Onboarding time', sensitivity_value: -0.3 },
+    ],
+    fragile_edges: [{ from_label: 'Engineering capacity', to_label: 'Delivery speed' }],
+  };
+
+  it('answer carries all five beats: leader, rationale, fragility, validation, next action — in order', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: FULL,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const text = out.assistant_text;
+      // 1/2 — leader + confidence
+      expect(text).toContain("the analysis currently favours 'Hire a senior engineer'");
+      expect(text).toContain('with a probability of 62%');
+      // 3 — why it leads (drivers)
+      expect(text).toContain('Engineering capacity');
+      // 4 — what is fragile (the named link)
+      expect(text).toContain(
+        "The most useful thing to check is the link from 'Engineering capacity' to 'Delivery speed'",
+      );
+      // 5 — what to validate
+      expect(text).toContain(VALIDATE_LINK);
+      // 6 — next action
+      expect(text).toMatch(/^• Strengthen the evidence behind that link, then re-run/m);
+      // Ordering: fragility (4) → validation (5) → action block (6).
+      const iFragile = text.indexOf('The most useful thing to check');
+      const iValidate = text.indexOf('The evidence that would most improve confidence');
+      const iAction = text.indexOf('What to check next');
+      expect(iFragile).toBeGreaterThanOrEqual(0);
+      expect(iValidate).toBeGreaterThan(iFragile);
+      expect(iAction).toBeGreaterThan(iValidate);
+    }
+  });
+
+  it('missing fragile edges → validation degrades honestly to the most-weighted factor', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: { ...FULL, fragile_edges: [] },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const text = out.assistant_text;
+      expect(text).not.toContain('real-world support for that link');
+      expect(text).toContain(
+        "The evidence that would most improve confidence is firmer support for 'Engineering capacity', since it carries the most weight in this result",
+      );
+    }
+  });
+
+  it('blank fragile-edge endpoint → dropped; validation takes the driver fallback (no blank leak)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: { ...FULL, fragile_edges: [{ from_label: '   ', to_label: 'Delivery speed' }] },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).not.toContain('real-world support for that link');
+      expect(out.assistant_text).toContain("firmer support for 'Engineering capacity'");
+    }
+  });
+
+  it('stale / unknown / none / undefined analysis never produces the validation sentence (gate falls through)', () => {
+    for (const freshness of ['stale', 'unknown', 'none', undefined] as const) {
+      const out = tryPostAnalysisAdviceGate({
+        message: 'Explain the results.',
+        analysis: FULL,
+        freshness,
+      });
+      expect(out.matched).toBe(false);
+      if (!out.matched) {
+        expect(out.reason).toBe('not_fresh');
+      }
+    }
+  });
+
+  it('validation sentence leaks no raw IDs / decimals / internal terms / arrows / em dashes and passes egress guards', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: FULL,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const text = out.assistant_text;
+      expect(text).toContain(VALIDATE_LINK); // confirm the sentence was exercised
+      expect(findForbiddenPhraseHit(text), `forbidden phrase in:\n${text}`).toBeNull();
+      expect(findSuccessClaimHit(text), `success-claim phrase in:\n${text}`).toBeNull();
+      expect(text).not.toMatch(/(opt_|fac_|goal_|node_|edge_)/i);
+      expect(text).not.toMatch(/\d+\.\d/);
+      expect(text).not.toMatch(/_meta|fragile_edge|switch_probability|node_id|context_pack|robustness band/i);
+      expect(text).not.toMatch(/[—→]/);
+    }
+  });
+
+  it('near-tie: validation stays coherent (driver fallback) with no lead-strength claim', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'Option A', probability: 0.505 },
+        runner_up: { label: 'Option B', probability: 0.495 },
+        margin_pp: 0.4,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.45 }],
+        // No fragile edges → driver fallback.
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const text = out.assistant_text;
+      expect(text).toMatch(/effectively tied/i);
+      expect(text).toContain(
+        "The evidence that would most improve confidence is firmer support for 'Delivery risk', since it carries the most weight in this result",
+      );
+      // Validation must not re-assert a meaningful lead on a near-tie.
+      expect(text).not.toMatch(/meaningful rather than marginal/i);
     }
   });
 });
