@@ -91,4 +91,30 @@ A pending `apply_proposed_change` must never become a **zombie** — re-offered 
 
 **15. Remaining gaps.** (a) **Fix C — behaviour #5 for route-level intercepts**: `vague_edit` / `chip_simplify` / post-analysis-label / edit_graph-no-op + the new no-live-proposal clarification return without committing a turn row (existing chip `task_1fb7f50a`). TurnExecutor clarify/reject paths already persist (#251). (b) **Reset-within-same-scenario**: no payload flag; explicit new/reset/template/import rely on a fresh `scenario_id` (out of scope). (c) Route-level dispatcher carry-forward (`dispatchEditGraph`, chip-click) intentionally omitted (B5) — a graph-moving edit should drop the proposal; documented, not a gap.
 
-**No merge or deploy performed — awaiting Paul/control approval.** Completion gate: live staging 8-journey suite (Why? / the second one / do that / what would change the outcome? / make that update / rerun / what changed? / refresh recall) runs only after approved merge + deploy.
+**16. Pre-merge advisory Integration Tests — compared to baseline, NOT assumed inherited.** The advisory `Integration Tests` job is RED on both #257 (head, run `27282115081`) and the `staging` baseline at `f76872c8` (run `27242573642`). The failing set was extracted from both CI logs and diffed: **identical** — 32 failing files with identical per-file failure counts, 174 tests failed on both (full list in §16a). The only delta on #257 is **additive**: Test Files 96 passed vs 95, Tests 1019 passed vs 1000 — i.e. #257 adds exactly one passing file (`route-v2-signature-loop.test.ts`, +19 passing) and **zero new failures**. `route-v2-signature-loop` and `route-v2-edit-lifecycle` both pass in CI integration. The failures are infra-dependent (no live LLM provider keys / Supabase in the advisory job → `provider:"unknown"`, `CEE_VALIDATION_FAILED`, `store.loadGraphAndBriefText is not a function`), unrelated to this lane. **Verdict: inherited advisory baseline; #257 introduces no integration regression. No fix attempted (would require approval + is out of lane scope).**
+
+§16a — identical failing files (both head and `f76872c8` baseline): admin.models(1), auth.comprehensive(7), auth.hmac-fallback(1), auth.multi-key(4), cee.analysis-ready-pricing(10), cee.draft-graph.causal-claims(9), cee.draft-graph.coaching-provenance(5), cee.draft-graph.coaching(2), cee.draft-graph.fail-closed(1), cee.draft-graph(5), cee.golden-journeys.telemetry(3), cee.golden-journeys(8), cee.hero-journey.disagreement(2), cee.hero-journey.truncation(1), cee.preflight-enforcement(4), cee.schema-v2(18), cee.signal-smoke(4), cee.status-consistency(5), cee.telemetry(2), cee.unified-pipeline.parity(3), cil-qualitative-lifecycle(5), orchestrate-v2-a1(5), orchestrate-v2-a2(4), orchestrate-v2-chip-click-resume(1), orchestrate-v2-deterministic-value-update(3), orchestrate-v2-fail-closed(4), orchestrate-v2-model-resolution(3), orchestrate-v2-preflight(6), orchestrate-v2-unsupported-action(5), orchestrator/edit-graph-dispatch-add-risk-e2e(2), orchestrator/edit-graph-no-op-recovery-e2e(5), repair-pipeline-validation(30).
+
+---
+
+## 5. Staging acceptance suite (run ONLY after approved merge + deploy)
+
+Nine live journeys on the deployed staging build (one real session unless noted). The first eight are the signature loop + follow-ups; the ninth (added per 2nd-pass review) proves the corrected invariant — *route suppression is not a mutation guarantee.*
+
+1. **"Why?"** — follow-up resolves against the prior answer.
+2. **"the second one"** — ordinal reference resolves.
+3. **"do that"** — confirmation resolves where applicable.
+4. **"what would change the outcome?"** — produces a proposal (pending `apply_proposed_change`).
+5. **"make that update"** — applies the pending proposal.
+6. **rerun** — re-runs analysis on the updated model.
+7. **"what changed?"** — explains the actual applied change (recent_changes-grounded).
+8. **refresh then recall** — after a refresh (same `scenario_id`, no replayed history), a remembered-detail question is answered (continuation, not "start over").
+9. **Suppressed-then-declined** *(corrected-invariant proof)* — prove that when the route suppresses edit handling but TurnExecutor then **declines** the mutation, the user gets a clear, recoverable response (never silent, never false success):
+   a. create a live pending proposal (`what would change the outcome?` → suggestion);
+   b. change the graph so the proposal no longer applies cleanly (e.g. edit a factor / rerun so the analysis-affecting graph hash diverges from the proposal's `preconditions.graph_hash`);
+   c. send "make that update";
+   d. **verify** the assistant does not go silent and does not falsely claim success;
+   e. **verify** the response clearly says it could not apply the suggested update because the model changed / the suggestion is no longer valid, and invites the user to rerun or pick a fresh update.
+   Expected runtime path: route emits `proposal_confirm_resolved` (`suppressed_live` when the request omits graphState so the route can't detect staleness, or `clarify_hash_mismatch` when the request carries the new graph) → if suppressed, TurnExecutor's `decideProposedChangeSynthesis` returns `superseded` → `PROPOSAL_SUPERSEDED_RESPONSE` recovery. The sibling **already-applied** variant (apply, then "make that update" again → `already_applied` → "That change is already in place.") is an acceptable alternative demonstration of the same boundary.
+
+**No merge or deploy performed — awaiting Paul/control approval.** The nine-journey staging acceptance suite runs ONLY after approved merge + deploy.
