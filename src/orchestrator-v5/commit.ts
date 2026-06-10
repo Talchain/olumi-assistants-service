@@ -37,6 +37,7 @@ import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing
 import { sanitiseUserFacingText } from './compose/output-safety.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type { PendingAction } from './session/pending-action.js';
+import { PENDING_ACTIONS_PER_TURN_CAP } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
@@ -95,6 +96,25 @@ export interface CommitMetadata {
    * (frame stage, no draft yet).
    */
   readonly graph_hash?: string;
+  /**
+   * V5 Signature Loop — pending proposals carried in from the PRIOR turn (the
+   * caller's `most_recent_pending_actions`). `commitDirectAnswer` re-persists
+   * the survivors alongside this turn's own pending actions so a single
+   * non-consuming turn that commits an empty pending array does NOT wipe a
+   * still-valid proposal. Survival rules live in `computeSurvivingPriorPendings`
+   * (wall/turn TTL, graph-hash invalidation, supersession, consumed). Omit /
+   * empty = no carry-forward (legacy behaviour).
+   */
+  readonly priorPendingActions?: readonly PendingAction[];
+  /**
+   * V5 Signature Loop — proposal refs (== chip_id) consumed by THIS turn and so
+   * excluded from carry-forward: the applied proposal on the apply path, and the
+   * dismissed proposals on the reject path. Mandatory on those two paths — a
+   * consumed/dismissed proposal must never carry forward and reappear as a
+   * zombie. See the consumption-path matrix in
+   * Docs/v5/v5-signature-loop-reliability.md.
+   */
+  readonly consumedPendingRefs?: readonly string[];
   /**
    * V5 Coaching State Spine — Stage 2B-1b: the internal Stage-2A `coaching_state`
    * derived at turn start (pre-dispatch). Persisted atomically with the turn via
@@ -236,6 +256,70 @@ export interface CommitResult {
 }
 
 /**
+ * Match key for carry-forward supersession + consumed matching. `chip_id` is
+ * present on every PendingAction and, for `apply_proposed_change`, is REQUIRED
+ * to equal `action.proposal_ref` (the bridge enforced by `parsePendingAction`),
+ * so `consumedPendingRefs` (proposal refs) match against it directly.
+ */
+function pendingMatchKey(pa: PendingAction): string {
+  return pa.chip_id;
+}
+
+/**
+ * V5 Signature Loop — pure carry-forward survival filter (behaviour #2).
+ *
+ * Given the PRIOR turn's pending actions and THIS turn's freshly-derived ones,
+ * return the prior pendings that should persist into this turn (each with its
+ * turn-count TTL decremented). A prior pending survives iff ALL hold:
+ *   1. not consumed this turn (applied / dismissed — `consumedRefs`);
+ *   2. not superseded by a this-turn pending with the same key (newer wins);
+ *   3. not wall-clock expired (`expires_at_iso > nowMs`; malformed → expired);
+ *   4. graph-hash precondition still matches `currentGraphHash` when BOTH are
+ *      known (a mismatch = the graph moved underneath it → invalidated);
+ *   5. turn-count TTL not exhausted AFTER decrementing by 1 (drop at `<= 0`).
+ *
+ * Pure and deterministic (clock injected). This is the single place the
+ * turn-count TTL is decremented — see the once-per-turn invariant in the
+ * consumption-path matrix (Docs/v5/v5-signature-loop-reliability.md): only the
+ * TurnExecutor `commitTurn` wrapper threads `priorPendingActions`, never the
+ * route-level dispatchers.
+ */
+export function computeSurvivingPriorPendings(
+  prior: readonly PendingAction[],
+  thisTurn: readonly PendingAction[],
+  consumedRefs: readonly string[],
+  currentGraphHash: string | undefined,
+  nowMs: number,
+): readonly PendingAction[] {
+  const consumed = new Set(consumedRefs);
+  const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
+  const survivors: PendingAction[] = [];
+  for (const pa of prior) {
+    const key = pendingMatchKey(pa);
+    if (consumed.has(key)) continue; // 1. applied / dismissed this turn
+    if (thisTurnKeys.has(key)) continue; // 2. superseded by a newer offer
+    const expiresMs = Date.parse(pa.expires_at_iso);
+    if (!Number.isFinite(expiresMs) || nowMs > expiresMs) continue; // 3. wall TTL
+    // 4. graph-hash invalidation — only when both hashes are known.
+    const preconditionHash = pa.preconditions.graph_hash;
+    if (
+      typeof preconditionHash === 'string' &&
+      preconditionHash.length > 0 &&
+      typeof currentGraphHash === 'string' &&
+      currentGraphHash.length > 0 &&
+      preconditionHash !== currentGraphHash
+    ) {
+      continue;
+    }
+    // 5. turn-count TTL — decrement once per carried turn; drop when exhausted.
+    const nextTurnCount = pa.expires_at_turn_count - 1;
+    if (nextTurnCount <= 0) continue;
+    survivors.push({ ...pa, expires_at_turn_count: nextTurnCount });
+  }
+  return survivors;
+}
+
+/**
  * Slice B commit: persist the turn via the session store, return the
  * unchanged response. Throws `StateCommitFailedError` on RPC failure;
  * TurnExecutor's existing catch handles the mapping to `STATE_COMMIT_FAILED`.
@@ -293,6 +377,23 @@ export async function commitDirectAnswer(
         )
       : metadata.pending_actions;
 
+  // V5 Signature Loop — carry forward the prior turn's surviving pendings so a
+  // single non-consuming turn (which commits an empty `chipDerivedPending`)
+  // does NOT wipe a still-valid proposal. This turn's own pendings come FIRST so
+  // a fresh offer is never evicted by a carried one when the per-turn cap binds.
+  // Dropping `priorPendingActions` (legacy callers) makes this a no-op.
+  const survivingPrior = computeSurvivingPriorPendings(
+    metadata.priorPendingActions ?? [],
+    chipDerivedPending,
+    metadata.consumedPendingRefs ?? [],
+    metadata.graph_hash,
+    Date.now(),
+  );
+  const finalPendings: readonly PendingAction[] = [
+    ...chipDerivedPending,
+    ...survivingPrior,
+  ].slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+
   // V5 Conversation Context Reliability: capture this turn's conversation
   // content for the next turn's ContextPack. user_message comes from the call
   // site verbatim (boundary payload.message via metadata.userMessage — the
@@ -322,7 +423,7 @@ export async function commitDirectAnswer(
     handler_facts: metadata.handler_facts,
     graph: metadata.graph,
     briefText: metadata.briefText,
-    pending_actions: chipDerivedPending,
+    pending_actions: finalPendings,
     coaching_state: metadata.coaching_state,
     userMessage,
     assistantMessage,
@@ -375,15 +476,19 @@ export async function commitDirectAnswer(
         expires_at_iso: pa.expires_at_iso,
       });
     }
-    if (chipDerivedPending.length > 0) {
+    if (finalPendings.length > 0) {
       log.debug(
         {
           scenario_id: metadata.scenario_id,
           turn_row_id: persistedRowId,
-          pending_action_count: chipDerivedPending.length,
-          kinds: chipDerivedPending.map((pa) => pa.action.kind),
+          // newly-created this turn vs carried forward from prior turns.
+          pending_action_count: finalPendings.length,
+          new_pending_count: chipDerivedPending.length,
+          carried_forward_count: survivingPrior.length,
+          consumed_ref_count: (metadata.consumedPendingRefs ?? []).length,
+          kinds: finalPendings.map((pa) => pa.action.kind),
         },
-        'V5 commit — pending actions persisted with turn',
+        'V5 commit — pending actions persisted with turn (incl. carry-forward)',
       );
     }
   } catch (telemetryErr) {

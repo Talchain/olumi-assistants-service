@@ -464,6 +464,13 @@ export async function runTurnExecutor(
     commitDirectAnswer(
       resp,
       {
+        // V5 Signature Loop — carry forward the prior turn's pendings by default
+        // so a non-consuming turn does not wipe a live proposal (behaviour #2).
+        // Placed BEFORE `...meta` so a call site can still override it; the
+        // apply / dismissal sites additionally set `consumedPendingRefs` (via
+        // meta) to exclude the proposal they just consumed / rejected, so it
+        // can never carry forward and reappear as a zombie.
+        priorPendingActions: context.most_recent_pending_actions ?? [],
         ...meta,
         coaching_state: context.coaching_state,
         userMessage: userMessageForTurn,
@@ -2084,6 +2091,10 @@ export async function runTurnExecutor(
               llm_calls_used: 0,
               duration_ms: Date.now() - startedAt,
               handler_facts: [],
+              // V5 Signature Loop — a REJECTED proposal must not carry forward.
+              // Exclude the dismissed refs from this turn's carry-forward so it
+              // cannot reappear as a zombie next turn (consumption-path #1).
+              consumedPendingRefs: dismissal.dismissed_refs,
             });
             commitPerformed = committed.performed;
             stagesCompleted.push('commit');
@@ -5079,6 +5090,15 @@ export async function runTurnExecutor(
         briefText: context.scenarioBriefText ?? undefined,
         ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0
           ? { pending_actions: pendingForCommit }
+          : {}),
+        // V5 Signature Loop — when this turn RESUMED a pending action (apply
+        // proposed change / ordinal / label pick), exclude its ref from
+        // carry-forward so a consumed proposal cannot reappear next turn. A
+        // successful apply also moves the graph hash, which independently
+        // invalidates the proposal in carry-forward; this is the explicit,
+        // hash-independent guard (consumption-path #2).
+        ...(consumedPendingAction !== null
+          ? { consumedPendingRefs: [consumedPendingAction.chip_id] }
           : {}),
       });
       if (timingsEnabled) {
