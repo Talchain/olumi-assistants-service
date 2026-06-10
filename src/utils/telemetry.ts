@@ -1076,8 +1076,10 @@ export const TelemetryEvents = {
   // dispatch / the no-live-proposal clarification.
   //
   // Payload:
-  //   - outcome: 'suppressed_live'        — ≥1 live, graph-safe proposal → edit
-  //              routing suppressed; falls through to TurnExecutor to apply.
+  //   - outcome: 'suppressed_live'        — ≥1 route-visible-live, graph-safe
+  //              proposal → edit routing + Stage-4A intercepts bypassed; falls
+  //              through to TurnExecutor, which makes the AUTHORITATIVE apply /
+  //              supersede / idempotency decision (NOT a guarantee of mutation).
   //            | 'clarify_none'           — read OK, no pending proposal at all.
   //            | 'clarify_expired'        — read OK, only wall/turn-expired ones.
   //            | 'clarify_hash_mismatch'  — read OK, only graph-hash-stale ones.

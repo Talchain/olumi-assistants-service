@@ -899,13 +899,17 @@ async function resolveProposalConfirmAtRoute(
   const notExpired = proposals.filter((pa) => {
     const expiresMs = Date.parse(pa.expires_at_iso);
     const wallValid = Number.isFinite(expiresMs) && nowMs <= expiresMs;
-    // Mirror TurnExecutor's `isExpired` (wall AND turn-count) so a route
-    // `suppressed_live` verdict implies the executor will actually apply the
-    // proposal. Carry-forward already drops `expires_at_turn_count <= 0` before
-    // persistence, so this is defence-in-depth + telemetry accuracy: should a
-    // turn-count-exhausted proposal ever reach the read, treat it as expired
-    // (→ `clarify_expired`) rather than emitting a misleading `suppressed_live`
-    // that TurnExecutor would then decline.
+    // Mirror TurnExecutor's `isExpired` (wall AND turn-count) for the
+    // route-visible expiry check. `suppressed_live` does NOT guarantee a
+    // mutation: it means route-visible expiry passed and edit handling is safely
+    // bypassed so TurnExecutor can make the AUTHORITATIVE apply / supersede /
+    // idempotency decision (graph-hash validity is still deferred downstream
+    // when the request carried no graphState; already-applied, validator
+    // failure, and handler failure can also prevent the mutation). Carry-forward
+    // already drops `expires_at_turn_count <= 0` before persistence, so this
+    // turn-count check is defence-in-depth + telemetry accuracy: a turn-count-
+    // exhausted proposal that ever reached the read is treated as expired
+    // (→ `clarify_expired`) rather than a misleading `suppressed_live`.
     const turnValid = pa.expires_at_turn_count > 0;
     return wallValid && turnValid;
   });
