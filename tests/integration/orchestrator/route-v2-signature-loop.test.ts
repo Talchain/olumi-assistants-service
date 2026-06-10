@@ -150,6 +150,7 @@ function liveProposal(overrides: {
   graphHash?: string;
   expiresAtIso?: string;
   ref?: string;
+  turnCount?: number;
 } = {}): PendingAction {
   const ref = overrides.ref ?? 'prop_signature';
   return {
@@ -168,7 +169,7 @@ function liveProposal(overrides: {
       public_message: 'Set Revenue to around 20.',
     },
     preconditions: { graph_hash: overrides.graphHash ?? REQUEST_GRAPH_HASH },
-    expires_at_turn_count: 2,
+    expires_at_turn_count: overrides.turnCount ?? 2,
     expires_at_iso: overrides.expiresAtIso ?? '2099-12-31T23:59:59.000Z',
     emitted_at_iso: '2026-06-10T11:59:00.000Z',
   } as PendingAction;
@@ -338,8 +339,23 @@ describe('POST /orchestrate/v2/turn — V5 Signature Loop guards', () => {
     expect(findEvent('v5.edit_graph.proposal_confirm_resolved')!.outcome).toBe('clarify_hash_mismatch');
   });
 
-  it('behaviour #4: an expired proposal yields the clarification', async () => {
+  it('behaviour #4: a wall-clock-expired proposal yields the clarification', async () => {
     pendingActionsForRead = [liveProposal({ expiresAtIso: '2020-01-01T00:00:00.000Z' })];
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: 'make that update' }),
+    });
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(findEvent('v5.edit_graph.proposal_confirm_resolved')!.outcome).toBe('clarify_expired');
+  });
+
+  // Review follow-up (turn-count parity): the route resolver now mirrors
+  // TurnExecutor's isExpired (wall AND turn-count), so a turn-count-exhausted
+  // proposal yields clarify_expired — never a misleading suppressed_live that
+  // the executor would then decline.
+  it('behaviour #4: a turn-count-exhausted proposal (TTL 0) yields the clarification, not suppressed_live', async () => {
+    pendingActionsForRead = [liveProposal({ turnCount: 0 })]; // wall-valid, hash-safe, but TTL exhausted
     await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
