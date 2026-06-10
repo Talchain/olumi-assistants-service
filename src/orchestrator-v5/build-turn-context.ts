@@ -33,7 +33,17 @@ import type { SessionTurnWithContent } from './session/conversation-content.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  computeStructuralReadiness,
+  mergeInterventionSourceObjects,
+} from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  buildFactorScaleMap,
+  projectInterventionsToRawScale,
+  summariseConversions,
+  summaryIsNoteworthy,
+  type InterventionConversion,
+} from './tools/plot-intervention-scale.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from './coaching/coaching-state-snapshot.js';
@@ -1003,14 +1013,73 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
   }
 
-  return {
-    graph: parsedGraph.data,
-    options: readiness.options.map((option) => ({
+  // CEE → PLoT value-scale protection (Phase 1).
+  //
+  // PLoT (`origin/staging @ 86038f1`) expects intervention input `value` to be
+  // RAW user-scale and normalises internally using the target factor node's
+  // `observed_state.cap`. CEE historically projected the normalised `[0,1]`
+  // convention, which double-normalises capped interventions (e.g. sends 0.25
+  // where PLoT expects 25000). We therefore denormalise/canonicalise the
+  // OUTBOUND interventions here, at the single egress projection point.
+  //
+  // The numeric `readiness.options[].interventions` map has already discarded
+  // `raw_value` / `cap` / `value_type`, so we re-read the ORIGINAL intervention
+  // objects from the persisted option nodes (object-preserving merge, same
+  // precedence + membership as readiness) and the target factors'
+  // `observed_state` (cap + normalised-convention evidence). See
+  // `plot-intervention-scale.ts` for the evidence-gated rule and its
+  // no-silent-corruption / double-conversion safety. Read-only: the persisted
+  // graph is never mutated — only the outbound PLoT projection changes.
+  const factorScaleById = buildFactorScaleMap(parsedGraph.data.nodes);
+  const optionNodesById = new Map<string, Record<string, unknown>>();
+  for (const node of parsedGraph.data.nodes) {
+    if (node.kind === 'option' && typeof node.id === 'string') {
+      optionNodesById.set(node.id, node as unknown as Record<string, unknown>);
+    }
+  }
+
+  const egressConversions: InterventionConversion[] = [];
+  const projectedOptions = readiness.options.map((option) => {
+    const optionNode = optionNodesById.get(option.option_id);
+    const rawObjects = optionNode ? mergeInterventionSourceObjects(optionNode) : {};
+    const { interventions, conversions } = projectInterventionsToRawScale(
+      rawObjects,
+      factorScaleById,
+    );
+    for (const conv of conversions) egressConversions.push(conv);
+    return {
       id: option.option_id,
       option_id: option.option_id,
       label: option.label,
-      interventions: normaliseNumericInterventions(option.interventions),
-    })),
+      interventions,
+    };
+  });
+
+  // Single REDACTED diagnostic per snapshot load. Carries rule counts + factor
+  // ids only — never input/output magnitudes or caps — so it cannot leak
+  // business values, and fires once (not per intervention) to avoid noise. The
+  // `ambiguous_no_evidence` / `inconsistent` lists are the Phase-2 migration
+  // signal (where the shim could not safely denormalise, or where intervention
+  // `raw_value` disagreed with `value * cap`).
+  const conversionSummary = summariseConversions(egressConversions);
+  if (summaryIsNoteworthy(conversionSummary)) {
+    log.info(
+      {
+        event: 'run_analysis.intervention_scale_egress',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        by_rule: conversionSummary.by_rule,
+        cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
+        inconsistent_raw_value_factors: conversionSummary.inconsistent_raw_value_factors,
+        ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
+      },
+      'run_analysis egress intervention value-scale projection (redacted; no magnitudes)',
+    );
+  }
+
+  return {
+    graph: parsedGraph.data,
+    options: projectedOptions,
     goal_node_id: readiness.goal_node_id,
     rawPersistedGraph: persistedGraph,
     // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
@@ -1020,26 +1089,4 @@ export async function loadScenarioSnapshotForRunAnalysis(
       ? { goal_constraints: parsedGraph.data.goal_constraints }
       : {}),
   };
-}
-
-function normaliseNumericInterventions(
-  interventions: Record<string, unknown>,
-): Record<string, number> {
-  const entries: Array<[string, number]> = [];
-  for (const [factorId, rawValue] of Object.entries(interventions)) {
-    const numeric = extractNumericInterventionValue(rawValue);
-    if (numeric !== null) entries.push([factorId, numeric]);
-  }
-  return Object.fromEntries(entries);
-}
-
-function extractNumericInterventionValue(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  const candidate = (value as Record<string, unknown>).value;
-  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
 }

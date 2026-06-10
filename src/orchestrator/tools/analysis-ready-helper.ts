@@ -128,6 +128,81 @@ export function mergeInterventionSources(nodeAny: Record<string, unknown>): Reco
   return found ? merged : undefined;
 }
 
+/**
+ * Returns true exactly when `extractNumericIntervention(v)` would return a
+ * finite number — bare finite number, or object with a finite numeric
+ * `.value`. Mirrors that function's acceptance predicate VERBATIM (same
+ * `typeof === 'object'` + `'value' in v` test, no extra array special-casing)
+ * so the object-preserving merge below selects the same source and the same
+ * factor set as the numeric `mergeInterventionSources`.
+ * @internal Exported for testing.
+ */
+export function hasFiniteInterventionValue(v: unknown): boolean {
+  if (typeof v === 'number') return Number.isFinite(v);
+  if (v && typeof v === 'object' && 'value' in v) {
+    const inner = (v as Record<string, unknown>).value;
+    return typeof inner === 'number' && Number.isFinite(inner);
+  }
+  return false;
+}
+
+/**
+ * Object-preserving sibling of `mergeInterventionSources`.
+ *
+ * `mergeInterventionSources` collapses each entry to a bare number via
+ * `extractNumericIntervention`, discarding `raw_value` / `unit` / `cap` /
+ * `value_type`. The CEE → PLoT egress value-scale protection
+ * (`plot-intervention-scale.ts`) needs those fields to decide raw vs
+ * normalised, so this returns the ORIGINAL intervention entry (object or bare
+ * number) per factor_id.
+ *
+ * Precedence and membership are IDENTICAL to `mergeInterventionSources`: same
+ * source order (1 `data.interventions` > 2 slash-keyed > 3 top-level
+ * `interventions`), same container guards (`typeof === 'object'`), and the same
+ * per-entry acceptance predicate (`hasFiniteInterventionValue`, which mirrors
+ * `extractNumericIntervention`). The two therefore produce the SAME key set and
+ * pick from the SAME source per factor_id — verified by a parity test. The only
+ * difference is the value shape (original entry vs bare number) and the
+ * empty-result encoding (`{}` here vs `undefined` there). Keep in sync.
+ * Read-only: never mutates the node.
+ * @internal Exported for the egress projection + testing.
+ */
+export function mergeInterventionSourceObjects(
+  nodeAny: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+
+  // Source 1 (highest precedence): node.data.interventions
+  const data = nodeAny.data;
+  if (data && typeof data === 'object') {
+    const dataInterventions = (data as Record<string, unknown>).interventions;
+    if (dataInterventions && typeof dataInterventions === 'object') {
+      for (const [k, v] of Object.entries(dataInterventions as Record<string, unknown>)) {
+        if (!(k in merged) && hasFiniteInterventionValue(v)) merged[k] = v;
+      }
+    }
+  }
+
+  // Source 2: flat slash-keyed entries like "data/interventions/fac_1"
+  for (const [k, v] of Object.entries(nodeAny)) {
+    const match = k.match(/^data\/interventions\/(.+)$/);
+    if (!match) continue;
+    const facId = match[1];
+    if (facId in merged) continue;
+    if (hasFiniteInterventionValue(v)) merged[facId] = v;
+  }
+
+  // Source 3 (lowest precedence): top-level node.interventions
+  if (nodeAny.interventions && typeof nodeAny.interventions === 'object') {
+    for (const [k, v] of Object.entries(nodeAny.interventions as Record<string, unknown>)) {
+      if (k in merged) continue;
+      if (hasFiniteInterventionValue(v)) merged[k] = v;
+    }
+  }
+
+  return merged;
+}
+
 // ============================================================================
 // Readiness Computation
 // ============================================================================
