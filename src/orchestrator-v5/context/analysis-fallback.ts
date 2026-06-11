@@ -334,6 +334,58 @@ export function applyTopLevelFragileEdgeOverride(
 }
 
 /**
+ * Which shape produced the top-driver projection, surfaced to telemetry so we
+ * can tell — per turn — whether the advice-gate classes that require a
+ * `top_driver` (`improvement`, `explain_results_free_text`,
+ * `what_would_flip_free_text`) were grounded from the per-option
+ * `results[].factor_sensitivity` shape, the top-level
+ * `enrichment.factor_sensitivity[]` shape (staging / body `analysis_state`),
+ * or nothing.
+ */
+export type TopDriverSource = 'per_option' | 'top_level' | 'none';
+
+/**
+ * Reconcile an `AnalysisResponseSummary`'s `top_drivers` against the
+ * TOP-LEVEL `enrichment.factor_sensitivity[]` shape.
+ *
+ * `compactAnalysis`'s `deriveTopDrivers` only walks per-option
+ * `results[].factor_sensitivity`. On staging — and on the body
+ * `analysis_state` ingress path, where the UI sends `option_comparison`
+ * entries that carry no `factor_sensitivity` — the drivers live at the top
+ * level and are otherwise dropped. The prior-facts fallback
+ * (`buildAnalysisFromPriorFacts`) has applied this derivation since the
+ * enrichment-passthrough slice; the ingress path did NOT, so a request
+ * carrying `analysis_state` projected `top_drivers: []`, failed the advice
+ * gate's `needs_top_driver` classes (`data_unavailable_for_class`), and fell
+ * through to the fresh-analysis follow-up recap copy instead of grounded
+ * advice prose. This helper closes that gap for BOTH paths from a single
+ * place — the same seam contract as {@link applyTopLevelFragileEdgeOverride}.
+ *
+ * Rules (additive, fail-closed):
+ *   - Per-option drivers present → returned unchanged (`'per_option'` wins).
+ *   - Per-option empty + top-level drivers derivable → fill `top_drivers`
+ *     (`'top_level'`). `deriveTopDriversFromTopLevel` keeps only finite
+ *     sensitivity values and labelled factors, so nothing unsafe leaks.
+ *   - Neither present → unchanged (`'none'`).
+ */
+export function applyTopLevelDriversOverride(
+  summary: AnalysisResponseSummary,
+  enrichment: Record<string, unknown>,
+): { summary: AnalysisResponseSummary; source: TopDriverSource } {
+  if (summary.top_drivers.length > 0) {
+    return { summary, source: 'per_option' };
+  }
+  const fromTopLevel = deriveTopDriversFromTopLevel(enrichment);
+  if (fromTopLevel.length === 0) {
+    return { summary, source: 'none' };
+  }
+  return {
+    summary: { ...summary, top_drivers: fromTopLevel },
+    source: 'top_level',
+  };
+}
+
+/**
  * Scan prior facts (newest-first, same order as `readRecent`) for the most
  * recent non-noop `run_analysis` fact and project it into an
  * `AnalysisResponseSummary`. Returns null when no usable prior analysis
@@ -389,30 +441,24 @@ export function buildAnalysisFromPriorFacts(
           }
         : fromEnrichment.winner;
 
-      // compactAnalysis only walks per-option `results[].factor_sensitivity`.
-      // PLoT also publishes top-level `enrichment.factor_sensitivity[]` (the
-      // shape on staging), which compactAnalysis ignores. When its top_drivers
-      // came back empty, derive from the top-level array.
-      const topDrivers =
-        fromEnrichment.top_drivers.length > 0
-          ? fromEnrichment.top_drivers
-          : deriveTopDriversFromTopLevel(enrichment as Record<string, unknown>);
-
-      // Same gap as top_drivers above: compactAnalysis's deriveTopFragileEdges
-      // only walks per-option results[].robustness.fragile_edges. On staging
-      // the fragile edges live at the TOP LEVEL (enrichment.robustness.
-      // fragile_edges) and never reach the advice-gate projection that
+      // compactAnalysis only walks per-option `results[].factor_sensitivity`
+      // and per-option results[].robustness.fragile_edges. On staging both
+      // drivers and fragile edges live at the envelope TOP LEVEL and would
+      // otherwise be dropped before the advice-gate projection that
       // composeExplainResults / composeMeaning read. Reconcile through the
-      // SHARED override helper so this prior-facts fallback and the body
+      // SHARED override helpers so this prior-facts fallback and the body
       // `analysis_state` ingress path (turn-executor) project identically;
       // per-option result wins when present.
-      const { summary: reconciled } = applyTopLevelFragileEdgeOverride(
+      const { summary: withDrivers } = applyTopLevelDriversOverride(
         {
           ...fromEnrichment,
           options: relabelled,
           winner,
-          top_drivers: topDrivers,
         },
+        enrichment as Record<string, unknown>,
+      );
+      const { summary: reconciled } = applyTopLevelFragileEdgeOverride(
+        withDrivers,
         enrichment as Record<string, unknown>,
       );
       return reconciled;

@@ -159,10 +159,12 @@ import {
 } from './context/context-pack-assembler.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import {
+  applyTopLevelDriversOverride,
   applyTopLevelFragileEdgeOverride,
   buildAnalysisFromPriorFacts,
   FALLBACK_STALENESS_REASON,
   type FragileEdgeSource,
+  type TopDriverSource,
 } from './context/analysis-fallback.js';
 import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import {
@@ -858,28 +860,39 @@ export async function runTurnExecutor(
     let analysisSummary: AnalysisResponseSummary | null = null;
     let analysisStalenessReason: string | null = null;
     let analysisStateSource: 'request' | 'fallback' | 'absent' = 'absent';
-    // Which shape produced the fragile edges, for telemetry. Set on the
-    // request path (below); null on the fallback/absent paths — the fallback
-    // already reconciles top-level edges inside buildAnalysisFromPriorFacts.
+    // Which shape produced the fragile edges / top drivers, for telemetry.
+    // Set on the request path (below); null on the fallback/absent paths —
+    // the fallback already reconciles both inside buildAnalysisFromPriorFacts.
     let fragileEdgeSource: FragileEdgeSource | null = null;
+    let topDriverSource: TopDriverSource | null = null;
     if (options.analysisState) {
       // The body-supplied analysis_state arrives in the V2RunResponse shape:
-      // top-level `robustness`, `option_comparison`, and NO per-option
-      // `results` (coerceIngressAnalysis leaves results empty). compactAnalysis
-      // therefore misses the top-level `robustness.fragile_edges`; apply the
-      // SAME override the prior-facts fallback uses so fragile-edge coaching
-      // projects identically on both paths. coerceIngressAnalysis preserves
-      // top-level robustness, so the coerced envelope doubles as the enrichment
-      // source. Per-option edges still win when the request carries them.
+      // top-level `robustness`, `factor_sensitivity`, `option_comparison`,
+      // and NO per-option `results` (coerceIngressAnalysis leaves results
+      // empty). compactAnalysis therefore misses BOTH the top-level
+      // `robustness.fragile_edges` AND the top-level `factor_sensitivity[]`
+      // drivers; apply the SAME overrides the prior-facts fallback uses so
+      // the projection is identical on both paths. Without the drivers
+      // override, `top_drivers: []` failed the advice gate's
+      // `needs_top_driver` classes and a grounded question like "What would
+      // change the outcome?" fell through to the fresh-analysis recap copy.
+      // coerceIngressAnalysis preserves the top-level fields, so the coerced
+      // envelope doubles as the enrichment source. Per-option data still
+      // wins when the request carries it.
       const coercedIngress = coerceIngressAnalysis(options.analysisState);
       const ingressSummary = compactAnalysis(coercedIngress);
       if (ingressSummary) {
-        const reconciled = applyTopLevelFragileEdgeOverride(
+        const withDrivers = applyTopLevelDriversOverride(
           ingressSummary,
+          coercedIngress as unknown as Record<string, unknown>,
+        );
+        const reconciled = applyTopLevelFragileEdgeOverride(
+          withDrivers.summary,
           coercedIngress as unknown as Record<string, unknown>,
         );
         analysisSummary = reconciled.summary;
         fragileEdgeSource = reconciled.source;
+        topDriverSource = withDrivers.source;
       }
       analysisStateSource = 'request';
       // Freshness verdict is independent of whether the request carries
@@ -945,6 +958,12 @@ export async function runTurnExecutor(
         // edges rescued from the top-level shape — the path that previously
         // dropped them. Null off the request path.
         fragile_edge_source: fragileEdgeSource,
+        // Same confirmation for the top-driver parity fix: `'top_level'`
+        // means a request-supplied analysis_state had its drivers rescued
+        // from the top-level `factor_sensitivity[]` shape — the gap that
+        // previously sent advice-gate `needs_top_driver` classes to the
+        // fresh-analysis recap copy. Null off the request path.
+        top_driver_source: topDriverSource,
       },
     );
     try {
