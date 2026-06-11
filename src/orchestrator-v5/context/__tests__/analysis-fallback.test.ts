@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
+  applyTopLevelDriversOverride,
   applyTopLevelFragileEdgeOverride,
   buildAnalysisFromPriorFacts,
   FALLBACK_STALENESS_REASON,
@@ -984,5 +985,155 @@ describe('applyTopLevelFragileEdgeOverride — shared ingress/fallback seam', ()
     expect(out.summary.top_fragile_edges).toEqual([
       { from_label: 'Customer Metadata Quality', to_label: 'Revenue' },
     ]);
+  });
+});
+
+describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => {
+  // Minimal staging-shape enrichment: top-level factor_sensitivity[] +
+  // option_comparison, NO per-option `results`. This is the shape BOTH the
+  // body analysis_state ingress path (after coerceIngressAnalysis sets
+  // results: []) and the prior-facts fallback see. The advice gate's
+  // `needs_top_driver` classes (explain_results_free_text /
+  // what_would_flip_free_text / improvement) fail without these drivers.
+  const STAGING_DRIVERS_ENRICHMENT: Record<string, unknown> = {
+    meta: { seed_used: 1, n_samples: 100, response_hash: 'h-drivers' },
+    option_comparison: [
+      { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.62 },
+      { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.38 },
+    ],
+    factor_sensitivity: [
+      { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive' },
+      { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative' },
+    ],
+    robustness: { level: 'moderate' },
+    analysis_status: 'complete',
+  };
+
+  function driversRunFact(enrichment: Record<string, unknown>): HandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000002',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.62, 'opt-b': 0.38 },
+        summary: 'Prior run',
+        enrichment,
+      },
+    } as unknown as HandlerFact;
+  }
+
+  // Simulate the turn-executor body-analysis_state path: coerceIngressAnalysis
+  // adds meta + sets results: [] while preserving the top-level fields; then
+  // compactAnalysis + the shared override run — exactly what turn-executor
+  // now does on options.analysisState.
+  function projectDriversViaIngress(analysisState: Record<string, unknown>) {
+    const coerced = {
+      ...analysisState,
+      meta: analysisState.meta ?? { seed_used: 0, n_samples: 0, response_hash: '' },
+      results: [],
+    };
+    const summary = compactAnalysis(coerced as unknown as Parameters<typeof compactAnalysis>[0]);
+    if (!summary) return { summary: null as never, source: 'none' as const };
+    return applyTopLevelDriversOverride(summary, coerced);
+  }
+
+  const driversBaseSummary = () =>
+    compactAnalysis({
+      ...STAGING_DRIVERS_ENRICHMENT,
+      factor_sensitivity: [],
+      results: [],
+    } as unknown as Parameters<typeof compactAnalysis>[0])!;
+
+  it('body analysis_state path: rescues the top-level drivers compactAnalysis alone drops (the recap-stub root cause)', () => {
+    // Pre-fix behaviour: compactAnalysis on the coerced ingress shape sees NO
+    // drivers (it walks per-option results[].factor_sensitivity only) — so
+    // the advice gate's needs_top_driver classes failed and "What would
+    // change the outcome?" shipped the fresh-analysis recap stub.
+    const bare = compactAnalysis(
+      { ...STAGING_DRIVERS_ENRICHMENT, results: [] } as unknown as Parameters<typeof compactAnalysis>[0],
+    )!;
+    expect(bare.top_drivers).toEqual([]);
+
+    // With the shared override the ingress path now carries the drivers.
+    const { summary, source } = projectDriversViaIngress(STAGING_DRIVERS_ENRICHMENT);
+    expect(source).toBe('top_level');
+    expect(summary!.top_drivers.map((d) => d.factor_label)).toEqual([
+      'Local Senior Hire Programme',
+      'Offshore Partner Engagement',
+    ]);
+    // Direction is honoured from the authoritative enum, not sign-derived.
+    expect(summary!.top_drivers.map((d) => d.direction)).toEqual([
+      'positive',
+      'negative',
+    ]);
+    // Winner/options from option_comparison are untouched by the override.
+    expect(summary!.winner.option_id).toBe('opt-a');
+  });
+
+  it('ingress vs fallback parity: identical top-driver projection for the same enrichment', () => {
+    const fallback = buildAnalysisFromPriorFacts([driversRunFact(STAGING_DRIVERS_ENRICHMENT)])!;
+    const ingress = projectDriversViaIngress(STAGING_DRIVERS_ENRICHMENT).summary!;
+    expect(ingress.top_drivers).toEqual(fallback.top_drivers);
+  });
+
+  it('accepts the alternate {factor_label, sensitivity} field naming', () => {
+    const { summary, source } = projectDriversViaIngress({
+      ...STAGING_DRIVERS_ENRICHMENT,
+      factor_sensitivity: [
+        { factor_label: 'Hiring Budget', sensitivity: 0.5, direction: 'negative' },
+      ],
+    });
+    expect(source).toBe('top_level');
+    expect(summary!.top_drivers).toEqual([
+      {
+        factor_id: 'Hiring Budget',
+        factor_label: 'Hiring Budget',
+        sensitivity: 0.5,
+        direction: 'negative',
+      },
+    ]);
+  });
+
+  it('per-option drivers win over the top-level override (source: per_option)', () => {
+    const summary = {
+      ...driversBaseSummary(),
+      top_drivers: [
+        {
+          factor_id: 'fac-per-option',
+          factor_label: 'Per-Option Driver',
+          sensitivity: 0.9,
+          direction: 'positive' as const,
+        },
+      ],
+    };
+    const out = applyTopLevelDriversOverride(summary, {
+      factor_sensitivity: [{ label: 'Top-Level Driver', elasticity: 0.8 }],
+    });
+    expect(out.source).toBe('per_option');
+    expect(out.summary).toBe(summary); // returned unchanged
+    expect(out.summary.top_drivers[0]!.factor_label).toBe('Per-Option Driver');
+  });
+
+  it('no drivers anywhere: summary unchanged, base projection intact (source: none)', () => {
+    const summary = driversBaseSummary();
+    const out = applyTopLevelDriversOverride(summary, { robustness: { level: 'moderate' } });
+    expect(out.source).toBe('none');
+    expect(out.summary).toBe(summary);
+    expect(out.summary.top_drivers).toEqual([]);
+    expect(out.summary.winner).toEqual(summary.winner); // winner/options untouched
+  });
+
+  it('fail-closed: non-finite or unlabelled sensitivity entries are skipped', () => {
+    const out = applyTopLevelDriversOverride(driversBaseSummary(), {
+      factor_sensitivity: [
+        { label: 'Bad Sensitivity', elasticity: Number.NaN },
+        { elasticity: 0.4 }, // no id/label at all
+        'not-an-object',
+      ],
+    });
+    expect(out.source).toBe('none');
+    expect(out.summary.top_drivers).toEqual([]);
   });
 });
