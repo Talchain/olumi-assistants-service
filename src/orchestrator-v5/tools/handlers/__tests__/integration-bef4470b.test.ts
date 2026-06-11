@@ -15,11 +15,17 @@
  *   - When Sonnet routes correctly (kind: 'goal'/'option'), the handler
  *     runs as a no-op; Sonnet's orientation text becomes assistant_text
  *     and a noop fact is persisted for observability.
- *   - When Sonnet still misroutes with kind: 'node' (the decision-node
- *     pattern), the validator catches it cleanly with ENTITY_KIND_MISMATCH
- *     and the recoverable-validator coaching path produces a 200 response
- *     asking the user to retarget — much better UX than the original
- *     opaque error template.
+ *
+ * V5 Chip Routeability Contract lane update: a node-kind explain_from_structure
+ * proposal (the "what factor most influences my decision?" decision-node
+ * pattern) is NO LONGER treated as a misroute. explain_from_structure now
+ * accepts kind 'node' (factor/decision/outcome/risk/action collapse to it) because
+ * the handler ignores the entity and explains the whole structure — so the
+ * node target validates and the user gets a helpful explanation instead of the
+ * generic "I wasn't sure what you meant" dead-end. The validator's
+ * ENTITY_KIND_MISMATCH authority is unchanged for run_analysis (the regression
+ * guard below) and for a node kind aimed at a real option/goal id (proven in
+ * chip-routeability-contract.test.ts).
  *
  * The graph fixture below mirrors the bef4470b shape: 1 goal, 1 decision
  * node, 2 options, 10 factors, 28 edges. The fact details (exact node
@@ -143,9 +149,10 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
     // misrouted as run_analysis proposals targeting the decision node
     // (kind: 'node') → ENTITY_KIND_MISMATCH and an opaque error template.
     // Post-0.9.0: with explain_from_structure registered (accepted_entity_kinds
-    // = ['goal', 'option']), Sonnet's tool description now explicitly steers
-    // pre-analysis structural questions to this handler. The well-routed
-    // proposal targets the goal node, and the validator passes.
+    // = ['goal', 'option', 'node'] after the V5 Chip Routeability lane), Sonnet's
+    // tool description now explicitly steers pre-analysis structural questions to
+    // this handler. The well-routed proposal targets the goal node, and the
+    // validator passes (goal was accepted before the lane too).
     const proposal: ProposalAction = {
       handler_id: 'explain_from_structure',
       entity: {
@@ -162,12 +169,17 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('validator rejects a residual node-kind misroute on explain_from_structure (degraded path)', () => {
-    // If Sonnet still emits kind: 'node' instead of 'goal'/'option', the
-    // validator catches it with ENTITY_KIND_MISMATCH. The recoverable-
-    // validator pipeline turns this into a 200 + coaching response asking
-    // the user to retarget — the correct degradation when the wire schema
-    // cannot disambiguate which node class the user meant.
+  it('validator now ACCEPTS a node-kind explain_from_structure proposal (V5 routeability fix)', () => {
+    // V5 Chip Routeability Contract lane: the "what factor most influences my
+    // decision?" pattern resolves to a node target (kind: 'node'). This is no
+    // longer a misroute — explain_from_structure ignores the entity and
+    // explains the whole structure, so the node target validates and the user
+    // gets a helpful structural explanation instead of the generic
+    // "I wasn't sure what you meant" dead-end (the original bef4470b failure).
+    // Validator authority is preserved elsewhere: the run_analysis regression
+    // guard below still rejects the same node-kind misroute, and the
+    // chip-routeability contract test proves a node kind aimed at a real
+    // option id still fails the graph-resolved kind cross-check.
     const proposal: ProposalAction = {
       handler_id: 'explain_from_structure',
       entity: {
@@ -181,10 +193,7 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
       cited_context_fields: ['graph.nodes'],
     };
     const result = validateToolCall(proposal, undefined, HANDLER_VALIDATION_REGISTRY);
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
-    }
+    expect(result.valid).toBe(true);
   });
 
   it('validator rejects the same misroute against run_analysis (regression guard)', () => {

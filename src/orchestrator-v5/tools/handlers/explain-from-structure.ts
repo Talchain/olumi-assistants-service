@@ -16,14 +16,18 @@
  * sets the flag on its outcome as defence-in-depth.
  *
  * Accepted entity kinds (validation-registry.ts):
- *   `['goal', 'option']` — the wire entity-kind enum's `node` literal
- *   collapses decision/factor/outcome/risk into one literal, which is too
- *   broad for a no-op handler to safely accept. Decision-node misroutes
- *   from Sonnet (the recurring "what factor influences my decision?"
- *   pattern) are caught by the validator's ENTITY_KIND_MISMATCH path and
- *   the recoverable-validator coaching pipeline returns a 200 response
- *   asking the user to retarget — correct degradation when the wire
- *   schema cannot disambiguate which node class the user meant.
+ *   `['goal', 'option', 'node']` — the wire entity-kind enum's `node` literal
+ *   collapses decision/factor/outcome/risk/action into one literal. `node` is
+ *   accepted because this handler IGNORES the proposal entity entirely and
+ *   explains the whole structure projection, so a factor / decision /
+ *   outcome / risk / action target is a legitimate thing to ask it to explain.
+ *   Rejecting `node` previously produced the V5 routeability dead-end for
+ *   factor-centric questions ("what factor most influences my decision?")
+ *   — ENTITY_KIND_MISMATCH → the generic "I wasn't sure what you meant"
+ *   response. Validator authority is preserved: a `node` kind proposed
+ *   against a real option/goal id still fails the graph-resolved kind
+ *   cross-check, a missing id still fails ENTITY_NOT_FOUND, and `edge` /
+ *   `constraint` stay rejected. See the V5 Chip Routeability Contract lane.
  *
  * F.6 invariant (no semantic computation):
  *   No PLoT, no ISL, no LLM call, no math/stats, no graph mutation. The
