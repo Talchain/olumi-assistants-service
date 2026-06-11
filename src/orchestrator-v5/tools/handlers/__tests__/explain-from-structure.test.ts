@@ -121,10 +121,10 @@ describe('explain_from_structure — registration', () => {
     expect(resolveHandler(registry, 'explain_from_structure')).not.toBeNull();
   });
 
-  it('declares accepted_entity_kinds = [goal, option] in the validation registry', () => {
+  it('declares accepted_entity_kinds = [goal, option, node] in the validation registry', () => {
     const decl = HANDLER_VALIDATION_REGISTRY.explain_from_structure;
     expect(decl).toBeDefined();
-    expect(decl?.accepted_entity_kinds).toEqual(['goal', 'option']);
+    expect(decl?.accepted_entity_kinds).toEqual(['goal', 'option', 'node']);
   });
 });
 
@@ -151,7 +151,14 @@ describe('explain_from_structure — validator', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('rejects a node-kind proposal with ENTITY_KIND_MISMATCH (kind=node is too broad — covers decision/outcome/risk)', () => {
+  it('accepts a node-kind proposal (kind=node covers factor/decision/outcome/risk/action — V5 routeability fix)', () => {
+    // V5 Chip Routeability Contract lane: factor/decision/outcome/risk/action all
+    // collapse to wire-kind 'node'. The handler ignores the entity and
+    // explains the whole structure, so a node target is a valid thing to ask
+    // it to explain. Previously this returned ENTITY_KIND_MISMATCH and the
+    // user saw the generic "I wasn't sure what you meant" dead-end. With graph
+    // undefined the graph-resolved kind cross-check is skipped; the widened
+    // structural gate alone admits the node proposal.
     const result = validateToolCall(
       buildProposal({
         entity: {
@@ -165,10 +172,7 @@ describe('explain_from_structure — validator', () => {
       undefined,
       HANDLER_VALIDATION_REGISTRY,
     );
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
-    }
+    expect(result.valid).toBe(true);
   });
 
   it('rejects an edge-kind proposal with ENTITY_KIND_MISMATCH', () => {

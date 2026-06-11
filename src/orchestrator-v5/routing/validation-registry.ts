@@ -123,26 +123,46 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   // a templated response with a "Run analysis" chip instead of a typed
   // PRECONDITION_UNMET rejection.
   //
-  // accepted_entity_kinds is restricted to ['goal', 'option'] for all
-  // three handlers. The wire entity-kind enum includes 'node' as a
-  // catch-all that covers decision, factor, outcome, and risk nodes
-  // collapsed into one literal. Accepting 'node' on explain_from_structure
-  // would let Sonnet target outcome/risk/edge-adjacent nodes that the
-  // no-op handler can't sensibly explain. The decision-node misroute
-  // pattern (Sonnet picking the decision node for "what factor influences
-  // my decision?") is caught instead by the validator's ENTITY_KIND_MISMATCH
-  // path, which routes through composeRecoverableValidationResponse to
-  // produce a 200 + coaching response asking the user to retarget — the
-  // correct degradation for a structurally-ambiguous request that the
-  // wire schema cannot disambiguate.
+  // accepted_entity_kinds for the two EXPLANATION handlers
+  // (explain_from_structure, explain_results) is ['goal', 'option', 'node'].
+  // The wire entity-kind enum collapses decision, factor, outcome, risk, and
+  // action nodes into the single 'node' literal (see `toEntityKind` in
+  // graph-lookup-adapter.ts). 'node' is accepted here because BOTH handlers
+  // are scenario-wide explainers that IGNORE the proposal entity entirely —
+  // they compose their answer from the structure/analysis projection (or
+  // Sonnet's validated answer_text), never from the targeted node. A
+  // factor / decision / outcome / risk / action target is therefore a
+  // legitimate thing to ask them to explain; rejecting it produced the V5
+  // routeability
+  // dead-end (factor-centric question → ENTITY_KIND_MISMATCH → the generic
+  // "I wasn't sure what you meant" response — the Live AI Experience audit's
+  // P0). See the V5 Chip Routeability Contract lane.
+  //
+  // Accepting 'node' does NOT weaken validator authority:
+  //   - Point B (validator.ts graph-resolved kind cross-check) still rejects
+  //     a 'node' proposed against a real option/goal id (resolved kind
+  //     'option'/'goal' !== 'node' → ENTITY_KIND_MISMATCH);
+  //   - a 'node' id absent from the graph still fails ENTITY_NOT_FOUND;
+  //   - an unresolved target still fails ENTITY_RESOLUTION_AMBIGUOUS.
+  // The graph-dependent checks run on the normal production path (graph
+  // context present). On a graph-absent turn (frame stage) the widened
+  // structural gate alone admits the node proposal — acceptable ONLY because
+  // these two handlers ignore the entity; it is not a general bypass.
+  //
+  // 'edge' is intentionally NOT accepted: the validator skips the existence +
+  // kind cross-check for edges (they have no stable id — validator.ts), so a
+  // no-op handler accepting 'edge' would have ZERO existence validation.
+  // Edge/link explanation is a separate follow-up that needs an
+  // edge-existence-check design first. 'constraint' stays rejected too.
+  // what_would_flip keeps ['goal', 'option'] — out of scope for this lane.
   explain_from_structure: {
     handler_id: 'explain_from_structure',
-    accepted_entity_kinds: ['goal', 'option'],
+    accepted_entity_kinds: ['goal', 'option', 'node'],
     confirmation_template: noopHandlerConfirmationTemplate,
   },
   explain_results: {
     handler_id: 'explain_results',
-    accepted_entity_kinds: ['goal', 'option'],
+    accepted_entity_kinds: ['goal', 'option', 'node'],
     confirmation_template: noopHandlerConfirmationTemplate,
   },
   what_would_flip: {

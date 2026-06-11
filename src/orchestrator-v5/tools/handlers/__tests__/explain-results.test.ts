@@ -147,10 +147,10 @@ describe('explain_results — registration', () => {
     expect(resolveHandler(registry, 'explain_results')).not.toBeNull();
   });
 
-  it('declares accepted_entity_kinds = [goal, option] in the validation registry', () => {
+  it('declares accepted_entity_kinds = [goal, option, node] in the validation registry', () => {
     const decl = HANDLER_VALIDATION_REGISTRY.explain_results;
     expect(decl).toBeDefined();
-    expect(decl?.accepted_entity_kinds).toEqual(['goal', 'option']);
+    expect(decl?.accepted_entity_kinds).toEqual(['goal', 'option', 'node']);
   });
 });
 
@@ -160,7 +160,11 @@ describe('explain_results — validator', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('rejects a node-kind proposal with ENTITY_KIND_MISMATCH', () => {
+  it('accepts a node-kind proposal (factor/decision/outcome/risk/action — V5 routeability fix)', () => {
+    // V5 Chip Routeability Contract lane: a factor-centric "why did this
+    // factor matter?" post-analysis question resolves to wire-kind 'node'.
+    // The handler ignores the entity and explains the whole analysis, so a
+    // node target is valid. Previously this dead-ended on ENTITY_KIND_MISMATCH.
     const result = validateToolCall(
       buildProposal({
         entity: {
@@ -173,10 +177,7 @@ describe('explain_results — validator', () => {
       undefined,
       HANDLER_VALIDATION_REGISTRY,
     );
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
-    }
+    expect(result.valid).toBe(true);
   });
 });
 
