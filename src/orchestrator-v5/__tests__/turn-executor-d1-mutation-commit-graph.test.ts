@@ -29,7 +29,7 @@
  * DGAI-shaped request echo).
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -414,14 +414,14 @@ describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 h
 
     const offenders: string[] = [];
     const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry);
-        if (statSync(full).isDirectory()) {
-          if (entry === '__tests__' || entry === 'node_modules') continue;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
           walk(full);
           continue;
         }
-        if (!entry.endsWith('.ts') || entry.endsWith('.test.ts')) continue;
+        if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue;
         const rel = full.slice(SRC_ROOT.length);
         const lines = readFileSync(full, 'utf8').split('\n');
         for (const line of lines) {
