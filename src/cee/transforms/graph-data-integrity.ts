@@ -2,7 +2,7 @@
  * Graph Data Integrity — Post-V3-Transform Corrections
  *
  * Runs in Stage 6 (Boundary), after transformResponseToV3(), before V3 schema validation.
- * Applies deterministic corrections to two known data quality issues:
+ * Applies deterministic corrections to three known data quality issues:
  *
  * 1. Factor scale inconsistency:
  *    When a factor has both raw_value and cap in observed_state, value must equal
@@ -18,6 +18,14 @@
  *    - Structural edges where the LLM explicitly emitted a value < 1.0 (wrong).
  *    - Any edge still missing effect_direction after the transform.
  *    Log every correction applied.
+ *
+ * 3. Observed-root intercept doctrine (Track S 0.12):
+ *    `observed_state.value` is the sole baseline carrier for observed root
+ *    nodes; `intercept` is a structural offset for derived (non-root)
+ *    equations only. A root carrying `intercept = observed_state.value` is
+ *    evaluated downstream at twice its baseline (ISL computes non-intervened
+ *    roots as `observed_state.value + intercept`). This module removes that
+ *    duplicate pattern and never assigns intercepts itself.
  *
  * Root cause commentary:
  *   Issue 1: The LLM emits raw_value:49 and cap:59 but encodes value:0.49
@@ -65,7 +73,8 @@ export interface InterceptPopulationRepair {
   node_id: string;
   field: 'intercept';
   before: number | undefined;
-  after: number;
+  /** Undefined when the repair REMOVED a duplicate root intercept (0.13a). */
+  after: number | undefined;
   source: 'observed_state.value';
   reason: string;
 }
@@ -426,44 +435,75 @@ function repairEdgeFields(v3Body: any, requestId?: string): EdgeFieldRepair[] {
 }
 
 // ---------------------------------------------------------------------------
-// Task 3: Intercept auto-population (root nodes only)
+// Task 3: Observed-root intercept doctrine (root nodes only)
 // ---------------------------------------------------------------------------
 
-/** Node kinds eligible for intercept population (participate in inference). */
+/** Node kinds eligible for the observed-root intercept repair (participate in inference). */
 const INTERCEPT_ELIGIBLE_KINDS = new Set(['factor', 'outcome', 'risk', 'goal']);
 
 /**
- * Auto-populate `intercept` on root V3 nodes from `observed_state.value`.
+ * Source kinds whose outgoing edges do NOT make the target a derived node.
+ * Mirrors PLoT's option filter (plot-lite-service src/normalisation/option-filter.ts),
+ * which removes these nodes and ALL incident edges before the graph reaches ISL.
+ * A factor whose only incoming edges come from these kinds is therefore a ROOT
+ * in the inference graph ISL evaluates, even though it has incoming edges here.
+ */
+const NON_CAUSAL_SOURCE_KINDS = new Set(['option', 'decision', 'constraint']);
+
+/** Tolerance for detecting `intercept === observed_state.value` duplicates. */
+const INTERCEPT_DUPLICATE_EPSILON = 1e-9;
+
+/**
+ * Enforce the intercept doctrine (Track S 0.12) on observed root V3 nodes:
+ * - `observed_state.value` is the sole baseline carrier for observed roots.
+ * - `intercept` is a structural offset for derived (non-root) equations.
+ * - Producers must never set `intercept = observed_state.value` on observed roots.
  *
- * Root-only: non-root nodes (with incoming directed edges) must NOT be
- * auto-populated because their observed value includes parent contributions.
- * Uses the same root detection logic as gap-detection.ts.
+ * ISL evaluates a non-intervened root as `observed_state.value + intercept`,
+ * so an observed root carrying `intercept = observed_state.value` is computed
+ * at twice its baseline (Track S 0.11 audit). This repair:
  *
- * Rules:
- * - Only for inference-participating kinds: factor, outcome, risk, goal
- * - Skip decision, option, action nodes
- * - If `intercept` is already defined (including 0): keep it (LLM value or explicit zero)
- * - If `observed_state.value` is a number: set `intercept = observed_state.value`
+ * - REMOVES `intercept` from an observed root when it numerically equals
+ *   `observed_state.value` (the duplicate-baseline pattern; the live
+ *   draft_graph prompt still instructs the LLM to emit it — 0.13b).
+ * - Never ASSIGNS an intercept. The pre-0.13a auto-population
+ *   (`intercept = observed_state.value` on roots) was the audited defect
+ *   and has been removed.
+ * - Leaves explicit-zero intercepts in place (zero cannot double-count).
+ * - Leaves root intercepts that DIFFER from `observed_state.value` in place
+ *   (not the audited pattern; whether legitimate root offsets exist is the
+ *   0.12 doctrine's open Neil question). Emits a redacted
+ *   `observed_root_intercept_retained` diagnostic (IDs only) so the
+ *   non-audited pattern stays measurable.
+ * - Never touches non-root (derived) nodes — their intercepts are
+ *   legitimate structural offsets.
+ *
+ * Rootness is judged on the inference graph, not the raw V3 graph: incoming
+ * directed edges from option/decision/constraint sources do not count,
+ * because PLoT removes those nodes and edges before ISL evaluation
+ * (all 170 affected nodes in the 0.11 staging audit were "roots" only in
+ * this post-filter sense). Bidirected edges are excluded as in gap-detection.ts.
  *
  * Mutates v3Body.nodes in place.
- *
- * PROMPT CHANGE NEEDED: Add to draft_graph prompt:
- * "When the brief mentions a current rate, frequency, or baseline value for a factor,
- *  extract it as the node's `intercept` field (0.0-1.0 normalised probability).
- *  Example: 'current churn is 3.2%' → intercept: 0.032"
  */
-function populateNodeIntercepts(v3Body: any, requestId?: string): InterceptPopulationRepair[] {
+function repairObservedRootIntercepts(v3Body: any, requestId?: string): InterceptPopulationRepair[] {
   const repairs: InterceptPopulationRepair[] = [];
 
   const nodes: any[] = Array.isArray(v3Body?.nodes) ? v3Body.nodes : [];
   const edges: any[] = Array.isArray(v3Body?.edges) ? v3Body.edges : [];
 
-  // Build set of nodes with at least one incoming directed edge (same as gap-detection.ts)
-  const hasIncomingDirected = new Set<string>();
+  const kindById = buildNodeKindMap(nodes);
+
+  // Build set of nodes with at least one incoming directed edge from a
+  // causal source (a source PLoT will not strip before ISL evaluation).
+  const hasCausalIncomingDirected = new Set<string>();
   for (const edge of edges) {
     if (!edge) continue;
     if (edge.edge_type === 'bidirected') continue;
-    if (edge.to) hasIncomingDirected.add(edge.to);
+    if (!edge.to || !edge.from) continue;
+    const sourceKind = kindById.get(edge.from);
+    if (sourceKind !== undefined && NON_CAUSAL_SOURCE_KINDS.has(sourceKind)) continue;
+    hasCausalIncomingDirected.add(edge.to);
   }
 
   for (const node of nodes) {
@@ -472,34 +512,53 @@ function populateNodeIntercepts(v3Body: any, requestId?: string): InterceptPopul
     // 1. Kind filter — only inference-participating nodes
     if (!INTERCEPT_ELIGIBLE_KINDS.has(node.kind)) continue;
 
-    // 2. Root-only — skip nodes with incoming directed edges
-    if (hasIncomingDirected.has(node.id)) continue;
+    // 2. Root-only (inference-graph rootness) — derived-node intercepts are
+    //    legitimate structural offsets and must be preserved
+    if (hasCausalIncomingDirected.has(node.id)) continue;
 
-    // 3. If intercept is already defined (including 0), keep it
-    if (node.intercept !== undefined && node.intercept !== null) continue;
-
-    // 4. Auto-populate from observed_state.value (guard NaN — typeof NaN === 'number')
+    // 3. Only observed roots — guard NaN (typeof NaN === 'number')
     const observedValue = node.observed_state?.value;
     if (typeof observedValue !== 'number' || Number.isNaN(observedValue)) continue;
 
-    const before = node.intercept;
-    node.intercept = observedValue;
+    // 4. Only the duplicate-baseline pattern: non-zero intercept equal to
+    //    observed_state.value. Explicit zero is kept; differing values are
+    //    out of scope here (0.13b).
+    const intercept = node.intercept;
+    if (typeof intercept !== 'number' || Number.isNaN(intercept)) continue;
+    if (intercept === 0) continue;
+    if (Math.abs(intercept - observedValue) > INTERCEPT_DUPLICATE_EPSILON) {
+      // Non-equal observed-root intercept: NOT the audited duplicate pattern,
+      // so it is preserved — whether legitimate root offsets exist at all is
+      // the 0.12 doctrine's open question (Neil), and the repair must not
+      // destroy data beyond its evidence. Emit a redacted diagnostic (IDs
+      // only, no values) so prevalence stays measurable after the prompt
+      // fix (0.13b) lands. scenario_id does not exist at this stage (the
+      // draft pipeline runs pre-persistence); request_id is the join key.
+      log.info({
+        event: "cee.graph_integrity.observed_root_intercept_retained",
+        request_id: requestId,
+        node_id: node.id,
+      }, `[graph-data-integrity] Observed-root intercept retained (differs from observed_state.value): ${node.id}`);
+      continue;
+    }
+
+    delete node.intercept;
     repairs.push({
       node_id: node.id,
       field: 'intercept',
-      before,
-      after: observedValue,
+      before: intercept,
+      after: undefined,
       source: 'observed_state.value',
-      reason: `root ${node.kind} intercept auto-populated from observed_state.value=${observedValue}`,
+      reason: `observed root ${node.kind} carried duplicate intercept=${intercept} equal to observed_state.value — removed (baseline is carried by observed_state.value alone)`,
     });
 
     log.info({
-      event: "cee.graph_integrity.intercept_populated",
+      event: "cee.graph_integrity.duplicate_root_intercept_removed",
       request_id: requestId,
       node_id: node.id,
       kind: node.kind,
       value: observedValue,
-    }, `[graph-data-integrity] Intercept populated: ${node.id} = ${observedValue}`);
+    }, `[graph-data-integrity] Duplicate root intercept removed: ${node.id} (= ${observedValue})`);
   }
 
   return repairs;
@@ -547,11 +606,11 @@ export function runGraphDataIntegrityChecks(
   }
 
   try {
-    summary.intercept_population_repairs = populateNodeIntercepts(v3Body, requestId);
+    summary.intercept_population_repairs = repairObservedRootIntercepts(v3Body, requestId);
   } catch (err) {
     log.warn(
       { error: err, request_id: requestId },
-      "[graph-data-integrity] Intercept population failed (non-blocking)",
+      "[graph-data-integrity] Observed-root intercept repair failed (non-blocking)",
     );
   }
 
