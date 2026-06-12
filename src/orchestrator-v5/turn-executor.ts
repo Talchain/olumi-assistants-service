@@ -5025,17 +5025,26 @@ export async function runTurnExecutor(
       // graph through GraphV3.parse before returning it — invalid graphs
       // do not reach here.
       //
-      // Fallback chain when mutated_graph is absent:
-      //   1. options.graphState (request ingress, freshest if UI sent it)
-      //   2. graphStateForTurn (post-fallback per-turn graph — already
-      //      tries options.graphState then context.persistedGraph)
-      // We prefer options.graphState directly (matches pre-D1 behaviour:
-      // commit only echoes the ingress when the UI explicitly sent it,
-      // otherwise leaves scenarios.graph untouched). graphStateForTurn
-      // is used only when a mutation handler emits mutated_graph but the
-      // UI didn't send graph_state — in that case the persisted graph
-      // is the right merge base.
-      const graphForCommit =
+      // When mutated_graph is absent the turn did not change the graph,
+      // and the commit MUST NOT write one (p_graph null leaves
+      // scenarios.graph untouched — the documented CommitMetadata.graph
+      // contract). The previous fallback persisted the client-echoed
+      // options.graphState on every spine turn ("pre-D1 behaviour"), but
+      // the wire never carries server-only fields (options[],
+      // goal_node_id on the draft_graph block), so a non-mutating
+      // explain overwrote the rich draft-persisted graph with a lossy
+      // echo. The analysis-freshness hash covers exactly those fields →
+      // graph_hash_diverged with zero edits → false "re-run analysis
+      // first" deflections (V5-FRESH-01 H2). Canvas persistence is
+      // UI-owned (DGAI autosaves scenarios.graph directly; client-side
+      // edits arrive as system_event turns which deliberately persist no
+      // graph), so the echo write was never load-bearing for saves.
+      const graphForCommit = handlerOutcome?.mutated_graph;
+      // Proposal-capture hash keeps its pre-fix input — the graph this
+      // turn reasoned over (mutated graph when present, else the request
+      // echo) — so pending-action preconditions.graph_hash semantics are
+      // unchanged by the persistence fix above.
+      const graphForProposalHash =
         handlerOutcome?.mutated_graph !== undefined
           ? handlerOutcome.mutated_graph
           : options.graphState;
@@ -5066,7 +5075,7 @@ export async function runTurnExecutor(
         try {
           return (
             computeAnalysisAffectingGraphHash(
-              (graphForCommit as GraphStateIngress | null | undefined) ?? undefined,
+              (graphForProposalHash as GraphStateIngress | null | undefined) ?? undefined,
             ) ?? null
           );
         } catch {
