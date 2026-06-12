@@ -1192,6 +1192,87 @@ describe('tryPostAnalysisAdviceGate — validation-priority beat (what to valida
       expect(text).not.toMatch(/meaningful rather than marginal/i);
     }
   });
+
+  // -----------------------------------------------------------------------
+  // Post-#261 DGAI body path (V5-VALIDATE-LAND-01 rebase refresh). #261
+  // (`applyTopLevelDriversOverride`) changed this composer's live input
+  // distribution: body-`analysis_state` turns — the shape the real UI sends —
+  // now arrive with `top_drivers` POPULATED from the envelope's top-level
+  // `factor_sensitivity[]` (signed values), where pre-#261 the same turns
+  // arrived with `top_drivers: []` and fell to the recap stub. The fixture
+  // mirrors the EXP-01 live smoke projection (scenario 686dfb35, turn
+  // e8734147): leader 64%, 48pp lead, signed drivers, fragile link
+  // 'Local Senior Hire Programme' → 'Q3 Roadmap Delivery Capacity'.
+  // -----------------------------------------------------------------------
+  describe('post-#261 DGAI body path (top_drivers populated from top-level factor_sensitivity)', () => {
+    const POST_261_BODY_PATH: AdviceGateAnalysis = {
+      status: 'success',
+      leading_option: { label: 'Hire Two Senior Engineers Locally', probability: 0.64 },
+      runner_up: { label: 'Introduce Tiered Pricing to Fund Gradual Hiring', probability: 0.16 },
+      margin_pp: 48,
+      robustness_band: 'moderate',
+      top_drivers: [
+        { factor_label: 'Local Senior Hire Programme', sensitivity_value: 0.52 },
+        { factor_label: 'Hiring and Staffing Cost', sensitivity_value: -0.21 },
+      ],
+      fragile_edges: [
+        { from_label: 'Local Senior Hire Programme', to_label: 'Q3 Roadmap Delivery Capacity' },
+      ],
+    };
+
+    it('validation beat fires on the populated-drivers shape, sits between fragility and next action, and stays grounded/leak-clean', () => {
+      const out = tryPostAnalysisAdviceGate({
+        message: 'Explain the results.',
+        analysis: POST_261_BODY_PATH,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        const text = out.assistant_text;
+        // #261 grounded-advice behaviour unregressed: real leader + the named
+        // fragile link, no recap-stub deflection copy.
+        expect(text).toContain("'Hire Two Senior Engineers Locally'");
+        expect(text).toContain(
+          "The most useful thing to check is the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity'",
+        );
+        expect(text).not.toMatch(/open the analysis view/i);
+        // Beat 5 — fragile link present, so the LINK sentence wins (drivers
+        // populated must NOT divert the beat to the driver fallback).
+        expect(text).toContain(VALIDATE_LINK);
+        expect(text).not.toContain('firmer support for');
+        // Ordering: fragility (4) → validation (5) → action block (6).
+        const iFragile = text.indexOf('The most useful thing to check');
+        const iValidate = text.indexOf('The evidence that would most improve confidence');
+        const iAction = text.indexOf('What to check next');
+        expect(iFragile).toBeGreaterThanOrEqual(0);
+        expect(iValidate).toBeGreaterThan(iFragile);
+        expect(iAction).toBeGreaterThan(iValidate);
+        // No new numerical claims from the beat (sensitivity values stay
+        // internal) and no id/decimal/internal leaks.
+        expect(text).not.toMatch(/0\.52|0\.21|sensitivity/i);
+        expect(text).not.toMatch(/(opt_|fac_|goal_|node_|edge_)/i);
+        expect(text).not.toMatch(/[—→]/);
+      }
+    });
+
+    it('pre-#261 body-path shape (drivers AND fragile edges empty) → gate declines outright; no validation sentence, no generic filler', () => {
+      // With neither signal the explain class fails its data requirements and
+      // the gate falls through (`data_unavailable_for_class`) — the strongest
+      // form of "no generic filler": the composer never runs, so the beat
+      // cannot fabricate. (Pre-#261 this was the live body-path shape; #261's
+      // driver override is what routes those turns into the populated case
+      // above.)
+      const out = tryPostAnalysisAdviceGate({
+        message: 'Explain the results.',
+        analysis: { ...POST_261_BODY_PATH, top_drivers: [], fragile_edges: [] },
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(false);
+      if (!out.matched) {
+        expect(out.reason).toBe('data_unavailable_for_class');
+      }
+    });
+  });
 });
 
 // =========================================================================
