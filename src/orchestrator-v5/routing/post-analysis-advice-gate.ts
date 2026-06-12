@@ -1635,7 +1635,7 @@ function composeExplainResults(
     : null;
   const sentences: string[] = [];
 
-  // 1. Standing — shared near-tie honesty (quoted), else a quoted clear lead.
+  // 1/2. Standing — leader and confidence (shared near-tie honesty, quoted; else a quoted clear lead).
   const closeness = interpretationCloseness(leadingLabel, runnerLabel, tieReason);
   if (closeness !== null) {
     sentences.push(closeness);
@@ -1654,7 +1654,7 @@ function composeExplainResults(
     }
   }
 
-  // 2. Drivers (quoted). Near-tie softens "driven by" to "could shift".
+  // 3. Why it leads — drivers (quoted). Near-tie softens "driven by" to "could shift".
   if (driverA && driverB) {
     sentences.push(
       nearTie
@@ -1669,23 +1669,25 @@ function composeExplainResults(
     );
   }
 
-  // 3. Name the specific fragile assumption when evidence exists (shared with
-  //    what_would_flip / meaning). No sign/causal claim — direction-honest.
+  // 4. What is fragile — name the specific fragile assumption when evidence
+  //    exists (shared with what_would_flip / meaning). No sign/causal claim —
+  //    direction-honest.
   if (topEdge) {
     sentences.push(describeFragileAssumption(topEdge));
   }
 
-  // 3b. What to validate: the single piece of evidence that would most improve
-  //     confidence. Points at the named fragile link when one exists, else the
-  //     most-weighted factor; omitted when neither is renderable (mirrors the
-  //     next-step fallback ladder, so no new required input is introduced).
+  // 5. What to validate: the single piece of evidence that would most improve
+  //    confidence. Points at the named fragile link when one exists, else the
+  //    most-weighted factor; omitted when neither is renderable (mirrors the
+  //    next-step fallback ladder, so no new required input is introduced).
   const validation = describeValidationPriority(topEdge != null, topDriverLabel);
   if (validation !== null) {
     sentences.push(validation);
   }
 
-  // 4. Robustness caveat: prefer the raw fragile signal over the projected
-  //    band; suppress confident stability copy on near-tie / raw-fragile.
+  // Robustness caveat — a conditional aside between beats 5 and 6 (not one of
+  //    the numbered rhetorical beats): prefer the raw fragile signal over the
+  //    projected band; suppress confident stability copy on near-tie / raw-fragile.
   if (nearTie || rawFragile) {
     sentences.push(
       'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
@@ -1708,8 +1710,8 @@ function composeExplainResults(
     }
   }
 
-  // 5. A concrete re-run Propose on EVERY path — previously the near-tie /
-  //    fragile path emitted no next step at all. Point the next step at whatever
+  // 6. Next action — a concrete re-run Propose on EVERY path; previously the
+  //    near-tie / fragile path emitted no next step at all. Point the next step at whatever
   //    the body emphasised: when a fragile link was NAMED above
   //    (describeFragileAssumption fires on any path with a renderable edge),
   //    strengthen THAT link so priorities don't read split ("check the link …
