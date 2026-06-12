@@ -2317,6 +2317,13 @@ interface ChatWithAnthropicArgs {
    * Incompatible with extended thinking — automatically skipped when thinking is enabled.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * Optional pre-split system blocks for prompt caching, mirroring the
+   * chatWithTools parameter of the same name. When provided, sent to the SDK
+   * verbatim (with cache_control intact) instead of the plain `system` string.
+   * Callers must keep `system` equal to the concatenation of block texts.
+   */
+  system_cache_blocks?: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>;
 }
 
 /**
@@ -2389,11 +2396,20 @@ export async function chatWithAnthropic(
       body: Anthropic.MessageCreateParamsNonStreaming;
       options: { signal: AbortSignal; headers: Record<string, string> };
     } {
+      // Use pre-split system cache blocks when provided (same contract as
+      // chatWithTools), otherwise the plain system string.
+      const systemParam: Anthropic.MessageCreateParams['system'] = args.system_cache_blocks
+        ? args.system_cache_blocks.map((block) => ({
+            type: 'text' as const,
+            text: block.text,
+            ...(block.cache_control ? { cache_control: block.cache_control } : {}),
+          }))
+        : args.system;
       const body: Anthropic.MessageCreateParamsNonStreaming = {
         model,
         max_tokens: maxTokens,
         temperature,
-        system: args.system,
+        system: systemParam,
         messages: [{ role: "user", content: args.userMessage }],
         ...(withStructuredOutputs && normalisedOutputSchema
           ? {
@@ -3248,6 +3264,7 @@ export class AnthropicAdapter implements LLMAdapter {
       timeoutMs: opts.timeoutMs,
       thinking: args.thinking,
       outputSchema: args.outputSchema,
+      system_cache_blocks: args.system_cache_blocks,
     });
   }
 

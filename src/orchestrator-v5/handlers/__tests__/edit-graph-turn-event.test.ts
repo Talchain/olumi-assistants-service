@@ -134,6 +134,8 @@ describe('deriveEditTurnFieldsFromResult', () => {
         model: 'claude-test',
         input_tokens_est: 222,
         output_tokens: 44,
+        cache_read_input_tokens: 5500,
+        cache_creation_input_tokens: 6100,
         stop_reason: 'end_turn',
         repair_attempts: 2,
         plot_outcome: 'pass',
@@ -143,6 +145,8 @@ describe('deriveEditTurnFieldsFromResult', () => {
     expect(f.model).toBe('claude-test');
     expect(f.input_tokens_est).toBe(222);
     expect(f.output_tokens).toBe(44);
+    expect(f.cache_read_input_tokens).toBe(5500);
+    expect(f.cache_creation_input_tokens).toBe(6100);
     expect(f.stop_reason).toBe('end_turn');
     expect(f.repair_attempts).toBe(2);
     expect(f.plot_outcome).toBe('pass');
@@ -168,6 +172,8 @@ describe('finaliseEditTurnEvent (defaults)', () => {
     expect(e.model).toBeNull();
     expect(e.input_tokens_est).toBe(0);
     expect(e.output_tokens).toBe(0);
+    expect(e.cache_read_input_tokens).toBe(0);
+    expect(e.cache_creation_input_tokens).toBe(0);
     expect(e.repair_attempts).toBe(0);
     expect(e.prompt_fallback_used).toBe(false);
     expect(e.latency_ms).toBe(0);

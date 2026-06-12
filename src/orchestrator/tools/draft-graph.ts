@@ -374,6 +374,28 @@ export async function handleDraftGraph(
   // Extract tool-level LLM telemetry from pipeline trace for diagnostic trace capture
   const toolLLMTelemetry = extractToolLLMTelemetry(body);
 
+  // Routine prompt-cache/usage event for the largest prompt in the system.
+  // The same numbers already flow into the diagnostic-trace collector, but
+  // that surface is debug-bundle-only — without this event draft_graph has no
+  // measurable cache hit rate in staging logs (token counts only, no content).
+  if (toolLLMTelemetry) {
+    log.info(
+      {
+        event: 'cee.draft_graph.llm_usage',
+        provider: toolLLMTelemetry.provider,
+        model: toolLLMTelemetry.model,
+        input_tokens: toolLLMTelemetry.input_tokens,
+        output_tokens: toolLLMTelemetry.output_tokens,
+        cache_read_input_tokens: toolLLMTelemetry.cache_read_input_tokens ?? null,
+        cache_creation_input_tokens: toolLLMTelemetry.cache_creation_input_tokens ?? null,
+        llm_latency_ms: toolLLMTelemetry.latency_ms,
+        prompt_version: toolLLMTelemetry.prompt_version ?? null,
+        prompt_hash: toolLLMTelemetry.prompt_hash ?? null,
+      },
+      'draft_graph LLM usage',
+    );
+  }
+
   log.info(
     {
       elapsed_ms: latencyMs,

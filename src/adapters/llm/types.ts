@@ -320,6 +320,16 @@ export interface ChatArgs {
    * Non-Anthropic adapters ignore this field.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * Optional pre-split system blocks for Anthropic prompt caching, mirroring
+   * ChatWithToolsArgs.system_cache_blocks. The first block should be the
+   * stable prefix (e.g. the PMS prompt), marked with cache_control; variable
+   * per-request content goes in subsequent unmarked blocks. Callers MUST keep
+   * `system` equal to the concatenation of all block texts — non-Anthropic
+   * adapters ignore this field and send `system` as-is (OpenAI's automatic
+   * prefix caching needs no markers).
+   */
+  system_cache_blocks?: SystemCacheBlock[];
 }
 
 /**

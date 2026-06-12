@@ -113,6 +113,20 @@ const LEGACY_MAX_TOKENS_MODELS = new Set([
 ]);
 
 /**
+ * OpenAI automatic prompt caching: cached prefix tokens are reported in
+ * usage.prompt_tokens_details.cached_tokens (a subset of prompt_tokens).
+ * Surfaced into UsageMetrics.cache_read_input_tokens so OpenAI cache hits
+ * are visible in telemetry alongside Anthropic's. Returns undefined when the
+ * API omits the field (older models/endpoints) — 0 means "reported, no hit".
+ */
+function cachedTokensFromUsage(
+  usage: { prompt_tokens_details?: { cached_tokens?: number | null } | null } | null | undefined,
+): number | undefined {
+  const cached = usage?.prompt_tokens_details?.cached_tokens;
+  return typeof cached === 'number' ? cached : undefined;
+}
+
+/**
  * Check if a model requires max_completion_tokens instead of max_tokens.
  *
  * OpenAI's newer models (gpt-4.1*, gpt-5*, o1*, o3*, o4*) reject the max_tokens
@@ -851,6 +865,7 @@ ${brief}
         usage: {
           input_tokens: response.usage?.prompt_tokens || 0,
           output_tokens: response.usage?.completion_tokens || 0,
+          cache_read_input_tokens: cachedTokensFromUsage(response.usage),
         },
       };
     } catch (error) {
@@ -981,6 +996,7 @@ ${brief}
         usage: {
           input_tokens: response.usage?.prompt_tokens || 0,
           output_tokens: response.usage?.completion_tokens || 0,
+          cache_read_input_tokens: cachedTokensFromUsage(response.usage),
         },
       };
     } catch (error) {
@@ -1233,6 +1249,7 @@ ${brief}
         usage: {
           input_tokens: response.usage?.prompt_tokens || 0,
           output_tokens: response.usage?.completion_tokens || 0,
+          cache_read_input_tokens: cachedTokensFromUsage(response.usage),
         },
       };
     } catch (error) {
@@ -1420,6 +1437,7 @@ ${brief}
         usage: {
           input_tokens: inputTokens,
           output_tokens: outputTokens,
+          cache_read_input_tokens: cachedTokensFromUsage(response.usage),
         },
       };
 
@@ -1575,6 +1593,7 @@ ${brief}
           latency_ms: latencyMs,
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
+          cache_read_input_tokens: cachedTokensFromUsage(response.usage),
           content_chars: content.length,
         },
         "OpenAI chat completion successful"
@@ -1589,6 +1608,7 @@ ${brief}
         usage: {
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
+          cache_read_input_tokens: cachedTokensFromUsage(response.usage),
         },
       };
     } catch (error: unknown) {
@@ -1797,6 +1817,7 @@ ${brief}
           latency_ms: latencyMs,
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
+          cache_read_input_tokens: cachedTokensFromUsage(response.usage),
           content_blocks: content.length,
           tool_use_blocks: content.filter(b => b.type === 'tool_use').length,
           stop_reason,
@@ -1812,6 +1833,7 @@ ${brief}
         usage: {
           input_tokens: response.usage?.prompt_tokens ?? 0,
           output_tokens: response.usage?.completion_tokens ?? 0,
+          cache_read_input_tokens: cachedTokensFromUsage(response.usage),
         },
       };
     } catch (error: unknown) {

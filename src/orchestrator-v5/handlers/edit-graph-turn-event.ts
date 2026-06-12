@@ -46,6 +46,10 @@ export type EditTurnEventFields = {
   input_tokens_est: number;
   /** Output tokens summed across all repair attempts (= total turn cost). */
   output_tokens: number;
+  /** Prompt-cache reads summed across attempts (0 = no hits or markers not sent). */
+  cache_read_input_tokens: number;
+  /** Prompt-cache writes summed across attempts (0 = no writes or markers not sent). */
+  cache_creation_input_tokens: number;
   /** Final decisive attempt's provider stop reason; 'unknown' when absent. */
   stop_reason: string;
   graph_nodes_before: number;
@@ -139,6 +143,8 @@ export function deriveEditTurnFieldsFromResult(
     model: d?.model ?? null,
     input_tokens_est: d?.input_tokens_est ?? 0,
     output_tokens: d?.output_tokens ?? 0,
+    cache_read_input_tokens: d?.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: d?.cache_creation_input_tokens ?? 0,
     stop_reason: d?.stop_reason ?? 'unknown',
     graph_nodes_after: nodesAfter,
     graph_edges_after: edgesAfter,
@@ -170,6 +176,8 @@ export function finaliseEditTurnEvent(
     model: ev.model ?? null,
     input_tokens_est: ev.input_tokens_est ?? 0,
     output_tokens: ev.output_tokens ?? 0,
+    cache_read_input_tokens: ev.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: ev.cache_creation_input_tokens ?? 0,
     stop_reason: ev.stop_reason ?? 'unknown',
     graph_nodes_before: ev.graph_nodes_before,
     graph_nodes_after: ev.graph_nodes_after ?? ev.graph_nodes_before,

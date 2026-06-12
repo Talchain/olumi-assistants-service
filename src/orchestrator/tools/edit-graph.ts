@@ -32,7 +32,7 @@ import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
 // ANTHROPIC_EDIT_GRAPH_SCHEMA import removed — structured outputs disabled for edit_graph
 // (operations[].value carries arbitrary patch payloads incompatible with closed schemas)
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
-import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
+import type { LLMAdapter, CallOpts, SystemCacheBlock } from "../../adapters/llm/types.js";
 import { GraphV3 } from "../../schemas/cee-v3.js";
 import type {
   TypedConversationBlock,
@@ -241,6 +241,9 @@ export interface EditGraphTraceDiagnostics {
   model?: string | null;
   input_tokens_est?: number;
   output_tokens?: number;
+  /** Prompt-cache tokens summed across attempts (0 when no markers sent / no hits). */
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
   stop_reason?: string | null;
   repair_attempts?: number;
   plot_outcome?: 'pass' | 'rejected' | 'unavailable' | 'skipped';
@@ -482,6 +485,48 @@ function resolveInstructionMode(intentCategory: EditIntentCategory): EditGraphTr
   if (intentCategory === 'parameter_update') return 'narrow_parameter_update';
   if (intentCategory === 'option_configuration') return 'narrow_option_configuration';
   return 'structural_default';
+}
+
+/**
+ * Split the edit_graph system prompt into Anthropic prompt-cache blocks:
+ * block 1 = the stable PMS prompt (cache_control: ephemeral), block 2 = the
+ * variable per-request remainder (intent instruction with resolved target
+ * labels + serialised graph context — NOT cacheable: caching it would write a
+ * unique cache entry per turn and never read).
+ *
+ * Contract: `system` must equal the concatenation of block texts byte-for-byte
+ * (non-Anthropic adapters ignore the blocks and send `system`; OpenAI's
+ * automatic prefix caching needs no markers). Returns undefined blocks when
+ * caching is disabled by config or there is no variable remainder to split.
+ */
+export function buildEditSystemCacheBlocks(
+  stablePrompt: string,
+  variableRemainder: string,
+  cachingEnabled: boolean = config.promptCache.anthropicEnabled,
+): SystemCacheBlock[] | undefined {
+  if (!cachingEnabled) return undefined;
+  if (stablePrompt.length === 0 || variableRemainder.length === 0) return undefined;
+  return [
+    { type: 'text', text: stablePrompt, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: variableRemainder },
+  ];
+}
+
+/**
+ * Narrow detector for the only error that should disable cache blocks for the
+ * remaining attempts: Anthropic 400 BadRequest whose body mentions
+ * cache_control. Mirrors `isCacheControlSchemaRejection` in
+ * orchestrator-v5/routing/route-with-tool-use.ts (kept local — the V4 tool
+ * layer must not import from V5 routing). Timeouts, 429s, 5xx and unrelated
+ * 400s must propagate unchanged.
+ */
+function isCacheControlRejection(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const anyErr = err as { status?: unknown; message?: unknown };
+  const status = typeof anyErr.status === 'number' ? anyErr.status : Number(anyErr.status ?? NaN);
+  if (status !== 400) return false;
+  const message = typeof anyErr.message === 'string' ? anyErr.message : String(anyErr.message ?? '');
+  return message.includes('cache_control');
 }
 
 // Seed aliases only. If a graph uses different labels, resolution safely falls
@@ -1573,6 +1618,8 @@ export async function handleEditGraph(
   let lastModel: string | null = null;
   let inputTokensSum = 0;
   let outputTokensSum = 0;
+  let cacheReadTokensSum = 0;
+  let cacheCreationTokensSum = 0;
   let lastStopReason: string | null = null;
   let repairAttempts = 0;
   let plotOutcome: EditGraphTraceDiagnostics['plot_outcome'] = 'skipped';
@@ -1607,6 +1654,8 @@ export async function handleEditGraph(
     model: lastModel,
     input_tokens_est: inputTokensSum,
     output_tokens: outputTokensSum,
+    cache_read_input_tokens: cacheReadTokensSum,
+    cache_creation_input_tokens: cacheCreationTokensSum,
     stop_reason: lastStopReason,
     repair_attempts: repairAttempts,
     plot_outcome: plotOutcome,
@@ -1729,8 +1778,12 @@ export async function handleEditGraph(
   // Build context section for LLM (edit compact graph + framing + analysis + selected elements)
   const contextSection = serialiseEditContextForLLM(context);
 
-  // Combine system prompt with serialised context
-  const fullSystemPrompt = `${systemPrompt}\n\n${intentInstruction ? `${intentInstruction}\n\n` : ''}${contextSection}`;
+  // Combine system prompt with serialised context. Kept as stable prefix +
+  // variable remainder so the Anthropic prompt cache can key on the PMS
+  // prompt alone — the remainder (intent instruction with resolved target
+  // labels + graph context) changes per request and must stay uncached.
+  const editVariableRemainder = `\n\n${intentInstruction ? `${intentInstruction}\n\n` : ''}${contextSection}`;
+  const fullSystemPrompt = `${systemPrompt}${editVariableRemainder}`;
   initialEffectiveInstruction = fullSystemPrompt;
 
   const callOpts: CallOpts = {
@@ -1755,6 +1808,9 @@ export async function handleEditGraph(
   let lastPlotErrors: string | undefined;
   let lastRawOps: unknown[] | undefined;
   let consecutiveNarrowStructuralFailures = 0;
+  // Set once if the API rejects cache_control (narrow 400) — remaining
+  // attempts resend identical bytes as a plain system string.
+  let cacheBlocksDisabled = false;
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     const isRepair = attempt > 1;
@@ -1789,9 +1845,16 @@ export async function handleEditGraph(
     // LLM call
     let chatResult;
     try {
-      const effectiveInstruction = isRepair
-        ? (await getSystemPrompt('repair_edit_graph')) + '\n\n' + contextSection
-        : fullSystemPrompt;
+      // Stable/variable split per attempt: the PMS prompt (edit prompt on the
+      // first attempt, repair prompt on retries) is the cacheable prefix; the
+      // per-request remainder is never cached. `system` stays the exact
+      // concatenation so non-Anthropic adapters see identical bytes.
+      const stablePrompt = isRepair ? await getSystemPrompt('repair_edit_graph') : systemPrompt;
+      const variableRemainder = isRepair ? `\n\n${contextSection}` : editVariableRemainder;
+      const effectiveInstruction = stablePrompt + variableRemainder;
+      const systemCacheBlocks = cacheBlocksDisabled
+        ? undefined
+        : buildEditSystemCacheBlocks(stablePrompt, variableRemainder);
       const editGraphThinking = config.cee.thinking?.editGraphEnabled
         ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.editGraphBudget }
         : undefined;
@@ -1806,12 +1869,23 @@ export async function handleEditGraph(
           system: effectiveInstruction,
           userMessage,
           maxTokens: getMaxTokensFromConfig('edit_graph') ?? 4000,
+          ...(systemCacheBlocks ? { system_cache_blocks: systemCacheBlocks } : {}),
           ...(editGraphThinking ? { thinking: editGraphThinking } : {}),
           ...(editGraphOutputSchema ? { outputSchema: editGraphOutputSchema } : {}),
         },
         callOpts,
       );
     } catch (error) {
+      // Cache-marker rejection (Anthropic 400 mentioning cache_control) must
+      // not burn the edit: disable blocks for the remaining attempts and let
+      // the normal retry flow resend the same bytes as a plain system string.
+      if (!cacheBlocksDisabled && isCacheControlRejection(error)) {
+        cacheBlocksDisabled = true;
+        log.warn(
+          { request_id: requestId, attempt },
+          'edit_graph prompt-cache blocks rejected by API; retrying without cache_control',
+        );
+      }
       // On last attempt, propagate LLM error
       if (attempt === totalAttempts) {
         const err: OrchestratorError = {
@@ -1841,6 +1915,8 @@ export async function handleEditGraph(
     lastModel = chatResult.model;
     inputTokensSum += chatResult.usage?.input_tokens ?? 0;
     outputTokensSum += chatResult.usage?.output_tokens ?? 0;
+    cacheReadTokensSum += chatResult.usage?.cache_read_input_tokens ?? 0;
+    cacheCreationTokensSum += chatResult.usage?.cache_creation_input_tokens ?? 0;
     lastStopReason = chatResult.stopReason ?? null;
 
     // Bidirected edges: the edit_graph prompt (v6) constrains output to directional
