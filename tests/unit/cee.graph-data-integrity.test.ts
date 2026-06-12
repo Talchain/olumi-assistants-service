@@ -677,6 +677,63 @@ describe("Task 3: Observed-root intercept doctrine", () => {
     expect(result.intercept_population_repairs[0].node_id).toBe("fac_campaign_quality");
   });
 
+  it("treats constraint-sourced edges as CAUSAL (PLoT runtime-filter pin): duplicate-valued intercept preserved", () => {
+    // Cross-repo pin: PLoT staging NON_CAUSAL_NODE_KINDS = ['option', 'decision']
+    // (plot-lite-service src/types/engine-v3.ts, documented in
+    // src/contracts/plot-to-isl.contract.ts). Constraint nodes are NOT
+    // filtered at PLoT runtime — option-filter.ts prose mentioning constraint
+    // is a known discrepancy the contract file calls out. A constraint→factor
+    // edge therefore survives to ISL, the factor is a DERIVED node there, and
+    // its intercept is a legitimate structural offset that must be preserved
+    // even when it equals observed_state.value.
+    const factor = makeNode({
+      id: "fac_capped",
+      kind: "factor",
+      observed_state: { value: 0.3 },
+      intercept: 0.3,
+    });
+    const constraint = { id: "con_budget", kind: "constraint", label: "Budget cap" };
+    const edge = makeEdge({ from: "con_budget", to: "fac_capped", exists_probability: 1.0, effect_direction: "negative" });
+    const v3 = makeV3Body({ nodes: [factor, constraint], edges: [edge] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((factor as any).intercept).toBe(0.3);
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("redacts the duplicate-removal log: IDs only, no numeric magnitudes", () => {
+    const logInfoSpy = vi.spyOn(log, "info");
+    try {
+      const node = makeNode({
+        id: "fac_redact",
+        kind: "factor",
+        observed_state: { value: 0.25 },
+        intercept: 0.25,
+      });
+      const v3 = makeV3Body({ nodes: [node] });
+      const result = runGraphDataIntegrityChecks(v3, "req-redact-1");
+
+      // The contracted before/after values live in the in-payload repair record…
+      expect(result.intercept_population_repairs[0]).toMatchObject({ before: 0.25, after: undefined });
+
+      // …while the emitted log carries IDs only.
+      const removed = logInfoSpy.mock.calls.filter(
+        (call) => (call[0] as any)?.event === "cee.graph_integrity.duplicate_root_intercept_removed",
+      );
+      expect(removed).toHaveLength(1);
+      expect(removed[0][0]).toMatchObject({
+        event: "cee.graph_integrity.duplicate_root_intercept_removed",
+        request_id: "req-redact-1",
+        node_id: "fac_redact",
+      });
+      expect(removed[0][0]).not.toHaveProperty("value");
+      expect(removed[0][0]).not.toHaveProperty("kind");
+      expect(String(removed[0][1])).not.toContain("0.25");
+    } finally {
+      logInfoSpy.mockRestore();
+    }
+  });
+
   it("preserves duplicate-valued intercept on a DERIVED node (causal incoming edge)", () => {
     // A non-root node's intercept is a legitimate structural offset even when
     // it coincides with observed_state.value — ISL does not take the root

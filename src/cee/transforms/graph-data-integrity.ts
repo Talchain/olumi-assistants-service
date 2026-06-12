@@ -443,12 +443,22 @@ const INTERCEPT_ELIGIBLE_KINDS = new Set(['factor', 'outcome', 'risk', 'goal']);
 
 /**
  * Source kinds whose outgoing edges do NOT make the target a derived node.
- * Mirrors PLoT's option filter (plot-lite-service src/normalisation/option-filter.ts),
- * which removes these nodes and ALL incident edges before the graph reaches ISL.
- * A factor whose only incoming edges come from these kinds is therefore a ROOT
- * in the inference graph ISL evaluates, even though it has incoming edges here.
+ *
+ * PINNED to PLoT's runtime filter contract: plot-lite-service
+ * `NON_CAUSAL_NODE_KINDS = ['option', 'decision']` (src/types/engine-v3.ts,
+ * consumed by src/normalisation/option-filter.ts), documented in
+ * src/contracts/plot-to-isl.contract.ts. PLoT removes these nodes and ALL
+ * incident edges before the graph reaches ISL, so a node whose only incoming
+ * edges come from these kinds is a ROOT in the inference graph ISL evaluates.
+ *
+ * Deliberately NOT including 'constraint': option-filter.ts prose mentions
+ * constraint, but the runtime constant is ['option', 'decision'] (the
+ * contract file calls out this exact discrepancy). A constraint→X edge
+ * survives to ISL, so X stays a derived node there and its intercept is a
+ * legitimate structural offset. If PLoT ever adds constraint to its filter,
+ * this set must change in the same release.
  */
-const NON_CAUSAL_SOURCE_KINDS = new Set(['option', 'decision', 'constraint']);
+const NON_CAUSAL_SOURCE_KINDS = new Set(['option', 'decision']);
 
 /** Tolerance for detecting `intercept === observed_state.value` duplicates. */
 const INTERCEPT_DUPLICATE_EPSILON = 1e-9;
@@ -479,10 +489,11 @@ const INTERCEPT_DUPLICATE_EPSILON = 1e-9;
  *   legitimate structural offsets.
  *
  * Rootness is judged on the inference graph, not the raw V3 graph: incoming
- * directed edges from option/decision/constraint sources do not count,
- * because PLoT removes those nodes and edges before ISL evaluation
- * (all 170 affected nodes in the 0.11 staging audit were "roots" only in
- * this post-filter sense). Bidirected edges are excluded as in gap-detection.ts.
+ * directed edges from option/decision sources do not count, because PLoT
+ * removes those nodes and edges before ISL evaluation (see
+ * NON_CAUSAL_SOURCE_KINDS pin; all 170 affected nodes in the 0.11 staging
+ * audit were "roots" only in this post-filter sense). Bidirected edges are
+ * excluded as in gap-detection.ts.
  *
  * Mutates v3Body.nodes in place.
  */
@@ -552,13 +563,13 @@ function repairObservedRootIntercepts(v3Body: any, requestId?: string): Intercep
       reason: `observed root ${node.kind} carried duplicate intercept=${intercept} equal to observed_state.value — removed (baseline is carried by observed_state.value alone)`,
     });
 
+    // Redacted log: IDs only, no numeric magnitudes. The contracted
+    // before/after values live in the in-payload repair record above.
     log.info({
       event: "cee.graph_integrity.duplicate_root_intercept_removed",
       request_id: requestId,
       node_id: node.id,
-      kind: node.kind,
-      value: observedValue,
-    }, `[graph-data-integrity] Duplicate root intercept removed: ${node.id} (= ${observedValue})`);
+    }, `[graph-data-integrity] Duplicate root intercept removed: ${node.id}`);
   }
 
   return repairs;
