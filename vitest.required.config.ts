@@ -5,16 +5,24 @@ import { defineConfig } from "vitest/config";
  * `pnpm test:required`).
  *
  * It runs the deterministic, in-process test suite that is currently GREEN, so
- * the required merge gate is trustworthy. Three groups are excluded here — all
- * still run, and fail visibly, in NON-required advisory jobs. Nothing is
- * deleted, weakened, or silently skipped.
+ * the required merge gate is trustworthy. Three groups are excluded here.
+ * Nothing is deleted, weakened, or silently skipped. Groups 1 and 3 are
+ * product tests that still run, and fail visibly, in NON-required advisory
+ * jobs. Group 2 is a different case — a package-boundary exclusion, not a
+ * product test (see its note below).
  *
  *   1. `tests/integration/**` — service-like (exercise LLM/Supabase/Redis paths;
  *      they showed `LLMTimeoutError` / `422` in CI run 26750031968). They run in
  *      `Integration Tests (advisory)` and `Full Test Suite (advisory)`.
  *
  *   2. STANDALONE_TOOL_EXCLUSIONS below — `tools/graph-evaluator/**`, a
- *      self-contained tool package with its own deps and runner (see note there).
+ *      self-contained tool package with its own deps and runner. Excluded from
+ *      the product gate as a package boundary, NOT because it is red. Its proper
+ *      home is the tool's own runner (`cd tools/graph-evaluator && npm test`);
+ *      it has no first-class CI job until the Phase 2 wiring lands. (Until then
+ *      the advisory Full Test Suite, which uses the default config, still
+ *      incidentally collects it and reports a tool-local-dep collection error —
+ *      noise, not a product signal.)
  *
  *   3. REQUIRED_GATE_RED_EXCLUSIONS below — the in-process test files that are
  *      currently red (captured from CI run 26750031968). They run in
