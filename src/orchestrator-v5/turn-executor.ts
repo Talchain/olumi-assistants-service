@@ -52,7 +52,7 @@ import {
   composeToolCallResponse,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
-import { buildTurnContext } from './build-turn-context.js';
+import { buildTurnContext, loadPersistedGraphStrict } from './build-turn-context.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -86,6 +86,7 @@ import {
   type FactorValueOperator,
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
 import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
 import {
@@ -5039,7 +5040,50 @@ export async function runTurnExecutor(
       // UI-owned (DGAI autosaves scenarios.graph directly; client-side
       // edits arrive as system_event turns which deliberately persist no
       // graph), so the echo write was never load-bearing for saves.
-      const graphForCommit = handlerOutcome?.mutated_graph;
+      //
+      // V5-D1-SHAPE-01 — when a D1 handler DID emit mutated_graph, it
+      // must not be committed wholesale: the handler mutated the
+      // ingress echo (`applyAndValidateMutation` merges structural
+      // fields back onto the INGRESS top-level shape), and the DGAI
+      // echo never carries `goal_node_id` / `options[]`, so the raw
+      // mutated_graph would replace the rich draft-persisted
+      // `scenarios.graph` with a stripped shape (scorecard J5c:
+      // options[] → 0, next run_analysis fails on the missing
+      // goal_node_id). Mirror of the edit_graph fix (PR #265): strict-
+      // read the persisted graph and merge the mutation onto that
+      // server-authoritative base. The strict read FAILS CLOSED — a
+      // degraded/unavailable read throws here, inside the STEP 7 try,
+      // and maps to STATE_COMMIT_FAILED below: the handler facts
+      // assert the mutation was applied, so committing them without
+      // the graph (or with a lossy graph) would corrupt canonical
+      // state. `context.session_id` IS the scenario id
+      // (build-turn-context sets `session_id: payload.scenario_id`)
+      // and is the same value `commitTurn` receives as `scenario_id`,
+      // so the read and the commit target the same scenarios row.
+      //
+      // Uniform at this chokepoint by design: the ONLY mutated_graph
+      // emitters are the three D1 handlers (set_factor_value,
+      // add_constraint, adjust_edge_strength — enumeration pinned by
+      // d1-mutated-graph-emitters invariant test); the flip-proposal
+      // apply path resolves through the same set_factor_value handler.
+      const graphForCommit = await (async (): Promise<unknown> => {
+        const mutated = handlerOutcome?.mutated_graph;
+        if (mutated === undefined || mutated === null) return mutated;
+        let persistedBase: unknown;
+        try {
+          persistedBase = await loadPersistedGraphStrict(context.session_id);
+        } catch (err) {
+          throw new Error(
+            `V5 D1 — refusing to persist mutated graph for scenario ${context.session_id}: persisted merge base unavailable (${err instanceof Error ? err.message : String(err)})`,
+          );
+        }
+        return mergeMutatedGraphForPersistence({
+          mutatedGraph: mutated as Record<string, unknown>,
+          persistedBase,
+          requestId,
+          scenarioId: context.session_id,
+        });
+      })();
       // Proposal-capture hash keeps its pre-fix input — the graph this
       // turn reasoned over (mutated graph when present, else the request
       // echo) — so pending-action preconditions.graph_hash semantics are

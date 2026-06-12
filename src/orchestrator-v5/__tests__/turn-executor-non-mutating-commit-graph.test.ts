@@ -441,22 +441,38 @@ describe('mutation safety — D1 set_factor_value still persists and staleness s
     );
 
     // Mutating turns still persist: the commit carries the handler's
-    // mutated_graph (graph defined — the fix only stops the echo fallback).
+    // graph (graph defined — the fix only stops the echo fallback).
+    //
+    // V5-D1-SHAPE-01 contract update: the committed graph is the
+    // mutation MERGED onto the persisted base (STEP 7
+    // mergeMutatedGraphForPersistence), so it retains goal_node_id +
+    // options[] from the rich persisted graph instead of the stripped
+    // echo shape this test originally pinned (POST_EDIT_ECHO_HASH —
+    // the live J6 re-anchor — was itself the J5c corruption: an
+    // echo-shaped scenarios.graph with options[] gone).
     const mutationWrite = appendCalls.at(-1)!;
     expect(mutationWrite.handler_id).toBe('set_factor_value');
     expect(mutationWrite.graph).toBeDefined();
     const committed = mutationWrite.graph as {
+      goal_node_id?: unknown;
+      options?: unknown;
       nodes: Array<{ id: string; observed_state?: { value?: number } }>;
     };
     const mutatedNode = committed.nodes.find((n) => n.id === 'fac_local_hire');
     expect(mutatedNode?.observed_state?.value).toBe(1);
+    expect(committed.goal_node_id).toBe(RICH_PERSISTED_GRAPH.goal_node_id);
+    expect(JSON.stringify(committed.options)).toBe(
+      JSON.stringify(RICH_PERSISTED_GRAPH.options),
+    );
 
-    // The persisted graph was REPLACED by the mutated graph (RPC applies
-    // p_graph) and hashes to the EXP-01 J6 re-anchor — the same value the
-    // live run re-anchored to after this exact edit.
-    expect(
-      computeAnalysisAffectingGraphHash(currentPersistedGraph as never),
-    ).toBe(POST_EDIT_ECHO_HASH);
+    // The persisted graph was REPLACED by the merged graph (RPC applies
+    // p_graph): off the run anchor (legitimate staleness) but NOT the
+    // stripped POST_EDIT_ECHO_HASH shape the pre-fix commit produced.
+    const committedHash = computeAnalysisAffectingGraphHash(
+      currentPersistedGraph as never,
+    );
+    expect(committedHash).not.toBe(RICH_HASH);
+    expect(committedHash).not.toBe(POST_EDIT_ECHO_HASH);
 
     // Follow-up turn: staleness is now LEGITIMATE (a real mutation
     // happened) — the prior anchor no longer matches.
@@ -471,6 +487,6 @@ describe('mutation safety — D1 set_factor_value still persists and staleness s
     const freshness = preHandlerFreshnessEvents().at(-1);
     expect(freshness!.data.freshness).toBe('stale');
     expect(freshness!.data.reason).toBe('graph_hash_diverged');
-    expect(freshness!.data.current_graph_hash).toBe(POST_EDIT_ECHO_HASH);
+    expect(freshness!.data.current_graph_hash).toBe(committedHash);
   });
 });

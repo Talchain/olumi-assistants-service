@@ -20,6 +20,7 @@
  */
 
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
+import { log } from '../../../../utils/telemetry.js';
 import { D1HandlerError } from './errors.js';
 
 /**
@@ -132,6 +133,128 @@ export function applyAndValidateMutation<TBefore, TAfter>(
   };
 
   return { mutatedGraph, before, after };
+}
+
+/**
+ * V5-D1-SHAPE-01 — merge a D1 `mutated_graph` back onto the
+ * server-authoritative persisted graph shape before persistence.
+ *
+ * Sibling of `mergeAppliedGraphForPersistence` (edit-graph-dispatch.ts,
+ * V5-PERSIST-FIX-01 / PR #265), which fixed the identical corruption
+ * class for `edit_graph` and explicitly flagged the D1 ingress-base
+ * merge as the remaining gap. The bug: `applyAndValidateMutation`
+ * (above) merges mutated structural fields back onto the INGRESS
+ * top-level shape — but the DGAI wire echo carries only
+ * `{nodes, edges}`, never `goal_node_id` / `options[]`, so a D1
+ * mutation committed wholesale replaced the rich draft-persisted
+ * `scenarios.graph` with a stripped shape (scorecard J5c: options[]
+ * → 0; subsequent run_analysis fails on the missing goal_node_id).
+ *
+ * Merge precedence (deliberate, per V5-D1-SHAPE-01):
+ *   1. The PERSISTED `scenarios.graph` (pre-mutation, strict-read by
+ *      the caller) is the base — NOT the ingress echo.
+ *   2. `mutatedGraph` wins for what the D1 mutation actually changed:
+ *      `nodes`, `edges`, and — unlike the edit_graph sibling —
+ *      top-level `goal_constraints` when present (D1 `add_constraint`
+ *      owns that field; no edit_graph operation writes it, which is
+ *      exactly why #265 does NOT overlay it).
+ *   3. Everything else top-level (`goal_node_id`, `options[]`, `meta`,
+ *      `schema_version`, draft-pipeline fields, …) passes through from
+ *      the base verbatim. Nothing is invented.
+ *   4. No options[] deletion dedupe: no D1 mutation removes nodes
+ *      (set_factor_value / add_constraint / adjust_edge_strength all
+ *      mutate in place), so unlike #265 there is no provably-deleted
+ *      option to drop — `options[]` survives byte-for-byte.
+ *
+ * Fallback to `mutatedGraph` as-is (the legacy ingress-shaped merge)
+ * covers the two cases the caller legitimately passes — NOT a degraded
+ * read. A degraded/unavailable persisted read FAILS CLOSED upstream at
+ * the turn-executor STEP 7 commit site (the strict loader's throw maps
+ * to STATE_COMMIT_FAILED; nothing is persisted), so "unavailable" is
+ * deliberately absent here:
+ *   - `persistedBase === null` — a GENUINELY-empty `scenarios.graph`
+ *     (strict read succeeded, no graph stored). Nothing to lose; the
+ *     ingress-shaped mutated graph is the first valid write.
+ *   - non-null but structurally unusable (not an object / missing
+ *     nodes+edges arrays) — malformed-but-READABLE persisted graph.
+ *     Heal forward via the mutated graph (commit a valid shape) rather
+ *     than fail closed, mirroring #265; logged at WARN, never silent.
+ *
+ * @internal Exported for testing and for the turn-executor STEP 7
+ * commit site (the single place a D1 `mutated_graph` reaches
+ * persistence).
+ */
+export function mergeMutatedGraphForPersistence(args: {
+  /** Handler-emitted post-mutation graph (ingress-shaped, validated). */
+  readonly mutatedGraph: Record<string, unknown>;
+  /**
+   * Raw persisted `scenarios.graph` (pre-mutation), or null for a
+   * GENUINELY-empty scenario. A degraded read never reaches here — it
+   * fails closed at the STEP 7 commit site before this helper is called.
+   */
+  readonly persistedBase: unknown;
+  readonly requestId: string;
+  readonly scenarioId: string;
+}): Record<string, unknown> {
+  const { mutatedGraph, persistedBase, requestId, scenarioId } = args;
+  const persistedUsable =
+    persistedBase !== null &&
+    persistedBase !== undefined &&
+    typeof persistedBase === 'object' &&
+    !Array.isArray(persistedBase) &&
+    Array.isArray((persistedBase as Record<string, unknown>).nodes) &&
+    Array.isArray((persistedBase as Record<string, unknown>).edges);
+  // A non-null persisted base that is NOT usable = a malformed-but-readable
+  // scenarios.graph. We heal forward via the mutated graph (see docstring)
+  // but flag it loudly so the anomaly is never silent.
+  const persistedMalformed =
+    persistedBase !== null && persistedBase !== undefined && !persistedUsable;
+
+  const merged: Record<string, unknown> = persistedUsable
+    ? {
+        ...(persistedBase as Record<string, unknown>),
+        nodes: mutatedGraph.nodes,
+        edges: mutatedGraph.edges,
+        ...(mutatedGraph.goal_constraints !== undefined
+          ? { goal_constraints: mutatedGraph.goal_constraints }
+          : {}),
+      }
+    : mutatedGraph;
+
+  const base = persistedUsable
+    ? (persistedBase as Record<string, unknown>)
+    : mutatedGraph;
+  const logPayload = {
+    event: 'v5.d1.persist_merge_back',
+    request_id: requestId,
+    scenario_id: scenarioId,
+    base: persistedUsable
+      ? 'persisted'
+      : persistedMalformed
+        ? 'mutated_fallback_malformed_base'
+        : 'mutated_fallback_genuine_empty',
+    base_has_goal_node_id: typeof base.goal_node_id === 'string',
+    base_options_count: Array.isArray(base.options) ? base.options.length : null,
+    mutated_node_count: Array.isArray(mutatedGraph.nodes)
+      ? mutatedGraph.nodes.length
+      : null,
+    mutated_edge_count: Array.isArray(mutatedGraph.edges)
+      ? mutatedGraph.edges.length
+      : null,
+  };
+  if (persistedMalformed) {
+    log.warn(
+      logPayload,
+      'V5 D1 — persisted scenarios.graph was non-null but structurally unusable; healing forward via the mutated ingress-shaped graph (no rich top-level fields recoverable from a malformed graph)',
+    );
+  } else {
+    log.info(
+      logPayload,
+      'V5 D1 — mutated graph merged onto persisted graph shape for persistence',
+    );
+  }
+
+  return merged;
 }
 
 /**
