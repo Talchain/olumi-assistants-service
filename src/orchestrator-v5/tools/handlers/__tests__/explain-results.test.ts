@@ -138,6 +138,15 @@ function buildProposal(overrides?: Partial<ProposalAction>): ProposalAction {
 const VALID_ANSWER_TEXT =
   'Hire Senior Engineer leads at 62 per cent because Engineering Capacity carries the strongest sensitivity in the model, well ahead of the runner-up.';
 
+// V5-LANE-B-STRUCTURAL-01: the standalone "what to validate" beat appended
+// on the execute path. With the default ANALYSIS_PROJECTION (no
+// fragile_edges, top driver "Engineering Capacity") and VALID_ANSWER_TEXT
+// (mentions the driver but carries no validation vocabulary), the dedup
+// guard does NOT fire and the driver-variant beat is appended.
+const DRIVER_BEAT_TEXT =
+  "The evidence that would most improve confidence is firmer support for 'Engineering Capacity', since it carries the most weight in this result.";
+const VALID_ANSWER_WITH_BEAT = `${VALID_ANSWER_TEXT}\n\n${DRIVER_BEAT_TEXT}`;
+
 describe('explain_results — registration', () => {
   it('is registered in the default V5 handler registry', () => {
     const registry = createRegistry({
@@ -213,7 +222,7 @@ describe('explain_results — precondition (analysis fact)', () => {
 });
 
 describe('explain_results — answer-carrying contract', () => {
-  it('happy path: uses Sonnet answer_text when answer_text_valid is true', async () => {
+  it('happy path: preserves Sonnet answer_text verbatim and appends the validation beat as a final paragraph', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
@@ -225,9 +234,18 @@ describe('explain_results — answer-carrying contract', () => {
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_WITH_BEAT);
+    expect(outcome.assistant_text.startsWith(VALID_ANSWER_TEXT)).toBe(true);
     expect(outcome.suppress_orientation).toBe(true);
     expect(outcome.llm_calls_used).toBe(0);
+    expect(outcome.__validation_beat).toEqual({
+      mechanism: 'appended',
+      beat: {
+        variant: 'driver',
+        driver_label: 'Engineering Capacity',
+        text: DRIVER_BEAT_TEXT,
+      },
+    });
   });
 
   it('bare tool_use regression: missing explanation → deterministic fallback with leading option + driver', async () => {
@@ -325,7 +343,10 @@ describe('explain_results — diagnostic fields', () => {
     if (fact.fact_type === 'explain_results') {
       expect(fact.result.answer_source).toBe('sonnet');
       expect(fact.result.fallback_reason).toBeNull();
-      expect(fact.result.answer_text_length).toBe(VALID_ANSWER_TEXT.length);
+      // answer_text_length measures the user-visible string, which now
+      // includes the appended validation beat.
+      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
+      expect(fact.result.answer_text_length).toBe(VALID_ANSWER_WITH_BEAT.length);
     }
   });
 
@@ -546,7 +567,7 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
         },
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_WITH_BEAT);
   });
 
   it('fresh: successful fact + freshness=fresh → executes normally', async () => {
@@ -559,7 +580,27 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_WITH_BEAT);
+  });
+
+  it('redaction (validation beat): appended link/driver beats contain no internal terms or raw IDs', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: {
+          ...ANALYSIS_PROJECTION,
+          fragile_edges: [
+            { from_label: 'Local Senior Hire Programme', to_label: 'Q3 Roadmap Delivery Capacity' },
+          ],
+        },
+      }),
+    );
+    const appended = outcome.assistant_text.slice(VALID_ANSWER_TEXT.length);
+    for (const pat of [/\bfragile_edges\b/i, /\bopt_/i, /\bfac_/i, /\bnode_/i, /-?\d+\.\d/, /\brecommend/i]) {
+      expect(appended, appended).not.toMatch(pat);
+    }
   });
 
   it('redaction: missing/degraded/stale recovery copy contains no internal terms', async () => {
@@ -592,5 +633,183 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
         expect(outcome.assistant_text, outcome.assistant_text).not.toMatch(pat);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5-LANE-B-STRUCTURAL-01 — the "what to validate" beat on the execute path.
+// Sonnet-valid append (link first, driver fallback), dedup skip, omit on no
+// signal, fallback parity, and schema round-trip with the beat present.
+// ---------------------------------------------------------------------------
+
+const FRAGILE_PROJECTION: AnalysisProjectionSummary = {
+  ...ANALYSIS_PROJECTION,
+  fragile_edges: [
+    {
+      from_label: 'Local Senior Hire Programme',
+      to_label: 'Q3 Roadmap Delivery Capacity',
+    },
+  ],
+};
+
+const LINK_BEAT_TEXT =
+  "The evidence that would most improve confidence is real-world support for the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since it is the assumption most likely to change the outcome.";
+
+describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => {
+  function makeExecuteInvocation(overrides?: {
+    explanation?: HandlerInvocation['explanation'];
+    analysisProjection?: AnalysisProjectionSummary;
+  }): HandlerInvocation {
+    return makeInvocation({
+      priorFacts: [makeRunAnalysisFact(false)],
+      explanation: overrides?.explanation ?? {
+        answer_text: VALID_ANSWER_TEXT,
+        answer_text_valid: true,
+      },
+      analysisProjection: overrides?.analysisProjection ?? ANALYSIS_PROJECTION,
+    });
+  }
+
+  it('Sonnet-valid + renderable fragile link → link beat appended, names both endpoints', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeExecuteInvocation({ analysisProjection: FRAGILE_PROJECTION }),
+    );
+    expect(outcome.assistant_text).toBe(`${VALID_ANSWER_TEXT}\n\n${LINK_BEAT_TEXT}`);
+    expect(outcome.__validation_beat).toEqual({
+      mechanism: 'appended',
+      beat: {
+        variant: 'link',
+        from_label: 'Local Senior Hire Programme',
+        to_label: 'Q3 Roadmap Delivery Capacity',
+        text: LINK_BEAT_TEXT,
+      },
+    });
+  });
+
+  it('dedup: both endpoint labels WITHOUT validation vocabulary → still appends (labels alone are not enough)', async () => {
+    const handler = createExplainResultsHandler();
+    const answer =
+      'Local Senior Hire Programme feeds Q3 Roadmap Delivery Capacity, which is why the leading option stays ahead in this model.';
+    const outcome = await handler(
+      makeExecuteInvocation({
+        explanation: { answer_text: answer, answer_text_valid: true },
+        analysisProjection: FRAGILE_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toBe(`${answer}\n\n${LINK_BEAT_TEXT}`);
+    expect(outcome.__validation_beat?.mechanism).toBe('appended');
+  });
+
+  it('dedup: both endpoint labels AND validation vocabulary → link skipped; distinct driver beat appended instead', async () => {
+    const handler = createExplainResultsHandler();
+    const answer =
+      'The result hinges on whether Local Senior Hire Programme really lifts Q3 Roadmap Delivery Capacity, so it is worth validating that relationship with real hiring data before relying on it.';
+    const outcome = await handler(
+      makeExecuteInvocation({
+        explanation: { answer_text: answer, answer_text_valid: true },
+        analysisProjection: FRAGILE_PROJECTION,
+      }),
+    );
+    // The driver ('Engineering Capacity') differs from both endpoints and is
+    // absent from the answer, so the driver rung adds a distinct priority.
+    expect(outcome.assistant_text).toBe(`${answer}\n\n${DRIVER_BEAT_TEXT}`);
+    expect(outcome.__validation_beat).toEqual({
+      mechanism: 'appended',
+      beat: {
+        variant: 'driver',
+        driver_label: 'Engineering Capacity',
+        text: DRIVER_BEAT_TEXT,
+      },
+    });
+  });
+
+  it('dedup: link covered AND driver already in the answer → dedup_skipped, narrative untouched', async () => {
+    const handler = createExplainResultsHandler();
+    const answer =
+      'The result hinges on Engineering Capacity and on whether Local Senior Hire Programme lifts Q3 Roadmap Delivery Capacity; checking that link against real evidence is the next step.';
+    const outcome = await handler(
+      makeExecuteInvocation({
+        explanation: { answer_text: answer, answer_text_valid: true },
+        analysisProjection: FRAGILE_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toBe(answer);
+    expect(outcome.__validation_beat).toEqual({
+      mechanism: 'dedup_skipped',
+      variant: 'link',
+      from_label: 'Local Senior Hire Programme',
+      to_label: 'Q3 Roadmap Delivery Capacity',
+    });
+  });
+
+  it('omit: no fragile link and no driver → narrative untouched, mechanism omitted', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeExecuteInvocation({
+        analysisProjection: {
+          ...ANALYSIS_PROJECTION,
+          top_drivers: [],
+          fragile_edges: [],
+        },
+      }),
+    );
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.__validation_beat).toEqual({
+      mechanism: 'omitted',
+      reason: 'no_renderable_signal',
+    });
+  });
+
+  it('ID guard: slug-shaped driver label is never named — beat omitted', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeExecuteInvocation({
+        analysisProjection: {
+          ...ANALYSIS_PROJECTION,
+          top_drivers: [{ factor_label: 'fac_engineering_capacity_1', sensitivity_value: 0.65 }],
+          fragile_edges: [],
+        },
+      }),
+    );
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.__validation_beat?.mechanism).toBe('omitted');
+  });
+
+  it('fallback parity: invalid answer_text → fallback narrative carries the same beat before the closing nudge', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeExecuteInvocation({
+        explanation: {
+          answer_text: 'too short',
+          answer_text_valid: false,
+          answer_validation_error: 'too_short',
+        },
+        analysisProjection: FRAGILE_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toContain(LINK_BEAT_TEXT);
+    const beatIndex = outcome.assistant_text.indexOf(LINK_BEAT_TEXT);
+    const nudgeIndex = outcome.assistant_text.indexOf(
+      'Would you like to explore what would change this result?',
+    );
+    expect(beatIndex).toBeGreaterThan(-1);
+    expect(nudgeIndex).toBeGreaterThan(beatIndex);
+    expect(outcome.__validation_beat?.mechanism).toBe('appended');
+  });
+
+  it('schema: fact round-trips through the strict schema with the beat appended (no new fact field)', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeExecuteInvocation({ analysisProjection: FRAGILE_PROJECTION }),
+    );
+    const parsed = ExplainResultsHandlerFactSchema.safeParse(outcome.handler_facts[0]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('precondition paths carry no validation-beat record (execute-only mechanism)', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(makeInvocation({ priorFacts: [], optionCount: 2 }));
+    expect(outcome.__validation_beat).toBeUndefined();
   });
 });

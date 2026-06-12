@@ -115,6 +115,25 @@ describe('composeExplainResultsFallback', () => {
     expect(text).toContain('Would you like to');
   });
 
+  // V5-LANE-B-STRUCTURAL-01: the handler-composed validation beat is placed
+  // before the closing nudge; absent/null → byte-identical legacy output.
+  it('places validationBeatText before the closing nudge', () => {
+    const beat =
+      "The evidence that would most improve confidence is firmer support for 'Engineering Capacity', since it carries the most weight in this result.";
+    const text = composeExplainResultsFallback(ANALYSIS, beat);
+    expectNaturalProse(text);
+    const beatIndex = text.indexOf(beat);
+    const nudgeIndex = text.indexOf('Would you like to explore what would change this result?');
+    expect(beatIndex).toBeGreaterThan(-1);
+    expect(nudgeIndex).toBeGreaterThan(beatIndex);
+  });
+
+  it('omitting validationBeatText (undefined or null) leaves the legacy output unchanged', () => {
+    const legacy = composeExplainResultsFallback(ANALYSIS);
+    expect(composeExplainResultsFallback(ANALYSIS, null)).toBe(legacy);
+    expect(composeExplainResultsFallback(ANALYSIS, undefined)).toBe(legacy);
+  });
+
   it('does NOT include the staleness caveat (handler prepends it via applyStalenessPrefix)', () => {
     // The composer is no longer responsible for the staleness caveat — the
     // handler's applyStalenessPrefix helper prepends it to the final

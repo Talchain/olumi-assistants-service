@@ -71,6 +71,36 @@ import {
 } from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
+import {
+  composeStandaloneValidationPriority,
+  decideValidationBeat,
+  isCleanDisplayLabel,
+  type ValidationBeatDecision,
+  type ValidationFragileEdge,
+} from '../../coaching/validation-priority.js';
+
+/**
+ * Inputs for the "what to validate" beat, read from the projection the
+ * turn-executor already threads in (same source the advice gate reads on
+ * the deterministic J1b path). `fragile_edges` arrives pre-filtered to
+ * renderable entries by `buildAnalysisProjectionSummary`; the first entry
+ * mirrors the advice gate's "top edge" selection. The driver label gets the
+ * standalone clean-label guard (non-empty, not ID-shaped) because this path
+ * does not pass through the gate's availability checks.
+ */
+function selectValidationSignals(
+  projection: HandlerInvocation['analysisProjection'],
+): {
+  fragileEdge: ValidationFragileEdge | null;
+  topDriverLabel: string | null;
+} {
+  const fragileEdge = projection?.fragile_edges?.[0] ?? null;
+  const rawDriverLabel = projection?.top_drivers?.[0]?.factor_label;
+  return {
+    fragileEdge,
+    topDriverLabel: isCleanDisplayLabel(rawDriverLabel) ? rawDriverLabel : null,
+  };
+}
 
 export function createExplainResultsHandler(): HandlerFn {
   return async function explainResultsHandler(
@@ -120,9 +150,41 @@ export function createExplainResultsHandler(): HandlerFn {
     // ignored on the user side.
     const explanation = invocation.explanation;
     const sonnetValid = !!(explanation && explanation.answer_text_valid);
-    const rawText = sonnetValid
-      ? explanation!.answer_text
-      : composeExplainResultsFallback(invocation.analysisProjection);
+
+    // V5-LANE-B-STRUCTURAL-01 — the "what to validate" beat (J1 hybrid).
+    // On the Sonnet-valid path the standalone beat is appended as a final
+    // paragraph, subject to the dedup guard (the free narrative may already
+    // state the validation priority). On the fallback path the beat is
+    // composed directly (no dedup — the deterministic narrative never
+    // states one) and placed by the composer before its closing nudge.
+    // Execute-verdict turns only; precondition/stale/missing/degraded copy
+    // above is untouched.
+    const { fragileEdge, topDriverLabel } = selectValidationSignals(
+      invocation.analysisProjection,
+    );
+    let validationBeat: ValidationBeatDecision;
+    let rawText: string;
+    if (sonnetValid) {
+      const answerText = explanation!.answer_text;
+      validationBeat = decideValidationBeat({
+        answerText,
+        fragileEdge,
+        topDriverLabel,
+      });
+      rawText =
+        validationBeat.mechanism === 'appended'
+          ? `${answerText}\n\n${validationBeat.beat.text}`
+          : answerText;
+    } else {
+      const beat = composeStandaloneValidationPriority(fragileEdge, topDriverLabel);
+      validationBeat = beat
+        ? { mechanism: 'appended', beat }
+        : { mechanism: 'omitted', reason: 'no_renderable_signal' };
+      rawText = composeExplainResultsFallback(
+        invocation.analysisProjection,
+        beat?.text ?? null,
+      );
+    }
 
     // V5 stale-aware explain recovery: the staleness signal travels via
     // the precondition branch above — `decideExplanationPrecondition`
@@ -167,6 +229,9 @@ export function createExplainResultsHandler(): HandlerFn {
       // Drive home that the handler owns the response; defence-in-depth in
       // case future compose-layer changes inspect this flag directly.
       suppress_orientation: true,
+      // Mechanism record for the validation beat — mirrored to telemetry by
+      // the turn-executor (see HandlerOutcome.__validation_beat).
+      __validation_beat: validationBeat,
     };
   };
 }

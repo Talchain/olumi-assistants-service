@@ -297,6 +297,22 @@ export interface HandlerOutcome {
    * fact / outcome contract that downstream consumers depend on.
    */
   readonly __plot_timings?: import('../telemetry/turn-timings.js').RunAnalysisTimings;
+  /**
+   * V5-LANE-B-STRUCTURAL-01 — mechanism record for the "what to validate"
+   * beat on the `explain_results` execute path (`appended` /
+   * `dedup_skipped` / `omitted` + the evidence it matched). The
+   * turn-executor mirrors it to telemetry
+   * (`v5.explanation.validation_beat`) so live smoke can assert the
+   * mechanism, not just the surface text.
+   *
+   * Deliberately NOT a field on `ExplainResultsHandlerFact`: that fact's
+   * `result` schema is `.strict()` in the generated `@talchain/schemas`
+   * package (vendored 0.13.0), so persisting it would require a package
+   * release — blocked behind V5-CI-01 (GitHub Packages auth). Tracked as a
+   * schema follow-up; until then this is an internal diagnostic channel on
+   * the same pattern as `__plot_timings` above.
+   */
+  readonly __validation_beat?: import('../coaching/validation-priority.js').ValidationBeatDecision;
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;

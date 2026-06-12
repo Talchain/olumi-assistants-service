@@ -19,6 +19,7 @@
  */
 
 import type { ContextPackAnalysis, ContextPackGraph } from './context-pack-assembler.js';
+import { isRenderableValidationEdge } from '../coaching/validation-priority.js';
 
 const STRUCTURE_LINK_CAP = 3;
 const NAMED_FACTOR_LINK_CAP = 4;
@@ -33,6 +34,11 @@ export interface AnalysisProjectionDriver {
   readonly sensitivity_value: number;
 }
 
+export interface AnalysisProjectionFragileEdge {
+  readonly from_label: string;
+  readonly to_label: string;
+}
+
 export interface AnalysisProjectionSummary {
   readonly status: string;
   readonly leading_option: AnalysisProjectionOption | null;
@@ -40,6 +46,16 @@ export interface AnalysisProjectionSummary {
   readonly margin_pp: number | null;
   readonly robustness_band: string | null;
   readonly top_drivers: readonly AnalysisProjectionDriver[];
+  /**
+   * Structured fragile-edge labels carried through from
+   * `ContextPackAnalysis.fragile_edges`, pre-filtered to renderable entries
+   * (both endpoint labels non-empty, shared predicate with the advice gate).
+   * Read by the `explain_results` handler's "what to validate" beat
+   * (V5-LANE-B-STRUCTURAL-01). Optional so pre-existing literal fixtures
+   * stay valid; absent and empty are equivalent (no link rung).
+   * F.6: pass-through labels only — no derivation.
+   */
+  readonly fragile_edges?: readonly AnalysisProjectionFragileEdge[];
   // V5 state-trust: `staleness_reason` removed. Freshness is now a
   // deterministic four-state verdict on TurnOutcome / analysis_ready.
   // The handler-facing projection no longer carries the legacy reason
@@ -75,6 +91,7 @@ export function buildAnalysisProjectionSummary(
     margin_pp: analysis.margin_pp,
     robustness_band: analysis.robustness_band,
     top_drivers: analysis.top_drivers,
+    fragile_edges: analysis.fragile_edges.filter(isRenderableValidationEdge),
   };
 }
 

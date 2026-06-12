@@ -4169,6 +4169,47 @@ export async function runTurnExecutor(
         ) {
           handlerEmittedMutatedGraph = true;
         }
+        // V5-LANE-B-STRUCTURAL-01: mirror the explain_results validation-
+        // beat mechanism record to telemetry so live smoke can assert
+        // appended / dedup_skipped / omitted (and the evidence matched)
+        // rather than only inspecting the surface text. Label fields follow
+        // the V5ExplanationEvidence precedent — observability-only, never
+        // persisted on the fact (generated schema is .strict(); persisted
+        // field is a @talchain/schemas follow-up behind V5-CI-01).
+        if (handlerOutcome.__validation_beat) {
+          const beat = handlerOutcome.__validation_beat;
+          emit(TelemetryEvents.V5ExplanationValidationBeat, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: proposedHandlerId,
+            mechanism: beat.mechanism,
+            variant:
+              beat.mechanism === 'appended'
+                ? beat.beat.variant
+                : beat.mechanism === 'dedup_skipped'
+                  ? beat.variant
+                  : null,
+            from_label:
+              beat.mechanism === 'appended' && beat.beat.variant === 'link'
+                ? beat.beat.from_label
+                : beat.mechanism === 'dedup_skipped'
+                  ? beat.from_label ?? null
+                  : null,
+            to_label:
+              beat.mechanism === 'appended' && beat.beat.variant === 'link'
+                ? beat.beat.to_label
+                : beat.mechanism === 'dedup_skipped'
+                  ? beat.to_label ?? null
+                  : null,
+            driver_label:
+              beat.mechanism === 'appended' && beat.beat.variant === 'driver'
+                ? beat.beat.driver_label
+                : beat.mechanism === 'dedup_skipped'
+                  ? beat.driver_label ?? null
+                  : null,
+            omission_reason: beat.mechanism === 'omitted' ? beat.reason : null,
+          });
+        }
         // V5 alpha hardening Phase 2.5: primary lifecycle event on
         // successful handler invocation. Fact count + LLM-call count
         // are queryable alongside the obs field set.
