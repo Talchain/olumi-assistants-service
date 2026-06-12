@@ -4,10 +4,17 @@
  * Pins the post-R-001 contract:
  *
  *  1. Applied edit (appliedGraph !== null, wasRejected === false)
- *     → commitDirectAnswer called with metadata.graph === editResult.appliedGraph
- *     so append_turn_atomic persists the post-edit graph atomically with the
- *     turn row. Without this, scenarios.graph would stay stale across edit
- *     turns (the original P0 finding).
+ *     → commitDirectAnswer called with a metadata.graph whose nodes/edges
+ *     are editResult.appliedGraph's, so append_turn_atomic persists the
+ *     post-edit graph atomically with the turn row. Without this,
+ *     scenarios.graph would stay stale across edit turns (the original
+ *     P0 finding). V5-PERSIST-FIX-01 amendment: the committed object is
+ *     the MERGE of the applied nodes/edges onto the persisted-graph base
+ *     (ingress fallback when no persisted graph exists, as in this
+ *     suite's degraded-context environment) — identity with appliedGraph
+ *     is no longer the contract; node/edge content equality is. The
+ *     merge semantics themselves are pinned in
+ *     edit-graph-dispatch-persist-merge-back.test.ts.
  *
  *  2. Rejected edit (appliedGraph === null, wasRejected === true)
  *     → commitDirectAnswer called with metadata.graph === undefined so the RPC
@@ -171,7 +178,15 @@ describe('dispatchEditGraph', () => {
       expect(result.commitPerformed).toBe(true);
       expect(commitDirectAnswer).toHaveBeenCalledTimes(1);
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0]!;
-      expect(metadata.graph).toBe(editResult.appliedGraph);
+      // V5-PERSIST-FIX-01: the committed graph is the applied mutation
+      // merged onto the persisted-base shape (ingress fallback here —
+      // no persisted graph in this suite's degraded context), not the
+      // appliedGraph object itself. Content equality on nodes/edges is
+      // the persistence contract; the applied arrays are carried by
+      // reference.
+      const committedGraph = metadata.graph as { nodes: unknown; edges: unknown };
+      expect(committedGraph.nodes).toBe(editResult.appliedGraph!.nodes);
+      expect(committedGraph.edges).toBe(editResult.appliedGraph!.edges);
       expect(metadata.scenario_id).toBe(SCENARIO_ID);
       expect(metadata.turn_id).toBe(TURN_ID);
       expect(metadata.handler_id).toBeNull();

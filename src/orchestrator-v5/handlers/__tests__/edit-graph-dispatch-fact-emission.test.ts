@@ -396,7 +396,14 @@ describe('dispatchEditGraph — DL-7 PR B fact emission', () => {
 
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0]!;
       // PR B does NOT regress the R-001 graph-persistence contract.
-      expect(metadata.graph).toBe(editResult.appliedGraph);
+      // V5-PERSIST-FIX-01 amendment: the committed object is the applied
+      // mutation merged onto the persisted-base shape (ingress fallback
+      // in this suite's degraded context), so the contract is node/edge
+      // content threading — not object identity. Merge semantics are
+      // pinned in edit-graph-dispatch-persist-merge-back.test.ts.
+      const committed = metadata.graph as { nodes: unknown; edges: unknown };
+      expect(committed.nodes).toBe(editResult.appliedGraph!.nodes);
+      expect(committed.edges).toBe(editResult.appliedGraph!.edges);
     });
 
     it('B11 rich-builder throw → generic fallback fact emitted (war-room must-fix)', async () => {
