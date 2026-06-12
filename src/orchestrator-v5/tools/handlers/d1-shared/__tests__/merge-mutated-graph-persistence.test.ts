@@ -7,7 +7,11 @@
  * DGAI wire echo carries only `{nodes, edges}` — never `goal_node_id`,
  * never `options[]` — so committing the D1 `mutated_graph` wholesale
  * replaced the rich draft-persisted `scenarios.graph` with a stripped
- * shape (and the next run_analysis failed on the missing goal_node_id).
+ * shape — canonical state loss (goal_node_id gone, options[] → 0,
+ * top-level metadata stripped, lossy merge base for future turns,
+ * spurious freshness/hash divergence). run_analysis may still succeed
+ * because readiness re-derives goal/options from node kinds, so this
+ * is corruption, not a guaranteed analysis outage.
  *
  * Fix under test: `mergeMutatedGraphForPersistence` — the mutated
  * nodes/edges (+ goal_constraints when the mutation wrote them) merged

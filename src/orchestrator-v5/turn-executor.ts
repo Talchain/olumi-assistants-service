@@ -5047,9 +5047,14 @@ export async function runTurnExecutor(
       // fields back onto the INGRESS top-level shape), and the DGAI
       // echo never carries `goal_node_id` / `options[]`, so the raw
       // mutated_graph would replace the rich draft-persisted
-      // `scenarios.graph` with a stripped shape (scorecard J5c:
-      // options[] → 0, next run_analysis fails on the missing
-      // goal_node_id). Mirror of the edit_graph fix (PR #265): strict-
+      // `scenarios.graph` with a stripped shape — canonical state
+      // loss: goal_node_id gone, options[] → 0 (scorecard J5c),
+      // top-level metadata stripped, future turns inherit the lossy
+      // merge base, and the freshness hash (which covers exactly
+      // those fields) can spuriously diverge. run_analysis itself may
+      // still succeed — readiness re-derives goal/options from node
+      // kinds — so this is corruption, not a guaranteed analysis
+      // outage. Mirror of the edit_graph fix (PR #265): strict-
       // read the persisted graph and merge the mutation onto that
       // server-authoritative base. The strict read FAILS CLOSED — a
       // degraded/unavailable read throws here, inside the STEP 7 try,

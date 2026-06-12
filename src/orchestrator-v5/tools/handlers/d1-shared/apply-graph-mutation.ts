@@ -147,8 +147,12 @@ export function applyAndValidateMutation<TBefore, TAfter>(
  * top-level shape — but the DGAI wire echo carries only
  * `{nodes, edges}`, never `goal_node_id` / `options[]`, so a D1
  * mutation committed wholesale replaced the rich draft-persisted
- * `scenarios.graph` with a stripped shape (scorecard J5c: options[]
- * → 0; subsequent run_analysis fails on the missing goal_node_id).
+ * `scenarios.graph` with a stripped shape — canonical state loss:
+ * goal_node_id gone, options[] → 0 (scorecard J5c), top-level
+ * metadata stripped, future turns inherit the lossy merge base, and
+ * freshness/hash behaviour can spuriously diverge. (run_analysis may
+ * still succeed — readiness re-derives goal/options from node kinds —
+ * so this is corruption, not a guaranteed analysis outage.)
  *
  * Merge precedence (deliberate, per V5-D1-SHAPE-01):
  *   1. The PERSISTED `scenarios.graph` (pre-mutation, strict-read by

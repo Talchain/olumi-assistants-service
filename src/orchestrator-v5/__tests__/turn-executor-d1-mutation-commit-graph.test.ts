@@ -8,8 +8,12 @@
  * INGRESS top-level shape), and the DGAI wire echo carries only
  * `{nodes, edges}` — never `goal_node_id`, never `options[]` — so the
  * STEP 7 commit replaced the rich draft-persisted `scenarios.graph`
- * with a stripped shape. The next run_analysis then failed on the
- * missing goal_node_id (`loadScenarioSnapshotForRunAnalysis` throws).
+ * with a stripped shape — canonical state loss: goal_node_id gone,
+ * options[] → 0, top-level metadata stripped, future turns inherit
+ * the lossy merge base, and freshness/hash behaviour can spuriously
+ * diverge. (run_analysis may still succeed — readiness re-derives
+ * goal/options from node kinds — so this is corruption, not a
+ * guaranteed analysis outage.)
  *
  * Fix under test: STEP 7 strict-reads the persisted graph
  * (`loadPersistedGraphStrict`) and commits
@@ -246,7 +250,8 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
     // THE FIX — server-authoritative top-level fields survive from the
     // persisted base. Pre-fix the committed graph was the echo-shaped
     // mutated_graph: no goal_node_id, no options[] (scorecard J5c
-    // options → 0; next run_analysis throws on the missing goal).
+    // options → 0; canonical state loss, not a guaranteed analysis
+    // outage — readiness re-derives goal/options from node kinds).
     expect(committed.goal_node_id).toBe(RICH_PERSISTED_GRAPH.goal_node_id);
     expect(JSON.stringify(committed.options)).toBe(
       JSON.stringify(RICH_PERSISTED_GRAPH.options),
