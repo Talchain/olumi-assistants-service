@@ -36,6 +36,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
@@ -329,11 +330,22 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
     // the graph would corrupt canonical state.
     expect(appendCalls).toHaveLength(0);
     expect(JSON.stringify(currentPersistedGraph)).toBe(pristine);
-    const errorBlock = (response.blocks as Array<{ type: string }>).find(
-      (b) => b.type === 'error',
-    );
+    // Pin the commit-failure envelope directly (Codex follow-up):
+    // STATE_COMMIT_FAILED maps to wire error_code 'INTERNAL_ERROR'
+    // (INTERNAL_TO_WIRE), is the retryable transient class
+    // (details.retryable), and STEP 7's catch stamps phase:'commit' —
+    // together these identify the commit-abort path, not a generic
+    // internal error.
+    const errorBlock = (
+      response.blocks as Array<{
+        type: string;
+        error_code?: string;
+        details?: Record<string, unknown>;
+      }>
+    ).find((b) => b.type === 'error');
     expect(errorBlock).toBeDefined();
-    // STATE_COMMIT_FAILED maps to wire 'INTERNAL_ERROR' (INTERNAL_TO_WIRE).
+    expect(errorBlock!.error_code).toBe('INTERNAL_ERROR');
+    expect(errorBlock!.details).toMatchObject({ retryable: true, phase: 'commit' });
     const completed = events.find((e) => e.event === 'turn_executor.completed');
     expect(completed?.data.failure_type).toBe('INTERNAL_ERROR');
     expect(completed?.data.commit_performed).toBe(false);
@@ -406,10 +418,22 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
 // correct for it (does it mutate the ingress echo? does it delete
 // nodes — which would need #265-style options[] dedupe?), then update
 // the allowlist below.
+//
+// AST-aware by design (Codex review, PR #268): a line regex on
+// `mutated_graph:` missed shorthand properties (`{ mutated_graph }`),
+// property assignments (`outcome.mutated_graph = g`), and computed
+// string keys. The TypeScript-AST scan below catches every static
+// WRITE form, and helper indirection too: a helper that builds
+// `{ mutated_graph: … }` for a caller to spread contains the flagged
+// construction in its own (scanned) source. Reads — property access,
+// destructuring, the optional-field type declaration in registry.ts —
+// are deliberately NOT flagged. A fully dynamic key
+// (`obj[someVar] = g`) remains out of static reach; that is
+// adversarial, not a realistic producer shape in this codebase.
 // ---------------------------------------------------------------------------
 
 describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 handlers', () => {
-  it('no new mutated_graph producer outside the reviewed allowlist', () => {
+  it('no new mutated_graph producer (any static write form) outside the reviewed allowlist', () => {
     const SRC_ROOT = new URL('../../', import.meta.url).pathname;
     const ALLOWED = new Set([
       'orchestrator-v5/tools/handlers/set-factor-value.ts',
@@ -418,6 +442,57 @@ describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 h
     ]);
 
     const offenders: string[] = [];
+    const scanned: string[] = [];
+
+    const flagWrites = (rel: string, text: string): void => {
+      const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+      const record = (node: ts.Node, form: string): void => {
+        if (ALLOWED.has(rel)) return;
+        const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+        offenders.push(`${rel}:${line + 1} (${form})`);
+      };
+      const visit = (node: ts.Node): void => {
+        // { mutated_graph: value } and { 'mutated_graph': value }
+        if (
+          ts.isPropertyAssignment(node) &&
+          (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+          node.name.text === 'mutated_graph'
+        ) {
+          record(node, 'property assignment');
+        }
+        // { ['mutated_graph']: value }
+        if (
+          ts.isPropertyAssignment(node) &&
+          ts.isComputedPropertyName(node.name) &&
+          ts.isStringLiteralLike(node.name.expression) &&
+          node.name.expression.text === 'mutated_graph'
+        ) {
+          record(node, 'computed property');
+        }
+        // { mutated_graph } shorthand
+        if (
+          ts.isShorthandPropertyAssignment(node) &&
+          node.name.text === 'mutated_graph'
+        ) {
+          record(node, 'shorthand property');
+        }
+        // outcome.mutated_graph = value / outcome['mutated_graph'] = value
+        if (
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ((ts.isPropertyAccessExpression(node.left) &&
+            node.left.name.text === 'mutated_graph') ||
+            (ts.isElementAccessExpression(node.left) &&
+              ts.isStringLiteralLike(node.left.argumentExpression) &&
+              node.left.argumentExpression.text === 'mutated_graph'))
+        ) {
+          record(node, 'assignment expression');
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+    };
+
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
@@ -427,26 +502,23 @@ describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 h
           continue;
         }
         if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue;
+        const text = readFileSync(full, 'utf8');
+        // Cheap pre-filter: AST-parse only files that mention the field.
+        if (!text.includes('mutated_graph')) continue;
         const rel = full.slice(SRC_ROOT.length);
-        const lines = readFileSync(full, 'utf8').split('\n');
-        for (const line of lines) {
-          const trimmed = line.trim();
-          // Comments and the optional-field TYPE declaration
-          // (`mutated_graph?:` in registry.ts) are not emit sites.
-          if (
-            trimmed.startsWith('//') ||
-            trimmed.startsWith('*') ||
-            trimmed.startsWith('/*')
-          ) {
-            continue;
-          }
-          if (/mutated_graph\s*:/.test(trimmed) && !/mutated_graph\?\s*:/.test(trimmed)) {
-            if (!ALLOWED.has(rel)) offenders.push(`${rel}: ${trimmed}`);
-          }
-        }
+        scanned.push(rel);
+        flagWrites(rel, text);
       }
     };
     walk(SRC_ROOT);
+
+    // The scan must have seen all three reviewed producers — guards
+    // against the walk silently skipping them (renamed dir, moved file).
+    for (const allowed of ALLOWED) {
+      expect(scanned, `expected to scan reviewed producer ${allowed}`).toContain(
+        allowed,
+      );
+    }
 
     expect(
       offenders,
