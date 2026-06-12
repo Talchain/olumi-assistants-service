@@ -57,7 +57,11 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import { buildTurnContext, loadMostRecentPendingActions } from '../build-turn-context.js';
+import {
+  buildTurnContext,
+  loadMostRecentPendingActions,
+  loadPersistedGraphStrict,
+} from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
@@ -1507,26 +1511,67 @@ export async function dispatchEditGraph(
   // On error the catch branch synthesises a `derivation_failed` verdict
   // and leaves `priorFactsForRecovery` empty so the no-op recovery falls
   // back to the bland fallback rather than re-throwing.
-  // V5-PERSIST-FIX-01 (H1): for an applied mutation this is the MERGED
-  // graph — the applied nodes/edges on the server-authoritative
-  // persisted base — because it is both what gets persisted
-  // (`graphForCommit` below) and what every current-graph-hash in this
-  // dispatch derives from (freshness, recovery pending refresh). The
-  // two must agree, and both must agree with what the NEXT turn will
-  // compute from `scenarios.graph`. Initialised with the ingress-base
-  // fallback merge; upgraded to the persisted base inside the try once
-  // buildTurnContext has loaded `scenarios.graph` (no extra DB read).
-  // If buildTurnContext throws, the ingress-base merge stands — still
-  // strictly shape-better than the pre-fix stripped commit.
-  let persistedPostEditGraph: unknown = successfulAppliedMutation
-    ? mergeAppliedGraphForPersistence({
-        appliedGraph: editResult.appliedGraph!,
-        persistedBase: null,
-        ingressBase: graphState,
-        requestId,
-        scenarioId: payload.scenario_id,
-      })
-    : graphState;
+  // V5-PERSIST-FIX-01 (H1): for an applied mutation `persistedPostEditGraph`
+  // is the MERGED graph — the applied nodes/edges laid onto the
+  // server-authoritative persisted base. It is BOTH what gets persisted
+  // (`graphForCommit` below) AND what every current-graph-hash in this
+  // dispatch derives from (freshness, recovery pending refresh); all three
+  // must agree with what the NEXT turn computes from `scenarios.graph`.
+  //
+  // Codex P0 — the base is resolved via the STRICT persisted loader, NOT
+  // buildTurnContext's `persistedGraph`. buildTurnContext swallows
+  // `scenarios.*` read failures into `graph: null`, so relying on it cannot
+  // distinguish a genuinely-empty scenario from a transient/degraded read —
+  // and committing the ingress fallback on a degraded read would overwrite a
+  // rich persisted graph with the lossy client echo (the exact corruption
+  // this fix removes). `loadPersistedGraphStrict` returns the graph, returns
+  // null ONLY for a genuinely-empty `scenarios.graph`, and THROWS on a
+  // degraded read:
+  //   - graph present  → merge onto it (server-only top-level fields survive).
+  //   - null (genuine) → ingress-base fallback: the no-persisted-graph case
+  //     (e.g. a client that sent graph_state for a never-persisted scenario);
+  //     there is nothing to lose, and the edit must still persist.
+  //   - degraded read  → FAIL CLOSED: refuse to persist (throw → route maps it
+  //     to a retryable 500) rather than risk corrupting canonical state. A
+  //     transient blip fails the edit (retryable) instead of silently
+  //     overwriting `scenarios.graph`; mirrors route-v2's no-graph_state
+  //     reload-failure handling, which also refuses to proceed. Throwing here
+  //     also fails fast — it avoids buildTurnContext's extra read against the
+  //     already-degraded store — while the outer assembly `finally` still
+  //     emits the single edit turn event.
+  let persistedPostEditGraph: unknown = graphState;
+  if (successfulAppliedMutation) {
+    let strictBase: unknown;
+    try {
+      strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+    } catch (err) {
+      log.warn(
+        {
+          event: 'v5.edit_graph.persist_base_unavailable',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 edit_graph — persisted merge base unavailable (degraded read); failing closed to avoid overwriting canonical scenarios.graph with the lossy ingress echo',
+      );
+      throw new Error(
+        'edit_graph: refusing to persist applied mutation — persisted merge base unavailable (degraded read)',
+      );
+    }
+    persistedPostEditGraph = mergeAppliedGraphForPersistence({
+      appliedGraph: editResult.appliedGraph!,
+      // null here = a GENUINELY empty scenarios.graph (the strict read
+      // succeeded); merge() then uses the ingress fallback base. A degraded
+      // read never reaches this line — it threw above.
+      persistedBase: strictBase ?? null,
+      ingressBase: graphState,
+      requestId,
+      scenarioId: payload.scenario_id,
+    });
+  }
 
   let freshness: FreshnessDerivation;
   let priorFactsForRecovery: readonly HandlerFact[] = [];
@@ -1548,20 +1593,9 @@ export async function dispatchEditGraph(
   try {
     const turnContext = await buildTurnContext(payload, requestId);
     priorFactsForRecovery = turnContext.prior_facts;
-    // V5-PERSIST-FIX-01: upgrade the merge to the persisted base now
-    // that buildTurnContext has loaded `scenarios.graph` (the pre-edit
-    // canonical state). The persisted graph is the merge base — NOT
-    // the ingress echo — so server-authoritative top-level fields
-    // (`goal_node_id`, `options[]`, …) survive the edit commit.
-    if (successfulAppliedMutation && turnContext.persistedGraph != null) {
-      persistedPostEditGraph = mergeAppliedGraphForPersistence({
-        appliedGraph: editResult.appliedGraph!,
-        persistedBase: turnContext.persistedGraph,
-        ingressBase: graphState,
-        requestId,
-        scenarioId: payload.scenario_id,
-      });
-    }
+    // V5-PERSIST-FIX-01: the merge base was already resolved above via the
+    // strict persisted read (so a degraded read fails closed). buildTurnContext
+    // is used here only for prior_facts / pending actions — NOT for the base.
     const currentGraphHash = computeAnalysisAffectingGraphHash(
       persistedPostEditGraph as GraphStateIngress | null | undefined,
     );
