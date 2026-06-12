@@ -91,7 +91,12 @@ export function buildAnalysisProjectionSummary(
     margin_pp: analysis.margin_pp,
     robustness_band: analysis.robustness_band,
     top_drivers: analysis.top_drivers,
-    fragile_edges: analysis.fragile_edges.filter(isRenderableValidationEdge),
+    // `?. ?? []` mirrors the sibling `renderableFragileEdges` idiom in the
+    // advice gate: the field is typed non-optional, but one call site
+    // (chip-click-dispatch) hand-constructs the analysis object, so this
+    // stays robust against a future producer that omits it rather than
+    // throwing mid-projection.
+    fragile_edges: analysis.fragile_edges?.filter(isRenderableValidationEdge) ?? [],
   };
 }
 

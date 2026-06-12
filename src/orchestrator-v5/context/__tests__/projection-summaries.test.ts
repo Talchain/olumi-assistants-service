@@ -105,6 +105,17 @@ describe('buildAnalysisProjectionSummary', () => {
   it('empty fragile_edges projects as an empty array', () => {
     expect(buildAnalysisProjectionSummary(ANALYSIS)?.fragile_edges).toEqual([]);
   });
+
+  it('defends against a producer that omits fragile_edges entirely (→ empty array, no throw)', () => {
+    // The field is typed non-optional, but chip-click-dispatch hand-builds
+    // the analysis object; the `?. ?? []` guard keeps projection from
+    // throwing if a future producer drops it. Cast to reach the path.
+    const { fragile_edges: _omitted, ...withoutFragileEdges } = ANALYSIS;
+    const summary = buildAnalysisProjectionSummary(
+      withoutFragileEdges as unknown as ContextPackAnalysis,
+    );
+    expect(summary?.fragile_edges).toEqual([]);
+  });
 });
 
 describe('buildStructureProjectionSummary', () => {
