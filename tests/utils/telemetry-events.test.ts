@@ -465,6 +465,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
         V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
         V5ExplanationEvidence: "v5.explanation.evidence",
+        // V5-LANE-B-STRUCTURAL-01 — "what to validate" beat mechanism record.
+        V5ExplanationValidationBeat: "v5.explanation.validation_beat",
         V5MutationLanguageGuard: "v5.mutation_language_guard",
         V5PromptCache: "v5.prompt_cache",
         V5ResponseProseSanitised: "v5.response.prose_sanitised",
@@ -1088,6 +1090,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // mapping yet; observability is via structured logs).
         TelemetryEvents.V5ExplanationAnswerVerdict,
         TelemetryEvents.V5ExplanationEvidence,
+        // V5-LANE-B-STRUCTURAL-01 validation-beat mechanism record —
+        // diagnostic-only on the same pattern as its explanation siblings;
+        // live smoke reads it from structured logs (Render Logs API).
+        TelemetryEvents.V5ExplanationValidationBeat,
         TelemetryEvents.V5UnexpectedExplanationPayload,
         TelemetryEvents.V5MutationLanguageGuard,
         TelemetryEvents.V5DeterministicValueUpdate,
@@ -1655,6 +1661,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.draft_narration.count_suppressed",
         "v5.explanation.answer_verdict",
         "v5.explanation.evidence",
+        // V5-LANE-B-STRUCTURAL-01 (2026-06-12) — validation-beat mechanism.
+        "v5.explanation.validation_beat",
         "v5.handler_invocation",
         "v5.mutation_language_guard",
         "v5.plot_response.invalid_numeric",
