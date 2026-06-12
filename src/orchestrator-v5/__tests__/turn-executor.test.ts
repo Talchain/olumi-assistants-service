@@ -1052,7 +1052,18 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       (resetSessionStoreForTests as () => void)();
     });
 
-    it('turn 1 persists graph via append when graphState is provided', async () => {
+    it('turn 1 does NOT persist the echoed graphState on a non-mutating turn (V5-FRESH-FIX-01)', async () => {
+      // CONTRACT CHANGE (V5-FRESH-FIX-01, H2 fix): this test previously
+      // pinned the opposite — every spine turn persisted the client-echoed
+      // graphState. That write was the false-staleness vector: the wire
+      // echo can never carry server-only fields (options[], goal_node_id
+      // on the draft block), so a non-mutating turn replaced the rich
+      // draft-persisted graph with a lossy shape and the analysis
+      // freshness hash diverged with zero edits. Non-mutating turns now
+      // commit NO graph (p_graph null → scenarios.graph untouched);
+      // graph writes happen only on handlerOutcome.mutated_graph (D1
+      // handlers) and the route-level draft/edit dispatchers. Read-side
+      // continuity (the loadGraph fallback below) is unchanged.
       const routingAdapter = mockRoutingAdapter(async () => mkTextResult('hi'));
       const graphState = { nodes: [{ id: 'node-1', kind: 'factor', label: 'Node 1' }], edges: [] };
 
@@ -1066,7 +1077,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       );
 
       expect((global as any).__test_append_calls).toHaveLength(1);
-      expect((global as any).__test_append_calls[0].graph).toEqual(graphState);
+      expect((global as any).__test_append_calls[0].graph).toBeUndefined();
     });
 
     it('turn 2 loads persisted graph via loadGraph when graphState is absent', async () => {
@@ -1136,13 +1147,17 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
         },
       );
 
-      // Verify graph was persisted via append
+      // V5-FRESH-FIX-01 contract change: the non-mutating turn 1 no
+      // longer persists the echoed graphState (see the H2 rationale on
+      // the first test in this block). scenarios.graph is written by the
+      // draft dispatcher / D1 mutated_graph paths instead.
       expect((global as any).__test_append_calls).toHaveLength(1);
-      const persistedGraph = (global as any).__test_append_calls[0].graph;
-      expect(persistedGraph).toEqual(graphState);
+      expect((global as any).__test_append_calls[0].graph).toBeUndefined();
 
-      // Set up the persisted graph for turn 2 to load
-      (global as any).__test_persisted_graph = persistedGraph;
+      // Set up the persisted graph for turn 2 to load — representing the
+      // graph a draft turn persisted (the canonical writer), not turn 1's
+      // echo. Read-side continuity is unchanged by the fix.
+      (global as any).__test_persisted_graph = graphState;
 
       // Turn 2: without graphState (follow-up)
       await runTurnExecutor(
