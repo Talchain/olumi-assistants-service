@@ -1035,12 +1035,26 @@ function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnve
  *      provably removed the option node). Entries whose ids never
  *      matched a base node are preserved (fail-open to preservation).
  *
- * Fallback: when the persisted graph is unavailable or structurally
- * unusable (null / not an object / missing nodes+edges arrays), the
- * RAW ingress graph is the base — the D1-style merge. That is strictly
- * better than today's stripped commit (it preserves whatever top-level
- * fields the echo did carry) and only loses fields the server never
- * had for this scenario.
+ * Fallback to the RAW ingress graph (the D1-style merge) covers the two
+ * cases the dispatcher legitimately passes — NOT a degraded read. A
+ * degraded/unavailable persisted read FAILS CLOSED upstream in
+ * `dispatchEditGraph` (the strict loader throws → retryable 500) and
+ * never reaches this helper, so "unavailable" is deliberately absent here:
+ *   - `persistedBase === null` — a GENUINELY-empty `scenarios.graph` (the
+ *     strict read succeeded and returned no graph). There is nothing to
+ *     lose; the ingress-merged graph is the first valid write.
+ *   - non-null but structurally unusable (not an object / missing
+ *     nodes+edges arrays) — a malformed-but-READABLE persisted graph. We
+ *     deliberately HEAL FORWARD via the ingress base (commit a valid
+ *     shape) rather than fail closed: a 500 on permanently-malformed data
+ *     would trap the user with no in-app recovery, and a malformed graph
+ *     holds no parseable rich top-level fields to preserve, so this is not
+ *     the H1 corruption class (that shape keeps both arrays → is "usable"
+ *     → merged onto, not replaced). This sub-case is logged at WARN.
+ *     (A future tightening could fail closed here too for maximum
+ *     fail-closed semantics — deferred; see Codex review note.)
+ * Either way the merge is strictly better than the pre-fix stripped
+ * commit and only loses fields the server never validly had.
  *
  * Nested `node.data` (e.g. `data.interventions`) is NOT addressed here:
  * node content is owned by `appliedGraph`, whose nodes were already
@@ -1050,7 +1064,11 @@ function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnve
  */
 export function mergeAppliedGraphForPersistence(args: {
   readonly appliedGraph: GraphV3T;
-  /** Raw persisted `scenarios.graph` (pre-edit), or null when unavailable. */
+  /**
+   * Raw persisted `scenarios.graph` (pre-edit), or null for a
+   * GENUINELY-empty scenario. A degraded read never reaches here — it
+   * fails closed in `dispatchEditGraph` before this helper is called.
+   */
   readonly persistedBase: unknown;
   /** Raw request/reloaded ingress graph — fallback base only. */
   readonly ingressBase: GraphStateIngress;
@@ -1065,6 +1083,11 @@ export function mergeAppliedGraphForPersistence(args: {
     !Array.isArray(persistedBase) &&
     Array.isArray((persistedBase as Record<string, unknown>).nodes) &&
     Array.isArray((persistedBase as Record<string, unknown>).edges);
+  // A non-null persisted base that is NOT usable = a malformed-but-readable
+  // scenarios.graph. We heal forward via ingress (see docstring) but flag it
+  // loudly so the anomaly is never silent — it should be vanishingly rare.
+  const persistedMalformed =
+    persistedBase !== null && persistedBase !== undefined && !persistedUsable;
   const base = (
     persistedUsable ? persistedBase : ingressBase
   ) as Record<string, unknown>;
@@ -1099,20 +1122,32 @@ export function mergeAppliedGraphForPersistence(args: {
     }
   }
 
-  log.info(
-    {
-      event: 'v5.edit_graph.persist_merge_back',
-      request_id: requestId,
-      scenario_id: scenarioId,
-      base: persistedUsable ? 'persisted' : 'ingress_fallback',
-      base_has_goal_node_id: typeof base.goal_node_id === 'string',
-      base_options_count: Array.isArray(baseOptions) ? baseOptions.length : null,
-      options_dropped_as_deleted: optionsDropped,
-      applied_node_count: appliedGraph.nodes.length,
-      applied_edge_count: appliedGraph.edges.length,
-    },
-    'V5 edit_graph — applied mutation merged onto persisted graph shape for persistence',
-  );
+  const logPayload = {
+    event: 'v5.edit_graph.persist_merge_back',
+    request_id: requestId,
+    scenario_id: scenarioId,
+    base: persistedUsable
+      ? 'persisted'
+      : persistedMalformed
+        ? 'ingress_fallback_malformed_base'
+        : 'ingress_fallback_genuine_empty',
+    base_has_goal_node_id: typeof base.goal_node_id === 'string',
+    base_options_count: Array.isArray(baseOptions) ? baseOptions.length : null,
+    options_dropped_as_deleted: optionsDropped,
+    applied_node_count: appliedGraph.nodes.length,
+    applied_edge_count: appliedGraph.edges.length,
+  };
+  if (persistedMalformed) {
+    log.warn(
+      logPayload,
+      'V5 edit_graph — persisted scenarios.graph was non-null but structurally unusable; healing forward via the ingress base (no rich top-level fields recoverable from a malformed graph)',
+    );
+  } else {
+    log.info(
+      logPayload,
+      'V5 edit_graph — applied mutation merged onto persisted graph shape for persistence',
+    );
+  }
 
   return merged;
 }
