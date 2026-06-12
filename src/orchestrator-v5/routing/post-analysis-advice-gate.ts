@@ -1280,6 +1280,44 @@ function interpretationNextStep(
     : RERUN_INFLUENTIAL_NEXT_STEP;
 }
 
+/**
+ * The "what to validate" sentence for `explain_results` — the single piece of
+ * evidence that would most improve (or revise) confidence in the current lead,
+ * stated as an insight-led priority rather than generic "gather more data"
+ * filler. Distinct rhetorical job from its two neighbours: it states the
+ * validation PRIORITY and why it matters, where {@link describeFragileAssumption}
+ * DIAGNOSES the fragile link and {@link interpretationNextStep} is the re-run
+ * ACTION.
+ *
+ * Specific by construction, from existing signals only (no new metric, no
+ * invented evidence, no causal/sign claim — F.6):
+ *   - when a fragile link was NAMED above (`hasNamedFragileEdge`), point at
+ *     real-world support for THAT link — it is the assumption most likely to
+ *     change the outcome, so it is also the highest-value thing to validate.
+ *     References "that link" rather than re-quoting the endpoints, so it neither
+ *     paraphrases the diagnosis sentence nor risks a second label render;
+ *   - otherwise name the most-weighted factor (the projection's top driver),
+ *     quoted so "and"-containing labels stay readable and the egress ID/decimal
+ *     guards hold by construction.
+ *
+ * Returns null when neither signal is renderable, so the composer omits the
+ * sentence rather than emitting generic copy. Mirrors {@link interpretationNextStep}'s
+ * fallback ladder exactly, so it never introduces a NEW required input — the
+ * gate's `needs_fragile_edges` stays false for `explain_results_free_text`.
+ */
+const VALIDATE_LINK_EVIDENCE =
+  'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome.';
+
+function describeValidationPriority(
+  hasNamedFragileEdge: boolean,
+  topDriverLabel: string | null,
+): string | null {
+  if (hasNamedFragileEdge) return VALIDATE_LINK_EVIDENCE;
+  return topDriverLabel !== null
+    ? `The evidence that would most improve confidence is firmer support for ${quoteLabel(topDriverLabel)}, since it carries the most weight in this result.`
+    : null;
+}
+
 function composeAdvice(
   leadingLabel: string,
   topDriverLabel: string | null,
@@ -1597,7 +1635,7 @@ function composeExplainResults(
     : null;
   const sentences: string[] = [];
 
-  // 1. Standing — shared near-tie honesty (quoted), else a quoted clear lead.
+  // 1/2. Standing — leader and confidence (shared near-tie honesty, quoted; else a quoted clear lead).
   const closeness = interpretationCloseness(leadingLabel, runnerLabel, tieReason);
   if (closeness !== null) {
     sentences.push(closeness);
@@ -1616,7 +1654,7 @@ function composeExplainResults(
     }
   }
 
-  // 2. Drivers (quoted). Near-tie softens "driven by" to "could shift".
+  // 3. Why it leads — drivers (quoted). Near-tie softens "driven by" to "could shift".
   if (driverA && driverB) {
     sentences.push(
       nearTie
@@ -1631,14 +1669,25 @@ function composeExplainResults(
     );
   }
 
-  // 3. Name the specific fragile assumption when evidence exists (shared with
-  //    what_would_flip / meaning). No sign/causal claim — direction-honest.
+  // 4. What is fragile — name the specific fragile assumption when evidence
+  //    exists (shared with what_would_flip / meaning). No sign/causal claim —
+  //    direction-honest.
   if (topEdge) {
     sentences.push(describeFragileAssumption(topEdge));
   }
 
-  // 4. Robustness caveat: prefer the raw fragile signal over the projected
-  //    band; suppress confident stability copy on near-tie / raw-fragile.
+  // 5. What to validate: the single piece of evidence that would most improve
+  //    confidence. Points at the named fragile link when one exists, else the
+  //    most-weighted factor; omitted when neither is renderable (mirrors the
+  //    next-step fallback ladder, so no new required input is introduced).
+  const validation = describeValidationPriority(topEdge != null, topDriverLabel);
+  if (validation !== null) {
+    sentences.push(validation);
+  }
+
+  // Robustness caveat — a conditional aside between beats 5 and 6 (not one of
+  //    the numbered rhetorical beats): prefer the raw fragile signal over the
+  //    projected band; suppress confident stability copy on near-tie / raw-fragile.
   if (nearTie || rawFragile) {
     sentences.push(
       'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
@@ -1661,8 +1710,8 @@ function composeExplainResults(
     }
   }
 
-  // 5. A concrete re-run Propose on EVERY path — previously the near-tie /
-  //    fragile path emitted no next step at all. Point the next step at whatever
+  // 6. Next action — a concrete re-run Propose on EVERY path; previously the
+  //    near-tie / fragile path emitted no next step at all. Point the next step at whatever
   //    the body emphasised: when a fragile link was NAMED above
   //    (describeFragileAssumption fires on any path with a renderable edge),
   //    strengthen THAT link so priorities don't read split ("check the link …
