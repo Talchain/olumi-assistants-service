@@ -57,7 +57,11 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import { buildTurnContext, loadMostRecentPendingActions } from '../build-turn-context.js';
+import {
+  buildTurnContext,
+  loadMostRecentPendingActions,
+  loadPersistedGraphStrict,
+} from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
@@ -995,6 +999,159 @@ function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnve
   };
 }
 
+/**
+ * V5-PERSIST-FIX-01 (H1) — merge the applied edit back onto the
+ * server-authoritative persisted graph shape before persistence.
+ *
+ * Why this exists: `GraphV3.safeParse` strips top-level `goal_node_id`
+ * and `options[]` (neither is declared on GraphV3), and `NodeV3` strips
+ * undeclared `node.data`. The edit pipeline parses its ingress through
+ * GraphV3, so `appliedGraph` can NEVER carry those fields — committing
+ * it wholesale replaced the rich draft-persisted `scenarios.graph` with
+ * a stripped `{nodes, edges}` shape. Fleet evidence at investigation
+ * time: 43/43 scenarios with an applied edit_graph fact had lost BOTH
+ * `goal_node_id` and `options[]`.
+ *
+ * Merge base precedence (deliberate, per V5-PERSIST-FIX-01):
+ *   1. The PERSISTED `scenarios.graph` (pre-edit) is the base. NOT the
+ *      ingress echo: the real DGAI echo cannot carry `options[]` /
+ *      `goal_node_id` (the draft wire block omits them), so an
+ *      ingress-base merge would pass synthetic tests while live edits
+ *      still lose both fields. This is the one caveat of the D1
+ *      `apply-graph-mutation.ts` merge-back we must NOT copy.
+ *   2. `appliedGraph` wins for what the edit actually changed: `nodes`
+ *      and `edges` (every edit_graph operation — add/update/remove
+ *      node/edge, incl. the constraint shortcut which writes
+ *      `goal_constraints` onto the goal NODE — lives inside those two
+ *      arrays). Top-level `goal_constraints` is NOT overlaid: no edit
+ *      operation writes it, so the base keeps its own (D1
+ *      `add_constraint` owns that field).
+ *   3. Everything else top-level (`goal_node_id`, `options[]`, `meta`,
+ *      `schema_version`, draft-pipeline fields, …) is preserved from
+ *      the base verbatim. Nothing is invented.
+ *   4. Option deletion is honoured, not resurrected: an `options[]`
+ *      entry is dropped IFF its id was a node id in the base graph and
+ *      that node is absent from `appliedGraph.nodes` (i.e. this edit
+ *      provably removed the option node). Entries whose ids never
+ *      matched a base node are preserved (fail-open to preservation).
+ *
+ * Fallback to the RAW ingress graph (the D1-style merge) covers the two
+ * cases the dispatcher legitimately passes — NOT a degraded read. A
+ * degraded/unavailable persisted read FAILS CLOSED upstream in
+ * `dispatchEditGraph` (the strict loader throws → retryable 500) and
+ * never reaches this helper, so "unavailable" is deliberately absent here:
+ *   - `persistedBase === null` — a GENUINELY-empty `scenarios.graph` (the
+ *     strict read succeeded and returned no graph). There is nothing to
+ *     lose; the ingress-merged graph is the first valid write.
+ *   - non-null but structurally unusable (not an object / missing
+ *     nodes+edges arrays) — a malformed-but-READABLE persisted graph. We
+ *     deliberately HEAL FORWARD via the ingress base (commit a valid
+ *     shape) rather than fail closed: a 500 on permanently-malformed data
+ *     would trap the user with no in-app recovery, and a malformed graph
+ *     holds no parseable rich top-level fields to preserve, so this is not
+ *     the H1 corruption class (that shape keeps both arrays → is "usable"
+ *     → merged onto, not replaced). This sub-case is logged at WARN.
+ *     (A future tightening could fail closed here too for maximum
+ *     fail-closed semantics — deferred; see Codex review note.)
+ * Either way the merge is strictly better than the pre-fix stripped
+ * commit and only loses fields the server never validly had.
+ *
+ * Nested `node.data` (e.g. `data.interventions`) is NOT addressed here:
+ * node content is owned by `appliedGraph`, whose nodes were already
+ * NodeV3-parsed at ingress. That remains a prompt/schema-lane issue.
+ *
+ * @internal Exported for testing.
+ */
+export function mergeAppliedGraphForPersistence(args: {
+  readonly appliedGraph: GraphV3T;
+  /**
+   * Raw persisted `scenarios.graph` (pre-edit), or null for a
+   * GENUINELY-empty scenario. A degraded read never reaches here — it
+   * fails closed in `dispatchEditGraph` before this helper is called.
+   */
+  readonly persistedBase: unknown;
+  /** Raw request/reloaded ingress graph — fallback base only. */
+  readonly ingressBase: GraphStateIngress;
+  readonly requestId: string;
+  readonly scenarioId: string;
+}): Record<string, unknown> {
+  const { appliedGraph, persistedBase, ingressBase, requestId, scenarioId } = args;
+  const persistedUsable =
+    persistedBase !== null &&
+    persistedBase !== undefined &&
+    typeof persistedBase === 'object' &&
+    !Array.isArray(persistedBase) &&
+    Array.isArray((persistedBase as Record<string, unknown>).nodes) &&
+    Array.isArray((persistedBase as Record<string, unknown>).edges);
+  // A non-null persisted base that is NOT usable = a malformed-but-readable
+  // scenarios.graph. We heal forward via ingress (see docstring) but flag it
+  // loudly so the anomaly is never silent — it should be vanishingly rare.
+  const persistedMalformed =
+    persistedBase !== null && persistedBase !== undefined && !persistedUsable;
+  const base = (
+    persistedUsable ? persistedBase : ingressBase
+  ) as Record<string, unknown>;
+
+  const merged: Record<string, unknown> = {
+    ...base,
+    nodes: appliedGraph.nodes,
+    edges: appliedGraph.edges,
+  };
+
+  // Precedence rule 4 — drop options[] entries provably deleted by THIS
+  // edit (id was a base node, node gone from the applied graph). All
+  // other entries are preserved byte-for-byte.
+  const baseOptions = base.options;
+  let optionsDropped = 0;
+  if (Array.isArray(baseOptions)) {
+    const baseNodeIds = new Set(
+      (base.nodes as unknown[])
+        .map((n) => (n && typeof n === 'object' ? (n as { id?: unknown }).id : undefined))
+        .filter((id): id is string => typeof id === 'string'),
+    );
+    const appliedNodeIds = new Set(appliedGraph.nodes.map((n) => n.id));
+    const survivors = baseOptions.filter((opt) => {
+      const id =
+        opt && typeof opt === 'object' ? (opt as { id?: unknown }).id : undefined;
+      if (typeof id !== 'string') return true;
+      return !(baseNodeIds.has(id) && !appliedNodeIds.has(id));
+    });
+    optionsDropped = baseOptions.length - survivors.length;
+    if (optionsDropped > 0) {
+      merged.options = survivors;
+    }
+  }
+
+  const logPayload = {
+    event: 'v5.edit_graph.persist_merge_back',
+    request_id: requestId,
+    scenario_id: scenarioId,
+    base: persistedUsable
+      ? 'persisted'
+      : persistedMalformed
+        ? 'ingress_fallback_malformed_base'
+        : 'ingress_fallback_genuine_empty',
+    base_has_goal_node_id: typeof base.goal_node_id === 'string',
+    base_options_count: Array.isArray(baseOptions) ? baseOptions.length : null,
+    options_dropped_as_deleted: optionsDropped,
+    applied_node_count: appliedGraph.nodes.length,
+    applied_edge_count: appliedGraph.edges.length,
+  };
+  if (persistedMalformed) {
+    log.warn(
+      logPayload,
+      'V5 edit_graph — persisted scenarios.graph was non-null but structurally unusable; healing forward via the ingress base (no rich top-level fields recoverable from a malformed graph)',
+    );
+  } else {
+    log.info(
+      logPayload,
+      'V5 edit_graph — applied mutation merged onto persisted graph shape for persistence',
+    );
+  }
+
+  return merged;
+}
+
 export async function dispatchEditGraph(
   params: DispatchEditGraphParams,
 ): Promise<DispatchEditGraphResult> {
@@ -1389,9 +1546,67 @@ export async function dispatchEditGraph(
   // On error the catch branch synthesises a `derivation_failed` verdict
   // and leaves `priorFactsForRecovery` empty so the no-op recovery falls
   // back to the bland fallback rather than re-throwing.
-  const persistedPostEditGraph = successfulAppliedMutation
-    ? editResult.appliedGraph
-    : graphState;
+  // V5-PERSIST-FIX-01 (H1): for an applied mutation `persistedPostEditGraph`
+  // is the MERGED graph — the applied nodes/edges laid onto the
+  // server-authoritative persisted base. It is BOTH what gets persisted
+  // (`graphForCommit` below) AND what every current-graph-hash in this
+  // dispatch derives from (freshness, recovery pending refresh); all three
+  // must agree with what the NEXT turn computes from `scenarios.graph`.
+  //
+  // Codex P0 — the base is resolved via the STRICT persisted loader, NOT
+  // buildTurnContext's `persistedGraph`. buildTurnContext swallows
+  // `scenarios.*` read failures into `graph: null`, so relying on it cannot
+  // distinguish a genuinely-empty scenario from a transient/degraded read —
+  // and committing the ingress fallback on a degraded read would overwrite a
+  // rich persisted graph with the lossy client echo (the exact corruption
+  // this fix removes). `loadPersistedGraphStrict` returns the graph, returns
+  // null ONLY for a genuinely-empty `scenarios.graph`, and THROWS on a
+  // degraded read:
+  //   - graph present  → merge onto it (server-only top-level fields survive).
+  //   - null (genuine) → ingress-base fallback: the no-persisted-graph case
+  //     (e.g. a client that sent graph_state for a never-persisted scenario);
+  //     there is nothing to lose, and the edit must still persist.
+  //   - degraded read  → FAIL CLOSED: refuse to persist (throw → route maps it
+  //     to a retryable 500) rather than risk corrupting canonical state. A
+  //     transient blip fails the edit (retryable) instead of silently
+  //     overwriting `scenarios.graph`; mirrors route-v2's no-graph_state
+  //     reload-failure handling, which also refuses to proceed. Throwing here
+  //     also fails fast — it avoids buildTurnContext's extra read against the
+  //     already-degraded store — while the outer assembly `finally` still
+  //     emits the single edit turn event.
+  let persistedPostEditGraph: unknown = graphState;
+  if (successfulAppliedMutation) {
+    let strictBase: unknown;
+    try {
+      strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+    } catch (err) {
+      log.warn(
+        {
+          event: 'v5.edit_graph.persist_base_unavailable',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 edit_graph — persisted merge base unavailable (degraded read); failing closed to avoid overwriting canonical scenarios.graph with the lossy ingress echo',
+      );
+      throw new Error(
+        'edit_graph: refusing to persist applied mutation — persisted merge base unavailable (degraded read)',
+      );
+    }
+    persistedPostEditGraph = mergeAppliedGraphForPersistence({
+      appliedGraph: editResult.appliedGraph!,
+      // null here = a GENUINELY empty scenarios.graph (the strict read
+      // succeeded); merge() then uses the ingress fallback base. A degraded
+      // read never reaches this line — it threw above.
+      persistedBase: strictBase ?? null,
+      ingressBase: graphState,
+      requestId,
+      scenarioId: payload.scenario_id,
+    });
+  }
 
   let freshness: FreshnessDerivation;
   let priorFactsForRecovery: readonly HandlerFact[] = [];
@@ -1413,6 +1628,9 @@ export async function dispatchEditGraph(
   try {
     const turnContext = await buildTurnContext(payload, requestId);
     priorFactsForRecovery = turnContext.prior_facts;
+    // V5-PERSIST-FIX-01: the merge base was already resolved above via the
+    // strict persisted read (so a degraded read fails closed). buildTurnContext
+    // is used here only for prior_facts / pending actions — NOT for the base.
     const currentGraphHash = computeAnalysisAffectingGraphHash(
       persistedPostEditGraph as GraphStateIngress | null | undefined,
     );
@@ -1960,8 +2178,15 @@ export async function dispatchEditGraph(
     // The rich/generic fact-builders use the same predicate, so a
     // graph cannot persist without a receipt fact and a receipt
     // fact cannot exist without persistable graph state.
+    // V5-PERSIST-FIX-01 (H1): persist the MERGED graph — the applied
+    // nodes/edges on the persisted-base shape — not the GraphV3-stripped
+    // `appliedGraph`. `persistedPostEditGraph` is that merge for an
+    // applied mutation (see its construction above); committing the
+    // same object every hash in this dispatch derived from keeps
+    // wire freshness, pending-action hashes and the next turn's
+    // persisted-graph hash in lockstep.
     const graphForCommit = successfulAppliedMutation
-      ? editResult.appliedGraph ?? undefined
+      ? persistedPostEditGraph ?? undefined
       : undefined;
     // V5 P0 — when the early-emit intercept or the no-op recovery
     // produced a refreshed `proposed_concept` pending action, persist
@@ -2044,8 +2269,15 @@ export async function dispatchEditGraph(
       response,
       commitPerformed: true,
       analysisReady,
-      // V5 H5 (Codex round-2 P1): returned `graph` matches what
-      // was actually persisted. Null when no successful applied
+      // V5 H5 (Codex round-2 P1, amended by V5-PERSIST-FIX-01): the
+      // returned `graph` is the typed applied graph whose nodes/edges
+      // are IDENTICAL to what was persisted; the persisted object is
+      // the merged superset that additionally preserves
+      // server-authoritative top-level fields (goal_node_id,
+      // options[], …). Route-v2 consumes this only for egress
+      // label-resolution and the diagnostic-trace hash — both read
+      // nodes/edges — so the typed value is kept rather than casting
+      // the raw merged object. Null when no successful applied
       // mutation, so route-v2 doesn't stamp a non-persisted graph
       // onto the wire envelope.
       graph: successfulAppliedMutation ? editResult.appliedGraph ?? null : null,

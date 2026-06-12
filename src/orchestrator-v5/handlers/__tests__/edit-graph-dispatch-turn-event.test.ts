@@ -22,6 +22,19 @@ vi.mock('../../commit.js', () => ({
 vi.mock('../../../adapters/llm/router.js', () => ({
   getAdapter: vi.fn().mockReturnValue({}),
 }));
+
+// V5-PERSIST-FIX-01: stub ONLY the strict persisted read so applied
+// mutations do not fail closed against the unconfigured test store.
+// `null` = a genuinely-empty scenarios.graph → ingress-base fallback merge,
+// i.e. the same (request-graph) base these tests used before the fix.
+// Everything else in build-turn-context stays real.
+vi.mock('../../build-turn-context.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
+  return {
+    ...actual,
+    loadPersistedGraphStrict: vi.fn().mockResolvedValue(null),
+  };
+});
 vi.mock('../../../adapters/llm/prompt-loader.js', () => ({
   getSystemPromptMeta: vi.fn(() => ({
     taskId: 'edit_graph',

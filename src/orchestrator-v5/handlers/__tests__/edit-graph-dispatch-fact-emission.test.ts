@@ -31,6 +31,19 @@ vi.mock('../../../adapters/llm/router.js', () => ({
   getAdapter: vi.fn().mockReturnValue({}),
 }));
 
+// V5-PERSIST-FIX-01: stub ONLY the strict persisted read so applied
+// mutations do not fail closed against the unconfigured test store.
+// `null` = a genuinely-empty scenarios.graph → ingress-base fallback merge,
+// i.e. the same (request-graph) base these tests used before the fix.
+// Everything else in build-turn-context stays real.
+vi.mock('../../build-turn-context.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
+  return {
+    ...actual,
+    loadPersistedGraphStrict: vi.fn().mockResolvedValue(null),
+  };
+});
+
 // Default behaviour: pass through to the real fact-builder module.
 // Individual tests that need to force a rich-builder throw replace
 // `buildEditGraphHandlerFact` via the mock instance below; tests that
@@ -396,7 +409,14 @@ describe('dispatchEditGraph — DL-7 PR B fact emission', () => {
 
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0]!;
       // PR B does NOT regress the R-001 graph-persistence contract.
-      expect(metadata.graph).toBe(editResult.appliedGraph);
+      // V5-PERSIST-FIX-01 amendment: the committed object is the applied
+      // mutation merged onto the persisted-base shape (ingress fallback
+      // in this suite's degraded context), so the contract is node/edge
+      // content threading — not object identity. Merge semantics are
+      // pinned in edit-graph-dispatch-persist-merge-back.test.ts.
+      const committed = metadata.graph as { nodes: unknown; edges: unknown };
+      expect(committed.nodes).toBe(editResult.appliedGraph!.nodes);
+      expect(committed.edges).toBe(editResult.appliedGraph!.edges);
     });
 
     it('B11 rich-builder throw → generic fallback fact emitted (war-room must-fix)', async () => {
