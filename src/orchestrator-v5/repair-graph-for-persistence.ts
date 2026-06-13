@@ -38,6 +38,22 @@ import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 /** Fixed error-class taxonomy for the redacted fallback diagnostic (0.13c-1 doctrine). */
 const KNOWN_ERROR_NAMES = new Set(['TypeError', 'RangeError', 'SyntaxError', 'Error']);
 
+/** Redacted error class — never the message (which could carry values/paths). */
+function errorClass(err: unknown): string {
+  return err instanceof Error
+    ? (KNOWN_ERROR_NAMES.has(err.name) ? err.name : 'unknown_error')
+    : 'non_error_throw';
+}
+
+/** Best-effort redacted warn that itself never throws — observability must never affect the flow. */
+function safeWarn(payload: Record<string, unknown>, msg: string): void {
+  try {
+    log.warn(payload, msg);
+  } catch {
+    /* observability is best-effort; never throw from a diagnostic */
+  }
+}
+
 export interface PersistRepairContext {
   readonly scenarioId?: string;
   /** Per-turn correlation id (turn_id doubles as request_id in V5). */
@@ -52,17 +68,45 @@ export interface PersistRepairContext {
  * is present and a duplicate observed-root intercept was found, otherwise the
  * original reference unchanged. Reuses the #263 `repairObservedRootIntercepts`
  * predicate — the predicate is never re-implemented here.
+ *
+ * Repair success is DECOUPLED from telemetry: once a duplicate is removed, the
+ * repaired clone is returned even if the summary telemetry/logging throws. An
+ * observability failure must never cause a known-dirty graph to be persisted.
+ * Only an actual clone/repair failure (unreachable for DB-JSON graphs) falls back
+ * to the unrepaired graph.
  */
 export function repairGraphForPersistence<T>(graph: T, ctx: PersistRepairContext = {}): T {
   // Graph-absent no-op: nothing to persist/repair.
   if (graph === undefined || graph === null) return graph;
+
+  let clone: T;
+  let repairs: ReturnType<typeof repairObservedRootIntercepts>;
   try {
-    const clone = JSON.parse(JSON.stringify(graph)) as T;
-    const repairs = repairObservedRootIntercepts(clone, ctx.turnId);
-    if (repairs.length === 0) return graph; // clean → persist the original, unchanged
-    // Redacted telemetry — IDs + counts only; never observed values/magnitudes or
-    // graph content. (`repairObservedRootIntercepts` also logs one redacted per-node
-    // event with node_id only.)
+    clone = JSON.parse(JSON.stringify(graph)) as T;
+    repairs = repairObservedRootIntercepts(clone, ctx.turnId);
+  } catch (err) {
+    // Could not clone/repair (unreachable for DB-JSON — JSON.stringify only throws on
+    // BigInt/circular). Persist the unrepaired graph; never fail the commit. Redacted.
+    safeWarn(
+      {
+        event: 'v5.graph_persist.intercept_repair_failed',
+        scenario_id: ctx.scenarioId,
+        turn_id: ctx.turnId,
+        reason: 'clone_or_repair_failed',
+        error_name: errorClass(err),
+      },
+      '[commit] persist-site intercept repair failed; persisting the unrepaired graph',
+    );
+    return graph;
+  }
+
+  if (repairs.length === 0) return graph; // clean → persist the original, unchanged
+
+  // Repair SUCCEEDED. Telemetry is best-effort and MUST NOT discard the repair — emit
+  // in its own guard so an observability failure cannot persist the dirty graph.
+  // Redacted: IDs + counts only; never observed values/magnitudes or graph content.
+  // (`repairObservedRootIntercepts` also logs one redacted per-node event, node_id only.)
+  try {
     emit(TelemetryEvents.V5GraphPersistInterceptRepair, {
       scenario_id: ctx.scenarioId,
       turn_id: ctx.turnId,
@@ -71,22 +115,17 @@ export function repairGraphForPersistence<T>(graph: T, ctx: PersistRepairContext
       corrected_count: repairs.length,
       node_ids: repairs.map((r) => r.node_id),
     });
-    return clone;
-  } catch (err) {
-    // Non-blocking fallback — never fail the commit. Redacted: fixed reason + error
-    // class only, never err.message (which could carry values/paths).
-    log.warn(
+  } catch (emitErr) {
+    safeWarn(
       {
-        event: 'v5.graph_persist.intercept_repair_failed',
+        event: 'v5.graph_persist.intercept_repair_telemetry_failed',
         scenario_id: ctx.scenarioId,
         turn_id: ctx.turnId,
-        reason: 'clone_or_repair_failed',
-        error_name: err instanceof Error
-          ? (KNOWN_ERROR_NAMES.has(err.name) ? err.name : 'unknown_error')
-          : 'non_error_throw',
+        reason: 'telemetry_emit_failed',
+        error_name: errorClass(emitErr),
       },
-      '[commit] persist-site intercept repair failed; persisting the unrepaired graph',
+      '[commit] persist-site intercept repair telemetry failed; the graph WAS repaired',
     );
-    return graph;
   }
+  return clone; // ALWAYS the repaired clone once repairs > 0
 }

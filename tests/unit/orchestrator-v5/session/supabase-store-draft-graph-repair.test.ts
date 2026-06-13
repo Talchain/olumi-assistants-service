@@ -41,10 +41,10 @@ describe('SupabaseSessionStore.storeDraftGraph — persist-site intercept repair
     expect((dirty.nodes[0] as Record<string, unknown>).intercept).toBe(0.5);     // input not mutated (clone)
   });
 
-  it('no-ops on absent graph (passes p_graph through unchanged)', async () => {
+  it('no-ops on absent graph (coerces p_graph to null → scenarios.graph unchanged)', async () => {
     const { store, rpc } = makeStore();
     await store.storeDraftGraph('sc-2', undefined);
-    expect((rpc.mock.calls[0]![1] as { p_graph: unknown }).p_graph).toBeUndefined();
+    expect((rpc.mock.calls[0]![1] as { p_graph: unknown }).p_graph).toBeNull();
   });
 
   it('passes a clean graph through unchanged', async () => {

@@ -363,7 +363,9 @@ export class SupabaseSessionStore implements SessionStore {
     // method is reserved for out-of-band admin/migration use — exactly the caller
     // class the persist-site repair must defend against. Repairing here keeps the
     // coverage airtight if it is ever re-wired. No-op when no graph is supplied.
-    const p_graph = repairGraphForPersistence(graph, { scenarioId });
+    // `?? null` mirrors the live append path (write.graph ?? null): a null p_graph
+    // leaves scenarios.graph unchanged, so an absent graph is a true no-op write.
+    const p_graph = repairGraphForPersistence(graph, { scenarioId }) ?? null;
     const { error } = await this.client.rpc('store_draft_graph', {
       p_scenario_id: scenarioId,
       p_graph,

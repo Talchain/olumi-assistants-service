@@ -150,4 +150,41 @@ describe('repairGraphForPersistence (Track S 0.13c-4)', () => {
     expect(p).not.toHaveProperty('message');
     expect(p).not.toHaveProperty('err');
   });
+
+  it('telemetry failure does NOT discard a successful repair (emit throws → graph still repaired, redacted fallback)', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    // A throwing test sink makes emit() throw (it invokes the sink before the guarded
+    // Datadog section). The repair must survive — the dirty graph must NOT be persisted.
+    setTestSink(() => {
+      throw new Error('sink boom');
+    });
+    const g: AnyGraph = {
+      nodes: [{ id: 'fac_dup', kind: 'factor', label: 'D', observed_state: { value: 0.5 }, intercept: 0.5 }],
+      edges: [],
+    };
+    let out!: AnyGraph;
+    try {
+      out = repairGraphForPersistence(g, { scenarioId: 'sc', turnId: 't', source: 'set_factor_value' });
+    } finally {
+      setTestSink(null);
+    }
+    // repair preserved despite the telemetry failure
+    expect('intercept' in nodeById(out, 'fac_dup')).toBe(false);
+    // a REDACTED fallback diagnostic was logged
+    const tf = warn.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((p) => p?.event === 'v5.graph_persist.intercept_repair_telemetry_failed');
+    expect(tf).toHaveLength(1);
+    const p = tf[0]!;
+    expect(p).toMatchObject({
+      event: 'v5.graph_persist.intercept_repair_telemetry_failed',
+      scenario_id: 'sc',
+      turn_id: 't',
+      reason: 'telemetry_emit_failed',
+      error_name: 'Error',
+    });
+    expect(Object.keys(p).sort()).toEqual(['error_name', 'event', 'reason', 'scenario_id', 'turn_id'].sort());
+    expect(p).not.toHaveProperty('message');
+    expect(p).not.toHaveProperty('err');
+  });
 });
