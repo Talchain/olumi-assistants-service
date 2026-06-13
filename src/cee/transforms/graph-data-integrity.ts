@@ -496,8 +496,15 @@ const INTERCEPT_DUPLICATE_EPSILON = 1e-9;
  * excluded as in gap-detection.ts.
  *
  * Mutates v3Body.nodes in place.
+ *
+ * Exported (Track S 0.13c-1) so the `run_analysis` load-time guard can apply
+ * the SAME repair to the in-memory graph it sends to PLoT — the analysis path
+ * loads `scenarios.graph` raw and does not run the CEE unified pipeline, so a
+ * legacy graph would otherwise still be evaluated at 2x baseline. Reusing this
+ * function (rather than re-implementing the doctrine) keeps the draft-path and
+ * analysis-path repairs byte-for-byte identical.
  */
-function repairObservedRootIntercepts(v3Body: any, requestId?: string): InterceptPopulationRepair[] {
+export function repairObservedRootIntercepts(v3Body: any, requestId?: string): InterceptPopulationRepair[] {
   const repairs: InterceptPopulationRepair[] = [];
 
   const nodes: any[] = Array.isArray(v3Body?.nodes) ? v3Body.nodes : [];

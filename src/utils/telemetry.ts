@@ -525,6 +525,9 @@ export const TelemetryEvents = {
   // traffic without the header does not receive `_timings`.
   V5TurnStageTimings: "v5.turn_executor.stage_timings",
   V5RunAnalysisTimings: "v5.run_analysis.timings",
+  // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
+  // Redacted: corrected_count + node IDs only, no observed magnitudes.
+  V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
   CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
 
   // V5 pending-action lifecycle. Fired at the appropriate point in the
