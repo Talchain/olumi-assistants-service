@@ -100,7 +100,8 @@ describe('guardAnalysisGraphIntercepts — #263 repair semantics on a clone', ()
     };
     const { graph, repairs } = guardAnalysisGraphIntercepts(clean);
     expect(repairs).toHaveLength(0);
-    expect(graph.nodes).toHaveLength(1);
+    // The clone is structurally identical to the input — nothing perturbed.
+    expect(graph).toEqual(clean);
   });
 
   it('7. emits a redacted, queryable telemetry event (corrected_count + IDs only, no magnitudes)', () => {
@@ -194,5 +195,54 @@ describe('run_analysis handler wiring (Track S 0.13c-1)', () => {
     // keep the legacy intercept (durable cleanup is the later migration).
     expect(graphNode(snapshot.graph, 'fac_root_dup').intercept).toBe(0.5);
     expect(graphNode(snapshot.rawPersistedGraph, 'fac_root_dup').intercept).toBe(0.5);
+  });
+
+  it('true-negative: clean graph → guard does not fire (0 corrections, no telemetry), PLoT gets the graph unchanged, run_analysis succeeds', async () => {
+    // Clean observed root: no intercept at all → nothing to repair. Proves the
+    // guard discriminates — a valid/current graph passes through untouched and
+    // emits no correction telemetry (the false-positive direction).
+    const cleanGraph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Goal' },
+        { id: 'fac_clean', kind: 'factor', label: 'Clean', observed_state: { value: 0.5 } },
+      ],
+      edges: [],
+    };
+    const snapshot = {
+      graph: JSON.parse(JSON.stringify(cleanGraph)),
+      options: [{ id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { fac_clean: 1 } }],
+      goal_node_id: 'goal_1',
+      rawPersistedGraph: JSON.parse(JSON.stringify(cleanGraph)),
+    } as RunAnalysisScenarioSnapshot;
+
+    const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+    setTestSink((event, data) => events.push({ event, data }));
+    const runMock = vi.fn(
+      async () => JSON.parse(JSON.stringify(minimalFixture)) as V2RunResponseEnvelope,
+    );
+    const plotClient = {
+      run: runMock,
+      validatePatch: vi.fn().mockResolvedValue({}),
+    } as unknown as PLoTClient;
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: async () => snapshot,
+    });
+
+    let outcome: unknown;
+    try {
+      outcome = await handler(makeInvocation('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'));
+    } finally {
+      setTestSink(null);
+    }
+
+    // run_analysis succeeds normally on a clean graph.
+    expect(outcome).toBeTruthy();
+    expect(runMock).toHaveBeenCalledTimes(1);
+    // Guard made zero corrections → NO telemetry event emitted (true negative).
+    expect(events.filter((e) => e.event === 'v5.run_analysis.intercept_guard')).toHaveLength(0);
+    // PLoT received the clean graph structurally UNCHANGED (no field perturbation).
+    const sentPayload = (runMock.mock.calls as Array<unknown[]>)[0]![0] as { graph: unknown };
+    expect(sentPayload.graph).toEqual(cleanGraph);
   });
 });
