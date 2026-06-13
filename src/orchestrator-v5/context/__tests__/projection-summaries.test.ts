@@ -73,6 +73,49 @@ describe('buildAnalysisProjectionSummary', () => {
     // entirely. The field MUST NOT be present.
     expect('staleness_reason' in (summary as object)).toBe(false);
   });
+
+  // V5-LANE-B-STRUCTURAL-01: fragile_edges projected for the explain_results
+  // validation beat — pass-through labels only, pre-filtered to renderable.
+  it('projects fragile_edges as label pass-through (F.6 — no derivation)', () => {
+    const summary = buildAnalysisProjectionSummary({
+      ...ANALYSIS,
+      fragile_edges: [
+        { from_label: 'Local Senior Hire Programme', to_label: 'Q3 Roadmap Delivery Capacity' },
+      ],
+    });
+    expect(summary?.fragile_edges).toEqual([
+      { from_label: 'Local Senior Hire Programme', to_label: 'Q3 Roadmap Delivery Capacity' },
+    ]);
+  });
+
+  it('drops non-renderable fragile edges (blank endpoint label on either side)', () => {
+    const summary = buildAnalysisProjectionSummary({
+      ...ANALYSIS,
+      fragile_edges: [
+        { from_label: '', to_label: 'Q3 Roadmap Delivery Capacity' },
+        { from_label: 'Local Senior Hire Programme', to_label: '   ' },
+        { from_label: 'Kept From', to_label: 'Kept To' },
+      ],
+    });
+    expect(summary?.fragile_edges).toEqual([
+      { from_label: 'Kept From', to_label: 'Kept To' },
+    ]);
+  });
+
+  it('empty fragile_edges projects as an empty array', () => {
+    expect(buildAnalysisProjectionSummary(ANALYSIS)?.fragile_edges).toEqual([]);
+  });
+
+  it('defends against a producer that omits fragile_edges entirely (→ empty array, no throw)', () => {
+    // The field is typed non-optional, but chip-click-dispatch hand-builds
+    // the analysis object; the `?. ?? []` guard keeps projection from
+    // throwing if a future producer drops it. Cast to reach the path.
+    const { fragile_edges: _omitted, ...withoutFragileEdges } = ANALYSIS;
+    const summary = buildAnalysisProjectionSummary(
+      withoutFragileEdges as unknown as ContextPackAnalysis,
+    );
+    expect(summary?.fragile_edges).toEqual([]);
+  });
 });
 
 describe('buildStructureProjectionSummary', () => {

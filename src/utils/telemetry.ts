@@ -920,6 +920,19 @@ export const TelemetryEvents = {
   // present. Never persisted on the handler fact and never surfaced to the
   // user. Payload: { handler_id, evidence_used, cited_fields }.
   V5ExplanationEvidence: "v5.explanation.evidence",
+  // V5ExplanationValidationBeat — mechanism record for the "what to
+  // validate" beat on the explain_results execute path
+  // (V5-LANE-B-STRUCTURAL-01). Emitted once per execute-verdict
+  // explain_results turn so live smoke can assert the mechanism, not just
+  // the surface text. Payload: { handler_id, mechanism: 'appended' |
+  // 'dedup_skipped' | 'omitted', variant?: 'link' | 'driver',
+  // from_label?, to_label?, driver_label?, omission_reason? }.
+  // The label fields follow the V5ExplanationEvidence precedent above:
+  // observability-only display labels, never persisted on the handler fact
+  // (the generated fact schema is .strict(); a persisted field is a
+  // @talchain/schemas follow-up blocked behind V5-CI-01) and never
+  // surfaced to the user from here.
+  V5ExplanationValidationBeat: "v5.explanation.validation_beat",
   // V5UnexpectedExplanationPayload — emitted when a mutation/computation
   // handler (run_analysis, draft_graph, edit_graph) carries a stray
   // `explanation` field. The field is silently dropped; the user is not

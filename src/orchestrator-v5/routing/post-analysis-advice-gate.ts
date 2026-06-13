@@ -68,6 +68,10 @@ import {
   type RawRobustnessSignals,
 } from '../coaching/robustness-honesty.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import {
+  describeValidationPriority,
+  isRenderableValidationEdge,
+} from '../coaching/validation-priority.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -852,12 +856,14 @@ function hasRenderableSecondDriver(analysis: AdviceGateAnalysis): boolean {
 /**
  * Per-edge renderability check. Both endpoint labels are interpolated
  * into prose (`"the link from <from> to <to>"`); a blank label on
- * either side would emit a malformed sentence.
+ * either side would emit a malformed sentence. Delegates to the shared
+ * predicate in `coaching/validation-priority.ts` so the advice-gate and
+ * handler-projection surfaces can never drift on what "renderable" means.
  */
 function isRenderableFragileEdge(
   edge: AdviceGateAnalysisFragileEdge,
 ): boolean {
-  return hasNonEmptyLabel(edge.from_label) && hasNonEmptyLabel(edge.to_label);
+  return isRenderableValidationEdge(edge);
 }
 
 /**
@@ -1280,43 +1286,12 @@ function interpretationNextStep(
     : RERUN_INFLUENTIAL_NEXT_STEP;
 }
 
-/**
- * The "what to validate" sentence for `explain_results` — the single piece of
- * evidence that would most improve (or revise) confidence in the current lead,
- * stated as an insight-led priority rather than generic "gather more data"
- * filler. Distinct rhetorical job from its two neighbours: it states the
- * validation PRIORITY and why it matters, where {@link describeFragileAssumption}
- * DIAGNOSES the fragile link and {@link interpretationNextStep} is the re-run
- * ACTION.
- *
- * Specific by construction, from existing signals only (no new metric, no
- * invented evidence, no causal/sign claim — F.6):
- *   - when a fragile link was NAMED above (`hasNamedFragileEdge`), point at
- *     real-world support for THAT link — it is the assumption most likely to
- *     change the outcome, so it is also the highest-value thing to validate.
- *     References "that link" rather than re-quoting the endpoints, so it neither
- *     paraphrases the diagnosis sentence nor risks a second label render;
- *   - otherwise name the most-weighted factor (the projection's top driver),
- *     quoted so "and"-containing labels stay readable and the egress ID/decimal
- *     guards hold by construction.
- *
- * Returns null when neither signal is renderable, so the composer omits the
- * sentence rather than emitting generic copy. Mirrors {@link interpretationNextStep}'s
- * fallback ladder exactly, so it never introduces a NEW required input — the
- * gate's `needs_fragile_edges` stays false for `explain_results_free_text`.
- */
-const VALIDATE_LINK_EVIDENCE =
-  'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome.';
-
-function describeValidationPriority(
-  hasNamedFragileEdge: boolean,
-  topDriverLabel: string | null,
-): string | null {
-  if (hasNamedFragileEdge) return VALIDATE_LINK_EVIDENCE;
-  return topDriverLabel !== null
-    ? `The evidence that would most improve confidence is firmer support for ${quoteLabel(topDriverLabel)}, since it carries the most weight in this result.`
-    : null;
-}
+// The "what to validate" sentence (beat 5) now lives in
+// `coaching/validation-priority.ts` (shared with the LLM `explain_results`
+// handler path — V5-LANE-B-STRUCTURAL-01). `describeValidationPriority` is
+// imported above and used verbatim by `composeExplainResults`, so this
+// composer's output is byte-for-byte unchanged by the extraction. See the
+// shared module for the in-flow vs standalone variant distinction.
 
 function composeAdvice(
   leadingLabel: string,

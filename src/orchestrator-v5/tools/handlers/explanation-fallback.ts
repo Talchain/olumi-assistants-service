@@ -89,9 +89,18 @@ export function formatEdgeStrengthMagnitude(value: number): string {
 /**
  * `explain_results` happy-path fallback — analysis exists, Sonnet's
  * answer_text was unusable. Format the projection summary into prose.
+ *
+ * `validationBeatText` (V5-LANE-B-STRUCTURAL-01): the pre-composed
+ * "what to validate" sentence from `coaching/validation-priority.ts`,
+ * inserted before the closing nudge so the fallback carries the same beat
+ * as the Sonnet-valid path. The handler owns composing it (it also reports
+ * the mechanism); this composer only places it. No dedup is needed here —
+ * this deterministic narrative never states a validation priority itself.
+ * Null/absent → omitted (no-signal turns and legacy call sites).
  */
 export function composeExplainResultsFallback(
   projection: AnalysisProjectionSummary | undefined,
+  validationBeatText?: string | null,
 ): string {
   if (!projection || !projection.leading_option) {
     // Defensive — the handler should not reach this branch without a
@@ -164,6 +173,10 @@ export function composeExplainResultsFallback(
         `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
       );
     }
+  }
+
+  if (typeof validationBeatText === 'string' && validationBeatText.length > 0) {
+    sentences.push(validationBeatText);
   }
 
   sentences.push('Would you like to explore what would change this result?');
