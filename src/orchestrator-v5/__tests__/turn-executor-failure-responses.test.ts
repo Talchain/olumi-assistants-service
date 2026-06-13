@@ -370,11 +370,14 @@ describe('TurnExecutor — success path is unchanged', () => {
     });
 
     // After a successful run_analysis the chip-generator emits an
-    // "Explain the result" prompt chip plus a "What could change the
-    // outcome?" action chip with action_type='what_would_flip'. The
-    // action chip means a chip click invokes the handler
-    // deterministically and a pending action is persisted so a typed
-    // "yes" on the next turn resumes via the short-confirm pre-route.
+    // "Explain the result" action chip (action_type='explain_results') plus a
+    // "What could change the outcome?" action chip (action_type='what_would_flip').
+    // Both are executable: a chip click invokes the handler deterministically
+    // and a pending action is persisted so a typed "yes" on the next turn
+    // resumes via the short-confirm pre-route. (The explain chip became a
+    // deterministic action chip with the fresh-followup / chip-routeability
+    // work — `EXPLAIN_RESULTS_ACTION` carries `action_type: 'explain_results'`;
+    // it was previously a prompt-only chip with no action_type.)
     expect(result.response.suggested_actions.length).toBeGreaterThan(0);
     const labels = result.response.suggested_actions.map((c) => c.label);
     expect(labels).toContain('Explain the result');
@@ -385,7 +388,7 @@ describe('TurnExecutor — success path is unchanged', () => {
     const whatFlip = result.response.suggested_actions.find(
       (c) => c.label === 'What could change the outcome?',
     );
-    expect(explain?.action_type).toBeUndefined();
+    expect(explain?.action_type).toBe('explain_results');
     expect(whatFlip?.action_type).toBe('what_would_flip');
 
     // V5 Group 1 Task B: successful run_analysis now emits an analysis_result

@@ -378,11 +378,16 @@ describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailed
     }
   });
 
-  it('analysis_status=blocked → INTERNAL_ERROR with error_code=analysis_blocked', async () => {
-    // V5 alpha hardening Phase 2.3: blocked now maps to a dedicated
-    // cause_kind so composer + UI can differentiate "engine decided it
-    // cannot answer" from "engine crashed mid-run". See
-    // Docs/v5/v5-resilience-contract.md Part C.
+  it('analysis_status=blocked → recoverable clean direct_answer 200 (analysis_blocked ∈ RECOVERABLE_HANDLER_CAUSES)', async () => {
+    // V5 alpha hardening Phase 2.6 (War-Room locked, post staging-95d64582):
+    // `analysis_blocked` is a RECOVERABLE_HANDLER_CAUSES member, so an engine
+    // "cannot answer" verdict recovers as a clean direct_answer 200 (commit
+    // performed, no failure_type, no error block) rather than a fatal
+    // INTERNAL_ERROR envelope. See compose/recoverable-handler-causes.ts and
+    // Docs/v5/v5-resilience-contract.md Part C. (Updated from the Phase 2.3
+    // fatal-mapping expectation, which the Phase 2.6 reclassification made
+    // obsolete; the recoverable-cause matrix in
+    // turn-executor-recoverable-handler.test.ts already covers analysis_blocked.)
     const blockedResponse: V2RunResponseEnvelope = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'b' },
       results: [],
@@ -397,17 +402,17 @@ describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailed
       scenarioReader: async () => makeScenarioSnapshot(),
     });
 
-    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-blocked', {
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-blocked', {
       routingAdapter,
       handlerRegistry: registry,
     });
-    const block = response.blocks[0]!;
-    if (block.type === 'error') {
-      expect(block.details).toMatchObject({
-        failure_origin: 'handler',
-        error_code: 'analysis_blocked',
-      });
-    }
+    // Recoverable clean-200 shape (mirrors the canonical recoverable-cause
+    // assertions in turn-executor-recoverable-handler.test.ts): commit
+    // happened, no failure_type, a direct_answer turn, and NO error block.
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.turn_class).toBe('direct_answer');
+    expect(response.blocks).toEqual([]);
   });
 });
 
