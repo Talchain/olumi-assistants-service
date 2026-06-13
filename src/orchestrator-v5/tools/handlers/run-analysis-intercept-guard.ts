@@ -91,12 +91,18 @@ export function guardAnalysisGraphIntercepts<T = unknown>(
     return { graph: clone, repairs };
   } catch (err) {
     // Non-blocking fallback: never fail run_analysis because of the guard.
+    // Redacted diagnostic — fixed `reason` + error CLASS only. Never log
+    // `err.message`: it is arbitrary free text that could carry parser
+    // positions, property paths, or (in future repair/clone errors) values,
+    // which would violate the lane's "no values or magnitudes in diagnostics"
+    // rule. `error_name` is a fixed error-class taxonomy (e.g. "TypeError").
     log.warn(
       {
         event: 'v5.run_analysis.intercept_guard_failed',
         request_id: opts.requestId,
         scenario_id: opts.scenarioId,
-        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        reason: 'clone_or_repair_failed',
+        error_name: err instanceof Error ? err.name : 'non_error_throw',
       },
       '[run-analysis] intercept guard failed; analysing the unrepaired graph',
     );

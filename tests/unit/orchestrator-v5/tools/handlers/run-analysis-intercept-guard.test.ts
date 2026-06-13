@@ -17,7 +17,7 @@ import {
   createRunAnalysisHandler,
   type RunAnalysisScenarioSnapshot,
 } from '../../../../../src/orchestrator-v5/tools/handlers/run-analysis.js';
-import { setTestSink } from '../../../../../src/utils/telemetry.js';
+import { log, setTestSink } from '../../../../../src/utils/telemetry.js';
 import type { HandlerInvocation } from '../../../../../src/orchestrator-v5/tools/registry.js';
 import type { PLoTClient } from '../../../../../src/orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../../src/orchestrator/types.js';
@@ -167,17 +167,35 @@ describe('guardAnalysisGraphIntercepts — #263 repair semantics on a clone', ()
     expect(nodeById(graph, 'fac_out').intercept).toBe(0.5 + 1e-7);
   });
 
-  it('is non-blocking: a non-serialisable graph degrades to the unrepaired input (no throw, no telemetry)', () => {
+  it('is non-blocking: a non-serialisable graph degrades to the unrepaired input (no throw, no telemetry, REDACTED warn)', () => {
     const circular: Record<string, unknown> = { nodes: [], edges: [] };
     circular.self = circular; // JSON.stringify throws on the cycle
     const events: Array<{ event: string }> = [];
     setTestSink((event) => events.push({ event }));
-    const result = guardAnalysisGraphIntercepts(circular, { requestId: 'req-fail' });
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const result = guardAnalysisGraphIntercepts(circular, { requestId: 'req-fail', scenarioId: 'sc-fail' });
     setTestSink(null);
 
     expect(result.repairs).toHaveLength(0);
     expect(result.graph).toBe(circular); // original input returned, unrepaired
     expect(events.filter((e) => e.event === 'v5.run_analysis.intercept_guard')).toHaveLength(0);
+
+    // Degradation warning must be REDACTED: fixed reason + error class + IDs only.
+    // No `err`/`message` free-text (which could carry parser positions or values).
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const warnPayload = warnSpy.mock.calls[0]![0] as Record<string, unknown>;
+    expect(warnPayload).toMatchObject({
+      event: 'v5.run_analysis.intercept_guard_failed',
+      request_id: 'req-fail',
+      scenario_id: 'sc-fail',
+      reason: 'clone_or_repair_failed',
+      error_name: 'TypeError',
+    });
+    expect(Object.keys(warnPayload).sort()).toEqual(
+      ['error_name', 'event', 'reason', 'request_id', 'scenario_id'].sort(),
+    );
+    expect(warnPayload).not.toHaveProperty('err');
+    expect(warnPayload).not.toHaveProperty('message');
   });
 
   it('7. emits a redacted, queryable telemetry event (corrected_count + IDs only, no magnitudes)', () => {
