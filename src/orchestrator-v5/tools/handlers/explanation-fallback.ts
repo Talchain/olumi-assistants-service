@@ -144,11 +144,28 @@ export function composeExplainResultsFallback(
   );
 
   if (projection.runner_up && projection.margin_pp !== null) {
-    sentences.push(
-      `That is ahead of ${projection.runner_up.label} by ${formatPercentagePoints(
-        projection.margin_pp,
-      )}, so the lead is meaningful rather than marginal.`,
-    );
+    if (isNearTieByMargin(projection.margin_pp, null)) {
+      // Near-tie honesty: a near-zero / sub-threshold margin is NOT a
+      // meaningful lead. Mirror composeWhatWouldFlipFallback's
+      // "effectively tied" framing so the explain and flip fallbacks never
+      // contradict — the S4 case where flip correctly said "effectively
+      // tied" while explain said "ahead by 0 percentage points, so the lead
+      // is meaningful rather than marginal." The margin number is
+      // deliberately not cited here: "0 percentage points" reads as a non
+      // sequitur beside a closeness statement. Margin-only on purpose (no
+      // rawRobustness param) to keep this fix isolated to the deterministic
+      // composer; the wider raw-signal near-tie override stays the flip
+      // composer's concern.
+      sentences.push(
+        `${leading.label} and ${projection.runner_up.label} are effectively tied, so the lead is too close to call without firming up the key assumptions.`,
+      );
+    } else {
+      sentences.push(
+        `That is ahead of ${projection.runner_up.label} by ${formatPercentagePoints(
+          projection.margin_pp,
+        )}, so the lead is meaningful rather than marginal.`,
+      );
+    }
   } else if (projection.runner_up) {
     sentences.push(
       `${projection.runner_up.label} sits in second place, with a probability of ${formatProbability(projection.runner_up.probability)}.`,

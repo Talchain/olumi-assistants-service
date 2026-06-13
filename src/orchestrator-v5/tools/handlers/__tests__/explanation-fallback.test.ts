@@ -116,6 +116,49 @@ describe('composeExplainResultsFallback', () => {
     expect(text).toContain('Would you like to');
   });
 
+  // S4 near-tie honesty (V5-WAVE-2 PR-A): a near-zero / sub-threshold margin
+  // must read as a close call, never "meaningful rather than marginal".
+  // Regression for the baseline S4 contradiction where the explain fallback
+  // said "ahead by 0 percentage points, so the lead is meaningful" while the
+  // sibling flip fallback correctly said "effectively tied". Margin-only
+  // near-tie (NEAR_TIE_PP_THRESHOLD = 1.0pp): 0 and 0.4 are near-tie; 12 is
+  // decisive.
+  it('describes a 0pp margin as effectively tied, never "meaningful rather than marginal"', () => {
+    const text = composeExplainResultsFallback({
+      ...ANALYSIS,
+      margin_pp: 0,
+      robustness_band: 'fragile',
+    });
+    expectNaturalProse(text);
+    expect(text).toContain('effectively tied');
+    expect(text).not.toContain('meaningful rather than marginal');
+    // The awkward "0 percentage points" non sequitur must not be cited.
+    expect(text).not.toContain('0 percentage points');
+    // Both option labels are named in the closeness sentence.
+    expect(text).toContain('Hire Senior Engineer');
+    expect(text).toContain('Hire Two Mid-Level');
+  });
+
+  it('treats a sub-1pp margin (0.4) as a near-tie, not a meaningful lead', () => {
+    const text = composeExplainResultsFallback({
+      ...ANALYSIS,
+      margin_pp: 0.4,
+      robustness_band: 'fragile',
+    });
+    expect(text).toContain('effectively tied');
+    expect(text).not.toContain('meaningful rather than marginal');
+  });
+
+  it('keeps the "meaningful rather than marginal" framing for a decisive margin (12pp)', () => {
+    const text = composeExplainResultsFallback({
+      ...ANALYSIS,
+      margin_pp: 12,
+    });
+    expect(text).toContain('12 percentage points');
+    expect(text).toContain('meaningful rather than marginal');
+    expect(text).not.toContain('effectively tied');
+  });
+
   // V5-LANE-B-STRUCTURAL-01: the handler-composed validation beat is placed
   // before the closing nudge; absent/null → byte-identical legacy output.
   it('places validationBeatText before the closing nudge', () => {
