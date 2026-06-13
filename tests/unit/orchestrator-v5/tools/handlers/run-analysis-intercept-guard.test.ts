@@ -104,6 +104,82 @@ describe('guardAnalysisGraphIntercepts — #263 repair semantics on a clone', ()
     expect(graph).toEqual(clean);
   });
 
+  it('discriminates at scale: strips ALL duplicate roots, preserves the clean root (multi-node)', () => {
+    const g: TestGraph = {
+      nodes: [
+        { id: 'fac_dup1', kind: 'factor', label: 'd1', observed_state: { value: 0.5 }, intercept: 0.5 },
+        { id: 'fac_dup2', kind: 'risk', label: 'd2', observed_state: { value: 0.2 }, intercept: 0.2 },
+        { id: 'fac_keep', kind: 'factor', label: 'k', observed_state: { value: 0.9 }, intercept: 0.1 },
+      ],
+      edges: [],
+    };
+    const { graph, repairs } = guardAnalysisGraphIntercepts(g);
+    expect(repairs.map((r) => r.node_id).sort()).toEqual(['fac_dup1', 'fac_dup2']);
+    expect('intercept' in nodeById(graph, 'fac_dup1')).toBe(false);
+    expect('intercept' in nodeById(graph, 'fac_dup2')).toBe(false);
+    expect(nodeById(graph, 'fac_keep').intercept).toBe(0.1); // non-equal → preserved
+  });
+
+  it('preserves a non-numeric (string) intercept even when it equals observed_state.value', () => {
+    // The typeof guard prevents a false positive: ISL only doubles a *numeric*
+    // root intercept, so a string carrier is left alone. (A persisted JSON graph
+    // cannot carry NaN — it serialises to null — so the numeric path is the only
+    // realistic one; this locks the typeof guard against regression.)
+    const g: TestGraph = {
+      nodes: [
+        { id: 'fac_str', kind: 'factor', label: 's', observed_state: { value: 0.5 }, intercept: '0.5' },
+      ],
+      edges: [],
+    };
+    const { graph, repairs } = guardAnalysisGraphIntercepts(g);
+    expect(repairs).toHaveLength(0);
+    expect(nodeById(graph, 'fac_str').intercept).toBe('0.5');
+  });
+
+  it('preserves an intercept on a constraint-derived node (constraint is NOT in NON_CAUSAL_SOURCE_KINDS)', () => {
+    // Guards the cross-repo PLoT pin: PLoT does NOT strip constraint nodes, so a
+    // constraint→factor edge keeps the target derived and its intercept a
+    // legitimate structural offset. If someone adds 'constraint' to
+    // NON_CAUSAL_SOURCE_KINDS, this node would wrongly become a stripped root.
+    const g: TestGraph = {
+      nodes: [
+        { id: 'con_x', kind: 'constraint', label: 'c' },
+        { id: 'fac_cd', kind: 'factor', label: 'cd', observed_state: { value: 0.4 }, intercept: 0.4 },
+      ],
+      edges: [{ from: 'con_x', to: 'fac_cd', edge_type: 'directed' }],
+    };
+    const { graph, repairs } = guardAnalysisGraphIntercepts(g);
+    expect(repairs).toHaveLength(0);
+    expect(nodeById(graph, 'fac_cd').intercept).toBe(0.4);
+  });
+
+  it('respects the duplicate epsilon boundary (within → stripped, beyond → preserved)', () => {
+    const g: TestGraph = {
+      nodes: [
+        { id: 'fac_in', kind: 'factor', label: 'in', observed_state: { value: 0.5 }, intercept: 0.5 + 1e-11 },
+        { id: 'fac_out', kind: 'factor', label: 'out', observed_state: { value: 0.5 }, intercept: 0.5 + 1e-7 },
+      ],
+      edges: [],
+    };
+    const { graph, repairs } = guardAnalysisGraphIntercepts(g);
+    expect(repairs.map((r) => r.node_id)).toEqual(['fac_in']);
+    expect('intercept' in nodeById(graph, 'fac_in')).toBe(false);
+    expect(nodeById(graph, 'fac_out').intercept).toBe(0.5 + 1e-7);
+  });
+
+  it('is non-blocking: a non-serialisable graph degrades to the unrepaired input (no throw, no telemetry)', () => {
+    const circular: Record<string, unknown> = { nodes: [], edges: [] };
+    circular.self = circular; // JSON.stringify throws on the cycle
+    const events: Array<{ event: string }> = [];
+    setTestSink((event) => events.push({ event }));
+    const result = guardAnalysisGraphIntercepts(circular, { requestId: 'req-fail' });
+    setTestSink(null);
+
+    expect(result.repairs).toHaveLength(0);
+    expect(result.graph).toBe(circular); // original input returned, unrepaired
+    expect(events.filter((e) => e.event === 'v5.run_analysis.intercept_guard')).toHaveLength(0);
+  });
+
   it('7. emits a redacted, queryable telemetry event (corrected_count + IDs only, no magnitudes)', () => {
     const events: Array<{ event: string; data: Record<string, unknown> }> = [];
     setTestSink((event, data) => events.push({ event, data }));
