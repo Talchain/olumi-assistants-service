@@ -35,6 +35,11 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
+    // V5-D1-SHAPE-01: the STEP 7 commit strict-reads the persisted graph
+    // before persisting a mutated_graph. null = genuinely-empty scenario →
+    // the ingress-shaped mutated graph commits as-is (this suite's
+    // pre-merge-back expectations).
+    loadGraph: async () => null,
   }),
   resetSessionStoreForTests: () => {},
 }));
