@@ -1,0 +1,41 @@
+{
+  "id": "rg-03-cycle-detected",
+  "name": "CYCLE_DETECTED — factor loop",
+  "description": "Graph has a cycle fac_a -> fac_b -> fac_a. Repair must remove the weaker edge.",
+  "brief": "We are deciding between two pricing strategies. The causal model has a cycle between competitive pressure and pricing.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_pricing", "kind": "decision", "label": "Pricing Strategy"},
+      {"id": "opt_premium", "kind": "option", "label": "Premium Pricing", "data": {"interventions": {"fac_price_level": 0.8}}},
+      {"id": "opt_competitive", "kind": "option", "label": "Competitive Pricing", "data": {"interventions": {"fac_price_level": 0.4}}},
+      {"id": "fac_price_level", "kind": "factor", "label": "Price Level", "category": "controllable", "data": {"value": 0.5, "extractionType": "inferred", "factor_type": "other", "uncertainty_drivers": ["Market research pending"]}},
+      {"id": "fac_competitor_response", "kind": "factor", "label": "Competitor Response", "category": "external", "prior": {"distribution": "uniform", "range_min": 0.0, "range_max": 1.0}},
+      {"id": "out_market_share", "kind": "outcome", "label": "Market Share"},
+      {"id": "goal_revenue", "kind": "goal", "label": "Maximise Revenue"}
+    ],
+    "edges": [
+      {"from": "dec_pricing", "to": "opt_premium", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_pricing", "to": "opt_competitive", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_premium", "to": "fac_price_level", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_competitive", "to": "fac_price_level", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_price_level", "to": "fac_competitor_response", "strength": {"mean": 0.60, "std": 0.18}, "exists_probability": 0.82, "effect_direction": "positive"},
+      {"from": "fac_competitor_response", "to": "fac_price_level", "strength": {"mean": 0.40, "std": 0.20}, "exists_probability": 0.65, "effect_direction": "negative"},
+      {"from": "fac_price_level", "to": "out_market_share", "strength": {"mean": 0.55, "std": 0.18}, "exists_probability": 0.80, "effect_direction": "positive"},
+      {"from": "fac_competitor_response", "to": "out_market_share", "strength": {"mean": -0.45, "std": 0.20}, "exists_probability": 0.75, "effect_direction": "negative"},
+      {"from": "out_market_share", "to": "goal_revenue", "strength": {"mean": 0.70, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "CYCLE_DETECTED", "node_or_edge": "fac_price_level -> fac_competitor_response -> fac_price_level", "detail": "Directed cycle detected. Remove weakest edge in the cycle."}
+  ],
+  "expected": {
+    "violations_addressed": ["CYCLE_DETECTED"],
+    "preserve_node_ids": ["dec_pricing", "opt_premium", "opt_competitive", "fac_price_level", "fac_competitor_response", "out_market_share", "goal_revenue"],
+    "forbidden_edges": [{"from": "fac_competitor_response", "to": "fac_price_level"}],
+    "required_edges": [{"from": "fac_price_level", "to": "fac_competitor_response"}],
+    "no_bridge_edges": false,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "no_json_comments": true
+  }
+}

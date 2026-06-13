@@ -1,0 +1,41 @@
+{
+  "id": "rg-05-structural-edge-not-canonical",
+  "name": "STRUCTURAL_EDGE_NOT_CANONICAL — wrong params on option→factor edge",
+  "description": "An option→factor structural edge has non-canonical parameters (mean=0.7, std=0.15, ep=0.80). Repair must set mean=1.0, std=0.01, exists_probability=1.0.",
+  "brief": "We are deciding between building or buying a software platform.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_platform", "kind": "decision", "label": "Platform Decision"},
+      {"id": "opt_build", "kind": "option", "label": "Build In-House", "data": {"interventions": {"fac_dev_effort": 1.0, "fac_vendor_cost": 0.0}}},
+      {"id": "opt_buy", "kind": "option", "label": "Buy Vendor Solution", "data": {"interventions": {"fac_dev_effort": 0.2, "fac_vendor_cost": 1.0}}},
+      {"id": "fac_dev_effort", "kind": "factor", "label": "Development Effort", "category": "controllable", "data": {"value": 0.5, "extractionType": "inferred", "factor_type": "cost", "uncertainty_drivers": ["Scope not finalised"]}},
+      {"id": "fac_vendor_cost", "kind": "factor", "label": "Vendor Cost", "category": "controllable", "data": {"value": 0.0, "extractionType": "inferred", "factor_type": "cost", "uncertainty_drivers": ["Vendor quotes pending"]}},
+      {"id": "out_time_to_market", "kind": "outcome", "label": "Time to Market"},
+      {"id": "goal_speed", "kind": "goal", "label": "Ship Fast and Cheaply"}
+    ],
+    "edges": [
+      {"from": "dec_platform", "to": "opt_build", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_platform", "to": "opt_buy", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_build", "to": "fac_dev_effort", "strength": {"mean": 0.7, "std": 0.15}, "exists_probability": 0.80, "effect_direction": "positive"},
+      {"from": "opt_build", "to": "fac_vendor_cost", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_buy", "to": "fac_dev_effort", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_buy", "to": "fac_vendor_cost", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_dev_effort", "to": "out_time_to_market", "strength": {"mean": 0.65, "std": 0.18}, "exists_probability": 0.82, "effect_direction": "positive"},
+      {"from": "fac_vendor_cost", "to": "out_time_to_market", "strength": {"mean": -0.30, "std": 0.15}, "exists_probability": 0.75, "effect_direction": "negative"},
+      {"from": "out_time_to_market", "to": "goal_speed", "strength": {"mean": 0.70, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "STRUCTURAL_EDGE_NOT_CANONICAL", "node_or_edge": "opt_build -> fac_dev_effort", "detail": "Option→factor structural edge must have mean=1.0, std=0.01, exists_probability=1.0."}
+  ],
+  "expected": {
+    "violations_addressed": ["STRUCTURAL_EDGE_NOT_CANONICAL"],
+    "preserve_node_ids": ["dec_platform", "opt_build", "opt_buy", "fac_dev_effort", "fac_vendor_cost", "out_time_to_market", "goal_speed"],
+    "forbidden_edges": [],
+    "required_edges": [{"from": "opt_build", "to": "fac_dev_effort"}],
+    "no_bridge_edges": false,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "no_json_comments": true
+  }
+}

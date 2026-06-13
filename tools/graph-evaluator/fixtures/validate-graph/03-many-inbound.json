@@ -1,0 +1,53 @@
+{
+  "id": "vg-03-many-inbound",
+  "name": "Many inbound edges forcing budget scaling",
+  "description": "One outcome with 5 inbound causal edges. Expect: budget constraint forces scaling, scaling_applied=true on affected edges.",
+  "brief": "We're evaluating a new product launch. R&D investment is $2M. Marketing budget is $800K. We have strong engineering talent but uncertain market timing. Sales team capacity is a constraint. Our supply chain partner has committed to 6-week lead times. Customer demand surveys show 70% purchase intent at the $49 price point.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_launch", "kind": "decision", "label": "Product Launch Decision"},
+      {"id": "opt_launch", "kind": "option", "label": "Launch Q2", "data": {"interventions": {"fac_rd": 0.9, "fac_marketing": 0.8, "fac_sales": 0.7}}},
+      {"id": "opt_delay", "kind": "option", "label": "Delay to Q4", "data": {"interventions": {"fac_rd": 0.5, "fac_marketing": 0.3, "fac_sales": 0.4}}},
+      {"id": "fac_rd", "kind": "factor", "label": "R&D Investment", "category": "controllable", "data": {"value": 0.7, "unit": "USD", "factor_type": "investment"}},
+      {"id": "fac_marketing", "kind": "factor", "label": "Marketing Budget", "category": "controllable", "data": {"value": 0.5, "unit": "USD", "factor_type": "cost"}},
+      {"id": "fac_sales", "kind": "factor", "label": "Sales Team Capacity", "category": "controllable", "data": {"value": 0.6, "factor_type": "headcount"}},
+      {"id": "fac_timing", "kind": "factor", "label": "Market Timing", "category": "external", "prior": {"distribution": "uniform", "range_min": 0.2, "range_max": 0.9}},
+      {"id": "fac_supply", "kind": "factor", "label": "Supply Chain Reliability", "category": "observable", "data": {"value": 0.7, "factor_type": "logistics"}},
+      {"id": "out_revenue", "kind": "outcome", "label": "First-Year Revenue"},
+      {"id": "out_margin", "kind": "outcome", "label": "Gross Margin"},
+      {"id": "goal_roi", "kind": "goal", "label": "Maximise Launch ROI"}
+    ],
+    "edges": [
+      {"from": "dec_launch", "to": "opt_launch", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_launch", "to": "opt_delay", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_launch", "to": "fac_rd", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_launch", "to": "fac_marketing", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_launch", "to": "fac_sales", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_delay", "to": "fac_rd", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_delay", "to": "fac_marketing", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_delay", "to": "fac_sales", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_rd", "to": "out_revenue", "strength": {"mean": 0.30, "std": 0.12}, "exists_probability": 0.88, "effect_direction": "positive"},
+      {"from": "fac_marketing", "to": "out_revenue", "strength": {"mean": 0.35, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"},
+      {"from": "fac_sales", "to": "out_revenue", "strength": {"mean": 0.25, "std": 0.10}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "fac_timing", "to": "out_revenue", "strength": {"mean": 0.20, "std": 0.15}, "exists_probability": 0.72, "effect_direction": "positive"},
+      {"from": "fac_supply", "to": "out_revenue", "strength": {"mean": 0.15, "std": 0.08}, "exists_probability": 0.78, "effect_direction": "positive"},
+      {"from": "fac_rd", "to": "out_margin", "strength": {"mean": -0.40, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "negative"},
+      {"from": "fac_marketing", "to": "out_margin", "strength": {"mean": -0.30, "std": 0.12}, "exists_probability": 0.80, "effect_direction": "negative"},
+      {"from": "out_revenue", "to": "goal_roi", "strength": {"mean": 0.55, "std": 0.12}, "exists_probability": 0.95, "effect_direction": "positive"},
+      {"from": "out_margin", "to": "goal_roi", "strength": {"mean": 0.45, "std": 0.10}, "exists_probability": 0.92, "effect_direction": "positive"}
+    ]
+  },
+  "expected": {
+    "in_scope_edges": [
+      {"from": "fac_rd", "to": "out_revenue"},
+      {"from": "fac_marketing", "to": "out_revenue"},
+      {"from": "fac_sales", "to": "out_revenue"},
+      {"from": "fac_timing", "to": "out_revenue"},
+      {"from": "fac_supply", "to": "out_revenue"},
+      {"from": "fac_rd", "to": "out_margin"},
+      {"from": "fac_marketing", "to": "out_margin"},
+      {"from": "out_revenue", "to": "goal_roi"},
+      {"from": "out_margin", "to": "goal_roi"}
+    ]
+  }
+}
