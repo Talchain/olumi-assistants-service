@@ -39,11 +39,14 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     });
 
     // ── Graph data integrity checks (post-V3-transform, pre-validation) ─────
-    // Runs two deterministic corrections:
+    // Runs three deterministic corrections:
     // 1. Factor scale consistency: assert value ≈ raw_value/cap (or raw_value/100 for "%").
     //    Corrects observed_state.value and matching analysis_ready.options interventions.
     // 2. Edge field defaults: ensure exists_probability and effect_direction are present.
     //    Structural edges default to 1.0/"positive"; causal to 0.8/sign-inferred.
+    // 3. Observed-root intercept doctrine: remove duplicate `intercept = observed_state.value`
+    //    from observed root nodes (ISL evaluates non-intervened roots as value + intercept,
+    //    so the duplicate doubles the baseline). Never assigns intercepts.
     // Mutations are logged in trace.pipeline.repair_summary.graph_data_integrity.
     const integrityRepairs = runGraphDataIntegrityChecks(v3Body, ctx.requestId);
     if (

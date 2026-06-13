@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { runGraphDataIntegrityChecks } from "../../src/cee/transforms/graph-data-integrity.js";
 import { transformEdgeToV3 } from "../../src/cee/transforms/schema-v3.js";
+import { log } from "../../src/utils/telemetry.js";
 
 /**
  * Tests for graph-data-integrity.ts and the related exists_probability fix in
@@ -603,32 +604,161 @@ describe("Task 2: Edge field boundary safety net", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Task 3: Intercept auto-population (root nodes only)
+// Task 3: Observed-root intercept doctrine (Track S 0.12 / 0.13a)
+//
+// Doctrine: observed_state.value is the sole baseline carrier for observed
+// roots; intercept is a structural offset for derived (non-root) equations.
+// ISL evaluates non-intervened roots as observed_state.value + intercept, so
+// a root with intercept = observed_state.value computes at 2x baseline (the
+// audited 0.11 pattern). The repair removes that duplicate and never assigns.
 // ---------------------------------------------------------------------------
 
-describe("Task 3: Intercept auto-population", () => {
-  it("sets intercept from observed_state.value for root factor (golden fixture 1)", () => {
+describe("Task 3: Observed-root intercept doctrine", () => {
+  it("does NOT assign intercept to an observed root factor (pre-0.13a auto-population removed)", () => {
     const node = makeNode({
       id: "fac_churn_rate",
       kind: "factor",
       observed_state: { value: 0.032 },
-      // intercept absent → should be auto-populated
+      // intercept absent → must STAY absent (auto-population was the audited defect)
     });
     const v3 = makeV3Body({ nodes: [node] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect(node.intercept).toBe(0.032);
+    expect((node as any).intercept).toBeUndefined();
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("removes duplicate intercept (= observed_state.value) from an observed root factor", () => {
+    const node = makeNode({
+      id: "fac_churn_rate",
+      kind: "factor",
+      observed_state: { value: 0.2 },
+      intercept: 0.2,
+    });
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((node as any).intercept).toBeUndefined();
+    expect("intercept" in node).toBe(false);
     expect(result.intercept_population_repairs).toHaveLength(1);
     expect(result.intercept_population_repairs[0]).toMatchObject({
       node_id: "fac_churn_rate",
       field: "intercept",
-      before: undefined,
-      after: 0.032,
+      before: 0.2,
+      after: undefined,
       source: "observed_state.value",
     });
   });
 
-  it("preserves LLM-extracted non-zero intercept (golden fixture 2)", () => {
+  it("removes duplicate intercept from a factor whose only incoming edges come from option nodes (0.11 staging shape)", () => {
+    // The 0.11 audit: all 170 affected staging nodes had incoming edges ONLY
+    // from option nodes. PLoT strips option/decision/constraint nodes and all
+    // incident edges before ISL, so these factors ARE roots in the evaluated
+    // graph. The repair must treat them as roots too.
+    const factor = makeNode({
+      id: "fac_campaign_quality",
+      kind: "factor",
+      observed_state: { value: 0.2 },
+      intercept: 0.2,
+    });
+    const optionA = { id: "opt_ai_tool", kind: "option", label: "AI tool" };
+    const optionB = { id: "opt_hire", kind: "option", label: "Hire" };
+    const outcome = { id: "out_conversion", kind: "outcome", label: "Conversion" };
+    const edges = [
+      makeEdge({ from: "opt_ai_tool", to: "fac_campaign_quality", exists_probability: 1.0, effect_direction: "positive" }),
+      makeEdge({ from: "opt_hire", to: "fac_campaign_quality", exists_probability: 1.0, effect_direction: "positive" }),
+      makeEdge({ from: "fac_campaign_quality", to: "out_conversion", exists_probability: 0.8, effect_direction: "positive" }),
+    ];
+    const v3 = makeV3Body({ nodes: [factor, optionA, optionB, outcome], edges });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((factor as any).intercept).toBeUndefined();
+    expect(result.intercept_population_repairs).toHaveLength(1);
+    expect(result.intercept_population_repairs[0].node_id).toBe("fac_campaign_quality");
+  });
+
+  it("treats constraint-sourced edges as CAUSAL (PLoT runtime-filter pin): duplicate-valued intercept preserved", () => {
+    // Cross-repo pin: PLoT staging NON_CAUSAL_NODE_KINDS = ['option', 'decision']
+    // (plot-lite-service src/types/engine-v3.ts, documented in
+    // src/contracts/plot-to-isl.contract.ts). Constraint nodes are NOT
+    // filtered at PLoT runtime — option-filter.ts prose mentioning constraint
+    // is a known discrepancy the contract file calls out. A constraint→factor
+    // edge therefore survives to ISL, the factor is a DERIVED node there, and
+    // its intercept is a legitimate structural offset that must be preserved
+    // even when it equals observed_state.value.
+    const factor = makeNode({
+      id: "fac_capped",
+      kind: "factor",
+      observed_state: { value: 0.3 },
+      intercept: 0.3,
+    });
+    const constraint = { id: "con_budget", kind: "constraint", label: "Budget cap" };
+    const edge = makeEdge({ from: "con_budget", to: "fac_capped", exists_probability: 1.0, effect_direction: "negative" });
+    const v3 = makeV3Body({ nodes: [factor, constraint], edges: [edge] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((factor as any).intercept).toBe(0.3);
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("redacts the duplicate-removal log: IDs only, no numeric magnitudes", () => {
+    const logInfoSpy = vi.spyOn(log, "info");
+    try {
+      const node = makeNode({
+        id: "fac_redact",
+        kind: "factor",
+        observed_state: { value: 0.25 },
+        intercept: 0.25,
+      });
+      const v3 = makeV3Body({ nodes: [node] });
+      const result = runGraphDataIntegrityChecks(v3, "req-redact-1");
+
+      // The contracted before/after values live in the in-payload repair record…
+      expect(result.intercept_population_repairs[0]).toMatchObject({ before: 0.25, after: undefined });
+
+      // …while the emitted log carries IDs only.
+      const removed = logInfoSpy.mock.calls.filter(
+        (call) => (call[0] as any)?.event === "cee.graph_integrity.duplicate_root_intercept_removed",
+      );
+      expect(removed).toHaveLength(1);
+      expect(removed[0][0]).toMatchObject({
+        event: "cee.graph_integrity.duplicate_root_intercept_removed",
+        request_id: "req-redact-1",
+        node_id: "fac_redact",
+      });
+      expect(removed[0][0]).not.toHaveProperty("value");
+      expect(removed[0][0]).not.toHaveProperty("kind");
+      expect(String(removed[0][1])).not.toContain("0.25");
+    } finally {
+      logInfoSpy.mockRestore();
+    }
+  });
+
+  it("preserves duplicate-valued intercept on a DERIVED node (causal incoming edge)", () => {
+    // A non-root node's intercept is a legitimate structural offset even when
+    // it coincides with observed_state.value — ISL does not take the root
+    // branch for derived nodes, so there is no double-count.
+    const parent = makeNode({
+      id: "fac_parent",
+      kind: "factor",
+      observed_state: { value: 0.3 },
+    });
+    const derived = makeNode({
+      id: "fac_derived",
+      kind: "factor",
+      label: "Derived Factor",
+      observed_state: { value: 0.5 },
+      intercept: 0.5,
+    });
+    const edge = makeEdge({ from: "fac_parent", to: "fac_derived", exists_probability: 0.8, effect_direction: "positive" });
+    const v3 = makeV3Body({ nodes: [parent, derived], edges: [edge] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((derived as any).intercept).toBe(0.5);
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("preserves root intercept that DIFFERS from observed_state.value (0.12 open Neil question)", () => {
     const node = makeNode({
       id: "fac_churn_rate",
       kind: "factor",
@@ -638,11 +768,76 @@ describe("Task 3: Intercept auto-population", () => {
     const v3 = makeV3Body({ nodes: [node] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect(node.intercept).toBe(0.05);
+    expect((node as any).intercept).toBe(0.05);
     expect(result.intercept_population_repairs).toHaveLength(0);
   });
 
-  it("preserves explicit zero intercept (zero is legitimate)", () => {
+  it("emits redacted observed_root_intercept_retained diagnostic (IDs only) for a non-equal observed-root intercept", () => {
+    const logInfoSpy = vi.spyOn(log, "info");
+    try {
+      const node = makeNode({
+        id: "fac_churn_rate",
+        kind: "factor",
+        observed_state: { value: 0.032 },
+        intercept: 0.05,
+      });
+      const v3 = makeV3Body({ nodes: [node] });
+      runGraphDataIntegrityChecks(v3, "req-retained-1");
+
+      const retained = logInfoSpy.mock.calls.filter(
+        (call) => (call[0] as any)?.event === "cee.graph_integrity.observed_root_intercept_retained",
+      );
+      expect(retained).toHaveLength(1);
+      expect(retained[0][0]).toMatchObject({
+        event: "cee.graph_integrity.observed_root_intercept_retained",
+        request_id: "req-retained-1",
+        node_id: "fac_churn_rate",
+      });
+      // Redaction: IDs only — the diagnostic must not carry the numeric values.
+      expect(retained[0][0]).not.toHaveProperty("value");
+      expect(retained[0][0]).not.toHaveProperty("intercept");
+    } finally {
+      logInfoSpy.mockRestore();
+    }
+  });
+
+  it("does NOT emit the retained diagnostic for duplicates, zeros, or derived nodes", () => {
+    const logInfoSpy = vi.spyOn(log, "info");
+    try {
+      const duplicateRoot = makeNode({
+        id: "fac_dup",
+        kind: "factor",
+        observed_state: { value: 0.2 },
+        intercept: 0.2, // duplicate → removed, not retained
+      });
+      const zeroRoot = makeNode({
+        id: "fac_zero",
+        kind: "factor",
+        observed_state: { value: 0.3 },
+        intercept: 0, // explicit zero → kept silently
+      });
+      const parent = makeNode({ id: "fac_parent", kind: "factor", label: "Parent" });
+      const derived = makeNode({
+        id: "fac_derived",
+        kind: "factor",
+        label: "Derived",
+        observed_state: { value: 0.5 },
+        intercept: 0.9, // derived structural offset → kept silently
+      });
+      const edge = makeEdge({ from: "fac_parent", to: "fac_derived", exists_probability: 0.8, effect_direction: "positive" });
+      const v3 = makeV3Body({ nodes: [duplicateRoot, zeroRoot, parent, derived], edges: [edge] });
+      runGraphDataIntegrityChecks(v3);
+
+      const retained = logInfoSpy.mock.calls.filter(
+        (call) => (call[0] as any)?.event === "cee.graph_integrity.observed_root_intercept_retained",
+      );
+      expect(retained).toHaveLength(0);
+    } finally {
+      logInfoSpy.mockRestore();
+    }
+  });
+
+  it("preserves explicit zero intercept (zero is legitimate and cannot double-count)", () => {
     const node = makeNode({
       id: "fac_churn_rate",
       kind: "factor",
@@ -652,160 +847,125 @@ describe("Task 3: Intercept auto-population", () => {
     const v3 = makeV3Body({ nodes: [node] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect(node.intercept).toBe(0);
+    expect((node as any).intercept).toBe(0);
     expect(result.intercept_population_repairs).toHaveLength(0);
   });
 
-  it("does NOT auto-populate intercept on decision node (golden fixture 3)", () => {
-    const node = {
-      id: "dec_pricing",
-      kind: "decision",
-      label: "Pricing Decision",
-    };
+  it("preserves explicit zero intercept even when observed_state.value is also zero", () => {
+    const node = makeNode({
+      id: "fac_zero",
+      kind: "factor",
+      observed_state: { value: 0 },
+      intercept: 0,
+    });
     const v3 = makeV3Body({ nodes: [node] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect((node as any).intercept).toBeUndefined();
+    expect((node as any).intercept).toBe(0);
     expect(result.intercept_population_repairs).toHaveLength(0);
   });
 
-  it("does NOT auto-populate intercept on option node", () => {
-    const node = {
-      id: "opt_expand",
-      kind: "option",
-      label: "Expand",
-      observed_state: { value: 0.5 },
-    };
-    const v3 = makeV3Body({ nodes: [node] });
-    runGraphDataIntegrityChecks(v3);
-    expect((node as any).intercept).toBeUndefined();
-  });
-
-  it("auto-populates intercept on root goal node with observed_state", () => {
-    const node = {
-      id: "goal_revenue",
-      kind: "goal",
-      label: "Maximise Revenue",
-      observed_state: { value: 0.7 },
-    };
-    const v3 = makeV3Body({ nodes: [node] });
+  it("does NOT assign intercept to root goal/outcome/risk nodes (pre-0.13a behaviour removed)", () => {
+    const goal = { id: "goal_revenue", kind: "goal", label: "Maximise Revenue", observed_state: { value: 0.7 } };
+    const outcome = { id: "out_nrr", kind: "outcome", label: "Net Revenue Retention", observed_state: { value: 0.85 } };
+    const risk = { id: "risk_churn", kind: "risk", label: "Churn Risk", observed_state: { value: 0.15 } };
+    const v3 = makeV3Body({ nodes: [goal, outcome, risk] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect((node as any).intercept).toBe(0.7);
-    expect(result.intercept_population_repairs).toHaveLength(1);
+    expect((goal as any).intercept).toBeUndefined();
+    expect((outcome as any).intercept).toBeUndefined();
+    expect((risk as any).intercept).toBeUndefined();
+    expect(result.intercept_population_repairs).toHaveLength(0);
   });
 
-  it("auto-populates intercept on root outcome node", () => {
-    const node = {
-      id: "out_nrr",
-      kind: "outcome",
-      label: "Net Revenue Retention",
-      observed_state: { value: 0.85 },
-    };
-    const v3 = makeV3Body({ nodes: [node] });
-    const result = runGraphDataIntegrityChecks(v3);
-
-    expect((node as any).intercept).toBe(0.85);
-    expect(result.intercept_population_repairs).toHaveLength(1);
-  });
-
-  it("auto-populates intercept on root risk node", () => {
+  it("removes duplicate intercept from root risk node (eligible-kind coverage)", () => {
     const node = {
       id: "risk_churn",
       kind: "risk",
       label: "Churn Risk",
       observed_state: { value: 0.15 },
+      intercept: 0.15,
     };
     const v3 = makeV3Body({ nodes: [node] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect((node as any).intercept).toBe(0.15);
+    expect((node as any).intercept).toBeUndefined();
     expect(result.intercept_population_repairs).toHaveLength(1);
   });
 
-  it("does NOT auto-populate intercept on node without observed_state", () => {
+  it("does NOT touch decision/option nodes even with duplicate-shaped fields", () => {
+    const decision = { id: "dec_pricing", kind: "decision", label: "Pricing Decision", observed_state: { value: 0.5 }, intercept: 0.5 };
+    const option = { id: "opt_expand", kind: "option", label: "Expand", observed_state: { value: 0.5 }, intercept: 0.5 };
+    const v3 = makeV3Body({ nodes: [decision, option] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((decision as any).intercept).toBe(0.5);
+    expect((option as any).intercept).toBe(0.5);
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("does NOT touch a node without observed_state (intercept not comparable)", () => {
     const node = makeNode({
       id: "fac_ext",
       kind: "factor",
-      // No observed_state
+      intercept: 0.4,
+      // No observed_state — nothing to duplicate against
     });
     const v3 = makeV3Body({ nodes: [node] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect((node as any).intercept).toBeUndefined();
+    expect((node as any).intercept).toBe(0.4);
     expect(result.intercept_population_repairs).toHaveLength(0);
   });
 
-  it("does NOT auto-populate intercept on non-root node with parents (negative test)", () => {
-    const parentNode = makeNode({
-      id: "fac_parent",
-      kind: "factor",
-      observed_state: { value: 0.3 },
-    });
-    const childNode = makeNode({
-      id: "fac_child",
-      kind: "factor",
-      label: "Child Factor",
-      observed_state: { value: 0.5 },
-    });
-    const edge = makeEdge({
-      from: "fac_parent",
-      to: "fac_child",
-    });
-    const v3 = makeV3Body({ nodes: [parentNode, childNode], edges: [edge] });
-    const result = runGraphDataIntegrityChecks(v3);
-
-    // Parent is root → gets intercept
-    expect((parentNode as any).intercept).toBe(0.3);
-    // Child has incoming edge → must NOT get intercept
-    expect((childNode as any).intercept).toBeUndefined();
-    expect(result.intercept_population_repairs).toHaveLength(1);
-    expect(result.intercept_population_repairs[0].node_id).toBe("fac_parent");
-  });
-
-  it("excludes bidirected edges from root detection (still root for directed)", () => {
+  it("treats a node with only bidirected incoming edges as a root (duplicate removed)", () => {
     const node = makeNode({
       id: "fac_bi",
       kind: "factor",
       observed_state: { value: 0.4 },
+      intercept: 0.4,
     });
+    const other = makeNode({ id: "fac_other", kind: "factor", label: "Other" });
     const edge = makeEdge({
       from: "fac_other",
       to: "fac_bi",
       edge_type: "bidirected",
     });
-    const v3 = makeV3Body({ nodes: [node], edges: [edge] });
+    const v3 = makeV3Body({ nodes: [node, other], edges: [edge] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect((node as any).intercept).toBe(0.4);
+    expect((node as any).intercept).toBeUndefined();
     expect(result.intercept_population_repairs).toHaveLength(1);
   });
 
-  it("does NOT auto-populate intercept when observed_state.value is NaN", () => {
+  it("does NOT touch a node when observed_state.value is NaN", () => {
     const node = makeNode({
       id: "fac_nan",
       kind: "factor",
       observed_state: { value: NaN },
+      intercept: 0.3,
     });
     const v3 = makeV3Body({ nodes: [node] });
     const result = runGraphDataIntegrityChecks(v3);
 
-    expect((node as any).intercept).toBeUndefined();
+    expect((node as any).intercept).toBe(0.3);
     expect(result.intercept_population_repairs).toHaveLength(0);
   });
 
-  it("handles mixed graph with root and non-root nodes correctly", () => {
+  it("handles mixed graph: repairs observed root duplicate, leaves derived nodes alone", () => {
     const rootFactor = makeNode({
       id: "fac_root",
       kind: "factor",
       label: "Root Factor",
       observed_state: { value: 0.2 },
+      intercept: 0.2, // duplicate → removed
     });
     const midFactor = makeNode({
       id: "fac_mid",
       kind: "factor",
       label: "Mid Factor",
       observed_state: { value: 0.6 },
+      intercept: 0.1, // derived structural offset → kept
     });
     const goal = {
       id: "goal_1",
@@ -813,18 +973,53 @@ describe("Task 3: Intercept auto-population", () => {
       label: "Goal",
     };
     const edges = [
-      makeEdge({ from: "fac_root", to: "fac_mid" }),
-      makeEdge({ from: "fac_mid", to: "goal_1" }),
+      makeEdge({ from: "fac_root", to: "fac_mid", exists_probability: 0.8, effect_direction: "positive" }),
+      makeEdge({ from: "fac_mid", to: "goal_1", exists_probability: 0.8, effect_direction: "positive" }),
     ];
     const v3 = makeV3Body({ nodes: [rootFactor, midFactor, goal], edges });
     const result = runGraphDataIntegrityChecks(v3);
 
-    // Root factor → intercept populated
-    expect((rootFactor as any).intercept).toBe(0.2);
-    // Mid factor (has incoming) → NOT populated
-    expect((midFactor as any).intercept).toBeUndefined();
-    // Goal (has incoming) → NOT populated
+    expect((rootFactor as any).intercept).toBeUndefined();
+    expect((midFactor as any).intercept).toBe(0.1);
     expect((goal as any).intercept).toBeUndefined();
     expect(result.intercept_population_repairs).toHaveLength(1);
+    expect(result.intercept_population_repairs[0].node_id).toBe("fac_root");
+  });
+
+  it("cannot recreate the audited pattern: idempotent, and no eligible root ends with a non-zero duplicate intercept", () => {
+    // Staging-shaped graph from the 0.11 audit: observed root factors with
+    // option-only incoming edges and duplicate intercepts.
+    const factors = [0.2, 0.3, 0.45].map((v, i) =>
+      makeNode({
+        id: `fac_${i}`,
+        kind: "factor",
+        label: `Factor ${i}`,
+        observed_state: { value: v },
+        intercept: v,
+      }),
+    );
+    const option = { id: "opt_a", kind: "option", label: "Option A" };
+    const outcome = { id: "out_1", kind: "outcome", label: "Outcome" };
+    const edges = [
+      ...factors.map((f) => makeEdge({ from: "opt_a", to: f.id as string, exists_probability: 1.0, effect_direction: "positive" })),
+      ...factors.map((f) => makeEdge({ from: f.id as string, to: "out_1", exists_probability: 0.8, effect_direction: "positive" })),
+    ];
+    const v3 = makeV3Body({ nodes: [...factors, option, outcome], edges });
+
+    const first = runGraphDataIntegrityChecks(v3);
+    expect(first.intercept_population_repairs).toHaveLength(3);
+
+    // Audited invariant: no inference-eligible root carries a non-zero
+    // intercept equal to its observed_state.value after the checks run.
+    for (const f of factors) {
+      expect((f as any).intercept).toBeUndefined();
+    }
+
+    // Idempotent: a second run finds nothing to repair and assigns nothing.
+    const second = runGraphDataIntegrityChecks(v3);
+    expect(second.intercept_population_repairs).toHaveLength(0);
+    for (const f of factors) {
+      expect((f as any).intercept).toBeUndefined();
+    }
   });
 });
