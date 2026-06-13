@@ -195,6 +195,42 @@ describe('V5 fresh-analysis follow-up guard — turn-executor integration', () =
     setTestSink(null);
   });
 
+  // V5-WAVE-2 PR-C: a fresh freshness-status question ("Is this analysis still
+  // up to date?") is owned by the stale-rerun / freshness-status guard, which
+  // runs BEFORE this fresh-followup guard. So it gets a crisp "still current"
+  // answer — NOT the fresh-followup recap, and NOT the egress generic fallback
+  // the LLM path produced when "up to date" classified as null intent and
+  // Sonnet wrote "previous/prior analysis".
+  it('"Is this analysis still up to date?" (fresh) → crisp still-current answer, no LLM, no recap, no egress fallback', async () => {
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      mkPayload('Is this analysis still up to date?'),
+      'req-fresh-j3-up-to-date',
+      { routingAdapter: adapter, graphState: READY_GRAPH as never },
+    );
+
+    // No LLM → the "previous/prior analysis" egress trip is impossible.
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.telemetry.turn_class).toBe('direct_answer');
+    expect(result.telemetry.llm_calls_used).toBe(0);
+
+    // The freshness-status guard owned it (fired before the fresh-followup guard).
+    const staleEvent = events.find((e) => e.event === 'v5.stale_rerun_guard');
+    expect(staleEvent, 'stale_rerun_guard telemetry should fire').toBeDefined();
+    expect(staleEvent!.data.matched).toBe(true);
+    expect(staleEvent!.data.intent_class).toBe('rerun_question');
+    expect(staleEvent!.data.freshness).toBe('fresh');
+
+    // Crisp determination, and NEITHER the recap stub NOR the generic egress fallback.
+    expect(result.response.assistant_text).toContain('still current');
+    expect(result.response.assistant_text).not.toContain(
+      "Here's the latest analysis recap.",
+    );
+    expect(result.response.assistant_text).not.toContain(
+      "Let me know what you'd like me to do next",
+    );
+  });
+
   it('"What drove this result?" with fresh analysis → guard matches, routing LLM NOT called', async () => {
     const adapter = throwingRoutingAdapter();
     const result = await runTurnExecutor(

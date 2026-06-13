@@ -214,7 +214,14 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   // ── rerun_question (most specific — anchored on rerun/stale vocabulary) ─
   { cls: 'rerun_question', pattern: /\bdo\s+(?:i|we)\s+need\s+to\s+(?:re-?run|rerun|run\s+again)\b/i },
   { cls: 'rerun_question', pattern: /\bshould\s+(?:i|we)\s+(?:re-?run|rerun|run\s+again)\b/i },
-  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)(?:\s+(?:result|results|analysis|outcome|outcomes))?\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|valid|fresh|current)\b/i },
+  // V5-WAVE-2 PR-C: the alternation originally covered only the negative /
+  // neutral freshness vocabulary ("out of date", "stale", "valid", "current"),
+  // so the POSITIVE phrasing "is this analysis still up to date?" classified as
+  // null intent, fell through every freshness guard to the LLM, and tripped the
+  // egress copy-policy guard ("previous/prior analysis"). Adding the positive
+  // forms ("up to date" / "up-to-date", "accurate") closes that gap so the
+  // freshness-status guard owns the question deterministically.
+  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)(?:\s+(?:result|results|analysis|outcome|outcomes))?\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|up[\s-]*to[\s-]*date|valid|fresh|current|accurate)\b/i },
   { cls: 'rerun_question', pattern: /\bdoes\s+(?:this|the\s+(?:analysis|result))\s+need\s+(?:a\s+)?(?:re-?run|rerun|refresh)\b/i },
   { cls: 'rerun_question', pattern: /\bis\s+(?:the\s+)?(?:analysis|result)\s+out\s*of\s*date\b/i },
 

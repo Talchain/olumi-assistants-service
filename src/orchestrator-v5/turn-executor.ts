@@ -3243,6 +3243,10 @@ export async function runTurnExecutor(
         const staleOutcome = tryStaleRerunGuard({
           message: payload.message,
           freshness: freshness?.freshness,
+          // V5-WAVE-2 PR-C: name the applied change in the stale re-run copy.
+          // `recent_changes` is newest-first; [0] is the most recent mutation
+          // summary (display-safe, the same field the state-query guard quotes).
+          recentChangeSummary: contextPack.recent_changes[0]?.summary ?? null,
         });
         emit(TelemetryEvents.V5StaleRerunGuard, {
           request_id: requestId,

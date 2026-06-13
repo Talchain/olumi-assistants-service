@@ -14,6 +14,13 @@ describe('classifyAnalyticalIntent', () => {
       'Are these results stale?',
       'Is the result out of date?',
       'Does this need a rerun?',
+      // V5-WAVE-2 PR-C: positive freshness phrasing — previously classified
+      // as null intent (the J3 root cause) because the alternation only had
+      // the negative/neutral forms.
+      'Is this analysis still up to date?',
+      'Is this analysis still up-to-date?',
+      'Are these results still up to date?',
+      'Is this analysis still accurate?',
     ];
     for (const msg of positives) {
       it(`matches "${msg}"`, () => {
