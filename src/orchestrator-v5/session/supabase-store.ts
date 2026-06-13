@@ -53,6 +53,7 @@ import {
   type CoachingStateSnapshot,
 } from '../coaching/coaching-state-snapshot.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { repairGraphForPersistence } from '../repair-graph-for-persistence.js';
 
 // V5 Conversation Context Reliability: user_message / assistant_message added
 // by migration 20260609120000. They are SELECTed here but parsed OUTSIDE the
@@ -356,9 +357,16 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async storeDraftGraph(scenarioId: string, graph: unknown): Promise<void> {
+    // Track S 0.13c-4: persist-site intercept repair on the SECOND scenarios.graph
+    // write RPC. `store_draft_graph` is currently dead on the live V5 path
+    // (commitDirectAnswer → append_turn_atomic_v2 is the sole live writer), but this
+    // method is reserved for out-of-band admin/migration use — exactly the caller
+    // class the persist-site repair must defend against. Repairing here keeps the
+    // coverage airtight if it is ever re-wired. No-op when no graph is supplied.
+    const p_graph = repairGraphForPersistence(graph, { scenarioId });
     const { error } = await this.client.rpc('store_draft_graph', {
       p_scenario_id: scenarioId,
-      p_graph: graph,
+      p_graph,
     });
     if (error) {
       throw new StateCommitFailedError(
