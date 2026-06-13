@@ -67,6 +67,7 @@ import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/tu
 import { config } from '../../../config/index.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
+import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import {
   buildAnalysisResultHeadline,
   describeAnalysisHeadline,
@@ -269,12 +270,28 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
+    // --- 2.6. Load-time intercept guard (Track S 0.13c-1) -----------------
+    // Legacy persisted graphs (drafted before #263 / Track S 0.13a) can carry
+    // the duplicate observed-root pattern `intercept === observed_state.value`.
+    // ISL evaluates a non-intervened root as `observed_state.value + intercept`,
+    // so such a root is analysed at 2x baseline. #263 repairs this on the draft
+    // path only; run_analysis loads `scenarios.graph` raw, so we apply the SAME
+    // repair to an in-memory CLONE here before PLoT sees the graph. The
+    // persisted `scenarios.graph` and `snapshot.rawPersistedGraph` (hashed
+    // below for `graph_hash_at_run` / freshness) are deliberately left
+    // untouched — this is a runtime guard, not a migration, and must not
+    // perturb freshness.
+    const graphForAnalysis = guardAnalysisGraphIntercepts(snapshot.graph, {
+      requestId: invocation.requestId,
+      scenarioId: args.scenario_id,
+    }).graph;
+
     // --- 3. Build PLoT payload (allowlisted fields) -----------------------
     // validateRunPayload inside PLoTClient.run enforces the strict allowlist
     // shape. We only forward fields PLoT accepts. No interpretation, no
-    // transformation.
+    // transformation beyond the 0.13c-1 intercept guard above.
     const plotPayload: Record<string, unknown> = {
-      graph: snapshot.graph,
+      graph: graphForAnalysis,
       options: snapshot.options,
       goal_node_id: snapshot.goal_node_id,
       request_id: invocation.requestId,

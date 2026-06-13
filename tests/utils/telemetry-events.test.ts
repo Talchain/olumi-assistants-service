@@ -544,6 +544,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ProposalContinuationInvalidated: "v5.proposal_continuation.invalidated",
         V5ProposalContinuationResumed: "v5.proposal_continuation.resumed",
         V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
+        V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
         V5RunAnalysisTimings: "v5.run_analysis.timings",
         V5TurnStageTimings: "v5.turn_executor.stage_timings",
       };
@@ -1228,6 +1229,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5ChipsFloorApplied,
         // V5 Lane 2 — egress chip-quality finalizer aggregate (diagnostic-only).
         TelemetryEvents.V5ChipsFinalized,
+        // Track S 0.13c-1 — run_analysis intercept guard summary (diagnostic-only,
+        // no Datadog metric; redacted corrected_count + node IDs).
+        TelemetryEvents.V5RunAnalysisInterceptGuard,
       ];
 
       for (const event of allEvents) {
@@ -1745,6 +1749,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.proposal_continuation.invalidated",
         "v5.proposal_continuation.resumed",
         "v5.routing_bounded_fallback",
+        "v5.run_analysis.intercept_guard",
         "v5.run_analysis.timings",
         "v5.turn_executor.stage_timings",
       ];
