@@ -219,7 +219,11 @@ describe('assembleContextPack', () => {
       win_probability: '28%',
     });
     expect(pack.display_analysis?.margin).toBe('44 percentage points');
-    expect(pack.display_analysis?.robustness_band).toBe('moderate');
+    // Raw canonical band 'moderate' is mapped to its plain-language phrase
+    // before reaching the LLM-facing projection (terminology-leak fix
+    // 2026-06-14). The raw enum carries on the handler-facing `analysis` slot.
+    expect(pack.display_analysis?.robustness_band).toBe('fairly stable');
+    expect(pack.analysis?.robustness_band).toBe('moderate');
     expect(pack.display_analysis?.top_drivers).toEqual([
       { label: 'Customer Churn', influence: 'moderate negative influence' },
     ]);
@@ -232,6 +236,9 @@ describe('assembleContextPack', () => {
     expect(serialised).not.toMatch(/\b0\.\d{2,}/);
     expect(serialised).not.toContain('sensitivity_value');
     expect(serialised).not.toContain('strength');
+    // Terminology-leak boundary invariant: no raw snake_case band enum token
+    // survives into the LLM-facing projection VALUE.
+    expect(serialised).not.toMatch(/\b(?:highly_stable|very_high|very_low)\b/);
   });
 
   it('display_analysis is null when raw analysis is null', () => {

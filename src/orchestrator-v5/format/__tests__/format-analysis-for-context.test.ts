@@ -107,15 +107,46 @@ describe('formatAnalysisForContext', () => {
     expect(missing!).not.toHaveProperty('margin');
   });
 
-  it('passes robustness_band through verbatim', () => {
+  // Terminology-leak regression (v5-cee-post-draft-coaching-terminology-quick-fix
+  // 2026-06-14): the canonical band ENUM must be mapped to a plain-language
+  // phrase via the SSOT (`describeRobustnessBand`) BEFORE it enters the
+  // LLM-facing projection. The raw snake_case token (esp. `highly_stable`)
+  // must never appear — Sonnet can echo a value it is shown, and the band
+  // token is not (and must not be) on the global egress forbidden list.
+  it('maps the canonical band enum to its SSOT plain-language phrase', () => {
+    const expected: Record<string, string> = {
+      fragile: 'fragile',
+      moderate: 'fairly stable',
+      stable: 'stable',
+      highly_stable: 'very stable',
+    };
     for (const band of ['fragile', 'moderate', 'stable', 'highly_stable'] as const) {
       const out = formatAnalysisForContext(rawAnalysis({ robustness_band: band }));
-      expect(out!.robustness_band).toBe(band);
+      expect(out!.robustness_band).toBe(expected[band]);
     }
+  });
+
+  it('never leaks the raw snake_case band token (highly_stable) into the projection', () => {
+    const out = formatAnalysisForContext(rawAnalysis({ robustness_band: 'highly_stable' }));
+    const json = JSON.stringify(out);
+    // The VALUE leak is closed: no snake_case band enum token survives.
+    expect(json).not.toContain('highly_stable');
+    expect(json).not.toMatch(/\b(?:very_high|very_low|highly_stable)\b/);
+    // The mapped, user-safe phrase is present instead.
+    expect(out!.robustness_band).toBe('very stable');
   });
 
   it('omits robustness_band when source is null', () => {
     const out = formatAnalysisForContext(rawAnalysis({ robustness_band: null }));
+    expect(out!).not.toHaveProperty('robustness_band');
+  });
+
+  it('omits robustness_band when the band is unknown (no leak, no fabrication)', () => {
+    // Defensive: a non-canonical band has no SSOT phrase → the field is
+    // dropped rather than echoing an unmapped token to the LLM.
+    const out = formatAnalysisForContext(
+      rawAnalysis({ robustness_band: 'totally_unknown_band' as never }),
+    );
     expect(out!).not.toHaveProperty('robustness_band');
   });
 
@@ -169,7 +200,8 @@ describe('formatAnalysisForContext', () => {
       leading_option: { label: 'Option A', win_probability: '86%' },
       runner_up: { label: 'Option B', win_probability: '79%' },
       margin: '7 percentage points',
-      robustness_band: 'moderate',
+      // mapped from canonical 'moderate' via the SSOT describeRobustnessBand
+      robustness_band: 'fairly stable',
       top_drivers: [
         { label: 'Price', influence: 'very strong positive influence' },
         { label: 'Demand', influence: 'moderate negative influence' },

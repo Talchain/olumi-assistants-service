@@ -27,6 +27,7 @@ import type {
 } from '../context/context-pack-assembler.js';
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
+import { describeRobustnessBand } from '../coaching/robustness-honesty.js';
 
 export interface DisplaySafeAnalysisOption {
   readonly label: string;
@@ -53,6 +54,9 @@ export interface DisplaySafeAnalysis {
   readonly runner_up?: DisplaySafeAnalysisOption;
   /** Phrase like `"7 percentage points"`. Omitted when 0 / unavailable. */
   readonly margin?: string;
+  /** Plain-language stability phrase (e.g. `"very stable"`), mapped from the
+   *  canonical band via the SSOT `describeRobustnessBand`. NEVER the raw
+   *  snake_case enum token (`highly_stable`). */
   readonly robustness_band?: string;
   readonly top_drivers?: readonly DisplaySafeAnalysisDriver[];
   /** Labels only — no `exists_probability`, no `strength`. */
@@ -134,8 +138,20 @@ export function formatAnalysisForContext(
     }
   }
 
-  if (raw.robustness_band) {
-    out.robustness_band = raw.robustness_band;
+  // Map the canonical band ENUM to a plain-language phrase via the SSOT
+  // (`describeRobustnessBand`) before it reaches the LLM-facing context.
+  // The raw snake_case token (`highly_stable`) must never enter the prompt:
+  // Sonnet can echo a value it is shown verbatim, and the band token is not
+  // on the global egress forbidden list (and must not be added there). The
+  // deterministic composers read the RAW `ContextPackAnalysis.robustness_band`
+  // (preserved on the handler-facing `analysis` slot), not this projection,
+  // so their enum switches are unaffected. NOTE: the KEY name `robustness_band`
+  // is still serialised into the prompt JSON; making the key itself user-safe
+  // is a routed context-contract follow-up (the LLM-facing key set mirrors the
+  // PMS routing-prompt's analysis field names and cannot be renamed in-lane).
+  const robustnessPhrase = describeRobustnessBand(raw.robustness_band);
+  if (robustnessPhrase) {
+    out.robustness_band = robustnessPhrase;
   }
 
   if (raw.top_drivers.length > 0) {

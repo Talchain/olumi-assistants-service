@@ -1268,3 +1268,81 @@ describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery 
     assertPassesAllGuards(result.text);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────
+// LANE REGRESSION LOCK (v5-cee-post-draft-coaching-terminology-quick-fix,
+// 2026-06-14). The V6 Pass-1 audit hypothesised a `typeof item === 'string'`
+// filter that "100% silently dropped" object-shaped `strengthen_items`. Root-
+// cause verification found NO such filter: object items ARE the canonical
+// contract shape ({id,label,detail,action_type,bias_category?}) and they
+// survive into the served post-draft narrative here. These tests pin that
+// contract so any future regression to a string-shape assumption is caught.
+//
+// Sibling-filter check (recorded, no defect): the string-only filters on
+// `widening_log.elements_added` / `…_excluded` are contract-correct — those
+// fields are `string[]` by schema (orchestrator/types.ts DraftCoachingWideningLog).
+// `bias_signals` use an object guard — correct, they are objects by schema.
+// No sibling shape-assumption defect exists to fix.
+// ───────────────────────────────────────────────────────────────────────
+describe('buildPostDraftNarrative — strengthen_items shape robustness (lane lock)', () => {
+  // A clean, gate-passing object detail (mirrors the canonical contract shape).
+  const VALID_DETAIL =
+    'the synergy assumption sits as a point value and would benefit from a 10 to 30M range';
+
+  it('object-shaped strengthen_items survive into the served narrative text', () => {
+    const items = [
+      { id: 's1', label: 'Stress synergy estimate', detail: VALID_DETAIL, action_type: 'add_constraint' },
+    ];
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems: items });
+    // The object's coaching value reaches the user as the assumption bullet.
+    expect(result.text).toContain('Assumption to check:');
+    expect(result.text).toContain('synergy assumption sits as a point value');
+    expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
+    expect(result.telemetry.strengthen_items_count).toBe(1);
+    assertPassesAllGuards(result.text);
+  });
+
+  it('object item survives even when followed by string / invalid entries (no throw, no raw leak)', () => {
+    // Mixed array: valid object FIRST, then non-object junk the old hypothesis
+    // claimed would poison the path. The valid object must still surface and
+    // none of the raw junk may leak into user copy.
+    const items: unknown[] = [
+      { id: 's1', label: 'Stress synergy estimate', detail: VALID_DETAIL, action_type: 'add_constraint' },
+      'a raw string strengthen item',
+      null,
+      42,
+      { id: 'x' }, // object missing label/detail/action_type
+    ];
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems: items });
+    expect(result.text).toContain('synergy assumption sits as a point value');
+    expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
+    expect(result.text).not.toContain('a raw string strengthen item');
+    expect(result.text).not.toContain('42');
+    assertPassesAllGuards(result.text);
+  });
+
+  it('string-only strengthen_items do not break the path (graceful fall-through)', () => {
+    // The legacy/invalid all-string array must not throw and must not leak the
+    // raw strings; the builder falls through to a lower-priority source.
+    const items: unknown[] = ['just a bare string', 'another bare string'];
+    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems: items });
+    expect(result.text.length).toBeGreaterThan(0);
+    expect(result.telemetry.assumption_source).not.toBe('strengthen_item_detail');
+    expect(result.telemetry.assumption_source).not.toBe('strengthen_item_label');
+    expect(result.text).not.toContain('just a bare string');
+    expect(result.text).not.toContain('another bare string');
+    assertPassesAllGuards(result.text);
+  });
+
+  it('non-array / null / undefined strengthen_items are handled gracefully', () => {
+    for (const bad of [null, undefined, 'not-an-array' as unknown, 7 as unknown]) {
+      const result = buildPostDraftNarrative({
+        graph: TWO_FACTOR_GRAPH,
+        strengthenItems: bad as never,
+      });
+      expect(result.text.length).toBeGreaterThan(0);
+      expect(result.telemetry.strengthen_items_count).toBe(0);
+      assertPassesAllGuards(result.text);
+    }
+  });
+});
