@@ -432,6 +432,66 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
 // adversarial, not a realistic producer shape in this codebase.
 // ---------------------------------------------------------------------------
 
+/**
+ * Pure scanner shared by the directory invariant and its self-test
+ * matrix (Codex follow-up): parse `text` and return one entry per
+ * static WRITE to a `mutated_graph` property. Reads (property access,
+ * destructuring) and type declarations are deliberately not returned.
+ * Both callers exercise THIS function, so the matrix test guards the
+ * real invariant logic — not a copy that could drift from it.
+ */
+function findMutatedGraphWrites(
+  text: string,
+): Array<{ readonly form: string; readonly line: number }> {
+  const sf = ts.createSourceFile('scan.ts', text, ts.ScriptTarget.Latest, true);
+  const hits: Array<{ form: string; line: number }> = [];
+  const record = (node: ts.Node, form: string): void => {
+    const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+    hits.push({ form, line: line + 1 });
+  };
+  const visit = (node: ts.Node): void => {
+    // { mutated_graph: value } and { 'mutated_graph': value }
+    if (
+      ts.isPropertyAssignment(node) &&
+      (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+      node.name.text === 'mutated_graph'
+    ) {
+      record(node, 'property assignment');
+    }
+    // { ['mutated_graph']: value }
+    if (
+      ts.isPropertyAssignment(node) &&
+      ts.isComputedPropertyName(node.name) &&
+      ts.isStringLiteralLike(node.name.expression) &&
+      node.name.expression.text === 'mutated_graph'
+    ) {
+      record(node, 'computed property');
+    }
+    // { mutated_graph } shorthand
+    if (
+      ts.isShorthandPropertyAssignment(node) &&
+      node.name.text === 'mutated_graph'
+    ) {
+      record(node, 'shorthand property');
+    }
+    // outcome.mutated_graph = value / outcome['mutated_graph'] = value
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ((ts.isPropertyAccessExpression(node.left) &&
+        node.left.name.text === 'mutated_graph') ||
+        (ts.isElementAccessExpression(node.left) &&
+          ts.isStringLiteralLike(node.left.argumentExpression) &&
+          node.left.argumentExpression.text === 'mutated_graph'))
+    ) {
+      record(node, 'assignment expression');
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return hits;
+}
+
 describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 handlers', () => {
   it('no new mutated_graph producer (any static write form) outside the reviewed allowlist', () => {
     const SRC_ROOT = new URL('../../', import.meta.url).pathname;
@@ -443,55 +503,6 @@ describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 h
 
     const offenders: string[] = [];
     const scanned: string[] = [];
-
-    const flagWrites = (rel: string, text: string): void => {
-      const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
-      const record = (node: ts.Node, form: string): void => {
-        if (ALLOWED.has(rel)) return;
-        const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
-        offenders.push(`${rel}:${line + 1} (${form})`);
-      };
-      const visit = (node: ts.Node): void => {
-        // { mutated_graph: value } and { 'mutated_graph': value }
-        if (
-          ts.isPropertyAssignment(node) &&
-          (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
-          node.name.text === 'mutated_graph'
-        ) {
-          record(node, 'property assignment');
-        }
-        // { ['mutated_graph']: value }
-        if (
-          ts.isPropertyAssignment(node) &&
-          ts.isComputedPropertyName(node.name) &&
-          ts.isStringLiteralLike(node.name.expression) &&
-          node.name.expression.text === 'mutated_graph'
-        ) {
-          record(node, 'computed property');
-        }
-        // { mutated_graph } shorthand
-        if (
-          ts.isShorthandPropertyAssignment(node) &&
-          node.name.text === 'mutated_graph'
-        ) {
-          record(node, 'shorthand property');
-        }
-        // outcome.mutated_graph = value / outcome['mutated_graph'] = value
-        if (
-          ts.isBinaryExpression(node) &&
-          node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-          ((ts.isPropertyAccessExpression(node.left) &&
-            node.left.name.text === 'mutated_graph') ||
-            (ts.isElementAccessExpression(node.left) &&
-              ts.isStringLiteralLike(node.left.argumentExpression) &&
-              node.left.argumentExpression.text === 'mutated_graph'))
-        ) {
-          record(node, 'assignment expression');
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(sf);
-    };
 
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -507,7 +518,10 @@ describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 h
         if (!text.includes('mutated_graph')) continue;
         const rel = full.slice(SRC_ROOT.length);
         scanned.push(rel);
-        flagWrites(rel, text);
+        if (ALLOWED.has(rel)) continue;
+        for (const hit of findMutatedGraphWrites(text)) {
+          offenders.push(`${rel}:${hit.line} (${hit.form})`);
+        }
       }
     };
     walk(SRC_ROOT);
@@ -527,5 +541,51 @@ describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 h
         'is a D1 ingress-echo mutation that never deletes nodes — review ' +
         'the new producer against that contract before extending the allowlist.',
     ).toEqual([]);
+  });
+});
+
+// Self-test matrix for the scanner (Codex follow-up): locks the set of
+// write forms the invariant detects and the read/type forms it must NOT,
+// so a future edit that weakens detection fails here loudly rather than
+// silently letting a new producer through the directory invariant.
+describe('findMutatedGraphWrites — detection matrix', () => {
+  it.each([
+    ['property assignment', 'export const o = { ok: true, mutated_graph: g };'],
+    ['quoted-key property', 'export const o = { "mutated_graph": g };'],
+    ['computed string key', 'export const o = { ["mutated_graph"]: g };'],
+    [
+      'shorthand property',
+      'const mutated_graph = g; export const o = { foo, mutated_graph };',
+    ],
+    ['property assignment expr', 'declare const outcome: any; outcome.mutated_graph = g;'],
+    [
+      'element assignment expr',
+      'declare const outcome: any; outcome["mutated_graph"] = g;',
+    ],
+    [
+      'helper literal (indirection)',
+      'export function withMutatedGraph(g: unknown) { return { mutated_graph: g }; }',
+    ],
+  ])('FLAGS a %s', (_label, src) => {
+    expect(findMutatedGraphWrites(src).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['optional-chain read', 'declare const o: any; export const x = o?.mutated_graph;'],
+    [
+      'presence-check read',
+      'declare const o: any; export const y = o.mutated_graph !== undefined;',
+    ],
+    [
+      'destructuring read',
+      'declare const o: any; const { mutated_graph } = o; export const z = mutated_graph;',
+    ],
+    [
+      'type declaration',
+      'export interface H { readonly mutated_graph?: unknown; }',
+    ],
+    ['unrelated identifier', 'export const mutated_graph_count = 3;'],
+  ])('does NOT flag a %s', (_label, src) => {
+    expect(findMutatedGraphWrites(src)).toEqual([]);
   });
 });
