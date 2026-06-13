@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
+  applyPriorFactsDriversFallback,
   applyTopLevelDriversOverride,
   applyTopLevelFragileEdgeOverride,
   buildAnalysisFromPriorFacts,
@@ -1135,5 +1136,119 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
     });
     expect(out.source).toBe('none');
     expect(out.summary.top_drivers).toEqual([]);
+  });
+});
+
+describe('applyPriorFactsDriversFallback — D1 tier-2 fallback-to-authoritative (PR-D)', () => {
+  // The baseline 5/5 echo: option_comparison + win_probabilities but NO
+  // factor_sensitivity anywhere (neither per-option results[] nor top-level).
+  // After coerceIngressAnalysis (results: []), compactAnalysis builds options
+  // but leaves top_drivers empty, and tier-1 applyTopLevelDriversOverride has
+  // nothing to rescue → source 'none'. This is precisely what deflected.
+  const LOSSY_ECHO: Record<string, unknown> = {
+    meta: { seed_used: 0, n_samples: 0, response_hash: 'h-lossy' },
+    option_comparison: [
+      { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.62 },
+      { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.38 },
+    ],
+    robustness: { level: 'moderate' },
+    analysis_status: 'complete',
+  };
+
+  const lossyIngressSummary = () =>
+    compactAnalysis(
+      { ...LOSSY_ECHO, results: [] } as unknown as Parameters<typeof compactAnalysis>[0],
+    )!;
+
+  // Authoritative persisted analysis: the run-analysis handler stored the full
+  // envelope, so per-option factor_sensitivity is present and recoverable.
+  function priorFactWithDrivers(): HandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000003',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.62, 'opt-b': 0.38 },
+        summary: 'Prior run',
+        enrichment: {
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-prior' },
+          results: [
+            {
+              option_id: 'opt-a',
+              option_label: 'Option A',
+              win_probability: 0.62,
+              outcome_mean: 100,
+              factor_sensitivity: [
+                { node_id: 'fac-x', label: 'Hiring Pace', sensitivity: 0.5, direction: 'positive' },
+                { node_id: 'fac-y', label: 'Budget Ceiling', sensitivity: -0.3, direction: 'negative' },
+              ],
+            },
+            { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.38, outcome_mean: 80 },
+          ],
+          analysis_status: 'complete',
+        },
+      },
+    } as unknown as HandlerFact;
+  }
+
+  it('baseline 5/5 regression: recovers drivers from prior facts when the ingress echo carried none', () => {
+    const summary = lossyIngressSummary();
+    // Precondition — the deflection root cause: ingress projected no drivers.
+    expect(summary.top_drivers).toEqual([]);
+
+    const { summary: filled, source } = applyPriorFactsDriversFallback(summary, [
+      priorFactWithDrivers(),
+    ]);
+    expect(source).toBe('prior_facts');
+    expect(filled.top_drivers.length).toBeGreaterThan(0);
+    expect(filled.top_drivers.map((d) => d.factor_label)).toContain('Hiring Pace');
+  });
+
+  it('end-to-end tier-1 -> tier-2: top-level override yields "none", then prior facts fill the drivers', () => {
+    const coerced = { ...LOSSY_ECHO, results: [] };
+    const ingress = compactAnalysis(
+      coerced as unknown as Parameters<typeof compactAnalysis>[0],
+    )!;
+    // tier 1 — nothing to rescue from the echo itself.
+    const tier1 = applyTopLevelDriversOverride(ingress, coerced);
+    expect(tier1.source).toBe('none');
+    expect(tier1.summary.top_drivers).toEqual([]);
+    // tier 2 — authoritative recovery.
+    const tier2 = applyPriorFactsDriversFallback(tier1.summary, [priorFactWithDrivers()]);
+    expect(tier2.source).toBe('prior_facts');
+    expect(tier2.summary.top_drivers.length).toBeGreaterThan(0);
+  });
+
+  it('never overrides drivers the summary already carried (additive, fail-closed)', () => {
+    const summaryWithDrivers = buildAnalysisFromPriorFacts([priorFactWithDrivers()])!;
+    expect(summaryWithDrivers.top_drivers.length).toBeGreaterThan(0);
+    const before = summaryWithDrivers.top_drivers;
+    // Even with another prior fact available, an already-populated summary is
+    // returned untouched (same reference) — tier-2 only fills the 'none' tail.
+    const other = runAnalysisFact({
+      leadingOptionId: 'opt-z',
+      winProbabilities: { 'opt-z': 0.7, 'opt-w': 0.3 },
+    });
+    const { summary, source } = applyPriorFactsDriversFallback(summaryWithDrivers, [other]);
+    expect(source).toBe('unchanged');
+    expect(summary.top_drivers).toBe(before);
+  });
+
+  it('unchanged when there is no prior run_analysis fact (nothing authoritative to recover)', () => {
+    const { summary, source } = applyPriorFactsDriversFallback(lossyIngressSummary(), []);
+    expect(source).toBe('unchanged');
+    expect(summary.top_drivers).toEqual([]);
+  });
+
+  it('unchanged when the prior fact carries no drivers either', () => {
+    const noDrivers = runAnalysisFact({
+      leadingOptionId: 'opt-a',
+      winProbabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
+    });
+    const { summary, source } = applyPriorFactsDriversFallback(lossyIngressSummary(), [noDrivers]);
+    expect(source).toBe('unchanged');
+    expect(summary.top_drivers).toEqual([]);
   });
 });

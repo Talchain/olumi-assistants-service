@@ -342,7 +342,7 @@ export function applyTopLevelFragileEdgeOverride(
  * `enrichment.factor_sensitivity[]` shape (staging / body `analysis_state`),
  * or nothing.
  */
-export type TopDriverSource = 'per_option' | 'top_level' | 'none';
+export type TopDriverSource = 'per_option' | 'top_level' | 'prior_facts' | 'none';
 
 /**
  * Reconcile an `AnalysisResponseSummary`'s `top_drivers` against the
@@ -528,5 +528,54 @@ export function buildAnalysisFromPriorFacts(
     margin,
     margin_pp: marginPp,
     analysis_status: 'complete',
+  };
+}
+
+/**
+ * D1 fallback-to-authoritative for top drivers (V5-WAVE-2 PR-D).
+ *
+ * Tier 2, applied ONLY after {@link applyTopLevelDriversOverride} (tier 1)
+ * has yielded no drivers — i.e. the request `analysis_state` echo carried
+ * neither per-option `results[].factor_sensitivity` nor a top-level
+ * `factor_sensitivity[]`, so its source came back `'none'`. That lossy echo
+ * leaves `top_drivers: []`, which fails the advice gate's `needs_top_driver`
+ * classes (`explain_results_free_text` / `what_would_flip_free_text`) and
+ * sends "What would change the outcome?" to the fresh-analysis recap stub
+ * instead of grounded advice (the baseline 5/5 flip-deflection).
+ *
+ * The persisted prior-facts analysis is the AUTHORITATIVE source — the
+ * run-analysis handler stores the full `V2RunResponseEnvelope` verbatim, so
+ * {@link buildAnalysisFromPriorFacts} recovers drivers the ingress echo
+ * dropped. Tier 1 is preferred and left untouched; this only runs on the
+ * `'none'` tail, so an echo that DID carry its own drivers keeps them.
+ *
+ * Additive and fail-closed:
+ *   - Only fills when `summary.top_drivers` is empty — never overrides a
+ *     request projection that carried drivers (a genuinely newer request
+ *     analysis keeps its own).
+ *   - Drivers key off factor labels, so no option-label source is needed.
+ *   - No usable prior `run_analysis` fact, or it too carries no drivers →
+ *     returned unchanged (`'unchanged'`).
+ *
+ * Freshness safety: the fresh-analysis advice gate only short-circuits when
+ * the verdict is `'fresh'`, and `buildAnalysisFromPriorFacts` selects the
+ * SAME fact the freshness verdict derives from (`selectRunAnalysisFact`).
+ * So when the gate fires these drivers describe the current analysis, not a
+ * staler one.
+ */
+export function applyPriorFactsDriversFallback(
+  summary: AnalysisResponseSummary,
+  priorFacts: readonly HandlerFact[],
+): { summary: AnalysisResponseSummary; source: 'prior_facts' | 'unchanged' } {
+  if (summary.top_drivers.length > 0) {
+    return { summary, source: 'unchanged' };
+  }
+  const authoritative = buildAnalysisFromPriorFacts(priorFacts);
+  if (!authoritative || authoritative.top_drivers.length === 0) {
+    return { summary, source: 'unchanged' };
+  }
+  return {
+    summary: { ...summary, top_drivers: authoritative.top_drivers },
+    source: 'prior_facts',
   };
 }

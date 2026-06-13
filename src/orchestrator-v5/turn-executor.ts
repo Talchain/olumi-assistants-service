@@ -160,6 +160,7 @@ import {
 } from './context/context-pack-assembler.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import {
+  applyPriorFactsDriversFallback,
   applyTopLevelDriversOverride,
   applyTopLevelFragileEdgeOverride,
   buildAnalysisFromPriorFacts,
@@ -894,6 +895,26 @@ export async function runTurnExecutor(
         analysisSummary = reconciled.summary;
         fragileEdgeSource = reconciled.source;
         topDriverSource = withDrivers.source;
+        // PR-D (V5-WAVE-2) tier-2 — D1 fallback-to-authoritative. When the
+        // ingress echo carried no usable drivers (tier-1
+        // `applyTopLevelDriversOverride` returned 'none' — neither per-option
+        // nor top-level `factor_sensitivity[]`), the projection is
+        // insufficient for the advice gate's `needs_top_driver` classes and
+        // "What would change the outcome?" deflects to the fresh-analysis
+        // recap stub (the baseline 5/5 case). Recover the drivers from the
+        // authoritative persisted analysis (prior facts). Additive: tier-1 is
+        // untouched and preferred; only the 'none' tail consults prior facts,
+        // and it never overrides drivers the echo already carried.
+        if (topDriverSource === 'none') {
+          const fromPriorFacts = applyPriorFactsDriversFallback(
+            reconciled.summary,
+            context.prior_facts,
+          );
+          if (fromPriorFacts.source === 'prior_facts') {
+            analysisSummary = fromPriorFacts.summary;
+            topDriverSource = 'prior_facts';
+          }
+        }
       }
       analysisStateSource = 'request';
       // Freshness verdict is independent of whether the request carries

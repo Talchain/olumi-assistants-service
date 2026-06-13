@@ -209,6 +209,40 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
   };
 }
 
+/**
+ * The baseline 5/5 shape: the persisted run_analysis fact carries the FULL
+ * envelope (top-level `factor_sensitivity[]` → drivers), but the UI echoes a
+ * LOSSY `analysis_state` that dropped the sensitivities. Tier-1
+ * `applyTopLevelDriversOverride` has nothing to rescue from the echo; tier-2
+ * `applyPriorFactsDriversFallback` recovers the drivers from THIS fact.
+ */
+function makeFreshRunAnalysisFactWithDrivers(): Record<string, unknown> {
+  return {
+    fact_type: 'run_analysis' as const,
+    fact_version: 1 as const,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_hire_local',
+      summary: 'Prior analysis result',
+      graph_hash_at_run: READY_GRAPH_HASH,
+      computed_at: new Date(Date.now() - 60_000).toISOString(),
+      win_probabilities: { opt_hire_local: 0.638, opt_status_quo: 0.156 },
+      enrichment: {
+        analysis_status: 'completed',
+        option_comparison: [
+          { option_id: 'opt_hire_local', option_label: 'Hire Two Senior Engineers Locally', win_probability: 0.638 },
+          { option_id: 'opt_status_quo', option_label: 'Continue with Current Team', win_probability: 0.156 },
+        ],
+        factor_sensitivity: [
+          { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive' },
+          { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative' },
+        ],
+      },
+    },
+  };
+}
+
 const PRIOR_RUN_ANALYSIS_TURN = {
   id: PRIOR_RA_ROW_ID,
   scenario_id: SCENARIO_ID,
@@ -337,6 +371,48 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(freshnessEvent!.data.analysis_state_source).toBe('request');
     expect(freshnessEvent!.data.top_driver_source).toBe('top_level');
     expect(freshnessEvent!.data.fragile_edge_source).toBe('top_level');
+  });
+
+  it('baseline 5/5: lossy echo (no sensitivities) + prior fact WITH drivers → grounded via prior-facts fallback, NOT recap', async () => {
+    // The captured baseline shape: the UI echoes a lossy analysis_state with
+    // its drivers stripped, but the persisted run_analysis fact carries the
+    // real drivers. PR-D tier-2 recovers them from the authoritative source.
+    mockState.priorFacts = [makeFreshRunAnalysisFactWithDrivers()];
+    const adapter = throwingRoutingAdapter();
+    const lossy = stagingShapedAnalysisState();
+    delete lossy.factor_sensitivity; // echo carries NO drivers anywhere
+
+    const result = await runTurnExecutor(
+      mkPayload('What would change the outcome?'),
+      'req-body-analysis-state-prior-facts-fallback',
+      {
+        routingAdapter: adapter,
+        graphState: READY_GRAPH as never,
+        analysisState: lossy as never,
+      },
+    );
+
+    // Deterministic path, and THE fix: grounded advice, not the recap stub.
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.response.assistant_text).not.toContain(RECAP_STUB_PREFIX);
+    expect(result.response.assistant_text).toContain('Hire Two Senior Engineers Locally');
+
+    // The advice gate matched the flip class because needs_top_driver is now
+    // satisfied from the authoritative prior-facts drivers.
+    const gateEvent = events.find((e) => e.event === 'v5.post_analysis_advice_gate');
+    expect(gateEvent!.data.matched).toBe(true);
+    expect(gateEvent!.data.advice_class).toBe('what_would_flip_free_text');
+
+    // Telemetry proves the AUTHORITATIVE source was used (tier-2), not tier-1
+    // top-level (the echo had nothing) — this is the D1 fallback signal.
+    const freshnessEvent = events.find(
+      (e) =>
+        e.data.analysis_state_source !== undefined &&
+        e.data.dispatch_path === 'turn_executor_pre_handler',
+    );
+    expect(freshnessEvent!.data.analysis_state_source).toBe('request');
+    expect(freshnessEvent!.data.top_driver_source).toBe('prior_facts');
   });
 
   it('genuinely data-absent body analysis_state (no drivers anywhere) still falls back to the recap copy', async () => {
