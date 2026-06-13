@@ -38,6 +38,15 @@ export interface RunAnalysisInterceptGuardResult<T = unknown> {
 }
 
 /**
+ * Fixed error-class taxonomy for the redacted fallback diagnostic. Normalising
+ * `error_name` through this allowlist (rather than trusting `err.name`) keeps the
+ * field provably one of a bounded set — never a custom error name that could
+ * embed a value/magnitude. Realistic throws here are clone/repair exceptions
+ * (`JSON.stringify` → TypeError/RangeError); anything else becomes `unknown_error`.
+ */
+const KNOWN_ERROR_NAMES = new Set(['TypeError', 'RangeError', 'SyntaxError', 'Error']);
+
+/**
  * Return a repaired deep CLONE of `graph` for the PLoT payload, stripping any
  * duplicate observed-root intercept via the #263 repair. The input `graph` is
  * never mutated.
@@ -96,13 +105,16 @@ export function guardAnalysisGraphIntercepts<T = unknown>(
     // positions, property paths, or (in future repair/clone errors) values,
     // which would violate the lane's "no values or magnitudes in diagnostics"
     // rule. `error_name` is a fixed error-class taxonomy (e.g. "TypeError").
+    const errorName = err instanceof Error
+      ? (KNOWN_ERROR_NAMES.has(err.name) ? err.name : 'unknown_error')
+      : 'non_error_throw';
     log.warn(
       {
         event: 'v5.run_analysis.intercept_guard_failed',
         request_id: opts.requestId,
         scenario_id: opts.scenarioId,
         reason: 'clone_or_repair_failed',
-        error_name: err instanceof Error ? err.name : 'non_error_throw',
+        error_name: errorName,
       },
       '[run-analysis] intercept guard failed; analysing the unrepaired graph',
     );

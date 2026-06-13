@@ -173,8 +173,12 @@ describe('guardAnalysisGraphIntercepts — #263 repair semantics on a clone', ()
     const events: Array<{ event: string }> = [];
     setTestSink((event) => events.push({ event }));
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    const result = guardAnalysisGraphIntercepts(circular, { requestId: 'req-fail', scenarioId: 'sc-fail' });
-    setTestSink(null);
+    let result!: { graph: unknown; repairs: readonly unknown[] };
+    try {
+      result = guardAnalysisGraphIntercepts(circular, { requestId: 'req-fail', scenarioId: 'sc-fail' });
+    } finally {
+      setTestSink(null);
+    }
 
     expect(result.repairs).toHaveLength(0);
     expect(result.graph).toBe(circular); // original input returned, unrepaired
