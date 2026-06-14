@@ -33,6 +33,7 @@ import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
 import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
+import { normaliseOptionInterventionContract } from './normalise-option-interventions.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -426,6 +427,22 @@ export async function commitDirectAnswer(
     source: metadata.handler_id ?? undefined,
   });
 
+  // V5 edit_graph P0: normalise edit-added option interventions to the canonical
+  // top-level OptionV3 contract before the write. An option from client-supplied
+  // graph_state can persist interventions under node.data.interventions, which
+  // GraphV3.safeParse strips on read (NodeV3 has no `data` field) — so the option
+  // reaches run_analysis/PLoT with zero interventions (422 / options_not_configured).
+  // Promoting them here makes the persisted record match draft-created options.
+  // Runs alongside (independent of) the Track S intercept repair above: that
+  // operates on factor observed-root intercepts, this on option intervention
+  // bundles. No-op on draft/already-canonical options; fail-open; idempotent.
+  const graphForStore = normaliseOptionInterventionContract(graphToPersist, {
+    scenarioId: metadata.scenario_id,
+    turnId: metadata.turn_id,
+    turnClass: metadata.turn_class,
+    source: metadata.handler_id ?? undefined,
+  });
+
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
@@ -436,7 +453,7 @@ export async function commitDirectAnswer(
     llm_calls_used: metadata.llm_calls_used,
     duration_ms: metadata.duration_ms,
     handler_facts: metadata.handler_facts,
-    graph: graphToPersist,
+    graph: graphForStore,
     briefText: metadata.briefText,
     pending_actions: finalPendings,
     coaching_state: metadata.coaching_state,
