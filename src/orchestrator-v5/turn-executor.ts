@@ -907,7 +907,10 @@ export async function runTurnExecutor(
         // and it never overrides drivers the echo already carried.
         if (topDriverSource === 'none') {
           const fromPriorFacts = applyPriorFactsDriversFallback(
-            reconciled.summary,
+            // Read the active working summary (which aliases `reconciled.summary`
+            // here) rather than the intermediate local, so tier-2 stays correct
+            // if reconciliation is later reassigned ahead of this point.
+            analysisSummary,
             context.prior_facts,
           );
           if (fromPriorFacts.source === 'prior_facts') {
