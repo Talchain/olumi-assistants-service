@@ -254,4 +254,28 @@ describe('commitDirectAnswer — persist-site intercept repair (Track S 0.13c-4)
     expect(appendCalls[0]!.graph).toEqual(clean);
     expect(events.filter((e) => e === 'v5.graph_persist.intercept_repair')).toHaveLength(0);
   });
+
+  it('telemetry failure at the persist site does NOT discard the repair: store.append still receives the repaired graph', async () => {
+    // Integration-level guarantee (not just the wrapper in isolation): a throwing sink
+    // makes the summary emit() throw, yet the graph that reaches store.append must be the
+    // repaired one — the dirty graph must never be persisted because telemetry failed.
+    setTestSink(() => {
+      throw new Error('sink boom');
+    });
+    const dirtyGraph = {
+      nodes: [{ id: 'fac_dup', kind: 'factor', label: 'D', observed_state: { value: 0.5 }, intercept: 0.5 }],
+      edges: [],
+      goal_node_id: 'goal_1',
+    };
+    const { store, appendCalls } = makeSpyStore();
+    try {
+      await commitDirectAnswer(composed(), { ...META, graph: dirtyGraph, handler_id: 'set_factor_value' as never }, store);
+    } finally {
+      setTestSink(null);
+    }
+    const persisted = appendCalls[0]!.graph as typeof dirtyGraph;
+    expect('intercept' in persisted.nodes[0]!).toBe(false);          // repaired graph persisted
+    expect(persisted.goal_node_id).toBe('goal_1');                   // shape preserved
+    expect((dirtyGraph.nodes[0] as Record<string, unknown>).intercept).toBe(0.5); // input untouched
+  });
 });

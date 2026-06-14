@@ -132,7 +132,7 @@ describe('repairGraphForPersistence (Track S 0.13c-4)', () => {
     expect(repairGraphForPersistence(g)).toBe(g);
   });
 
-  it('non-blocking: a non-serialisable graph degrades to the unrepaired input (no throw, redacted warn)', () => {
+  it('non-blocking: a non-serialisable graph degrades to the unrepaired input (clone failure, redacted warn)', () => {
     const circular: Record<string, unknown> = { nodes: [], edges: [] };
     circular.self = circular;
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
@@ -141,11 +141,42 @@ describe('repairGraphForPersistence (Track S 0.13c-4)', () => {
     const out = repairGraphForPersistence(circular, { scenarioId: 'sc', turnId: 't' });
     setTestSink(null);
 
-    expect(out).toBe(circular);
+    expect(out).toBe(circular); // no repaired artifact exists → persist the original
     expect(events.filter((e) => e === 'v5.graph_persist.intercept_repair')).toHaveLength(0);
     expect(warn).toHaveBeenCalledTimes(1);
     const p = warn.mock.calls[0]![0] as Record<string, unknown>;
-    expect(p).toMatchObject({ event: 'v5.graph_persist.intercept_repair_failed', reason: 'clone_or_repair_failed', error_name: 'TypeError', scenario_id: 'sc', turn_id: 't' });
+    expect(p).toMatchObject({ event: 'v5.graph_persist.intercept_repair_failed', reason: 'clone_failed', error_name: 'TypeError', scenario_id: 'sc', turn_id: 't' });
+    expect(Object.keys(p).sort()).toEqual(['error_name', 'event', 'reason', 'scenario_id', 'turn_id'].sort());
+    expect(p).not.toHaveProperty('message');
+    expect(p).not.toHaveProperty('err');
+  });
+
+  it('repair-step throw AFTER mutation does NOT discard the repair (returns the never-dirtier clone, not the dirty original)', () => {
+    // The shared predicate deletes node.intercept BEFORE its redacted per-node log.info.
+    // Force that internal log to throw (the only way the repair step can throw today) and
+    // prove the wrapper still persists the repaired clone — structurally, not by luck.
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {
+      throw new Error('logger boom');
+    });
+    const g: AnyGraph = {
+      nodes: [{ id: 'fac_dup', kind: 'factor', label: 'D', observed_state: { value: 0.5 }, intercept: 0.5 }],
+      edges: [],
+    };
+    const out = repairGraphForPersistence(g, { scenarioId: 'sc', turnId: 't', source: 'set_factor_value' });
+    info.mockRestore();
+
+    // the duplicate WAS stripped from the persisted graph despite the predicate throwing
+    expect('intercept' in nodeById(out, 'fac_dup')).toBe(false);
+    expect(out).not.toBe(g); // the clone, never the original reference
+    expect(nodeById(g, 'fac_dup').intercept).toBe(0.5); // input untouched
+    // redacted repair_failed fallback (no success emit — its bookkeeping threw)
+    const rf = warn.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((p) => p?.event === 'v5.graph_persist.intercept_repair_failed');
+    expect(rf).toHaveLength(1);
+    const p = rf[0]!;
+    expect(p).toMatchObject({ event: 'v5.graph_persist.intercept_repair_failed', reason: 'repair_failed', error_name: 'Error', scenario_id: 'sc', turn_id: 't' });
     expect(Object.keys(p).sort()).toEqual(['error_name', 'event', 'reason', 'scenario_id', 'turn_id'].sort());
     expect(p).not.toHaveProperty('message');
     expect(p).not.toHaveProperty('err');

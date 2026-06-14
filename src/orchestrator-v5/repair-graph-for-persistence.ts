@@ -29,8 +29,10 @@
  *    unchanged (system events, chip clicks, non-graph turns write no graph).
  *  - Clean graphs are returned UNCHANGED (the original reference, no clone) so a
  *    no-duplicate write is byte-identical to before this change.
- *  - Non-blocking: never fails a commit. On any clone/repair error it persists the
- *    unrepaired graph and emits a redacted warning (no values, no graph content).
+ *  - Non-blocking: never fails a commit. A clone failure persists the unrepaired
+ *    graph; a repair-step throw persists the never-dirtier clone (the repair only
+ *    ever deletes duplicate intercepts) — observability can never discard a repair.
+ *    Both emit a redacted warning (no values, no graph content).
  */
 import { repairObservedRootIntercepts } from '../cee/transforms/graph-data-integrity.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
@@ -71,36 +73,61 @@ export interface PersistRepairContext {
  *
  * Repair success is DECOUPLED from telemetry: once a duplicate is removed, the
  * repaired clone is returned even if the summary telemetry/logging throws. An
- * observability failure must never cause a known-dirty graph to be persisted.
- * Only an actual clone/repair failure (unreachable for DB-JSON graphs) falls back
- * to the unrepaired graph.
+ * observability failure must never cause a known-dirty graph to be persisted. This
+ * holds structurally: clone and repair are separated, so a repair-step throw (today
+ * only reachable via the predicate's own internal log) returns the never-dirtier
+ * clone, and only a clone failure (unreachable for DB-JSON graphs) falls back to the
+ * unrepaired graph.
  */
 export function repairGraphForPersistence<T>(graph: T, ctx: PersistRepairContext = {}): T {
   // Graph-absent no-op: nothing to persist/repair.
   if (graph === undefined || graph === null) return graph;
 
+  // 1. Clone. Only a clone failure leaves us with no repaired artifact, so only then
+  //    do we fall back to the original graph. (Unreachable for DB-JSON — JSON.stringify
+  //    throws only on BigInt/circular, neither of which occurs in a persisted graph.)
   let clone: T;
-  let repairs: ReturnType<typeof repairObservedRootIntercepts>;
   try {
     clone = JSON.parse(JSON.stringify(graph)) as T;
-    repairs = repairObservedRootIntercepts(clone, ctx.turnId);
   } catch (err) {
-    // Could not clone/repair (unreachable for DB-JSON — JSON.stringify only throws on
-    // BigInt/circular). Persist the unrepaired graph; never fail the commit. Redacted.
     safeWarn(
       {
         event: 'v5.graph_persist.intercept_repair_failed',
         scenario_id: ctx.scenarioId,
         turn_id: ctx.turnId,
-        reason: 'clone_or_repair_failed',
+        reason: 'clone_failed',
         error_name: errorClass(err),
       },
-      '[commit] persist-site intercept repair failed; persisting the unrepaired graph',
+      '[commit] persist-site intercept repair could not clone the graph; persisting the unrepaired graph',
     );
     return graph;
   }
 
-  if (repairs.length === 0) return graph; // clean → persist the original, unchanged
+  // 2. Repair the CLONE in place. `repairObservedRootIntercepts` only ever DELETES
+  //    duplicate observed-root intercepts (never adds/changes a value) and mutates a
+  //    node BEFORE its own redacted per-node logging. So even if it throws (today only
+  //    reachable via that internal log, which the stock pino logger does not do), the
+  //    clone is at-least-as-repaired as the original and NEVER dirtier — persist the
+  //    clone, never the unrepaired original. This makes "observability never discards a
+  //    repair" structural, not contingent on the logger being non-throwing.
+  let repairs: ReturnType<typeof repairObservedRootIntercepts>;
+  try {
+    repairs = repairObservedRootIntercepts(clone, ctx.turnId);
+  } catch (err) {
+    safeWarn(
+      {
+        event: 'v5.graph_persist.intercept_repair_failed',
+        scenario_id: ctx.scenarioId,
+        turn_id: ctx.turnId,
+        reason: 'repair_failed',
+        error_name: errorClass(err),
+      },
+      '[commit] persist-site intercept repair threw after cloning; persisting the never-dirtier clone',
+    );
+    return clone; // never dirtier than the original; never the unrepaired graph
+  }
+
+  if (repairs.length === 0) return graph; // clean → persist the original reference, unchanged
 
   // Repair SUCCEEDED. Telemetry is best-effort and MUST NOT discard the repair — emit
   // in its own guard so an observability failure cannot persist the dirty graph.
