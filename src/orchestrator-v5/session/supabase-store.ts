@@ -357,15 +357,21 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async storeDraftGraph(scenarioId: string, graph: unknown): Promise<void> {
+    // True no-op on an absent graph: return BEFORE any RPC. Unlike
+    // append_turn_atomic_v2 (which guards `IF p_graph IS NOT NULL`), the
+    // store_draft_graph RPC runs an UNCONDITIONAL `UPDATE scenarios SET
+    // graph = p_graph` (migration 20260422120000), so passing null would CLEAR
+    // scenarios.graph rather than leave it unchanged. Never issue the RPC unless
+    // there is an actual graph to write.
+    if (graph === undefined || graph === null) return;
+
     // Track S 0.13c-4: persist-site intercept repair on the SECOND scenarios.graph
     // write RPC. `store_draft_graph` is currently dead on the live V5 path
     // (commitDirectAnswer → append_turn_atomic_v2 is the sole live writer), but this
     // method is reserved for out-of-band admin/migration use — exactly the caller
     // class the persist-site repair must defend against. Repairing here keeps the
-    // coverage airtight if it is ever re-wired. No-op when no graph is supplied.
-    // `?? null` mirrors the live append path (write.graph ?? null): a null p_graph
-    // leaves scenarios.graph unchanged, so an absent graph is a true no-op write.
-    const p_graph = repairGraphForPersistence(graph, { scenarioId }) ?? null;
+    // coverage airtight if it is ever re-wired.
+    const p_graph = repairGraphForPersistence(graph, { scenarioId });
     const { error } = await this.client.rpc('store_draft_graph', {
       p_scenario_id: scenarioId,
       p_graph,
