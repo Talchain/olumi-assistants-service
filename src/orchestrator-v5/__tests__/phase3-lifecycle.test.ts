@@ -208,69 +208,115 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect(payload.stale_coaching_emitted).toBe(false);
   });
 
-  // V5 P0-B — leak guards for the REUSED analysis_result block.
-  // The fact's enrichment carries decision_review PLUS raw siblings
-  // (graph, factor_sensitivity, option_comparison). The reused block must
-  // surface only the narrow allowlist.
-  it('LEAK GUARD: reused analysis_result block removes raw enrichment (only decision_review survives) and preserves option-id-keyed win_probabilities', () => {
-    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
-    const response = composeToolCallResponse({
-      orientation: '',
-      confirmation: 'Flip summary.',
-      coaching: null,
-      stage: 'decide',
-      handlerFacts: [],
-      lifecycle: {
-        priorFacts: [priorFact],
-        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
-        requestId: 'req-leak',
-        scenarioId: SCENARIO_ID,
+  // V5 P0-B — panel-aware keep-list + leak guards for the analysis_result
+  // block. Enrichment is reduced to the fields DGAI hydrates the Results
+  // panel from; every leak-carrying field is dropped at the build site. The
+  // rich fixture mirrors the live staging bundle (build cef69b0): leak
+  // markers live in DROPPED fields (_meta/meta → [REDACTED]; m1_coaching →
+  // isl_engine; decision_brief/fact_objects → seed lineage).
+  function richRunAnalysisFact(opts?: { withDecisionReview?: boolean; onlyLeak?: boolean }): RunAnalysisHandlerFact {
+    const enrichment: Record<string, unknown> = opts?.onlyLeak
+      ? {}
+      : {
+          option_comparison: [
+            { option_id: 'opt_a', option_label: 'Plan A', win_probability: 0.7 },
+            { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.3 },
+          ],
+          factor_sensitivity: [{ factor_id: 'fac_x', influence_score: 0.5 }],
+          robustness: { level: 'fragile', fragile_edges: [] },
+          results: [{ option_id: 'opt_a' }],
+        };
+    if (!opts?.onlyLeak && opts?.withDecisionReview !== false) {
+      enrichment.decision_review = { narrative_summary: 'ok' };
+    }
+    // Leak carriers — always present, always dropped.
+    enrichment._meta = { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } };
+    enrichment.meta = { build: 'cef69b0', feature_flags: { TOKEN_RL_ENABLE: '[REDACTED]' } };
+    enrichment.m1_coaching = { assumptions_ledger: { assumptions: [{ source_service: 'isl_engine' }] } };
+    enrichment.decision_brief = { seed: 12345 };
+    enrichment.fact_objects = [{ lineage: { seed: 999 } }];
+    enrichment.downstream_calls = { isl: [{ request_payload: { graph: { nodes: [] } } }] };
+    enrichment.graph = { nodes: [] };
+    enrichment.critiques = [{ code: 'MONTE_CARLO_FAILED', message: 'internal' }];
+    enrichment.flip_thresholds = [{ factor_id: 'fac_x', flip_value: null }];
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment,
       },
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  function analysisResultBlockFor(fact: RunAnalysisHandlerFact, opts: { currentTurn: boolean }) {
+    const response = composeToolCallResponse({
+      orientation: '', confirmation: 'x', coaching: null, stage: 'decide',
+      handlerFacts: opts.currentTurn ? [fact] : [],
+      lifecycle: opts.currentTurn
+        ? undefined
+        : {
+            priorFacts: [fact],
+            freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+            requestId: 'req', scenarioId: SCENARIO_ID,
+          },
     });
-    const block = response.blocks.find((b) => b.type === 'analysis_result') as
+    return response.blocks.find((b) => b.type === 'analysis_result') as
       | { win_probabilities?: Record<string, number>; enrichment?: Record<string, unknown> }
       | undefined;
+  }
+
+  it('LEAK GUARD: analysis_result enrichment is reduced to the panel keep-list; every leak carrier ([REDACTED]/isl_engine/seed/_meta/graph/critiques) is dropped', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact(), { currentTurn: false });
     expect(block).toBeDefined();
-
-    // Raw enrichment REMOVED — only decision_review may pass.
     const enr = block!.enrichment ?? {};
-    expect(Object.keys(enr).sort()).toEqual(['decision_review']);
-    expect('graph' in enr).toBe(false);
-    expect('factor_sensitivity' in enr).toBe(false);
-    expect('option_comparison' in enr).toBe(false);
-
-    // decision_review passthrough preserved (DGAI / coaching correlate on it).
-    expect(enr.decision_review).toEqual(priorFact.result.enrichment!.decision_review);
-
+    // Only panel-aware keep-list fields survive.
+    expect(Object.keys(enr).sort()).toEqual([
+      'decision_review', 'factor_sensitivity', 'option_comparison', 'results', 'robustness',
+    ]);
+    // Leak carriers dropped.
+    for (const k of ['_meta', 'meta', 'm1_coaching', 'decision_brief', 'fact_objects', 'downstream_calls', 'graph', 'critiques', 'flip_thresholds']) {
+      expect(k in enr).toBe(false);
+    }
+    // No leak markers survive ANYWHERE in the kept enrichment.
+    const enrJson = JSON.stringify(enr);
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson.toLowerCase()).not.toContain('isl_engine');
+    expect(enrJson).not.toMatch(/"seed"/);
     // win_probabilities preserved VERBATIM, keyed by option id (DGAI correlates by id).
     expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
   });
 
-  it('LEAK GUARD: reused analysis_result block carries NO enrichment when the prior fact has no decision_review (chip-click autofire-off case)', () => {
-    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
-    // Strip decision_review — the typical chip-click shape (autofire disabled).
-    delete (priorFact.result.enrichment as Record<string, unknown>).decision_review;
-    const response = composeToolCallResponse({
-      orientation: '',
-      confirmation: 'Flip summary.',
-      coaching: null,
-      stage: 'decide',
-      handlerFacts: [],
-      lifecycle: {
-        priorFacts: [priorFact],
-        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
-        requestId: 'req-leak-no-dr',
-        scenarioId: SCENARIO_ID,
-      },
-    });
-    const block = response.blocks.find((b) => b.type === 'analysis_result') as
-      | { win_probabilities?: Record<string, number>; enrichment?: unknown }
-      | undefined;
+  it('KEEP-LIST: panel fields survive when decision_review is absent (chip-click autofire-off) — block is NOT starved', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact({ withDecisionReview: false }), { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    expect(Object.keys(enr).sort()).toEqual([
+      'factor_sensitivity', 'option_comparison', 'results', 'robustness',
+    ]);
+  });
+
+  it('KEEP-LIST: when enrichment carries ONLY leak fields, the block omits enrichment entirely', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact({ onlyLeak: true }), { currentTurn: false });
     expect(block).toBeDefined();
-    // No decision_review → no enrichment field at all (raw siblings never leak).
     expect('enrichment' in block!).toBe(false);
-    // But the option-keyed win_probabilities are still present for DGAI.
     expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
+  });
+
+  it('DEDUPE CONSISTENCY: the current-turn run_analysis block and the reused follow-up block carry IDENTICAL enrichment for the same fact', () => {
+    const fact = richRunAnalysisFact();
+    const currentTurn = analysisResultBlockFor(fact, { currentTurn: true });
+    const reused = analysisResultBlockFor(fact, { currentTurn: false });
+    expect(currentTurn).toBeDefined();
+    expect(reused).toBeDefined();
+    // Same transform on both → identical block payload → DGAI content-hash
+    // dedupe + panel hydration stay consistent across turns.
+    expect(reused!.enrichment).toEqual(currentTurn!.enrichment);
+    expect(reused!.win_probabilities).toEqual(currentTurn!.win_probabilities);
   });
 
   // PR 3 contract — block_id stability across stale rebuilds.
