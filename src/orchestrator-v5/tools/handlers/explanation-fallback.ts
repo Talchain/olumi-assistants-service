@@ -157,7 +157,7 @@ export function composeExplainResultsFallback(
       // composer; the wider raw-signal near-tie override stays the flip
       // composer's concern.
       sentences.push(
-        `${leading.label} and ${projection.runner_up.label} are effectively tied, so the lead is too close to call without firming up the key assumptions.`,
+        `${quoteLabel(leading.label)} and ${quoteLabel(projection.runner_up.label)} are effectively tied, so the lead is too close to call without firming up the key assumptions.`,
       );
     } else {
       sentences.push(
