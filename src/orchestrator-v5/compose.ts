@@ -268,11 +268,31 @@ function buildBlocksFromFacts(
 }
 
 /**
- * Panel-aware enrichment keep-list — the structured fields DGAI hydrates the
- * V5 Results panel from (verified against the live staging debug bundle, build
- * cef69b0). Every other enrichment field is dropped at the block-build site.
+ * P0-B **temporary safe-transport** enrichment keep-list for the
+ * `analysis_result` block.
+ *
+ * THIS IS NOT THE COACHING CONTRACT. It is a regression-safe transport shape
+ * scoped to P0-B: this PR changes the `analysis_result.enrichment` payload, so
+ * the keep-list's only jobs are (1) don't break/degrade today's Results panel
+ * and (2) stop the raw-enrichment leak. Olumi's coaching contract is
+ * value-led — the science/analysis layer defines the valuable coaching
+ * signals, and the frontend decides how to present them; current DGAI field
+ * usage is a REGRESSION GATE here, not the source of truth.
+ *
+ * Why these five are safe to keep: verified against the live staging debug
+ * bundle (build cef69b0). The current Results panel hydrates from
+ * `results.report.option_probabilities` only (option win-probabilities); factor
+ * influence/sensitivity render as `unmatched` (not yet consumed). Keeping
+ * `results` + `option_comparison` preserves every currently-rendered field;
+ * `factor_sensitivity` + `robustness` + `decision_review` are clean,
+ * strategically-valuable science fields preserved so we transport them rather
+ * than drop them.
+ *
+ * Dropped fields that look strategically valuable but are NOT currently
+ * rendered are recorded as a POST-P0 coaching-contract workstream (see the
+ * block comment below) — NOT silently deleted from the future product model.
  */
-const PANEL_ENRICHMENT_KEEP = [
+const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   'option_comparison',
   'factor_sensitivity',
   'results',
@@ -280,16 +300,22 @@ const PANEL_ENRICHMENT_KEEP = [
   'decision_review',
 ] as const;
 
+// POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
+// model): the keep-list above is transport-only. These dropped enrichment
+// fields carry potentially-valuable coaching signals the frontend does not
+// render today; the value-led coaching contract should decide which to surface
+// (cleaned) rather than this transport shape deciding by omission:
+//   flip_thresholds, decision_quality, improvement_guidance, review_cards,
+//   insights, decision_brief, conditional_winners, identifiability,
+//   robustness_synthesis, m1_review, m1_coaching, factor_stability,
+//   edge_sensitivity, confidence_tier.
+// Tracked as a separate coaching-contract workstream item.
+
 /**
- * Reduce a run_analysis fact's opaque enrichment to the panel-aware keep-list.
- *
- * WHY a keep-list (not the full enrichment, not decision_review-only):
- *   - DGAI hydrates the Results panel from these structured fields and dedupes
- *     by a content-derived response hash (whole-body canonical JSON — see
- *     plugins/response-hash.ts). A follow-up turn's reused block must carry the
- *     SAME enrichment as the run_analysis block, or the panel re-hydrates with
- *     fewer fields and degrades — so this transform is applied to BOTH blocks
- *     (identical shape → consistent hydration + dedupe).
+ * Reduce a run_analysis fact's opaque enrichment to the P0-B safe-transport
+ * keep-list. Applied to BOTH the current-turn run_analysis block and the
+ * reused follow-up block so they emit an IDENTICAL block for a given analysis
+ * (consistent DGAI content-hash dedupe + panel hydration). Rationale:
  *   - The full raw enrichment LEAKS: the prose-only `sanitiseEnrichment` never
  *     strips structural fields and is bypassed entirely when
  *     CEE_TURN_DEBUG_ENABLED is on. The live bundle carried `[REDACTED]` (in
@@ -297,19 +323,19 @@ const PANEL_ENRICHMENT_KEEP = [
  *     `decision_brief`/`fact_objects`). The keep-list drops all of those
  *     carriers at the block-build site (debug-independent), so `_meta`,
  *     payloads, graph, graph hashes and raw debug fields never ship.
- *   - `decision_review` is kept "where safe": present-only; its nested prose is
- *     still scrubbed by the response-finaliser in normal (debug-off) mode.
+ *   - `decision_review` is kept present-only; its nested prose is still
+ *     scrubbed by the response-finaliser in normal (debug-off) mode.
  *
- * Returns `undefined` when no allowlisted field is present so the block omits
- * the `enrichment` key (the typical chip-click, autofire-off shape).
+ * Returns `undefined` when no kept field is present so the block omits the
+ * `enrichment` key (the typical chip-click, autofire-off shape).
  */
-function toPanelEnrichment(enrichment: unknown): Record<string, unknown> | undefined {
+function toSafeTransportEnrichment(enrichment: unknown): Record<string, unknown> | undefined {
   if (enrichment === null || enrichment === undefined || typeof enrichment !== 'object') {
     return undefined;
   }
   const src = enrichment as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  for (const key of PANEL_ENRICHMENT_KEEP) {
+  for (const key of P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) {
     if (src[key] !== undefined) out[key] = src[key];
   }
   return Object.keys(out).length > 0 ? out : undefined;
@@ -325,20 +351,21 @@ function toPanelEnrichment(enrichment: unknown): Record<string, unknown> | undef
  *
  *   - `win_probabilities` preserved VERBATIM, keyed by option id (DGAI
  *     correlates by option id).
- *   - enrichment reduced to the panel-aware keep-list (see toPanelEnrichment).
+ *   - enrichment reduced to the P0-B safe-transport keep-list (see
+ *     toSafeTransportEnrichment) — transport-only, NOT the coaching contract.
  */
 function buildAnalysisResultBlock(
   fact: RunAnalysisHandlerFact,
 ): OlumiResponse['blocks'][number] {
   const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
-  const panelEnrichment = toPanelEnrichment(enrichment);
+  const transportEnrichment = toSafeTransportEnrichment(enrichment);
   return {
     type: 'analysis_result',
     summary,
     leading_option_id,
     ...(win_probabilities !== undefined ? { win_probabilities } : {}),
-    ...(panelEnrichment !== undefined
-      ? { enrichment: panelEnrichment as typeof enrichment }
+    ...(transportEnrichment !== undefined
+      ? { enrichment: transportEnrichment as typeof enrichment }
       : {}),
   };
 }
