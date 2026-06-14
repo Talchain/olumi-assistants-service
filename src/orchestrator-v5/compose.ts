@@ -268,12 +268,11 @@ function buildBlocksFromFacts(
 }
 
 /**
- * Pure helper: build the `analysis_result` block from a run_analysis fact's
- * result (summary + leading option + win probabilities + opaque enrichment).
- * Shared by branch-1 (current-turn fact) and the prior-fact FRESH lifecycle
- * branch so the UI gets a non-empty, structured result summary even when
- * `decision_review` is absent (autofire off) and the Phase 3 cards are empty.
- * Enrichment is sanitised downstream by the response-finaliser before egress.
+ * Pure helper: build the `analysis_result` block for the CURRENT-TURN
+ * run_analysis fact (branch-1) — the turn that produced the analysis. Carries
+ * the full opaque enrichment (sanitised downstream by the response-finaliser
+ * before egress). This is the existing run_analysis-turn contract and is
+ * intentionally unchanged.
  */
 function buildAnalysisResultBlock(
   fact: RunAnalysisHandlerFact,
@@ -285,6 +284,50 @@ function buildAnalysisResultBlock(
     leading_option_id,
     ...(win_probabilities !== undefined ? { win_probabilities } : {}),
     ...(enrichment !== undefined ? { enrichment } : {}),
+  };
+}
+
+/**
+ * V5 P0-B — build the `analysis_result` block for a REUSED prior run_analysis
+ * fact (the FRESH lifecycle branch, on a follow-up what_would_flip / explain
+ * chip-click). Unlike the analysis-producing turn (branch-1), a follow-up turn
+ * surfaces only the MINIMAL correlation data and a NARROW enrichment allowlist:
+ *
+ *   - `win_probabilities` — preserved VERBATIM, keyed by option id, because
+ *     downstream (DGAI) correlates by option id; we never re-key or drop it.
+ *   - enrichment — allowlisted to `decision_review` ONLY, and only when
+ *     present ("where safe"). All other raw enrichment fields (robustness,
+ *     factor_sensitivity, flip_thresholds, _meta, ceeTrace, debug, etc.) are
+ *     REMOVED at the source. This is defense-in-depth beyond the egress
+ *     sanitiser: a follow-up turn does not re-surface the full raw enrichment
+ *     of an older analysis. On the chip-click path `decision_review` is
+ *     typically absent (autofire off), so the block carries no enrichment at
+ *     all — summary + leading option + option-keyed win_probabilities.
+ *
+ * `decision_review`, when present, is still sanitised by the response-finaliser
+ * before egress (same path the Phase 3 review/coaching/evidence blocks use).
+ */
+function buildReusedAnalysisResultBlock(
+  fact: RunAnalysisHandlerFact,
+): OlumiResponse['blocks'][number] {
+  const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
+  // Narrow enrichment allowlist: decision_review only, where present.
+  let allowlistedEnrichment: Record<string, unknown> | undefined;
+  if (enrichment !== undefined && enrichment !== null && typeof enrichment === 'object') {
+    const decisionReview = (enrichment as Record<string, unknown>).decision_review;
+    if (decisionReview !== undefined) {
+      allowlistedEnrichment = { decision_review: decisionReview };
+    }
+  }
+  return {
+    type: 'analysis_result',
+    summary,
+    leading_option_id,
+    // DGAI correlates by option id — preserve win_probabilities verbatim.
+    ...(win_probabilities !== undefined ? { win_probabilities } : {}),
+    ...(allowlistedEnrichment !== undefined
+      ? { enrichment: allowlistedEnrichment as typeof enrichment }
+      : {}),
   };
 }
 
@@ -419,7 +462,7 @@ function buildLifecycleBlocksFromPrior(
   // reaching here, so a diverged graph never surfaces a result block (only the
   // stale-safe rerun coaching block). Enrichment is sanitised by the
   // response-finaliser before egress.
-  const analysisResultBlock = buildAnalysisResultBlock(priorFact);
+  const analysisResultBlock = buildReusedAnalysisResultBlock(priorFact);
   const phase3Blocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash);
   const freshBlocks: OlumiResponse['blocks'] = [analysisResultBlock, ...phase3Blocks];
   emitLifecycle(lifecycle, {

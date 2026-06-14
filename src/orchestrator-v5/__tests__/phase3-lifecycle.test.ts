@@ -208,6 +208,71 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect(payload.stale_coaching_emitted).toBe(false);
   });
 
+  // V5 P0-B — leak guards for the REUSED analysis_result block.
+  // The fact's enrichment carries decision_review PLUS raw siblings
+  // (graph, factor_sensitivity, option_comparison). The reused block must
+  // surface only the narrow allowlist.
+  it('LEAK GUARD: reused analysis_result block removes raw enrichment (only decision_review survives) and preserves option-id-keyed win_probabilities', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    const response = composeToolCallResponse({
+      orientation: '',
+      confirmation: 'Flip summary.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+        requestId: 'req-leak',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    const block = response.blocks.find((b) => b.type === 'analysis_result') as
+      | { win_probabilities?: Record<string, number>; enrichment?: Record<string, unknown> }
+      | undefined;
+    expect(block).toBeDefined();
+
+    // Raw enrichment REMOVED — only decision_review may pass.
+    const enr = block!.enrichment ?? {};
+    expect(Object.keys(enr).sort()).toEqual(['decision_review']);
+    expect('graph' in enr).toBe(false);
+    expect('factor_sensitivity' in enr).toBe(false);
+    expect('option_comparison' in enr).toBe(false);
+
+    // decision_review passthrough preserved (DGAI / coaching correlate on it).
+    expect(enr.decision_review).toEqual(priorFact.result.enrichment!.decision_review);
+
+    // win_probabilities preserved VERBATIM, keyed by option id (DGAI correlates by id).
+    expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
+  });
+
+  it('LEAK GUARD: reused analysis_result block carries NO enrichment when the prior fact has no decision_review (chip-click autofire-off case)', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    // Strip decision_review — the typical chip-click shape (autofire disabled).
+    delete (priorFact.result.enrichment as Record<string, unknown>).decision_review;
+    const response = composeToolCallResponse({
+      orientation: '',
+      confirmation: 'Flip summary.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+        requestId: 'req-leak-no-dr',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    const block = response.blocks.find((b) => b.type === 'analysis_result') as
+      | { win_probabilities?: Record<string, number>; enrichment?: unknown }
+      | undefined;
+    expect(block).toBeDefined();
+    // No decision_review → no enrichment field at all (raw siblings never leak).
+    expect('enrichment' in block!).toBe(false);
+    // But the option-keyed win_probabilities are still present for DGAI.
+    expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
+  });
+
   // PR 3 contract — block_id stability across stale rebuilds.
   it('STALE re-emission: same source fact graph_hash → same stale block_id (UI dedupe)', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
