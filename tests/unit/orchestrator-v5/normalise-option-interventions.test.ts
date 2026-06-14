@@ -143,6 +143,88 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
     expect(opt).not.toHaveProperty('data/interventions/fac_c');
   });
 
+  // --- MIXED top-level + data.interventions: data wins, metadata preserved ---
+  // (Codex blocker: the read path documents data.interventions as Source 1 — it
+  // wins over a possibly-stale top-level. The normaliser must overlay, not skip.)
+
+  const ivOf = (opt: Record<string, unknown>, fac: string): Record<string, unknown> =>
+    (opt.interventions as Record<string, Record<string, unknown>>)[fac];
+
+  it('OVERLAY: mixed top-level + data.interventions(new factor) → both present; top-level metadata preserved; new factor fresh', () => {
+    const g: AnyGraph = {
+      nodes: [{
+        id: 'opt_mix',
+        kind: 'option',
+        label: 'M',
+        is_baseline: false,
+        interventions: {
+          fac_a: {
+            value: 0.9, unit: '£', source: 'brief_extraction', reasoning: 'orig',
+            target_match: { node_id: 'fac_a', confidence: 'high', match_type: 'exact_id' }, value_confidence: 'high',
+          },
+        },
+        data: { interventions: { fac_b: 0.5 } },
+      }],
+      edges: [],
+    };
+    const opt = nodeById(normaliseOptionInterventionContract(g) as AnyGraph, 'opt_mix');
+    // existing top-level entry preserved verbatim
+    expect(ivOf(opt, 'fac_a')).toEqual({
+      value: 0.9, unit: '£', source: 'brief_extraction', reasoning: 'orig',
+      target_match: { node_id: 'fac_a', confidence: 'high', match_type: 'exact_id' }, value_confidence: 'high',
+    });
+    // new factor from data promoted as fresh InterventionV3
+    expect(ivOf(opt, 'fac_b')).toEqual({
+      value: 0.5, source: 'user_specified', target_match: { node_id: 'fac_b', match_type: 'exact_id', confidence: 'high' },
+    });
+    expect((opt.data as Record<string, unknown>).interventions).toBeUndefined();
+  });
+
+  it('OVERLAY: data.interventions OVERRIDES a stale top-level value (data wins) while preserving metadata', () => {
+    const g: AnyGraph = {
+      nodes: [{
+        id: 'opt_o',
+        kind: 'option',
+        label: 'O',
+        is_baseline: false,
+        interventions: {
+          fac_a: {
+            value: 0.9, unit: '£', source: 'brief_extraction', reasoning: 'orig',
+            target_match: { node_id: 'fac_a', confidence: 'high', match_type: 'exact_id' }, value_confidence: 'high',
+          },
+        },
+        data: { interventions: { fac_a: { value: 0.55, unit: '£', raw_value: 110000 } } },
+      }],
+      edges: [],
+    };
+    const fac_a = ivOf(nodeById(normaliseOptionInterventionContract(g) as AnyGraph, 'opt_o'), 'fac_a');
+    expect(fac_a.value).toBe(0.55);        // edited value WINS (not the stale 0.9)
+    expect(fac_a.raw_value).toBe(110000);  // newer raw_value applied
+    // unrelated top-level metadata preserved
+    expect(fac_a.source).toBe('brief_extraction');
+    expect(fac_a.reasoning).toBe('orig');
+    expect(fac_a.value_confidence).toBe('high');
+    expect(fac_a.target_match).toEqual({ node_id: 'fac_a', confidence: 'high', match_type: 'exact_id' });
+  });
+
+  it('OVERLAY: slash-keyed edit OVERRIDES a stale top-level value (data wins), metadata preserved, slash key removed', () => {
+    const g: AnyGraph = {
+      nodes: [{
+        id: 'opt_sl',
+        kind: 'option',
+        label: 'SL',
+        is_baseline: false,
+        interventions: { fac_a: { value: 0.9, source: 'brief_extraction', target_match: { node_id: 'fac_a', confidence: 'high', match_type: 'exact_id' } } },
+        'data/interventions/fac_a': 0.25,
+      }],
+      edges: [],
+    };
+    const opt = nodeById(normaliseOptionInterventionContract(g) as AnyGraph, 'opt_sl');
+    expect(ivOf(opt, 'fac_a').value).toBe(0.25);           // slash edit wins
+    expect(ivOf(opt, 'fac_a').source).toBe('brief_extraction'); // metadata preserved
+    expect(opt).not.toHaveProperty('data/interventions/fac_a');
+  });
+
   // --- Control #2 mandated no-op proofs -------------------------------------
 
   it('NO-OP: a real draft-shaped graph is returned UNCHANGED (reference identity)', () => {

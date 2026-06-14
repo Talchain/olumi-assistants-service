@@ -132,4 +132,46 @@ describe('edit_graph option-contract persist→read replay (V5 P0)', () => {
       .map((n) => JSON.stringify(n));
     expect(draftAfter).toEqual(draftBefore);
   });
+
+  // Codex blocker replay: editing an EXISTING option's intervention writes
+  // data.interventions over a (stale) top-level value. Without the overlay the
+  // read-time strip drops the edit and readiness silently uses the stale value
+  // (200 on the wrong configuration) — worse than the add-option 422.
+  it('EDIT-EXISTING-OPTION: a data.interventions override wins over the stale top-level value after parse/readiness', () => {
+    const build = () => ({
+      nodes: [
+        { id: 'goal_support', kind: 'goal', label: 'G' },
+        { id: 'fac_annual_cost', kind: 'factor', label: 'Annual Support Cost', observed_state: { value: 0.267 } },
+        {
+          id: 'opt_edited',
+          kind: 'option',
+          label: 'Edited',
+          is_baseline: false,
+          // stale top-level value from draft creation
+          interventions: {
+            fac_annual_cost: {
+              value: 0.9, unit: '£', source: 'brief_extraction',
+              target_match: { node_id: 'fac_annual_cost', confidence: 'high', match_type: 'exact_id' }, value_confidence: 'high',
+            },
+          },
+          // the user's edit (must win)
+          data: { interventions: { fac_annual_cost: { value: 0.55, unit: '£', raw_value: 110000 } } },
+        },
+        draftOption('opt_other', 0.6, true),
+      ],
+      edges: [edge('opt_edited', 'fac_annual_cost'), edge('opt_other', 'fac_annual_cost')],
+    });
+
+    // CONTROL (no fix): GraphV3 strips data → readiness uses the STALE top-level 0.9
+    const control = GraphV3.safeParse(build());
+    expect(control.success).toBe(true);
+    if (!control.success) return;
+    expect(optionInReadiness(control.data, 'opt_edited').interventions.fac_annual_cost).toBe(0.9);
+
+    // FIXED: overlay makes the edited 0.55 win, and it survives parse/readiness
+    const fixed = GraphV3.safeParse(normaliseOptionInterventionContract(build()));
+    expect(fixed.success).toBe(true);
+    if (!fixed.success) return;
+    expect(optionInReadiness(fixed.data, 'opt_edited').interventions.fac_annual_cost).toBe(0.55);
+  });
 });
