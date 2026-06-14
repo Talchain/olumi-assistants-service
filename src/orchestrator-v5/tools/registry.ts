@@ -249,6 +249,19 @@ export interface HandlerInvocation {
    * block in the envelope).
    */
   readonly rawRobustness?: import('../coaching/pick-raw-robustness.js').RawRobustnessSignals | null;
+  /**
+   * Honest flip-threshold evidence (`enrichment.flip_thresholds` summarised)
+   * selected by `pickLatestFlipSummary` off the same `run_analysis` fact the
+   * freshness/projection layer chose. Threaded into the `what_would_flip`
+   * deterministic fallback composer so it answers from the actual flip
+   * evidence — saying no single-factor tipping point was found within the
+   * tested range when `flip_value` is null with reason
+   * `no_effect_within_bounds`, and never implying "small changes could flip"
+   * unless `margin_supports_flip` is true. Optional so non-explanation
+   * handlers and existing test fixtures stay unaffected; `null` is the
+   * explicit "no flip evidence available" form.
+   */
+  readonly flipSummary?: import('../compose/flip-proposal.js').FlipSummary | null;
 }
 
 /**

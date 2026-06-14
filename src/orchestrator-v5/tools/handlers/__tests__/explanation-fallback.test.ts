@@ -18,6 +18,7 @@ import type {
   StructureProjectionSummary,
 } from '../../../context/projection-summaries.js';
 import type { RawRobustnessSignals } from '../../../coaching/pick-raw-robustness.js';
+import type { FlipSummary } from '../../../compose/flip-proposal.js';
 import {
   composeExplainFromStructureFallback,
   composeExplainResultsFallback,
@@ -652,5 +653,121 @@ describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation p
     // … and the single fragility caveat is the only one that fires.
     expect(text.toLowerCase()).toMatch(/picture appears fragile/);
     expect((text.match(/effectively tied/gi) ?? []).length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 P0-B — honest flip-evidence composition.
+//
+// Reproduces the live staging failure (build cef69b0, scenario e22aa97b): a
+// `what_would_flip` chip-click answered "the picture appears fragile, so even
+// small adjustments to the strongest drivers could shift which option leads"
+// while the flip analysis had found NO single-factor tipping point within
+// bounds (`flip_value: null`, `flip_reason: 'no_effect_within_bounds'`, and a
+// `margin_sensitivity` reporting `movement: 'none'`). The composer now reads
+// the flip evidence (threaded as the 3rd arg) and answers honestly.
+// ---------------------------------------------------------------------------
+describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () => {
+  // Fragile band + finite margin: WITHOUT a flip summary this projection
+  // produces the "picture appears fragile … could shift which option leads"
+  // sentence, so it is the right control for proving the flip evidence
+  // suppresses that contradiction.
+  const FRAGILE_BAND: AnalysisProjectionSummary = {
+    status: 'complete',
+    leading_option: { label: 'Hire One Tech Lead', probability: 0.66 },
+    runner_up: { label: 'Hire Two Developers', probability: 0.32 },
+    margin_pp: 34,
+    robustness_band: 'fragile',
+    top_drivers: [
+      { factor_label: 'Tech Lead in Place', sensitivity_value: 0.7 },
+      { factor_label: 'Developer Headcount Added', sensitivity_value: 0.4 },
+    ],
+  };
+
+  const NO_PRACTICAL_FLIP: FlipSummary = {
+    overall_status: 'no_practical_flip',
+    margin_supports_flip: false,
+    entries: [
+      {
+        factor_id: 'fac_hiring_cost',
+        factor_label: 'Hiring and Salary Cost',
+        flip_value: null,
+        flip_reason: 'no_effect_within_bounds',
+        margin_supports_flip: false,
+      },
+    ],
+  };
+
+  const RAW_FRAGILE: RawRobustnessSignals = { level: 'fragile', near_tie_is_tie: false };
+  const CONTRADICTORY = /could shift which option leads/i;
+  const NAMES_FRAGILITY = /picture appears fragile/i;
+  const HONEST_NO_FLIP = /no single factor on its own reached a tipping point/i;
+
+  it('no_practical_flip + fragile band: says no single-factor tipping point and SUPPRESSES the "could flip" contradiction', () => {
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, NO_PRACTICAL_FLIP);
+    expectNaturalProse(text);
+    expect(text).toMatch(HONEST_NO_FLIP);
+    // The exact live-staging contradiction must be gone.
+    expect(text).not.toMatch(CONTRADICTORY);
+    expect(text).not.toMatch(NAMES_FRAGILITY);
+  });
+
+  it('CONTROL: the SAME fragile projection WITHOUT flip evidence still emits the fragility "could shift" copy (proves the flip verdict is what suppresses it)', () => {
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE);
+    expect(text).toMatch(CONTRADICTORY);
+    expect(text).not.toMatch(HONEST_NO_FLIP);
+  });
+
+  it('concrete flip: names the clearest single lever and frames it as something to test (no invented threshold value)', () => {
+    const concrete: FlipSummary = {
+      overall_status: 'concrete',
+      margin_supports_flip: true,
+      entries: [
+        {
+          factor_id: 'fac_capacity',
+          factor_label: 'Engineering Capacity',
+          flip_value: 0.42,
+          flip_reason: null,
+          margin_supports_flip: true,
+        },
+      ],
+    };
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, concrete);
+    expectNaturalProse(text);
+    expect(text).toMatch(/Engineering Capacity is the most likely single factor to change which option leads/i);
+    expect(text).toMatch(/clearest one to test/i);
+    expect(text).not.toMatch(HONEST_NO_FLIP);
+  });
+
+  it('insufficient_data: says it could not isolate a single-factor tipping point and makes no flippability claim', () => {
+    const insufficient: FlipSummary = {
+      overall_status: 'insufficient_data',
+      margin_supports_flip: false,
+      entries: [
+        {
+          factor_id: 'fac_x',
+          factor_label: 'Some Factor',
+          flip_value: null,
+          flip_reason: 'max_iterations',
+          margin_supports_flip: false,
+        },
+      ],
+    };
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, insufficient);
+    expect(text).toMatch(/did not isolate a single-factor tipping point/i);
+    expect(text).not.toMatch(CONTRADICTORY);
+  });
+
+  it('backward-compat: a 2-arg call equals a 3-arg call with flipSummary undefined / null / overall_status "none"', () => {
+    const twoArg = composeWhatWouldFlipFallback(ANALYSIS, null);
+    expect(composeWhatWouldFlipFallback(ANALYSIS, null, undefined)).toBe(twoArg);
+    expect(composeWhatWouldFlipFallback(ANALYSIS, null, null)).toBe(twoArg);
+    expect(
+      composeWhatWouldFlipFallback(ANALYSIS, null, {
+        overall_status: 'none',
+        margin_supports_flip: false,
+        entries: [],
+      }),
+    ).toBe(twoArg);
   });
 });

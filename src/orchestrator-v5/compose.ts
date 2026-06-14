@@ -201,14 +201,7 @@ function buildBlocksFromFacts(
   for (const fact of facts) {
     if (fact.fact_type === 'run_analysis') {
       currentTurnRunAnalysisHandled = true;
-      const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
-      blocks.push({
-        type: 'analysis_result',
-        summary,
-        leading_option_id,
-        ...(win_probabilities !== undefined ? { win_probabilities } : {}),
-        ...(enrichment !== undefined ? { enrichment } : {}),
-      });
+      blocks.push(buildAnalysisResultBlock(fact));
 
       // PR 3 lifecycle branch 1 — fresh blocks from current-turn fact.
       const graphHash = fact.result.graph_hash_at_run;
@@ -272,6 +265,27 @@ function buildBlocksFromFacts(
   }
 
   return blocks;
+}
+
+/**
+ * Pure helper: build the `analysis_result` block from a run_analysis fact's
+ * result (summary + leading option + win probabilities + opaque enrichment).
+ * Shared by branch-1 (current-turn fact) and the prior-fact FRESH lifecycle
+ * branch so the UI gets a non-empty, structured result summary even when
+ * `decision_review` is absent (autofire off) and the Phase 3 cards are empty.
+ * Enrichment is sanitised downstream by the response-finaliser before egress.
+ */
+function buildAnalysisResultBlock(
+  fact: RunAnalysisHandlerFact,
+): OlumiResponse['blocks'][number] {
+  const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
+  return {
+    type: 'analysis_result',
+    summary,
+    leading_option_id,
+    ...(win_probabilities !== undefined ? { win_probabilities } : {}),
+    ...(enrichment !== undefined ? { enrichment } : {}),
+  };
 }
 
 /**
@@ -393,8 +407,21 @@ function buildLifecycleBlocksFromPrior(
     return blocks;
   }
 
-  // verdict === 'fresh' — rebuild Phase 3 blocks from the prior fact.
-  const freshBlocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash);
+  // verdict === 'fresh' — emit the result summary block PLUS rebuilt Phase 3
+  // blocks from the prior fact.
+  //
+  // V5 P0-B: the `analysis_result` block (result summary / win probabilities /
+  // enrichment) gives the UI a non-empty, structured answer on a
+  // what_would_flip / explain chip-click even when `decision_review` is absent
+  // (autofire off) and the Phase 3 cards come back empty. This is emitted on
+  // the FRESH verdict ONLY — the graph hash still matches the source fact, so
+  // it is safe to present as live. The 'stale' branch above returns before
+  // reaching here, so a diverged graph never surfaces a result block (only the
+  // stale-safe rerun coaching block). Enrichment is sanitised by the
+  // response-finaliser before egress.
+  const analysisResultBlock = buildAnalysisResultBlock(priorFact);
+  const phase3Blocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash);
+  const freshBlocks: OlumiResponse['blocks'] = [analysisResultBlock, ...phase3Blocks];
   emitLifecycle(lifecycle, {
     lifecycle_state: 'emitted_fresh',
     selected_fact_index: freshness.selected_fact_index,

@@ -52,6 +52,7 @@ import { curatedHandlerChips } from './helpers.js';
 import type { ContextPackAnalysis } from '../context/context-pack-assembler.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -273,14 +274,53 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
     }
   }
 
-  // Priority 3: any run_analysis fact present → exploration prompt.
+  // Priority 3: any run_analysis fact present → "What could change the
+  // outcome?".
+  //
+  // V5 P0-B — this chip must dispatch DETERMINISTICALLY. It was previously a
+  // bare promptChip with no `action_type`, so a click routed through the LLM /
+  // post-analysis advice gate as plain text instead of the deterministic
+  // what_would_flip handler (the routing hole P0-B closes). We now emit the
+  // EXECUTABLE what_would_flip chip — byte-identical to the post-run_analysis
+  // rule's chip — so the click resolves via `dispatchDeterministicChipClick`.
+  //
+  // Precondition parity (red-team guard): the what_would_flip handler only
+  // returns 'execute' when, ALSO, an analysis projection is buildable from the
+  // facts AND freshness !== 'stale' (see `decideExplanationPrecondition`).
+  // `buildAnalysisProjectionSummary` returns null only for a null input, and
+  // on the chip-click path that input is non-null iff
+  // `buildAnalysisFromPriorFacts` is non-null — so projection-buildability is
+  // the faithful 'execute' predicate. Freshness is already non-stale here
+  // (Priority 1 diverted `hasAnyRunAnalysisFact && stale` to the re-run
+  // prompt), but we assert it defensively. When the precondition would NOT be
+  // met, we keep the conversational promptChip (status quo) so a click never
+  // lands the user on a "no analysis run yet" handler template.
   if (hasAnyRunAnalysisFact) {
+    const combinedFacts: readonly HandlerFact[] = [
+      ...(input.handlerFacts ?? []),
+      ...(input.priorFacts ?? []),
+    ];
+    const projectionBuildable = buildAnalysisFromPriorFacts(combinedFacts, undefined) !== null;
+    const preconditionWouldExecute = projectionBuildable && freshness !== 'stale';
     emit(TelemetryEvents.V5ChipsFloorApplied, {
       reason: 'post_analysis_no_obvious_next',
       stage,
       analysis_ready_status: readyStatusLabel,
       has_run_analysis_fact: true,
     });
+    if (preconditionWouldExecute) {
+      // Executable — identical shape to the post-run_analysis rule's chip so a
+      // click bypasses the LLM and dispatches the what_would_flip handler.
+      return [
+        {
+          id: 'chip_action_what_would_flip',
+          label: 'What could change the outcome?',
+          message: 'What could change the outcome of this analysis?',
+          action_type: 'what_would_flip',
+        },
+      ];
+    }
+    // Precondition would not execute → keep the conversational prompt.
     return [
       promptChip(
         'floor_post_analysis_explore',

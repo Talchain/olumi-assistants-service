@@ -106,6 +106,7 @@ export function createWhatWouldFlipHandler(): HandlerFn {
       : composeWhatWouldFlipFallback(
           invocation.analysisProjection,
           invocation.rawRobustness ?? null,
+          invocation.flipSummary ?? null,
         );
 
     // V5 state-trust: CEE no longer prefixes assistant_text with the

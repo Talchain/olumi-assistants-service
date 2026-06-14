@@ -1382,12 +1382,11 @@ describe('generateChips — V5 link-safe chip floor', () => {
     expect(eventsNamed('v5.chips.floor_applied')[0].data.reason).toBe('needs_input');
   });
 
-  it('frame stage + prior run_analysis fact + no current handler → floor adds "What could change the outcome?" prompt (post_analysis_no_obvious_next)', () => {
-    // The analyse-stage rule requires hasAnalysis=false. Here we have a
-    // prior fact but no projection on this turn, and stage=frame so the
-    // analyse-stage rule doesn't run anyway. Existing rules return [];
-    // floor's priority 3 (post-analysis without obvious next) picks the
-    // conversational exploration prompt.
+  it('frame stage + prior run_analysis fact + no current handler → floor emits the EXECUTABLE what_would_flip chip (post_analysis_no_obvious_next)', () => {
+    // V5 P0-B: floor priority 3 now emits an EXECUTABLE what_would_flip chip
+    // (not a bare prompt) so a click dispatches the deterministic handler
+    // instead of falling through to the LLM. The prior run_analysis fact makes
+    // a projection buildable, so the handler precondition would 'execute'.
     const chips = generateChips({
       stage: 'frame',
       handlerFacts: [],
@@ -1396,7 +1395,8 @@ describe('generateChips — V5 link-safe chip floor', () => {
       priorFacts: [runAnalysisFact()],
     });
     expect(chips).toHaveLength(1);
-    expect(chips[0]).not.toHaveProperty('action_type');
+    expect(chips[0].action_type).toBe('what_would_flip');
+    expect(chips[0].id).toBe('chip_action_what_would_flip');
     expect(chips[0].label).toBe('What could change the outcome?');
     const floor = eventsNamed('v5.chips.floor_applied');
     expect(floor).toHaveLength(1);
@@ -1546,7 +1546,8 @@ describe('generateChips — V5 link-safe chip floor', () => {
     });
     expect(needsInput[0].id).toBe('chip_prompt_floor_set_option_values');
 
-    // Post-analysis explore path
+    // Post-analysis explore path — V5 P0-B: now the executable what_would_flip
+    // chip (deterministic dispatch) rather than a bare prompt.
     const postAnalysis = generateChips({
       stage: 'frame',
       handlerFacts: [],
@@ -1554,7 +1555,8 @@ describe('generateChips — V5 link-safe chip floor', () => {
       validationRegistry: REGISTRY,
       priorFacts: [runAnalysisFact()],
     });
-    expect(postAnalysis[0].id).toBe('chip_prompt_floor_post_analysis_explore');
+    expect(postAnalysis[0].id).toBe('chip_action_what_would_flip');
+    expect(postAnalysis[0].action_type).toBe('what_would_flip');
 
     // Ready-no-fact path uses existing executable chip id
     const ready = generateChips({

@@ -62,6 +62,24 @@ export interface FlipEntry {
    * See `Docs/v5/cee-plot-flip-value-scale-contract.md`.
    */
   readonly value_scale?: string | null;
+  /**
+   * PLoT's reason a `flip_value` is `null`. The honest `what_would_flip`
+   * copy ladder reads `'no_effect_within_bounds'` to say no single-factor
+   * tipping point was found within the tested range — instead of implying
+   * a flip exists. `null` when not provided. (Additive: existing
+   * proposal-seam consumers do not read it.)
+   */
+  readonly flip_reason?: string | null;
+  /**
+   * Whether this entry's `margin_sensitivity` block carries EVIDENCE of
+   * real movement — NOT mere presence. PLoT emits a `margin_sensitivity`
+   * object that reports `movement: 'none'` / `strongest_delta: null` when
+   * probing found no movement, so the key being present is not support.
+   * `true` only when `margin_sensitivity.movement` is a non-empty value
+   * other than `'none'`, or `strongest_delta_abs > 0`. Gates the
+   * "small changes could flip the result" copy. (Additive.)
+   */
+  readonly margin_supports_flip?: boolean;
 }
 
 /** The factor's graph node info needed to invert + display safely. */
@@ -257,6 +275,25 @@ function readValueScale(r: Record<string, unknown>): string | null {
 }
 
 /**
+ * Does a flip-threshold row's `margin_sensitivity` carry EVIDENCE of real
+ * movement? Presence alone is not enough — PLoT emits a `margin_sensitivity`
+ * object that reports `movement: 'none'` / `strongest_delta: null` when
+ * probing found no movement (observed live on staging build `cef69b0`,
+ * scenario `e22aa97b`). The honest-copy gate (do not imply "small changes
+ * could flip the result") must therefore read the CONTENT, not the key.
+ */
+function readMarginSupportsFlip(r: Record<string, unknown>): boolean {
+  const ms = r.margin_sensitivity;
+  if (!ms || typeof ms !== 'object') return false;
+  const m = ms as Record<string, unknown>;
+  const movement = typeof m.movement === 'string' ? m.movement.toLowerCase().trim() : null;
+  if (movement !== null && movement.length > 0 && movement !== 'none') return true;
+  const strongestAbs =
+    typeof m.strongest_delta_abs === 'number' ? m.strongest_delta_abs : null;
+  return strongestAbs !== null && Number.isFinite(strongestAbs) && strongestAbs > 0;
+}
+
+/**
  * Read `enrichment.flip_thresholds[]` defensively into typed FlipEntry[].
  * Tolerates the opaque enrichment shape; drops malformed rows.
  */
@@ -278,9 +315,57 @@ export function readFlipEntries(enrichment: unknown): FlipEntry[] {
       direction: typeof r.direction === 'string' ? r.direction : null,
       unit: typeof r.unit === 'string' ? r.unit : null,
       value_scale: readValueScale(r),
+      flip_reason: typeof r.flip_reason === 'string' ? r.flip_reason : null,
+      margin_supports_flip: readMarginSupportsFlip(r),
     });
   }
   return out;
+}
+
+/** Overall flip-evidence verdict across an analysis's flip thresholds. */
+export type FlipOverallStatus =
+  | 'concrete' // ≥1 entry has a finite flip_value (a real single-factor tipping point exists)
+  | 'no_practical_flip' // entries exist, ALL null with reason 'no_effect_within_bounds'
+  | 'insufficient_data' // entries exist but null without that reason (no verdict)
+  | 'none'; // no flip thresholds at all
+
+/**
+ * Compact, honest summary of `enrichment.flip_thresholds[]` for the
+ * deterministic `what_would_flip` composer. `overall_status` drives the
+ * copy ladder; `margin_supports_flip` (true only when ≥1 entry carries
+ * real margin movement) gates the "small changes could flip" claim.
+ */
+export interface FlipSummary {
+  readonly overall_status: FlipOverallStatus;
+  readonly entries: readonly FlipEntry[];
+  readonly margin_supports_flip: boolean;
+}
+
+/**
+ * Derive a {@link FlipSummary} from already-read {@link FlipEntry}[]. Pure.
+ * Mirrors the legacy deterministic engine's per-entry flip_status derivation
+ * (`src/orchestrator/deterministic/actions/what-would-flip.ts`) at the
+ * summary level. Returns `'none'` for an empty list so the composer can
+ * distinguish "no flip data" (fall back to current behaviour) from
+ * "flip data says nothing flips" (`'no_practical_flip'`).
+ */
+export function summariseFlipEntries(entries: readonly FlipEntry[]): FlipSummary {
+  const margin_supports_flip = entries.some((e) => e.margin_supports_flip === true);
+  if (entries.length === 0) {
+    return { overall_status: 'none', entries, margin_supports_flip };
+  }
+  const hasConcrete = entries.some(
+    (e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value),
+  );
+  if (hasConcrete) {
+    return { overall_status: 'concrete', entries, margin_supports_flip };
+  }
+  const allNoEffect = entries.every((e) => e.flip_reason === 'no_effect_within_bounds');
+  return {
+    overall_status: allNoEffect ? 'no_practical_flip' : 'insufficient_data',
+    entries,
+    margin_supports_flip,
+  };
 }
 
 /**

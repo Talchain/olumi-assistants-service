@@ -174,8 +174,11 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
         scenarioId: SCENARIO_ID,
       },
     });
-    // No analysis_result block (current turn produced no run_analysis fact).
-    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeUndefined();
+    // V5 P0-B: the FRESH prior-fact branch now ALSO emits the result-summary
+    // `analysis_result` block (so the UI has a non-empty, structured answer
+    // even without decision_review). Emitted on FRESH only — the STALE test
+    // below still asserts it is absent on a diverged graph.
+    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeDefined();
     // Phase 3 blocks rebuilt from prior fact and tagged fresh.
     const reviewCards = response.blocks.filter((b) => b.type === 'review_card');
     const coaching = response.blocks.filter((b) => b.type === 'coaching');
@@ -200,7 +203,8 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
     expect(payload.lifecycle_state).toBe('emitted_fresh');
     expect(payload.reason).toBe('prior_fact_fresh');
-    expect(payload.block_count).toBe(phase3Blocks.length);
+    // V5 P0-B: block_count now includes the added analysis_result block.
+    expect(payload.block_count).toBe(phase3Blocks.length + 1);
     expect(payload.stale_coaching_emitted).toBe(false);
   });
 

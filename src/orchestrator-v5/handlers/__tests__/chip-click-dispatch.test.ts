@@ -1144,10 +1144,13 @@ describe('PR 3 chip-click lifecycle — explain_results / what_would_flip emit P
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
 
     // The composer received lifecycle context and emitted Phase 3 blocks
-    // rebuilt fresh from the prior run_analysis fact. No analysis_result
-    // (no current-turn run_analysis fact).
+    // rebuilt fresh from the prior run_analysis fact, PLUS the result-summary
+    // `analysis_result` block (V5 P0-B) so the UI has a non-empty, structured
+    // answer even when decision_review is absent (autofire off). Emitted on
+    // the FRESH verdict only — the graph hash matches the source fact.
     const blocks = out.response.blocks;
-    expect(blocks.find((b) => b.type === 'analysis_result')).toBeUndefined();
+    const analysisResult = blocks.find((b) => b.type === 'analysis_result');
+    expect(analysisResult).toBeDefined();
     const reviewCards = blocks.filter((b) => b.type === 'review_card');
     const coaching = blocks.filter((b) => b.type === 'coaching');
     expect(reviewCards.length).toBeGreaterThan(0);

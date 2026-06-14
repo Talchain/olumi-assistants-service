@@ -6,6 +6,7 @@ import {
   buildFlipProposalEmit,
   readFlipEntries,
   selectFlipProposal,
+  summariseFlipEntries,
   type FlipEntry,
   type FactorNodeInfo,
 } from '../flip-proposal.js';
@@ -484,5 +485,104 @@ describe('buildFlipProposalEmit — display-scale chip survives #239 finalisatio
     const res = buildFlipProposalEmit(enrichment, lookup, emitCtx());
     expect(res.status).toBe('unsafe_copy');
     expect(res.status).not.toBe('emitted'); // no chip AND no pending materialised
+  });
+});
+
+// V5 P0-B — flip_reason + content-aware margin_supports_flip + summary verdict.
+describe('readFlipEntries — captures flip_reason + margin_supports_flip (content, not presence)', () => {
+  it('reads flip_reason and treats margin_sensitivity{movement:"none"} as NOT support (the live staging shape)', () => {
+    // Mirrors enrichment.flip_thresholds from the staging debug bundle
+    // (build cef69b0, scenario e22aa97b): flip_value null, no_effect reason,
+    // and a margin_sensitivity object that reports zero movement.
+    const enrichment = {
+      flip_thresholds: [
+        {
+          factor_id: 'fac_hiring_cost',
+          factor_label: 'Hiring and Salary Cost',
+          flip_value: null,
+          direction: 'increase',
+          flip_reason: 'no_effect_within_bounds',
+          margin_sensitivity: {
+            movement: 'none',
+            strongest_delta: null,
+            strongest_delta_abs: null,
+            min_probe_delta: 0,
+            max_probe_delta: 0,
+            display_value_available: false,
+          },
+        },
+      ],
+    };
+    const [entry] = readFlipEntries(enrichment);
+    expect(entry.flip_reason).toBe('no_effect_within_bounds');
+    // Presence of a margin_sensitivity object is NOT support — movement is none.
+    expect(entry.margin_supports_flip).toBe(false);
+  });
+
+  it('treats real movement (movement !== "none" OR strongest_delta_abs > 0) as support', () => {
+    const enrichment = {
+      flip_thresholds: [
+        {
+          factor_id: 'f1',
+          factor_label: 'F1',
+          flip_value: null,
+          margin_sensitivity: { movement: 'flipped' },
+        },
+        {
+          factor_id: 'f2',
+          factor_label: 'F2',
+          flip_value: null,
+          margin_sensitivity: { movement: 'none', strongest_delta_abs: 0.12 },
+        },
+      ],
+    };
+    const entries = readFlipEntries(enrichment);
+    expect(entries[0].margin_supports_flip).toBe(true); // movement flipped
+    expect(entries[1].margin_supports_flip).toBe(true); // non-zero strongest delta
+  });
+});
+
+describe('summariseFlipEntries — overall_status verdict', () => {
+  const entry = (over: Partial<FlipEntry>): FlipEntry => ({
+    factor_id: 'f',
+    factor_label: 'F',
+    flip_value: null,
+    flip_reason: null,
+    margin_supports_flip: false,
+    ...over,
+  });
+
+  it('empty → none', () => {
+    expect(summariseFlipEntries([]).overall_status).toBe('none');
+  });
+
+  it('all null + no_effect_within_bounds → no_practical_flip (margin not supporting)', () => {
+    const s = summariseFlipEntries([
+      entry({ flip_reason: 'no_effect_within_bounds' }),
+      entry({ flip_reason: 'no_effect_within_bounds' }),
+    ]);
+    expect(s.overall_status).toBe('no_practical_flip');
+    expect(s.margin_supports_flip).toBe(false);
+  });
+
+  it('any finite flip_value → concrete', () => {
+    const s = summariseFlipEntries([
+      entry({ flip_reason: 'no_effect_within_bounds' }),
+      entry({ flip_value: 0.42 }),
+    ]);
+    expect(s.overall_status).toBe('concrete');
+  });
+
+  it('null without no_effect reason → insufficient_data', () => {
+    const s = summariseFlipEntries([entry({ flip_reason: 'max_iterations' })]);
+    expect(s.overall_status).toBe('insufficient_data');
+  });
+
+  it('margin_supports_flip aggregates across entries (some=true → true)', () => {
+    const s = summariseFlipEntries([
+      entry({ flip_reason: 'no_effect_within_bounds' }),
+      entry({ flip_value: 0.5, margin_supports_flip: true }),
+    ]);
+    expect(s.margin_supports_flip).toBe(true);
   });
 });
