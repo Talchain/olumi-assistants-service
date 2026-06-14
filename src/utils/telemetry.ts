@@ -528,6 +528,9 @@ export const TelemetryEvents = {
   // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
   // Redacted: corrected_count + node IDs only, no observed magnitudes.
   V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+  // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
+  // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
+  V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
   CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
 
   // V5 pending-action lifecycle. Fired at the appropriate point in the
