@@ -29,9 +29,10 @@
  * canonical top-level bundle at the single `scenarios.graph` write chokepoint
  * (`commitDirectAnswer` → `store.append`), with the SAME precedence the read
  * path uses — Source 1 `data.interventions` > Source 2 slash-keyed > top-level —
- * so the newer edit WINS while unrelated top-level metadata (target_match,
- * source, reasoning, value_confidence) is preserved. The persisted record then
- * matches draft-created options and survives the read-time NodeV3 strip.
+ * so the newer edit WINS and is marked `source: 'user_specified'`, preserving
+ * only the still-valid factor match (`target_match`) from any existing top-level
+ * entry. The persisted record then matches draft-created options and survives
+ * the read-time NodeV3 strip.
  *
  * Precedence note: this MUST stay consistent with
  * `mergeInterventionSources` (src/orchestrator/tools/analysis-ready-helper.ts).
@@ -167,13 +168,15 @@ function freshInterventionV3(fac: string, rec: RecoveredIntervention): Dict {
  * (no recoverable non-canonical entries → the option is already canonical /
  * a draft; leave it untouched).
  *
- * Overlay semantics (data wins, metadata preserved):
- *  - factor present in BOTH top-level and a recovered source → keep the existing
- *    InterventionV3 (target_match/source/reasoning/value_confidence) but set its
- *    `value` from the recovered source, and `unit`/`raw_value` only when the
- *    recovered source supplied them (the newer edit wins on the value);
- *  - factor present ONLY in a recovered source → fresh InterventionV3;
- *  - factor present ONLY at top-level → preserved verbatim.
+ * Overlay semantics (data wins; provenance stays truthful):
+ *  - factor present in BOTH top-level and a recovered source → a USER EDIT:
+ *    rebuild a fresh `user_specified` InterventionV3 from the recovered value,
+ *    preserving ONLY the still-valid `target_match` from the existing entry.
+ *    Stale `source`/`reasoning`/`value_confidence`/`display_value` described the
+ *    OLD value (`source` means "how this intervention was determined") and are
+ *    NOT carried forward — that would misreport the edit's provenance;
+ *  - factor present ONLY in a recovered source → fresh `user_specified` InterventionV3;
+ *  - factor present ONLY at top-level → preserved verbatim (not edited).
  */
 function buildMergedInterventions(node: Dict): Dict | null {
   const recovered = recoverFromDataSources(node);
@@ -189,22 +192,15 @@ function buildMergedInterventions(node: Dict): Dict | null {
     }
   }
 
-  // Overlay the recovered (newer) values — data wins on `value`.
+  // Overlay the recovered (newer) values — data wins, and an overridden value is
+  // re-marked `user_specified` (only the factor match is carried from the old entry).
   for (const [fac, rec] of recovered) {
+    const fresh = freshInterventionV3(fac, rec);
     const existing = out[fac];
-    if (isPlainObject(existing)) {
-      existing.value = rec.value;
-      if (rec.unit !== undefined) existing.unit = rec.unit;
-      if (rec.raw_value !== undefined) existing.raw_value = rec.raw_value;
-      // Defensive: an existing top-level entry should already be a valid
-      // InterventionV3, but synthesise the required fields if it is not.
-      if (!isPlainObject(existing.target_match)) {
-        existing.target_match = { node_id: fac, match_type: 'exact_id', confidence: 'high' };
-      }
-      if (existing.source === undefined) existing.source = 'user_specified';
-    } else {
-      out[fac] = freshInterventionV3(fac, rec);
+    if (isPlainObject(existing) && isPlainObject(existing.target_match)) {
+      fresh.target_match = existing.target_match;
     }
+    out[fac] = fresh;
   }
 
   return out;
@@ -280,7 +276,11 @@ export function normaliseOptionInterventionContract<T>(
         const merged = buildMergedInterventions(node);
         if (merged === null) continue;
         node.interventions = merged;
-        if (isPlainObject(node.data)) delete (node.data as Dict).interventions;
+        if (isPlainObject(node.data)) {
+          delete (node.data as Dict).interventions;
+          // Drop a now-empty `data` object (cosmetic: NodeV3 strips `data` on read).
+          if (Object.keys(node.data as Dict).length === 0) delete (node as Dict).data;
+        }
         for (const k of Object.keys(node)) {
           if (SLASH_KEY_RE.test(k)) delete node[k];
         }

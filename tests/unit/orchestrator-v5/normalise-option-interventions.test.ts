@@ -92,7 +92,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
       },
     });
     // non-canonical location cleared; `cap` dropped (not an InterventionV3 field)
-    expect((opt.data as Record<string, unknown>).interventions).toBeUndefined();
+    expect(opt.data).toBeUndefined();
     for (const iv of Object.values(opt.interventions as Record<string, Record<string, unknown>>)) {
       expect(iv).not.toHaveProperty('cap');
     }
@@ -177,7 +177,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
     expect(ivOf(opt, 'fac_b')).toEqual({
       value: 0.5, source: 'user_specified', target_match: { node_id: 'fac_b', match_type: 'exact_id', confidence: 'high' },
     });
-    expect((opt.data as Record<string, unknown>).interventions).toBeUndefined();
+    expect(opt.data).toBeUndefined();
   });
 
   it('OVERLAY: data.interventions OVERRIDES a stale top-level value (data wins) while preserving metadata', () => {
@@ -200,10 +200,13 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
     const fac_a = ivOf(nodeById(normaliseOptionInterventionContract(g) as AnyGraph, 'opt_o'), 'fac_a');
     expect(fac_a.value).toBe(0.55);        // edited value WINS (not the stale 0.9)
     expect(fac_a.raw_value).toBe(110000);  // newer raw_value applied
-    // unrelated top-level metadata preserved
-    expect(fac_a.source).toBe('brief_extraction');
-    expect(fac_a.reasoning).toBe('orig');
-    expect(fac_a.value_confidence).toBe('high');
+    expect(fac_a.unit).toBe('£');          // unit from the edit
+    // provenance is made truthful: an overridden value is a USER edit
+    expect(fac_a.source).toBe('user_specified');
+    // stale value-descriptive metadata is NOT carried over
+    expect(fac_a.reasoning).toBeUndefined();
+    expect(fac_a.value_confidence).toBeUndefined();
+    // only the still-valid factor match is preserved
     expect(fac_a.target_match).toEqual({ node_id: 'fac_a', confidence: 'high', match_type: 'exact_id' });
   });
 
@@ -220,8 +223,10 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
       edges: [],
     };
     const opt = nodeById(normaliseOptionInterventionContract(g) as AnyGraph, 'opt_sl');
-    expect(ivOf(opt, 'fac_a').value).toBe(0.25);           // slash edit wins
-    expect(ivOf(opt, 'fac_a').source).toBe('brief_extraction'); // metadata preserved
+    expect(ivOf(opt, 'fac_a').value).toBe(0.25);              // slash edit wins
+    expect(ivOf(opt, 'fac_a').source).toBe('user_specified'); // user edit, not stale provenance
+    expect(ivOf(opt, 'fac_a').reasoning).toBeUndefined();
+    expect(ivOf(opt, 'fac_a').target_match).toEqual({ node_id: 'fac_a', confidence: 'high', match_type: 'exact_id' });
     expect(opt).not.toHaveProperty('data/interventions/fac_a');
   });
 

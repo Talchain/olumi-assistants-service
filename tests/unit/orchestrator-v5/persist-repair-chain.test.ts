@@ -163,7 +163,7 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
     // (2) Option interventions promoted to the canonical top-level contract
     const opt = nodeById(persisted, 'opt_hybrid');
     expect(opt.interventions).toEqual(PROMOTED_OPT_HYBRID_INTERVENTIONS);
-    expect((opt.data as Record<string, unknown>).interventions).toBeUndefined();
+    expect(opt.data).toBeUndefined();
 
     // (3) Draft-created option is byte-equivalent
     expect(JSON.stringify(nodeById(persisted, 'opt_draft'))).toBe(JSON.stringify(draftOption()));
@@ -213,7 +213,7 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
     const out = repairThenNormalise as AnyGraph;
     expect('intercept' in nodeById(out, 'fac_root_dup')).toBe(false);
     expect(nodeById(out, 'opt_hybrid').interventions).toEqual(PROMOTED_OPT_HYBRID_INTERVENTIONS);
-    expect((nodeById(out, 'opt_hybrid').data as Record<string, unknown>).interventions).toBeUndefined();
+    expect(nodeById(out, 'opt_hybrid').data).toBeUndefined();
     expect(JSON.stringify(nodeById(out, 'opt_draft'))).toBe(JSON.stringify(draftOption()));
   });
 });
