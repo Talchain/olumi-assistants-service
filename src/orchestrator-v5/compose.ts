@@ -312,24 +312,6 @@ const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
 // Tracked as a separate coaching-contract workstream item.
 
 /**
- * Reduce a run_analysis fact's opaque enrichment to the P0-B safe-transport
- * keep-list. Applied to BOTH the current-turn run_analysis block and the
- * reused follow-up block so they emit an IDENTICAL block for a given analysis
- * (consistent DGAI content-hash dedupe + panel hydration). Rationale:
- *   - The full raw enrichment LEAKS: the prose-only `sanitiseEnrichment` never
- *     strips structural fields and is bypassed entirely when
- *     CEE_TURN_DEBUG_ENABLED is on. The live bundle carried `[REDACTED]` (in
- *     `_meta`/`meta`), `isl_engine` (in `m1_coaching`) and `seed` lineage (in
- *     `decision_brief`/`fact_objects`). The keep-list drops all of those
- *     carriers at the block-build site (debug-independent), so `_meta`,
- *     payloads, graph, graph hashes and raw debug fields never ship.
- *   - `decision_review` is kept present-only; its nested prose is still
- *     scrubbed by the response-finaliser in normal (debug-off) mode.
- *
- * Returns `undefined` when no kept field is present so the block omits the
- * `enrichment` key (the typical chip-click, autofire-off shape).
- */
-/**
  * Internal/debug carrier KEYS that must never ship inside a kept field, at any
  * depth (Codex review — the keep-list was a shallow top-level pick, so a leak
  * carrier nested inside a kept field would survive the copy). These are
@@ -347,8 +329,16 @@ const INTERNAL_ENRICHMENT_KEYS: ReadonlySet<string> = new Set([
 
 /**
  * Deep-clone a value while removing every {@link INTERNAL_ENRICHMENT_KEYS} key
- * at any depth. Cloning (rather than sharing the source reference) also keeps
- * the persisted fact unmutated.
+ * at any depth, AND dropping any leaf whose string value carries the redaction
+ * marker `[REDACTED]` under a non-denylisted key (Codex review #2 — the strip
+ * was key-only, so a `[REDACTED]` value hiding under a harmless key would
+ * survive). `[REDACTED]` is never legitimate user-facing data, so this has no
+ * false positives. We deliberately do NOT value-scrub broader tokens such as
+ * "engine" / "provenance": they appear in legitimate science data
+ * ("Engineering Capacity", `confidence_provenance`), so a broad scrub would
+ * corrupt kept fields — that residual is covered by the value-level regression
+ * test instead. Cloning (not sharing the source reference) keeps the persisted
+ * fact unmutated.
  */
 function stripInternalKeysDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripInternalKeysDeep);
@@ -356,12 +346,33 @@ function stripInternalKeysDeep(value: unknown): unknown {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (INTERNAL_ENRICHMENT_KEYS.has(k)) continue;
+      if (typeof v === 'string' && v.includes('[REDACTED]')) continue;
       out[k] = stripInternalKeysDeep(v);
     }
     return out;
   }
   return value;
 }
+
+/**
+ * Reduce a run_analysis fact's opaque enrichment to the P0-B safe-transport
+ * keep-list. Applied to BOTH the current-turn run_analysis block and the
+ * reused follow-up block so they emit an IDENTICAL block for a given analysis
+ * (consistent DGAI content-hash dedupe + panel hydration). Rationale:
+ *   - The full raw enrichment LEAKS: the prose-only `sanitiseEnrichment` never
+ *     strips structural fields and is bypassed entirely when
+ *     CEE_TURN_DEBUG_ENABLED is on. The live bundle carried `[REDACTED]` (in
+ *     `_meta`/`meta`), `isl_engine` (in `m1_coaching`) and `seed` lineage (in
+ *     `decision_brief`/`fact_objects`). The keep-list drops those carriers at
+ *     the block-build site (debug-independent), and `stripInternalKeysDeep`
+ *     removes any that nest inside a kept field — so `_meta`, payloads, graph,
+ *     graph hashes and raw debug fields never ship.
+ *   - `decision_review` is kept present-only; its nested prose is still
+ *     scrubbed by the response-finaliser in normal (debug-off) mode.
+ *
+ * Returns `undefined` when no kept field is present so the block omits the
+ * `enrichment` key (the typical chip-click, autofire-off shape).
+ */
 
 function toSafeTransportEnrichment(enrichment: unknown): Record<string, unknown> | undefined {
   if (enrichment === null || enrichment === undefined || typeof enrichment !== 'object') {

@@ -1260,11 +1260,11 @@ describe('PR 3 chip-click lifecycle — explain_results / what_would_flip emit P
     const actions = out.response.suggested_actions ?? [];
     // Must NOT re-offer the executable (stale) what_would_flip chip.
     expect(actions.find((a) => a.action_type === 'what_would_flip')).toBeUndefined();
-    // Must steer to rerun (executable run_analysis chip OR the conversational
-    // "Re-run analysis" prompt — either is acceptable; both are rerun intent).
-    const steersToRerun = actions.some(
-      (a) => a.action_type === 'run_analysis' || /re-?run/i.test(a.label ?? ''),
-    );
-    expect(steersToRerun).toBe(true);
+    // analysisReady is 'ready' here, so the sharp, intended recovery is the
+    // EXECUTABLE one-click "Rerun analysis" chip (the stale-recovery rule
+    // fires) — not merely a conversational rerun prompt.
+    const rerun = actions.find((a) => a.action_type === 'run_analysis');
+    expect(rerun).toBeDefined();
+    expect(/re-?run/i.test(rerun!.label ?? '')).toBe(true);
   });
 });

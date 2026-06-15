@@ -370,6 +370,49 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect(fs[0]!.influence_score).toBe(0.5);
   });
 
+  // V5 P0-B — Codex non-blocker #2: VALUE-level guard. The redaction marker
+  // `[REDACTED]` hiding under a harmless (non-denylisted) key is dropped, while
+  // legitimate science values that merely CONTAIN internal-sounding substrings
+  // (e.g. "Engineering Capacity" contains "engin"; confidence_provenance) are
+  // preserved — we deliberately do not broad-scrub those tokens.
+  it('LEAK GUARD (value-level): a [REDACTED] value under a harmless key is dropped; legit science labels with internal-sounding substrings survive', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          factor_sensitivity: [
+            {
+              factor_id: 'fac_eng',
+              factor_label: 'Engineering Capacity', // contains "engin" — MUST survive
+              confidence_provenance: 'isl-model-v2', // legit metadata — MUST survive
+              note: '[REDACTED]', // redaction marker under a harmless key — STRIPPED
+            },
+          ],
+          option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    const enrJson = JSON.stringify(enr);
+    // The redaction marker is gone (value-level guard), and the carrier key with it.
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson).not.toMatch(/"note"/);
+    // No false positives: legit labels / provenance with internal-sounding
+    // substrings are preserved verbatim.
+    expect(enrJson).toContain('Engineering Capacity');
+    expect(enrJson).toContain('confidence_provenance');
+    expect(enrJson).toContain('isl-model-v2');
+  });
+
   // PR 3 contract — block_id stability across stale rebuilds.
   it('STALE re-emission: same source fact graph_hash → same stale block_id (UI dedupe)', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);

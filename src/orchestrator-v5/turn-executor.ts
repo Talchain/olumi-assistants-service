@@ -4250,12 +4250,20 @@ export async function runTurnExecutor(
           // deterministic fallback (used when Sonnet's answer_text is unusable)
           // is just as honest — it must not reintroduce the "small adjustments
           // could shift which option leads" contradiction on a no-practical-flip
-          // result. Gated on explanation handlers; sourced from the same
-          // selected run_analysis fact as projection/freshness.
-          rawRobustness: isExplanationHandler
+          // result.
+          //
+          // SAME-SOURCE GUARANTEE (Codex review #2): `analysisProjection` is
+          // built from `contextPackForLog.analysis`, which on the request path
+          // (`analysisStateSource === 'request'`) comes from the body-supplied
+          // analysis_state, NOT prior facts. The prior-fact flip / robustness
+          // evidence could then describe a DIFFERENT run. So we only pair
+          // prior-fact evidence with a prior-fact-built projection; when the
+          // projection is request-sourced we withhold it and the composer falls
+          // back to the request projection's own band (consistent, no mix).
+          rawRobustness: isExplanationHandler && analysisStateSource !== 'request'
             ? pickLatestRawRobustness(context.prior_facts)
             : undefined,
-          flipSummary: isExplanationHandler
+          flipSummary: isExplanationHandler && analysisStateSource !== 'request'
             ? pickLatestFlipSummary(context.prior_facts)
             : undefined,
         });
