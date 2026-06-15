@@ -329,6 +329,40 @@ const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
  * Returns `undefined` when no kept field is present so the block omits the
  * `enrichment` key (the typical chip-click, autofire-off shape).
  */
+/**
+ * Internal/debug carrier KEYS that must never ship inside a kept field, at any
+ * depth (Codex review — the keep-list was a shallow top-level pick, so a leak
+ * carrier nested inside a kept field would survive the copy). These are
+ * clearly-internal keys (never DGAI-correlation data), so a recursive removal
+ * is safe and makes the transport shape robust against nested carriers — even
+ * in debug-on mode, where the response-finaliser's prose scrub is bypassed.
+ * NOTE: legitimate science metadata keys like `confidence_provenance` /
+ * `confidence_source` are NOT in this set — they are kept structural fields.
+ */
+const INTERNAL_ENRICHMENT_KEYS: ReadonlySet<string> = new Set([
+  '_meta', 'meta', '_diagnostics', 'ceeTrace', 'cee_trace', 'debug',
+  'payloads', 'downstream_calls', 'graph', 'graph_hash', 'graph_hash_at_run',
+  'feature_flags', 'feature_flags_snapshot', 'lineage', 'seed',
+]);
+
+/**
+ * Deep-clone a value while removing every {@link INTERNAL_ENRICHMENT_KEYS} key
+ * at any depth. Cloning (rather than sharing the source reference) also keeps
+ * the persisted fact unmutated.
+ */
+function stripInternalKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripInternalKeysDeep);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (INTERNAL_ENRICHMENT_KEYS.has(k)) continue;
+      out[k] = stripInternalKeysDeep(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 function toSafeTransportEnrichment(enrichment: unknown): Record<string, unknown> | undefined {
   if (enrichment === null || enrichment === undefined || typeof enrichment !== 'object') {
     return undefined;
@@ -336,7 +370,9 @@ function toSafeTransportEnrichment(enrichment: unknown): Record<string, unknown>
   const src = enrichment as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const key of P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) {
-    if (src[key] !== undefined) out[key] = src[key];
+    // Shallow keep-list at the top level PLUS a deep strip of internal/debug
+    // carriers inside each kept field, so the keep-list is not merely shallow.
+    if (src[key] !== undefined) out[key] = stripInternalKeysDeep(src[key]);
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

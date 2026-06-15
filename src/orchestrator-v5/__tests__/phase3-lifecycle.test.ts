@@ -319,6 +319,57 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect(reused!.win_probabilities).toEqual(currentTurn!.win_probabilities);
   });
 
+  // V5 P0-B — Codex non-blocker: the keep-list is not merely a shallow
+  // top-level pick. Internal/debug carriers NESTED inside a kept field are
+  // deep-stripped at the build site, so they cannot survive even in debug-on
+  // mode (where the response-finaliser's prose scrub is bypassed). Legitimate
+  // science metadata (e.g. confidence_provenance) is preserved.
+  it('LEAK GUARD (debug-independent): internal carriers NESTED inside kept fields are deep-stripped; science metadata is preserved', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          factor_sensitivity: [
+            {
+              factor_id: 'fac_x',
+              influence_score: 0.5,
+              confidence_provenance: 'isl-model-v2', // legit science metadata — KEPT
+              _meta: { TOKEN_RL_ENABLE: '[REDACTED]' }, // nested carrier — STRIPPED
+              lineage: { seed: 12345 }, // nested carrier — STRIPPED
+            },
+          ],
+          robustness: { level: 'fragile', graph_hash: 'deadbeef', fragile_edges: [] },
+          option_comparison: [
+            { option_id: 'opt_a', win_probability: 0.7, downstream_calls: { isl: [{}] } },
+          ],
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    const enrJson = JSON.stringify(enr);
+    // Nested internal carriers gone — debug-independent (runs at the build site).
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson).not.toMatch(/"seed"/);
+    expect(enrJson).not.toMatch(/"graph_hash"/);
+    expect(enrJson).not.toMatch(/"_meta"/);
+    expect(enrJson).not.toMatch(/"lineage"/);
+    expect(enrJson).not.toMatch(/"downstream_calls"/);
+    // Legit science metadata + structural values preserved (NOT over-stripped).
+    expect(enrJson).toContain('confidence_provenance');
+    expect(enrJson).toContain('isl-model-v2');
+    const fs = enr.factor_sensitivity as Array<Record<string, unknown>>;
+    expect(fs[0]!.influence_score).toBe(0.5);
+  });
+
   // PR 3 contract — block_id stability across stale rebuilds.
   it('STALE re-emission: same source fact graph_hash → same stale block_id (UI dedupe)', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);

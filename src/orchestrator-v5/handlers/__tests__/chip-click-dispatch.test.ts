@@ -1221,4 +1221,50 @@ describe('PR 3 chip-click lifecycle — explain_results / what_would_flip emit P
     // current_hash (READY_GRAPH) ≠ STALE_HASH proves freshness diverged.
     expect(currentHash).not.toBe(STALE_HASH);
   });
+
+  // Codex blocker fix — a STALE what_would_flip follow-up must STEER the user
+  // to rerun, not loop them back into an executable (stale) what_would_flip
+  // chip. The dispatch now threads freshness + readiness into generateChips so
+  // the stale-recovery rule / floor Priority 1 can fire.
+  it('STALE suggested_actions: steers to rerun, NOT an executable stale what_would_flip chip', async () => {
+    const STALE_HASH = 'gh_diverged_stale_actions';
+    const priorFact = await makePriorRunAnalysisFact(STALE_HASH);
+    buildTurnContextMock.mockResolvedValueOnce({
+      ...DEFAULT_TURN_CONTEXT,
+      prior_facts: [priorFact],
+      persistedGraph: READY_GRAPH,
+    });
+    // On a stale graph the real handler returns the stale template (a
+    // precondition-unmet fact), which is what reaches generateChips.
+    whatWouldFlipHandlerMock.mockResolvedValueOnce({
+      assistant_text: 'These results may be out of date. Would you like to re-run analysis?',
+      handler_facts: [
+        {
+          fact_type: 'what_would_flip' as const, fact_version: 1, noop: true,
+          result: {
+            precondition_unmet: true, option_count: 2,
+            answer_source: 'precondition_template' as const,
+            fallback_reason: null, answer_text_length: 60,
+          },
+        },
+      ],
+      llm_calls_used: 0, suppress_orientation: true,
+    });
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor('what_would_flip'),
+      requestId: 'req-flip-stale-actions',
+    });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+
+    const actions = out.response.suggested_actions ?? [];
+    // Must NOT re-offer the executable (stale) what_would_flip chip.
+    expect(actions.find((a) => a.action_type === 'what_would_flip')).toBeUndefined();
+    // Must steer to rerun (executable run_analysis chip OR the conversational
+    // "Re-run analysis" prompt — either is acceptable; both are rerun intent).
+    const steersToRerun = actions.some(
+      (a) => a.action_type === 'run_analysis' || /re-?run/i.test(a.label ?? ''),
+    );
+    expect(steersToRerun).toBe(true);
+  });
 });

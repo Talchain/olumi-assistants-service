@@ -871,6 +871,21 @@ async function dispatchChipClickNoopExplanation(
       priorFacts: context.prior_facts,
       analysis: null,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
+      // V5 P0-B blocker fix (Codex review): thread readiness + freshness so a
+      // STALE what_would_flip / explain follow-up steers the user to the
+      // "Rerun analysis" action (chip-generator stale-recovery rule + floor
+      // Priority 1, both of which read `turnOutcome.analysis_freshness` +
+      // `analysisReady.status`) instead of looping back into the executable
+      // (stale) what_would_flip chip. Sourced from the SAME freshness/readiness
+      // the precondition + wire response already use, so no second derivation.
+      analysisReady: projectionInputs.analysisReady,
+      turnOutcome: {
+        graph_mutated: false,
+        analysis_run: false,
+        analysis_selected_fact_index: projectionInputs.analysisFreshness.selected_fact_index,
+        analysis_freshness: projectionInputs.analysisFreshness.freshness,
+        freshness_reason: projectionInputs.analysisFreshness.reason,
+      },
     });
 
     let response = composeToolCallResponse({
