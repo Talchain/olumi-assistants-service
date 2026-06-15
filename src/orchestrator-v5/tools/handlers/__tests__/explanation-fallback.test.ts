@@ -783,4 +783,31 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
     expect(text).not.toMatch(HONEST_NO_FLIP);
     expect(text).not.toMatch(/This result looks stable/i);
   });
+
+  it('overall_status "none" on a NEAR-TIE (non-fragile) band is absent flip evidence, so it preserves the existing near-tie fallback (not masked by a stable-band assertion)', () => {
+    // Distinct composer branch from the fragile one above. A stable band with a
+    // near-zero margin + raw near_tie override emits the closeness fallback
+    // "the result is sensitive to small movements … the leading option could
+    // change without much shifting". 'none' must NOT suppress it.
+    const nearTieProjection: AnalysisProjectionSummary = {
+      ...FRAGILE_BAND,
+      margin_pp: 0.5,
+      robustness_band: 'stable',
+    };
+    const rawNearTie: RawRobustnessSignals = { level: 'stable', near_tie_is_tie: true };
+    const noFlipEvidence: FlipSummary = {
+      overall_status: 'none',
+      margin_supports_flip: false,
+      entries: [],
+    };
+    const withNone = composeWhatWouldFlipFallback(nearTieProjection, rawNearTie, noFlipEvidence);
+    const withoutFlip = composeWhatWouldFlipFallback(nearTieProjection, rawNearTie);
+    // 'none' behaves EXACTLY like absent flip evidence.
+    expect(withNone).toBe(withoutFlip);
+    // The near-tie closeness fallback is actually present (proving it is not
+    // masked, and the band is NOT fragile here).
+    expect(withNone.toLowerCase()).toMatch(/sensitive to small movements/);
+    expect(withNone).not.toMatch(NAMES_FRAGILITY);
+    expect(withNone).not.toMatch(HONEST_NO_FLIP);
+  });
 });
