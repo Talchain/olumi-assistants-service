@@ -770,4 +770,17 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
       }),
     ).toBe(twoArg);
   });
+
+  it('overall_status "none" on a fragile band is absent flip evidence, so it preserves the existing fragility fallback', () => {
+    const noFlipEvidence: FlipSummary = {
+      overall_status: 'none',
+      margin_supports_flip: false,
+      entries: [],
+    };
+    const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, noFlipEvidence);
+    expect(text).toMatch(CONTRADICTORY);
+    expect(text).toMatch(NAMES_FRAGILITY);
+    expect(text).not.toMatch(HONEST_NO_FLIP);
+    expect(text).not.toMatch(/This result looks stable/i);
+  });
 });

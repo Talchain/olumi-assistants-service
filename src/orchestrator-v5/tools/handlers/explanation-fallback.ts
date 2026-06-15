@@ -317,10 +317,14 @@ export function composeWhatWouldFlipFallback(
   // The flippability claims (fragile / near-tie branches) are additionally
   // gated on `flip.margin_supports_flip`: a `margin_sensitivity` block that
   // reports `movement: 'none'` is NOT evidence that small changes could flip.
-  // When `flipSummary` is absent (routed/Sonnet path, or older facts with no
-  // flip thresholds) the ladder is unchanged — backward-compatible verbatim.
-  const flip = flipSummary ?? null;
-  const flipVerdict = flip !== null && flip.overall_status !== 'none' ? flip.overall_status : null;
+  // When `flipSummary` is absent (routed/Sonnet path, older facts with no
+  // flip thresholds, or an explicit `'none'` summary) the ladder is unchanged
+  // — backward-compatible verbatim.
+  const flip =
+    flipSummary !== null && flipSummary !== undefined && flipSummary.overall_status !== 'none'
+      ? flipSummary
+      : null;
+  const flipVerdict = flip !== null ? flip.overall_status : null;
   const flippabilityClaimAllowed = flip === null || flip.margin_supports_flip;
 
   if (flipVerdict === 'no_practical_flip') {
