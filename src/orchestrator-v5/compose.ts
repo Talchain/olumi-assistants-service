@@ -298,6 +298,16 @@ const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   'results',
   'robustness',
   'decision_review',
+  // DGAI read-side givens with NO fallback (Codex closure review — the
+  // frontend regression gate this backend repo cannot run itself). Both reach
+  // enrichment via PLoT's `.passthrough()` schema + CEE's byte-for-byte store
+  // (run-analysis.ts), so dropping them would regress the Results panel:
+  //   - `option_comparison_status` — fixture-proven top-level (value 'computed').
+  //   - `conditional_probabilities` — emitted by PLoT for constraint-bearing
+  //     analyses (V5 forwards goal_constraints); read with no fallback.
+  // (`conditional_winners` stays a follow-up: valuable but not currently read.)
+  'option_comparison_status',
+  'conditional_probabilities',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product

@@ -307,6 +307,40 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
   });
 
+  it('KEEP-LIST: DGAI read-side givens with no fallback (option_comparison_status, conditional_probabilities) survive while leak carriers are dropped', () => {
+    // Codex closure review — these top-level fields reach enrichment via PLoT
+    // .passthrough() + CEE's byte-for-byte store and are read with no fallback,
+    // so dropping them would regress the Results panel (e.g. constraint-bearing
+    // analyses). option_comparison_status is fixture-proven (value 'computed').
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+          option_comparison_status: 'computed',
+          conditional_probabilities: [{ option_id: 'opt_a', given: 'c1', probability: 0.55 }],
+          // leak carriers that must still be dropped
+          _meta: { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } },
+          downstream_calls: { isl: [] },
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    expect(enr.option_comparison_status).toBe('computed');
+    expect(enr.conditional_probabilities).toEqual([{ option_id: 'opt_a', given: 'c1', probability: 0.55 }]);
+    expect('_meta' in enr).toBe(false);
+    expect('downstream_calls' in enr).toBe(false);
+    expect(JSON.stringify(enr)).not.toContain('[REDACTED]');
+  });
+
   it('DEDUPE CONSISTENCY: the current-turn run_analysis block and the reused follow-up block carry IDENTICAL enrichment for the same fact', () => {
     const fact = richRunAnalysisFact();
     const currentTurn = analysisResultBlockFor(fact, { currentTurn: true });
