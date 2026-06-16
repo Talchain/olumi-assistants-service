@@ -63,6 +63,7 @@ import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
+import { encodeOptionInterventionsForEdit, optionIdsTouchedByOperations } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
@@ -2740,6 +2741,48 @@ export async function handleEditGraph(
         attempt,
         diagnostics(),
       );
+    }
+
+    // V5 edit_graph P0 (add-option encoding) — a successful edit must never
+    // persist an analysis-incompatible option. Encode option interventions to
+    // the canonical top-level InterventionV3 (deriving `value` from raw_value +
+    // the target factor's cap via the canonical `normaliseFactorValue`, and
+    // recovering the data.interventions / node-level shapes the edit LLM emits).
+    // If a TOUCHED option carries intervention intent whose value cannot be
+    // SAFELY derived (no cap to normalise against, or an ambiguous node-level
+    // target), DEFER: reject the edit via the standard non-applied path so
+    // scenarios.graph is left UNCHANGED rather than persisting an option that
+    // would later fail run_analysis with `options_not_configured`.
+    {
+      const touchedOptionIds = optionIdsTouchedByOperations(operations, appliedGraph);
+      const encoded = encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds);
+      if (encoded.unresolvedOptionIds.length > 0) {
+        validationOutcome = 'option_interventions_unresolvable';
+        setViolationCodes(['option_interventions_unresolvable']);
+        recoveryPathChosen = 'rejection_block';
+        branchTaken = 'rejection';
+        branchReason = 'option_interventions_unresolvable';
+        failureBranch = 'option_interventions_unresolvable';
+        failureCode = 'OPTION_INTERVENTIONS_UNRESOLVABLE';
+        // Detailed id list stays in `failureMessage` for telemetry/diagnostics only;
+        // the block's rejection.reason (which the UI may surface) is kept generic.
+        failureMessage = `Option intervention value(s) could not be encoded: ${encoded.unresolvedOptionIds.join(', ')}`;
+        return buildRejectionResult(
+          'Option interventions could not be safely encoded.',
+          operations,
+          baseGraphHash,
+          turnId,
+          startTime,
+          'OPTION_INTERVENTIONS_UNRESOLVABLE',
+          undefined,
+          attempt,
+          diagnostics(),
+        );
+      }
+      if (encoded.graph !== appliedGraph) {
+        appliedGraph = encoded.graph as GraphV3T;
+        appliedGraphHash = computeGraphHash(appliedGraph);
+      }
     }
 
     // ---- Success: build block ----
