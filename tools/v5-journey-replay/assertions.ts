@@ -13,7 +13,15 @@
  */
 
 import type { FetchResult } from './client.js';
-import { findForbiddenMatches } from './forbidden-terms.js';
+import {
+  findForbiddenMatches,
+  findEnrichmentLeakCarriers,
+  ID_PREFIX_REGEX,
+  GRAPH_HASH_LEAK_REGEX,
+  FLIP_NO_TIPPING_POINT_RE,
+  FLIP_COULD_FLIP_CLAIM_RE,
+} from './forbidden-terms.js';
+import type { DgaiResultState, LeakFinding, TurnResponse } from './types.js';
 
 export type AssertionResult =
   | { readonly ok: true; readonly evidence: string }
@@ -561,8 +569,19 @@ export function assertWhatChanged(
   result: FetchResult,
   ctx?: DL7AssertionContext,
 ): AssertionResult {
-  const core = coreAssertions(result);
-  if (core) return core;
+  // Structural core WITHOUT the forbidden-phrase scan. `noForbiddenTerms`
+  // is deferred to the END of this assertion (see below) so the SPECIFIC
+  // denial diagnosis (`what_changed_denies_recent_edit`) wins when a denial
+  // phrase is ALSO a forbidden user-facing phrase — the two guards overlap
+  // because the shared `FORBIDDEN_USER_FACING_PHRASES` list grew to include
+  // denial copy ("I haven't applied any changes", "no changes have been
+  // applied"). Leak-safety is preserved: a denial-that-is-also-forbidden is
+  // still caught here (by the denial gate), and the final `noForbiddenTerms`
+  // gate below still fails any NON-denial forbidden term. The pass/fail set
+  // is unchanged — only the reported `failing_contract` for an
+  // overlapping hit becomes the more-specific denial contract.
+  const structural = httpOk(result) ?? bodyParsedOk(result) ?? noBoundaryError(result);
+  if (structural) return structural;
   const body = result.body;
   const text = body?.assistant_text ?? '';
   if (text.length === 0) {
@@ -621,6 +640,11 @@ export function assertWhatChanged(
         `elapsed=${result.elapsed_ms}ms`,
     };
   }
+  // Final leak gate — any NON-denial forbidden term (e.g. "validator",
+  // "previous analysis") still fails the row here. Runs last so the
+  // denial gate above owns the diagnosis for denial-class phrases.
+  const forbidden = noForbiddenTerms(result);
+  if (forbidden) return forbidden;
   return {
     ok: true,
     evidence:
@@ -825,5 +849,462 @@ export function assertExplainLeader(
       `labels_checked=${labels.length} ` +
       `chip_count=${(result.body?.suggested_actions ?? []).length} ` +
       `elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+// ===========================================================================
+// V5 Golden Journey benchmark prep — P0 journey assertions.
+//
+// New assertions for the build-pinned two-mode benchmark:
+//   - DGAI visible result-state presence       (assertDgaiResultState)
+//   - #278 add-option encode acknowledgement    (assertAddOption)
+//   - #278 Gate-3 unencodable add safe-defer     (assertAddOptionDefer)
+//   - #278 Gate-2 edit-existing-option           (assertEditOptionContainment)
+//     CONTAINMENT-PASS (per the approved scoring rule)
+//   - #277 what_would_flip fresh chip-click       (assertWhatWouldFlipChip)
+//   - #277 what_would_flip stale follow-up        (assertWhatWouldFlipStale)
+//
+// All inherit `coreAssertions` (HTTP 200, body parsed, no BoundaryError, no
+// forbidden prose terms in assistant_text + chips). The added checks document
+// what replay can/cannot prove from the wire — consistent with the DL-7
+// assertions above.
+// ===========================================================================
+
+// A cappable add ("Add an in-house option costing £120,000") should be
+// acknowledged, not deferred. Acceptance phrasing observed across the
+// edit_graph apply path. Combined with the following run_analysis step
+// (assertAnalysisRun) which proves the encode landed (no
+// options_not_configured 500), this gives end-to-end Gate-1 coverage.
+export const ADD_OPTION_ACK_PATTERN =
+  /\b(?:added|created|introduced)\b[^.]*\boption\b|\bnew option\b|\boption (?:has been|was|is now) (?:added|created|included)\b/i;
+
+// Safe-defer copy — the edit_graph DEFER path declines to apply and leaves
+// the graph unchanged (#278 Gate 3 / buildRejectionResult). The canonical
+// observed line is "I wasn't able to make that change safely".
+export const SAFE_DEFER_PATTERN =
+  /\bI wasn'?t able to make that change safely\b|\b(?:wasn'?t|was not|couldn'?t|could not|unable to|not able to)\b[^.]*\b(?:make that change|add (?:that|the|this) option|apply (?:that|the|this)|do that)\b|\bcan'?t safely\b/i;
+
+// Value-parse leak ("You gave unknown ...") — the pre-existing edit-pipeline
+// value tokeniser leak that must never reach the user. A hard fail on the
+// edit-existing-option step.
+export const VALUE_PARSE_LEAK_PATTERN = /\byou gave unknown\b|\bgave unknown\b/i;
+
+/**
+ * Extract the DGAI visible result-state from the public `analysis_result`
+ * block. Mirrors `buildBlocksFromFacts` (`src/orchestrator-v5/compose.ts`):
+ * the block carries `summary`, `leading_option_id`, `win_probabilities`
+ * (option-keyed) and `enrichment`. Defensive — degrades to `present:false`.
+ */
+export function extractDgaiState(body: TurnResponse | undefined): DgaiResultState {
+  const ar = (body?.blocks ?? []).find((b) => b?.type === 'analysis_result');
+  if (!ar) return { present: false };
+  let winCount: number | undefined;
+  const wp = ar.win_probabilities;
+  if (Array.isArray(wp)) winCount = wp.length;
+  else if (wp && typeof wp === 'object') winCount = Object.keys(wp as Record<string, unknown>).length;
+  return {
+    present: true,
+    leading_option_id: typeof ar.leading_option_id === 'string' ? ar.leading_option_id : undefined,
+    win_probability_count: winCount,
+    has_summary: typeof ar.summary === 'string' && ar.summary.length > 0,
+    has_enrichment: ar.enrichment != null && typeof ar.enrichment === 'object',
+  };
+}
+
+/**
+ * Collect leak findings on PUBLIC response surfaces only (per the approved
+ * amendment): assistant_text, chip labels/messages, the DGAI-visible
+ * `analysis_result.summary`, and — only when `scanEnrichment` is true (flip
+ * modes: gate-277 / p0-full-golden) — the public `analysis_result.enrichment`
+ * payload via the #277 carrier scanner. Never scans evidence-pack metadata.
+ *
+ * Informational: the harness records these on the row regardless of pass/fail.
+ * Hard pass/fail is the per-step assertion's job.
+ */
+export function collectLeakFindings(
+  body: TurnResponse | undefined,
+  opts: { readonly scanEnrichment: boolean },
+): readonly LeakFinding[] {
+  const findings: LeakFinding[] = [];
+  for (const m of findForbiddenMatches(body?.assistant_text ?? '')) {
+    findings.push({ surface: 'assistant_text', detail: m });
+  }
+  for (const chip of body?.suggested_actions ?? []) {
+    for (const m of findForbiddenMatches(`${chip.label} | ${chip.message}`)) {
+      findings.push({ surface: 'chip', detail: `${chip.id}:${m}` });
+    }
+  }
+  const ar = (body?.blocks ?? []).find((b) => b?.type === 'analysis_result');
+  if (typeof ar?.summary === 'string') {
+    for (const m of findForbiddenMatches(ar.summary)) {
+      findings.push({ surface: 'analysis_result_summary', detail: m });
+    }
+  }
+  if (opts.scanEnrichment && ar?.enrichment != null) {
+    for (const f of findEnrichmentLeakCarriers(ar.enrichment)) {
+      findings.push({ surface: 'enrichment', detail: `${f.kind}:${f.detail}@${f.path}` });
+    }
+  }
+  return findings;
+}
+
+/**
+ * DGAI visible result-state presence — asserts the public `analysis_result`
+ * block is present and populated enough to hydrate the DGAI Results panel
+ * (`leading_option_id` + ≥2 option-keyed win-probabilities), and that the
+ * user-facing summary carries no CATASTROPHIC leak (raw entity id, graph
+ * hash, or `[REDACTED]` sentinel — never acceptable on any build). The
+ * broader prose leak set on the summary is captured informationally by
+ * `collectLeakFindings`, not hard-failed here, to avoid false reds on the
+ * partial-spine build.
+ */
+export function assertDgaiResultState(result: FetchResult): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const dgai = extractDgaiState(result.body);
+  if (!dgai.present) {
+    return {
+      ok: false,
+      failing_contract: 'dgai_result_state_absent',
+      evidence: `status=200 analysis_result_block=absent — DGAI Results panel would not hydrate`,
+    };
+  }
+  if (dgai.leading_option_id === undefined) {
+    return {
+      ok: false,
+      failing_contract: 'dgai_leading_option_missing',
+      evidence: `status=200 analysis_result present but leading_option_id absent`,
+    };
+  }
+  if (dgai.win_probability_count === undefined || dgai.win_probability_count < 2) {
+    return {
+      ok: false,
+      failing_contract: 'dgai_win_probabilities_too_few',
+      evidence: `status=200 win_probability_count=${dgai.win_probability_count ?? 0} (expected ≥2)`,
+    };
+  }
+  const summary = (result.body?.blocks ?? []).find((b) => b?.type === 'analysis_result')?.summary ?? '';
+  if (ID_PREFIX_REGEX.test(summary) || GRAPH_HASH_LEAK_REGEX.test(summary) || summary.includes('[REDACTED]')) {
+    return {
+      ok: false,
+      failing_contract: 'dgai_summary_catastrophic_leak',
+      evidence: `status=200 analysis_result.summary contains a raw id / graph hash / [REDACTED] marker`,
+    };
+  }
+  return {
+    ok: true,
+    evidence:
+      `status=200 analysis_result=present leading=${dgai.leading_option_id} ` +
+      `win_probs=${dgai.win_probability_count} summary=${dgai.has_summary} ` +
+      `enrichment=${dgai.has_enrichment} elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+/**
+ * #278 add-option (cappable) — the add is acknowledged/applied, not deferred.
+ * The encode→rerun proof is the SUBSEQUENT run_analysis step
+ * (`assertAnalysisRun`): if the encode failed, run_analysis returns a 500
+ * `options_not_configured` envelope and that step fails on `httpOk`.
+ */
+export function assertAddOption(result: FetchResult): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const text = result.body?.assistant_text ?? '';
+  const chipCount = (result.body?.suggested_actions ?? []).length;
+  if (text.length === 0 && chipCount === 0) {
+    return {
+      ok: false,
+      failing_contract: 'add_option_empty',
+      evidence: `status=200 text_len=0 chip_count=0`,
+    };
+  }
+  if (SAFE_DEFER_PATTERN.test(text)) {
+    return {
+      ok: false,
+      failing_contract: 'add_option_unexpected_defer',
+      evidence: `status=200 cappable add deferred (Gate-1 expects encode + apply): text_preview="${text.slice(0, 120)}"`,
+    };
+  }
+  if (CLARIFICATION_BACK_PATTERN.test(text)) {
+    return {
+      ok: false,
+      failing_contract: 'add_option_clarification_back_no_apply',
+      evidence: `status=200 response asked for clarification instead of adding the option`,
+    };
+  }
+  const acked = ADD_OPTION_ACK_PATTERN.test(text) || MUTATION_ACK_PATTERN.test(text);
+  if (!acked) {
+    return {
+      ok: false,
+      failing_contract: 'add_option_no_acknowledgement',
+      evidence: `status=200 but no add/mutation acknowledgement: text_preview="${text.slice(0, 120)}"`,
+    };
+  }
+  return {
+    ok: true,
+    evidence:
+      `status=200 add_acknowledged text_len=${text.length} chip_count=${chipCount} ` +
+      `elapsed=${result.elapsed_ms}ms (encode proven by following run_analysis)`,
+  };
+}
+
+/**
+ * #278 Gate 3 — unencodable add → SAFE DEFER. The response must decline to
+ * apply (defer or clarify), must NOT falsely claim the option was added, and
+ * must not leak. Graph-unchanged is the contract; the harness proves "no
+ * false success" on the wire and the runbook pairs this with a Supabase /
+ * reload check for graph immutability.
+ */
+export function assertAddOptionDefer(result: FetchResult): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const text = result.body?.assistant_text ?? '';
+  if (text.length === 0) {
+    return { ok: false, failing_contract: 'add_option_defer_empty_text', evidence: `status=200 text_len=0` };
+  }
+  const deferred = SAFE_DEFER_PATTERN.test(text) || CLARIFICATION_BACK_PATTERN.test(text);
+  if (!deferred) {
+    return {
+      ok: false,
+      failing_contract: 'add_option_defer_missing_defer_copy',
+      evidence: `status=200 expected safe-defer/clarify copy for an unencodable add: text_preview="${text.slice(0, 120)}"`,
+    };
+  }
+  if (ADD_OPTION_ACK_PATTERN.test(text)) {
+    return {
+      ok: false,
+      failing_contract: 'add_option_defer_false_success_claim',
+      evidence: `status=200 defer path falsely claims the option was added`,
+    };
+  }
+  return {
+    ok: true,
+    evidence: `status=200 safe_defer=ok no_false_add=ok text_len=${text.length} elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+/**
+ * #278 Gate 2 — edit an EXISTING option's intervention. CONTAINMENT-PASS
+ * (approved scoring rule): the live NL path currently routes to
+ * set_factor_value / clarify (strict apply→rerun→200 is not reachable via NL
+ * and is recorded by the journey on a separate "not exercised / known routing
+ * limitation" line that does not colour the verdict).
+ *
+ * PASS iff safely contained:
+ *   - clear defer/clarify copy (graph unchanged), OR a clean apply that
+ *     references the targeted OPTION; AND
+ *   - no value-parse leak ("You gave unknown"), no raw id / hash / [REDACTED].
+ * FAIL iff:
+ *   - value-parse / id / hash leak; OR
+ *   - mutation-ack that references a FACTOR but not the option (misapplied as
+ *     a factor-value update); OR
+ *   - an apply-claim referencing NEITHER the option nor a factor (implies a
+ *     success it cannot be shown to have achieved).
+ *
+ * Wire-observability limit: replay cannot read the persisted graph here, so
+ * "graph unchanged" on the defer path is asserted as "no apply-claim"; the
+ * journey's persist→reload→run_analysis step is the structural cross-check.
+ */
+export function assertEditOptionContainment(
+  result: FetchResult,
+  ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const text = result.body?.assistant_text ?? '';
+  if (text.length === 0 && (result.body?.suggested_actions ?? []).length === 0) {
+    return { ok: false, failing_contract: 'edit_option_empty', evidence: `status=200 text_len=0 chip_count=0` };
+  }
+  // Hard fail: value-parse leak (raw id / hash already caught by core's
+  // noForbiddenTerms over assistant_text).
+  const leakMatch = text.match(VALUE_PARSE_LEAK_PATTERN);
+  if (leakMatch) {
+    return {
+      ok: false,
+      failing_contract: 'edit_option_value_parse_leak',
+      evidence: `status=200 value-parse leak in copy: match="${leakMatch[0]}"`,
+    };
+  }
+  const lower = text.toLowerCase();
+  const clarify = CLARIFICATION_BACK_PATTERN.test(text);
+  const defer = SAFE_DEFER_PATTERN.test(text);
+  const mutationAck = MUTATION_ACK_PATTERN.test(text);
+  const factorMentioned = ctx?.factorLabel != null && lower.includes(ctx.factorLabel.toLowerCase());
+  const optionMentioned = (ctx?.step1OptionLabels ?? []).some((l) => lower.includes(l.toLowerCase()));
+
+  if (mutationAck && factorMentioned && !optionMentioned) {
+    return {
+      ok: false,
+      failing_contract: 'edit_option_misapplied_as_factor',
+      evidence:
+        `status=200 mutation acknowledged referencing the FACTOR ("${ctx?.factorLabel}") not the option ` +
+        `— request misapplied as a factor-value update`,
+    };
+  }
+  if (mutationAck && !optionMentioned) {
+    return {
+      ok: false,
+      failing_contract: 'edit_option_unverifiable_apply_claim',
+      evidence: `status=200 claims an edit was applied but references neither the option nor a factor`,
+    };
+  }
+  if (clarify || defer) {
+    return {
+      ok: true,
+      evidence:
+        `status=200 contained path=${defer ? 'defer' : 'clarify'} graph_unchanged=implied ` +
+        `no_leak=ok text_len=${text.length} elapsed=${result.elapsed_ms}ms`,
+    };
+  }
+  if (mutationAck && optionMentioned) {
+    // Clean apply referencing the option — the strict path working. Safe (no
+    // leak, references the right entity). The separate strict-apply line and
+    // the persist→reload→rerun step cross-check correctness of the value.
+    return {
+      ok: true,
+      evidence:
+        `status=200 contained path=applied_option_ref (strict path working) no_leak=ok ` +
+        `text_len=${text.length} elapsed=${result.elapsed_ms}ms`,
+    };
+  }
+  // Neither a clear defer/clarify nor a recognised apply — ambiguous prose
+  // with no leak and no misapply signal. Treat as contained-but-unclear: the
+  // safest reading (no apply-claim) is PASS, annotated for reviewer triage.
+  return {
+    ok: true,
+    evidence:
+      `status=200 contained path=no_apply_claim (ambiguous prose, no misapply, no leak) ` +
+      `text_len=${text.length} elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+/**
+ * Read the optional server `_timings.turn` block (present only when
+ * `V5_TIMING_DEBUG=true`). Returns the deterministic-dispatch signals the
+ * flip chip-click assertion needs.
+ */
+function readTurnTimings(body: TurnResponse | undefined): {
+  handlerId?: string;
+  llmCalls?: number;
+} {
+  const t = body?._timings;
+  const turn = t && typeof t === 'object' ? (t as { turn?: Record<string, unknown> }).turn : undefined;
+  if (!turn || typeof turn !== 'object') return {};
+  const handlerId = typeof turn.handler_id === 'string' ? turn.handler_id : undefined;
+  const llmCalls = typeof turn.llm_calls_used === 'number' ? turn.llm_calls_used : undefined;
+  return { handlerId, llmCalls };
+}
+
+/**
+ * #277 what_would_flip FRESH chip-click. Asserts the #277 acceptance signals
+ * observable on the wire:
+ *   - non-empty assistant_text AND non-empty blocks-or-actions (#277 P0 #3);
+ *   - deterministic dispatch: when `_timings` is present, `llm_calls_used`
+ *     must be 0 (no router call) and `handler_id` must be `what_would_flip`;
+ *     when `_timings` is absent (V5_TIMING_DEBUG off) dispatch is recorded as
+ *     `not_capturable` (the runbook enables V5_TIMING_DEBUG to prove it);
+ *   - honesty: must NOT simultaneously assert "no tipping point" AND "small
+ *     changes could flip" (the pre-#277 contradiction on the no-effect case).
+ * Forbidden prose terms are covered by `coreAssertions`; the #277 enrichment
+ * carrier leak is checked separately via `collectLeakFindings(scanEnrichment)`.
+ */
+export function assertWhatWouldFlipChip(
+  result: FetchResult,
+  _ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const body = result.body;
+  const text = body?.assistant_text ?? '';
+  const blockCount = (body?.blocks ?? []).length;
+  const chipCount = (body?.suggested_actions ?? []).length;
+  if (text.length === 0 || (blockCount === 0 && chipCount === 0)) {
+    return {
+      ok: false,
+      failing_contract: 'wwf_chip_empty_blocks_actions',
+      evidence: `status=200 text_len=${text.length} blocks=${blockCount} chips=${chipCount} (need non-empty text AND blocks-or-actions)`,
+    };
+  }
+  const { handlerId, llmCalls } = readTurnTimings(body);
+  if (llmCalls !== undefined && llmCalls > 0) {
+    return {
+      ok: false,
+      failing_contract: 'wwf_chip_routed_through_llm',
+      evidence: `status=200 _timings.llm_calls_used=${llmCalls} (>0 — chip did not dispatch deterministically)`,
+    };
+  }
+  if (handlerId !== undefined && handlerId !== 'what_would_flip') {
+    return {
+      ok: false,
+      failing_contract: 'wwf_chip_unexpected_handler',
+      evidence: `status=200 _timings.handler_id="${handlerId}" (expected "what_would_flip")`,
+    };
+  }
+  const honestMarker = FLIP_NO_TIPPING_POINT_RE.test(text);
+  const couldFlipClaim = FLIP_COULD_FLIP_CLAIM_RE.test(text);
+  if (honestMarker && couldFlipClaim) {
+    return {
+      ok: false,
+      failing_contract: 'wwf_chip_contradiction_no_flip_but_could_flip',
+      evidence: `status=200 copy asserts BOTH "no tipping point" AND "small changes could flip" — dishonest contradiction`,
+    };
+  }
+  const dispatch = llmCalls === undefined ? 'not_capturable(V5_TIMING_DEBUG off)' : `deterministic(llm_calls=${llmCalls})`;
+  return {
+    ok: true,
+    evidence:
+      `status=200 text_len=${text.length} blocks=${blockCount} chips=${chipCount} ` +
+      `dispatch=${dispatch} handler=${handlerId ?? 'n/a'} ` +
+      `honest_marker=${honestMarker} could_flip_claim=${couldFlipClaim} elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+/**
+ * #277 what_would_flip STALE follow-up. After a post-analysis edit, a flip
+ * follow-up must steer the user to RERUN (not loop into an executable stale
+ * flip). Asserts a rerun/refresh staleness steer is present AND that no
+ * executable `what_would_flip` chip is offered while stale (the #277 Codex
+ * blocker fix).
+ */
+export function assertWhatWouldFlipStale(
+  result: FetchResult,
+  _ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const body = result.body;
+  const text = body?.assistant_text ?? '';
+  const chips = body?.suggested_actions ?? [];
+  if (text.length === 0 && chips.length === 0) {
+    return { ok: false, failing_contract: 'wwf_stale_empty', evidence: `status=200 text_len=0 chip_count=0` };
+  }
+  // Executable stale flip chip must NOT be present.
+  const executableFlipChip = chips.find((c) => c.action_type === 'what_would_flip');
+  if (executableFlipChip) {
+    return {
+      ok: false,
+      failing_contract: 'wwf_stale_executable_flip_chip_present',
+      evidence: `status=200 stale follow-up offers executable what_would_flip chip (id=${executableFlipChip.id}) instead of steering to rerun`,
+    };
+  }
+  // Staleness steer must be present (text or chip), mirroring assertExplainLeaderStale.
+  const stalenessText =
+    /\b(stale|model has changed|no longer reflects?|out[- ]of[- ]date|since (?:the )?analysis|re[- ]?run)\b/i.test(text);
+  const stalenessChip = chips.some((chip) => {
+    const blob = `${chip.label} ${chip.message}`.toLowerCase();
+    return /\b(?:re[- ]?run|refresh|update|stale)\b/.test(blob) && blob.includes('analy');
+  });
+  if (!stalenessText && !stalenessChip) {
+    return {
+      ok: false,
+      failing_contract: 'wwf_stale_no_rerun_steer',
+      evidence: `status=200 no staleness/rerun steer in text or chips chip_count=${chips.length}`,
+    };
+  }
+  return {
+    ok: true,
+    evidence:
+      `status=200 staleness_text=${stalenessText} staleness_chip=${stalenessChip} ` +
+      `no_executable_flip_chip=ok chip_count=${chips.length} elapsed=${result.elapsed_ms}ms`,
   };
 }

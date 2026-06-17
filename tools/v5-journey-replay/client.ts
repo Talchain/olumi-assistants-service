@@ -55,6 +55,13 @@ export interface FetchResult {
   readonly status: number;
   readonly body: TurnResponse;
   readonly elapsed_ms: number;
+  /**
+   * Server-assigned request id, captured from the `X-Request-Id` response
+   * header (falling back to the `request_id` field on an error envelope
+   * body). Used for post-mortem log lookups in the evidence pack. Not a
+   * secret. Undefined when the server emits neither.
+   */
+  readonly request_id?: string;
 }
 
 function buildAuthHeaders(apiKey: string | undefined): Record<string, string> {
@@ -101,6 +108,14 @@ export async function postTurn(
       throw sanitiseError(err, apiKey);
     }
     const elapsed = Date.now() - start;
+    // Capture the server request id from the response header (case-
+    // insensitive `get`). Not a secret; used for log correlation in the
+    // evidence pack. Falls back to the body `request_id` (error envelope)
+    // after parsing below.
+    const headerRequestId =
+      typeof res.headers?.get === 'function'
+        ? (res.headers.get('x-request-id') ?? res.headers.get('x-olumi-request-id') ?? undefined)
+        : undefined;
     // Read text first so we can fall back without locking the body
     // stream. `Response.json()` consumes the stream — calling text()
     // afterward throws.
@@ -128,7 +143,16 @@ export async function postTurn(
         __body_sha256_prefix: sha256Prefix,
       };
     }
-    return { status: res.status, body, elapsed_ms: elapsed };
+    const bodyRequestId =
+      typeof (body as { request_id?: unknown }).request_id === 'string'
+        ? (body as { request_id?: string }).request_id
+        : undefined;
+    return {
+      status: res.status,
+      body,
+      elapsed_ms: elapsed,
+      request_id: headerRequestId ?? bodyRequestId,
+    };
   } finally {
     clearTimeout(timer);
   }

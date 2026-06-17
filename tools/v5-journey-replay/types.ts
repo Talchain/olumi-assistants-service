@@ -7,6 +7,35 @@ import type { JourneyId } from './steps.js';
 
 export type StepStatus = 'passed' | 'failed' | 'skipped';
 
+/**
+ * DGAI visible result-state snapshot captured per analysis-bearing step.
+ * Mirrors the public `analysis_result` block emitted by
+ * `src/orchestrator-v5/compose.ts` (`buildBlocksFromFacts`), which hydrates
+ * the DGAI Results panel via `mapV5AnalysisToReport`. Optional/additive.
+ */
+export interface DgaiResultState {
+  /** An `analysis_result` block is present on the response body. */
+  readonly present: boolean;
+  /** Winning option id carried on the block (Results-panel ranking source). */
+  readonly leading_option_id?: string;
+  /** Count of option win-probability entries — the field DGAI hydrates from. */
+  readonly win_probability_count?: number;
+  /** The block carries a user-facing `summary`. */
+  readonly has_summary?: boolean;
+  /** The block carries an `enrichment` object (coaching/decision_review transport). */
+  readonly has_enrichment?: boolean;
+}
+
+/**
+ * A leak match found on a PUBLIC response surface. Captured per-step for the
+ * evidence pack regardless of pass/fail so reviewers see everything detected.
+ * Never sourced from the evidence pack's own internal metadata.
+ */
+export interface LeakFinding {
+  readonly surface: 'assistant_text' | 'chip' | 'analysis_result_summary' | 'enrichment';
+  readonly detail: string;
+}
+
 export interface EvidenceRow {
   readonly step: string;
   readonly status: StepStatus;
@@ -59,12 +88,50 @@ export interface EvidenceRow {
     readonly message: string;
     readonly action_type?: string;
   }>;
+  /**
+   * Server request id (from `X-Request-Id`), captured per-step for log
+   * correlation. Not a secret. Optional/additive.
+   */
+  readonly request_id?: string;
+  /**
+   * Per-step wall-clock latency in ms (from `FetchResult.elapsed_ms`).
+   * Always available even when the server `_timings` block is absent
+   * (`V5_TIMING_DEBUG` off). The richer per-stage breakdown remains in the
+   * `evidence` string via `formatTimingsEvidence`.
+   */
+  readonly latency_ms?: number;
+  /** DGAI visible result-state snapshot, when the step bears analysis. */
+  readonly dgai_state?: DgaiResultState;
+  /**
+   * Informational leak findings on public surfaces for this step. Captured
+   * regardless of pass/fail. Hard pass/fail remains the assertion's job.
+   */
+  readonly leak_findings?: readonly LeakFinding[];
 }
 
 export interface TurnResponse {
   readonly response_version?: number;
   readonly assistant_text?: string;
-  readonly blocks?: ReadonlyArray<{ type: string; error_code?: string }>;
+  // `analysis_result` blocks carry the DGAI-visible fields (summary,
+  // leading_option_id, win_probabilities, enrichment). All optional — only
+  // an `analysis_result`-typed block populates them. Widened from the
+  // original `{ type, error_code }` shape additively.
+  readonly blocks?: ReadonlyArray<{
+    readonly type: string;
+    readonly error_code?: string;
+    readonly summary?: string;
+    readonly leading_option_id?: string;
+    readonly win_probabilities?: unknown;
+    readonly enrichment?: unknown;
+  }>;
+  /**
+   * Optional server timing block, present only when `V5_TIMING_DEBUG=true`
+   * AND the request sent `X-Olumi-Debug: timings` (the harness always does).
+   * Parsed by `format-timings.ts`; the flip assertion reads
+   * `_timings.turn.{handler_id,llm_calls_used}` to prove deterministic
+   * chip-click dispatch.
+   */
+  readonly _timings?: Record<string, unknown>;
   readonly suggested_actions?: ReadonlyArray<{
     readonly id: string;
     readonly label: string;
@@ -165,4 +232,14 @@ export interface HarnessConfig {
    * for available ids.
    */
   readonly journey?: JourneyId;
+  /**
+   * Build-provenance metadata for the evidence pack: the PR merge SHAs
+   * deliberately INCLUDED on the pinned build, and the open PRs deliberately
+   * EXCLUDED. Resolved from `--included-prs` / `--excluded-prs` CLI args
+   * (each `<num>[:<sha>]` comma-separated), best-effort enriched via `gh`
+   * when available. Both optional — the harness is fully usable without
+   * `gh` or these flags (they only add provenance lines to the pack).
+   */
+  readonly includedPrs?: readonly string[];
+  readonly excludedPrs?: readonly string[];
 }

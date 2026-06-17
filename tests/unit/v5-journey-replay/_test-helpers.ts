@@ -28,6 +28,8 @@ export interface FetchMockInit {
   /** Override stringified body — needed for non-JSON-parseable test inputs. */
   readonly rawText?: string;
   readonly contentType?: string;
+  /** When set, `headers.get('x-request-id')` returns this value. */
+  readonly requestId?: string;
 }
 
 function buildMockResponse(init: FetchMockInit): MockResponse {
@@ -36,7 +38,14 @@ function buildMockResponse(init: FetchMockInit): MockResponse {
   const contentType = init.contentType ?? 'application/json';
   return {
     status: init.status ?? 200,
-    headers: { get: (n: string) => (n.toLowerCase() === 'content-type' ? contentType : null) },
+    headers: {
+      get: (n: string) => {
+        const key = n.toLowerCase();
+        if (key === 'content-type') return contentType;
+        if (key === 'x-request-id') return init.requestId ?? null;
+        return null;
+      },
+    },
     async json() {
       return JSON.parse(rawText);
     },

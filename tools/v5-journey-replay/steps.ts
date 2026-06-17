@@ -122,6 +122,23 @@ function requireFactorLabel(ctx: JourneyContext): string {
   return label;
 }
 
+/**
+ * Read the first option label parsed at Step 1, or throw a precondition
+ * error. Used by the P0 `edit_option_intervention` step so the NL edit
+ * targets a REAL drafted option (existing pre-add) rather than improvising
+ * a label the graph may not contain.
+ */
+function requireFirstOptionLabel(ctx: JourneyContext): string {
+  const labels = ctx.step1Capture?.optionLabels;
+  if (!labels || labels.length === 0) {
+    throw new JourneyPreconditionError(
+      'no_option_label_available',
+      'Step 1 did not produce a usable option label for the edit-option-intervention step.',
+    );
+  }
+  return labels[0]!;
+}
+
 export function mkTurnId(): string {
   return randomUUID();
 }
@@ -131,6 +148,34 @@ const DECISION_BRIEF =
   'delivery over the next six months: hire two senior engineers locally, ' +
   'engage an offshore partner, or introduce tiered pricing to hire more ' +
   'gradually. Decision matters for Q3 roadmap commitments.';
+
+// ---------------------------------------------------------------------------
+// V5 Golden Journey benchmark prep — P0 fixtures (NL message payloads).
+//
+// CAPPABLE_ADD carries a £ value that derives a model value via the canonical
+// normaliser (value = raw/cap) → #278 Gate 1 (encode → rerun 200).
+// UNCAPPABLE_ADD has no cappable value → #278 Gate 3 (safe defer, graph
+// unchanged). EDIT_OPTION_INTERVENTION targets an EXISTING option (#278 Gate
+// 2 / containment). STALE_TRIGGER_EDIT is the proven edit_graph mutation
+// (reused from DL-7) that reliably drives freshness=stale for the flip-stale
+// leg.
+// ---------------------------------------------------------------------------
+
+/** #278 Gate 1 — cappable add-option (encode → rerun 200). */
+const CAPPABLE_ADD_MESSAGE = 'Add an in-house delivery option costing £120,000 per year.';
+
+/** #278 Gate 3 — unencodable add-option (must safe-defer, graph unchanged). */
+const UNCAPPABLE_ADD_MESSAGE = 'Add an In-House Capacity option.';
+
+/** #278 Gate 2 — edit an existing option's intervention (containment-pass). */
+function editOptionInterventionMessage(ctx: JourneyContext): string {
+  return `Change the "${requireFirstOptionLabel(ctx)}" option's annual cost to £135,000.`;
+}
+
+/** Reliable post-analysis mutation to drive freshness=stale (flip-stale leg). */
+function staleTriggerEditMessage(ctx: JourneyContext): string {
+  return `Edit the model: make ${requireFactorLabel(ctx)} more important.`;
+}
 
 export const CANONICAL_STEPS: readonly JourneyStep[] = [
   {
@@ -519,6 +564,324 @@ export const STALENESS_STEPS: readonly JourneyStep[] = [
   },
 ];
 
+// ===========================================================================
+// V5 Golden Journey benchmark prep — P0 journeys.
+//
+// Reusable step builders (kept inline per the existing file's convention of
+// repeating the draft step). Step NAMES use unique suffixes that do NOT
+// collide with any existing journey suffix, so `pickAssertion` routes them
+// additively without changing canonical / DL-7 behaviour.
+// ===========================================================================
+
+function draftStep(): JourneyStep {
+  return {
+    name: '1_draft_graph',
+    description:
+      'POST fresh scenario + decision brief → expect draft_graph response with post-draft chips.',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: DECISION_BRIEF,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  };
+}
+
+function runAnalysisChip(name: string, dependsOn: string, description: string): JourneyStep {
+  return {
+    name,
+    description,
+    depends_on: dependsOn,
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'analyse',
+      message: 'Run analysis.',
+      turn_class: 'decide',
+      source: 'chip_click',
+      chip: { action_type: 'run_analysis' },
+    }),
+  };
+}
+
+function whatWouldFlipChipStep(name: string, dependsOn: string, description: string): JourneyStep {
+  // The exact #277 failing UI envelope: chip_click + action_type
+  // what_would_flip + turn_class frame.
+  return {
+    name,
+    description,
+    depends_on: dependsOn,
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'What would flip this?',
+      turn_class: 'frame',
+      source: 'chip_click',
+      chip: { action_type: 'what_would_flip' },
+    }),
+  };
+}
+
+// P0 Partial spine baseline — draft → run → explain → add → rerun → edit-option
+// → what-changed → reload-rerun. Flip legs EXCLUDED (#277 not deployed).
+export const P0_PARTIAL_SPINE_STEPS: readonly JourneyStep[] = [
+  draftStep(),
+  runAnalysisChip(
+    '2_run_analysis_dgai',
+    '1_draft_graph',
+    'chip_click run_analysis on fresh draft → 200, analysis_ready, DGAI analysis_result block populated.',
+  ),
+  {
+    name: '3_explain_leader',
+    description: '"Why does the leading option win?" → 200, names leading option + driver + caveat.',
+    depends_on: '2_run_analysis_dgai',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'Why does the leading option win?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '4_add_option_encode',
+    description: '#278 Gate 1 — add a cappable option → encode (no defer); rerun proves it.',
+    depends_on: '1_draft_graph',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: CAPPABLE_ADD_MESSAGE,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  runAnalysisChip(
+    '5_rerun_after_add',
+    '4_add_option_encode',
+    '#278 Gate 1 — rerun analysis after the add → 200 (no options_not_configured), DGAI populated.',
+  ),
+  {
+    name: '6_edit_option_intervention',
+    description: '#278 Gate 2 — edit an existing option\'s intervention (CONTAINMENT-PASS).',
+    depends_on: '5_rerun_after_add',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: editOptionInterventionMessage(ctx),
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '7_what_changed',
+    description: '"What changed?" → recent_changes surfaced in plain product terms, no leak.',
+    depends_on: '6_edit_option_intervention',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: 'What changed?',
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  runAnalysisChip(
+    '8_persist_reload_rerun',
+    '6_edit_option_intervention',
+    'persist → reload → run_analysis (no client graph echo) → 200, DGAI populated.',
+  ),
+];
+
+// P0 Full golden baseline — partial spine + what_would_flip fresh chip-click +
+// stale follow-up. Runs only after #277 is merged + deployed.
+export const P0_FULL_GOLDEN_STEPS: readonly JourneyStep[] = [
+  draftStep(),
+  runAnalysisChip(
+    '2_run_analysis_dgai',
+    '1_draft_graph',
+    'chip_click run_analysis on fresh draft → 200, analysis_ready, DGAI populated.',
+  ),
+  {
+    name: '3_explain_leader',
+    description: '"Why does the leading option win?" → 200, names leading option + driver + caveat.',
+    depends_on: '2_run_analysis_dgai',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'Why does the leading option win?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+  whatWouldFlipChipStep(
+    '4_what_would_flip_chip',
+    '2_run_analysis_dgai',
+    '#277 — fresh what_would_flip chip-click → deterministic dispatch, honest copy, non-empty blocks/actions.',
+  ),
+  {
+    name: '5_add_option_encode',
+    description: '#278 Gate 1 — add a cappable option → encode (no defer); rerun proves it.',
+    depends_on: '1_draft_graph',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: CAPPABLE_ADD_MESSAGE,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  runAnalysisChip(
+    '6_rerun_after_add',
+    '5_add_option_encode',
+    '#278 Gate 1 — rerun analysis after the add → 200 (no options_not_configured), DGAI populated.',
+  ),
+  {
+    name: '7_edit_option_intervention',
+    description: '#278 Gate 2 — edit an existing option\'s intervention (CONTAINMENT-PASS).',
+    depends_on: '6_rerun_after_add',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: editOptionInterventionMessage(ctx),
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '8_what_changed',
+    description: '"What changed?" → recent_changes surfaced in plain product terms, no leak.',
+    depends_on: '7_edit_option_intervention',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: 'What changed?',
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  runAnalysisChip(
+    '9_persist_reload_rerun',
+    '7_edit_option_intervention',
+    'persist → reload → run_analysis (no client graph echo) → 200, DGAI populated.',
+  ),
+  {
+    name: '10_stale_trigger_edit',
+    description: 'Post-analysis edit_graph mutation → drives freshness=stale for the flip-stale leg.',
+    depends_on: '9_persist_reload_rerun',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: staleTriggerEditMessage(ctx),
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  whatWouldFlipChipStep(
+    '11_what_would_flip_stale',
+    '10_stale_trigger_edit',
+    '#277 — stale what_would_flip follow-up → steers to RERUN, no executable stale flip chip.',
+  ),
+];
+
+// Gate-probe: #278 acceptance (Gate 1 add→rerun 200, Gate 3 unencodable→defer).
+// Gate 4a/b/c (top-level-raw-uncapped / missing-factor / unit-mismatch) are
+// not reachable via NL over HTTP — they are unit-test proven (see
+// src/orchestrator/tools/__tests__/encode-option-interventions.test.ts) and
+// referenced in the runbook.
+export const GATE_278_STEPS: readonly JourneyStep[] = [
+  draftStep(),
+  {
+    name: '2_add_option_encode',
+    description: '#278 Gate 1 — add a cappable option → encode (no defer).',
+    depends_on: '1_draft_graph',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: CAPPABLE_ADD_MESSAGE,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  runAnalysisChip(
+    '3_rerun_after_add',
+    '2_add_option_encode',
+    '#278 Gate 1 — rerun analysis after the cappable add → 200, no options_not_configured.',
+  ),
+  {
+    name: '4_add_option_defer',
+    description: '#278 Gate 3 — add an unencodable option → safe defer, graph unchanged, no false success.',
+    depends_on: '1_draft_graph',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: UNCAPPABLE_ADD_MESSAGE,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+];
+
+// Gate-probe: #277 live acceptance (fresh flip chip-click + stale follow-up).
+export const GATE_277_STEPS: readonly JourneyStep[] = [
+  draftStep(),
+  runAnalysisChip(
+    '2_run_analysis_dgai',
+    '1_draft_graph',
+    'chip_click run_analysis on fresh draft → 200, analysis_ready, DGAI populated.',
+  ),
+  whatWouldFlipChipStep(
+    '3_what_would_flip_chip',
+    '2_run_analysis_dgai',
+    '#277 — fresh what_would_flip chip-click → deterministic dispatch, honest copy, non-empty blocks/actions, enrichment leak-clean.',
+  ),
+  {
+    name: '4_stale_trigger_edit',
+    description: 'Post-analysis edit_graph mutation → drives freshness=stale for the flip-stale leg.',
+    depends_on: '2_run_analysis_dgai',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: staleTriggerEditMessage(ctx),
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  whatWouldFlipChipStep(
+    '5_what_would_flip_stale',
+    '4_stale_trigger_edit',
+    '#277 — stale what_would_flip follow-up → steers to RERUN, no executable stale flip chip.',
+  ),
+];
+
 // ---------------------------------------------------------------------------
 // Journey registry — keys are the values accepted by the `--journey` CLI
 // flag. The default is `canonical` so existing invocations stay
@@ -526,13 +889,25 @@ export const STALENESS_STEPS: readonly JourneyStep[] = [
 // `DL7_PR_B_LANDED !== 'true'` (gating logic lives in index.ts).
 // ---------------------------------------------------------------------------
 
-export type JourneyId = 'canonical' | 'dl7-set-factor' | 'dl7-edit-graph' | 'dl7-staleness';
+export type JourneyId =
+  | 'canonical'
+  | 'dl7-set-factor'
+  | 'dl7-edit-graph'
+  | 'dl7-staleness'
+  | 'gate-278'
+  | 'gate-277'
+  | 'p0-partial-spine'
+  | 'p0-full-golden';
 
 export const JOURNEY_IDS: readonly JourneyId[] = [
   'canonical',
   'dl7-set-factor',
   'dl7-edit-graph',
   'dl7-staleness',
+  'gate-278',
+  'gate-277',
+  'p0-partial-spine',
+  'p0-full-golden',
 ];
 
 export const JOURNEY_REGISTRY: Readonly<Record<JourneyId, readonly JourneyStep[]>> = {
@@ -540,7 +915,21 @@ export const JOURNEY_REGISTRY: Readonly<Record<JourneyId, readonly JourneyStep[]
   'dl7-set-factor': SET_FACTOR_STEPS,
   'dl7-edit-graph': EDIT_GRAPH_STEPS,
   'dl7-staleness': STALENESS_STEPS,
+  'gate-278': GATE_278_STEPS,
+  'gate-277': GATE_277_STEPS,
+  'p0-partial-spine': P0_PARTIAL_SPINE_STEPS,
+  'p0-full-golden': P0_FULL_GOLDEN_STEPS,
 };
+
+/**
+ * Journeys whose flip legs require #277 to be live. Used by the evidence
+ * writer to render the "what_would_flip EXCLUDED" banner on the partial
+ * spine and to enable the public-enrichment leak scan on the flip modes.
+ */
+export const FLIP_MODE_JOURNEYS: ReadonlySet<JourneyId> = new Set<JourneyId>([
+  'gate-277',
+  'p0-full-golden',
+]);
 
 /**
  * Journeys whose execution is gated until edit_graph DL-7 PR B is

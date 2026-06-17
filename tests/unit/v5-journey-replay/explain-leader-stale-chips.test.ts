@@ -56,9 +56,12 @@ describe('assertExplainLeaderStale — chip-label staleness detection', () => {
     { label: 'Update analysis', message: 'Update analysis with the new graph state.' },
     { label: 'Stale analysis — rerun?', message: 'The analysis is stale; want to refresh?' },
     // Mixed case + chip-text-only (label is something else, message carries the signal).
+    // NB: avoid "previous analysis" here — it is a FORBIDDEN_USER_FACING_PHRASE
+    // and would (correctly) fail the leak gate before the staleness check. The
+    // separate leak-gate guard test below pins that behaviour explicitly.
     {
       label: 'Refresh',
-      message: 'Your previous analysis is now stale relative to the current graph.',
+      message: 'Your last analysis is now stale relative to the current graph.',
     },
   ])('passes when chip surfaces staleness: %j', ({ label, message }) => {
     const r = assertExplainLeaderStale(chipFixture(label, message));
@@ -100,5 +103,20 @@ describe('assertExplainLeaderStale — chip-label staleness detection', () => {
     });
     expect(r.ok).toBe(true);
     expect(r.evidence).toMatch(/staleness_text=true/);
+  });
+
+  // Leak-safety guard: a stale chip that carries a FORBIDDEN_USER_FACING_PHRASE
+  // ("previous analysis") must still FAIL via the core forbidden-term scan —
+  // the staleness path must NOT let a real user-facing leak through. This pins
+  // that the fixture change above removed an accidental phrase collision, NOT
+  // the leak detection itself.
+  it('fails (leak-safety) when a stale chip message carries a forbidden phrase', () => {
+    const r = assertExplainLeaderStale(
+      chipFixture('Refresh', 'Your previous analysis is now stale relative to the current graph.'),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.failing_contract).toMatch(/forbidden terms in chip/);
+    }
   });
 });

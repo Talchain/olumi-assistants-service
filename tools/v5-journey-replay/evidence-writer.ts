@@ -15,7 +15,7 @@
 import { writeFileSync } from 'node:fs';
 
 import { createRedactor } from './redact.js';
-import type { JourneyId, Step1Capture } from './steps.js';
+import { FLIP_MODE_JOURNEYS, type JourneyId, type Step1Capture } from './steps.js';
 import type { EvidenceRow, HealthzResult } from './types.js';
 
 export interface EvidenceHeader {
@@ -55,6 +55,18 @@ export interface EvidenceHeader {
    * cross-reference graph hashes across turns.
    */
   readonly step1_capture?: Step1Capture;
+  /**
+   * Scenario UUID for this run. Build-pinning / provenance field — lets a
+   * reviewer cross-reference Supabase rows and Render logs.
+   */
+  readonly scenario_id?: string;
+  /**
+   * PR merge SHAs deliberately INCLUDED on the pinned build, and open PRs
+   * deliberately EXCLUDED. Each entry is a `<num>[:<sha>]` string supplied
+   * via `--included-prs` / `--excluded-prs`. Optional — elided when unset.
+   */
+  readonly included_prs?: readonly string[];
+  readonly excluded_prs?: readonly string[];
 }
 
 type Redactor = (v: unknown) => string;
@@ -197,6 +209,9 @@ export function renderEvidencePack(
   );
   lines.push(`- **Base URL:** ${escapePipes(redact(header.base_url))}`);
   lines.push(`- **Started at:** ${header.started_at}`);
+  if (header.scenario_id !== undefined) {
+    lines.push(`- **Scenario ID:** \`${escapePipes(redact(header.scenario_id))}\``);
+  }
   lines.push(`- **Expected prompt version:** \`${header.prompt_version}\``);
   lines.push(`- **Expected prompt hash:** \`${header.prompt_hash}\``);
   lines.push(`- **Auth mode:** ${header.auth_mode}`);
@@ -209,6 +224,32 @@ export function renderEvidencePack(
   );
   if (header.journey !== undefined) {
     lines.push(`- **Journey:** \`${header.journey}\``);
+    // Flip-leg coverage banner — make the excluded legs unmissable so the
+    // partial-spine baseline cannot be misread as covering what_would_flip.
+    if (FLIP_MODE_JOURNEYS.has(header.journey)) {
+      lines.push('- **what_would_flip legs:** INCLUDED (#277 acceptance / full golden).');
+    } else if (header.journey === 'p0-partial-spine') {
+      lines.push(
+        '- **what_would_flip legs:** ⚠️ EXCLUDED — #277 not deployed on this build. ' +
+          'Flip honesty / completeness / flip-leak-safety are NOT covered by this run.',
+      );
+    } else if (header.journey === 'gate-278') {
+      lines.push('- **what_would_flip legs:** not part of this #278 gate probe.');
+    }
+  }
+  if (header.included_prs !== undefined && header.included_prs.length > 0) {
+    lines.push(
+      `- **Included PR merge SHAs:** ${header.included_prs
+        .map((p) => `\`${escapePipes(redact(p))}\``)
+        .join(', ')}`,
+    );
+  }
+  if (header.excluded_prs !== undefined && header.excluded_prs.length > 0) {
+    lines.push(
+      `- **Excluded open PRs:** ${header.excluded_prs
+        .map((p) => `\`${escapePipes(redact(p))}\``)
+        .join(', ')}`,
+    );
   }
   if (header.dl7_pr_b_landed !== undefined) {
     // Historical name: `DL7_PR_B_LANDED`. The journey is no longer
@@ -354,6 +395,42 @@ export function renderEvidencePack(
     }
   }
 
+  // ---- Per-step capture: latency / request id / DGAI state / leak findings ----
+  if (rows.length > 0) {
+    lines.push('### Per-step capture (latency · request id · DGAI result-state · leak findings)');
+    lines.push('');
+    lines.push('| step | latency | request_id | DGAI result-state | leak findings |');
+    lines.push('|---|---|---|---|---|');
+    for (const row of rows) {
+      const lat = row.latency_ms !== undefined ? `${row.latency_ms}ms` : '—';
+      const reqId = row.request_id ? `\`${escapePipes(redact(row.request_id))}\`` : '—';
+      let dgai = 'n/a';
+      if (row.dgai_state) {
+        const d = row.dgai_state;
+        dgai = d.present
+          ? `present leading=\`${escapePipes(redact(d.leading_option_id ?? '?'))}\` ` +
+            `win=${d.win_probability_count ?? 0} summary=${d.has_summary ?? false} ` +
+            `enrich=${d.has_enrichment ?? false}`
+          : 'absent';
+      }
+      const leaks =
+        row.leak_findings && row.leak_findings.length > 0
+          ? row.leak_findings.map((f) => `${f.surface}:${escapePipes(redact(f.detail))}`).join('; ')
+          : 'none';
+      lines.push(`| \`${row.step}\` | ${lat} | ${reqId} | ${dgai} | ${leaks} |`);
+    }
+    lines.push('');
+    lines.push(
+      '_Latency is per-step wall-clock; richer server `_timings` (when ' +
+        '`V5_TIMING_DEBUG=true`) is appended to each row’s evidence above. Leak ' +
+        'findings are informational captures over PUBLIC surfaces (assistant_text, ' +
+        'chips, `analysis_result.summary`, and — flip modes only — public ' +
+        '`analysis_result.enrichment`); hard pass/fail remains the per-step ' +
+        'assertion’s job._',
+    );
+    lines.push('');
+  }
+
   // ---- Canonical steps brief (canonical journey only) ----
   // For DL-7 journeys, the step descriptions live in `steps.ts`
   // alongside each `JourneyStep.description`; the table above already
@@ -370,7 +447,8 @@ export function renderEvidencePack(
     lines.push('6. "Increase the budget factor" → edit proposal or clarifying question');
     lines.push('');
   } else {
-    lines.push(`## DL-7 journey: \`${header.journey}\``);
+    const journeyHeading = header.journey.startsWith('dl7-') ? 'DL-7 journey' : 'Journey';
+    lines.push(`## ${journeyHeading}: \`${header.journey}\``);
     lines.push('');
     lines.push(
       'See per-step `description` fields in [tools/v5-journey-replay/steps.ts]' +

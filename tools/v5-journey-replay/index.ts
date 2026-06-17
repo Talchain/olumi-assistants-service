@@ -37,19 +37,28 @@ import { pathToFileURL } from 'node:url';
 
 import { getHealthz, postTurn, preflightAuth, type FetchResult } from './client.js';
 import {
+  assertAddOption,
+  assertAddOptionDefer,
   assertAnalysisRun,
+  assertDgaiResultState,
   assertDraftGraph,
   assertEditGraphGeneric,
+  assertEditOptionContainment,
   assertExplainLeader,
   assertExplainLeaderStale,
   assertProductShape,
   assertSetFactorValue,
   assertWhatChanged,
   assertWhatWouldFlip,
+  assertWhatWouldFlipChip,
+  assertWhatWouldFlipStale,
+  collectLeakFindings,
+  extractDgaiState,
   type AssertionResult,
   type DL7AssertionContext,
 } from './assertions.js';
 import {
+  FLIP_MODE_JOURNEYS,
   JOURNEY_IDS,
   JOURNEY_REGISTRY,
   JourneyPreconditionError,
@@ -230,6 +239,8 @@ function parseArgs(): ResolvedHarnessConfig {
   let outPath = 'Docs/v5/v5-golden-path-evidence-cee.md';
   let scenarioPrefix = 'local';
   let expectedBuildCli: string | undefined;
+  let includedPrs: string[] | undefined;
+  let excludedPrs: string[] | undefined;
   // Default journey is `canonical` so existing CLI invocations and
   // harness self-tests stay backwards-compatible.
   let journey: JourneyId = 'canonical';
@@ -251,11 +262,25 @@ function parseArgs(): ResolvedHarnessConfig {
       journey = parseJourneyArg(args[++i]!);
     } else if (arg.startsWith('--journey=')) {
       journey = parseJourneyArg(arg.slice('--journey='.length));
+    } else if (arg === '--included-prs' && i + 1 < args.length) {
+      includedPrs = parsePrList(args[++i]!);
+    } else if (arg.startsWith('--included-prs=')) {
+      includedPrs = parsePrList(arg.slice('--included-prs='.length));
+    } else if (arg === '--excluded-prs' && i + 1 < args.length) {
+      excludedPrs = parsePrList(args[++i]!);
+    } else if (arg.startsWith('--excluded-prs=')) {
+      excludedPrs = parsePrList(arg.slice('--excluded-prs='.length));
     } else if (arg === '--help' || arg === '-h') {
       console.log(
         'Usage: pnpm tsx tools/v5-journey-replay/index.ts \\\n' +
           '         [--base-url URL] [--out PATH] [--scenario-prefix TAG] \\\n' +
-          '         [--expected-build SHA] [--journey ID]\n' +
+          '         [--expected-build SHA] [--journey ID] \\\n' +
+          '         [--included-prs 276:8d05e3b,278:9ac9ea6] [--excluded-prs 277,270,271]\n' +
+          '\n' +
+          'Build provenance: --included-prs / --excluded-prs take comma-separated\n' +
+          '`<num>[:<sha>]` entries and are rendered verbatim into the evidence pack.\n' +
+          'They are OPTIONAL — the harness runs without them and without `gh`. Use\n' +
+          '`gh pr view <n> --json mergeCommit` to populate them (see the runbook).\n' +
           '\n' +
           'Auth: set OLUMI_REPLAY_API_KEY env var for remote URLs (required).\n' +
           '\n' +
@@ -277,7 +302,29 @@ function parseArgs(): ResolvedHarnessConfig {
   // mode (well-formed-only check, no SHA comparison).
   const expectedBuild = expectedBuildCli ?? readExpectedBuildEnv();
 
-  return { baseUrl, outPath, scenarioPrefix, apiKey: readApiKey(), expectedBuild, journey };
+  return {
+    baseUrl,
+    outPath,
+    scenarioPrefix,
+    apiKey: readApiKey(),
+    expectedBuild,
+    journey,
+    includedPrs,
+    excludedPrs,
+  };
+}
+
+/**
+ * Parse a `--included-prs` / `--excluded-prs` value: comma-separated
+ * `<num>[:<sha>]` entries. Whitespace-trimmed; empty entries dropped.
+ * Returns undefined for an empty list so the evidence pack elides the line.
+ */
+function parsePrList(raw: string): string[] | undefined {
+  const items = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return items.length > 0 ? items : undefined;
 }
 
 /**
@@ -428,7 +475,7 @@ async function run(): Promise<void> {
   const deployGate = evaluateDeployGate(cfg.baseUrl, healthz.result, cfg.expectedBuild);
   if (deployGate.halt) {
     console.error(`[DEPLOY HALT] ${deployGate.reason}`);
-    const haltHeader = buildEvidenceHeader(cfg, startedAt, healthz.result, {
+    const haltHeader = buildEvidenceHeader(cfg, scenarioId, startedAt, healthz.result, {
       status: 0,
       note: `deploy gate halted: ${deployGate.reason}`,
     });
@@ -443,7 +490,7 @@ async function run(): Promise<void> {
   if (preflight.kind === 'halt') {
     console.error(`[PREFLIGHT HALT] ${preflight.reason}`);
     // Still emit an evidence pack so the halt is recorded.
-    const haltHeader = buildEvidenceHeader(cfg, startedAt, healthz.result, {
+    const haltHeader = buildEvidenceHeader(cfg, scenarioId, startedAt, healthz.result, {
       status: preflight.status,
       note: preflight.reason,
     });
@@ -605,6 +652,23 @@ async function run(): Promise<void> {
           return `${base} ${timingsEvidence}`;
         };
 
+        // Additive capture fields (V5 Golden Journey prep). DGAI result-state
+        // and leak findings are informational on every row; the public
+        // enrichment leak scan runs only on the flip modes (gate-277 /
+        // p0-full-golden). Leak detail strings are redacted defensively.
+        const scanEnrichment = FLIP_MODE_JOURNEYS.has(cfg.journey);
+        const dgaiState = extractDgaiState(result.body);
+        const leakFindings = collectLeakFindings(result.body, { scanEnrichment }).map((f) => ({
+          surface: f.surface,
+          detail: redactString(f.detail, cfg.apiKey),
+        }));
+        const captureFields = {
+          request_id: result.request_id,
+          latency_ms: result.elapsed_ms,
+          dgai_state: dgaiState.present ? dgaiState : undefined,
+          leak_findings: leakFindings.length > 0 ? leakFindings : undefined,
+        };
+
         if (assertion.ok) {
           rows.push({
             step: step.name,
@@ -615,6 +679,7 @@ async function run(): Promise<void> {
             assistant_text: assistantTextRedacted,
             journey_id: cfg.journey,
             chips: chipsRedacted,
+            ...captureFields,
           });
           console.log(`[PASS] ${step.name}: ${redact(composeEvidence(assertion.evidence))}`);
         } else {
@@ -628,6 +693,7 @@ async function run(): Promise<void> {
             assistant_text: assistantTextRedacted,
             journey_id: cfg.journey,
             chips: chipsRedacted,
+            ...captureFields,
           });
           console.log(
             `[FAIL] ${step.name}: ${redact(assertion.failing_contract)} | ${redact(composeEvidence(assertion.evidence))}`,
@@ -656,6 +722,7 @@ async function run(): Promise<void> {
   // called process.exit(3) above.
   const header = buildEvidenceHeader(
     cfg,
+    scenarioId,
     startedAt,
     healthz.result,
     { status: preflight.status, note: preflight.note },
@@ -675,6 +742,7 @@ async function run(): Promise<void> {
 
 function buildEvidenceHeader(
   cfg: HarnessConfig,
+  scenarioId: string,
   startedAt: string,
   healthz: HealthzResult | undefined,
   preflight: { readonly status: number; readonly note: string },
@@ -694,6 +762,9 @@ function buildEvidenceHeader(
     journey: cfg.journey,
     dl7_pr_b_landed: isDL7PrBLanded(),
     step1_capture: step1Capture,
+    scenario_id: scenarioId,
+    included_prs: cfg.includedPrs,
+    excluded_prs: cfg.excludedPrs,
   };
 }
 
@@ -783,26 +854,49 @@ function pickAssertion(
   stepName: string,
   ctx: DL7AssertionContext,
 ): (result: FetchResult) => AssertionResult {
-  switch (stepName) {
-    case '1_draft_graph':
+  // Dispatch on the suffix after the leading "<num>_" so the same logical
+  // step can carry a different number across journeys. Suffixes are unique
+  // per assertion. Legacy canonical suffixes that intentionally use the
+  // lenient product-shape check (`weakest_option`, `add_option`,
+  // `edit_budget`) have no case and fall through to `assertProductShape` —
+  // preserving the exact prior behaviour for the canonical/DL-7 journeys.
+  const suffix = stepName.replace(/^\d+_/, '');
+  switch (suffix) {
+    case 'draft_graph':
       return assertDraftGraph;
-    case '4_run_analysis':
-    case '2_run_analysis':
+    case 'run_analysis':
       return assertAnalysisRun;
-    case '5_explain_leader':
+    // P0 run-analysis steps additionally assert DGAI visible result-state.
+    case 'run_analysis_dgai':
+    case 'rerun_after_add':
+    case 'persist_reload_rerun':
+      return (result) => {
+        const a = assertAnalysisRun(result);
+        return a.ok ? assertDgaiResultState(result) : a;
+      };
+    case 'explain_leader':
       return (result) => assertExplainLeader(result, ctx);
-    case '4_explain_leader_stale':
+    case 'explain_leader_stale':
       return (result) => assertExplainLeaderStale(result, ctx);
-    case '2_set_factor_value':
-    case '3_set_factor_value':
+    case 'set_factor_value':
       return (result) => assertSetFactorValue(result, ctx);
-    case '2_edit_graph_generic':
-    case '3_edit_graph_generic':
+    case 'edit_graph_generic':
+    case 'stale_trigger_edit':
       return (result) => assertEditGraphGeneric(result, ctx);
-    case '3_what_changed':
+    case 'what_changed':
       return (result) => assertWhatChanged(result, ctx);
-    case '6_what_would_flip':
+    case 'what_would_flip':
       return (result) => assertWhatWouldFlip(result, ctx);
+    case 'what_would_flip_chip':
+      return (result) => assertWhatWouldFlipChip(result, ctx);
+    case 'what_would_flip_stale':
+      return (result) => assertWhatWouldFlipStale(result, ctx);
+    case 'add_option_encode':
+      return assertAddOption;
+    case 'add_option_defer':
+      return assertAddOptionDefer;
+    case 'edit_option_intervention':
+      return (result) => assertEditOptionContainment(result, ctx);
     default:
       return assertProductShape;
   }

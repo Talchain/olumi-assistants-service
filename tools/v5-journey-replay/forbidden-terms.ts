@@ -156,3 +156,120 @@ export function findForbiddenMatches(text: string): readonly string[] {
   }
   return matches;
 }
+
+// ===========================================================================
+// V5 Golden Journey benchmark prep — #277-specific public-surface guards.
+//
+// SCOPE (per the approved lane amendment): these scanners target ONLY
+// user-facing / public response payload — the public `analysis_result`
+// enrichment object and user-facing flip prose. They are NOT run over the
+// evidence-pack's own internal metadata, and they are NOT part of the
+// general prose leak scan (`findForbiddenMatches`), which already hard-gates
+// `assistant_text` + chip labels/messages in every step via `coreAssertions`.
+//
+// The enrichment-carrier scan is the #277 ("what_would_flip" P0-B) leak
+// contract: #277's keep-list transform (`toSafeTransportEnrichment`) drops
+// the structural debug/lineage carriers below. Detecting them in the public
+// enrichment is therefore a #277-acceptance / full-golden concern — it is
+// deliberately EXCLUDED from the partial-spine mode (which pins a build where
+// #277 is not yet deployed, so the carriers may legitimately still be present
+// and must not red the spine baseline).
+// ===========================================================================
+
+/**
+ * Structured enrichment keys that #277 drops as debug/lineage carriers.
+ * Presence of any of these inside the PUBLIC `analysis_result.enrichment`
+ * payload is a leak once #277 is live. Detected by key presence at any depth
+ * (not prose matching) — these are object keys, not user copy.
+ *
+ * Source: #277 PR body "Deliberately dropped as leak/debug carriers".
+ */
+export const ENRICHMENT_LEAK_CARRIER_KEYS: readonly string[] = [
+  '_meta',
+  'meta',
+  'm1_coaching',
+  'm1_review',
+  'decision_brief',
+  'fact_objects',
+  'downstream_calls',
+  'critiques',
+  'graph',
+  'seed',
+];
+
+/**
+ * Leaf VALUE markers that must never appear inside the public enrichment
+ * payload. `[REDACTED]` is the redaction sentinel (a kept field carrying it
+ * means a debug carrier survived); `isl_engine` is internal engine lineage.
+ */
+export const ENRICHMENT_LEAK_VALUE_MARKERS: readonly string[] = [
+  '[REDACTED]',
+  'isl_engine',
+];
+
+export interface EnrichmentLeakFinding {
+  readonly kind: 'carrier_key' | 'value_marker';
+  /** The carrier key name or the value marker string that matched. */
+  readonly detail: string;
+  /** Dotted path within the enrichment object where it was found. */
+  readonly path: string;
+}
+
+/**
+ * Recursively scan a PUBLIC enrichment payload (or any public response
+ * sub-object) for #277 leak carriers. Returns every finding so the evidence
+ * pack can list them. Depth-bounded as a defensive guard against pathological
+ * nesting. Caller decides whether a finding fails the run (it is a hard gate
+ * only in `gate-277` / `p0-full-golden`).
+ */
+export function findEnrichmentLeakCarriers(
+  enrichment: unknown,
+  maxDepth = 12,
+): readonly EnrichmentLeakFinding[] {
+  const findings: EnrichmentLeakFinding[] = [];
+  const visit = (node: unknown, path: string, depth: number): void => {
+    if (node === null || node === undefined || depth > maxDepth) return;
+    if (typeof node === 'string') {
+      for (const marker of ENRICHMENT_LEAK_VALUE_MARKERS) {
+        if (node.includes(marker)) {
+          findings.push({ kind: 'value_marker', detail: marker, path: path || '<root>' });
+        }
+      }
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((v, i) => visit(v, `${path}[${i}]`, depth + 1));
+      return;
+    }
+    if (typeof node === 'object') {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        const childPath = path ? `${path}.${k}` : k;
+        if (ENRICHMENT_LEAK_CARRIER_KEYS.includes(k)) {
+          findings.push({ kind: 'carrier_key', detail: k, path: childPath });
+        }
+        visit(v, childPath, depth + 1);
+      }
+    }
+  };
+  visit(enrichment, '', 0);
+  return findings;
+}
+
+/**
+ * #277 flip honesty — the dishonest "no practical flip, yet says small
+ * changes could flip" contradiction.
+ *
+ * `FLIP_NO_TIPPING_POINT_RE` matches the honest #277 copy ("no single factor
+ * on its own reached a tipping point ...", "no realistic single-factor shift
+ * ... within the current bounds"). `FLIP_COULD_FLIP_CLAIM_RE` matches the
+ * pre-#277 dishonest flippability claim ("even small adjustments ... could
+ * shift which option leads"). Co-occurrence is the contradiction the live
+ * `no_effect` case exposed. Each regex is anchored so the honest sentence
+ * ("...that would change which option leads") does NOT trip the could-flip
+ * pattern (which requires "small ... could shift/flip").
+ */
+export const FLIP_NO_TIPPING_POINT_RE =
+  /\bno (?:single |realistic single-)?(?:factor|factor shift)\b[^.]*\btipping point\b|\bno realistic single-factor shift\b|\bno single factor on its own reached a tipping point\b/i;
+
+export const FLIP_COULD_FLIP_CLAIM_RE =
+  /\bsmall (?:adjustments?|changes?|movements?)\b[^.]*\b(?:shift|flip|change which option leads)\b|\bcould (?:shift|flip) which option leads\b/i;
