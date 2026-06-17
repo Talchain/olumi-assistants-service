@@ -378,6 +378,78 @@ describe('composeValidationFailure — PARAMETER_INVALID missing_value (Fix B)',
   });
 });
 
+// ---------------------------------------------------------------------------
+// task_99f83f0d — "You gave unknown." leak must die for ANY PARAMETER_INVALID
+// path that omits actual_value (invalid_operator, graph predicates), not only
+// the missing_value branch. The clause drops; the constraint guidance stays.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID undefined actual (task_99f83f0d)', () => {
+  it('actual_value omitted (no missing_value reason) → no "You gave unknown." leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'invalid operator',
+      details: { parameter: 'value', constraint_description: 'a valid value' },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).not.toContain('You gave');
+    expect(response.assistant_text).not.toContain('unknown');
+    // Constraint guidance is preserved.
+    expect(response.assistant_text).toContain('needs to be a valid value');
+    assertStyle(response.assistant_text);
+  });
+
+  it('genuine scalar still renders "You gave X" (no regression)', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad',
+      details: { parameter: 'value', actual_value: 1.5, constraint_description: 'a number between 0 and 1' },
+    });
+    expect(response.assistant_text).toContain('You gave 1.5');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// task_99f83f0d — option-intervention misroute containment. When a
+// set_factor_value is refused because the user implied an option-specific
+// intervention edit, the composer must clarify (graph already unchanged) and
+// must NOT attach an auto-routing chip that could loop back into the misroute.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — OPTION_INTERVENTION_MISROUTE', () => {
+  it('clarifies option-vs-factor, names the factor, and offers a text prompt only', () => {
+    const { response, template_id, chip_type } = composeFor({
+      code: 'OPTION_INTERVENTION_MISROUTE',
+      message: 'set_factor_value refused — option-intervention edit implied',
+      details: { handler_id: 'set_factor_value', factor_label: 'Annual Support Cost' },
+    });
+    expect(template_id).toBe('option_intervention_misroute');
+    expect(chip_type).toBe('text_prompt');
+    expect(response.assistant_text).toContain("option's intervention");
+    expect(response.assistant_text).toContain('Annual Support Cost');
+    // Reassures the user nothing was mutated.
+    expect(response.assistant_text.toLowerCase()).toContain("haven't changed anything");
+    // No value/handler-id leak.
+    expect(response.assistant_text).not.toContain('set_factor_value');
+    // Exactly one chip, and it must NOT carry an action_type (no re-route).
+    expect(response.suggested_actions.length).toBe(1);
+    expect(response.suggested_actions[0]?.action_type).toBeUndefined();
+    assertStyle(response.assistant_text);
+  });
+
+  it('reads cleanly when no factor_label is supplied', () => {
+    const { response, template_id } = composeFor({
+      code: 'OPTION_INTERVENTION_MISROUTE',
+      message: 'refused',
+      details: { handler_id: 'set_factor_value' },
+    });
+    expect(template_id).toBe('option_intervention_misroute');
+    expect(response.assistant_text).toContain("the factor's own value");
+    expect(response.assistant_text).not.toContain('that item');
+    assertStyle(response.assistant_text);
+  });
+});
+
 describe('composeValidationFailure — response shape', () => {
   // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND is now the ONE
   // validation-error branch that surfaces with a different wire code —
@@ -436,6 +508,7 @@ describe('composeValidationFailure — response shape', () => {
       { code: 'ENTITY_RESOLUTION_AMBIGUOUS', details: { entity_kind: 'option' } },
       { code: 'ENTITY_RESOLUTION_SUSPICIOUS', details: { entity_kind: 'option' } },
       { code: 'PARAMETER_INVALID', details: { parameter_name: 'value' } },
+      { code: 'OPTION_INTERVENTION_MISROUTE', details: { factor_label: 'Annual Support Cost' } },
       { code: 'PRECONDITION_UNMET', details: { reason: 'no_options_defined' } },
     ];
 
@@ -460,6 +533,7 @@ describe('composeValidationFailure — response shape', () => {
       'ENTITY_RESOLUTION_AMBIGUOUS',
       'ENTITY_RESOLUTION_SUSPICIOUS',
       'PARAMETER_INVALID',
+      'OPTION_INTERVENTION_MISROUTE',
       'PRECONDITION_UNMET',
     ];
     for (const code of codes) {

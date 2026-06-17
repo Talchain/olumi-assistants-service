@@ -101,6 +101,7 @@ import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
+import { impliesOptionInterventionEdit } from './routing/option-intervention-guard.js';
 import {
   deriveContextReadiness,
   type ContextReadiness,
@@ -3826,11 +3827,55 @@ export async function runTurnExecutor(
       //     production code after Phase 1.5. Guarded by invariant script.
       const validationRegistry = options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
       handlerProposedForObs = proposedHandlerId;
-      const validationResult = validateToolCall(
+      let validationResult = validateToolCall(
         action,
         graphLookupForValidate,
         validationRegistry,
       );
+
+      // V5 edit_graph P0 containment (task_99f83f0d) — option-intervention
+      // misroute guard. A request that implies editing an OPTION's
+      // intervention ("revise the Outsource option's Annual Support Cost
+      // intervention to £135k") can be proposed — by the LLM router, or in
+      // principle synthesised by the deterministic pre-route — as a
+      // `set_factor_value` on the SHARED factor. The proposal validates (the
+      // factor is a real, correctly-kinded target), so without this guard it
+      // would silently mutate the factor's own value: the wrong entity, and
+      // unrecoverable from the user's point of view. Both the LLM and
+      // deterministic producers converge on this execute block BEFORE any
+      // handler runs, so one guard here covers every dispatch path.
+      // `set_factor_value` stays a legitimate handler for genuine factor
+      // edits — we refuse ONLY this case, re-using the existing recoverable-
+      // validator path so the turn composes a clarify and commits a
+      // direct_answer with the graph UNCHANGED (no handler executes).
+      if (
+        validationResult.valid &&
+        proposedHandlerId === 'set_factor_value' &&
+        impliesOptionInterventionEdit(
+          userMessageForTurn ?? '',
+          graphLookupForValidate
+            ? graphLookupForValidate
+                .listEntitiesByKind('option')
+                .map((entity) => entity.label)
+                .filter((label): label is string =>
+                  typeof label === 'string' && label.trim().length > 0,
+                )
+            : [],
+        )
+      ) {
+        validationResult = {
+          valid: false,
+          error: {
+            code: 'OPTION_INTERVENTION_MISROUTE',
+            message:
+              'set_factor_value refused — the request implies an option-specific intervention edit, not a factor-value change',
+            details: {
+              handler_id: 'set_factor_value',
+              ...(action.entity.label ? { factor_label: action.entity.label } : {}),
+            },
+          },
+        };
+      }
       stagesCompleted.push('validate');
       if (!graphLookupForValidate) {
         stagesCompleted.push('validate_skipped_no_graph');
