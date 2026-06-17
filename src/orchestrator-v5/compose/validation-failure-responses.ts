@@ -303,10 +303,20 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
 
   const constraint = sanitiseForUser(details.constraint_description ?? 'a valid value');
   const actual = sanitiseForUser(details.actual_value);
+  // V5 edit_graph P0 (task_99f83f0d) — kill the "You gave unknown." leak.
+  // `sanitiseForUser` maps undefined/null/empty inputs to the internal
+  // 'unknown' sentinel; rendering "You gave unknown." leaks a placeholder
+  // that means nothing to the user. This covers PARAMETER_INVALID emission
+  // sites that omit `actual_value` entirely (invalid_operator, graph
+  // predicates) — not just the `missing_value` branch above. When there is
+  // no real value to echo back, drop the clause and keep only the
+  // constraint guidance; genuine scalars still render "You gave X".
+  const showActual = actual !== 'unknown';
   return {
     body: {
-      assistant_text:
-        `'${parameter}' needs to be ${constraint}. You gave ${actual}.`,
+      assistant_text: showActual
+        ? `'${parameter}' needs to be ${constraint}. You gave ${actual}.`
+        : `'${parameter}' needs to be ${constraint}.`,
       suggested_actions: [
         {
           id: chipId('prompt', 'param-retry'),
@@ -316,6 +326,35 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
       ],
     },
     template_id: 'parameter_invalid',
+    chip_type: 'text_prompt',
+  };
+}
+
+/**
+ * V5 edit_graph P0 containment (task_99f83f0d). The user implied an edit to
+ * an OPTION's intervention but the proposal resolved to a `set_factor_value`
+ * on the shared factor; the turn-executor refused the mutation and routed
+ * this code so we clarify instead of silently changing the factor's own
+ * value. No auto-routing chip (which could loop back into the same
+ * misroute) — a single text-prompt to disambiguate. Graph is unchanged by
+ * the time this composes.
+ */
+function composeOptionInterventionMisroute(error: ValidationError): BranchResult {
+  const details = error.details ?? {};
+  const factorLabel = readString(details.factor_label);
+  const subject = factorLabel
+    ? `the ${safeLabel({ label: factorLabel, kind: undefined })} factor's own value`
+    : `the factor's own value`;
+  return {
+    body: {
+      assistant_text:
+        `That looks like a change to an option's intervention rather than ` +
+        `${subject}, so I haven't changed anything. Tell me whether you ` +
+        `meant the factor's value or a specific option's effect, and I'll ` +
+        `take it from there.`,
+      suggested_actions: [fallbackPrompt('Describe what you want to change')],
+    },
+    template_id: 'option_intervention_misroute',
     chip_type: 'text_prompt',
   };
 }
@@ -335,6 +374,7 @@ export const VALIDATION_COMPOSERS: Readonly<Record<ValidationErrorCode, BranchCo
   ENTITY_RESOLUTION_SUSPICIOUS: (e) => composeEntityResolutionSuspicious(e),
   PRECONDITION_UNMET: (e) => composePreconditionUnmet(e),
   PARAMETER_INVALID: (e) => composeParameterInvalid(e),
+  OPTION_INTERVENTION_MISROUTE: (e) => composeOptionInterventionMisroute(e),
 };
 
 /**

@@ -111,6 +111,12 @@ function sampleError(code: ValidationErrorCode): ValidationError {
           constraint_description: 'a positive number',
         },
       };
+    case 'OPTION_INTERVENTION_MISROUTE':
+      return {
+        code,
+        message: 'Option intervention implied',
+        details: { handler_id: 'set_factor_value', factor_label: 'Annual Support Cost' },
+      };
     case 'PRECONDITION_UNMET':
       return {
         code,
@@ -127,6 +133,7 @@ const ALL_CODES: readonly ValidationErrorCode[] = [
   'ENTITY_RESOLUTION_AMBIGUOUS',
   'ENTITY_RESOLUTION_SUSPICIOUS',
   'PARAMETER_INVALID',
+  'OPTION_INTERVENTION_MISROUTE',
   'PRECONDITION_UNMET',
 ];
 

@@ -157,6 +157,14 @@ export type ValidationErrorCode =
   | 'ENTITY_RESOLUTION_AMBIGUOUS'
   | 'ENTITY_RESOLUTION_SUSPICIOUS'
   | 'PARAMETER_INVALID'
+  // V5 edit_graph P0 containment (task_99f83f0d): a set_factor_value proposal
+  // refused because the user's message implies an option-specific
+  // intervention edit (not a factor-value change). Synthesised at the
+  // turn-executor execute chokepoint, never produced by validateToolCall
+  // itself (the check needs the raw user message, which the validator does
+  // not receive). Routed through the standard recoverable-validator path so
+  // the turn composes a clarify and commits a direct_answer, graph unchanged.
+  | 'OPTION_INTERVENTION_MISROUTE'
   | 'PRECONDITION_UNMET';
 
 export interface ValidationError {
