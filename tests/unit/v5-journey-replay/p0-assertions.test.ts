@@ -277,6 +277,31 @@ describe('assertEditOptionContainment (#278 Gate 2 containment)', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.failing_contract).toBe('edit_option_unverifiable_apply_claim');
   });
+
+  // Review comment 1 — option labels unavailable.
+  it('FAIL (precondition) — missing option labels + mutation acknowledgement', () => {
+    // No step1OptionLabels in ctx: an acknowledged edit cannot be verified for
+    // containment → explicit precondition failure, NOT a silent pass and NOT a
+    // misleading unverifiable_apply_claim.
+    const r = assertEditOptionContainment(
+      res({ assistant_text: 'Updated the option as requested.' }),
+      { factorLabel: 'Annual Cost' },
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.failing_contract).toBe('edit_option_missing_option_labels');
+  });
+
+  it('PASS — missing option labels + safe defer (graph unchanged, no leak)', () => {
+    // With no mutation acknowledgement, a safe defer is valid containment even
+    // when option labels are unavailable — labels are only required to verify
+    // an apply-claim.
+    const r = assertEditOptionContainment(
+      res({ assistant_text: "I wasn't able to make that change safely." }),
+      undefined,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.evidence).toMatch(/path=defer/);
+  });
 });
 
 // ---------------------------------------------------------------------------

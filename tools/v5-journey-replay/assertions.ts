@@ -1129,34 +1129,44 @@ export function assertEditOptionContainment(
   const clarify = CLARIFICATION_BACK_PATTERN.test(text);
   const defer = SAFE_DEFER_PATTERN.test(text);
   const mutationAck = MUTATION_ACK_PATTERN.test(text);
-  const factorMentioned = ctx?.factorLabel != null && lower.includes(ctx.factorLabel.toLowerCase());
-  const optionMentioned = (ctx?.step1OptionLabels ?? []).some((l) => lower.includes(l.toLowerCase()));
+  const hasOptionLabels = (ctx?.step1OptionLabels ?? []).length > 0;
 
-  if (mutationAck && factorMentioned && !optionMentioned) {
-    return {
-      ok: false,
-      failing_contract: 'edit_option_misapplied_as_factor',
-      evidence:
-        `status=200 mutation acknowledged referencing the FACTOR ("${ctx?.factorLabel}") not the option ` +
-        `— request misapplied as a factor-value update`,
-    };
-  }
-  if (mutationAck && !optionMentioned) {
-    return {
-      ok: false,
-      failing_contract: 'edit_option_unverifiable_apply_claim',
-      evidence: `status=200 claims an edit was applied but references neither the option nor a factor`,
-    };
-  }
-  if (clarify || defer) {
-    return {
-      ok: true,
-      evidence:
-        `status=200 contained path=${defer ? 'defer' : 'clarify'} graph_unchanged=implied ` +
-        `no_leak=ok text_len=${text.length} elapsed=${result.elapsed_ms}ms`,
-    };
-  }
-  if (mutationAck && optionMentioned) {
+  // An acknowledged edit/apply must be VERIFIABLE: confirming containment
+  // (did it target the option, or misapply to a factor?) requires Step 1
+  // option labels. When they're absent we cannot tell — so fail as an
+  // explicit precondition (`edit_option_missing_option_labels`) rather than
+  // letting the apply-claim pass OR mislabelling it `unverifiable_apply_claim`
+  // (which implies the RESPONSE was bad, not the harness context). This does
+  // NOT let an acknowledged mutation pass when labels are unavailable.
+  if (mutationAck) {
+    if (!hasOptionLabels) {
+      return {
+        ok: false,
+        failing_contract: 'edit_option_missing_option_labels',
+        evidence:
+          `status=200 mutation acknowledged but Step 1 captured no option labels — ` +
+          `harness/context insufficient to verify containment (cannot confirm the edit ` +
+          `targeted the option rather than a factor)`,
+      };
+    }
+    const factorMentioned = ctx?.factorLabel != null && lower.includes(ctx.factorLabel.toLowerCase());
+    const optionMentioned = (ctx?.step1OptionLabels ?? []).some((l) => lower.includes(l.toLowerCase()));
+    if (factorMentioned && !optionMentioned) {
+      return {
+        ok: false,
+        failing_contract: 'edit_option_misapplied_as_factor',
+        evidence:
+          `status=200 mutation acknowledged referencing the FACTOR ("${ctx?.factorLabel}") not the option ` +
+          `— request misapplied as a factor-value update`,
+      };
+    }
+    if (!optionMentioned) {
+      return {
+        ok: false,
+        failing_contract: 'edit_option_unverifiable_apply_claim',
+        evidence: `status=200 claims an edit was applied but references neither the option nor a factor`,
+      };
+    }
     // Clean apply referencing the option — the strict path working. Safe (no
     // leak, references the right entity). The separate strict-apply line and
     // the persist→reload→rerun step cross-check correctness of the value.
@@ -1167,9 +1177,19 @@ export function assertEditOptionContainment(
         `text_len=${text.length} elapsed=${result.elapsed_ms}ms`,
     };
   }
-  // Neither a clear defer/clarify nor a recognised apply — ambiguous prose
-  // with no leak and no misapply signal. Treat as contained-but-unclear: the
-  // safest reading (no apply-claim) is PASS, annotated for reviewer triage.
+
+  // No mutation acknowledgement → contained when the response defers/clarifies
+  // (graph unchanged) or is ambiguous prose with no apply-claim. Leak already
+  // excluded above. Option labels are NOT required on this path — a safe
+  // defer/clarify with the graph unchanged is valid containment regardless.
+  if (clarify || defer) {
+    return {
+      ok: true,
+      evidence:
+        `status=200 contained path=${defer ? 'defer' : 'clarify'} graph_unchanged=implied ` +
+        `no_leak=ok text_len=${text.length} elapsed=${result.elapsed_ms}ms`,
+    };
+  }
   return {
     ok: true,
     evidence:

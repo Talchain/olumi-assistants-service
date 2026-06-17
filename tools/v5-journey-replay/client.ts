@@ -143,10 +143,10 @@ export async function postTurn(
         __body_sha256_prefix: sha256Prefix,
       };
     }
-    const bodyRequestId =
-      typeof (body as { request_id?: unknown }).request_id === 'string'
-        ? (body as { request_id?: string }).request_id
-        : undefined;
+    // `body` is typed `TurnResponse`, which declares `request_id?: string`,
+    // so no cast is needed (the non-JSON fingerprint fallback simply leaves
+    // it undefined).
+    const bodyRequestId = typeof body.request_id === 'string' ? body.request_id : undefined;
     return {
       status: res.status,
       body,
