@@ -25,22 +25,28 @@
  * This module is that missing, unit-token-aware check. It inspects the raw
  * user message for a unit/qualifier token attached to the value being set and
  * compares its UNIT FAMILY (currency / percent / time / metric / count) to the
- * target factor's stored unit family. When the user's token belongs to a
- * DIFFERENT family than the typed factor, the value cannot be resolved with
- * confidence and the caller must fail closed (clarify, graph unchanged).
+ * target factor's stored unit family. When the user's token cannot be resolved
+ * against the typed factor with confidence, the caller must fail closed
+ * (clarify, graph unchanged).
  *
  * Design choices — deliberately narrow; this is containment, not NL hardening:
- *   - Only a RECOGNISED unit token in a different family blocks. Unknown words
- *     (sentence connectives like "now", "instead", "next") classify as `null`
- *     and are IGNORED, so there are no false-positive clarifies on ordinary
- *     phrasing.
+ *   - A value-attached token fails closed when it is EITHER a recognised unit in
+ *     a different family (`incompatible_unit`, e.g. "5 agents" / "50 percent" on
+ *     a £ factor) OR an unrecognised unit-like token we cannot resolve at all
+ *     (`unresolved_unit_token`, e.g. "5 widgets"). Only a curated allowlist of
+ *     sentence connectives ("now", "instead", "for", "times", …) is treated as
+ *     prose and ignored, so ordinary phrasing does not over-clarify.
  *   - The check is inert unless the factor carries a stored unit. A factor with
  *     no unit has no family to conflict with, so bare-number and count-factor
  *     flows ("Set X to 0.5", "Set headcount to 5") are never affected.
- *   - We anchor on the LAST numeric value in the message (value updates place
- *     the value last) so a unit-family word inside the factor label earlier in
- *     the sentence ("Set the 3 month runway factor to 5") cannot trigger a
- *     false block.
+ *   - The check is bound to the value ATTACHED TO THE PROPOSED MUTATION (passed
+ *     by the caller), not merely the last number, so a compound turn ("Set Cost
+ *     to 5 agents and set Programme to 0.5") is judged on the cost-factor's own
+ *     value. When the proposed value cannot be attributed in a multi-quantity
+ *     message, only a KNOWN-incompatible unit blocks — an unattributable unknown
+ *     word is treated as prose, so explanatory numbers ("…£500,000, that is 5
+ *     times our baseline") never over-block. Callers that omit the proposed
+ *     value fall back to the last numeric value.
  *   - The vocabulary is broader than CQE's on purpose: it also recognises the
  *     unit WORDS CQE drops ("percent", "pounds") and count nouns ("agents"),
  *     which is exactly the class of token that produced the live failure.
