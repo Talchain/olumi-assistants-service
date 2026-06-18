@@ -32,6 +32,8 @@ import type { SessionStore, SessionTurnWrite } from '../../../src/orchestrator-v
 import { repairGraphForPersistence } from '../../../src/orchestrator-v5/repair-graph-for-persistence.js';
 import { normaliseOptionInterventionContract } from '../../../src/orchestrator-v5/normalise-option-interventions.js';
 import { setTestSink } from '../../../src/utils/telemetry.js';
+import { GraphV3 } from '../../../src/schemas/cee-v3.js';
+import { computeStructuralReadiness } from '../../../src/orchestrator/tools/analysis-ready-helper.js';
 
 type AnyNode = Record<string, unknown> & { id: string };
 type AnyGraph = { nodes: AnyNode[]; edges: Array<Record<string, unknown>>; [k: string]: unknown };
@@ -171,6 +173,49 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
     // input graph not mutated (both repairs deep-clone)
     expect('intercept' in nodeById(g, 'fac_root_dup')).toBe(true);
     expect((nodeById(g, 'opt_hybrid').data as { interventions: unknown }).interventions).toBeDefined();
+  });
+
+  it('P0-A: commitDirectAnswer normalises an option interventions:null → {} before store.append, so the persisted graph is readable and rerun is graceful', async () => {
+    setTestSink(() => {});
+    const { store, appendCalls } = makeSpyStore();
+    // Simulate the residual: the final appliedGraph carries an added option with
+    // interventions:null (an unrecognised-shape add the #281 encoder did not flag).
+    const g: AnyGraph = {
+      nodes: [
+        { id: 'goal_g', kind: 'goal', label: 'G' },
+        { id: 'dec_d', kind: 'decision', label: 'D' },
+        { id: 'fac_a', kind: 'factor', label: 'A', observed_state: { value: 0.2 } },
+        draftOption(),
+        { id: 'opt_inhouse_capacity', kind: 'option', label: 'In-House Capacity', is_baseline: false, interventions: null },
+      ],
+      edges: [
+        // Schema-valid edges so GraphV3.safeParse isolates the interventions fix.
+        { from: 'dec_d', to: 'opt_draft', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'dec_d', to: 'opt_inhouse_capacity', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_draft', to: 'fac_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_inhouse_capacity', to: 'fac_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'fac_a', to: 'goal_g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    };
+    const composed = composeDirectAnswerResponse({ assistant_text: 'applied', stage: 'frame' });
+
+    await commitDirectAnswer(composed, { ...META, graph: g }, store);
+
+    const persisted = appendCalls[0]!.graph as AnyGraph;
+    // (1) interventions:null normalised to an analysis-safe empty record
+    expect(nodeById(persisted, 'opt_inhouse_capacity').interventions).toEqual({});
+    // (2) the persisted graph now PARSES (interventions:null previously failed GraphV3 → rerun 500)
+    const parsed = GraphV3.safeParse(persisted);
+    expect(parsed.success).toBe(true);
+    // (3) rerun degrades gracefully: the option is needs_encoding, NOT an unreadable graph
+    if (parsed.success) {
+      const readiness = computeStructuralReadiness(parsed.data);
+      const opt = readiness!.options.find((o) => o.option_id === 'opt_inhouse_capacity')!;
+      expect(opt.status).toBe('needs_encoding');
+    }
+    // (4) draft option byte-equivalent; input not mutated
+    expect(JSON.stringify(nodeById(persisted, 'opt_draft'))).toBe(JSON.stringify(draftOption()));
+    expect((g.nodes.find((n) => n.id === 'opt_inhouse_capacity') as AnyNode).interventions).toBeNull();
   });
 
   it('idempotent: re-committing the already-repaired graph changes nothing (stable persisted graph)', async () => {

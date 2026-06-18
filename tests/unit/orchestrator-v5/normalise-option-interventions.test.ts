@@ -330,6 +330,107 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
 
   // --- the promoted shape survives the NodeV3 read-time strip ----------------
 
+  // --- P0-A add-option residual: interventions:null containment net ----------
+
+  it('NULL→{}: an option persisted with interventions:null is coerced to an empty record', () => {
+    const info = vi.spyOn(log, 'info').mockImplementation(() => log as never);
+    const g: AnyGraph = { nodes: [{ id: 'opt_null', kind: 'option', label: 'N', interventions: null }], edges: [] };
+    const out = normaliseOptionInterventionContract(g, { scenarioId: 'sc', turnId: 't' }) as AnyGraph;
+    expect(nodeById(out, 'opt_null').interventions).toEqual({});
+    expect(out).not.toBe(g); // clone produced
+    expect((g.nodes[0] as AnyNode).interventions).toBeNull(); // input not mutated
+    const calls = info.mock.calls.map((c) => c[0] as Record<string, unknown>)
+      .filter((p) => p?.event === 'v5.graph_persist.option_contract_normalised');
+    expect(calls[0]).toMatchObject({ corrected_count: 1, node_ids: ['opt_null'] });
+  });
+
+  it('NON-RECORD→{}: array / scalar interventions are coerced to an empty record (never persist invalid shape)', () => {
+    for (const bad of [[], [1, 2], 'x', 5, true]) {
+      const g: AnyGraph = { nodes: [{ id: 'opt_b', kind: 'option', label: 'B', interventions: bad as unknown }], edges: [] };
+      const out = normaliseOptionInterventionContract(g) as AnyGraph;
+      expect(nodeById(out, 'opt_b').interventions).toEqual({});
+    }
+  });
+
+  it('NO-OP: a valid top-level interventions record is unchanged (reference identity)', () => {
+    const g: AnyGraph = { nodes: [draftOption('opt_ok', false)], edges: [] };
+    expect(normaliseOptionInterventionContract(g)).toBe(g);
+  });
+
+  it('NO-OP: an empty-record {} interventions is already analysis-safe and unchanged (reference identity)', () => {
+    const g: AnyGraph = { nodes: [{ id: 'opt_e', kind: 'option', label: 'E', interventions: {} }], edges: [] };
+    expect(normaliseOptionInterventionContract(g)).toBe(g);
+  });
+
+  it('NULL + recoverable data.interventions: promotes to a real record (not just {}), null replaced', () => {
+    const g: AnyGraph = {
+      nodes: [{ id: 'opt_nr', kind: 'option', label: 'NR', interventions: null, data: { interventions: { fac_a: 0.4 } } }],
+      edges: [],
+    };
+    const out = normaliseOptionInterventionContract(g) as AnyGraph;
+    expect(nodeById(out, 'opt_nr').interventions).toEqual({
+      fac_a: { value: 0.4, source: 'user_specified', target_match: { node_id: 'fac_a', match_type: 'exact_id', confidence: 'high' } },
+    });
+  });
+
+  it('EXCEPTION-SAFE: interventions:null is sanitised to {} EVEN WHEN the promotion pass throws (sweep not undone by fail-open)', async () => {
+    // Force PASS 2 (recoverable promotion) to throw: extractNumericIntervention
+    // is called ONLY inside the promotion detect/merge. The PASS 1 null sweep
+    // must still hold — fail-open returns the SWEPT graph, never the raw null.
+    vi.resetModules();
+    vi.doMock('../../../src/orchestrator/tools/analysis-ready-helper.js', async (orig) => {
+      const actual = await orig<typeof import('../../../src/orchestrator/tools/analysis-ready-helper.js')>();
+      return { ...actual, extractNumericIntervention: () => { throw new Error('forced promotion failure'); } };
+    });
+    const { normaliseOptionInterventionContract: fn } =
+      await import('../../../src/orchestrator-v5/normalise-option-interventions.js');
+
+    const g: AnyGraph = {
+      nodes: [
+        { id: 'opt_null', kind: 'option', label: 'N', interventions: null },                   // PASS 1 must sweep → {}
+        { id: 'opt_rec', kind: 'option', label: 'R', data: { interventions: { fac_a: 0.4 } } }, // triggers PASS 2 → forced throw
+      ],
+      edges: [],
+    };
+    const out = fn(g) as AnyGraph;
+
+    // Promotion threw, but the null→{} invariant survived (NOT the original null):
+    expect(nodeById(out, 'opt_null').interventions).toEqual({});
+    expect(nodeById(out, 'opt_null').interventions).not.toBeNull();
+    expect(out).not.toBe(g);                                   // returned the swept graph, not the raw original
+    expect((g.nodes[0] as AnyNode).interventions).toBeNull();  // input not mutated
+
+    vi.doUnmock('../../../src/orchestrator/tools/analysis-ready-helper.js');
+    vi.resetModules();
+  });
+
+  it('GraphV3.safeParse: interventions:null FAILS but {} and absent PASS (the read-time parse-bomb)', () => {
+    const mk = (opt: Record<string, unknown>) => ({
+      nodes: [{ id: 'goal_g', kind: 'goal', label: 'G' }, { id: 'opt_x', kind: 'option', label: 'X', ...opt }],
+      edges: [],
+    });
+    expect(GraphV3.safeParse(mk({ interventions: null })).success).toBe(false);
+    expect(GraphV3.safeParse(mk({ interventions: {} })).success).toBe(true);
+    expect(GraphV3.safeParse(mk({})).success).toBe(true);
+  });
+
+  it('NULL→{} survives GraphV3.safeParse (the persisted graph is readable; option is needs_encoding-shaped {})', () => {
+    const g = {
+      nodes: [
+        { id: 'goal_g', kind: 'goal', label: 'G' },
+        { id: 'fac_x', kind: 'factor', label: 'X', observed_state: { value: 0 } },
+        { id: 'opt_null', kind: 'option', label: 'N', interventions: null },
+      ],
+      edges: [{ from: 'opt_null', to: 'fac_x', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }],
+    };
+    const normalised = normaliseOptionInterventionContract(g);
+    const parsed = GraphV3.safeParse(normalised);
+    expect(parsed.success).toBe(true); // was previously a parse failure on interventions:null
+    if (!parsed.success) return;
+    const opt = parsed.data.nodes.find((n) => n.id === 'opt_null') as Record<string, unknown>;
+    expect(opt.interventions).toEqual({});
+  });
+
   it('the promoted option survives GraphV3.safeParse (NodeV3 strips data; top-level interventions persist)', () => {
     const g = {
       nodes: [

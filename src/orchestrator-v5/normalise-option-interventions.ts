@@ -103,6 +103,19 @@ function isPlainObject(v: unknown): v is Dict {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+/**
+ * P0-A add-option residual — an option whose top-level `interventions` is
+ * PRESENT but NOT a plain-object record (the live failure: `interventions:null`;
+ * also any non-record like an array/scalar). `NodeV3.interventions` is
+ * `z.record(...).optional()`, so `GraphV3.safeParse` ACCEPTS absent/`{}`/record
+ * but REJECTS `null` ("Expected object, received null") on read — making the
+ * persisted graph unreadable and rerun fail `options_not_configured`/500. An
+ * ABSENT `interventions` key is safe (optional) and is intentionally NOT flagged.
+ */
+function hasInvalidInterventionsShape(node: Dict): boolean {
+  return 'interventions' in node && !isPlainObject(node.interventions);
+}
+
 function carriedUnitRaw(value: number, src: unknown): RecoveredIntervention {
   if (!isPlainObject(src)) return { value };
   const out: { value: number; unit?: string; raw_value?: number | string | boolean } = { value };
@@ -219,12 +232,75 @@ function findOptionsNeedingPromotion(graph: unknown): string[] {
   return ids;
 }
 
+/** Collect ids of option nodes whose top-level `interventions` is null/non-record. Read-only. */
+function findOptionsWithInvalidInterventions(graph: unknown): string[] {
+  if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) return [];
+  const ids: string[] = [];
+  for (const node of graph.nodes) {
+    if (!isPlainObject(node) || node.kind !== 'option') continue;
+    if (hasInvalidInterventionsShape(node)) {
+      ids.push(typeof node.id === 'string' ? node.id : '<unknown>');
+    }
+  }
+  return ids;
+}
+
 /**
- * Normalise edit-added/edited option interventions to the canonical top-level
- * `InterventionV3` contract before persistence (Source 1/2 overlaid onto
- * top-level, data wins). Returns a repaired CLONE when at least one option
- * carries recoverable non-canonical interventions, otherwise the ORIGINAL
- * reference unchanged.
+ * PASS 1 — the minimal, TOTAL null/non-record invariant sweep. Coerce any
+ * option's top-level `interventions: null` (or a non-record array/scalar) to an
+ * empty record `{}`. Deliberately separate from the recoverable-promotion logic
+ * so that a promotion failure (PASS 2 fail-open) can NEVER re-expose a
+ * parse-breaking `interventions:null` shape. Returns the ORIGINAL reference when
+ * no option is invalid (byte-identical no-op). The only failure mode is a
+ * JSON-clone throw (circular/BigInt graph) — which cannot be persisted as jsonb
+ * anyway — so the caller treats a sweep throw as "nothing persistable to fix".
+ */
+function sweepInvalidOptionInterventions<T>(graph: T): { graph: T; ids: string[] } {
+  const ids = findOptionsWithInvalidInterventions(graph);
+  if (ids.length === 0) return { graph, ids };
+  const clone = JSON.parse(JSON.stringify(graph)) as T;
+  const nodes = (clone as { nodes?: unknown }).nodes;
+  if (Array.isArray(nodes)) {
+    for (const node of nodes) {
+      if (isPlainObject(node) && node.kind === 'option' && hasInvalidInterventionsShape(node)) {
+        node.interventions = {};
+      }
+    }
+  }
+  return { graph: clone, ids };
+}
+
+/** Redacted success summary — IDs + counts only, never values. No-op when nothing changed. */
+function emitNormalised(ids: string[], ctx: OptionContractNormaliseContext): void {
+  if (ids.length === 0) return;
+  safeLog('info', {
+    event: 'v5.graph_persist.option_contract_normalised',
+    scenario_id: ctx.scenarioId,
+    turn_id: ctx.turnId,
+    ...(ctx.turnClass !== undefined ? { turn_class: ctx.turnClass } : {}),
+    ...(ctx.source !== undefined && ctx.source !== null ? { source: ctx.source } : {}),
+    corrected_count: ids.length,
+    node_ids: ids,
+  }, '[commit] normalised edit option interventions to the canonical top-level contract');
+}
+
+/**
+ * Normalise edit-added/edited option interventions before persistence. Two
+ * responsibilities at the single `scenarios.graph` write chokepoint:
+ *
+ *  1. PROMOTE recoverable non-canonical interventions (data.interventions /
+ *     slash-keyed) onto the canonical top-level `InterventionV3` contract
+ *     (Source 1/2 overlaid onto top-level, data wins) — #276/#278.
+ *  2. COERCE an analysis-invalid top-level `interventions` shape (null or a
+ *     non-record) to an empty record `{}` — P0-A add-option containment. An
+ *     option must never persist with `interventions:null`, which `GraphV3`
+ *     rejects on read (rerun 500 / options_not_configured); `{}` is the
+ *     analysis-safe `needs_encoding` state. This is containment only — it does
+ *     not recover any value lost upstream.
+ *
+ * Returns a repaired CLONE when at least one option needs either treatment,
+ * otherwise the ORIGINAL reference unchanged (clean/draft graphs are
+ * byte-identical no-ops).
  */
 export function normaliseOptionInterventionContract<T>(
   graph: T,
@@ -233,41 +309,65 @@ export function normaliseOptionInterventionContract<T>(
   // Graph-absent no-op: nothing to persist/normalise.
   if (graph === undefined || graph === null) return graph;
 
-  // 1. Detect (read-only) — keep clean graphs byte-identical (original reference).
-  let dirtyOptionIds: string[];
+  // ── PASS 1 — TOTAL null/non-record invariant sweep ──────────────────────────
+  // An option must NEVER persist with `interventions:null` (or a non-record),
+  // which GraphV3 rejects on read. This sweep is independent of PASS 2 below: a
+  // promotion failure can never re-expose the parse-breaking shape, because
+  // PASS 2 fail-opens to THIS swept graph, not the raw original.
+  let base: T = graph;
+  let sweptIds: string[] = [];
   try {
-    dirtyOptionIds = findOptionsNeedingPromotion(graph);
+    const swept = sweepInvalidOptionInterventions(graph);
+    base = swept.graph;
+    sweptIds = swept.ids;
+  } catch (err) {
+    // Only reachable on a circular/BigInt graph — which cannot be persisted as
+    // jsonb regardless (the write would fail), so there is no persisted
+    // parse-bomb to prevent here. Fail-open to the original and continue.
+    safeLog('warn', {
+      event: 'v5.graph_persist.option_invariant_sweep_failed',
+      scenario_id: ctx.scenarioId,
+      turn_id: ctx.turnId,
+      error_name: errorClass(err),
+    }, '[commit] option interventions invariant sweep threw; persisting the graph unchanged');
+    base = graph;
+    sweptIds = [];
+  }
+
+  // ── PASS 2 — recoverable promotion (#276/#278), best-effort ─────────────────
+  // Operates on the SWEPT `base`. Every fail-open path returns `base` (which
+  // already satisfies the PASS-1 invariant), NEVER the raw original `graph`.
+  const finishWithoutPromotion = (): T => {
+    emitNormalised(sweptIds, ctx); // no-op when the sweep also changed nothing
+    return base;
+  };
+
+  let promoteIds: string[];
+  try {
+    promoteIds = findOptionsNeedingPromotion(base);
   } catch (err) {
     safeLog('warn', {
       event: 'v5.graph_persist.option_contract_normalise_failed',
-      scenario_id: ctx.scenarioId,
-      turn_id: ctx.turnId,
-      reason: 'detect_failed',
-      error_name: errorClass(err),
-    }, '[commit] option-contract normalise detect threw; persisting the graph unchanged');
-    return graph;
+      scenario_id: ctx.scenarioId, turn_id: ctx.turnId, reason: 'detect_failed', error_name: errorClass(err),
+    }, '[commit] option-contract promotion detect threw; persisting the swept graph');
+    return finishWithoutPromotion();
   }
-  if (dirtyOptionIds.length === 0) return graph; // clean → original reference, unchanged
+  if (promoteIds.length === 0) return finishWithoutPromotion();
 
-  // 2. Clone. A clone failure leaves no repaired artifact → persist the original.
-  //    (Unreachable for DB-JSON graphs: JSON.stringify throws only on BigInt/circular.)
   let clone: T;
   try {
-    clone = JSON.parse(JSON.stringify(graph)) as T;
+    clone = JSON.parse(JSON.stringify(base)) as T;
   } catch (err) {
     safeLog('warn', {
       event: 'v5.graph_persist.option_contract_normalise_failed',
-      scenario_id: ctx.scenarioId,
-      turn_id: ctx.turnId,
-      reason: 'clone_failed',
-      error_name: errorClass(err),
-    }, '[commit] option-contract normalise could not clone the graph; persisting the graph unchanged');
-    return graph;
+      scenario_id: ctx.scenarioId, turn_id: ctx.turnId, reason: 'clone_failed', error_name: errorClass(err),
+    }, '[commit] option-contract promotion could not clone the graph; persisting the swept graph');
+    return finishWithoutPromotion();
   }
 
-  // 3. Merge on the CLONE. Any throw discards the clone and persists the
-  //    untouched original — fail-open never leaves a node with data stripped but
-  //    no top-level bundle.
+  // Merge on the CLONE. Any throw discards the clone and persists the SWEPT base
+  // (PASS-1 invariant intact) — never a node with data stripped but no top-level
+  // bundle, and never a re-exposed interventions:null.
   try {
     const nodes = (clone as { nodes?: unknown }).nodes;
     if (Array.isArray(nodes)) {
@@ -289,24 +389,12 @@ export function normaliseOptionInterventionContract<T>(
   } catch (err) {
     safeLog('warn', {
       event: 'v5.graph_persist.option_contract_normalise_failed',
-      scenario_id: ctx.scenarioId,
-      turn_id: ctx.turnId,
-      reason: 'merge_failed',
-      error_name: errorClass(err),
-    }, '[commit] option-contract normalise threw after cloning; persisting the original graph unchanged');
-    return graph;
+      scenario_id: ctx.scenarioId, turn_id: ctx.turnId, reason: 'merge_failed', error_name: errorClass(err),
+    }, '[commit] option-contract promotion threw after cloning; persisting the swept graph');
+    return finishWithoutPromotion();
   }
 
-  // 4. Merge succeeded. Redacted summary: IDs + counts only, never values.
-  safeLog('info', {
-    event: 'v5.graph_persist.option_contract_normalised',
-    scenario_id: ctx.scenarioId,
-    turn_id: ctx.turnId,
-    ...(ctx.turnClass !== undefined ? { turn_class: ctx.turnClass } : {}),
-    ...(ctx.source !== undefined && ctx.source !== null ? { source: ctx.source } : {}),
-    corrected_count: dirtyOptionIds.length,
-    node_ids: dirtyOptionIds,
-  }, '[commit] normalised edit option interventions to the canonical top-level contract');
-
+  // Both passes succeeded. Redacted summary: union of swept + promoted ids.
+  emitNormalised([...new Set([...sweptIds, ...promoteIds])], ctx);
   return clone;
 }
