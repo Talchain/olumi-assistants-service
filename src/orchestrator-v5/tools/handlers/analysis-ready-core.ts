@@ -172,6 +172,11 @@ function classifyUnresolvedOptions(
       for (const [fac, srcRaw] of Object.entries(bundle)) {
         const src = isPlainObject(srcRaw) ? srcRaw : {};
         if (finiteNum(src.value) !== undefined) continue; // value present → not the blocker
+        // NO_CAP / UNIT_MISMATCH are honest blockers ONLY when there is actual raw-value
+        // intent to normalise. An empty/malformed entry (no value AND no raw_value) is NOT a
+        // missing-cap or unit problem — it falls through to the generic reason so the recovery
+        // copy never wrongly tells the user the factor "needs a bound". (Codex 4524991061.)
+        if (finiteNum(src.raw_value) === undefined) continue;
         const factor = factorById.get(fac);
         // Target factor doesn't resolve (or SHAPE-2 ambiguous): not specifically a cap or
         // unit problem → fall through to the generic OPTION_INTERVENTION_UNRESOLVABLE reason.

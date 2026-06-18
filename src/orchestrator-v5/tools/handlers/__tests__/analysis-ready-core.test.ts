@@ -208,6 +208,13 @@ describe('EP2 readiness core — defer-reason coverage vs the (post-#281) encode
         );
       },
     ), 'OPTION_INTERVENTION_UNRESOLVABLE'],
+    // Codex review 4524991061: empty/malformed entry + factor has NO cap + NO raw-value intent
+    // → must stay GENERIC, not NO_CAP_UNRECOVERABLE (the cap is not the blocker; there is no
+    // value to bound, so "needs a bound" copy would be misleading).
+    ['empty intervention + factor has no cap', withBrokenOptHybrid(
+      (o) => { o.interventions = { fac_annual_cost: {} }; },
+      (g) => { (nodeById(g, 'fac_annual_cost') as Dict).observed_state = { value: 0.6, unit: '£' }; },
+    ), 'OPTION_INTERVENTION_UNRESOLVABLE'],
   ];
 
   it.each(cases)('encoder defer "%s" → unrecoverable + typed reason %s + non-empty next step', (_label, graph, expectedCode) => {
@@ -218,6 +225,34 @@ describe('EP2 readiness core — defer-reason coverage vs the (post-#281) encode
     expect(r.reasonCodes[0]).toBe(expectedCode);
     expect(typeof r.nextStep).toBe('string');
     expect((r.nextStep ?? '').length).toBeGreaterThan(0); // every reason has user-safe copy
+  });
+
+  // Codex review 4524991061 — the misclassification regression + its honest-copy guarantee,
+  // and the kept missing-cap-WITH-raw-value mapping (must still be NO_CAP_UNRECOVERABLE).
+  it('empty intervention + missing cap (no raw-value intent) → generic, NOT NO_CAP, with honest copy', () => {
+    const g = makeBase();
+    const opt = nodeById(g, 'opt_hybrid')!;
+    delete opt.interventions;
+    opt.interventions = { fac_annual_cost: {} };                                  // empty/malformed: no value, no raw_value
+    (nodeById(g, 'fac_annual_cost') as Dict).observed_state = { value: 0.6, unit: '£' }; // factor has NO cap
+    const r = assessAnalysisReadiness(g);
+    expect(r.status).toBe('unrecoverable');
+    expect(r.reasonCodes[0]).toBe('OPTION_INTERVENTION_UNRESOLVABLE');
+    expect(r.reasonCodes).not.toContain('NO_CAP_UNRECOVERABLE');
+    const copy = (r.nextStep ?? '').toLowerCase();
+    expect(copy.length).toBeGreaterThan(0);
+    expect(copy).not.toMatch(/\bcap\b|\bbound\b/); // copy must NOT imply a missing cap
+  });
+
+  it('regression kept: raw-value intent + missing cap → NO_CAP_UNRECOVERABLE (the cap IS the blocker)', () => {
+    const g = makeBase();
+    const opt = nodeById(g, 'opt_hybrid')!;
+    delete opt.interventions;
+    opt.data = { interventions: { fac_annual_cost: { raw_value: 120000 } } };     // real raw-value intent
+    (nodeById(g, 'fac_annual_cost') as Dict).observed_state = { value: 0.6, unit: '£' }; // factor has NO cap
+    const r = assessAnalysisReadiness(g);
+    expect(r.status).toBe('unrecoverable');
+    expect(r.reasonCodes[0]).toBe('NO_CAP_UNRECOVERABLE');
   });
 });
 
