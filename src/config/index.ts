@@ -527,6 +527,11 @@ const ConfigSchema = z.object({
     // Default OFF in production; staging sets V5_TIMING_DEBUG=true so the
     // replay harness can request `_timings` via the debug header.
     timingDebugEnabled: booleanString.default(false),
+    // CEE → PLoT intervention value-scale egress net (CEE_PLOT_EGRESS_SCALE_NET_ENABLED).
+    // When true, the run_analysis projection boundary canonicalises outbound
+    // option interventions to RAW user-scale (evidence-gated) before they reach
+    // PLoT. Default OFF: the net ships dark and is a runtime no-op until enabled.
+    plotEgressScaleNetEnabled: booleanString.default(false),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
@@ -928,6 +933,7 @@ function parseConfig(): Config {
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
       pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
       timingDebugEnabled: env.V5_TIMING_DEBUG,
+      plotEgressScaleNetEnabled: env.CEE_PLOT_EGRESS_SCALE_NET_ENABLED,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
       promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
       fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,
