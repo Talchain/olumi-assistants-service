@@ -102,7 +102,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
     // redacted summary: option ids + counts only
     const calls = info.mock.calls
       .map((c) => c[0] as Record<string, unknown>)
-      .filter((p) => p?.event === 'v5.graph_persist.option_contract_normalised');
+      .filter((p) => p?.event === 'v5.graph_persist.interventions_normalised');
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ corrected_count: 1, node_ids: ['opt_hybrid'] });
     for (const k of ['interventions', 'value', 'before', 'after', 'graph', 'nodes', 'data', 'raw_value']) {
@@ -244,7 +244,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
       edges: [{ from: 'opt_hire', to: 'fac_annual_cost' }],
     };
     expect(normaliseOptionInterventionContract(g)).toBe(g); // no clone churn
-    expect(info.mock.calls.filter((c) => (c[0] as { event?: string })?.event === 'v5.graph_persist.option_contract_normalised')).toHaveLength(0);
+    expect(info.mock.calls.filter((c) => (c[0] as { event?: string })?.event === 'v5.graph_persist.interventions_normalised')).toHaveLength(0);
   });
 
   it('NO-OP: a chip-click/proposal-shaped graph with valid top-level interventions is unchanged (reference identity)', () => {
@@ -340,7 +340,7 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
     expect(out).not.toBe(g); // clone produced
     expect((g.nodes[0] as AnyNode).interventions).toBeNull(); // input not mutated
     const calls = info.mock.calls.map((c) => c[0] as Record<string, unknown>)
-      .filter((p) => p?.event === 'v5.graph_persist.option_contract_normalised');
+      .filter((p) => p?.event === 'v5.graph_persist.interventions_normalised');
     expect(calls[0]).toMatchObject({ corrected_count: 1, node_ids: ['opt_null'] });
   });
 
@@ -421,15 +421,17 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
     const g: AnyGraph = {
       nodes: [
         { id: 'opt_null', kind: 'option', label: 'N', interventions: null },                   // PASS 1 must sweep → {}
+        { id: 'fac_null', kind: 'factor', label: 'F', interventions: null },                    // PASS 1 must sweep a NON-OPTION too
         { id: 'opt_rec', kind: 'option', label: 'R', data: { interventions: { fac_a: 0.4 } } }, // triggers PASS 2 → forced throw
       ],
       edges: [],
     };
     const out = fn(g) as AnyGraph;
 
-    // Promotion threw, but the null→{} invariant survived (NOT the original null):
+    // Promotion threw, but the node-level null→{} invariant survived for BOTH the
+    // option and the non-option node (NOT the original null):
     expect(nodeById(out, 'opt_null').interventions).toEqual({});
-    expect(nodeById(out, 'opt_null').interventions).not.toBeNull();
+    expect(nodeById(out, 'fac_null').interventions).toEqual({});
     expect(out).not.toBe(g);                                   // returned the swept graph, not the raw original
     expect((g.nodes[0] as AnyNode).interventions).toBeNull();  // input not mutated
 

@@ -41,20 +41,31 @@
  * so the policy is mirrored here rather than shared. Centralising the
  * precedence into one helper is a deliberate (non-blocking) follow-up.
  *
+ * P0-A add-option containment (the node-level invariant): separately, NO node
+ * may persist with a top-level `interventions` that is `null` or a non-record
+ * (array/scalar). `NodeV3.interventions` is `z.record(...).optional()` on EVERY
+ * kind, so `GraphV3.safeParse` REJECTS such a shape on read for ANY node (not
+ * just options) → the persisted graph is unreadable and rerun fails
+ * `options_not_configured`/500. PASS 1 below sweeps every node's invalid shape
+ * to an empty record `{}` (the analysis-safe `needs_encoding` state). This is
+ * containment only — it does not recover a value lost upstream. The
+ * (option-only) recoverable promotion above is PASS 2.
+ *
  * Scope: INDEPENDENT of the Track S persist-site intercept repair
  * (`repairGraphForPersistence`), which it runs alongside — that operates on
  * factor observed-root intercepts; this operates on option intervention
- * bundles. The two touch disjoint node sets and commute.
+ * bundles + the node-level interventions-shape invariant. Disjoint fields; they
+ * commute.
  *
  * Safety (mirrors the persist-site repair doctrine):
  *  - No-op when there is no graph to persist (undefined/null) → returns the input.
- *  - Returns the ORIGINAL reference UNCHANGED when no option carries recoverable
- *    `data.interventions`/slash-keyed entries (every draft graph: its options
- *    carry only top-level interventions), so a no-promotion write is
- *    byte-identical to before this change.
- *  - Fail-open: never fails a commit. A detect/clone/merge throw persists the
- *    ORIGINAL graph unchanged (the clone is discarded). Emits a redacted warning
- *    (IDs + counts only, never values or graph content).
+ *  - Returns the ORIGINAL reference UNCHANGED when no node needs the invariant
+ *    sweep AND no option carries recoverable `data.interventions`/slash-keyed
+ *    entries (every draft graph), so a no-change write is byte-identical.
+ *  - Fail-open with a floor: PASS 1 (the null/non-record sweep) is total; PASS 2
+ *    (promotion) is best-effort and, on any detect/clone/merge throw, fail-opens
+ *    to the SWEPT graph — never re-exposing a parse-breaking shape. Emits a
+ *    redacted warning (IDs + counts only, never values or graph content).
  */
 import { extractNumericIntervention } from '../orchestrator/tools/analysis-ready-helper.js';
 import { log } from '../utils/telemetry.js';
@@ -111,7 +122,10 @@ function isPlainObject(v: unknown): v is Dict {
  * so `GraphV3.safeParse` ACCEPTS absent/`{}`/record but REJECTS `null`/array/
  * scalar ("Expected object, received null") on read for ANY node, making the
  * persisted graph unreadable and rerun fail `options_not_configured`/500. An
- * ABSENT `interventions` key is safe (optional) and is intentionally NOT flagged.
+ * An ABSENT `interventions` key is safe (optional) and NOT flagged. An explicit
+ * `undefined` value is likewise treated as absent: it is not persistable JSON
+ * (JSON.stringify drops undefined-valued keys), so it is not a parse-bomb and
+ * flagging it would only cost an unnecessary clone + a misleading log.
  *
  * JSON-only assumption: `scenarios.graph` is a Postgres `jsonb` column, so a
  * persisted node's `interventions` is always a JSON value (object / array /
@@ -121,7 +135,7 @@ function isPlainObject(v: unknown): v is Dict {
  * is a valid record. Non-JSON objects cannot reach this path.
  */
 function hasInvalidInterventionsShape(node: Dict): boolean {
-  return 'interventions' in node && !isPlainObject(node.interventions);
+  return 'interventions' in node && node.interventions !== undefined && !isPlainObject(node.interventions);
 }
 
 function carriedUnitRaw(value: number, src: unknown): RecoveredIntervention {
@@ -285,18 +299,24 @@ function sweepInvalidNodeInterventions<T>(graph: T): { graph: T; ids: string[] }
   return { graph: clone, ids };
 }
 
-/** Redacted success summary — IDs + counts only, never values. No-op when nothing changed. */
+/**
+ * Redacted success summary — IDs + counts only, never values. No-op when nothing
+ * changed. `node_ids` are the affected nodes from EITHER pass — the node-level
+ * invariant sweep (any kind) and/or the option-only recoverable promotion — so
+ * the event name is node-neutral (it can fire for a factor/decision/goal/risk
+ * node swept by PASS 1, not just options).
+ */
 function emitNormalised(ids: string[], ctx: OptionContractNormaliseContext): void {
   if (ids.length === 0) return;
   safeLog('info', {
-    event: 'v5.graph_persist.option_contract_normalised',
+    event: 'v5.graph_persist.interventions_normalised',
     scenario_id: ctx.scenarioId,
     turn_id: ctx.turnId,
     ...(ctx.turnClass !== undefined ? { turn_class: ctx.turnClass } : {}),
     ...(ctx.source !== undefined && ctx.source !== null ? { source: ctx.source } : {}),
     corrected_count: ids.length,
     node_ids: ids,
-  }, '[commit] normalised edit option interventions to the canonical top-level contract');
+  }, '[commit] normalised graph node interventions (option-contract promotion and/or invalid-shape sweep)');
 }
 
 /**
@@ -340,11 +360,11 @@ export function normaliseOptionInterventionContract<T>(
     // jsonb regardless (the write would fail), so there is no persisted
     // parse-bomb to prevent here. Fail-open to the original and continue.
     safeLog('warn', {
-      event: 'v5.graph_persist.option_invariant_sweep_failed',
+      event: 'v5.graph_persist.interventions_sweep_failed',
       scenario_id: ctx.scenarioId,
       turn_id: ctx.turnId,
       error_name: errorClass(err),
-    }, '[commit] option interventions invariant sweep threw; persisting the graph unchanged');
+    }, '[commit] node interventions invariant sweep threw; persisting the graph unchanged');
     base = graph;
     sweptIds = [];
   }
