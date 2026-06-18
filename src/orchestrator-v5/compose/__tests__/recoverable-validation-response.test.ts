@@ -117,6 +117,12 @@ function sampleError(code: ValidationErrorCode): ValidationError {
         message: 'Option intervention implied',
         details: { handler_id: 'set_factor_value', factor_label: 'Annual Support Cost' },
       };
+    case 'VALUE_UNIT_UNRESOLVED':
+      return {
+        code,
+        message: 'Value unit unresolved',
+        details: { handler_id: 'set_factor_value', factor_label: 'Marketing budget', user_unit_family: 'count', factor_unit_family: 'currency' },
+      };
     case 'PRECONDITION_UNMET':
       return {
         code,
@@ -134,6 +140,7 @@ const ALL_CODES: readonly ValidationErrorCode[] = [
   'ENTITY_RESOLUTION_SUSPICIOUS',
   'PARAMETER_INVALID',
   'OPTION_INTERVENTION_MISROUTE',
+  'VALUE_UNIT_UNRESOLVED',
   'PRECONDITION_UNMET',
 ];
 

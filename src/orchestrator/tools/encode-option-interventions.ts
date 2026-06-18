@@ -185,10 +185,22 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
  * @param touchedOptionIds  option ids the edit referenced; only these can flag an
  *   unresolved/defer (a pre-existing malformed option cannot block an unrelated
  *   edit). When undefined, every option may flag.
+ * @param mustConfigureOptionIds  option ids this edit ADDED while REQUESTING an
+ *   intervention configuration (the `add_node` payload carried intervention
+ *   intent). Configure-or-don't-persist (P0-A): if such an option ends up with
+ *   zero canonical top-level interventions — because cap/unit/evidence/encoding
+ *   was missing so the requested value could not be derived — it would persist
+ *   as `interventions:null` and make run_analysis fail `options_not_configured`,
+ *   so it is DEFERRED (the edit rejects, graph unchanged). This is INTENT-scoped,
+ *   NOT "any added option": an option added with NO intervention request (an
+ *   intentional `needs_encoding` option, configured in a later turn) is a valid
+ *   intermediate state and must NOT block — only a FAILED configuration attempt
+ *   does. The caller derives this set from the add operations' payloads.
  */
 export function encodeOptionInterventionsForEdit<T>(
   graph: T,
   touchedOptionIds?: ReadonlySet<string>,
+  mustConfigureOptionIds?: ReadonlySet<string>,
 ): EncodeOptionInterventionsResult<T> {
   if (!isPlainObject(graph) || !Array.isArray((graph as Dict).nodes)) {
     return { graph, unresolvedOptionIds: [] };
@@ -227,6 +239,7 @@ export function encodeOptionInterventionsForEdit<T>(
       if (!isPlainObject(node) || node.kind !== 'option') continue;
       const id = typeof node.id === 'string' ? node.id : '<unknown>';
       const isTouched = !touchedOptionIds || touchedOptionIds.has(id);
+      const mustConfigure = mustConfigureOptionIds !== undefined && mustConfigureOptionIds.has(id);
       const targets = optionTargets.get(id) ?? [];
       const recovered = gatherRawInterventions(node, targets);
 
@@ -245,11 +258,23 @@ export function encodeOptionInterventionsForEdit<T>(
         // ambiguous target — zero or multiple factor edges) is malformed → defer.
         // NOTE: an option merely WIRED to factors with no interventions is a valid
         // intermediate ("needs encoding") state — NOT a malformed intervention — so
-        // it is left alone. Deferring it would wrongly reject an unrelated edit
-        // (e.g. a label rename) on such a pre-existing under-configured option.
+        // it is left alone for EDITS. Deferring it would wrongly reject an unrelated
+        // edit (e.g. a label rename) on such a pre-existing under-configured option.
         if (Object.keys(base).length === 0) {
-          const nodeLevelIntent = finiteNum(node.raw_value) !== undefined || finiteNum(node.value) !== undefined;
-          if (nodeLevelIntent && isTouched) unresolved.push(id);
+          if (mustConfigure) {
+            // P0-A configure-or-don't-persist: this option was ADDED while
+            // REQUESTING an intervention configuration, but it ends up with zero
+            // canonical top-level interventions — the requested value could not
+            // be encoded (cap/unit/evidence/encoding missing) and collapsed away.
+            // Persisting it as interventions:null would make run_analysis fail
+            // options_not_configured. Defer so the graph is unchanged. (An option
+            // added with NO request — an intentional needs_encoding option — is
+            // NOT in this set, so it still passes through.)
+            unresolved.push(id);
+          } else {
+            const nodeLevelIntent = finiteNum(node.raw_value) !== undefined || finiteNum(node.value) !== undefined;
+            if (nodeLevelIntent && isTouched) unresolved.push(id);
+          }
         }
         continue;
       }
@@ -266,8 +291,12 @@ export function encodeOptionInterventionsForEdit<T>(
       }
 
       if (optionUnresolved) {
-        if (isTouched) unresolved.push(id);
-        continue; // leave malformed; discarded if the edit defers (touched), else untouched
+        // Touched (edit referenced it) OR a must-configure add (new option that
+        // requested an intervention that cannot be encoded, e.g. an uncappable
+        // factor) → defer. A must-configure add must not persist unconfigured
+        // (P0-A), the same as a touched option.
+        if (isTouched || mustConfigure) unresolved.push(id);
+        continue; // leave malformed; discarded if the edit defers, else untouched
       }
       plan.push({ index: i, id, bundle });
     }
@@ -314,7 +343,13 @@ export function encodeOptionInterventionsForEdit<T>(
         '[edit_graph] option-intervention encode threw; deferring touched options',
       );
     } catch { /* observability best-effort */ }
-    return { graph, unresolvedOptionIds: touchedOptionIds ? Array.from(touchedOptionIds) : [] };
+    // Defer the touched set AND any must-configure adds (a failed encode must
+    // never leave an added-with-intent option persisted unconfigured).
+    const deferOnError = new Set<string>([
+      ...(touchedOptionIds ? touchedOptionIds : []),
+      ...(mustConfigureOptionIds ? mustConfigureOptionIds : []),
+    ]);
+    return { graph, unresolvedOptionIds: Array.from(deferOnError) };
   }
 }
 
@@ -343,4 +378,51 @@ export function optionIdsTouchedByOperations(
     }
   }
   return touched;
+}
+
+/** True when an add_node option payload REQUESTED an intervention (any shape). */
+function addPayloadRequestsIntervention(value: Dict): boolean {
+  // Top-level interventions bundle with at least one entry.
+  if (isPlainObject(value.interventions) && Object.keys(value.interventions as Dict).length > 0) return true;
+  // data.interventions bundle (SHAPE 1) with at least one entry.
+  const data = value.data;
+  if (isPlainObject(data) && isPlainObject((data as Dict).interventions) && Object.keys((data as Dict).interventions as Dict).length > 0) {
+    return true;
+  }
+  // Slash-keyed flat entries `data/interventions/<fac>`.
+  for (const k of Object.keys(value)) {
+    if (SLASH_KEY_RE.test(k)) return true;
+  }
+  // Node-level scalar intent (SHAPE 2): a unit/raw_value/value smeared on the option.
+  if (finiteNum(value.raw_value) !== undefined || finiteNum(value.value) !== undefined || typeof value.unit === 'string') {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Option ids ADDED by this edit (`add_node`, kind `option`) whose payload
+ * REQUESTED an intervention configuration. These are the configure-or-don't-
+ * persist set (P0-A): if the requested value cannot be encoded into canonical
+ * top-level interventions (cap/unit/evidence missing), the add must DEFER
+ * rather than persist an `interventions:null` option that later fails
+ * run_analysis with `options_not_configured`.
+ *
+ * Deliberately INTENT-scoped: an option added with NO intervention request (an
+ * intentional `needs_encoding` option to configure in a later turn) is NOT in
+ * this set, so the established two-phase add flow is preserved.
+ */
+export function optionIdsAddedWithInterventionIntent(
+  operations: ReadonlyArray<{ op?: unknown; value?: unknown }>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const op of operations) {
+    if (op.op !== 'add_node') continue;
+    const value = op.value;
+    if (!isPlainObject(value) || value.kind !== 'option') continue;
+    const id = typeof value.id === 'string' ? value.id : undefined;
+    if (id === undefined) continue;
+    if (addPayloadRequestsIntervention(value)) ids.add(id);
+  }
+  return ids;
 }

@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   encodeOptionInterventionsForEdit,
   optionIdsTouchedByOperations,
+  optionIdsAddedWithInterventionIntent,
 } from '../encode-option-interventions.js';
 
 type Dict = Record<string, unknown>;
@@ -214,5 +215,108 @@ describe('encodeOptionInterventionsForEdit (add-option encoding)', () => {
       expect(() => encodeOptionInterventionsForEdit(bad)).not.toThrow();
       expect(encodeOptionInterventionsForEdit(bad).graph).toBe(bad);
     }
+  });
+});
+
+describe('optionIdsAddedWithInterventionIntent (intent-scoped add detection)', () => {
+  it('flags an add whose payload carried data.interventions intent', () => {
+    const ops = [{ op: 'add_node', value: { id: 'opt_a', kind: 'option', data: { interventions: { fac_annual_cost: { unit: '£', raw_value: 120000 } } } } }];
+    expect([...optionIdsAddedWithInterventionIntent(ops)]).toEqual(['opt_a']);
+  });
+  it('flags an add whose payload carried top-level interventions intent', () => {
+    const ops = [{ op: 'add_node', value: { id: 'opt_b', kind: 'option', interventions: { fac_annual_cost: { unit: '£', raw_value: 120000 } } } }];
+    expect([...optionIdsAddedWithInterventionIntent(ops)]).toEqual(['opt_b']);
+  });
+  it('flags an add whose payload carried node-level scalar intent (SHAPE 2)', () => {
+    const ops = [{ op: 'add_node', value: { id: 'opt_c', kind: 'option', unit: '£', raw_value: 120000 } }];
+    expect([...optionIdsAddedWithInterventionIntent(ops)]).toEqual(['opt_c']);
+  });
+  it('does NOT flag a bare needs_encoding add (empty interventions, no request)', () => {
+    const ops = [
+      { op: 'add_node', value: { id: 'opt_bare', kind: 'option', data: { interventions: {} } } },
+      { op: 'add_node', value: { id: 'opt_none', kind: 'option', label: 'No effect' } },
+    ];
+    expect([...optionIdsAddedWithInterventionIntent(ops)]).toEqual([]);
+  });
+  it('ignores non-option adds and non-add ops', () => {
+    const ops = [
+      { op: 'add_node', value: { id: 'fac_x', kind: 'factor', unit: '£', raw_value: 5 } },
+      { op: 'update_node', value: { id: 'opt_x', kind: 'option', interventions: { f: { raw_value: 1 } } } },
+    ];
+    expect([...optionIdsAddedWithInterventionIntent(ops)]).toEqual([]);
+  });
+});
+
+describe('encodeOptionInterventionsForEdit (P0-A configure-or-don\'t-persist for added options)', () => {
+  // The COMBINED-BUILD live failure: edit_graph ADDED an option that REQUESTED a
+  // £ intervention on a drafted cost factor with no cap; the value could not be
+  // derived and the option committed with interventions:null, so a later
+  // run_analysis returned options_not_configured. The fix defers (graph
+  // unchanged) an added option that REQUESTED a configuration it cannot produce
+  // — INTENT-scoped, so an intentional bare needs_encoding add still passes.
+
+  it('ADD-with-intent (defer): requested intervention collapsed to interventions:null → unresolved, graph unchanged', () => {
+    // The requested value did not survive to the node (collapsed away upstream),
+    // but the add was a configuration attempt, so it must not persist unconfigured.
+    const g = {
+      nodes: [goal(), cappedFactor(), { id: 'opt_null', kind: 'option', label: 'Null IV', interventions: null }],
+      edges: [edge('opt_null', 'fac_annual_cost')],
+    };
+    const before = JSON.stringify(g);
+    const out = encodeOptionInterventionsForEdit(g, new Set(['opt_null']), new Set(['opt_null']));
+    expect(out.unresolvedOptionIds).toEqual(['opt_null']);
+    expect(out.graph).toBe(g);
+    expect(JSON.stringify(g)).toBe(before);
+  });
+
+  it('ADD-with-intent (defer): requested intervention cannot be encoded (uncappable factor) → unresolved', () => {
+    const g = {
+      nodes: [goal(), uncappedFactor(), { id: 'opt_unc', kind: 'option', label: 'Unc', data: { interventions: { fac_inhouse_capacity: { unit: 'agents', raw_value: 2 } } } }],
+      edges: [edge('opt_unc', 'fac_inhouse_capacity')],
+    };
+    const out = encodeOptionInterventionsForEdit(g, new Set(['opt_unc']), new Set(['opt_unc']));
+    expect(out.unresolvedOptionIds).toEqual(['opt_unc']);
+    expect(out.graph).toBe(g);
+  });
+
+  it('ADD-with-intent (encode): a requested intervention that IS encodable (capped factor) → encodes, NOT deferred (Gate-1 PASS preserved)', () => {
+    const g = {
+      nodes: [goal(), cappedFactor(), { id: 'opt_ok', kind: 'option', label: 'OK', data: { interventions: { fac_annual_cost: { unit: '£', raw_value: 120000 } } } }],
+      edges: [edge('opt_ok', 'fac_annual_cost')],
+    };
+    const { graph, unresolvedOptionIds } = encodeOptionInterventionsForEdit(g, new Set(['opt_ok']), new Set(['opt_ok']));
+    expect(unresolvedOptionIds).toEqual([]);
+    expect(iv(optionOf(graph as { nodes: Dict[] }, 'opt_ok'), 'fac_annual_cost').value).toBe(0.8);
+  });
+
+  it('ADD-without-intent (allow): a bare needs_encoding add (not in must-configure) is NOT deferred — preserves the two-phase add flow', () => {
+    // Mirrors the orphan-option contract: an option added wired-but-unconfigured,
+    // with no requested intervention, is a valid intermediate state.
+    const g = {
+      nodes: [goal(), cappedFactor(), { id: 'opt_needs', kind: 'option', label: 'Configure later' }],
+      edges: [edge('opt_needs', 'fac_annual_cost')],
+    };
+    const out = encodeOptionInterventionsForEdit(g, new Set(['opt_needs']), new Set() /* no requested config */);
+    expect(out.unresolvedOptionIds).toEqual([]);
+    expect(out.graph).toBe(g);
+  });
+
+  it('RENAME (allow): a PRE-EXISTING wired-but-unconfigured option, touched by a rename, is NOT deferred', () => {
+    const g = {
+      nodes: [goal(), cappedFactor(), { id: 'opt_rename', kind: 'option', label: 'Renamed' }],
+      edges: [edge('opt_rename', 'fac_annual_cost')],
+    };
+    const out = encodeOptionInterventionsForEdit(g, new Set(['opt_rename']), new Set() /* not an add */);
+    expect(out.unresolvedOptionIds).toEqual([]);
+    expect(out.graph).toBe(g);
+  });
+
+  it('opt-in: omitting the must-configure set preserves the legacy lenient behaviour', () => {
+    const g = {
+      nodes: [goal(), cappedFactor(), { id: 'opt_legacy', kind: 'option', label: 'Legacy' }],
+      edges: [edge('opt_legacy', 'fac_annual_cost')],
+    };
+    const out = encodeOptionInterventionsForEdit(g, new Set(['opt_legacy']));
+    expect(out.unresolvedOptionIds).toEqual([]);
   });
 });

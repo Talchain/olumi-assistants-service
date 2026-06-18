@@ -72,4 +72,30 @@ describe('edit_graph add-option encoding — boundary replay', () => {
     expect(out.unresolvedOptionIds).toEqual(['opt_u']); // caller (edit handler) defers → graph never committed
     expect(out.graph).toBe(g);
   });
+
+  it('P0-A: ADDED option that REQUESTED a configuration it could not encode → defer; the rerun graph stays analysis-ready (no options_not_configured)', () => {
+    // The COMBINED-BUILD live failure: an ADDED option REQUESTED a £ intervention
+    // on a drafted factor with no cap; the value could not be derived and
+    // collapsed to interventions:null; the next run_analysis returned
+    // options_not_configured. The must-configure set (intent-scoped) carries that
+    // request, so the encoder defers it even though the node now looks empty.
+    const g = {
+      nodes: [...baseNodes(), { id: 'opt_unconf', kind: 'option', label: 'Unconfigured' }],
+      edges: [edge('opt_unconf', 'fac_annual_cost')],
+    };
+    // CONTROL: were this option persisted, it reaches run_analysis with zero
+    // numeric interventions after safeParse → the options_not_configured class.
+    expect(readinessOption(g, 'opt_unconf').status).toBe('needs_encoding');
+    expect(Object.keys(readinessOption(g, 'opt_unconf').interventions)).toHaveLength(0);
+    // FIXED (P0-A configure-or-don't-persist): the add requested a configuration
+    // (so it is in the must-configure set), so the encoder defers — graph
+    // unchanged, the edit handler rejects, nothing is committed.
+    const out = encodeOptionInterventionsForEdit(g, new Set(['opt_unconf']), new Set(['opt_unconf']));
+    expect(out.unresolvedOptionIds).toEqual(['opt_unconf']);
+    expect(out.graph).toBe(g);
+    // The graph the rerun reads (pre-add baseline) keeps its ready options, so
+    // run_analysis does NOT trip options_not_configured.
+    expect(readinessOption(g, 'opt_a').status).toBe('ready');
+    expect(readinessOption(g, 'opt_b').status).toBe('ready');
+  });
 });
