@@ -360,6 +360,35 @@ function composeOptionInterventionMisroute(error: ValidationError): BranchResult
 }
 
 /**
+ * P0-A value/unit fail-closed containment. The user expressed a value whose
+ * unit cannot be resolved against the target factor with confidence (e.g.
+ * "Set Hiring Cost to 5 agents" — a headcount value on a £ factor, or
+ * "50 percent" on a currency factor). The turn-executor refused the mutation
+ * and routed this code so we clarify instead of silently coercing the bare
+ * number. No auto-routing chip (a replay would drop the same unit and loop) —
+ * a single text-prompt to restate the value with a clear unit. The graph is
+ * unchanged by the time this composes.
+ */
+function composeValueUnitUnresolved(error: ValidationError): BranchResult {
+  const details = error.details ?? {};
+  const factorLabel = readString(details.factor_label);
+  const subject = factorLabel
+    ? `the ${safeLabel({ label: factorLabel, kind: undefined })} factor`
+    : `that factor`;
+  return {
+    body: {
+      assistant_text:
+        `I wasn't sure what value to use for ${subject}, so I haven't ` +
+        `changed anything. Please tell me the value with its unit, for ` +
+        `example £100,000, and I'll apply it.`,
+      suggested_actions: [fallbackPrompt('Give the value with its unit')],
+    },
+    template_id: 'value_unit_unresolved',
+    chip_type: 'text_prompt',
+  };
+}
+
+/**
  * Composer map — `Record<ValidationErrorCode, BranchComposerFn>` with
  * TypeScript exhaustiveness. Adding a new code to the `ValidationErrorCode`
  * union without adding an entry here is a compile error (see
@@ -375,6 +404,7 @@ export const VALIDATION_COMPOSERS: Readonly<Record<ValidationErrorCode, BranchCo
   PRECONDITION_UNMET: (e) => composePreconditionUnmet(e),
   PARAMETER_INVALID: (e) => composeParameterInvalid(e),
   OPTION_INTERVENTION_MISROUTE: (e) => composeOptionInterventionMisroute(e),
+  VALUE_UNIT_UNRESOLVED: (e) => composeValueUnitUnresolved(e),
 };
 
 /**

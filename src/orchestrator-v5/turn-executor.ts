@@ -102,6 +102,7 @@ import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
 import { impliesOptionInterventionEdit } from './routing/option-intervention-guard.js';
+import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
 import {
   deriveContextReadiness,
   type ContextReadiness,
@@ -3875,6 +3876,65 @@ export async function runTurnExecutor(
             },
           },
         };
+      }
+
+      // P0-A value/unit fail-closed containment. A set_factor_value request can
+      // express the value with a unit the upstream pipeline silently DROPS
+      // ("Set Incremental Hiring Cost to 5 agents" → CQE does not recognise
+      // "agents", so the proposal carries a bare 5 that sits inside the £
+      // factor's cap and every existing guard passes — the factor became £5).
+      // The `unit_mismatch` predicate cannot catch this because the dropped
+      // unit never reaches it, and a bare number against a typed factor is a
+      // legitimate "reuse the existing unit" case the predicate must keep
+      // accepting. So we inspect the RAW user message here — the only place the
+      // dropped token survives — and fail closed when the value's unit token
+      // belongs to a different family than the factor's stored unit. Placed
+      // AFTER the misroute guard: both short-circuit on `validationResult.valid`
+      // so an option-intervention edit stays classified as misroute. Refuses
+      // ONLY the unresolvable case; clean numeric / matching-unit / untyped-
+      // factor edits are untouched. Reuses the recoverable-validator path
+      // (clarify, direct_answer, graph unchanged, no handler executes).
+      if (
+        validationResult.valid &&
+        proposedHandlerId === 'set_factor_value' &&
+        graphLookupForValidate?.findFactorObservedState !== undefined
+      ) {
+        const factorObs = graphLookupForValidate.findFactorObservedState(action.entity.id);
+        // Bind the check to the value the handler would apply (not just the last
+        // number in the message), so a compound turn is judged on this factor's
+        // own value. The value parameter is a bare number or { value, unit?, cap? }.
+        const valueParam = action.parameters.find((p) => p.name === 'value');
+        const rawValueParam = valueParam?.value;
+        const proposedValue =
+          typeof rawValueParam === 'number'
+            ? rawValueParam
+            : rawValueParam !== null &&
+                typeof rawValueParam === 'object' &&
+                typeof (rawValueParam as { value?: unknown }).value === 'number'
+              ? (rawValueParam as { value: number }).value
+              : undefined;
+        const verdict = classifyValueUnitAgainstFactor(
+          userMessageForTurn ?? '',
+          factorObs?.unit,
+          proposedValue,
+        );
+        if (!verdict.resolved) {
+          validationResult = {
+            valid: false,
+            error: {
+              code: 'VALUE_UNIT_UNRESOLVED',
+              message:
+                'set_factor_value refused — the value\'s unit could not be resolved against the target factor',
+              details: {
+                handler_id: 'set_factor_value',
+                rejection_reason: verdict.reason,
+                ...(verdict.user_unit_family ? { user_unit_family: verdict.user_unit_family } : {}),
+                factor_unit_family: verdict.factor_unit_family,
+                ...(action.entity.label ? { factor_label: action.entity.label } : {}),
+              },
+            },
+          };
+        }
       }
       stagesCompleted.push('validate');
       if (!graphLookupForValidate) {

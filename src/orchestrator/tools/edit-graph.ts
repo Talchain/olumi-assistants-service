@@ -63,7 +63,7 @@ import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
-import { encodeOptionInterventionsForEdit, optionIdsTouchedByOperations } from "./encode-option-interventions.js";
+import { encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
@@ -2755,7 +2755,15 @@ export async function handleEditGraph(
     // would later fail run_analysis with `options_not_configured`.
     {
       const touchedOptionIds = optionIdsTouchedByOperations(operations, appliedGraph);
-      const encoded = encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds);
+      // P0-A configure-or-don't-persist: an option ADDED while REQUESTING an
+      // intervention configuration must end up with canonical top-level
+      // interventions, or the add is deferred (graph unchanged) rather than
+      // persisting an interventions:null option that later fails run_analysis
+      // with options_not_configured. Intent-scoped (not "any added option") so a
+      // bare needs_encoding add (no requested intervention, configured later) is
+      // never rejected.
+      const mustConfigureOptionIds = optionIdsAddedWithInterventionIntent(operations);
+      const encoded = encodeOptionInterventionsForEdit(appliedGraph, touchedOptionIds, mustConfigureOptionIds);
       if (encoded.unresolvedOptionIds.length > 0) {
         validationOutcome = 'option_interventions_unresolvable';
         setViolationCodes(['option_interventions_unresolvable']);

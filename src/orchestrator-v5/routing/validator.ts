@@ -165,6 +165,16 @@ export type ValidationErrorCode =
   // not receive). Routed through the standard recoverable-validator path so
   // the turn composes a clarify and commits a direct_answer, graph unchanged.
   | 'OPTION_INTERVENTION_MISROUTE'
+  // P0-A value/unit fail-closed containment: a set_factor_value proposal
+  // refused because the user expressed the value with a unit that cannot be
+  // resolved against the target factor with confidence (e.g. "Set Hiring Cost
+  // to 5 agents" — a headcount value on a £ factor). Like
+  // OPTION_INTERVENTION_MISROUTE it is synthesised at the turn-executor execute
+  // chokepoint (the check needs the raw user message, which validateToolCall
+  // does not receive) and routed through the standard recoverable-validator
+  // path so the turn composes a clarify and commits a direct_answer, graph
+  // unchanged.
+  | 'VALUE_UNIT_UNRESOLVED'
   | 'PRECONDITION_UNMET';
 
 export interface ValidationError {

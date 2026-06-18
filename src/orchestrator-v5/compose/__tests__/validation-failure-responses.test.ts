@@ -450,6 +450,39 @@ describe('composeValidationFailure — OPTION_INTERVENTION_MISROUTE', () => {
   });
 });
 
+describe('composeValidationFailure — VALUE_UNIT_UNRESOLVED (P0-A)', () => {
+  it('clarifies the unresolved value/unit, names the factor, reassures nothing changed, one text prompt', () => {
+    const { response, template_id, chip_type } = composeFor({
+      code: 'VALUE_UNIT_UNRESOLVED',
+      message: 'set_factor_value refused — value unit unresolved',
+      details: { handler_id: 'set_factor_value', factor_label: 'Marketing budget', user_unit_family: 'count', factor_unit_family: 'currency' },
+    });
+    expect(template_id).toBe('value_unit_unresolved');
+    expect(chip_type).toBe('text_prompt');
+    expect(response.assistant_text).toContain('Marketing budget');
+    expect(response.assistant_text.toLowerCase()).toContain("haven't changed anything");
+    // No handler-id / internal family enum leak in the user copy.
+    expect(response.assistant_text).not.toContain('set_factor_value');
+    expect(response.assistant_text).not.toContain('count');
+    expect(response.assistant_text).not.toContain('currency');
+    // One chip, no re-route action_type (a replay would drop the unit and loop).
+    expect(response.suggested_actions.length).toBe(1);
+    expect(response.suggested_actions[0]?.action_type).toBeUndefined();
+    assertStyle(response.assistant_text);
+  });
+
+  it('reads cleanly when no factor_label is supplied', () => {
+    const { response, template_id } = composeFor({
+      code: 'VALUE_UNIT_UNRESOLVED',
+      message: 'refused',
+      details: { handler_id: 'set_factor_value' },
+    });
+    expect(template_id).toBe('value_unit_unresolved');
+    expect(response.assistant_text).toContain('that factor');
+    assertStyle(response.assistant_text);
+  });
+});
+
 describe('composeValidationFailure — response shape', () => {
   // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND is now the ONE
   // validation-error branch that surfaces with a different wire code —
@@ -509,6 +542,7 @@ describe('composeValidationFailure — response shape', () => {
       { code: 'ENTITY_RESOLUTION_SUSPICIOUS', details: { entity_kind: 'option' } },
       { code: 'PARAMETER_INVALID', details: { parameter_name: 'value' } },
       { code: 'OPTION_INTERVENTION_MISROUTE', details: { factor_label: 'Annual Support Cost' } },
+      { code: 'VALUE_UNIT_UNRESOLVED', details: { factor_label: 'Marketing budget' } },
       { code: 'PRECONDITION_UNMET', details: { reason: 'no_options_defined' } },
     ];
 
@@ -534,6 +568,7 @@ describe('composeValidationFailure — response shape', () => {
       'ENTITY_RESOLUTION_SUSPICIOUS',
       'PARAMETER_INVALID',
       'OPTION_INTERVENTION_MISROUTE',
+      'VALUE_UNIT_UNRESOLVED',
       'PRECONDITION_UNMET',
     ];
     for (const code of codes) {
