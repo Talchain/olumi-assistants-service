@@ -384,10 +384,16 @@ export function optionIdsTouchedByOperations(
 function addPayloadRequestsIntervention(value: Dict): boolean {
   // Top-level interventions bundle with at least one entry.
   if (isPlainObject(value.interventions) && Object.keys(value.interventions as Dict).length > 0) return true;
-  // data.interventions bundle (SHAPE 1) with at least one entry.
+  // EXPLICIT null interventions = a configuration that was attempted and
+  // collapsed to nothing (distinct from the key being absent = an intentional
+  // bare needs_encoding add). An explicit empty {} stays a no-request bare add.
+  if ('interventions' in value && value.interventions === null) return true;
+  // data.interventions bundle (SHAPE 1) with at least one entry, or explicit null.
   const data = value.data;
-  if (isPlainObject(data) && isPlainObject((data as Dict).interventions) && Object.keys((data as Dict).interventions as Dict).length > 0) {
-    return true;
+  if (isPlainObject(data)) {
+    const di = (data as Dict).interventions;
+    if (isPlainObject(di) && Object.keys(di as Dict).length > 0) return true;
+    if ('interventions' in (data as Dict) && di === null) return true;
   }
   // Slash-keyed flat entries `data/interventions/<fac>`.
   for (const k of Object.keys(value)) {

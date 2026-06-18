@@ -123,5 +123,59 @@ describe('classifyValueUnitAgainstFactor', () => {
   it('RESOLVES when the trailing word is an ordinary connective, not a unit', () => {
     expect(classifyValueUnitAgainstFactor('Set Marketing budget to 50000 now', '£').resolved).toBe(true);
     expect(classifyValueUnitAgainstFactor('Set Marketing budget to 50000 instead', '£').resolved).toBe(true);
+    expect(classifyValueUnitAgainstFactor('Set Marketing budget to £300k for', '£').resolved).toBe(true);
+    expect(classifyValueUnitAgainstFactor('Set the factor to £2 instead', '£').resolved).toBe(true);
+  });
+
+  it('BLOCKS an UNRECOGNISED value-attached unit token ("5 widgets") on a typed factor (fail closed)', () => {
+    const v = classifyValueUnitAgainstFactor('Set Marketing budget to 5 widgets', '£');
+    expect(v.resolved).toBe(false);
+    if (!v.resolved) {
+      expect(v.reason).toBe('unresolved_unit_token');
+      expect(v.factor_unit_family).toBe('currency');
+    }
+  });
+
+  it('BLOCKS a leading-dot value with an incompatible unit (".5 agents")', () => {
+    expect(classifyValueUnitAgainstFactor('Set Marketing budget to .5 agents', '£').resolved).toBe(false);
+  });
+
+  it('does NOT block an unrecognised word against an UNTYPED factor', () => {
+    expect(classifyValueUnitAgainstFactor('Set Product quality to 5 widgets', undefined).resolved).toBe(true);
+  });
+});
+
+describe('classifyValueUnitAgainstFactor — proposed-value attribution (compound turns)', () => {
+  it('binds to the PROPOSED value: "...Cost to 5 agents and ...Programme to 0.5" blocks the cost-factor value (5)', () => {
+    const msg = 'Set Cost to 5 agents and set Programme to 0.5';
+    // Cost (£) proposal applies value 5 → "5 agents" is its token → block.
+    expect(classifyValueUnitAgainstFactor(msg, '£', 5).resolved).toBe(false);
+  });
+
+  it('does NOT block the OTHER clause: the same message judged on value 0.5 (no trailing unit) resolves', () => {
+    const msg = 'Set Cost to 5 agents and set Programme to 0.5';
+    expect(classifyValueUnitAgainstFactor(msg, '£', 0.5).resolved).toBe(true);
+  });
+
+  it('does not over-block an explanatory number: "to £500,000 — that is 5 times..." judged on 500000 resolves', () => {
+    const msg = 'Set Marketing budget to £500,000 — that is 5 times our current £100,000 baseline';
+    expect(classifyValueUnitAgainstFactor(msg, '£', 500000).resolved).toBe(true);
+  });
+
+  it('does not over-block a legitimate compound currency edit: "...£5000 and headcount to 5 agents" on the £5000 value', () => {
+    const msg = 'Set Cost to £5000 and headcount to 5 agents';
+    expect(classifyValueUnitAgainstFactor(msg, '£', 5000).resolved).toBe(true);
+  });
+
+  it('expands magnitude suffixes when attributing (proposed 120000 matches "120k")', () => {
+    expect(classifyValueUnitAgainstFactor('Set Marketing budget to 120k', '£', 120000).resolved).toBe(true);
+  });
+
+  it('multi-quantity fallback (proposed value not in text): blocks a KNOWN-incompatible unit, ignores unknown words', () => {
+    // Proposed 0.8 is not literally in the message; still, an explicit "5 agents"
+    // (known count) against a £ factor must fail closed.
+    expect(classifyValueUnitAgainstFactor('Set Cost to 5 agents and Programme to 50%', '£', 0.8).resolved).toBe(false);
+    // ...but an unattributable UNKNOWN word does not block in fallback.
+    expect(classifyValueUnitAgainstFactor('Set Cost to 5 widgets and Programme to 50000', '£', 0.8).resolved).toBe(true);
   });
 });

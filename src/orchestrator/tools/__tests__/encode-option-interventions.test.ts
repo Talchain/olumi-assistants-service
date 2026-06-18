@@ -238,6 +238,13 @@ describe('optionIdsAddedWithInterventionIntent (intent-scoped add detection)', (
     ];
     expect([...optionIdsAddedWithInterventionIntent(ops)]).toEqual([]);
   });
+  it('flags an add whose payload carried an EXPLICIT null interventions (collapsed config attempt), top-level and data', () => {
+    const ops = [
+      { op: 'add_node', value: { id: 'opt_null_top', kind: 'option', interventions: null } },
+      { op: 'add_node', value: { id: 'opt_null_data', kind: 'option', data: { interventions: null } } },
+    ];
+    expect([...optionIdsAddedWithInterventionIntent(ops)].sort()).toEqual(['opt_null_data', 'opt_null_top']);
+  });
   it('ignores non-option adds and non-add ops', () => {
     const ops = [
       { op: 'add_node', value: { id: 'fac_x', kind: 'factor', unit: '£', raw_value: 5 } },

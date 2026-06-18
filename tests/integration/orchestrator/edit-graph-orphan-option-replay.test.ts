@@ -322,3 +322,65 @@ describe('edit_graph orphan-option replay', () => {
     expect(result.diagnostics?.validation_violation_codes ?? []).not.toContain('OPTION_NO_FACTOR_EDGES');
   });
 });
+
+// fac_payroll in makeHiringContext() has NO observed_state → no cap → an
+// intervention on it cannot be encoded. A complete option that REQUESTS such an
+// intervention is the COMBINED-BUILD live failure shape; it must defer.
+const ADD_OPTION_REQUESTS_UNCAPPABLE_RESPONSE = {
+  operations: [
+    { op: 'add_node', path: '/nodes/opt_contract_hiring', value: { id: 'opt_contract_hiring', kind: 'option', label: 'Contract hiring', data: { interventions: { fac_payroll: { unit: '£', raw_value: 50000 } } } }, impact: 'moderate', rationale: 'Adds a contract hiring option requesting a payroll change.' },
+    { op: 'add_edge', path: '/edges/dec_hiring->opt_contract_hiring', value: { from: 'dec_hiring', to: 'opt_contract_hiring', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' }, impact: 'moderate', rationale: 'Wires decision to the new option.' },
+    { op: 'add_edge', path: '/edges/opt_contract_hiring->fac_payroll', value: { from: 'opt_contract_hiring', to: 'fac_payroll', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' }, impact: 'moderate', rationale: 'Connects new option to payroll factor.' },
+  ],
+  removed_edges: [], warnings: [], coaching: { summary: 'Added contract hiring option with a payroll change.', rerun_recommended: true },
+};
+
+// Same add, but the requested intervention carries its OWN cap so it CAN encode.
+const ADD_OPTION_REQUESTS_ENCODABLE_RESPONSE = {
+  operations: [
+    { op: 'add_node', path: '/nodes/opt_contract_hiring', value: { id: 'opt_contract_hiring', kind: 'option', label: 'Contract hiring', data: { interventions: { fac_payroll: { unit: '£', raw_value: 50000, cap: 100000 } } } }, impact: 'moderate', rationale: 'Adds a contract hiring option requesting a payroll change.' },
+    { op: 'add_edge', path: '/edges/dec_hiring->opt_contract_hiring', value: { from: 'dec_hiring', to: 'opt_contract_hiring', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' }, impact: 'moderate', rationale: 'Wires decision to the new option.' },
+    { op: 'add_edge', path: '/edges/opt_contract_hiring->fac_payroll', value: { from: 'opt_contract_hiring', to: 'fac_payroll', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' }, impact: 'moderate', rationale: 'Connects new option to payroll factor.' },
+  ],
+  removed_edges: [], warnings: [], coaching: { summary: 'Added contract hiring option with a payroll change.', rerun_recommended: true },
+};
+
+describe('edit_graph P0-A add-option configure-or-don\'t-persist (real handleEditGraph)', () => {
+  it('add REQUESTING an intervention on an uncappable factor → deferred, graph not committed', async () => {
+    // The live failure shape: an added option that requested a £ change on a
+    // factor with no cap. It is structurally complete (has its factor edge), so
+    // it is NOT an OPTION_NO_FACTOR_EDGES reject — it must defer on the encoder.
+    const adapter = makeAdapter(ADD_OPTION_REQUESTS_UNCAPPABLE_RESPONSE);
+    const ctx = makeHiringContext();
+
+    const result = await handleEditGraph(
+      ctx,
+      'Add a contract hiring option costing £50,000',
+      adapter,
+      'req-p0a-defer',
+      'turn-p0a-defer',
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.appliedGraph).toBeNull();
+    expect(result.diagnostics?.failure_code).toBe('OPTION_INTERVENTIONS_UNRESOLVABLE');
+    // NOT an orphan-edge rejection — it reached and failed the encoder net.
+    expect(result.diagnostics?.validation_violation_codes ?? []).not.toContain('OPTION_NO_FACTOR_EDGES');
+  });
+
+  it('CONTROL: add REQUESTING an intervention that CAN encode (intervention carries a cap) → accepted', async () => {
+    const adapter = makeAdapter(ADD_OPTION_REQUESTS_ENCODABLE_RESPONSE);
+    const ctx = makeHiringContext();
+
+    const result = await handleEditGraph(
+      ctx,
+      'Add a contract hiring option costing £50,000',
+      adapter,
+      'req-p0a-encode',
+      'turn-p0a-encode',
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.diagnostics?.failure_code ?? null).not.toBe('OPTION_INTERVENTIONS_UNRESOLVABLE');
+  });
+});

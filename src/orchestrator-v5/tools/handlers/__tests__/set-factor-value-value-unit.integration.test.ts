@@ -135,6 +135,62 @@ describe('value/unit fail-closed containment via runTurnExecutor', () => {
     }
   });
 
+  it('REFUSES an UNRECOGNISED trailing unit "Set Marketing budget to 5 widgets" — graph unchanged', async () => {
+    const ingressGraph = buildD1Fixture();
+    const budgetBefore = JSON.stringify(ingressGraph.nodes.find((n) => n.id === 'f-budget'));
+
+    const payload = makeMessagePayload({
+      turn_id: 'a1a1a1a1-aaaa-4aaa-8aaa-a1a1a1a1a1a1',
+      scenario_id: TEST_SCENARIO_ID,
+      message: 'set Marketing budget to 5 widgets',
+    });
+
+    const { response, telemetry } = await runTurnExecutor(payload, 'req-vu-widgets', {
+      routingAdapter: throwingRoutingAdapter,
+      graphState: ingressGraph,
+    });
+
+    expect(telemetry.turn_class).toBe('direct_answer');
+    expect(telemetry.stages_completed).not.toContain('execute');
+    expect(response.blocks.find((b) => b.type === 'graph_patch')).toBeUndefined();
+    expect(JSON.stringify(ingressGraph.nodes.find((n) => n.id === 'f-budget'))).toBe(budgetBefore);
+  });
+
+  it('COMPOUND turn: an LLM-proposed £-factor edit is judged on ITS value (5 agents), not the unrelated 0.5 — refused, graph unchanged', async () => {
+    // "Set Marketing budget to 5 agents and set Product quality to 0.5" is
+    // multi-quantity, so the deterministic pre-route bails and the LLM proposes.
+    // The mocked proposal targets f-budget (£) with a bare 5 (unit dropped). The
+    // guard must bind to that value (5 → "5 agents"), NOT the last number (0.5).
+    const COMPOUND_TOOL_CALL = {
+      intent_class: 'execute',
+      action: {
+        handler_id: 'set_factor_value',
+        entity: { id: 'f-budget', kind: 'node', label: 'Marketing budget', resolution_status: 'resolved', resolution_method: 'id_match' },
+        parameters: [{ name: 'value', value: 5, operator: 'set', source: 'user_explicit' }],
+        cited_context_fields: ['graph.nodes'],
+      },
+    };
+    const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(COMPOUND_TOOL_CALL));
+    const ingressGraph = buildD1Fixture();
+    const budgetBefore = JSON.stringify(ingressGraph.nodes.find((n) => n.id === 'f-budget'));
+
+    const payload = makeMessagePayload({
+      turn_id: 'a2a2a2a2-aaaa-4aaa-8aaa-a2a2a2a2a2a2',
+      scenario_id: TEST_SCENARIO_ID,
+      message: 'Set Marketing budget to 5 agents and set Product quality to 0.5',
+    });
+
+    const { response, telemetry } = await runTurnExecutor(payload, 'req-vu-compound', {
+      routingAdapter,
+      graphState: ingressGraph,
+    });
+
+    expect(telemetry.turn_class).toBe('direct_answer');
+    expect(telemetry.stages_completed).not.toContain('execute');
+    expect(response.blocks.find((b) => b.type === 'graph_patch')).toBeUndefined();
+    expect(JSON.stringify(ingressGraph.nodes.find((n) => n.id === 'f-budget'))).toBe(budgetBefore);
+  });
+
   it('CONTROL: a compatible currency edit "to £50,000" still applies (no regression)', async () => {
     const ingressGraph = buildD1Fixture();
 

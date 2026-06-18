@@ -3900,9 +3900,23 @@ export async function runTurnExecutor(
         graphLookupForValidate?.findFactorObservedState !== undefined
       ) {
         const factorObs = graphLookupForValidate.findFactorObservedState(action.entity.id);
+        // Bind the check to the value the handler would apply (not just the last
+        // number in the message), so a compound turn is judged on this factor's
+        // own value. The value parameter is a bare number or { value, unit?, cap? }.
+        const valueParam = action.parameters.find((p) => p.name === 'value');
+        const rawValueParam = valueParam?.value;
+        const proposedValue =
+          typeof rawValueParam === 'number'
+            ? rawValueParam
+            : rawValueParam !== null &&
+                typeof rawValueParam === 'object' &&
+                typeof (rawValueParam as { value?: unknown }).value === 'number'
+              ? (rawValueParam as { value: number }).value
+              : undefined;
         const verdict = classifyValueUnitAgainstFactor(
           userMessageForTurn ?? '',
           factorObs?.unit,
+          proposedValue,
         );
         if (!verdict.resolved) {
           validationResult = {
@@ -3913,7 +3927,8 @@ export async function runTurnExecutor(
                 'set_factor_value refused — the value\'s unit could not be resolved against the target factor',
               details: {
                 handler_id: 'set_factor_value',
-                user_unit_family: verdict.user_unit_family,
+                rejection_reason: verdict.reason,
+                ...(verdict.user_unit_family ? { user_unit_family: verdict.user_unit_family } : {}),
                 factor_unit_family: verdict.factor_unit_family,
                 ...(action.entity.label ? { factor_label: action.entity.label } : {}),
               },
