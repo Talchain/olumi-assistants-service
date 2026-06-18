@@ -40,6 +40,7 @@ import {
   quoteLabel,
   type RawRobustnessSignals,
 } from '../../coaching/robustness-honesty.js';
+import type { FlipSummary } from '../../compose/flip-proposal.js';
 
 export { formatSensitivityDirection };
 
@@ -224,6 +225,7 @@ export function composeExplainResultsFallback(
 export function composeWhatWouldFlipFallback(
   projection: AnalysisProjectionSummary | undefined,
   rawRobustness?: RawRobustnessSignals | null,
+  flipSummary?: FlipSummary | null,
 ): string {
   if (!projection || !projection.leading_option) {
     return 'The analysis has finished, but the sensitivity picture could not be summarised from the available data. Would you like to run the analysis again?';
@@ -302,15 +304,66 @@ export function composeWhatWouldFlipFallback(
     }
   }
 
-  if (fragileSignal) {
-    // Fragility claim — only when there is an actual fragile signal
-    // (raw level very_low/low/fragile, or canonical band already
-    // 'fragile'). Naming fragility here is honest because the
-    // robustness band itself is fragile.
+  // Closing sentence — flip-threshold evidence first, robustness band second.
+  //
+  // `enrichment.flip_thresholds[]` is the most direct signal for "what could
+  // change the outcome", so when it is available (`flipSummary` present and
+  // not `'none'`) it OWNS the closing sentence and the robustness-band
+  // heuristic is bypassed. Critically, this is where we stop the live staging
+  // contradiction (build cef69b0): the band said `fragile` and the composer
+  // claimed "small adjustments could shift which option leads", while the
+  // flip analysis had found NO single-factor tipping point within bounds.
+  //
+  // The flippability claims (fragile / near-tie branches) are additionally
+  // gated on `flip.margin_supports_flip`: a `margin_sensitivity` block that
+  // reports `movement: 'none'` is NOT evidence that small changes could flip.
+  // When `flipSummary` is absent (routed/Sonnet path, older facts with no
+  // flip thresholds, or an explicit `'none'` summary) the ladder is unchanged
+  // — backward-compatible verbatim.
+  const flip =
+    flipSummary !== null && flipSummary !== undefined && flipSummary.overall_status !== 'none'
+      ? flipSummary
+      : null;
+  const flipVerdict = flip !== null ? flip.overall_status : null;
+  const flippabilityClaimAllowed = flip === null || flip.margin_supports_flip;
+
+  if (flipVerdict === 'no_practical_flip') {
+    // flip_value null + reason no_effect_within_bounds across the tested
+    // factors: say so plainly. No fragility/flippability claim.
+    sentences.push(
+      'Within the tested range, no single factor on its own reached a tipping point that would change which option leads.',
+    );
+  } else if (flipVerdict === 'concrete') {
+    // A real single-factor tipping point exists. Name the clearest lever(s)
+    // and frame as something to TEST. We deliberately do not quote a
+    // threshold value here (the scale-safe "Test X at N" number is surfaced
+    // by the separate flip-proposal chip, which honours the value_scale
+    // contract); the prose names the factor so we never misprint a scale.
+    const concrete = flip!.entries
+      .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value))
+      .slice(0, 2)
+      .map((e) => e.factor_label);
+    if (concrete.length === 1) {
+      sentences.push(
+        `${concrete[0]} is the most likely single factor to change which option leads, so it is the clearest one to test.`,
+      );
+    } else if (concrete.length >= 2) {
+      sentences.push(
+        `${concrete[0]} and ${concrete[1]} are the most likely single factors to change which option leads, so they are the clearest ones to test.`,
+      );
+    }
+  } else if (flipVerdict === 'insufficient_data') {
+    sentences.push(
+      'The analysis did not isolate a single-factor tipping point here, so it is not clear that any one change on its own would change which option leads.',
+    );
+  } else if (fragileSignal && flippabilityClaimAllowed) {
+    // Fragility claim — only when there is an actual fragile signal AND no
+    // flip evidence contradicts easy flippability. Naming fragility here is
+    // honest because the robustness band itself is fragile.
     sentences.push(
       'The picture appears fragile, so even small adjustments to the strongest drivers could shift which option leads.',
     );
-  } else if (nearTie) {
+  } else if (nearTie && flippabilityClaimAllowed) {
     // Near-tie WITHOUT a fragile signal — say the result is close /
     // sensitive without invoking the robustness band. Avoids the
     // overclaim where a stable + near-tie result was previously told

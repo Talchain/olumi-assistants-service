@@ -201,14 +201,7 @@ function buildBlocksFromFacts(
   for (const fact of facts) {
     if (fact.fact_type === 'run_analysis') {
       currentTurnRunAnalysisHandled = true;
-      const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
-      blocks.push({
-        type: 'analysis_result',
-        summary,
-        leading_option_id,
-        ...(win_probabilities !== undefined ? { win_probabilities } : {}),
-        ...(enrichment !== undefined ? { enrichment } : {}),
-      });
+      blocks.push(buildAnalysisResultBlock(fact));
 
       // PR 3 lifecycle branch 1 — fresh blocks from current-turn fact.
       const graphHash = fact.result.graph_hash_at_run;
@@ -272,6 +265,166 @@ function buildBlocksFromFacts(
   }
 
   return blocks;
+}
+
+/**
+ * P0-B **temporary safe-transport** enrichment keep-list for the
+ * `analysis_result` block.
+ *
+ * THIS IS NOT THE COACHING CONTRACT. It is a regression-safe transport shape
+ * scoped to P0-B: this PR changes the `analysis_result.enrichment` payload, so
+ * the keep-list's only jobs are (1) don't break/degrade today's Results panel
+ * and (2) stop the raw-enrichment leak. Olumi's coaching contract is
+ * value-led — the science/analysis layer defines the valuable coaching
+ * signals, and the frontend decides how to present them; current DGAI field
+ * usage is a REGRESSION GATE here, not the source of truth.
+ *
+ * Why these five are safe to keep: verified against the live staging debug
+ * bundle (build cef69b0). The current Results panel hydrates from
+ * `results.report.option_probabilities` only (option win-probabilities); factor
+ * influence/sensitivity render as `unmatched` (not yet consumed). Keeping
+ * `results` + `option_comparison` preserves every currently-rendered field;
+ * `factor_sensitivity` + `robustness` + `decision_review` are clean,
+ * strategically-valuable science fields preserved so we transport them rather
+ * than drop them.
+ *
+ * Dropped fields that look strategically valuable but are NOT currently
+ * rendered are recorded as a POST-P0 coaching-contract workstream (see the
+ * block comment below) — NOT silently deleted from the future product model.
+ */
+const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
+  'option_comparison',
+  'factor_sensitivity',
+  'results',
+  'robustness',
+  'decision_review',
+  // DGAI read-side givens with NO fallback (Codex closure review — the
+  // frontend regression gate this backend repo cannot run itself). Both reach
+  // enrichment via PLoT's `.passthrough()` schema + CEE's byte-for-byte store
+  // (run-analysis.ts), so dropping them would regress the Results panel:
+  //   - `option_comparison_status` — fixture-proven top-level (value 'computed').
+  //   - `conditional_probabilities` — emitted by PLoT for constraint-bearing
+  //     analyses (V5 forwards goal_constraints); read with no fallback.
+  // (`conditional_winners` stays a follow-up: valuable but not currently read.)
+  'option_comparison_status',
+  'conditional_probabilities',
+] as const;
+
+// POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
+// model): the keep-list above is transport-only. These dropped enrichment
+// fields carry potentially-valuable coaching signals the frontend does not
+// render today; the value-led coaching contract should decide which to surface
+// (cleaned) rather than this transport shape deciding by omission:
+//   flip_thresholds, decision_quality, improvement_guidance, review_cards,
+//   insights, decision_brief, conditional_winners, identifiability,
+//   robustness_synthesis, m1_review, m1_coaching, factor_stability,
+//   edge_sensitivity, confidence_tier.
+// Tracked as a separate coaching-contract workstream item.
+
+/**
+ * Internal/debug carrier KEYS that must never ship inside a kept field, at any
+ * depth (Codex review — the keep-list was a shallow top-level pick, so a leak
+ * carrier nested inside a kept field would survive the copy). These are
+ * clearly-internal keys (never DGAI-correlation data), so a recursive removal
+ * is safe and makes the transport shape robust against nested carriers — even
+ * in debug-on mode, where the response-finaliser's prose scrub is bypassed.
+ * NOTE: legitimate science metadata keys like `confidence_provenance` /
+ * `confidence_source` are NOT in this set — they are kept structural fields.
+ */
+const INTERNAL_ENRICHMENT_KEYS: ReadonlySet<string> = new Set([
+  '_meta', 'meta', '_diagnostics', 'ceeTrace', 'cee_trace', 'debug',
+  'payloads', 'downstream_calls', 'graph', 'graph_hash', 'graph_hash_at_run',
+  'feature_flags', 'feature_flags_snapshot', 'lineage', 'seed',
+]);
+
+/**
+ * Deep-clone a value while removing every {@link INTERNAL_ENRICHMENT_KEYS} key
+ * at any depth, AND dropping any leaf whose string value carries the redaction
+ * marker `[REDACTED]` under a non-denylisted key (Codex review #2 — the strip
+ * was key-only, so a `[REDACTED]` value hiding under a harmless key would
+ * survive). `[REDACTED]` is never legitimate user-facing data, so this has no
+ * false positives. We deliberately do NOT value-scrub broader tokens such as
+ * "engine" / "provenance": they appear in legitimate science data
+ * ("Engineering Capacity", `confidence_provenance`), so a broad scrub would
+ * corrupt kept fields — that residual is covered by the value-level regression
+ * test instead. Cloning (not sharing the source reference) keeps the persisted
+ * fact unmutated.
+ */
+function stripInternalKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripInternalKeysDeep);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (INTERNAL_ENRICHMENT_KEYS.has(k)) continue;
+      if (typeof v === 'string' && v.includes('[REDACTED]')) continue;
+      out[k] = stripInternalKeysDeep(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Reduce a run_analysis fact's opaque enrichment to the P0-B safe-transport
+ * keep-list. Applied to BOTH the current-turn run_analysis block and the
+ * reused follow-up block so they emit an IDENTICAL block for a given analysis
+ * (consistent DGAI content-hash dedupe + panel hydration). Rationale:
+ *   - The full raw enrichment LEAKS: the prose-only `sanitiseEnrichment` never
+ *     strips structural fields and is bypassed entirely when
+ *     CEE_TURN_DEBUG_ENABLED is on. The live bundle carried `[REDACTED]` (in
+ *     `_meta`/`meta`), `isl_engine` (in `m1_coaching`) and `seed` lineage (in
+ *     `decision_brief`/`fact_objects`). The keep-list drops those carriers at
+ *     the block-build site (debug-independent), and `stripInternalKeysDeep`
+ *     removes any that nest inside a kept field — so `_meta`, payloads, graph,
+ *     graph hashes and raw debug fields never ship.
+ *   - `decision_review` is kept present-only; its nested prose is still
+ *     scrubbed by the response-finaliser in normal (debug-off) mode.
+ *
+ * Returns `undefined` when no kept field is present so the block omits the
+ * `enrichment` key (the typical chip-click, autofire-off shape).
+ */
+
+function toSafeTransportEnrichment(enrichment: unknown): Record<string, unknown> | undefined {
+  if (enrichment === null || enrichment === undefined || typeof enrichment !== 'object') {
+    return undefined;
+  }
+  const src = enrichment as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) {
+    // Shallow keep-list at the top level PLUS a deep strip of internal/debug
+    // carriers inside each kept field, so the keep-list is not merely shallow.
+    if (src[key] !== undefined) out[key] = stripInternalKeysDeep(src[key]);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Build the `analysis_result` block from a run_analysis fact. Used by BOTH the
+ * current-turn run_analysis block (branch-1) and the REUSED prior-fact FRESH
+ * lifecycle branch (V5 P0-B), so both turns emit an IDENTICAL block for a given
+ * analysis — keeping DGAI's content-hash dedupe and Results-panel hydration
+ * consistent across the run_analysis turn and any follow-up explain /
+ * what_would_flip turn.
+ *
+ *   - `win_probabilities` preserved VERBATIM, keyed by option id (DGAI
+ *     correlates by option id).
+ *   - enrichment reduced to the P0-B safe-transport keep-list (see
+ *     toSafeTransportEnrichment) — transport-only, NOT the coaching contract.
+ */
+function buildAnalysisResultBlock(
+  fact: RunAnalysisHandlerFact,
+): OlumiResponse['blocks'][number] {
+  const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
+  const transportEnrichment = toSafeTransportEnrichment(enrichment);
+  return {
+    type: 'analysis_result',
+    summary,
+    leading_option_id,
+    ...(win_probabilities !== undefined ? { win_probabilities } : {}),
+    ...(transportEnrichment !== undefined
+      ? { enrichment: transportEnrichment as typeof enrichment }
+      : {}),
+  };
 }
 
 /**
@@ -393,8 +546,21 @@ function buildLifecycleBlocksFromPrior(
     return blocks;
   }
 
-  // verdict === 'fresh' — rebuild Phase 3 blocks from the prior fact.
-  const freshBlocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash);
+  // verdict === 'fresh' — emit the result summary block PLUS rebuilt Phase 3
+  // blocks from the prior fact.
+  //
+  // V5 P0-B: the `analysis_result` block (result summary / win probabilities /
+  // enrichment) gives the UI a non-empty, structured answer on a
+  // what_would_flip / explain chip-click even when `decision_review` is absent
+  // (autofire off) and the Phase 3 cards come back empty. This is emitted on
+  // the FRESH verdict ONLY — the graph hash still matches the source fact, so
+  // it is safe to present as live. The 'stale' branch above returns before
+  // reaching here, so a diverged graph never surfaces a result block (only the
+  // stale-safe rerun coaching block). Enrichment is sanitised by the
+  // response-finaliser before egress.
+  const analysisResultBlock = buildAnalysisResultBlock(priorFact);
+  const phase3Blocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash);
+  const freshBlocks: OlumiResponse['blocks'] = [analysisResultBlock, ...phase3Blocks];
   emitLifecycle(lifecycle, {
     lifecycle_state: 'emitted_fresh',
     selected_fact_index: freshness.selected_fact_index,

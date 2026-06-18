@@ -231,6 +231,13 @@ async function buildFreshFragileContext(opts: {
    * absent (older facts compatibility).
    */
   readonly synthesis_overall_assessment?: string | null;
+  /**
+   * Optional `enrichment.flip_thresholds[]` (V5 P0-B). Set to the live
+   * staging shape (flip_value null + flip_reason no_effect_within_bounds +
+   * margin_sensitivity{movement:'none'}) to drive the honest no-tipping-point
+   * composer branch end-to-end.
+   */
+  readonly flip_thresholds?: ReadonlyArray<Record<string, unknown>>;
 }): Promise<typeof DEFAULT_TURN_CONTEXT> {
   // Compute the analysis-affecting graph hash so the prior fact's
   // graph_hash_at_run can match → freshness 'fresh' → composer runs.
@@ -265,6 +272,9 @@ async function buildFreshFragileContext(opts: {
   };
   if (opts.results !== undefined) {
     enrichment.results = opts.results;
+  }
+  if (opts.flip_thresholds !== undefined) {
+    enrichment.flip_thresholds = opts.flip_thresholds;
   }
   if (opts.raw_robustness_level !== null) {
     enrichment.robustness = { level: opts.raw_robustness_level };
@@ -510,5 +520,63 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     // little effect (and is never mis-signed as strengthen/weaken).
     expect(text.toLowerCase()).toMatch(/weakens/);
     expect(text.toLowerCase()).toContain('has little effect');
+  });
+
+  // V5 P0-B — the live staging failure, reproduced end-to-end and fixed.
+  // Build cef69b0, scenario e22aa97b: the served answer said the picture was
+  // fragile and "small adjustments could shift which option leads" while the
+  // flip analysis had found NO single-factor tipping point within bounds.
+  it('no_practical_flip (flip_value null + no_effect_within_bounds, margin movement none) on a fragile band: answers honestly, SUPPRESSES the contradiction, emits non-empty blocks + suggested_actions, and never calls the LLM', async () => {
+    buildTurnContextMock.mockResolvedValueOnce(
+      await buildFreshFragileContext({
+        leading_prob: 0.66,
+        runner_prob: 0.32,
+        margin_pp: 34,
+        // Fragile band: WITHOUT flip evidence this would emit the contradiction.
+        raw_robustness_level: 'fragile',
+        // The exact live-staging flip_thresholds shape.
+        flip_thresholds: [
+          {
+            factor_id: 'fac_hiring_cost',
+            factor_label: 'Hiring and Salary Cost',
+            flip_value: null,
+            direction: 'increase',
+            flip_reason: 'no_effect_within_bounds',
+            margin_sensitivity: {
+              movement: 'none',
+              strongest_delta_abs: null,
+              display_value_available: false,
+            },
+          },
+        ],
+      }),
+    );
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor(),
+      requestId: 'req-flip-no-practical',
+      handlerRegistry: REAL_REGISTRY,
+    });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+
+    // (1) Deterministic — no LLM router call.
+    expect(routeWithToolUseSpy).not.toHaveBeenCalled();
+
+    // (2) Honest answer text.
+    const text = commitedAssistantText();
+    expect(text.toLowerCase()).toMatch(
+      /no single factor on its own reached a tipping point/,
+    );
+    // The exact live-staging contradiction must be gone.
+    expect(text.toLowerCase()).not.toMatch(/could shift which option leads/);
+    expect(text.toLowerCase()).not.toMatch(/picture appears fragile/);
+
+    // (3) Non-empty blocks + suggested_actions (P0 #3).
+    const response = commitDirectAnswerMock.mock.calls[0]![0] as {
+      blocks?: ReadonlyArray<{ type: string }>;
+      suggested_actions?: ReadonlyArray<unknown>;
+    };
+    expect(response.blocks?.some((b) => b.type === 'analysis_result')).toBe(true);
+    expect((response.suggested_actions ?? []).length).toBeGreaterThan(0);
   });
 });

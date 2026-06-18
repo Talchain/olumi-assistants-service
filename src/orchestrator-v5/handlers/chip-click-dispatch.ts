@@ -90,6 +90,8 @@ import {
   pickLatestRawRobustness,
   type RawRobustnessSignals,
 } from '../coaching/pick-raw-robustness.js';
+import { pickLatestFlipSummary } from '../coaching/pick-flip-summary.js';
+import type { FlipSummary } from '../compose/flip-proposal.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
   HandlerInvocationFailedError,
@@ -802,6 +804,10 @@ async function dispatchChipClickNoopExplanation(
         // raw-fragile or near-tie results — same SSOT used by the
         // free-text post-analysis advice gate.
         rawRobustness: projectionInputs.rawRobustness,
+        // Honest flip-threshold evidence so the what_would_flip composer
+        // answers from the actual analysis (no single-factor tipping point
+        // within bounds → say so) instead of contradicting it.
+        flipSummary: projectionInputs.flipSummary,
       });
     } catch (err) {
       if (err instanceof HandlerInvocationFailedError) {
@@ -850,12 +856,45 @@ async function dispatchChipClickNoopExplanation(
       ? decl.confirmation_template(outcome)
       : (decl?.confirmation_template ?? outcome.assistant_text);
 
+    // V5 P0-B — post-explanation suggested_actions. The noop explanation
+    // chip-click path previously committed `suggested_actions: []`, leaving
+    // the user with no next step after a deterministic answer. Reuse the
+    // SAME `generateChips` rule the run_analysis chip-click path uses so the
+    // follow-ups are deterministic and honest: the generator emits genuine
+    // next actions (e.g. "Explain the result", "Re-run analysis") only when a
+    // rule matches, and its floor returns `[]` (`v5.chips.empty_intentional`)
+    // when no safe chip applies — no filler. `analysis: null` matches the
+    // run_analysis chip-click call; the post-handler branch does not read it.
+    const noopSuggestedActions = generateChips({
+      stage: payload.stage,
+      handlerFacts: outcome.handler_facts,
+      priorFacts: context.prior_facts,
+      analysis: null,
+      validationRegistry: HANDLER_VALIDATION_REGISTRY,
+      // V5 P0-B blocker fix (Codex review): thread readiness + freshness so a
+      // STALE what_would_flip / explain follow-up steers the user to the
+      // "Rerun analysis" action (chip-generator stale-recovery rule + floor
+      // Priority 1, both of which read `turnOutcome.analysis_freshness` +
+      // `analysisReady.status`) instead of looping back into the executable
+      // (stale) what_would_flip chip. Sourced from the SAME freshness/readiness
+      // the precondition + wire response already use, so no second derivation.
+      analysisReady: projectionInputs.analysisReady,
+      turnOutcome: {
+        graph_mutated: false,
+        analysis_run: false,
+        analysis_selected_fact_index: projectionInputs.analysisFreshness.selected_fact_index,
+        analysis_freshness: projectionInputs.analysisFreshness.freshness,
+        freshness_reason: projectionInputs.analysisFreshness.reason,
+      },
+    });
+
     let response = composeToolCallResponse({
       orientation: '',
       confirmation: confirmationText,
       coaching: null,
       stage: payload.stage,
       handlerFacts: outcome.handler_facts,
+      suggested_actions: noopSuggestedActions,
       // PR 3 — explain/flip handlers do NOT produce a run_analysis fact,
       // so the composer's lifecycle branch 2 fires: it walks prior_facts
       // for the canonical run_analysis fact (selected by the
@@ -991,6 +1030,12 @@ interface ProjectionInputs {
   // `null` when no successful run_analysis fact is present (the precondition
   // bypasses the composer entirely in that case).
   readonly rawRobustness: RawRobustnessSignals | null;
+  // Honest flip-threshold summary from the SAME run_analysis fact. Lets the
+  // what_would_flip composer answer from the flip evidence (no single-factor
+  // tipping point within bounds → say so) rather than the robustness band.
+  // `null` when no successful fact or the enrichment carries no flip
+  // thresholds.
+  readonly flipSummary: FlipSummary | null;
 }
 
 /**
@@ -1101,5 +1146,10 @@ function buildProjectionInputs(
   // the projection band may have flattened.
   const rawRobustness = pickLatestRawRobustness(context.prior_facts);
 
-  return { analysisReady, analysisProjection, analysisFreshness, graph, rawRobustness };
+  // Step 5: honest flip-threshold summary from the SAME run_analysis fact, so
+  // the what_would_flip composer answers from the flip evidence rather than a
+  // robustness band that can contradict it. `null` when no flip thresholds.
+  const flipSummary = pickLatestFlipSummary(context.prior_facts);
+
+  return { analysisReady, analysisProjection, analysisFreshness, graph, rawRobustness, flipSummary };
 }

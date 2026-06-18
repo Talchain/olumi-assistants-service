@@ -183,6 +183,7 @@ import {
 import { buildFlipProposalEmit, type FactorNodeInfo } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
+import { pickLatestFlipSummary } from './coaching/pick-flip-summary.js';
 import { deriveRecentChangesEvidence } from './context/recent-changes.js';
 import type { TurnOutcome } from './turn-outcome.js';
 import {
@@ -4244,6 +4245,27 @@ export async function runTurnExecutor(
           structureProjection,
           graphForTurn: graphStateForTurn ?? undefined,
           analysisFreshness: routingFreshness ?? undefined,
+          // V5 P0-B (Codex review): thread the SAME robustness + flip evidence
+          // the chip-click path threads, so the routed what_would_flip
+          // deterministic fallback (used when Sonnet's answer_text is unusable)
+          // is just as honest — it must not reintroduce the "small adjustments
+          // could shift which option leads" contradiction on a no-practical-flip
+          // result.
+          //
+          // SAME-SOURCE GUARANTEE (Codex review #2): `analysisProjection` is
+          // built from `contextPackForLog.analysis`, which on the request path
+          // (`analysisStateSource === 'request'`) comes from the body-supplied
+          // analysis_state, NOT prior facts. The prior-fact flip / robustness
+          // evidence could then describe a DIFFERENT run. So we only pair
+          // prior-fact evidence with a prior-fact-built projection; when the
+          // projection is request-sourced we withhold it and the composer falls
+          // back to the request projection's own band (consistent, no mix).
+          rawRobustness: isExplanationHandler && analysisStateSource !== 'request'
+            ? pickLatestRawRobustness(context.prior_facts)
+            : undefined,
+          flipSummary: isExplanationHandler && analysisStateSource !== 'request'
+            ? pickLatestFlipSummary(context.prior_facts)
+            : undefined,
         });
         if (timingsEnabled) {
           turnTimings.handler_execute_ms = Date.now() - handlerStartedAt;

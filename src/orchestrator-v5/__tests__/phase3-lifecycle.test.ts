@@ -174,8 +174,11 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
         scenarioId: SCENARIO_ID,
       },
     });
-    // No analysis_result block (current turn produced no run_analysis fact).
-    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeUndefined();
+    // V5 P0-B: the FRESH prior-fact branch now ALSO emits the result-summary
+    // `analysis_result` block (so the UI has a non-empty, structured answer
+    // even without decision_review). Emitted on FRESH only — the STALE test
+    // below still asserts it is absent on a diverged graph.
+    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeDefined();
     // Phase 3 blocks rebuilt from prior fact and tagged fresh.
     const reviewCards = response.blocks.filter((b) => b.type === 'review_card');
     const coaching = response.blocks.filter((b) => b.type === 'coaching');
@@ -200,8 +203,248 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
     expect(payload.lifecycle_state).toBe('emitted_fresh');
     expect(payload.reason).toBe('prior_fact_fresh');
-    expect(payload.block_count).toBe(phase3Blocks.length);
+    // V5 P0-B: block_count now includes the added analysis_result block.
+    expect(payload.block_count).toBe(phase3Blocks.length + 1);
     expect(payload.stale_coaching_emitted).toBe(false);
+  });
+
+  // V5 P0-B — panel-aware keep-list + leak guards for the analysis_result
+  // block. Enrichment is reduced to the fields DGAI hydrates the Results
+  // panel from; every leak-carrying field is dropped at the build site. The
+  // rich fixture mirrors the live staging bundle (build cef69b0): leak
+  // markers live in DROPPED fields (_meta/meta → [REDACTED]; m1_coaching →
+  // isl_engine; decision_brief/fact_objects → seed lineage).
+  function richRunAnalysisFact(opts?: { withDecisionReview?: boolean; onlyLeak?: boolean }): RunAnalysisHandlerFact {
+    const enrichment: Record<string, unknown> = opts?.onlyLeak
+      ? {}
+      : {
+          option_comparison: [
+            { option_id: 'opt_a', option_label: 'Plan A', win_probability: 0.7 },
+            { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.3 },
+          ],
+          factor_sensitivity: [{ factor_id: 'fac_x', influence_score: 0.5 }],
+          robustness: { level: 'fragile', fragile_edges: [] },
+          results: [{ option_id: 'opt_a' }],
+        };
+    if (!opts?.onlyLeak && opts?.withDecisionReview !== false) {
+      enrichment.decision_review = { narrative_summary: 'ok' };
+    }
+    // Leak carriers — always present, always dropped.
+    enrichment._meta = { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } };
+    enrichment.meta = { build: 'cef69b0', feature_flags: { TOKEN_RL_ENABLE: '[REDACTED]' } };
+    enrichment.m1_coaching = { assumptions_ledger: { assumptions: [{ source_service: 'isl_engine' }] } };
+    enrichment.decision_brief = { seed: 12345 };
+    enrichment.fact_objects = [{ lineage: { seed: 999 } }];
+    enrichment.downstream_calls = { isl: [{ request_payload: { graph: { nodes: [] } } }] };
+    enrichment.graph = { nodes: [] };
+    enrichment.critiques = [{ code: 'MONTE_CARLO_FAILED', message: 'internal' }];
+    enrichment.flip_thresholds = [{ factor_id: 'fac_x', flip_value: null }];
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment,
+      },
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  function analysisResultBlockFor(fact: RunAnalysisHandlerFact, opts: { currentTurn: boolean }) {
+    const response = composeToolCallResponse({
+      orientation: '', confirmation: 'x', coaching: null, stage: 'decide',
+      handlerFacts: opts.currentTurn ? [fact] : [],
+      lifecycle: opts.currentTurn
+        ? undefined
+        : {
+            priorFacts: [fact],
+            freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+            requestId: 'req', scenarioId: SCENARIO_ID,
+          },
+    });
+    return response.blocks.find((b) => b.type === 'analysis_result') as
+      | { win_probabilities?: Record<string, number>; enrichment?: Record<string, unknown> }
+      | undefined;
+  }
+
+  it('LEAK GUARD: analysis_result enrichment is reduced to the panel keep-list; every leak carrier ([REDACTED]/isl_engine/seed/_meta/graph/critiques) is dropped', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact(), { currentTurn: false });
+    expect(block).toBeDefined();
+    const enr = block!.enrichment ?? {};
+    // Only panel-aware keep-list fields survive.
+    expect(Object.keys(enr).sort()).toEqual([
+      'decision_review', 'factor_sensitivity', 'option_comparison', 'results', 'robustness',
+    ]);
+    // Leak carriers dropped.
+    for (const k of ['_meta', 'meta', 'm1_coaching', 'decision_brief', 'fact_objects', 'downstream_calls', 'graph', 'critiques', 'flip_thresholds']) {
+      expect(k in enr).toBe(false);
+    }
+    // No leak markers survive ANYWHERE in the kept enrichment.
+    const enrJson = JSON.stringify(enr);
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson.toLowerCase()).not.toContain('isl_engine');
+    expect(enrJson).not.toMatch(/"seed"/);
+    // win_probabilities preserved VERBATIM, keyed by option id (DGAI correlates by id).
+    expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
+  });
+
+  it('KEEP-LIST: panel fields survive when decision_review is absent (chip-click autofire-off) — block is NOT starved', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact({ withDecisionReview: false }), { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    expect(Object.keys(enr).sort()).toEqual([
+      'factor_sensitivity', 'option_comparison', 'results', 'robustness',
+    ]);
+  });
+
+  it('KEEP-LIST: when enrichment carries ONLY leak fields, the block omits enrichment entirely', () => {
+    const block = analysisResultBlockFor(richRunAnalysisFact({ onlyLeak: true }), { currentTurn: false });
+    expect(block).toBeDefined();
+    expect('enrichment' in block!).toBe(false);
+    expect(block!.win_probabilities).toEqual({ opt_a: 0.7, opt_b: 0.3 });
+  });
+
+  it('KEEP-LIST: DGAI read-side givens with no fallback (option_comparison_status, conditional_probabilities) survive while leak carriers are dropped', () => {
+    // Codex closure review — these top-level fields reach enrichment via PLoT
+    // .passthrough() + CEE's byte-for-byte store and are read with no fallback,
+    // so dropping them would regress the Results panel (e.g. constraint-bearing
+    // analyses). option_comparison_status is fixture-proven (value 'computed').
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+          option_comparison_status: 'computed',
+          conditional_probabilities: [{ option_id: 'opt_a', given: 'c1', probability: 0.55 }],
+          // leak carriers that must still be dropped
+          _meta: { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } },
+          downstream_calls: { isl: [] },
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    expect(enr.option_comparison_status).toBe('computed');
+    expect(enr.conditional_probabilities).toEqual([{ option_id: 'opt_a', given: 'c1', probability: 0.55 }]);
+    expect('_meta' in enr).toBe(false);
+    expect('downstream_calls' in enr).toBe(false);
+    expect(JSON.stringify(enr)).not.toContain('[REDACTED]');
+  });
+
+  it('DEDUPE CONSISTENCY: the current-turn run_analysis block and the reused follow-up block carry IDENTICAL enrichment for the same fact', () => {
+    const fact = richRunAnalysisFact();
+    const currentTurn = analysisResultBlockFor(fact, { currentTurn: true });
+    const reused = analysisResultBlockFor(fact, { currentTurn: false });
+    expect(currentTurn).toBeDefined();
+    expect(reused).toBeDefined();
+    // Same transform on both → identical block payload → DGAI content-hash
+    // dedupe + panel hydration stay consistent across turns.
+    expect(reused!.enrichment).toEqual(currentTurn!.enrichment);
+    expect(reused!.win_probabilities).toEqual(currentTurn!.win_probabilities);
+  });
+
+  // V5 P0-B — Codex non-blocker: the keep-list is not merely a shallow
+  // top-level pick. Internal/debug carriers NESTED inside a kept field are
+  // deep-stripped at the build site, so they cannot survive even in debug-on
+  // mode (where the response-finaliser's prose scrub is bypassed). Legitimate
+  // science metadata (e.g. confidence_provenance) is preserved.
+  it('LEAK GUARD (debug-independent): internal carriers NESTED inside kept fields are deep-stripped; science metadata is preserved', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          factor_sensitivity: [
+            {
+              factor_id: 'fac_x',
+              influence_score: 0.5,
+              confidence_provenance: 'isl-model-v2', // legit science metadata — KEPT
+              _meta: { TOKEN_RL_ENABLE: '[REDACTED]' }, // nested carrier — STRIPPED
+              lineage: { seed: 12345 }, // nested carrier — STRIPPED
+            },
+          ],
+          robustness: { level: 'fragile', graph_hash: 'deadbeef', fragile_edges: [] },
+          option_comparison: [
+            { option_id: 'opt_a', win_probability: 0.7, downstream_calls: { isl: [{}] } },
+          ],
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    const enrJson = JSON.stringify(enr);
+    // Nested internal carriers gone — debug-independent (runs at the build site).
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson).not.toMatch(/"seed"/);
+    expect(enrJson).not.toMatch(/"graph_hash"/);
+    expect(enrJson).not.toMatch(/"_meta"/);
+    expect(enrJson).not.toMatch(/"lineage"/);
+    expect(enrJson).not.toMatch(/"downstream_calls"/);
+    // Legit science metadata + structural values preserved (NOT over-stripped).
+    expect(enrJson).toContain('confidence_provenance');
+    expect(enrJson).toContain('isl-model-v2');
+    const fs = enr.factor_sensitivity as Array<Record<string, unknown>>;
+    expect(fs[0]!.influence_score).toBe(0.5);
+  });
+
+  // V5 P0-B — Codex non-blocker #2: VALUE-level guard. The redaction marker
+  // `[REDACTED]` hiding under a harmless (non-denylisted) key is dropped, while
+  // legitimate science values that merely CONTAIN internal-sounding substrings
+  // (e.g. "Engineering Capacity" contains "engin"; confidence_provenance) are
+  // preserved — we deliberately do not broad-scrub those tokens.
+  it('LEAK GUARD (value-level): a [REDACTED] value under a harmless key is dropped; legit science labels with internal-sounding substrings survive', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          factor_sensitivity: [
+            {
+              factor_id: 'fac_eng',
+              factor_label: 'Engineering Capacity', // contains "engin" — MUST survive
+              confidence_provenance: 'isl-model-v2', // legit metadata — MUST survive
+              note: '[REDACTED]', // redaction marker under a harmless key — STRIPPED
+            },
+          ],
+          option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+
+    const block = analysisResultBlockFor(fact, { currentTurn: false });
+    const enr = block!.enrichment ?? {};
+    const enrJson = JSON.stringify(enr);
+    // The redaction marker is gone (value-level guard), and the carrier key with it.
+    expect(enrJson).not.toContain('[REDACTED]');
+    expect(enrJson).not.toMatch(/"note"/);
+    // No false positives: legit labels / provenance with internal-sounding
+    // substrings are preserved verbatim.
+    expect(enrJson).toContain('Engineering Capacity');
+    expect(enrJson).toContain('confidence_provenance');
+    expect(enrJson).toContain('isl-model-v2');
   });
 
   // PR 3 contract — block_id stability across stale rebuilds.
