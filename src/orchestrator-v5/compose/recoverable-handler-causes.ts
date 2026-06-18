@@ -33,6 +33,11 @@ export const RECOVERABLE_HANDLER_CAUSES: ReadonlySet<HandlerInvocationFailedCaus
   [
     'args_validation_failed',
     'options_not_configured',
+    // EP2 (V5 Edit Safety Core): the read-boundary analysis-ready guard blocking an
+    // un-analysable persisted graph is user-recoverable (graph state, not infra) —
+    // a clean direct_answer 200 with an honest next-step + recovery chip. (War-Room
+    // convention: control to record against the handler-failure-scope doc.)
+    'analysis_not_ready',
     'analysis_blocked',
     'parameter_invalid_at_execute',
     'entity_not_found_in_graph',

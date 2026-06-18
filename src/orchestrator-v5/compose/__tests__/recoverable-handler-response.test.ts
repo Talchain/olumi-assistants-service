@@ -43,6 +43,7 @@ describe('isRecoverableHandlerCause', () => {
     const expected: HandlerInvocationFailedCause[] = [
       'args_validation_failed',
       'options_not_configured',
+      'analysis_not_ready', // EP2 (V5 Edit Safety Core) — read-boundary guard blocked outcome
       'analysis_blocked',
       'parameter_invalid_at_execute',
       'entity_not_found_in_graph',
@@ -70,8 +71,8 @@ describe('isRecoverableHandlerCause', () => {
     }
   });
 
-  it('locked-set size matches the documented War-Room list (7)', () => {
-    expect(RECOVERABLE_HANDLER_CAUSES.size).toBe(7);
+  it('locked-set size matches the documented War-Room list (8: +analysis_not_ready, EP2 V5 Edit Safety Core)', () => {
+    expect(RECOVERABLE_HANDLER_CAUSES.size).toBe(8);
   });
 });
 
@@ -79,6 +80,7 @@ describe('composeRecoverableHandlerResponse', () => {
   it.each([
     ['args_validation_failed', { specific_issue: 'missing scenario_id' }],
     ['options_not_configured', { first_option_label: 'Hire Senior Engineer' }],
+    ['analysis_not_ready', { reason_code: 'NO_CAP_UNRECOVERABLE', next_step: 'Review the option values — this option needs a bound (cap) before it can be analysed.' }],
     ['analysis_blocked', {}],
     ['parameter_invalid_at_execute', { specific_issue: 'value out of range' }],
     ['entity_not_found_in_graph', {}],

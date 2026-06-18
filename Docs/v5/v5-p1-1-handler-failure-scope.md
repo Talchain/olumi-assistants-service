@@ -162,3 +162,11 @@ Scope for a future P1-1 branch, ordered by user-facing impact:
    - `analysis_blocked` → 200 + scenario-status chip
 3. Reconcile the two dispatch paths. Either unify chip-click under TurnExecutor (with a pre-classified short-circuit skipping ORIENT) or hold the current split but make failure-to-HTTP consistent.
 4. The `v5_journey_id` observability fix in `evaluateAnalysisStatus` (deferred from this branch; requires `ctx` signature change).
+
+## Amendment — EP2 (V5 Edit Safety Core), 2026-06-18: recoverable-causes lock 7 → 8
+
+**Decision (recorded):** EP2 intentionally adds `analysis_not_ready` to the recoverable typed-200 handler causes so an **un-analysable persisted graph** (the read-boundary `assessAnalysisReadiness` guard found it `unrecoverable` — e.g. a non-canonical option-intervention shape that cannot be safely encoded, or a structurally un-analysable graph) returns an **honest recovery path** (200 + user-safe next-step + "Review the model" chip) **rather than a 500**. The `RECOVERABLE_HANDLER_CAUSES` lock expands from **7 to 8**.
+
+- Added at `src/orchestrator-v5/compose/recoverable-handler-causes.ts` (the locked set) + `handler-errors.ts` (cause union + `next_step`/`reason_code` details) + `handler-failure-responses.ts` (the 200 composer case). The lock-size test (`recoverable-handler-response.test.ts`) is updated 7 → 8.
+- Rationale matches §"user-recoverable" above: the failure reflects **graph state / user intent**, not infrastructure — exactly the clean direct_answer 200 + coaching-chip shape.
+- Scope discipline: this is the **only** handler-failure change in EP2. No other cause kinds, dispatch paths, or 500-vs-200 boundaries were touched.

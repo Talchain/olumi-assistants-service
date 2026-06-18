@@ -45,6 +45,7 @@ import {
   summaryIsNoteworthy,
   type InterventionConversion,
 } from './tools/plot-intervention-scale.js';
+import { assessAnalysisReadiness, AnalysisNotReadyError } from './tools/handlers/analysis-ready-core.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from './coaching/coaching-state-snapshot.js';
@@ -501,10 +502,29 @@ function distinctSorted(values: readonly string[]): string[] {
  * when no graph is persisted or the parse fails — provenance is diagnostic and
  * never affects correctness.
  */
-function deriveDecisionContextGraphHash(graph: unknown | null): string | null {
+export function deriveDecisionContextGraphHash(graph: unknown | null): string | null {
   if (graph == null) return null;
   try {
-    const parsed = GraphStateIngressSchema.safeParse(graph);
+    let toHash: unknown = graph;
+    // EP2 (V5 Edit Safety Core), gated atomically with the run-time guard. When
+    // ON: (a) an unrecoverable graph short-circuits to null → freshness resolves
+    // as `unknown`/current_graph_hash_unavailable (not fresh), so a prior result is
+    // never shown as current over an un-analysable graph (Blocker 2); (b) a
+    // ready/repaired graph is canonicalised BEFORE hashing so this matches the
+    // run-time `graph_hash_at_run` (brief §6 consistency). Flag OFF ⇒ unchanged.
+    //
+    // UI RESIDUAL (EP2): the backend proves an unrecoverable graph does NOT read
+    // fresh/current (freshness → `unknown`/current_graph_hash_unavailable). On
+    // non-run turns, whether DGAI renders `unknown` as a clear "needs fixing" cue
+    // is NOT verified here — the explicit recovery copy is tied to the run_analysis
+    // `analysis_not_ready` outcome. UI rendering of `unknown` should be checked in
+    // EP3 or a separate read-only UI verification.
+    if (config.cee.analysisReadyGuardEnabled) {
+      const verdict = assessAnalysisReadiness(graph);
+      if (verdict.status === 'unrecoverable') return null;
+      toHash = verdict.canonicalGraph ?? graph;
+    }
+    const parsed = GraphStateIngressSchema.safeParse(toHash);
     return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data) : null;
   } catch {
     return null;
@@ -1004,7 +1024,25 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`No persisted graph found for scenario ${scenarioId}`);
   }
 
-  const parsedGraph = GraphV3.safeParse(persistedGraph);
+  // EP2 (V5 Edit Safety Core) — read-boundary analysis-ready guard. Behind
+  // `analysisReadyGuardEnabled` (default OFF), canonicalise the persisted graph
+  // BEFORE GraphV3.safeParse strips `node.data` (which would otherwise drop an
+  // autosave-written `node.data.interventions` option → silent options_not_configured),
+  // and block an un-analysable graph as a typed recoverable failure (NOT a 500).
+  // `graphForSnapshot` (= the canonical graph when the guard is on) is also used as
+  // `rawPersistedGraph` so `graph_hash_at_run` is computed from the SAME canonical
+  // projection the freshness side hashes (brief §6 consistency). Flag OFF ⇒
+  // `graphForSnapshot === persistedGraph` ⇒ byte-identical to today.
+  let graphForSnapshot: unknown = persistedGraph;
+  if (config.cee.analysisReadyGuardEnabled) {
+    const verdict = assessAnalysisReadiness(persistedGraph);
+    if (verdict.status === 'unrecoverable') {
+      throw new AnalysisNotReadyError(verdict);
+    }
+    graphForSnapshot = verdict.canonicalGraph ?? persistedGraph;
+  }
+
+  const parsedGraph = GraphV3.safeParse(graphForSnapshot);
   if (!parsedGraph.success) {
     throw new Error(`Persisted graph failed GraphV3 validation for scenario ${scenarioId}`);
   }
@@ -1039,7 +1077,9 @@ export async function loadScenarioSnapshotForRunAnalysis(
     graph: parsedGraph.data,
     options,
     goal_node_id: readiness.goal_node_id,
-    rawPersistedGraph: persistedGraph,
+    // EP2: canonical graph when the guard is on (graphForSnapshot === persistedGraph
+    // when off) — keeps graph_hash_at_run consistent with the freshness-side hash.
+    rawPersistedGraph: graphForSnapshot,
     // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
     // constraints added via `add_constraint`. Omitted when absent so
     // run-analysis can use the existing optional-field idiom.
