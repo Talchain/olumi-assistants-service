@@ -352,6 +352,39 @@ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
     }
   });
 
+  it('NODE-LEVEL: the sweep covers NON-OPTION nodes too (interventions is a NodeV3 field, so the parse-bomb is node-level)', () => {
+    // GraphV3.safeParse rejects interventions:null on a factor/decision/goal/risk
+    // node just as it does on an option; the sweep must match the full surface.
+    const g: AnyGraph = {
+      nodes: [
+        { id: 'fac_n', kind: 'factor', label: 'F', interventions: null },
+        { id: 'dec_a', kind: 'decision', label: 'D', interventions: [1, 2] as unknown },
+        { id: 'goal_s', kind: 'goal', label: 'G', interventions: 'x' as unknown },
+        { id: 'risk_b', kind: 'risk', label: 'R', interventions: true as unknown },
+      ],
+      edges: [],
+    };
+    const out = normaliseOptionInterventionContract(g) as AnyGraph;
+    expect(nodeById(out, 'fac_n').interventions).toEqual({});
+    expect(nodeById(out, 'dec_a').interventions).toEqual({});
+    expect(nodeById(out, 'goal_s').interventions).toEqual({});
+    expect(nodeById(out, 'risk_b').interventions).toEqual({});
+    // input not mutated
+    expect((g.nodes[0] as AnyNode).interventions).toBeNull();
+  });
+
+  it('GraphV3.safeParse: interventions:null FAILS on a NON-OPTION (factor) node too; sweep makes it parse', () => {
+    const bomb = { nodes: [{ id: 'goal_g', kind: 'goal', label: 'G' }, { id: 'fac_n', kind: 'factor', label: 'F', interventions: null }], edges: [] };
+    expect(GraphV3.safeParse(bomb).success).toBe(false); // node-level parse-bomb confirmed
+    const swept = normaliseOptionInterventionContract(bomb);
+    const parsed = GraphV3.safeParse(swept);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const fac = parsed.data.nodes.find((n) => n.id === 'fac_n') as Record<string, unknown>;
+      expect(fac.interventions).toEqual({});
+    }
+  });
+
   it('NO-OP: a valid top-level interventions record is unchanged (reference identity)', () => {
     const g: AnyGraph = { nodes: [draftOption('opt_ok', false)], edges: [] };
     expect(normaliseOptionInterventionContract(g)).toBe(g);

@@ -107,10 +107,18 @@ function isPlainObject(v: unknown): v is Dict {
  * P0-A add-option residual — an option whose top-level `interventions` is
  * PRESENT but NOT a plain-object record (the live failure: `interventions:null`;
  * also any non-record like an array/scalar). `NodeV3.interventions` is
- * `z.record(...).optional()`, so `GraphV3.safeParse` ACCEPTS absent/`{}`/record
- * but REJECTS `null` ("Expected object, received null") on read — making the
+ * `z.record(...).optional()` — declared on EVERY node kind, not just options —
+ * so `GraphV3.safeParse` ACCEPTS absent/`{}`/record but REJECTS `null`/array/
+ * scalar ("Expected object, received null") on read for ANY node, making the
  * persisted graph unreadable and rerun fail `options_not_configured`/500. An
  * ABSENT `interventions` key is safe (optional) and is intentionally NOT flagged.
+ *
+ * JSON-only assumption: `scenarios.graph` is a Postgres `jsonb` column, so a
+ * persisted node's `interventions` is always a JSON value (object / array /
+ * string / number / boolean / null) — never a `Date`/`Map`/class instance.
+ * Under that assumption `isPlainObject` is a true record catch-all: every
+ * non-record JSON value (null, array, scalar) is flagged, and every JSON object
+ * is a valid record. Non-JSON objects cannot reach this path.
  */
 function hasInvalidInterventionsShape(node: Dict): boolean {
   return 'interventions' in node && !isPlainObject(node.interventions);
@@ -232,12 +240,17 @@ function findOptionsNeedingPromotion(graph: unknown): string[] {
   return ids;
 }
 
-/** Collect ids of option nodes whose top-level `interventions` is null/non-record. Read-only. */
-function findOptionsWithInvalidInterventions(graph: unknown): string[] {
+/**
+ * Collect ids of ANY node (not just options) whose top-level `interventions` is
+ * null/non-record. The parse-bomb surface is node-level: `NodeV3.interventions`
+ * is declared on every kind, so `GraphV3.safeParse` rejects `interventions:null`
+ * on a factor/decision/goal/risk node too. Read-only.
+ */
+function findNodesWithInvalidInterventions(graph: unknown): string[] {
   if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) return [];
   const ids: string[] = [];
   for (const node of graph.nodes) {
-    if (!isPlainObject(node) || node.kind !== 'option') continue;
+    if (!isPlainObject(node)) continue;
     if (hasInvalidInterventionsShape(node)) {
       ids.push(typeof node.id === 'string' ? node.id : '<unknown>');
     }
@@ -246,23 +259,25 @@ function findOptionsWithInvalidInterventions(graph: unknown): string[] {
 }
 
 /**
- * PASS 1 — the minimal, TOTAL null/non-record invariant sweep. Coerce any
- * option's top-level `interventions: null` (or a non-record array/scalar) to an
- * empty record `{}`. Deliberately separate from the recoverable-promotion logic
- * so that a promotion failure (PASS 2 fail-open) can NEVER re-expose a
+ * PASS 1 — the minimal, TOTAL null/non-record invariant sweep. Coerce ANY
+ * node's top-level `interventions: null` (or a non-record array/scalar) to an
+ * empty record `{}`. Covers every node kind because the parse-bomb surface is
+ * node-level (see {@link findNodesWithInvalidInterventions}). Deliberately
+ * separate from the recoverable-promotion logic (which stays option-only) so
+ * that a promotion failure (PASS 2 fail-open) can NEVER re-expose a
  * parse-breaking `interventions:null` shape. Returns the ORIGINAL reference when
- * no option is invalid (byte-identical no-op). The only failure mode is a
+ * no node is invalid (byte-identical no-op). The only failure mode is a
  * JSON-clone throw (circular/BigInt graph) — which cannot be persisted as jsonb
  * anyway — so the caller treats a sweep throw as "nothing persistable to fix".
  */
-function sweepInvalidOptionInterventions<T>(graph: T): { graph: T; ids: string[] } {
-  const ids = findOptionsWithInvalidInterventions(graph);
+function sweepInvalidNodeInterventions<T>(graph: T): { graph: T; ids: string[] } {
+  const ids = findNodesWithInvalidInterventions(graph);
   if (ids.length === 0) return { graph, ids };
   const clone = JSON.parse(JSON.stringify(graph)) as T;
   const nodes = (clone as { nodes?: unknown }).nodes;
   if (Array.isArray(nodes)) {
     for (const node of nodes) {
-      if (isPlainObject(node) && node.kind === 'option' && hasInvalidInterventionsShape(node)) {
+      if (isPlainObject(node) && hasInvalidInterventionsShape(node)) {
         node.interventions = {};
       }
     }
@@ -309,15 +324,15 @@ export function normaliseOptionInterventionContract<T>(
   // Graph-absent no-op: nothing to persist/normalise.
   if (graph === undefined || graph === null) return graph;
 
-  // ── PASS 1 — TOTAL null/non-record invariant sweep ──────────────────────────
-  // An option must NEVER persist with `interventions:null` (or a non-record),
-  // which GraphV3 rejects on read. This sweep is independent of PASS 2 below: a
-  // promotion failure can never re-expose the parse-breaking shape, because
-  // PASS 2 fail-opens to THIS swept graph, not the raw original.
+  // ── PASS 1 — TOTAL null/non-record invariant sweep (ALL node kinds) ─────────
+  // No node may persist with `interventions:null` (or a non-record), which
+  // GraphV3 rejects on read for ANY kind. This sweep is independent of PASS 2
+  // below: a promotion failure can never re-expose the parse-breaking shape,
+  // because PASS 2 fail-opens to THIS swept graph, not the raw original.
   let base: T = graph;
   let sweptIds: string[] = [];
   try {
-    const swept = sweepInvalidOptionInterventions(graph);
+    const swept = sweepInvalidNodeInterventions(graph);
     base = swept.graph;
     sweptIds = swept.ids;
   } catch (err) {

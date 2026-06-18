@@ -218,6 +218,34 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
     expect((g.nodes.find((n) => n.id === 'opt_inhouse_capacity') as AnyNode).interventions).toBeNull();
   });
 
+  it('P0-A: commitDirectAnswer also sweeps a NON-OPTION node interventions:null → {} (node-level parse-bomb surface)', async () => {
+    setTestSink(() => {});
+    const { store, appendCalls } = makeSpyStore();
+    // A factor node carrying interventions:null would fail GraphV3 on read just
+    // like an option — the sweep must cover it at the commit chokepoint.
+    const g: AnyGraph = {
+      nodes: [
+        { id: 'goal_g', kind: 'goal', label: 'G' },
+        { id: 'dec_d', kind: 'decision', label: 'D' },
+        { id: 'fac_bomb', kind: 'factor', label: 'F', observed_state: { value: 0.2 }, interventions: null },
+        draftOption(),
+      ],
+      edges: [
+        { from: 'dec_d', to: 'opt_draft', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_draft', to: 'fac_bomb', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'fac_bomb', to: 'goal_g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    };
+    const composed = composeDirectAnswerResponse({ assistant_text: 'applied', stage: 'frame' });
+
+    await commitDirectAnswer(composed, { ...META, graph: g }, store);
+
+    const persisted = appendCalls[0]!.graph as AnyGraph;
+    expect(nodeById(persisted, 'fac_bomb').interventions).toEqual({}); // non-option swept too
+    expect(GraphV3.safeParse(persisted).success).toBe(true);           // graph now readable
+    expect((g.nodes.find((n) => n.id === 'fac_bomb') as AnyNode).interventions).toBeNull(); // input untouched
+  });
+
   it('idempotent: re-committing the already-repaired graph changes nothing (stable persisted graph)', async () => {
     setTestSink(() => {});
     const composed = composeDirectAnswerResponse({ assistant_text: 'applied', stage: 'frame' });
