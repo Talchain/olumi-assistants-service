@@ -73,3 +73,89 @@ hedge.
 This contract governs the flip-threshold **proposal chip** (`flip-proposal.ts`, chip-click
 `what_would_flip` EXECUTE path) only. It does **not** cover the deterministic what-would-flip
 narrative copy (`composeWhatWouldFlip*`) or its fragile-edge label parity (tracked separately).
+
+---
+
+# CEE → PLoT contract: `run_analysis` intervention input scale (egress net, #284)
+
+**Status:** active · flag-gated, default OFF; enabled on `cee-staging` for a monitored soak (2026-06-19) · **Scope:** outbound option interventions at the `run_analysis` projection boundary · **Owner:** CEE
+**Related code:** [`src/orchestrator-v5/tools/plot-intervention-scale.ts`](../../src/orchestrator-v5/tools/plot-intervention-scale.ts), [`src/orchestrator-v5/build-turn-context.ts`](../../src/orchestrator-v5/build-turn-context.ts) (`loadScenarioSnapshotForRunAnalysis`) · **Flag:** `cee.plotEgressScaleNetEnabled` / env `CEE_PLOT_EGRESS_SCALE_NET_ENABLED`
+
+This section covers the **opposite direction** to the flip-threshold contract above: how CEE sends
+option intervention values **into** PLoT's `run_analysis` (the flat `{ factor_id: finite number }`
+intervention map).
+
+## Observed PLoT normalisation heuristic (build `78aea76`, empirically verified)
+
+PLoT normalises a factor's intervention values **per-factor, by whether they look raw**:
+
+- If **any** of a factor's intervention values across the compared options is `> 1` → PLoT treats
+  them **all as raw** and divides by the factor's `observed_state.cap`.
+- If **all** are `≤ 1` → PLoT uses them **directly** as already-normalised.
+
+Evidence (direct, non-persisting `/v2/run` probes; `cap = 150000`, edge strength `0.9`):
+
+| Inputs for one factor (two options) | PLoT outcome | Interpretation |
+|---|---|---|
+| uniform **normalised** `{0.8, 0.2}` | `0.706 / 0.176` | used **directly** |
+| uniform **raw** `{120000, 30000}` | `0.706 / 0.176` | **÷cap** → same internal values |
+| **mixed** `{0.8, 30000}` | **`0.000 / 0.176`** | the `0.8` is **÷cap'd to ~0** because the sibling is raw |
+
+**Corrected mental model.** The earlier "PLoT always expects raw / always ÷cap" assumption was
+wrong. PLoT handles **uniform normalised** and **uniform raw** option values **equivalently**. The
+corruption case is **mixed-scale** factors: a normalised value is silently divided by cap (→ ~0)
+when any sibling option's value for the **same factor** is raw (`> 1`).
+
+## What #284 does (egress canonicalisation net)
+
+At `loadScenarioSnapshotForRunAnalysis`, when `cee.plotEgressScaleNetEnabled` is ON, CEE
+canonicalises every outbound option intervention to **raw user-scale** before PLoT, via the
+evidence-gated rule in `plot-intervention-scale.ts`. Given the heuristic above:
+
+- For **uniform-scale** scenarios it is behaviourally **equivalent** to OFF (PLoT already handles
+  them) → low risk.
+- Its corrective value is **eliminating mixed-scale corruption**: making all of a factor's outbound
+  values raw means PLoT consistently ÷cap's them, so a normalised sibling can no longer drag one
+  option to ~0.
+- Flag **default OFF**; byte-identical no-op when OFF. **Read-only**: never mutates the persisted
+  graph; the PLoT request stays the flat `{ factor_id: finite number }` map; intervention-level
+  `raw_value` / `cap` / `unit` are **never** sent.
+
+## Evidence-gated rules + diagnostic categories
+
+Per numeric intervention (no silent corruption; double-conversion-safe):
+
+| Category | Behaviour |
+|---|---|
+| `raw_value_used` | Explicit finite `raw_value` wins. If it disagrees with `value × cap` (normalised input) or `value` (raw-looking input) beyond 0.5% tol → also flagged `inconsistent_scale` (surfaced, never repaired). |
+| `cap_denormalised` | `value × cap`, **only** when the target factor's own `observed_state` proves `value ≈ raw_value / cap` (baseline `∈ (0, 1]`, `raw_value > value` — forces `cap > 1`). |
+| `ambiguous_no_evidence` | `[0, 1]` on a capped factor **without** proving evidence → passed through unchanged (never blindly scaled). |
+| `no_cap` | No usable cap → passthrough. |
+| `encoded_verbatim` | Categorical/boolean (`value_type`, `encoding_map`, or boolean `raw_value`) → passed through verbatim, never scaled. |
+| `passthrough` | Already-raw (`< 0` or `> 1`) on a capped factor → sent as-is. |
+
+A **single redacted** diagnostic `run_analysis.intervention_scale_egress` is emitted per snapshot
+load when noteworthy — **factor ids + rule counts only**, never magnitudes, caps, units, or user
+text.
+
+## Read-shape invariant (Track S relationship; PR B prerequisite)
+
+`loadScenarioSnapshotForRunAnalysis` runs the persisted graph through `GraphV3.safeParse`, which
+**strips undeclared `node.data`** and keeps the **declared top-level `node.interventions`**. The
+egress net therefore reads option interventions from **top-level `node.interventions` post-parse**
+(via `mergeInterventionSourceObjects`, which holds key/precedence parity with the numeric
+`mergeInterventionSources`). Track S's persist-time `normaliseOptionInterventionContract` already
+promotes `data.interventions` / slash-keyed entries to this canonical top-level location at the
+write chokepoint, preserving `raw_value` / `value_type`.
+
+> **Invariant for the future add-option encode path (PR B).** Any add-option encode/promote must
+> **land interventions at top-level `node.interventions`** (so they survive `GraphV3.safeParse` and
+> are visible to the egress net) and must **compose with #281's fail-closed value/unit guard** —
+> do not duplicate or fight it.
+
+## Acceptance + rollout status
+
+Flag-ON staging acceptance passed and rollback proven (2026-06-19). The net is currently enabled on
+`cee-staging` for a monitored soak (build `dbe8d22`), watching `run_analysis.intervention_scale_egress`
+(`cap_denormalised` / `ambiguous_no_evidence` / `inconsistent_scale`). Rollback = set the flag OFF
+and redeploy (config is read once per process, so a restart is required for the change to take effect).
