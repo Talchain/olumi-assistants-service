@@ -106,6 +106,11 @@ wrong. PLoT handles **uniform normalised** and **uniform raw** option values **e
 corruption case is **mixed-scale** factors: a normalised value is silently divided by cap (→ ~0)
 when any sibling option's value for the **same factor** is raw (`> 1`).
 
+**How the model was refined.** The original Step 0 verification confirmed the raw + `observed_state.cap`
+behaviour for values `≥ 1` but did not exercise the mixed-scale interaction. The flag-ON staging soak
+refined the model by showing that **mixed-scale factors are the actual corruption case** — uniform-scale
+inputs (all-normalised or all-raw) are handled equivalently by PLoT and were never the failure mode.
+
 ## What #284 does (egress canonicalisation net)
 
 At `loadScenarioSnapshotForRunAnalysis`, when `cee.plotEgressScaleNetEnabled` is ON, CEE
@@ -128,6 +133,7 @@ Per numeric intervention (no silent corruption; double-conversion-safe):
 | Category | Behaviour |
 |---|---|
 | `raw_value_used` | Explicit finite `raw_value` wins. If it disagrees with `value × cap` (normalised input) or `value` (raw-looking input) beyond 0.5% tol → also flagged `inconsistent_scale` (surfaced, never repaired). |
+| `inconsistent_scale` | Diagnostic-only flag when explicit `raw_value` disagrees with the normalised or raw-looking `value` beyond tolerance. The egress net does **not** repair by inference; `raw_value` remains authoritative and the inconsistency is surfaced for audit and soak monitoring. (Orthogonal to the rule — co-occurs with `raw_value_used`.) |
 | `cap_denormalised` | `value × cap`, **only** when the target factor's own `observed_state` proves `value ≈ raw_value / cap` (baseline `∈ (0, 1]`, `raw_value > value` — forces `cap > 1`). |
 | `ambiguous_no_evidence` | `[0, 1]` on a capped factor **without** proving evidence → passed through unchanged (never blindly scaled). |
 | `no_cap` | No usable cap → passthrough. |
