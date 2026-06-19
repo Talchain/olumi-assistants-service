@@ -33,7 +33,18 @@ import type { SessionTurnWithContent } from './session/conversation-content.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import { config } from '../config/index.js';
+import {
+  computeStructuralReadiness,
+  mergeInterventionSourceObjects,
+} from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  buildFactorScaleMap,
+  projectInterventionsToRawScale,
+  summariseConversions,
+  summaryIsNoteworthy,
+  type InterventionConversion,
+} from './tools/plot-intervention-scale.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from './coaching/coaching-state-snapshot.js';
@@ -1003,14 +1014,30 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
   }
 
+  // CEE → PLoT value-scale egress net (Tier 0, Phase 1) — flag-gated, default OFF.
+  //
+  // PLoT consumes intervention input `value` as RAW user-scale and normalises
+  // internally using the target factor node's `observed_state.cap` (re-verified
+  // clean on PLoT staging `78aea76`, 2026-06-18). CEE historically projected the
+  // normalised `[0,1]` convention, which double-normalises capped interventions
+  // (e.g. sends 0.25 where PLoT expects 25000). When `cee.plotEgressScaleNetEnabled`
+  // is ON we canonicalise the OUTBOUND interventions here — the single egress
+  // projection point — via the evidence-gated rule in `plot-intervention-scale.ts`
+  // (no silent corruption, double-conversion-safe). When OFF this is a
+  // byte-identical no-op (the legacy numeric projection). Read-only either way:
+  // the persisted graph is never mutated; only the outbound PLoT projection changes.
+  const options = config.cee.plotEgressScaleNetEnabled
+    ? projectOptionsToRawScale(parsedGraph.data.nodes, readiness.options, requestId, scenarioId)
+    : readiness.options.map((option) => ({
+        id: option.option_id,
+        option_id: option.option_id,
+        label: option.label,
+        interventions: normaliseNumericInterventions(option.interventions),
+      }));
+
   return {
     graph: parsedGraph.data,
-    options: readiness.options.map((option) => ({
-      id: option.option_id,
-      option_id: option.option_id,
-      label: option.label,
-      interventions: normaliseNumericInterventions(option.interventions),
-    })),
+    options,
     goal_node_id: readiness.goal_node_id,
     rawPersistedGraph: persistedGraph,
     // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
@@ -1020,6 +1047,63 @@ export async function loadScenarioSnapshotForRunAnalysis(
       ? { goal_constraints: parsedGraph.data.goal_constraints }
       : {}),
   };
+}
+
+/**
+ * Egress value-scale projection (flag-ON path). Re-reads the ORIGINAL
+ * intervention objects from the persisted option nodes (object-preserving merge
+ * — same precedence + membership as readiness) plus the target factors'
+ * `observed_state` (cap + normalised-convention evidence), and canonicalises
+ * each outbound intervention to raw user-scale via the evidence-gated rule. Emits
+ * a SINGLE redacted diagnostic per load (rule counts + factor ids only — never
+ * magnitudes or caps) when anything was denormalised / inconsistent / ambiguous.
+ * Pure with respect to the persisted graph: it reads nodes but never mutates them.
+ */
+function projectOptionsToRawScale(
+  nodes: GraphV3T['nodes'],
+  options: ReadonlyArray<{ option_id: string; label: string; interventions: Record<string, unknown> }>,
+  requestId: string,
+  scenarioId: string,
+): Array<{ id: string; option_id: string; label: string; interventions: Record<string, number> }> {
+  const factorScaleById = buildFactorScaleMap(nodes);
+  const optionNodesById = new Map<string, Record<string, unknown>>();
+  for (const node of nodes) {
+    if (node.kind === 'option' && typeof node.id === 'string') {
+      optionNodesById.set(node.id, node as unknown as Record<string, unknown>);
+    }
+  }
+
+  const egressConversions: InterventionConversion[] = [];
+  const projected = options.map((option) => {
+    const optionNode = optionNodesById.get(option.option_id);
+    const rawObjects = optionNode ? mergeInterventionSourceObjects(optionNode) : {};
+    const { interventions, conversions } = projectInterventionsToRawScale(rawObjects, factorScaleById);
+    for (const conv of conversions) egressConversions.push(conv);
+    return {
+      id: option.option_id,
+      option_id: option.option_id,
+      label: option.label,
+      interventions,
+    };
+  });
+
+  const conversionSummary = summariseConversions(egressConversions);
+  if (summaryIsNoteworthy(conversionSummary)) {
+    log.info(
+      {
+        event: 'run_analysis.intervention_scale_egress',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        by_rule: conversionSummary.by_rule,
+        cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
+        inconsistent_scale_factors: conversionSummary.inconsistent_scale_factors,
+        ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
+      },
+      'run_analysis egress intervention value-scale projection (redacted; no magnitudes)',
+    );
+  }
+
+  return projected;
 }
 
 function normaliseNumericInterventions(
