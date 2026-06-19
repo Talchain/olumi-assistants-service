@@ -1125,6 +1125,22 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // Discriminated outcome — each case maps to a distinct wire
         // response. Parallels TurnExecutor's catch ladder so chip-click
         // errors surface with the same typed granularity.
+        //
+        // V5 C5 — recoverable handler cause (RECOVERABLE_HANDLER_CAUSES, e.g.
+        // options_not_configured when an added option is not yet configured for
+        // analysis): the dispatcher already composed a clean graceful body via
+        // the shared composeRecoverableHandlerResponse machinery. Return a 200
+        // (NOT a 500), mirroring the TurnExecutor handler-recovery path. No
+        // analysis_ready is stamped — no analysis ran and the graph was not
+        // mutated, so the UI retains its prior store value (failure semantics).
+        if (cc.outcome === 'handler_recovered') {
+          return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
+            graph: cc.graph,
+            requestStartedAt: routeStartedAt,
+            scenarioId: ingress.scenario_id,
+            turnId: ingress.turn_id,
+          });
+        }
         if (cc.outcome === 'handler_failure') {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'chip_click_dispatch',

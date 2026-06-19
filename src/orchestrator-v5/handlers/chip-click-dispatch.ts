@@ -46,7 +46,7 @@
  * (not on the LLM adapter globally).
  */
 
-import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
+import type { MessageTurnPayload, OlumiResponse, StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
 import { config } from '../../config/index.js';
@@ -97,6 +97,11 @@ import {
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
 } from '../tools/handler-errors.js';
+// V5 C5 — chip-click recoverable-cause escape repair. Reuse the SAME recovery
+// machinery the Sonnet/TurnExecutor path uses (no parallel recovery system).
+import { isRecoverableHandlerCause } from '../compose/recoverable-handler-causes.js';
+import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
+import type { ComposeContext } from '../compose/types.js';
 
 /**
  * Note on ingress state (graphState / analysisState):
@@ -208,12 +213,112 @@ export type DispatchChipClickRunAnalysisResult =
       readonly graph: GraphV3T | null;
     }
   | {
+      // V5 C5 — recoverable handler cause (RECOVERABLE_HANDLER_CAUSES, e.g.
+      // options_not_configured when an added option is not yet configured for
+      // analysis). The dispatcher composes a clean graceful body via the SAME
+      // composeRecoverableHandlerResponse machinery the Sonnet path uses;
+      // route-v2 maps this to a 200 (NOT the handler_failure → 500 path).
+      // `commitPerformed:false` — no analysis ran and no graph mutated, so
+      // `analysisReady` is omitted and the UI retains its prior store value,
+      // exactly as for the other failure outcomes.
+      readonly outcome: 'handler_recovered';
+      readonly response: OlumiResponse;
+      readonly commitPerformed: false;
+      readonly causeKind: string;
+      readonly analysisReady?: undefined;
+      readonly graph: GraphV3T | null;
+    }
+  | {
       readonly outcome: 'handler_result_invalid';
       readonly response: OlumiResponse;
       readonly commitPerformed: false;
       readonly analysisReady?: undefined;
       readonly graph: GraphV3T | null;
     };
+
+/**
+ * V5 C5 — chip-click recoverable-cause escape repair.
+ *
+ * Mirrors TurnExecutor's handler-recovery branch (turn-executor.ts) for the
+ * chip-click dispatch path. A handler invocation that fails with a RECOVERABLE
+ * cause (`RECOVERABLE_HANDLER_CAUSES` — e.g. `options_not_configured` when an
+ * added option is not yet configured for analysis) composes a clean graceful
+ * body via the SAME `composeRecoverableHandlerResponse` machinery, so route-v2
+ * can return a 200 instead of mapping the failure to a 500 BoundaryError.
+ *
+ * Cause-gated by the SHARED `isRecoverableHandlerCause` predicate (same locked
+ * set as the Sonnet path — the two cannot diverge on which causes recover).
+ * Returns `null` for FATAL causes so the caller keeps the existing
+ * `handler_failure` → 500 behaviour, and `null` on the impossible-state
+ * `fallback` template (cause on the recoverable list but no composer branch),
+ * matching TurnExecutor's fail-loud-to-500 guard. The recoverable response
+ * carries coaching text + a recovery chip; it never claims the option was
+ * configured and never sets `analysis_ready`.
+ */
+function tryComposeRecoverableChipOutcome(
+  err: HandlerInvocationFailedError,
+  graph: GraphV3T | null,
+  stage: StageType,
+  requestId: string,
+  scenarioId: string,
+): Extract<DispatchChipClickRunAnalysisResult, { outcome: 'handler_recovered' }> | null {
+  if (!isRecoverableHandlerCause(err.cause_kind)) return null;
+
+  // ComposeContext is unused by composeRecoverableHandlerResponse today (the
+  // body comes from the shared per-cause composer), but the signature requires
+  // it; pass the canonical validation registry the Sonnet path uses.
+  const recoveryCtx: ComposeContext = { handlerRegistry: HANDLER_VALIDATION_REGISTRY };
+  const recovered = composeRecoverableHandlerResponse(err, recoveryCtx, stage);
+
+  // Impossible-state guard — the cause is on the recoverable list but the
+  // composer has no per-cause branch (template_id === 'fallback'). That is a
+  // code bug, not a runtime fault: fall through to the fatal 500 path so the
+  // gap is visible, mirroring TurnExecutor.
+  if (recovered.template_id === 'fallback') {
+    log.error(
+      {
+        event: 'assert_recoverable_handler_fallback',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        cause_kind: err.cause_kind,
+      },
+      'V5 chip_click hit recoverable composer fallback — cause on recoverable list but no template; returning typed failure (500)',
+    );
+    return null;
+  }
+
+  log.warn(
+    {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      cause_kind: err.cause_kind,
+      retryable: err.retryable,
+      recoverable: true,
+    },
+    'V5 chip_click handler invocation failed — recoverable',
+  );
+
+  // Recovery telemetry — same cross-layer event the Sonnet path emits, so a
+  // single `v5.recovery_response` query finds recoveries across both layers.
+  emit(TelemetryEvents.RecoveryResponse, {
+    request_id: requestId,
+    scenario_id: scenarioId,
+    failure_origin: 'handler',
+    handler_cause_kind: err.cause_kind,
+    template_used: recovered.template_id,
+    chip_type: recovered.chip_type,
+    chip_count: recovered.response.suggested_actions.length,
+    retryable: err.retryable,
+  });
+
+  return {
+    outcome: 'handler_recovered',
+    response: recovered.response,
+    commitPerformed: false,
+    causeKind: err.cause_kind,
+    graph,
+  };
+}
 
 /**
  * Phase 2b — top-level dispatch entry point.
@@ -393,6 +498,17 @@ export async function dispatchChipClickRunAnalysis(
       // Mirror TurnExecutor's catch ladder so chip-click errors surface
       // with the same typed granularity as Sonnet-routed errors.
       if (err instanceof HandlerInvocationFailedError) {
+        // V5 C5 — recoverable causes (e.g. options_not_configured) compose a
+        // graceful 200 via the shared machinery instead of a 500. Cause-gated;
+        // fatal causes fall through to the handler_failure → 500 path below.
+        const recovered = tryComposeRecoverableChipOutcome(
+          err,
+          snapshotGraph,
+          payload.stage,
+          requestId,
+          payload.scenario_id,
+        );
+        if (recovered) return recovered;
         log.warn(
           {
             request_id: requestId,
@@ -811,6 +927,16 @@ async function dispatchChipClickNoopExplanation(
       });
     } catch (err) {
       if (err instanceof HandlerInvocationFailedError) {
+        // V5 C5 — same recoverable-cause escape repair as the run_analysis
+        // ladder, so the two chip-click paths cannot diverge on recoverability.
+        const recovered = tryComposeRecoverableChipOutcome(
+          err,
+          projectionInputs.graph,
+          payload.stage,
+          requestId,
+          payload.scenario_id,
+        );
+        if (recovered) return recovered;
         log.warn(
           {
             request_id: requestId,
