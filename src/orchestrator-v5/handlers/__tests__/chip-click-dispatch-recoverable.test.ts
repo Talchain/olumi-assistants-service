@@ -29,6 +29,11 @@ import { setTestSink } from '../../../utils/telemetry.js';
 import { log } from '../../../utils/telemetry.js';
 import { RECOVERABLE_HANDLER_CAUSES } from '../../compose/recoverable-handler-causes.js';
 
+// Mutable turn-budget holder so the budget-precedence test can shrink the
+// turn_ms to make `turnAbort` fire before a (deliberately slow) handler throws.
+// `vi.hoisted` guarantees it is initialised before the hoisted `vi.mock` factory.
+const { budgetHolder } = vi.hoisted(() => ({ budgetHolder: { turnMs: 30000 } }));
+
 // `dispatchChipClickRunAnalysis` calls `buildTurnContext` unconditionally at
 // the top (even on the injected-registry test path), which would hit Supabase.
 // Stub it with a minimal context; everything else (registry, handler) is real
@@ -47,7 +52,7 @@ vi.mock('../../build-turn-context.js', async () => {
       session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       request_id: 'req-c5',
       budgets: {
-        turn_ms: 30000,
+        turn_ms: budgetHolder.turnMs,
         handler_ms: 20000,
         plot_ms: 15000,
         anthropic_ms: 15000,
@@ -179,6 +184,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  budgetHolder.turnMs = 30000;
   setTestSink(null);
   warnSpy?.mockRestore();
   errorSpy?.mockRestore();
@@ -255,6 +261,27 @@ describe('chip-click run_analysis — recoverable-cause escape (cause gating)', 
       });
       expect(out.outcome, `${cause} must stay handler_failure (→ 500)`).toBe('handler_failure');
     }
+  });
+
+  it('BUDGET precedence: a recoverable cause thrown AFTER the turn budget aborts → handler_failure (NOT recovered), parity with TurnExecutor BUDGET_EXCEEDED', async () => {
+    // Shrink the turn budget so `turnAbort` fires (~immediately) before the
+    // handler — which deliberately delays — throws its recoverable cause. The
+    // catch ladder must see `turnAbort.signal.aborted` and fail loud.
+    budgetHolder.turnMs = 0;
+    const slowThenRecoverable: HandlerFn = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      throw new HandlerInvocationFailedError('late options_not_configured', {
+        cause_kind: 'options_not_configured',
+        retryable: false,
+        details: { handler_id: 'run_analysis' },
+      });
+    };
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-budget-precedence',
+      handlerRegistry: new Map<V5ActionType, HandlerFn>([['run_analysis', slowThenRecoverable]]),
+    });
+    expect(out.outcome).toBe('handler_failure');
   });
 
   it('emits v5.recovery_response telemetry recording the recoverable cause', async () => {

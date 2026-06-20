@@ -261,7 +261,15 @@ function tryComposeRecoverableChipOutcome(
   stage: StageType,
   requestId: string,
   scenarioId: string,
+  aborted: boolean,
 ): Extract<DispatchChipClickRunAnalysisResult, { outcome: 'handler_recovered' }> | null {
+  // BUDGET_EXCEEDED precedence (parity with TurnExecutor): if the turn budget
+  // already aborted, a recoverable cause MUST fail loud (→ handler_failure →
+  // 500) rather than be masked as a graceful recovery. Mirrors the
+  // `turnAbort.signal.aborted && isRecoverableHandlerCause(...)` short-circuit
+  // in turn-executor.ts — a timed-out turn is a degraded outcome, not a clean
+  // "needs configuration" recovery.
+  if (aborted) return null;
   if (!isRecoverableHandlerCause(err.cause_kind)) return null;
 
   // ComposeContext is unused by composeRecoverableHandlerResponse today (the
@@ -499,14 +507,16 @@ export async function dispatchChipClickRunAnalysis(
       // with the same typed granularity as Sonnet-routed errors.
       if (err instanceof HandlerInvocationFailedError) {
         // V5 C5 — recoverable causes (e.g. options_not_configured) compose a
-        // graceful 200 via the shared machinery instead of a 500. Cause-gated;
-        // fatal causes fall through to the handler_failure → 500 path below.
+        // graceful 200 via the shared machinery instead of a 500. Cause-gated,
+        // and budget-gated (an aborted turn fails loud, parity with TurnExecutor).
+        // Fatal/aborted causes fall through to the handler_failure → 500 path.
         const recovered = tryComposeRecoverableChipOutcome(
           err,
           snapshotGraph,
           payload.stage,
           requestId,
           payload.scenario_id,
+          turnAbort.signal.aborted,
         );
         if (recovered) return recovered;
         log.warn(
@@ -928,13 +938,15 @@ async function dispatchChipClickNoopExplanation(
     } catch (err) {
       if (err instanceof HandlerInvocationFailedError) {
         // V5 C5 — same recoverable-cause escape repair as the run_analysis
-        // ladder, so the two chip-click paths cannot diverge on recoverability.
+        // ladder (cause-gated + budget-gated), so the two chip-click paths
+        // cannot diverge on recoverability or budget precedence.
         const recovered = tryComposeRecoverableChipOutcome(
           err,
           projectionInputs.graph,
           payload.stage,
           requestId,
           payload.scenario_id,
+          turnAbort.signal.aborted,
         );
         if (recovered) return recovered;
         log.warn(
