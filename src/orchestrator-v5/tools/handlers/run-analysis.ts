@@ -68,6 +68,7 @@ import { config } from '../../../config/index.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
+import { AnalysisNotReadyError } from './analysis-ready-core.js';
 import {
   buildAnalysisResultHeadline,
   describeAnalysisHeadline,
@@ -224,6 +225,27 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     try {
       snapshot = await deps.scenarioReader(args.scenario_id, invocation.signal);
     } catch (readError) {
+      // EP2 (V5 Edit Safety Core): the read-boundary guard found the persisted
+      // graph unrecoverable. Map to a typed RECOVERABLE failure (200 + honest
+      // next-step + review chip), NOT the generic retryable scenario_read_failed
+      // (which would read as an infra 500). No PLoT call, no run_analysis fact.
+      if (readError instanceof AnalysisNotReadyError) {
+        const verdict = readError.verdict;
+        throw new HandlerInvocationFailedError(
+          `Persisted graph is not analysis-ready for ${args.scenario_id}`,
+          {
+            cause_kind: 'analysis_not_ready',
+            retryable: false,
+            details: {
+              handler_id: 'run_analysis',
+              scenario_id: args.scenario_id,
+              ...(verdict.reasonCodes[0] !== undefined ? { reason_code: verdict.reasonCodes[0] } : {}),
+              ...(verdict.nextStep !== null ? { next_step: verdict.nextStep } : {}),
+            },
+            cause: readError,
+          },
+        );
+      }
       throw new HandlerInvocationFailedError(
         `Scenario read failed for ${args.scenario_id}`,
         {

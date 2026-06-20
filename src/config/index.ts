@@ -532,6 +532,12 @@ const ConfigSchema = z.object({
     // option interventions to RAW user-scale (evidence-gated) before they reach
     // PLoT. Default OFF: the net ships dark and is a runtime no-op until enabled.
     plotEgressScaleNetEnabled: booleanString.default(false),
+    // EP2 (V5 Edit Safety Core, Phase 1): read-boundary analysis-ready guard at
+    // run_analysis (scoped to /orchestrate/v2/turn). Default OFF. When ON it gates
+    // the run-time canonicalisation AND the freshness-side canonicalise-before-hash
+    // + unrecoverable short-circuit ATOMICALLY (no split mode); flag OFF =>
+    // byte-identical to today on both sides. CEE_RUN_ANALYSIS_READY_GUARD.
+    analysisReadyGuardEnabled: booleanString.default(false),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
@@ -934,6 +940,7 @@ function parseConfig(): Config {
       pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
       timingDebugEnabled: env.V5_TIMING_DEBUG,
       plotEgressScaleNetEnabled: env.CEE_PLOT_EGRESS_SCALE_NET_ENABLED,
+      analysisReadyGuardEnabled: env.CEE_RUN_ANALYSIS_READY_GUARD,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
       promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
       fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,

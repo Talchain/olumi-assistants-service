@@ -180,6 +180,30 @@ export function composeHandlerFailureBody(
         chip_type: 'action',
       };
 
+    case 'analysis_not_ready': {
+      // EP2 (V5 Edit Safety Core): the read-boundary guard blocked an
+      // un-analysable persisted graph. Surface the honest, user-safe next step
+      // (carried in details.next_step; no internal IDs) + a review chip.
+      const nextStep =
+        typeof details.next_step === 'string' && details.next_step.trim().length > 0
+          ? details.next_step.trim()
+          : 'This scenario needs a quick fix before it can be analysed.';
+      return {
+        body: {
+          assistant_text: nextStep,
+          suggested_actions: [
+            {
+              id: 'chip_prompt_fix_before_analysis',
+              label: 'Review the model',
+              message: 'Help me fix my model so it can be analysed.',
+            },
+          ],
+        },
+        template_id: 'analysis_not_ready',
+        chip_type: 'text_prompt',
+      };
+    }
+
     case 'options_not_configured': {
       const rawLabel =
         typeof details.first_option_label === 'string' && details.first_option_label.trim().length > 0

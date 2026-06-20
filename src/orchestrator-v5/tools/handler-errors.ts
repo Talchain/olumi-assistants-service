@@ -42,6 +42,11 @@ export type HandlerInvocationFailedCause =
   | 'analysis_blocked'
   | 'analysis_failed'
   | 'options_not_configured'
+  // EP2 (V5 Edit Safety Core): the read-boundary analysis-ready guard found the
+  // persisted graph unrecoverable (non-canonical option shape that can't be
+  // safely encoded, or structurally un-analysable). Recoverable typed 200 with
+  // an honest next-step — NOT a 500. Carries `reason_code` + `next_step` in details.
+  | 'analysis_not_ready'
   // V5 D1 mutation handlers (set_factor_value, add_constraint,
   // adjust_edge_strength). Surface at execute-time when the validator's
   // structural pass missed the failure — e.g. graph-dependent checks
@@ -71,6 +76,10 @@ export interface HandlerFailureDetails {
   readonly missing_item_label?: string;
   readonly analysis_status?: string;
   readonly scenario_id?: string;
+  /** EP2 analysis_not_ready: user-safe next step (no internal IDs). */
+  readonly next_step?: string;
+  /** EP2 analysis_not_ready: typed reason code for telemetry. */
+  readonly reason_code?: string;
   readonly [key: string]: unknown;
 }
 
