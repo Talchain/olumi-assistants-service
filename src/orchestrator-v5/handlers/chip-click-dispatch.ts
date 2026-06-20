@@ -263,12 +263,16 @@ function tryComposeRecoverableChipOutcome(
   scenarioId: string,
   aborted: boolean,
 ): Extract<DispatchChipClickRunAnalysisResult, { outcome: 'handler_recovered' }> | null {
-  // BUDGET_EXCEEDED precedence (parity with TurnExecutor): if the turn budget
-  // already aborted, a recoverable cause MUST fail loud (→ handler_failure →
-  // 500) rather than be masked as a graceful recovery. Mirrors the
-  // `turnAbort.signal.aborted && isRecoverableHandlerCause(...)` short-circuit
-  // in turn-executor.ts — a timed-out turn is a degraded outcome, not a clean
-  // "needs configuration" recovery.
+  // Budget-abort precedence (parity with TurnExecutor's
+  // `turnAbort.signal.aborted && isRecoverableHandlerCause(...)` short-circuit):
+  // if the turn budget already aborted, a recoverable cause MUST fail loud
+  // rather than be masked as a graceful recovery. NB only the FAIL-LOUD
+  // precedence is shared — the chip path surfaces this as the existing
+  // handler_failure → 500 (INTERNAL_ERROR, chip_click_run_analysis_handler_failed);
+  // it deliberately does NOT reproduce TurnExecutor's BUDGET_EXCEEDED wire
+  // classification (that would mean a new route outcome, out of scope). A
+  // timed-out turn is a degraded outcome, not a clean "needs configuration"
+  // recovery, so it must not emit a graceful body or recovery telemetry.
   if (aborted) return null;
   if (!isRecoverableHandlerCause(err.cause_kind)) return null;
 

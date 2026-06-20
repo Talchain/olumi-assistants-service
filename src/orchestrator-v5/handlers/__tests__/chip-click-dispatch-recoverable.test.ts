@@ -282,6 +282,11 @@ describe('chip-click run_analysis — recoverable-cause escape (cause gating)', 
       handlerRegistry: new Map<V5ActionType, HandlerFn>([['run_analysis', slowThenRecoverable]]),
     });
     expect(out.outcome).toBe('handler_failure');
+    // No recovery side effects on the aborted path — parity with TurnExecutor's
+    // no-recovery-side-effects contract: the helper returns BEFORE composing a
+    // body or emitting recovery telemetry. Pins against a future regression that
+    // moves the emit ahead of the abort gate.
+    expect(events.find((e) => e.event === 'v5.recovery_response')).toBeUndefined();
   });
 
   it('emits v5.recovery_response telemetry recording the recoverable cause', async () => {
