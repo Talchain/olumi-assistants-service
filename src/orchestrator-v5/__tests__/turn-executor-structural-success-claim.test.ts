@@ -359,9 +359,9 @@ describe('conservative — advisory and benign phrasing is preserved', () => {
 // ---------------------------------------------------------------------------
 
 describe('intent-gated — structural-edit request + broad claim → declines', () => {
-  it('user asks to connect + noun-less edge claim → swapped', async () => {
+  it('structural-noun connection request + noun-less edge claim → swapped', async () => {
     const { response } = await runTurnExecutor(
-      payload('Please connect Marketing to Revenue', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14'),
+      payload('Add a connection between Marketing and Revenue', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14'),
       'req-intent-edge',
       { routingAdapter: mockRoutingAdapter('Done, I connected Marketing to Revenue.') },
     );
@@ -369,7 +369,7 @@ describe('intent-gated — structural-edit request + broad claim → declines', 
     expect(swapEvents()).toHaveLength(1);
   });
 
-  it('user asks to add an option + actorless "model now includes" claim → swapped', async () => {
+  it('add-option request + actorless "model now includes" claim → swapped', async () => {
     const { response } = await runTurnExecutor(
       payload('Add a new option called Coach', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa15'),
       'req-intent-state',
@@ -377,6 +377,53 @@ describe('intent-gated — structural-edit request + broad claim → declines', 
     );
     expect(response.assistant_text).toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(1);
+  });
+
+  // Codex blocker 4 — edit/change/update/modify request + vague false success.
+  it('"Change the dependency …" request + "I updated it" → swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Change the dependency between Cost and Growth', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa16'),
+      'req-intent-edit',
+      { routingAdapter: mockRoutingAdapter('Done, I updated it.') },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex round-5 preservation cases — must NOT swap (no false declines).
+// ---------------------------------------------------------------------------
+
+describe('Codex round-5 — preserved (not swapped)', () => {
+  it('state/read-out question ("Did you add an option?") + state answer → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Did you add an option?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa17'),
+      'req-statequery',
+      { routingAdapter: mockRoutingAdapter('Your model now includes four options.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('social connection request ("connect Alice with Bob") + social claim → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Can you connect Alice with Bob?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa18'),
+      'req-social',
+      { routingAdapter: mockRoutingAdapter('Sure, I connected Alice with Bob.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('conditional advice ("I would add … if …") even under edit intent → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Could you add a risk factor?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa19'),
+      'req-conditional',
+      { routingAdapter: mockRoutingAdapter('I would add a risk factor if we needed more sensitivity.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
   });
 });
 

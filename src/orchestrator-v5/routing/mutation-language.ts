@@ -144,8 +144,11 @@ export const V5_STRUCTURAL_DECLINE_TEXT =
  */
 const BROAD_STRUCTURAL_CLAIM_PATTERNS: readonly RegExp[] = [
   // First-person edit/structural verb (no noun anchor) — incl. verb synonyms.
+  // NB: "I'd / I would" is deliberately EXCLUDED — conditional advice ("I would
+  // add a factor if …", "I'd add another option if you wanted") is not a success
+  // claim; it falls to monitor via containsMutationLanguage, never a swap.
   new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am|${APOS}d| would| just| already)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+|now\\s+)?(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|remov(?:e|ed|ing)|delet(?:e|ed|ing)|drew|draw(?:ing)?)\\b`,
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am| just| already)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+|now\\s+)?(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|remov(?:e|ed|ing)|delet(?:e|ed|ing)|drew|draw(?:ing)?)\\b`,
     'i',
   ),
   // Actorless state-now success assertion ("your model now includes/has …").
@@ -174,21 +177,49 @@ export function containsBroadStructuralClaimLanguage(text: string): boolean {
  * deliberately excluded — they have working handlers and mutate the graph.
  */
 const STRUCTURAL_EDIT_REQUEST_PATTERNS: readonly RegExp[] = [
-  // edit verb (any inflection) + structural noun: "add an option", "adding a
-  // factor", "remove the churn factor", "can you connect the two nodes".
+  // edit verb (any inflection, incl. edit/change/update/modify/set up/establish)
+  // + structural noun: "add an option", "edit the relationship", "set up a
+  // connection between X and Y", "change the dependency", "remove the factor".
   new RegExp(
-    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|hook(?:s|ing|ed)? up)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
+    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
     'i',
   ),
   // "a new <structural noun>".
   new RegExp(`\\b(?:a |an |another )?new\\s+${STRUCTURAL_NOUN}\\b`, 'i'),
-  // edge request without a noun: "connect X to Y", "link A and B".
-  /\b(?:connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?)\b[^.?!]*\b(?:to|with|between)\b/i,
+  // edit verb directly on the graph/model: "update the model", "edit the graph",
+  // "change the decision model". (Read-out questions are excluded by the
+  // state-query guard below; scalar edits never reach the structural noun.)
+  new RegExp(
+    `\\b(?:edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|revis(?:e|es|ing|ed)|rebuild|rebuilt|rework(?:s|ing|ed)?|redraw|redrew|adjust(?:s|ing|ed)?)\\b[^.?!]*\\b(?:the|your|this|my|our)\\s+(?:decision\\s+)?(?:graph|model)\\b`,
+    'i',
+  ),
+  // NB (review round 5): the noun-less "connect X to/with Y" intent pattern was
+  // REMOVED. Text alone cannot tell a graph edge ("connect Cost to Growth") from
+  // a social/workflow request ("connect me with the team", "connect Alice with
+  // Bob"). Confirming the two targets are real graph labels needs graph-label
+  // context at this seam — deferred to #289. Until then, noun-less connection
+  // requests do NOT create intent; the assistant-side claim is monitored.
+];
+
+/**
+ * STATE / READ-OUT questions that ASK whether an edit already happened — these
+ * must NOT count as a request to perform an edit ("Did you add an option?",
+ * "Have you added a factor?", "Did you update the model?", "Is the option now
+ * included?"). Request-shaped questions ("Can you add an option?", "Could you
+ * change …", "Please update the model") do not match these.
+ */
+const STRUCTURAL_STATE_QUERY_PATTERNS: readonly RegExp[] = [
+  /\b(?:did|do|does)\s+(?:you|we|it|the|that|this)\b/i,
+  /\b(?:have|has)\s+(?:you|we|i|it|the|that|this)\b/i,
+  /\b(?:is|are|was|were)\b[^.?!]*\b(?:now|already)\b/i,
+  /\b(?:was|were)\b[^.?!]*\b(?:added|created|connected|updated|changed|included|removed|made|linked|wired|modified|inserted|attached|established)\b/i,
 ];
 
 /** True when the user's message requests a STRUCTURAL graph edit this turn. */
 export function mentionsStructuralEditRequest(userMessage: string | null | undefined): boolean {
   if (typeof userMessage !== 'string' || userMessage.length === 0) return false;
+  // A read-out/state question ("did you add …?") is not a request to edit.
+  if (STRUCTURAL_STATE_QUERY_PATTERNS.some((p) => p.test(userMessage))) return false;
   return STRUCTURAL_EDIT_REQUEST_PATTERNS.some((p) => p.test(userMessage));
 }
 

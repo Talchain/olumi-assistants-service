@@ -233,6 +233,23 @@ describe('classifyStructuralClaim — intent-gated honesty decision', () => {
   it('advisory "I\'d suggest adding" → monitor even under intent (never swap)', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: ADVISORY, structuralEditIntent: true }).verdict).toBe('monitor');
   });
+
+  // Codex blocker 3 — conditional advice ("I would add … if …") is NOT a success
+  // claim and must never swap, even when the user requested a structural edit.
+  it('conditional advice ("I would add … if …") is never swapped, even under intent', () => {
+    for (const t of [
+      'I would add a risk factor if we needed more sensitivity.',
+      "I'd add another option if you wanted to explore that.",
+      'I would include a dependency in a fuller model.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).not.toBe('swap');
+    }
+  });
+  it('high-confidence success claims still swap (not weakened by the conditional fix)', () => {
+    for (const t of ["I've added the option.", 'I added a risk factor.', 'I updated the model.']) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('swap');
+    }
+  });
   it('benign prose → pass', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: BENIGN }).verdict).toBe('pass');
   });
@@ -268,16 +285,55 @@ describe('containsBroadStructuralClaimLanguage — broad (intent-gated) detector
 });
 
 describe('mentionsStructuralEditRequest — user structural-edit intent', () => {
-  it('detects add / connect / remove of a graph element', () => {
+  it('detects request-shaped structural edits (add/create/remove + noun, "new <noun>")', () => {
     expect(mentionsStructuralEditRequest('Add an option called Coach.')).toBe(true);
     expect(mentionsStructuralEditRequest('1. A new option, "Coach Internal Developer into Tech Lead Role"')).toBe(true);
-    expect(mentionsStructuralEditRequest('connect Marketing to Revenue')).toBe(true);
     expect(mentionsStructuralEditRequest('remove the churn factor')).toBe(true);
+    expect(mentionsStructuralEditRequest('I want to add a factor')).toBe(true);
   });
-  it('does NOT fire on read-only questions or scalar edits', () => {
+
+  // Codex blocker 4 — edit/change/update/modify must create intent.
+  it('detects edit/change/update/modify requests', () => {
+    expect(mentionsStructuralEditRequest('Edit the relationship between Cost and Growth')).toBe(true);
+    expect(mentionsStructuralEditRequest('Change the dependency between Cost and Growth')).toBe(true);
+    expect(mentionsStructuralEditRequest('Update the model to include a new option')).toBe(true);
+    expect(mentionsStructuralEditRequest('Modify the relationship between Cost and Growth')).toBe(true);
+    expect(mentionsStructuralEditRequest('Please update the model')).toBe(true);
+  });
+
+  // Codex blocker 2 — structural-noun connection requests must create intent.
+  it('detects structural-noun connection requests', () => {
+    expect(mentionsStructuralEditRequest('Add a relationship between Cost and Growth')).toBe(true);
+    expect(mentionsStructuralEditRequest('Create a dependency between Cost and Growth')).toBe(true);
+    expect(mentionsStructuralEditRequest('Set up a connection between Cost and Growth')).toBe(true);
+  });
+
+  // Codex blocker 1 — request-shaped questions still create intent.
+  it('request-shaped questions create intent', () => {
+    expect(mentionsStructuralEditRequest('Can you add an option?')).toBe(true);
+    expect(mentionsStructuralEditRequest('Could you change the relationship between Cost and Growth?')).toBe(true);
+  });
+
+  // Codex blocker 1 — state/read-out questions must NOT create intent.
+  it('does NOT fire on state / read-out questions', () => {
+    expect(mentionsStructuralEditRequest('Did you add an option?')).toBe(false);
+    expect(mentionsStructuralEditRequest('Have you added a factor?')).toBe(false);
+    expect(mentionsStructuralEditRequest('Did you update the model?')).toBe(false);
+    expect(mentionsStructuralEditRequest('Is the option now included?')).toBe(false);
+  });
+
+  // Codex blocker 2 — people / workflow connection requests must NOT create intent.
+  it('does NOT fire on social / workflow connection requests', () => {
+    expect(mentionsStructuralEditRequest('Can you connect Alice with Bob?')).toBe(false);
+    expect(mentionsStructuralEditRequest('Please connect me with the team')).toBe(false);
+    expect(mentionsStructuralEditRequest('Can you connect us with Marketing?')).toBe(false);
+  });
+
+  it('does NOT fire on read-only questions, scalar edits, or noun-less edges (deferred to #289)', () => {
     expect(mentionsStructuralEditRequest('what do I have so far?')).toBe(false);
     expect(mentionsStructuralEditRequest('summarise the model')).toBe(false);
     expect(mentionsStructuralEditRequest('set the budget to 5')).toBe(false);
+    expect(mentionsStructuralEditRequest('connect Marketing to Revenue')).toBe(false); // noun-less → #289
     expect(mentionsStructuralEditRequest('')).toBe(false);
   });
 });
