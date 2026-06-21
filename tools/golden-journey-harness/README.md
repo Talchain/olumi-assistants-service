@@ -66,6 +66,34 @@ A5 strengthens once canonical-state **M3 `_context_summary`** lands.
 trace **fails** A6 instead of being inconclusive (dispatch guardrail #5). Without
 it, A6 auto-derives expectation from whether any turn actually returned a trace.
 
+## Gating doctrine
+
+The principle behind which invariants gate the exit code:
+
+- **Deterministic and safety invariants gate.** `A3` (durable-state-changed),
+  `A6` (debug/observability), `A7` (recovery/repair-visible) are structural and
+  deterministic — a fail is a real regression.
+- **LLM-semantic *quality* invariants advise.** `A5` (coaching grounding) reads
+  generated prose for quality and is variance-prone, so it is reported but does
+  not gate.
+- **`A4` stays gating even though it reads assistant text** — it is a
+  safety/honesty invariant (a turn must not *claim* a mutation it did not make).
+  A false-fail there is the safe direction, and its trustworthiness rests on the
+  Brief 4 structural-honesty detector (success-claim vs durable-state /
+  clarify-or-proposed shape), not on free-text quality.
+- **`A1` is advisory *for now*** because it is still provisional and depends on
+  prose + context observability we cannot yet ground on the wire.
+
+**A1's advisory status is temporary.** Once canonical-state **M3
+`_context_summary`** and the canonical state object make coherence
+wire-grounded, A1 should **graduate to a true gating invariant**.
+
+**M3 has a double role.** It (1) unblocks **A2** live context observability
+(A2 is in-process-only until then), and (2) closes the residual **A5**
+content-level uncertainty by exposing the actual context the model received
+during future thin-response checks — so a thin A5 response can then be
+attributed to context vs pure LLM variance.
+
 ## What is NOT proven on the live wire
 
 - **A2** is asserted **in-process only** (`tests/unit/golden-journey-harness/context-completeness.test.ts`)

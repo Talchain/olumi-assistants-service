@@ -13,12 +13,20 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 | Gating verdict | no gating fails (advisory fails do not gate) |
 | Diagnostic-trace flag confirmed ON | yes |
 
+## Gating doctrine
+
+- **Deterministic + safety invariants gate** (A3, A6, A7 — structural; a fail is a real regression).
+- **LLM-semantic *quality* invariants advise** (A5 coaching-grounding — variance-prone; reported, not exit-gating).
+- **A4 stays gating** despite reading assistant text: it is a safety/honesty invariant (no claiming a mutation that did not happen), where a false-fail is the safe direction and trust rests on the Brief 4 structural-honesty detector — not free-text quality.
+- **A1 is advisory _for now_** (still provisional; prose/context-observability dependent). It **graduates to gating** once canonical-state **M3 `_context_summary`** + the canonical state object make coherence wire-grounded.
+- **M3 double role:** unblocks **A2** live context observability (in-process-only until then) AND closes the residual **A5** content-level uncertainty by exposing the actual context the model received during future thin-response checks.
+
 ## Run metadata
 
 - **Mode:** replay
 - **Started at:** replay (deterministic fixture)
 - **Branch:** `claude/unruffled-brahmagupta-c387c7`
-- **Harness commit:** `771c6320e4a5bf53afe9fb4ef314a2618c80d919`
+- **Harness commit:** `bd1111637f6d4d21a3f7126926d53982fb61fe91`
 
 ## Core-component matrix
 

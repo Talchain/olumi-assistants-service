@@ -176,6 +176,27 @@ export function renderGoldenReport(input: GoldenReportInput, redact: Redactor = 
     );
     lines.push('');
   }
+  // Gating doctrine — which invariants drive the exit code, and why.
+  lines.push('## Gating doctrine');
+  lines.push('');
+  lines.push('- **Deterministic + safety invariants gate** (A3, A6, A7 — structural; a fail is a real regression).');
+  lines.push('- **LLM-semantic *quality* invariants advise** (A5 coaching-grounding — variance-prone; reported, not exit-gating).');
+  lines.push(
+    '- **A4 stays gating** despite reading assistant text: it is a safety/honesty invariant (no claiming a ' +
+      'mutation that did not happen), where a false-fail is the safe direction and trust rests on the Brief 4 ' +
+      'structural-honesty detector — not free-text quality.',
+  );
+  lines.push(
+    '- **A1 is advisory _for now_** (still provisional; prose/context-observability dependent). It **graduates ' +
+      'to gating** once canonical-state **M3 `_context_summary`** + the canonical state object make coherence ' +
+      'wire-grounded.',
+  );
+  lines.push(
+    '- **M3 double role:** unblocks **A2** live context observability (in-process-only until then) AND closes ' +
+      'the residual **A5** content-level uncertainty by exposing the actual context the model received during ' +
+      'future thin-response checks.',
+  );
+  lines.push('');
 
   // ---- Run metadata ----
   lines.push('## Run metadata');
