@@ -33,7 +33,6 @@ import {
 
 import {
   makeFinding,
-  type CoreComponent,
   type CoverageCaveat,
   type Finding,
 } from './components.js';
