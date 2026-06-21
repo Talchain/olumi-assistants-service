@@ -93,14 +93,12 @@ describe('containsStructuralSuccessClaim — MUST MATCH (first-person mutation v
       'I\'ll add the "Coach Internal Developer into Tech Lead Role" option to your model now, connecting it to the relevant factors as discussed.',
     ],
     ['present-perfect completion', "I've added the Coach option."],
-    // Edge / relationship claims carrying a structural noun (link/connection/
-    // relationship/dependency) — these swap; noun-less entity-pair claims do NOT
-    // (see the monitor tests below).
-    ['edge noun — created a link', 'I created a link between Marketing and Revenue.'],
-    ['edge noun — wired a dependency', 'I wired a dependency from the budget factor.'],
-    ['edge noun — added a connection', 'I added a connection from Marketing to Revenue.'],
-    ['edge noun — set up a connection', 'I set up a connection between cost and growth.'],
-    ['edge noun — removed the relationship', 'I removed the relationship between the two factors.'],
+    // Claims anchored to an UNAMBIGUOUS structural noun (option/factor/node/
+    // edge/driver/constraint) swap unconditionally. Edge nouns (link/connection/
+    // relationship/dependency) are ambiguous and intent-gated (see classify
+    // tests); they still swap here when an unambiguous noun is also present.
+    ['edge claim w/ factor anchor', 'I wired a dependency from the budget factor.'],
+    ['edge claim w/ factors anchor', 'I removed the relationship between the two factors.'],
     ['past-tense graph edit', 'I updated the graph.'],
     ['past-tense model edit', 'I changed the model.'],
     ['future commitment + factor', "I'll add a factor for that."],
@@ -141,6 +139,10 @@ describe('containsStructuralSuccessClaim — MUST NOT MATCH (advisory / offer / 
     ['people — connected Alice with Bob', 'I connected Alice with Bob.'],
     ['people — joined teams for a workshop', 'I joined Marketing and Sales for the workshop.'],
     ['conversational connect with people', "I'll connect you with the team later."],
+    // Review round 6 — ambiguous edge nouns must NOT swap unconditionally:
+    // doc links and social/team connections are not graph edits.
+    ['doc link — created a link to docs', 'I created a link to the documentation.'],
+    ['social — established a connection with team', 'I established a connection with the team.'],
     ['empty', ''],
   ];
   for (const [name, text] of mustNotMatch) {
@@ -208,6 +210,36 @@ describe('classifyStructuralClaim — intent-gated honesty decision', () => {
   it('actorless "model now includes X" → swap under intent, monitor without', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: ACTORLESS_STATE, structuralEditIntent: true }).verdict).toBe('swap');
     expect(classifyStructuralClaim({ ...base, assistantText: ACTORLESS_STATE }).verdict).toBe('monitor');
+  });
+
+  // Round-6 blocker 2 — PASSIVE structural success ("the option has been added",
+  // "the relationship is now in place") swaps under intent, monitored without.
+  it('passive structural success → swap under intent, monitor without', () => {
+    for (const t of [
+      'The option has been added.',
+      'The relationship is now in place.',
+      'The connection was established.',
+      'A new dependency has now been added.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('swap');
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('monitor');
+    }
+  });
+
+  // Round-6 blocker 3 — ambiguous edge nouns swap under intent, but are NEVER
+  // unconditionally swapped (doc links / social connections preserved).
+  it('edge-noun claims (link/connection) → swap under intent, never unconditionally', () => {
+    for (const t of [
+      'I created a link between Marketing and Revenue.',
+      'I added a connection from Marketing to Revenue.',
+      'I set up a connection between cost and growth.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('swap');
+    }
+  });
+  it('ambiguous doc link / social connection WITHOUT intent are NOT swapped', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: 'I created a link to the documentation.' }).verdict).not.toBe('swap');
+    expect(classifyStructuralClaim({ ...base, assistantText: 'I established a connection with the team.' }).verdict).not.toBe('swap');
   });
 
   it('broad claim WITHOUT intent → monitor (broad_no_intent), never swap', () => {
@@ -314,12 +346,16 @@ describe('mentionsStructuralEditRequest — user structural-edit intent', () => 
     expect(mentionsStructuralEditRequest('Could you change the relationship between Cost and Growth?')).toBe(true);
   });
 
-  // Codex blocker 1 — state/read-out questions must NOT create intent.
-  it('does NOT fire on state / read-out questions', () => {
+  // Codex blocker 1 — state/read-out questions must NOT create intent,
+  // including POSSESSIVE forms (review round 6: "does your/my/our …").
+  it('does NOT fire on state / read-out questions (incl. possessives)', () => {
     expect(mentionsStructuralEditRequest('Did you add an option?')).toBe(false);
     expect(mentionsStructuralEditRequest('Have you added a factor?')).toBe(false);
     expect(mentionsStructuralEditRequest('Did you update the model?')).toBe(false);
     expect(mentionsStructuralEditRequest('Is the option now included?')).toBe(false);
+    expect(mentionsStructuralEditRequest('Does your model include an option?')).toBe(false);
+    expect(mentionsStructuralEditRequest('Has your model got a churn factor?')).toBe(false);
+    expect(mentionsStructuralEditRequest('Do our nodes include a driver?')).toBe(false);
   });
 
   // Codex blocker 2 — people / workflow connection requests must NOT create intent.
@@ -329,11 +365,12 @@ describe('mentionsStructuralEditRequest — user structural-edit intent', () => 
     expect(mentionsStructuralEditRequest('Can you connect us with Marketing?')).toBe(false);
   });
 
-  it('does NOT fire on read-only questions, scalar edits, or noun-less edges (deferred to #289)', () => {
+  it('does NOT fire on read-only questions, scalar edits, noun-less or non-graph edge requests', () => {
     expect(mentionsStructuralEditRequest('what do I have so far?')).toBe(false);
     expect(mentionsStructuralEditRequest('summarise the model')).toBe(false);
     expect(mentionsStructuralEditRequest('set the budget to 5')).toBe(false);
     expect(mentionsStructuralEditRequest('connect Marketing to Revenue')).toBe(false); // noun-less → #289
+    expect(mentionsStructuralEditRequest('add a link to the documentation')).toBe(false); // doc link, no "between … and"
     expect(mentionsStructuralEditRequest('')).toBe(false);
   });
 });

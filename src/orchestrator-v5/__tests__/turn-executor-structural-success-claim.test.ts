@@ -249,11 +249,11 @@ describe('E1 — structural success claim is swapped to an honest decline (no co
     expect(swapEvents()).toHaveLength(1);
   });
 
-  it('first-person edge claim WITH a structural noun ("added a connection") → declines', async () => {
+  it('high-confidence claim with an unambiguous structural noun ("added a factor") → declines', async () => {
     const { response } = await runTurnExecutor(
-      payload('link those two', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa09'),
+      payload('do that', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa09'),
       'req-e1-edge',
-      { routingAdapter: mockRoutingAdapter("I've added a connection between Marketing and Revenue.") },
+      { routingAdapter: mockRoutingAdapter("I've added a new factor to your model.") },
     );
     expect(response.assistant_text).toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(1);
@@ -452,5 +452,61 @@ describe('reverse-trust — committed scalar mutation is never swapped', () => {
     const committed = mutationWrite.graph as { nodes?: Array<{ id: string; observed_state?: { value?: number } }> };
     const mutatedNode = (committed.nodes ?? []).find((n) => n.id === 'fac_local_hire');
     expect(mutatedNode?.observed_state?.value).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex round-6 — possessive state query / passive success / ambiguous edge.
+// ---------------------------------------------------------------------------
+
+describe('Codex round-6 — state query, passive success, ambiguous edge', () => {
+  it('possessive state query ("Does your model include an option?") + read-out → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Does your model include an option?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa20'),
+      'req-possessive-statequery',
+      { routingAdapter: mockRoutingAdapter('Your model now includes four options.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('passive success ("The option has been added.") under add-intent → swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Add a new option called Coach', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa21'),
+      'req-passive-add',
+      { routingAdapter: mockRoutingAdapter('The option has been added.') },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
+
+  it('passive relationship ("The relationship is now in place.") under intent → swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Add a relationship between Cost and Growth', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa22'),
+      'req-passive-rel',
+      { routingAdapter: mockRoutingAdapter('The relationship is now in place.') },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
+
+  it('non-graph doc link ("I created a link to the documentation") → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('where are the docs?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa23'),
+      'req-doclink',
+      { routingAdapter: mockRoutingAdapter('I created a link to the documentation.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('non-graph social connection ("I established a connection with the team") → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('introduce me to the team', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa24'),
+      'req-socialconn',
+      { routingAdapter: mockRoutingAdapter('I established a connection with the team.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
   });
 });

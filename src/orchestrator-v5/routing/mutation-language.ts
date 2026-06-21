@@ -67,12 +67,22 @@ export function containsMutationLanguage(text: string): boolean {
 // label matching for the rare no-intent residuals.)
 // ---------------------------------------------------------------------------
 
-/** Truly-structural graph nouns. Deliberately EXCLUDES the ambiguous
- *  model/graph/diagram/decision, which appear in non-graph prose ("model
- *  documentation", "decision log", "diagram for the presentation"); the
- *  direct-object graph/model edit is handled by its own pattern below. */
+/** UNAMBIGUOUS structural graph nouns — safe for the UNCONDITIONAL narrow swap.
+ *  Excludes model/graph/diagram/decision (non-graph prose: "model
+ *  documentation", "decision log") AND the ambiguous edge nouns
+ *  link/connection/relationship/dependency (review round 6: "I created a link to
+ *  the documentation", "I established a connection with the team") — those live
+ *  in EDGE_NOUN and only act under structural-edit intent. */
 const STRUCTURAL_NOUN =
-  '(?:option|options|factor|factors|node|nodes|edge|edges|link|links|connection|connections|relationship|relationships|dependency|dependencies|driver|drivers|constraint|constraints)';
+  '(?:option|options|factor|factors|node|nodes|edge|edges|driver|drivers|constraint|constraints)';
+/** Ambiguous edge nouns — appear in non-graph prose (doc links, social/team
+ *  connections, software dependencies). Never trigger the unconditional swap;
+ *  used only for INTENT (with "between … and" framing) and the passive form. */
+const EDGE_NOUN =
+  '(?:link|links|connection|connections|relationship|relationships|dependency|dependencies)';
+/** Structural OR edge nouns — for passive-success detection (intent-gated). */
+const STRUCTURAL_OR_EDGE_NOUN =
+  '(?:option|options|factor|factors|node|nodes|edge|edges|driver|drivers|constraint|constraints|link|links|connection|connections|relationship|relationships|dependency|dependencies)';
 /** Apostrophe class: straight + typographic (Sonnet emits either). */
 const APOS = "['’]";
 
@@ -161,6 +171,14 @@ const BROAD_STRUCTURAL_CLAIM_PATTERNS: readonly RegExp[] = [
     `\\b(?:connect|connected|connecting|link|linked|linking|wir(?:e|ed|ing)|join(?:ed|ing)?|draw|drew)\\b[^.!?]*\\bbetween\\b[^.!?]*\\band\\b`,
     'i',
   ),
+  // Passive structural success (review round 6): "the option has been added",
+  // "the relationship is now in place", "the connection was established". Uses
+  // the structural-OR-edge noun set; broad → only swaps under structural-edit
+  // intent, so non-graph passives ("the note has been added") never match.
+  new RegExp(
+    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${STRUCTURAL_OR_EDGE_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|introduced|incorporated|included|put\\s+in\\s+place|in\\s+place)\\b`,
+    'i',
+  ),
 ];
 
 /** True when text uses BROAD structural-claim language (see above). */
@@ -178,8 +196,9 @@ export function containsBroadStructuralClaimLanguage(text: string): boolean {
  */
 const STRUCTURAL_EDIT_REQUEST_PATTERNS: readonly RegExp[] = [
   // edit verb (any inflection, incl. edit/change/update/modify/set up/establish)
-  // + structural noun: "add an option", "edit the relationship", "set up a
-  // connection between X and Y", "change the dependency", "remove the factor".
+  // + UNAMBIGUOUS structural noun: "add an option", "remove the churn factor",
+  // "connect the two nodes", "edit the constraint". (Edge nouns need relational
+  // framing — see pattern 4.)
   new RegExp(
     `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
     'i',
@@ -193,12 +212,18 @@ const STRUCTURAL_EDIT_REQUEST_PATTERNS: readonly RegExp[] = [
     `\\b(?:edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|revis(?:e|es|ing|ed)|rebuild|rebuilt|rework(?:s|ing|ed)?|redraw|redrew|adjust(?:s|ing|ed)?)\\b[^.?!]*\\b(?:the|your|this|my|our)\\s+(?:decision\\s+)?(?:graph|model)\\b`,
     'i',
   ),
-  // NB (review round 5): the noun-less "connect X to/with Y" intent pattern was
-  // REMOVED. Text alone cannot tell a graph edge ("connect Cost to Growth") from
-  // a social/workflow request ("connect me with the team", "connect Alice with
-  // Bob"). Confirming the two targets are real graph labels needs graph-label
-  // context at this seam — deferred to #289. Until then, noun-less connection
-  // requests do NOT create intent; the assistant-side claim is monitored.
+  // edge-noun request WITH "…between X and Y" framing (review round 6):
+  // "add a relationship between Cost and Growth", "set up a connection between
+  // X and Y", "edit the dependency between A and B". The framing is REQUIRED so
+  // "add a link to the documentation" / "connect me with the team" do NOT match.
+  new RegExp(
+    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?|rewir(?:e|es|ing|ed))\\b[^.?!]*\\b${EDGE_NOUN}\\b[^.?!]*\\bbetween\\b[^.?!]*\\band\\b`,
+    'i',
+  ),
+  // NB (review round 5): the noun-less "connect X to/with Y" intent pattern stays
+  // REMOVED — text can't tell a graph edge from a social/workflow request
+  // ("connect me with the team", "connect Alice with Bob") without graph labels.
+  // Deferred to #289; such claims are monitored, not swapped.
 ];
 
 /**
@@ -209,8 +234,8 @@ const STRUCTURAL_EDIT_REQUEST_PATTERNS: readonly RegExp[] = [
  * change …", "Please update the model") do not match these.
  */
 const STRUCTURAL_STATE_QUERY_PATTERNS: readonly RegExp[] = [
-  /\b(?:did|do|does)\s+(?:you|we|it|the|that|this)\b/i,
-  /\b(?:have|has)\s+(?:you|we|i|it|the|that|this)\b/i,
+  /\b(?:did|do|does)\s+(?:you|we|it|i|the|that|this|your|my|our|its|their|his|her)\b/i,
+  /\b(?:have|has)\s+(?:you|we|i|it|the|that|this|your|my|our|its|their|his|her)\b/i,
   /\b(?:is|are|was|were)\b[^.?!]*\b(?:now|already)\b/i,
   /\b(?:was|were)\b[^.?!]*\b(?:added|created|connected|updated|changed|included|removed|made|linked|wired|modified|inserted|attached|established)\b/i,
 ];
