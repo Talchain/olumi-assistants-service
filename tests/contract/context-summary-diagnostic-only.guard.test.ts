@@ -51,7 +51,16 @@ function walkTsFiles(dir: string, out: string[] = []): string[] {
       // Skip generated + test directories — the guard targets product src.
       if (entry === '__tests__' || entry === 'generated') continue;
       walkTsFiles(full, out);
-    } else if (entry.endsWith('.ts') && !entry.endsWith('.d.ts') && !entry.endsWith('.test.ts')) {
+    } else if (
+      entry.endsWith('.ts') &&
+      !entry.endsWith('.d.ts') &&
+      !entry.endsWith('.test.ts') &&
+      // Skip editor/sync duplicate copies ("foo 2.ts", "foo 3.tsx") — the
+      // repo's .gitignore already excludes these via the `* 2.*` rule, so
+      // they never reach a PR; this filesystem walk must not couple the
+      // guard to recurring sync junk.
+      !/ \d+\.[cm]?tsx?$/.test(entry)
+    ) {
       out.push(full);
     }
   }
