@@ -143,6 +143,39 @@ describe('ContextPack analysis_state — canonicalState input is authoritative (
   });
 });
 
+describe('ContextPack — behaviour 9: AI-facing context populated together', () => {
+  it('graph + analysis_state + recent_changes + recent_turns all present in one pack', () => {
+    const priorTurn = {
+      id: 'r1',
+      scenario_id: 's',
+      user_id: 'u',
+      turn_id: 't-prev',
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: 'h',
+      response_emitted: true,
+      llm_calls_used: 1,
+      created_at: '2026-04-30T00:00:00.000Z',
+      user_message: 'what changed?',
+      assistant_message: 'I adjusted a link in the model.',
+    };
+    // adjust_edge_strength is the simplest mutation fact that projects to a
+    // recent_changes entry (no result fields required).
+    const mutationFact = { fact_type: 'adjust_edge_strength', fact_version: 1, noop: false, result: {} };
+    const pack = assembleContextPack({
+      payload: PAYLOAD,
+      priorTurns: [priorTurn as never],
+      priorFacts: [runAnalysisFact(HASH), mutationFact as never],
+      graph,
+    });
+    expect(pack.graph.counts.nodes).toBeGreaterThan(0);
+    expect(pack.analysis_state).not.toBeNull();
+    expect(pack.analysis_state!.freshness).toBe('fresh');
+    expect(pack.conversation.recent_turns.length).toBeGreaterThanOrEqual(1);
+    expect(pack.recent_changes.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
 describe('ContextPack analysis_state — schema', () => {
   it('the assembled pack (with analysis_state) validates against ContextPackSchema', () => {
     const pack = assembleContextPack({

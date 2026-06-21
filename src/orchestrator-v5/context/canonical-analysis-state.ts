@@ -88,11 +88,6 @@ export const CANONICAL_ANALYSIS_STATE_VERSION = '1.0.0';
  *     Persisted scenario state asserts an analysis exists, yet no
  *     successful run_analysis fact is selectable. Blocks (unusable).
  *
- *   fact_present_graph_unparseable
- *     A successful fact with a run-time graph hash exists, but the current
- *     graph could not be hashed on this turn — the freshness comparison is
- *     impossible despite a real fact. Blocks (unusable).
- *
  *   status_ready_with_actionable_blockers
  *     Readiness reports `ready`, yet an ACTIONABLE blocker
  *     (missing_value / ambiguous_value / missing_connection) is present.
@@ -105,10 +100,20 @@ export const CANONICAL_ANALYSIS_STATE_VERSION = '1.0.0';
  *     A newer run_analysis fact arrived in a non-success state while an
  *     older success would otherwise be presented as current. Downgrades
  *     chips + forces rerun; prose stays usable (caveated).
+ *
+ * NOT a contradiction: a successful fact whose run hash exists while the
+ * current graph could not be hashed this turn (freshness
+ * `current_graph_hash_unavailable`). That is a NORMAL, recoverable state —
+ * an ordinary no-graph follow-up turn ("explain the result"), or
+ * turn-executor's deliberate null-hash on a persisted-graph parse failure
+ * ("stale-aware explain recovery"). At this layer we cannot distinguish it
+ * from genuine corruption, and the benign case dominates, so it is handled
+ * as freshness `unknown` (prose + follow-up usable, chips not, no rerun) —
+ * SYMMETRIC with the `legacy_fact_missing_hash` flavour of `unknown`, never
+ * a hard block.
  */
 export type CanonicalContradiction =
   | 'scenario_claims_analysis_no_fact'
-  | 'fact_present_graph_unparseable'
   | 'status_ready_with_actionable_blockers'
   | 'fact_status_success_but_degraded_newer';
 
@@ -145,6 +150,33 @@ function coerceReadyStatus(raw: string | null | undefined): AnalysisReadyStatusT
     return raw as AnalysisReadyStatusT;
   }
   return null;
+}
+
+/**
+ * Closed set of degraded (non-success) analysis statuses. The upstream PLoT
+ * `analysis_status` is an OPEN string (run-analysis accepts any non-empty
+ * value and still persists a fact), so we allowlist before the value enters
+ * the redacted summary / any LLM-facing surface — an unrecognised upstream
+ * token cannot inject free text. Unrecognised → 'other'; null → null.
+ */
+const KNOWN_DEGRADED_STATUSES: ReadonlySet<string> = new Set([
+  'partial',
+  'blocked',
+  'failed',
+  'degraded',
+  'incomplete',
+  'inconclusive',
+  'error',
+  'timeout',
+  'cancelled',
+  'unknown',
+]);
+
+function normaliseDegradedStatus(raw: string | null): string | null {
+  if (raw === null) return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === '') return null;
+  return KNOWN_DEGRADED_STATUSES.has(trimmed) ? trimmed : 'other';
 }
 
 /**
@@ -355,15 +387,10 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
     contradictions.push('scenario_claims_analysis_no_fact');
   }
 
-  // A real fact with a run hash, but the current graph could not be hashed
-  // → the freshness comparison is impossible despite a genuine fact.
-  if (
-    hasFact &&
-    derivation.current_graph_hash === null &&
-    derivation.graph_hash_at_run !== null
-  ) {
-    contradictions.push('fact_present_graph_unparseable');
-  }
+  // NOTE: a fact with a run hash + current_graph_hash === null
+  // (freshness `current_graph_hash_unavailable`) is intentionally NOT a
+  // contradiction — it is a benign no-graph / parse-recovery follow-up
+  // turn, handled as freshness `unknown` (see CanonicalContradiction doc).
 
   // Actionable blockers on a 'ready' payload are a should-never-happen
   // integrity violation. Advisory constraint_dropped blockers do NOT count.
@@ -383,7 +410,6 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
   // Hard block: nothing is usable.
   const blockedUnusable =
     status === 'blocked' ||
-    contradictions.includes('fact_present_graph_unparseable') ||
     contradictions.includes('scenario_claims_analysis_no_fact');
 
   // Trust downgrade: a fact exists but is not chip-safe; surface a rerun.
@@ -424,7 +450,7 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
     blockers,
     model_adjustments: modelAdjustments,
     goal_node_id: goalNodeId,
-    degraded_fact_status: params.degradedStatus,
+    degraded_fact_status: normaliseDegradedStatus(params.degradedStatus),
     contradictions,
     usableForProse,
     usableForChips,

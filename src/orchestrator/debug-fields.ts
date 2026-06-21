@@ -107,9 +107,12 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    * Stripped before strict `OlumiResponseSchema` validation, re-attached
    * after — same mechanic as `_diagnostic_trace`. Diagnostic-only: the
    * Golden-Journey Harness A1/A2 reads it; UI / prose / chip / coaching
-   * paths MUST NOT (enforced by a static guard test). The route's runtime
-   * guard (`coerceV5ContextSummary`) drops malformed shapes before
-   * re-attach.
+   * paths MUST NOT (enforced by a static guard test). Unlike `_timings` /
+   * `_diagnostic_trace` (which may arrive body-attached upstream and are
+   * coerced), this value is BUILT FRESH at the route gate from the canonical
+   * state (`buildV5ContextSummary`); any body-attached copy is dropped by
+   * the strip step, so the attached value is well-formed by construction and
+   * needs no runtime coercion.
    */
   readonly _context_summary?: V5ContextSummary;
 };

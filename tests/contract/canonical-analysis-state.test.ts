@@ -193,17 +193,45 @@ describe('selectCanonicalAnalysisState — contradictions (fail loud, no silent 
     expect(state.usableForFollowupContext).toBe(false);
   });
 
-  it('fact present but current graph unparseable → blocked unusable', () => {
+  it('fact present + current graph not hashable this turn → unknown, NOT blocked (recoverable follow-up)', () => {
+    // No-graph follow-up turn ("explain the result") or turn-executor's
+    // deliberate null-hash on a persisted-graph parse failure. This is a
+    // benign, recoverable state — handled as freshness 'unknown', NOT a
+    // hard block, and SYMMETRIC with the legacy-fact 'unknown' case.
     const state = selectCanonicalAnalysisState({
       priorFacts: chain(mkRunAnalysisFact({ graph_hash_at_run: HASH_A, computed_at: '2026-04-30T01:00:00.000Z' })),
       currentGraphHash: null, // graph could not be hashed this turn
       readiness: READY,
     });
+    expect(state.freshness).toBe('unknown');
     expect(state.freshness_reason).toBe('current_graph_hash_unavailable');
-    expect(state.contradictions).toContain('fact_present_graph_unparseable');
-    expect(state.blockedUnusable).toBe(true);
-    expect(state.usableForProse).toBe(false);
-    expect(state.usableForChips).toBe(false);
+    expect(state.contradictions).toEqual([]);
+    expect(state.blockedUnusable).toBe(false);
+    expect(state.usableForProse).toBe(true); // referenceable, caveated
+    expect(state.usableForFollowupContext).toBe(true);
+    expect(state.usableForChips).toBe(false); // freshness unverifiable → no result chips
+    expect(state.requiresRerun).toBe(false);
+  });
+
+  it('symmetry: current_graph_hash_unavailable and legacy_fact_missing_hash get identical usability', () => {
+    const noCurrentHash = selectCanonicalAnalysisState({
+      priorFacts: chain(mkRunAnalysisFact({ graph_hash_at_run: HASH_A, computed_at: '2026-04-30T01:00:00.000Z' })),
+      currentGraphHash: null,
+      readiness: READY,
+    });
+    const legacyFact = selectCanonicalAnalysisState({
+      priorFacts: chain(mkRunAnalysisFact({ computed_at: '2026-04-30T01:00:00.000Z' })), // no graph_hash_at_run
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    for (const s of [noCurrentHash, legacyFact]) {
+      expect(s.freshness).toBe('unknown');
+      expect(s.blockedUnusable).toBe(false);
+      expect(s.usableForProse).toBe(true);
+      expect(s.usableForFollowupContext).toBe(true);
+      expect(s.usableForChips).toBe(false);
+      expect(s.contradictions).toEqual([]);
+    }
   });
 
   it('ready + ACTIONABLE blocker (missing_value) → contradiction, chips off, rerun on, prose stays', () => {
@@ -246,6 +274,32 @@ describe('selectCanonicalAnalysisState — contradictions (fail loud, no silent 
     expect(state.usableForChips).toBe(false);
     expect(state.requiresRerun).toBe(true);
     expect(state.usableForProse).toBe(true);
+  });
+
+  it('degraded-newer false-positive guard: missing timestamps do NOT raise the contradiction', () => {
+    // Neither fact carries computed_at → "newer" is unprovable → no
+    // contradiction (the guard must not fire on ambiguous ordering).
+    const success = mkRunAnalysisFact({ status: 'computed', graph_hash_at_run: HASH_A });
+    const degradedNoTs = mkRunAnalysisFact({ status: 'partial', graph_hash_at_run: HASH_A });
+    const state = selectCanonicalAnalysisState({
+      priorFacts: [degradedNoTs, success],
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    expect(state.contradictions).not.toContain('fact_status_success_but_degraded_newer');
+    expect(state.usableForChips).toBe(true); // fresh + no contradiction
+    expect(state.degraded_fact_status).toBe('partial');
+  });
+
+  it('degraded_fact_status is normalised to a bounded token (unknown upstream PLoT status → other)', () => {
+    const success = mkRunAnalysisFact({ status: 'computed', graph_hash_at_run: HASH_A, computed_at: '2026-04-30T01:00:00.000Z' });
+    const weird = mkRunAnalysisFact({ status: 'SOME_WEIRD_PLOT_STATUS_v9', graph_hash_at_run: HASH_A, computed_at: '2026-04-30T02:00:00.000Z' });
+    const state = selectCanonicalAnalysisState({
+      priorFacts: [weird, success],
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    expect(state.degraded_fact_status).toBe('other'); // not the raw upstream string
   });
 });
 

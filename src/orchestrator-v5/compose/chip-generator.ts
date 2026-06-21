@@ -265,10 +265,16 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   const canExploreAnalysis = cs ? cs.usableForFollowupContext : hasAnyRunAnalysisFact;
   const stage = input.stage;
 
-  // Priority 1: stale post-edit → conversational re-run prompt.
+  // Priority 1: rerun-required → conversational re-run prompt. The reason
+  // label distinguishes a true staleness rerun from a trust-downgrade rerun
+  // (actionable-blocker / degraded-newer contradiction on otherwise-fresh
+  // analysis) so the floor-applied telemetry stream is not misleading once
+  // canonicalState is threaded (M5).
   if (requiresRerun) {
+    const rerunReason =
+      cs && cs.freshness !== 'stale' ? 'trust_downgrade_rerun' : 'stale_post_edit';
     emit(TelemetryEvents.V5ChipsFloorApplied, {
-      reason: 'stale_post_edit',
+      reason: rerunReason,
       stage,
       analysis_ready_status: readyStatusLabel,
       has_run_analysis_fact: true,

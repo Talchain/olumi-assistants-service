@@ -139,12 +139,18 @@ describe('route-v2 — flag-gated `_context_summary`', () => {
     configHolder.cee.contextSummaryEnabled = false;
   });
 
-  it('flag OFF → response does NOT carry `_context_summary`', async () => {
+  it('flag OFF → no `_context_summary`, and prose carries no hash/diagnostic field', async () => {
     configHolder.cee.contextSummaryEnabled = false;
     const { status, body } = await postTurn(app, '66666666-6666-4666-8666-666666666601');
     expect(status).toBe(200);
     expect(body).not.toHaveProperty('_context_summary');
     expect(body.response_version).toBe(2);
+    // Behaviour 10: the graph hash + freshness_reason codes must not appear
+    // in user-facing PROSE. (analysis_ready.graph_hash_at_run is a separate,
+    // documented structured wire field — the state-trust contract — that the
+    // UI reads to verify freshness; it is NOT prose and NOT in scope here.)
+    expect(String(body.assistant_text)).not.toContain('HASH_A');
+    expect(String(body.assistant_text)).not.toContain('graph_hash_match');
   });
 
   it('flag ON → redacted `_context_summary` present, statuses/predicates/counts only', async () => {
@@ -163,13 +169,22 @@ describe('route-v2 — flag-gated `_context_summary`', () => {
     expect(cs.capabilities_present).toBeNull();
   });
 
-  it('flag ON → `_context_summary` leaks no user text or graph content', async () => {
+  it('flag ON → summary is redaction-clean and user-facing prose carries no hash/diagnostic/brief', async () => {
     configHolder.cee.contextSummaryEnabled = true;
     const { body } = await postTurn(app, '66666666-6666-4666-8666-666666666603');
-    const json = JSON.stringify(body._context_summary);
-    expect(json).not.toContain(LONG_BRIEF);
-    expect(json).not.toContain(LEAK_CANARY);
-    expect(json).not.toContain('Option A');
+    // The summary itself is redaction-clean (no user text / graph content).
+    const summaryJson = JSON.stringify(body._context_summary);
+    expect(summaryJson).not.toContain(LONG_BRIEF);
+    expect(summaryJson).not.toContain(LEAK_CANARY);
+    expect(summaryJson).not.toContain('Option A');
+    // Behaviour 10: user-facing PROSE must not leak the graph hash digest,
+    // the freshness_reason code, or the brief. (The hash legitimately lives
+    // inside _context_summary and the structured analysis_ready field; the
+    // contract is specifically that PROSE stays clean.)
+    const prose = String(body.assistant_text);
+    expect(prose).not.toContain('HASH_A');
+    expect(prose).not.toContain('graph_hash_match');
+    expect(prose).not.toContain(LONG_BRIEF);
   });
 
   it('flag ON but no freshness on the result → no `_context_summary` (never fabricated)', async () => {
@@ -178,5 +193,35 @@ describe('route-v2 — flag-gated `_context_summary`', () => {
     const { status, body } = await postTurn(app, '66666666-6666-4666-8666-666666666604');
     expect(status).toBe(200);
     expect(body).not.toHaveProperty('_context_summary');
+  });
+
+  it('flag ON + egress validation fails → typed-fallback 200 carries NO `_context_summary`', async () => {
+    // The re-attach is gated on `egress.ok`; the strip removes any
+    // body-attached copy. Prove the fallback envelope stays debug-free even
+    // when the flag is on AND an upstream body pre-attached a summary.
+    configHolder.cee.contextSummaryEnabled = true;
+    dispatchDraftGraphMock.mockResolvedValueOnce({
+      response: {
+        // Malformed product envelope: response_version must be the literal 2,
+        // so OlumiResponseSchema.safeParse fails → typed fallback path.
+        response_version: 'NOT_TWO' as unknown as 2,
+        assistant_text: 'Drafted a decision graph.',
+        blocks: [] as const,
+        suggested_actions: [] as const,
+        insights: [] as const,
+        stage_indicator: 'frame' as const,
+        // Upstream body pre-attach that the strip MUST drop.
+        _context_summary: { version: '1.0.0', stale: 'leak' } as unknown,
+      },
+      commitPerformed: true,
+      analysisReady: readyAnalysis(),
+      graph: canaryGraph(),
+      freshness: freshDerivation(),
+    });
+    const { status, body } = await postTurn(app, '66666666-6666-4666-8666-666666666605');
+    expect(status).toBe(200);
+    expect(body).not.toHaveProperty('_context_summary');
+    // Fallback envelope still satisfies the schema (response_version: 2).
+    expect(body.response_version).toBe(2);
   });
 });
