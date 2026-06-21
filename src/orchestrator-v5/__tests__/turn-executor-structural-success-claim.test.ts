@@ -249,21 +249,11 @@ describe('E1 — structural success claim is swapped to an honest decline (no co
     expect(swapEvents()).toHaveLength(1);
   });
 
-  it('"model now includes" state assertion → declines', async () => {
-    const { response } = await runTurnExecutor(
-      payload('show me', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa04'),
-      'req-e1-statenow',
-      { routingAdapter: mockRoutingAdapter('Your model now includes the Coach option.') },
-    );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
-  });
-
-  it('first-person edge claim ("I connected X to Y") with no commit → declines', async () => {
+  it('first-person edge claim WITH a structural noun ("added a connection") → declines', async () => {
     const { response } = await runTurnExecutor(
       payload('link those two', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa09'),
       'req-e1-edge',
-      { routingAdapter: mockRoutingAdapter('I connected Marketing to Revenue for you.') },
+      { routingAdapter: mockRoutingAdapter("I've added a connection between Marketing and Revenue.") },
     );
     expect(response.assistant_text).toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(1);
@@ -325,6 +315,41 @@ describe('conservative — advisory and benign phrasing is preserved', () => {
     expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
     expect((response.assistant_text ?? '').toLowerCase()).toContain('four options');
     expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('grounded "model now includes/contains" read-out is NOT swapped (review round 3)', async () => {
+    const text = 'The model now contains three factors and two existing options.';
+    const { response } = await runTurnExecutor(
+      payload('summarise the model', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11'),
+      'req-readout-includes',
+      { routingAdapter: mockRoutingAdapter(text) },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect((response.assistant_text ?? '').toLowerCase()).toContain('three factors');
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('idiom with an edge verb ("connected the dots between") is NOT swapped', async () => {
+    const text = 'I connected the dots between cost and growth for you.';
+    const { response } = await runTurnExecutor(
+      payload('explain', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12'),
+      'req-idiom',
+      { routingAdapter: mockRoutingAdapter(text) },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('noun-less edge claim ("I connected X to Y") is NOT swapped but IS monitored', async () => {
+    const text = 'I connected Marketing to Revenue.';
+    const { response } = await runTurnExecutor(
+      payload('hook them up', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa13'),
+      'req-edge-residual',
+      { routingAdapter: mockRoutingAdapter(text) },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE); // not false-declined
+    expect(swapEvents()).toHaveLength(0);
+    expect(monitorEvents()).toHaveLength(1); // residual FN surfaced, not lost
   });
 });
 

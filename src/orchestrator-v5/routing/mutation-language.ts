@@ -46,16 +46,20 @@ export function containsMutationLanguage(text: string): boolean {
 //
 // SEPARATE from MUTATION_PATTERNS / containsMutationLanguage above (which feed
 // validateExplanationAnswer and the broad STEP 6.5 monitor — left UNCHANGED).
-// This detector is conservative by design: it fires only on FIRST-PERSON
-// success / commitment / completion claims anchored to a graph object
-// (incl. edge nouns link/connection/relationship/dependency), first-person
-// edge claims that name two entities ("I connected Marketing to Revenue"),
-// and the narrow "model now includes/contains <graph object>" change
-// assertion. Advisory ("you could add…", "I'd suggest adding…"), offers
-// ("would you like me to add…"), benign pronoun phrasing ("I'll add that to
-// my notes", "I'll update you on the results") and legitimate current-state
-// read-outs ("your model now has four options") are deliberately NOT matched
-// — they are not claims that THIS turn changed the model.
+// This detector (the SWAP detector) is high-precision by design: it fires ONLY
+// on a FIRST-PERSON mutation/commitment/completion verb anchored to a STRUCTURAL
+// graph noun (option/factor/node/edge/link/connection/relationship/dependency/
+// constraint/driver/model/graph), e.g. "I'll add the option", "I've added the
+// Coach option", "I created a link between X and Y", "I set up a connection".
+// Deliberately NOT matched (no false declines): advisory ("you could add…",
+// "I'd suggest adding…"), offers ("would you like me to add…"), benign pronouns
+// ("I'll add that to my notes", "I'll update you"), idioms/people ("I connected
+// the dots…", "I connected Alice with Bob"), and grounded current-state read-
+// outs ("your model now has/includes four options"). Noun-less edge claims
+// ("I connected Marketing to Revenue") and actorless "model now includes X" are
+// genuine claims the text cannot safely confirm without graph-label / request-
+// intent context; they are surfaced via the monitor (candidate-miss telemetry),
+// not swapped, and the context-aware fix is a tracked follow-up.
 // ---------------------------------------------------------------------------
 
 /** Graph-object nouns that anchor a first-person mutation verb to a STRUCTURAL claim. */
@@ -80,39 +84,27 @@ const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
     `\\bI(?:${APOS}m| am)\\s+(?:adding|setting|changing|updating|removing|connecting|creating|wiring|adjusting|linking|deleting|inserting)\\b[^.?!]*\\b${GRAPH_OBJECT}\\b`,
     'i',
   ),
-  // Present-perfect completion: "I've added … <graph object>".
+  // Present-perfect completion: "I've added … <graph object>", "I've set up a
+  // connection", "I've established a link".
   new RegExp(
-    `\\bI(?:${APOS}ve| have)\\s+(?:added|set|set up|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited)\\b[^.?!]*\\b${GRAPH_OBJECT}\\b`,
+    `\\bI(?:${APOS}ve| have)\\s+(?:added|set|set up|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited|established)\\b[^.?!]*\\b${GRAPH_OBJECT}\\b`,
     'i',
   ),
-  // Simple-past completion: "I added … <graph object>", "I updated the graph".
+  // Simple-past completion: "I added … <graph object>", "I updated the graph",
+  // "I set up a connection", "I established a dependency".
   new RegExp(
-    `\\bI\\s+(?:added|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited)\\b[^.?!]*\\b${GRAPH_OBJECT}\\b`,
+    `\\bI\\s+(?:added|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited|set up|established)\\b[^.?!]*\\b${GRAPH_OBJECT}\\b`,
     'i',
   ),
-  // Edge / relationship claims that name two ENTITIES rather than a graph-object
-  // noun ("I connected Marketing to Revenue", "I linked X to the goal"). The
-  // "between … and …" form is case-insensitive; the bare "X to/with/and Y" form
-  // requires Capitalised entities so conversational "I'll connect you with the
-  // team" (lowercase object) is NOT matched. First-person anchored throughout.
-  new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+)?(?:connected|connecting|linked|linking|wired|wiring|joined|joining|drew|drawing)\\b[^.!?]*\\bbetween\\b[^.!?]*\\band\\b`,
-    'i',
-  ),
-  new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+)?(?:connect|connected|connecting|link|linked|linking|wire|wired|wiring|join|joined|joining)\\s+[A-Z]\\w*(?:\\s+[A-Z]\\w*)*\\s+(?:to|with|and)\\s+(?:the\\s+)?[A-Z]\\w*`,
-    // NB: no 'i' flag — entity tokens must be Capitalised to avoid matching
-    // conversational "connect you with the team".
-  ),
-  // State-now CHANGE assertion — narrowed (Brief 4 review). Only "model now
-  // includes/contains <graph object>" reads as a structural-change claim.
-  // Plain current-state read-outs ("your model now has four options", "your
-  // model now supports a comparison") use other verbs and are deliberately NOT
-  // matched, so legitimate state descriptions are preserved.
-  new RegExp(
-    `\\b(?:your\\s+|the\\s+)?(?:model|graph|decision)\\s+now\\s+(?:includes|contains)\\b[^.!?]*\\b${GRAPH_OBJECT}\\b`,
-    'i',
-  ),
+  // NB (Brief 4 review round 3): the bare entity-pair matchers ("…between X and
+  // Y", capitalised "…X to Y") and the actorless "model now includes/contains"
+  // matcher were REMOVED. Text alone cannot tell a graph edge ("connected
+  // Marketing to Revenue") from an idiom/people claim ("connected the dots
+  // between cost and growth", "connected Alice with Bob") or a grounded read-out
+  // ("the model now contains three factors"). Those need graph-label / request-
+  // intent context — tracked as a follow-up. Until then the swap fires ONLY on a
+  // first-person mutation verb anchored to a structural graph noun (above); the
+  // noun-less edge residuals are surfaced via the monitor below, not swapped.
 ];
 
 /**
@@ -135,6 +127,29 @@ export function containsStructuralSuccessClaim(text: string): boolean {
  */
 export const V5_STRUCTURAL_DECLINE_TEXT =
   'I have not changed the model. I cannot make that kind of structural change to the model in this version.';
+
+/**
+ * MONITOR-ONLY broad detector for candidate false-negatives the SWAP detector
+ * cannot safely confirm: first-person connection/edge verbs without a
+ * structural-noun anchor ("I connected Marketing to Revenue", "I linked churn
+ * with retention", "I wired capacity and throughput"). Used ONLY to emit
+ * candidate-miss telemetry — NEVER to swap — so noun-less edge claims are
+ * observable rather than vanishing, without false-declining idioms or
+ * conversational "connect you with the team". Kept SEPARATE from
+ * `containsMutationLanguage` so the explanation-answer validator is unaffected.
+ */
+const STRUCTURAL_CLAIM_MONITOR_PATTERNS: readonly RegExp[] = [
+  new RegExp(
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+)?(?:connect|connected|connecting|link|linked|linking|wire|wired|wiring|join|joined|joining)\\b`,
+    'i',
+  ),
+];
+
+/** True when text reads like a noun-less first-person edge claim (monitor only). */
+export function looksLikeStructuralClaimCandidate(text: string): boolean {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  return STRUCTURAL_CLAIM_MONITOR_PATTERNS.some((p) => p.test(text));
+}
 
 /** Gate verdict for `classifyStructuralClaim`. */
 export type StructuralClaimVerdict = 'swap' | 'monitor' | 'pass';
@@ -160,9 +175,10 @@ export interface ClassifyStructuralClaimInput {
  *
  *  - 'swap'    : no mutation committed AND a structural success CLAIM is present
  *                → caller replaces text with V5_STRUCTURAL_DECLINE_TEXT.
- *  - 'monitor' : no mutation committed AND broad mutation language is present
- *                but the narrow detector did NOT fire → candidate false-negative
- *                (observability only, no swap).
+ *  - 'monitor' : no mutation committed AND the narrow detector did NOT fire, but
+ *                broad mutation language OR a noun-less first-person edge claim
+ *                (looksLikeStructuralClaimCandidate) is present → candidate
+ *                false-negative (observability only, no swap).
  *  - 'pass'    : a mutation committed (the claim is true), or no claim / benign.
  */
 export function classifyStructuralClaim(input: ClassifyStructuralClaimInput): StructuralClaimVerdict {
@@ -172,6 +188,11 @@ export function classifyStructuralClaim(input: ClassifyStructuralClaimInput): St
     proposedHandlerId === 'draft_graph' || proposedHandlerId === 'edit_graph';
   if (handlerEmittedMutatedGraph || isDraftOrEditGraph) return 'pass';
   if (containsStructuralSuccessClaim(assistantText)) return 'swap';
-  if (containsMutationLanguage(assistantText)) return 'monitor';
+  if (
+    containsMutationLanguage(assistantText) ||
+    looksLikeStructuralClaimCandidate(assistantText)
+  ) {
+    return 'monitor';
+  }
   return 'pass';
 }

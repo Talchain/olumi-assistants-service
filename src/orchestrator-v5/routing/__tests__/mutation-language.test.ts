@@ -8,6 +8,7 @@ import {
   containsMutationLanguage,
   containsStructuralSuccessClaim,
   classifyStructuralClaim,
+  looksLikeStructuralClaimCandidate,
   V5_STRUCTURAL_DECLINE_TEXT,
 } from '../mutation-language.js';
 
@@ -84,7 +85,7 @@ const E1_SUCCESS_CLAIM: readonly RegExp[] = [
   /\boption\b[^.]*\bto your model now\b/i,
 ];
 
-describe('containsStructuralSuccessClaim — MUST MATCH (first-person / completion / state-now)', () => {
+describe('containsStructuralSuccessClaim — MUST MATCH (first-person mutation verb + structural noun)', () => {
   const mustMatch: ReadonlyArray<readonly [string, string]> = [
     [
       'verbatim E1 capture',
@@ -92,12 +93,14 @@ describe('containsStructuralSuccessClaim — MUST MATCH (first-person / completi
     ],
     ['present-perfect completion', "I've added the Coach option."],
     ['"I have added it to the model"', 'I have added it to the model.'],
-    ['state-now includes', 'Your model now includes the Coach option.'],
+    // Edge / relationship claims carrying a structural noun (link/connection/
+    // relationship/dependency) — these swap; noun-less entity-pair claims do NOT
+    // (see the monitor tests below).
     ['edge noun — created a link', 'I created a link between Marketing and Revenue.'],
-    ['edge relation — connected X to Y', 'I connected Marketing to Revenue.'],
     ['edge noun — wired a dependency', 'I wired a dependency from the budget factor.'],
     ['edge noun — added a connection', 'I added a connection from Marketing to Revenue.'],
-    ["future edge — I'll connect X to Y", "I'll connect Marketing to Revenue."],
+    ['edge noun — set up a connection', 'I set up a connection between cost and growth.'],
+    ['edge noun — removed the relationship', 'I removed the relationship between the two factors.'],
     ['past-tense graph edit', 'I updated the graph.'],
     ['past-tense model edit', 'I changed the model.'],
     ['future commitment + factor', "I'll add a factor for that."],
@@ -123,11 +126,20 @@ describe('containsStructuralSuccessClaim — MUST NOT MATCH (advisory / offer / 
     ['conditional pronoun, no graph ref', "I'll add it once you confirm."],
     ['greeting', 'Hello, how can I help?'],
     ['plain prose', 'Here are the trade-offs between the options.'],
-    // Read-only current-state descriptions (Brief 4 review / Gemini HIGH) —
-    // narrowed state-now must preserve these on no-mutation turns.
+    // Read-only current-state descriptions (Brief 4 review / Gemini HIGH) — must
+    // be preserved on no-mutation turns; actorless "model now …" no longer swaps
+    // at all (incl. includes/contains).
     ['read-out — model now has count', 'Your model now has four options.'],
     ['read-out — model now supports', 'Your model now supports a comparison of the options.'],
     ['read-out — model now shows', 'Your model now shows three factors and one goal.'],
+    ['read-out — model now contains count', 'The model now contains three factors and two options.'],
+    ['read-out — model now includes existing', 'Your model now includes four existing options.'],
+    // Idioms / people — edge VERBS without a structural noun must not swap
+    // (review round 3). These are surfaced by the monitor, never declined.
+    ['idiom — drew a distinction', 'I drew a distinction between Cost and Revenue.'],
+    ['idiom — connected the dots', 'I connected the dots between cost and growth.'],
+    ['people — connected Alice with Bob', 'I connected Alice with Bob.'],
+    ['people — joined teams for a workshop', 'I joined Marketing and Sales for the workshop.'],
     ['conversational connect with people', "I'll connect you with the team later."],
     ['empty', ''],
   ];
@@ -216,5 +228,47 @@ describe('classifyStructuralClaim — canonical mutation predicate (mirrors hand
   it('empty / nullish text → pass', () => {
     expect(classifyStructuralClaim({ assistantText: '', handlerEmittedMutatedGraph: false, proposedHandlerId: null })).toBe('pass');
     expect(classifyStructuralClaim({ assistantText: undefined, handlerEmittedMutatedGraph: false, proposedHandlerId: null })).toBe('pass');
+  });
+
+  // Review round 3 — noun-less edge claims the SWAP detector cannot safely
+  // confirm are surfaced as candidate-misses (monitor), NEVER swapped, so we
+  // avoid false-declining idioms / people / conversational phrasing.
+  it('no mutation + noun-less edge claim ("connected X to Y") → monitor, not swap', () => {
+    expect(
+      classifyStructuralClaim({ assistantText: 'I connected Marketing to Revenue.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
+    ).toBe('monitor');
+  });
+  it('no mutation + lower-case edge claim → monitor (residual FN surfaced, not lost)', () => {
+    expect(
+      classifyStructuralClaim({ assistantText: 'I connected marketing to revenue.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
+    ).toBe('monitor');
+  });
+  it('grounded read-out ("the model now contains three factors") → pass (no swap)', () => {
+    expect(
+      classifyStructuralClaim({ assistantText: 'The model now contains three factors and two options.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
+    ).toBe('pass');
+  });
+  it('idiom with an edge verb ("drew a distinction") → not swapped', () => {
+    expect(
+      classifyStructuralClaim({ assistantText: 'I drew a distinction between Cost and Revenue.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
+    ).not.toBe('swap');
+  });
+  it('people claim with an edge verb ("connected Alice with Bob") → not swapped', () => {
+    expect(
+      classifyStructuralClaim({ assistantText: 'I connected Alice with Bob.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
+    ).not.toBe('swap');
+  });
+});
+
+describe('looksLikeStructuralClaimCandidate — monitor-only broad edge detector', () => {
+  it('flags first-person connection/edge verbs (residual FNs)', () => {
+    expect(looksLikeStructuralClaimCandidate('I connected Marketing to Revenue.')).toBe(true);
+    expect(looksLikeStructuralClaimCandidate('I linked churn with retention.')).toBe(true);
+    expect(looksLikeStructuralClaimCandidate("I'll wire capacity to throughput.")).toBe(true);
+  });
+  it('does not flag grounded read-outs or plain prose', () => {
+    expect(looksLikeStructuralClaimCandidate('Here are the trade-offs.')).toBe(false);
+    expect(looksLikeStructuralClaimCandidate('Your model now has four options.')).toBe(false);
+    expect(looksLikeStructuralClaimCandidate('')).toBe(false);
   });
 });
