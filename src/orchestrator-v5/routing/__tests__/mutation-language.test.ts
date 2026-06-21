@@ -158,7 +158,7 @@ describe('containsStructuralSuccessClaim — MUST NOT MATCH (advisory / offer / 
 describe('V5_STRUCTURAL_DECLINE_TEXT — approved copy oracle (Brief 4 req #6)', () => {
   it('is exactly the approved copy (pins the integration-test literal)', () => {
     expect(V5_STRUCTURAL_DECLINE_TEXT).toBe(
-      'I have not changed the model. I cannot make that kind of structural change to the model in this version.',
+      "I haven't changed the model. This version can't make that kind of model edit yet.",
     );
   });
   it('carries no E1 success-claim token', () => {

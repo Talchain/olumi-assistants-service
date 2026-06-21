@@ -107,7 +107,7 @@ const hasSuccessClaim = (txt: unknown): boolean =>
  * mutation-language.test.ts so the two cannot silently diverge.
  */
 const EXPECTED_DECLINE =
-  'I have not changed the model. I cannot make that kind of structural change to the model in this version.';
+  "I haven't changed the model. This version can't make that kind of model edit yet.";
 
 // The verbatim captured false-success turn (c92614a8 / f15ede2f).
 const E1_CAPTURED_CLAIM =
