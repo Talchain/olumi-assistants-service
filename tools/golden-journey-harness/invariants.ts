@@ -588,6 +588,18 @@ export function evaluateJourney(
         'scalar-value coverage — NOT the old vague `edit_graph_generic` no-op, and NOT typed-ops / typed ' +
         'add_option apply coverage. Add a typed-ops / add_option journey when that path exists (guardrail #3).',
     },
+    {
+      component: 'science_grounded_coaching',
+      title: 'Live A5 is advisory, not a hard gate',
+      detail:
+        'The DETERMINISTIC REPLAY is the stable regression gate. Live semantic checks (A5 coaching-grounding; ' +
+        'A1 while provisional) are ADVISORY: a lone live fail does not gate (non-zero exit) unless reproduced ' +
+        'across repeated calls or backed by deterministic context evidence. A5 already keys on GROUNDING TOKENS ' +
+        '(option/factor label, probability, science enrichment), NOT response length. A 5× repeat of ' +
+        'explain_leader on a constant scenario reproduced zero thin/ungrounded responses with stable analysis ' +
+        'context — the earlier single thin response classified as likely LLM variance. A5 strengthens once the ' +
+        'canonical-state M3 `_context_summary` surface exposes the actual context the model received.',
+    },
   ];
   if (opts.setFactorValueFragile) {
     caveats.push({

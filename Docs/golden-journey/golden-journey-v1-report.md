@@ -8,7 +8,9 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 |---|---|
 | Mode | replay |
 | Findings: pass / inconclusive / fail | 35 / 1 / 0 |
+| Fails: gating / advisory | 0 / 0 |
 | **Next component to fix** | **1. Context management** (via A2) |
+| Gating verdict | no gating fails (advisory fails do not gate) |
 | Diagnostic-trace flag confirmed ON | yes |
 
 ## Run metadata
@@ -16,7 +18,7 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 - **Mode:** replay
 - **Started at:** replay (deterministic fixture)
 - **Branch:** `claude/unruffled-brahmagupta-c387c7`
-- **Harness commit:** `f247d2c34eb947a2a8d4b20741e34046f6defbeb`
+- **Harness commit:** `771c6320e4a5bf53afe9fb4ef314a2618c80d919`
 
 ## Core-component matrix
 
@@ -58,9 +60,9 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 
 ## Findings (fails + inconclusives)
 
-| invariant | status | severity | component | step | evidence |
-|---|---|---|---|---|---|
-| A2 | inconclusive | medium | 1. Context management | — | context completeness not wire-observable for: graph, analysis_state, blockers, capabilities, recent_turn_state — asserted in-process (tests/unit/golden-journey-harness/context-completeness.test.ts). Priority follow-up: flag-gated debug context-summary surface [source=wire (ContextPack not serialised)] |
+| invariant | status | gating? | severity | component | step | evidence |
+|---|---|---|---|---|---|---|
+| A2 | inconclusive | — | medium | 1. Context management | — | context completeness not wire-observable for: graph, analysis_state, blockers, capabilities, recent_turn_state — asserted in-process (tests/unit/golden-journey-harness/context-completeness.test.ts). Priority follow-up: flag-gated debug context-summary surface [source=wire (ContextPack not serialised)] |
 
 ## Coverage caveats (what this run did NOT prove)
 
@@ -68,6 +70,7 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 |---|---|---|
 | 1. Context management | A2 asserted in-process only | AI-facing context completeness (A2) is proven by the committed in-process test, NOT on the live system — the ContextPack is never serialised on the wire. It stays in-process / wire-inconclusive until the canonical-state M3 `_context_summary` debug surface lands (then A2 becomes wire-observable in the live report). |
 | 4. Typed action/mutation | Mutate covers the typed scalar value-edit path only | The mutate step drives a concrete scalar value-edit (`Set <captured factor> to 0.5`) — a REAL durable mutation that routes through the TYPED scalar handler (observed live: handler_id=`set_factor_value`, exit_path=`turn_executor`, llm_calls=0). This is genuine typed scalar-value coverage — NOT the old vague `edit_graph_generic` no-op, and NOT typed-ops / typed add_option apply coverage. Add a typed-ops / add_option journey when that path exists (guardrail #3). |
+| 5. Science-grounded coaching | Live A5 is advisory, not a hard gate | The DETERMINISTIC REPLAY is the stable regression gate. Live semantic checks (A5 coaching-grounding; A1 while provisional) are ADVISORY: a lone live fail does not gate (non-zero exit) unless reproduced across repeated calls or backed by deterministic context evidence. A5 already keys on GROUNDING TOKENS (option/factor label, probability, science enrichment), NOT response length. A 5× repeat of explain_leader on a constant scenario reproduced zero thin/ungrounded responses with stable analysis context — the earlier single thin response classified as likely LLM variance. A5 strengthens once the canonical-state M3 `_context_summary` surface exposes the actual context the model received. |
 
 ## assistant_text per step (redacted)
 

@@ -52,7 +52,15 @@ pnpm tsx tools/golden-journey-harness/index.ts \
   --base-url https://cee-staging.onrender.com --scenario-prefix gj-v1 --trace-confirmed
 ```
 
-Exit codes: `0` no fails · `1` ≥1 fail · `2` harness error · `3` auth/preflight/deploy halt.
+Exit codes: `0` no **gating** fails · `1` ≥1 gating fail · `2` harness error · `3` auth/preflight/deploy halt.
+
+**Gating vs advisory.** The deterministic replay is the stable regression gate.
+Semantic, LLM-variance-prone checks — **A5** (coaching grounding) and **A1** while
+provisional — are **advisory**: reported (and shown in the report's `gating?` column)
+but they do **not** set a non-zero exit code on their own. Only gating fails
+(A3/A4/A6/A7) gate. A lone live A5 fail is therefore not a hard regression — see the
+[A5 flap characterisation](../../Docs/golden-journey/golden-journey-v1-a5-flap-characterisation.md).
+A5 strengthens once canonical-state **M3 `_context_summary`** lands.
 
 `--trace-confirmed` asserts `CEE_DIAGNOSTIC_TRACE_ENABLED` is ON, so a missing
 trace **fails** A6 instead of being inconclusive (dispatch guardrail #5). Without

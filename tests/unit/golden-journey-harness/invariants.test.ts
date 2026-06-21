@@ -27,6 +27,8 @@ import type {
   TurnRole,
   WireBody,
 } from '../../../tools/golden-journey-harness/observation.js';
+import { isAdvisoryFinding, makeFinding } from '../../../tools/golden-journey-harness/components.js';
+import { nextComponentToFix } from '../../../tools/golden-journey-harness/report.js';
 
 function obs(partial: Partial<TurnObservation> & { role: TurnRole; body?: WireBody }): TurnObservation {
   return {
@@ -274,5 +276,36 @@ describe('evaluateJourney — aggregation + caveats', () => {
   it('adds a trace-flag caveat when the diagnostic flag is not confirmed', () => {
     const { caveats } = evaluateJourney([], { diagnosticTraceExpected: false });
     expect(caveats.some((c) => c.title.includes('Diagnostic-trace flag not confirmed ON'))).toBe(true);
+  });
+
+  it('always emits the "live A5 advisory" caveat', () => {
+    const { caveats } = evaluateJourney([], { diagnosticTraceExpected: true });
+    expect(caveats.some((c) => c.title.includes('Live A5 is advisory'))).toBe(true);
+  });
+});
+
+describe('advisory gating (A5 / provisional A1 do not hard-gate)', () => {
+  it('classifies A5 fail and provisional A1 as advisory, A3 fail as gating', () => {
+    expect(isAdvisoryFinding(makeFinding('A5', 'fail', 'medium', 'x'))).toBe(true);
+    expect(isAdvisoryFinding(makeFinding('A1', 'fail', 'high', 'x', { provisional: true }))).toBe(true);
+    expect(isAdvisoryFinding(makeFinding('A3', 'fail', 'high', 'x'))).toBe(false);
+  });
+
+  it('nextComponentToFix prefers a gating fail over an advisory fail', () => {
+    const next = nextComponentToFix([
+      makeFinding('A5', 'fail', 'medium', 'ungrounded'),
+      makeFinding('A3', 'fail', 'high', 'hash unchanged'),
+    ]);
+    expect(next?.invariant).toBe('A3');
+    expect(next?.advisory).toBe(false);
+  });
+
+  it('nextComponentToFix surfaces an advisory fail (labelled) above an inconclusive', () => {
+    const next = nextComponentToFix([
+      makeFinding('A2', 'inconclusive', 'medium', 'in-process'),
+      makeFinding('A5', 'fail', 'medium', 'ungrounded'),
+    ]);
+    expect(next?.invariant).toBe('A5');
+    expect(next?.advisory).toBe(true);
   });
 });

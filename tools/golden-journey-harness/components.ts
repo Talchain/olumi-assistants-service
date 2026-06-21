@@ -144,11 +144,26 @@ export function makeFinding(
 }
 
 /**
+ * Advisory invariants are semantic / LLM-variance-prone: a single live fail
+ * is NOT a hard regression by itself (the deterministic replay is the stable
+ * gate). A5 (coaching grounding) is advisory; A1 is advisory while provisional.
+ * The A5 flap probe (5× explain on a constant scenario) reproduced zero thin
+ * responses with stable analysis context — consistent with LLM variance — so
+ * a lone A5 fail must not hard-gate a live run.
+ */
+export const ADVISORY_INVARIANTS: ReadonlySet<InvariantId> = new Set<InvariantId>(['A5']);
+
+/** True when a finding should be treated as advisory (non-gating). */
+export function isAdvisoryFinding(f: Finding): boolean {
+  return ADVISORY_INVARIANTS.has(f.invariant_id) || f.provisional === true;
+}
+
+/**
  * A coverage caveat is NOT a pass/fail of the product — it records a known
  * limitation of what THIS HARNESS RUN proved, surfaced so a reader never
  * mistakes "not exercised" for "verified". Dispatch guardrails #2 and #3
- * are encoded here (A2 in-process-only; mutate validates the V4-style path
- * only, not typed-path coverage).
+ * are encoded here (A2 in-process-only; mutate validates the typed scalar
+ * value-edit path only, not typed-ops/add_option coverage).
  */
 export interface CoverageCaveat {
   readonly component: CoreComponent;

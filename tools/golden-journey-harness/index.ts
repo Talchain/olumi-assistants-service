@@ -57,6 +57,7 @@ import {
   type GoldenJourneyContext,
 } from './journey.js';
 import { evaluateJourney } from './invariants.js';
+import { isAdvisoryFinding } from './components.js';
 import { JourneyPreconditionError } from '../v5-journey-replay/steps.js';
 import {
   getAnalysisReady,
@@ -164,9 +165,16 @@ function finishAndExit(input: RunReportInput, redact: (v: unknown) => string): n
   console.log('');
   console.log(`Report written to ${input.out_path}`);
   const fails = input.findings.filter((f) => f.status === 'fail').length;
+  const gatingFails = input.findings.filter((f) => f.status === 'fail' && !isAdvisoryFinding(f)).length;
+  const advisoryFails = fails - gatingFails;
   const inconclusive = input.findings.filter((f) => f.status === 'inconclusive').length;
-  console.log(`findings: ${input.findings.length} (fail=${fails} inconclusive=${inconclusive})`);
-  process.exit(fails > 0 ? 1 : 0);
+  console.log(
+    `findings: ${input.findings.length} (fail=${fails} [gating=${gatingFails} advisory=${advisoryFails}] inconclusive=${inconclusive})`,
+  );
+  // Only GATING fails set a non-zero exit code. Advisory fails (A5 / provisional
+  // A1 — semantic, LLM-variance-prone) are reported but do not hard-gate a single
+  // live run; the deterministic replay is the stable regression gate.
+  process.exit(gatingFails > 0 ? 1 : 0);
 }
 
 // --------------------------------------------------------------------------

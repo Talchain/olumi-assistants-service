@@ -21,6 +21,7 @@ import {
   COMPONENT_NUMBER,
   CORE_COMPONENTS,
   INVARIANT_TITLE,
+  isAdvisoryFinding,
   type CoreComponent,
   type CoverageCaveat,
   type Finding,
@@ -93,17 +94,19 @@ export function statusByInvariant(findings: readonly Finding[]): Record<Invarian
 
 /**
  * "Which core component must fix this next?" — the primary component of the
- * highest-priority finding: a fail beats an inconclusive; ties broken by
- * invariant order (A1..A7), then by component number.
+ * highest-priority finding. Priority: a GATING fail beats an ADVISORY fail
+ * (A5 / provisional A1 are semantic & LLM-variance-prone) beats an
+ * inconclusive; ties broken by invariant order (A1..A7), then component number.
  */
 export function nextComponentToFix(
   findings: readonly Finding[],
-): { component: CoreComponent; invariant: InvariantId; evidence: string } | null {
+): { component: CoreComponent; invariant: InvariantId; evidence: string; advisory: boolean } | null {
   const ranked = findings
     .filter((f) => f.status !== 'pass')
     .map((f) => ({
       f,
-      priority: f.status === 'fail' ? 0 : 1,
+      // 0 = gating fail, 1 = advisory fail, 2 = inconclusive
+      priority: f.status === 'fail' ? (isAdvisoryFinding(f) ? 1 : 0) : 2,
       invOrder: INVARIANT_ORDER.indexOf(f.invariant_id),
       compNum: COMPONENT_NUMBER[f.component_primary],
     }))
@@ -113,13 +116,20 @@ export function nextComponentToFix(
     );
   if (ranked.length === 0) return null;
   const top = ranked[0]!.f;
-  return { component: top.component_primary, invariant: top.invariant_id, evidence: top.evidence };
+  return {
+    component: top.component_primary,
+    invariant: top.invariant_id,
+    evidence: top.evidence,
+    advisory: isAdvisoryFinding(top),
+  };
 }
 
 export function renderGoldenReport(input: GoldenReportInput, redact: Redactor = identityRedact): string {
   const lines: string[] = [];
   const invStatus = statusByInvariant(input.findings);
   const failCount = input.findings.filter((f) => f.status === 'fail').length;
+  const gatingFailCount = input.findings.filter((f) => f.status === 'fail' && !isAdvisoryFinding(f)).length;
+  const advisoryFailCount = failCount - gatingFailCount;
   const inconclusiveCount = input.findings.filter((f) => f.status === 'inconclusive').length;
   const passCount = input.findings.filter((f) => f.status === 'pass').length;
   const next = nextComponentToFix(input.findings);
@@ -141,12 +151,18 @@ export function renderGoldenReport(input: GoldenReportInput, redact: Redactor = 
   lines.push('|---|---|');
   lines.push(`| Mode | ${input.mode} |`);
   lines.push(`| Findings: pass / inconclusive / fail | ${passCount} / ${inconclusiveCount} / ${failCount} |`);
+  lines.push(`| Fails: gating / advisory | ${gatingFailCount} / ${advisoryFailCount} |`);
   lines.push(
     `| **Next component to fix** | ${
       next === null
         ? '_none — no fails or inconclusives_'
-        : `**${COMPONENT_NUMBER[next.component]}. ${COMPONENT_LABEL[next.component]}** (via ${next.invariant})`
+        : `**${COMPONENT_NUMBER[next.component]}. ${COMPONENT_LABEL[next.component]}** (via ${next.invariant})${
+            next.advisory ? ' — _advisory only (not a gate; deterministic replay is the gate)_' : ''
+          }`
     } |`,
+  );
+  lines.push(
+    `| Gating verdict | ${gatingFailCount > 0 ? `${gatingFailCount} gating fail(s)` : 'no gating fails'} (advisory fails do not gate) |`,
   );
   lines.push(
     `| Diagnostic-trace flag confirmed ON | ${input.diagnosticTraceExpected ? 'yes' : 'no — A6 mostly inconclusive (guardrail #5)'} |`,
@@ -247,11 +263,12 @@ export function renderGoldenReport(input: GoldenReportInput, redact: Redactor = 
   if (actionable.length === 0) {
     lines.push('_No fails or inconclusives — every wire-observable invariant held._');
   } else {
-    lines.push('| invariant | status | severity | component | step | evidence |');
-    lines.push('|---|---|---|---|---|---|');
+    lines.push('| invariant | status | gating? | severity | component | step | evidence |');
+    lines.push('|---|---|---|---|---|---|---|');
     for (const f of actionable) {
+      const gating = f.status === 'fail' && !isAdvisoryFinding(f) ? 'gating' : f.status === 'fail' ? 'advisory' : '—';
       lines.push(
-        `| ${f.invariant_id}${f.provisional ? ' _(prov.)_' : ''} | ${f.status} | ${f.severity} | ${
+        `| ${f.invariant_id}${f.provisional ? ' _(prov.)_' : ''} | ${f.status} | ${gating} | ${f.severity} | ${
           COMPONENT_NUMBER[f.component_primary]
         }. ${COMPONENT_LABEL[f.component_primary]} | ${f.step ?? '—'} | ${escapePipes(redact(f.evidence))} |`,
       );
