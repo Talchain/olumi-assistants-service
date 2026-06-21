@@ -67,49 +67,54 @@ export function containsMutationLanguage(text: string): boolean {
 // label matching for the rare no-intent residuals.)
 // ---------------------------------------------------------------------------
 
-/** UNAMBIGUOUS structural graph nouns — safe for the UNCONDITIONAL narrow swap.
+/** UNAMBIGUOUS structural graph nouns — the ONLY nouns that enforce a swap.
  *  Excludes model/graph/diagram/decision (non-graph prose: "model
  *  documentation", "decision log") AND the ambiguous edge nouns
- *  link/connection/relationship/dependency (review round 6: "I created a link to
- *  the documentation", "I established a connection with the team") — those live
- *  in EDGE_NOUN and only act under structural-edit intent. */
+ *  link/connection/relationship/dependency ("I created a link to the
+ *  documentation", "I established a connection with the team", "between Alice
+ *  and Bob"). Those edge nouns can't be told from ordinary language without
+ *  graph labels, so they are monitor-only and deferred to #289 (review round 7);
+ *  the rail no longer references them. */
 const STRUCTURAL_NOUN =
   '(?:option|options|factor|factors|node|nodes|edge|edges|driver|drivers|constraint|constraints)';
-/** Ambiguous edge nouns — appear in non-graph prose (doc links, social/team
- *  connections, software dependencies). Never trigger the unconditional swap;
- *  used only for INTENT (with "between … and" framing) and the passive form. */
-const EDGE_NOUN =
-  '(?:link|links|connection|connections|relationship|relationships|dependency|dependencies)';
-/** Structural OR edge nouns — for passive-success detection (intent-gated). */
-const STRUCTURAL_OR_EDGE_NOUN =
-  '(?:option|options|factor|factors|node|nodes|edge|edges|driver|drivers|constraint|constraints|link|links|connection|connections|relationship|relationships|dependency|dependencies)';
 /** Apostrophe class: straight + typographic (Sonnet emits either). */
 const APOS = "['’]";
+
+/** Non-graph artefacts a structural noun may belong to — "model documentation",
+ *  "an option to the presentation", "the decision log". Used to EXCLUDE such
+ *  prose CONSISTENTLY across the narrow, intent and graph/model patterns (review
+ *  round 7). */
+const NON_GRAPH_CONTEXT =
+  '(?:presentation|slides?|deck|decks|email|emails|e-mail|doc|docs|document|documents|documentation|report|reports|write-?up|notes?|notebook|agenda|meeting|minutes|spec|specs|readme|wiki|page|pages|chat|conversation|thread|ticket|backlog|roadmap|log|logs|file|files|approach|strateg(?:y|ies)|version|versions|name|names|template|templates|prompt|prompts)';
+/** "<graph|model> <non-graph word>" compound — e.g. "the model documentation". */
+const NON_GRAPH_COMPOUND = `(?!\\s+${NON_GRAPH_CONTEXT}\\b)`;
+/** "<noun> to/in/for [the] <non-graph word>" — e.g. "an option to the presentation". */
+const NON_GRAPH_PP = `(?!\\s+(?:to|in|for|on|of|into|onto)\\s+(?:the\\s+|a\\s+|an\\s+|my\\s+|our\\s+|your\\s+|this\\s+|that\\s+)?${NON_GRAPH_CONTEXT}\\b)`;
 
 const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   // Future commitment: "I'll add … <structural noun>".
   new RegExp(
-    `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m about to| am about to)\\s+(?:go ahead and\\s+)?(?:add|set|change|update|remove|connect|create|wire|adjust|modify|link|delete|insert)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
+    `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m about to| am about to)\\s+(?:go ahead and\\s+)?(?:add|set|change|update|remove|connect|create|wire|adjust|modify|link|delete|insert)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // "let me add … <structural noun>".
   new RegExp(
-    `\\blet me\\s+(?:add|set|change|update|remove|connect|create|wire|adjust|modify|link|delete|insert)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
+    `\\blet me\\s+(?:add|set|change|update|remove|connect|create|wire|adjust|modify|link|delete|insert)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // In-progress: "I'm adding … <structural noun>".
   new RegExp(
-    `\\bI(?:${APOS}m| am)\\s+(?:adding|setting|changing|updating|removing|connecting|creating|wiring|adjusting|linking|deleting|inserting)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
+    `\\bI(?:${APOS}m| am)\\s+(?:adding|setting|changing|updating|removing|connecting|creating|wiring|adjusting|linking|deleting|inserting)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Present-perfect completion: "I've added … <structural noun>", "I've set up a connection".
   new RegExp(
-    `\\bI(?:${APOS}ve| have)\\s+(?:added|set|set up|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
+    `\\bI(?:${APOS}ve| have)\\s+(?:added|set|set up|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Simple-past completion: "I added … <structural noun>", "I set up a connection".
   new RegExp(
-    `\\bI\\s+(?:added|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited|set up|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
+    `\\bI\\s+(?:added|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited|set up|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Direct-object graph/model edit: "I updated the graph", "I changed the model".
@@ -117,7 +122,7 @@ const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   // excludes compound nouns so "changed the model documentation" / "updated the
   // decision log" / "created a diagram for the presentation" do NOT match.
   new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+)?(?:updated|update|changed|change|edited|edit|modified|modify|revised|revise|rebuilt|rebuild|reworked|rework|redrew|redraw)\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b(?!\\s+(?:documentation|docs?|log|logs|file|files|approach|strateg(?:y|ies)|version|name|spec|notes?|presentation|template|prompt))`,
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+)?(?:updated|update|changed|change|edited|edit|modified|modify|revised|revise|rebuilt|rebuild|reworked|rework|redrew|redraw)\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
     'i',
   ),
 ];
@@ -171,12 +176,14 @@ const BROAD_STRUCTURAL_CLAIM_PATTERNS: readonly RegExp[] = [
     `\\b(?:connect|connected|connecting|link|linked|linking|wir(?:e|ed|ing)|join(?:ed|ing)?|draw|drew)\\b[^.!?]*\\bbetween\\b[^.!?]*\\band\\b`,
     'i',
   ),
-  // Passive structural success (review round 6): "the option has been added",
-  // "the relationship is now in place", "the connection was established". Uses
-  // the structural-OR-edge noun set; broad → only swaps under structural-edit
-  // intent, so non-graph passives ("the note has been added") never match.
+  // Passive structural success (review rounds 6/7): "the option has been added",
+  // "the factor has been changed", "the option was updated". Scoped to the
+  // UNAMBIGUOUS structural noun set (edge nouns are deferred to #289); the
+  // participle list covers add/create AND change/update/modify/edit. Broad →
+  // only swaps under structural-edit intent, so non-graph passives ("the note
+  // has been added") never match.
   new RegExp(
-    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${STRUCTURAL_OR_EDGE_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|introduced|incorporated|included|put\\s+in\\s+place|in\\s+place)\\b`,
+    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${STRUCTURAL_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|introduced|incorporated|included|changed|updated|modified|edited|rewired|revised|reworked|adjusted|put\\s+in\\s+place|in\\s+place)\\b`,
     'i',
   ),
 ];
@@ -200,30 +207,25 @@ const STRUCTURAL_EDIT_REQUEST_PATTERNS: readonly RegExp[] = [
   // "connect the two nodes", "edit the constraint". (Edge nouns need relational
   // framing — see pattern 4.)
   new RegExp(
-    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b`,
+    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // "a new <structural noun>".
   new RegExp(`\\b(?:a |an |another )?new\\s+${STRUCTURAL_NOUN}\\b`, 'i'),
   // edit verb directly on the graph/model: "update the model", "edit the graph",
-  // "change the decision model". (Read-out questions are excluded by the
-  // state-query guard below; scalar edits never reach the structural noun.)
+  // "change the decision model". The non-graph compound guard excludes
+  // "the model documentation" / "the model presentation" (review round 7).
   new RegExp(
-    `\\b(?:edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|revis(?:e|es|ing|ed)|rebuild|rebuilt|rework(?:s|ing|ed)?|redraw|redrew|adjust(?:s|ing|ed)?)\\b[^.?!]*\\b(?:the|your|this|my|our)\\s+(?:decision\\s+)?(?:graph|model)\\b`,
+    `\\b(?:edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|revis(?:e|es|ing|ed)|rebuild|rebuilt|rework(?:s|ing|ed)?|redraw|redrew|adjust(?:s|ing|ed)?)\\b[^.?!]*\\b(?:the|your|this|my|our)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
     'i',
   ),
-  // edge-noun request WITH "…between X and Y" framing (review round 6):
-  // "add a relationship between Cost and Growth", "set up a connection between
-  // X and Y", "edit the dependency between A and B". The framing is REQUIRED so
-  // "add a link to the documentation" / "connect me with the team" do NOT match.
-  new RegExp(
-    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?|rewir(?:e|es|ing|ed))\\b[^.?!]*\\b${EDGE_NOUN}\\b[^.?!]*\\bbetween\\b[^.?!]*\\band\\b`,
-    'i',
-  ),
-  // NB (review round 5): the noun-less "connect X to/with Y" intent pattern stays
-  // REMOVED — text can't tell a graph edge from a social/workflow request
-  // ("connect me with the team", "connect Alice with Bob") without graph labels.
-  // Deferred to #289; such claims are monitored, not swapped.
+  // NB (review round 7): the edge-noun "…between X and Y" intent pattern was
+  // REMOVED. "between Alice and Bob" / "between the release notes and the
+  // documentation" are not graph edges, and "between … and" (or "from … to")
+  // can't tell graph labels from ordinary language at this seam. Ambiguous edge
+  // nouns (link/connection/relationship/dependency) are therefore monitor-only
+  // until #289 supplies graph-label context. The noun-less "connect X to Y"
+  // pattern stays removed for the same reason.
 ];
 
 /**

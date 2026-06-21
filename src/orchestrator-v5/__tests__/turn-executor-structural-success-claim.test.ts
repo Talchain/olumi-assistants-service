@@ -359,9 +359,9 @@ describe('conservative — advisory and benign phrasing is preserved', () => {
 // ---------------------------------------------------------------------------
 
 describe('intent-gated — structural-edit request + broad claim → declines', () => {
-  it('structural-noun connection request + noun-less edge claim → swapped', async () => {
+  it('add-option intent + noun-less edge claim → swapped', async () => {
     const { response } = await runTurnExecutor(
-      payload('Add a connection between Marketing and Revenue', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14'),
+      payload('Add a new option, then hook it up', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14'),
       'req-intent-edge',
       { routingAdapter: mockRoutingAdapter('Done, I connected Marketing to Revenue.') },
     );
@@ -379,10 +379,10 @@ describe('intent-gated — structural-edit request + broad claim → declines', 
     expect(swapEvents()).toHaveLength(1);
   });
 
-  // Codex blocker 4 — edit/change/update/modify request + vague false success.
-  it('"Change the dependency …" request + "I updated it" → swapped', async () => {
+  // Codex blocker 4 — edit/update request on the model + vague false success.
+  it('"Update the model to include a new option" + "I updated it" → swapped', async () => {
     const { response } = await runTurnExecutor(
-      payload('Change the dependency between Cost and Growth', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa16'),
+      payload('Update the model to include a new option', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa16'),
       'req-intent-edit',
       { routingAdapter: mockRoutingAdapter('Done, I updated it.') },
     );
@@ -480,11 +480,11 @@ describe('Codex round-6 — state query, passive success, ambiguous edge', () =>
     expect(swapEvents()).toHaveLength(1);
   });
 
-  it('passive relationship ("The relationship is now in place.") under intent → swapped', async () => {
+  it('passive structural success ("The factor has been changed.") under intent → swapped', async () => {
     const { response } = await runTurnExecutor(
-      payload('Add a relationship between Cost and Growth', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa22'),
-      'req-passive-rel',
-      { routingAdapter: mockRoutingAdapter('The relationship is now in place.') },
+      payload('Change the churn factor structure', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa22'),
+      'req-passive-struct',
+      { routingAdapter: mockRoutingAdapter('The factor has been changed.') },
     );
     expect(response.assistant_text).toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(1);
@@ -505,6 +505,63 @@ describe('Codex round-6 — state query, passive success, ambiguous edge', () =>
       payload('introduce me to the team', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa24'),
       'req-socialconn',
       { routingAdapter: mockRoutingAdapter('I established a connection with the team.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex round-7 — non-graph context (documentation/presentation), people/doc
+// edges, and passive change verbs. Exclusions must apply across the path.
+// ---------------------------------------------------------------------------
+
+describe('Codex round-7 — non-graph context & ambiguous edges preserved', () => {
+  it('"update the model documentation" → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Please update the model documentation.', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa30'),
+      'req-model-docs',
+      { routingAdapter: mockRoutingAdapter('I updated the model documentation.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('"change the model presentation" → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Change the model presentation.', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa31'),
+      'req-model-pres',
+      { routingAdapter: mockRoutingAdapter('I changed the model presentation.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('"add an option to the presentation" → NOT swapped (unconditional noun guarded)', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Can you add an option to the presentation?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa32'),
+      'req-option-pres',
+      { routingAdapter: mockRoutingAdapter('I added an option to the presentation.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('people edge ("relationship between Alice and Bob") → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Create a relationship between Alice and Bob.', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa33'),
+      'req-people-edge',
+      { routingAdapter: mockRoutingAdapter('I established a relationship between Alice and Bob.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('doc edge ("link between the release notes and the documentation") → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Add a link between the release notes and the documentation.', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa34'),
+      'req-doc-edge',
+      { routingAdapter: mockRoutingAdapter('I added a link between the release notes and the documentation.') },
     );
     expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(0);

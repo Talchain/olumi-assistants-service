@@ -101,6 +101,7 @@ describe('containsStructuralSuccessClaim — MUST MATCH (first-person mutation v
     ['edge claim w/ factors anchor', 'I removed the relationship between the two factors.'],
     ['past-tense graph edit', 'I updated the graph.'],
     ['past-tense model edit', 'I changed the model.'],
+    ['option to your model (graph target, not excluded)', 'I added an option to your model.'],
     ['future commitment + factor', "I'll add a factor for that."],
     ['"let me add the option"', 'Let me add the option.'],
     ['present-continuous + option', "I'm adding the option now."],
@@ -143,6 +144,12 @@ describe('containsStructuralSuccessClaim — MUST NOT MATCH (advisory / offer / 
     // doc links and social/team connections are not graph edits.
     ['doc link — created a link to docs', 'I created a link to the documentation.'],
     ['social — established a connection with team', 'I established a connection with the team.'],
+    // Review round 7 — non-graph context (presentation/documentation) must NOT
+    // swap even with an unambiguous noun ("option to the presentation") or the
+    // graph/model compound ("model documentation").
+    ['non-graph — option to the presentation', 'I added an option to the presentation.'],
+    ['non-graph — model documentation', 'I updated the model documentation.'],
+    ['non-graph — model presentation', 'I changed the model presentation.'],
     ['empty', ''],
   ];
   for (const [name, text] of mustNotMatch) {
@@ -214,12 +221,12 @@ describe('classifyStructuralClaim — intent-gated honesty decision', () => {
 
   // Round-6 blocker 2 — PASSIVE structural success ("the option has been added",
   // "the relationship is now in place") swaps under intent, monitored without.
-  it('passive structural success → swap under intent, monitor without', () => {
+  it('passive structural success (incl. change/update verbs) → swap under intent, monitor without', () => {
     for (const t of [
       'The option has been added.',
-      'The relationship is now in place.',
-      'The connection was established.',
-      'A new dependency has now been added.',
+      'The factor has been changed.',
+      'A new option was created.',
+      'The option has now been updated.',
     ]) {
       expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('swap');
       expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('monitor');
@@ -324,26 +331,39 @@ describe('mentionsStructuralEditRequest — user structural-edit intent', () => 
     expect(mentionsStructuralEditRequest('I want to add a factor')).toBe(true);
   });
 
-  // Codex blocker 4 — edit/change/update/modify must create intent.
-  it('detects edit/change/update/modify requests', () => {
-    expect(mentionsStructuralEditRequest('Edit the relationship between Cost and Growth')).toBe(true);
-    expect(mentionsStructuralEditRequest('Change the dependency between Cost and Growth')).toBe(true);
+  // Codex blocker 4 — edit/change/update/modify on a structural noun or the
+  // graph/model must create intent.
+  it('detects edit/change/update/modify requests (structural noun or graph/model)', () => {
+    expect(mentionsStructuralEditRequest('Edit the option')).toBe(true);
+    expect(mentionsStructuralEditRequest('Change the churn factor')).toBe(true);
+    expect(mentionsStructuralEditRequest('Modify the node')).toBe(true);
     expect(mentionsStructuralEditRequest('Update the model to include a new option')).toBe(true);
-    expect(mentionsStructuralEditRequest('Modify the relationship between Cost and Growth')).toBe(true);
     expect(mentionsStructuralEditRequest('Please update the model')).toBe(true);
   });
 
-  // Codex blocker 2 — structural-noun connection requests must create intent.
-  it('detects structural-noun connection requests', () => {
-    expect(mentionsStructuralEditRequest('Add a relationship between Cost and Growth')).toBe(true);
-    expect(mentionsStructuralEditRequest('Create a dependency between Cost and Growth')).toBe(true);
-    expect(mentionsStructuralEditRequest('Set up a connection between Cost and Growth')).toBe(true);
+  // Review round 7 — ambiguous edge-noun requests no longer create intent
+  // ("between … and" can't tell graph labels from people/docs). Deferred to #289.
+  it('does NOT create intent for ambiguous edge-noun requests (deferred to #289)', () => {
+    expect(mentionsStructuralEditRequest('Add a relationship between Cost and Growth')).toBe(false);
+    expect(mentionsStructuralEditRequest('Create a dependency between Cost and Growth')).toBe(false);
+    expect(mentionsStructuralEditRequest('Set up a connection between Cost and Growth')).toBe(false);
+    expect(mentionsStructuralEditRequest('Create a relationship between Alice and Bob')).toBe(false);
+    expect(mentionsStructuralEditRequest('Add a link between the release notes and the documentation')).toBe(false);
   });
 
   // Codex blocker 1 — request-shaped questions still create intent.
   it('request-shaped questions create intent', () => {
     expect(mentionsStructuralEditRequest('Can you add an option?')).toBe(true);
-    expect(mentionsStructuralEditRequest('Could you change the relationship between Cost and Growth?')).toBe(true);
+    expect(mentionsStructuralEditRequest('Could you remove the churn factor?')).toBe(true);
+  });
+
+  // Review round 7 — non-graph compound / PP targets do NOT create intent.
+  it('does NOT create intent for non-graph documentation/presentation targets', () => {
+    expect(mentionsStructuralEditRequest('Please update the model documentation.')).toBe(false);
+    expect(mentionsStructuralEditRequest('Change the model presentation.')).toBe(false);
+    expect(mentionsStructuralEditRequest('Can you add an option to the presentation?')).toBe(false);
+    // …but a genuine graph target still does.
+    expect(mentionsStructuralEditRequest('Add an option to your model')).toBe(true);
   });
 
   // Codex blocker 1 — state/read-out questions must NOT create intent,
