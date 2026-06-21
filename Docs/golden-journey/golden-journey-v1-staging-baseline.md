@@ -2,24 +2,24 @@
 
 Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/). Drives the core PoC journey (draft → run analysis → explain → follow-up → mutate → rerun → explain what changed → reload → verify chips → capture debug) and classifies every assertion into one of the six core components.
 
-> **⚠ Interpretation correction (post-run).** The A3 (Typed action/mutation) FAIL below was produced by a **vague** mutate instruction ("make _<factor>_ more important") that the system correctly answered **clarify-first** ("the model is unchanged… tell me the specific factor/value") — so no mutation happened and the back half of the journey was not strongly tested. A follow-up **concrete-mutation rerun** (`Set <factor> to 0.5`) **mutated correctly** (graph hash changed, freshness stale→fresh, win-probs shifted). **Component 4 is therefore NOT a confirmed defect** — see [golden-journey-v1-concrete-mutation-rerun.md](golden-journey-v1-concrete-mutation-rerun.md). No fix lane is opened. The "next component to fix" verdict in the table below reflects this single ambiguous run and should be read with that correction.
+> **Run context.** This baseline uses the **concrete** mutate step (`Set <captured factor> to 0.5`, see [concrete-mutation-rerun.md](golden-journey-v1-concrete-mutation-rerun.md)). The mutation now works on the hard path: step `5_mutate` went `freshness=stale`, the graph hash **changed** (`eb628374…` → `cea64b54…`), via the typed `handler_id=set_factor_value` — so **A3/A4/A7 PASS** and Component 4 is healthy. The **A5 FAIL** below is an *incidental, variance-prone* finding: `3_explain_leader` returned a thin 84-char response with no grounding on this run, whereas the same step was 1574 chars and richly grounded on the prior run. It is **not** a confirmed systemic defect from one run, and **not** the mutation lane — do not open a fix lane on it without repeated confirmation.
 
 ## Executive verdict
 
 | signal | value |
 |---|---|
 | Mode | live |
-| Findings: pass / inconclusive / fail | 33 / 1 / 1 |
-| **Next component to fix** | **4. Typed action/mutation** (via A3) |
+| Findings: pass / inconclusive / fail | 34 / 1 / 1 |
+| **Next component to fix** | **5. Science-grounded coaching** (via A5) |
 | Diagnostic-trace flag confirmed ON | yes |
 
 ## Run metadata
 
 - **Mode:** live
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-06-21T15:37:36.138Z
+- **Started at:** 2026-06-21T18:54:16.695Z
 - **Branch:** `claude/unruffled-brahmagupta-c387c7`
-- **Harness commit:** `ecbab45de4d596a4820808de87c6d7b5b4ed27f4`
+- **Harness commit:** `f247d2c34eb947a2a8d4b20741e34046f6defbeb`
 - **Deployed build (/healthz):** `7479cda`
 
 ## Core-component matrix
@@ -29,8 +29,8 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 | 1 | Context management | A2 | [INCONCLUSIVE] inconclusive |
 | 2 | Canonical state | A1 | [PASS] pass |
 | 3 | AI orchestration | — | — |
-| 4 | Typed action/mutation | A3, A4 | [FAIL] fail |
-| 5 | Science-grounded coaching | A5 | [PASS] pass |
+| 4 | Typed action/mutation | A3, A4 | [PASS] pass |
+| 5 | Science-grounded coaching | A5 | [FAIL] fail |
 | 6 | Observability/recovery | A6, A7 | [PASS] pass |
 
 ## Invariant results (A1..A7)
@@ -39,9 +39,9 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 |---|---|---|---|---|
 | A1 _(provisional)_ | Analysis state is not contradicted by prose, chips or reload | 2. Canonical state | [PASS] pass | coherent: status=ready freshness=fresh denial=none |
 | A2 | AI-facing context contains graph, analysis, blockers, capabilities, recent-turn state | 1. Context management | [INCONCLUSIVE] inconclusive | context completeness not wire-observable for: graph, analysis_state, blockers, capabilities, recent_turn_state — asserted in-process (tests/unit/golden-journey-harness/context-completeness.test.ts). Priority follow-up: flag-gated debug context-summary surface [source=wire (ContextPack not serialised)] |
-| A3 | Actions only count when durable state changed | 4. Typed action/mutation | [FAIL] fail | durable analysis-affecting graph hash UNCHANGED after a mutation step (baseline===current) — a counted action did not change canonical state |
+| A3 | Actions only count when durable state changed | 4. Typed action/mutation | [PASS] pass | durable analysis-affecting graph hash changed after mutation (baseline≠current) — the action counted |
 | A4 | Failed/proposed/non-mutating turns never claim success | 4. Typed action/mutation | [PASS] pass | no false success claim (role=draft http=200) |
-| A5 | Coaching is grounded in actual graph/analysis/science signals | 5. Science-grounded coaching | [PASS] pass | coaching grounded in graph/analysis/science signals |
+| A5 | Coaching is grounded in actual graph/analysis/science signals | 5. Science-grounded coaching | [FAIL] fail | analysis is ready but coaching references no real option/factor label, probability, or science signal |
 | A6 | Debug output explains what happened | 6. Observability/recovery | [PASS] pass | _diagnostic_trace present: exit_path="draft_graph" correlation_ids ✓ timings=true |
 | A7 | Repairs/recoveries are visible, not silent | 6. Observability/recovery | [PASS] pass | repairs surfaced to the user via analysis_ready.model_adjustments (n=2) |
 
@@ -49,14 +49,14 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 
 | step | role | http | status | evidence |
 |---|---|---|---|---|
-| `1_draft` | draft | 200 | [PASS] pass | http=200 text_len=750 analysis_status=ready freshness=none current_hash=2d083dae0e repairs=2 chips=3 exit_path=draft_graph trace=present draft={total:54791,parse:54743,parse_llm:52963,normalise:1,enrich:3,repair:22,repair_fired:false,repair_attempts:0,validation:0,threshold:0,package:8,boundary:11} |
-| `2_run_analysis` | analysis | 200 | [PASS] pass | http=200 text_len=151 analysis_status=ready freshness=fresh hash_at_run=2d083dae0e current_hash=2d083dae0e chips=2 exit_path=chip_click trace=present |
-| `3_explain_leader` | explain | 200 | [PASS] pass | http=200 text_len=1574 analysis_status=ready freshness=fresh hash_at_run=2d083dae0e current_hash=2d083dae0e chips=1 exit_path=turn_executor trace=present timings={total:16454,ctx:680,ctx_pack:12,ctx_chars:18780,routing:15337,handler:1,compose:4,commit:405,handler_id:explain_results,cache:miss,cache_read_tokens:0,cache_create_tokens:7110,input_tokens:4554,llm_calls:1} |
-| `4_follow_up` | follow_up | 200 | [PASS] pass | http=200 text_len=1865 analysis_status=ready freshness=fresh hash_at_run=2d083dae0e current_hash=2d083dae0e chips=1 exit_path=turn_executor trace=present timings={total:28294,ctx:937,ctx_pack:9,ctx_chars:20591,routing:27006,handler:1,compose:2,commit:330,handler_id:explain_results,cache:hit,cache_read_tokens:7110,cache_create_tokens:0,input_tokens:5010,llm_calls:1} |
-| `5_mutate` | mutate | 200 | [PASS] pass | http=200 text_len=121 chips=1 exit_path=edit_graph trace=present |
-| `6_rerun_analysis` | rerun_analysis | 200 | [FAIL] fail | http=200 text_len=151 analysis_status=ready freshness=fresh hash_at_run=2d083dae0e current_hash=2d083dae0e chips=2 exit_path=chip_click trace=present |
-| `7_explain_what_changed` | explain_changed | 200 | [PASS] pass | http=200 text_len=161 analysis_status=ready freshness=fresh hash_at_run=2d083dae0e current_hash=2d083dae0e chips=0 exit_path=turn_executor trace=present timings={total:1001,ctx:878,ctx_pack:9,ctx_chars:23062,llm_calls:0} |
-| `8_reload` | reload | 200 | [PASS] pass | http=200 text_len=1253 analysis_status=ready freshness=fresh hash_at_run=2d083dae0e current_hash=2d083dae0e chips=1 exit_path=turn_executor trace=present timings={total:13778,ctx:759,ctx_pack:7,ctx_chars:23021,routing:12656,handler:2,compose:3,commit:346,handler_id:explain_results,cache:hit,cache_read_tokens:7110,cache_create_tokens:0,input_tokens:5665,llm_calls:1} |
+| `1_draft` | draft | 200 | [PASS] pass | http=200 text_len=861 analysis_status=ready freshness=none current_hash=eb628374e2 repairs=2 chips=3 exit_path=draft_graph trace=present draft={total:60461,parse:60351,parse_llm:58490,normalise:0,enrich:5,repair:25,repair_fired:false,repair_attempts:0,validation:54,threshold:54,package:11,boundary:12} |
+| `2_run_analysis` | analysis | 200 | [PASS] pass | http=200 text_len=162 analysis_status=ready freshness=fresh hash_at_run=eb628374e2 current_hash=eb628374e2 chips=2 exit_path=chip_click trace=present |
+| `3_explain_leader` | explain | 200 | [FAIL] fail | http=200 text_len=84 analysis_status=ready freshness=fresh hash_at_run=eb628374e2 current_hash=eb628374e2 chips=2 exit_path=turn_executor trace=present timings={total:32423,ctx:673,ctx_pack:11,ctx_chars:20495,llm_calls:1} |
+| `4_follow_up` | follow_up | 200 | [PASS] pass | http=200 text_len=1608 analysis_status=ready freshness=fresh hash_at_run=eb628374e2 current_hash=eb628374e2 chips=1 exit_path=turn_executor trace=present timings={total:16079,ctx:921,ctx_pack:10,ctx_chars:20798,routing:14799,handler:1,compose:4,commit:334,handler_id:explain_results,cache:hit,cache_read_tokens:7110,cache_create_tokens:0,input_tokens:5119,llm_calls:1} |
+| `5_mutate` | mutate | 200 | [PASS] pass | http=200 text_len=253 analysis_status=ready freshness=stale hash_at_run=eb628374e2 current_hash=cea64b5484 chips=1 exit_path=turn_executor trace=present timings={total:930,ctx:650,ctx_pack:3,ctx_chars:22892,handler:3,compose:111,commit:155,handler_id:set_factor_value,llm_calls:0} |
+| `6_rerun_analysis` | rerun_analysis | 200 | [PASS] pass | http=200 text_len=162 analysis_status=ready freshness=fresh hash_at_run=cea64b5484 current_hash=cea64b5484 chips=2 exit_path=chip_click trace=present |
+| `7_explain_what_changed` | explain_changed | 200 | [PASS] pass | http=200 text_len=253 analysis_status=ready freshness=fresh hash_at_run=cea64b5484 current_hash=cea64b5484 chips=0 exit_path=turn_executor trace=present timings={total:1055,ctx:928,ctx_pack:12,ctx_chars:23302,llm_calls:0} |
+| `8_reload` | reload | 200 | [PASS] pass | http=200 text_len=1367 analysis_status=ready freshness=fresh hash_at_run=cea64b5484 current_hash=cea64b5484 chips=1 exit_path=turn_executor trace=present timings={total:12908,ctx:568,ctx_pack:6,ctx_chars:23442,routing:12151,handler:0,compose:3,commit:173,handler_id:explain_results,cache:hit,cache_read_tokens:7110,cache_create_tokens:0,input_tokens:5926,llm_calls:1} |
 | `9_verify_chips` | evaluation | — | [PASS] pass | evaluation over captured turns — exercises A4, A7: Verify chips/actions across the mutate + rerun turns (no false-success chips; rerun affordance after stale). |
 | `10_capture_debug` | evaluation | — | [PASS] pass | evaluation over captured turns — exercises A6: Capture the debug/context trace (_diagnostic_trace + _timings) from every turn into the report. |
 
@@ -64,22 +64,22 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 
 | invariant | status | severity | component | step | evidence |
 |---|---|---|---|---|---|
-| A3 | fail | high | 4. Typed action/mutation | 6_rerun_analysis | durable analysis-affecting graph hash UNCHANGED after a mutation step (baseline===current) — a counted action did not change canonical state |
+| A5 | fail | medium | 5. Science-grounded coaching | 3_explain_leader | analysis is ready but coaching references no real option/factor label, probability, or science signal |
 | A2 | inconclusive | medium | 1. Context management | — | context completeness not wire-observable for: graph, analysis_state, blockers, capabilities, recent_turn_state — asserted in-process (tests/unit/golden-journey-harness/context-completeness.test.ts). Priority follow-up: flag-gated debug context-summary surface [source=wire (ContextPack not serialised)] |
 
 ## Coverage caveats (what this run did NOT prove)
 
 | component | caveat | detail |
 |---|---|---|
-| 1. Context management | A2 asserted in-process only | AI-facing context completeness (A2) is proven by the committed in-process test, NOT on the live system — the ContextPack is never serialised on the wire. Priority follow-up (guardrail #2): a flag-gated debug context-summary surface so A2 becomes wire-observable in the live report. |
-| 4. Typed action/mutation | Mutate validates the V4-style path only | The mutate step drives `edit_graph_generic` (the proven deterministic path). This validates the CURRENT path only and is NOT typed-path coverage. Migrate the step to the typed mutation path (typed add_option / typed ops) when that path exists (guardrail #3). |
+| 1. Context management | A2 asserted in-process only | AI-facing context completeness (A2) is proven by the committed in-process test, NOT on the live system — the ContextPack is never serialised on the wire. It stays in-process / wire-inconclusive until the canonical-state M3 `_context_summary` debug surface lands (then A2 becomes wire-observable in the live report). |
+| 4. Typed action/mutation | Mutate covers the scalar value-edit path only | The mutate step drives a concrete scalar value-edit (`Set <captured factor> to 0.5`) — a REAL durable mutation via the deterministic value-update gate (set_factor_value semantics; observed live exit_path=`edit_graph`). This is scalar-value-edit coverage; it is NOT typed-ops / typed add_option apply coverage. Add a typed-ops / add_option journey when that path exists (guardrail #3). |
 
 ## assistant_text per step (redacted)
 
 ### `1_draft`
 
 ```
-I've built a first decision model for "Meet Q3 Roadmap Commitments with Sustainable Capacity".
+I've built a first decision model for "Deliver Q3 Roadmap Commitments on Time".
 
 Options compared
 • Hire Two Senior Engineers Locally
@@ -88,9 +88,9 @@ Options compared
 • Introduce Tiered Pricing to Fund
 
 What the model is weighing
-• Main trade-off: Hiring and Scaling Budget balanced against Local Senior Hire
-• Assumption to check: Senior local hires typically take 2-3 months to reach full productivity; if Q3 starts in under 3 months, this path may not deliver in time
-• Worth a look: Consider a hybrid path
+• Main trade-off: Hiring and Staffing Spend balanced against Local Senior Headcount Added
+• Assumption to check: A short offshore pilot on a non-critical workstream would reveal coordination overhead before it threatens Q3 roadmap commitments
+• Worth a look: Tiered pricing revenue is entirely unvalidated; if conversion is slow, the gradual hiring path may deliver no capacity within the six-month window
 
 Your brief covered the main points; adding detail on the lighter areas would sharpen the comparison.
 
@@ -104,7 +104,7 @@ Chips:
 ### `2_run_analysis`
 
 ```
-Hire Two Senior Engineers Locally currently leads by 58 percentage points, but treat this as provisional: the result is sensitive to Local Senior Hire.
+Hire Two Senior Engineers Locally currently leads by 55 percentage points, but treat this as provisional: the result is sensitive to Local Senior Headcount Added.
 ```
 Chips:
 - **Explain the result** — "Please explain the analysis result in plain language." action_type=`explain_results`
@@ -113,35 +113,18 @@ Chips:
 ### `3_explain_leader`
 
 ```
-Hire Two Senior Engineers Locally comes out ahead in 71% of simulations, 58 percentage points clear of the Engage Offshore Partner option, because the model's strongest driver works almost entirely in its favour.
-
-Local Senior Hire has a very strong positive influence on Q3 Roadmap Delivery Capacity, and that outcome is the primary path to your goal. When you choose local hiring, this relationship fires at full strength. The other options either don't activate it at all (offshore, status quo) or activate it only indirectly and more slowly (tiered pricing, which funds hiring gradually rather than immediately).
-
-Engineering Talent Market Tightness works against the local hire option by making recruitment harder and slower, and Time to Productive Contribution adds a further drag, since new hires don't contribute from day one. These are the two forces most likely to erode the lead. However, the model currently treats them as moderate influences, not strong enough to overcome the very strong positive pull of Local Senior Hire itself.
-
-The result carries moderate stability, meaning it holds under most plausible variations but is sensitive to your assumptions about how quickly local hires become productive and how tight the talent market really is. Those two assumptions are worth pressure-testing before you commit.
-
-The evidence that would most improve confidence is real-world support for the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since it is the assumption most likely to change the outcome.
+I couldn't complete that turn cleanly, but your current analysis is still available.
 ```
 Chips:
-- **Explore what would change this** — "Explore what would change the result." action_type=`what_would_flip`
+- **Explain results** — "Explain the result" action_type=`explain_results`
+- **Re-run analysis** — "Run the analysis" action_type=`run_analysis`
 
 ### `4_follow_up`
 
 ```
-Engage Offshore Partner comes out ahead in only 14% of simulations, 58 percentage points behind the local hire option. The gap is large enough that this is not a close call under your current assumptions.
+Hire Two Senior Engineers Locally comes out ahead in 70% of simulations, while Introduce Tiered Pricing to Fund Gradual Hiring manages just 15% — a gap of 55 percentage points. The core reason is that the local hire option drives Local Senior Headcount Added directly and strongly, which in turn lifts both Engineering Delivery Capacity and Q3 Roadmap Commitment Confidence through moderate positive causal links. Tiered pricing takes a longer, less certain route: it first needs to generate Revenue Uplift, which has only a weak positive link to Engineering Delivery Capacity, and the hiring it funds happens gradually rather than immediately. That delay is a real problem for a six-month Q3 deadline. Tiered pricing does have one structural advantage — Revenue Uplift carries a moderate negative link to Staffing Cost Overrun, meaning it partially self-funds and reduces cost risk. But that benefit is not enough to close the delivery gap within your timeframe. The result is fragile overall, though, because the relationship between Local Senior Headcount Added and Engineering Delivery Capacity is the most vulnerable assumption in your model. If those two new hires take longer to reach full productivity than assumed — which Local Engineering Talent Market Tightness could worsen — the margin narrows and tiered pricing becomes more competitive.
 
-The core problem for the offshore option is that its primary path to Q3 Roadmap Delivery Capacity is weak. The Offshore Partnership factor has only a weak positive connection to delivery capacity, compared to the moderate positive connection that Local Senior Hire carries. So even when offshore is activated at full strength, it simply does not move the delivery capacity needle as much.
-
-On top of that, the offshore option carries a risk that the local hire option does not: Coordination and Integration Overhead. That risk has a moderate positive connection from Offshore Partnership, and feeds a negative drag on your goal. The model treats this as a weak negative influence on the final outcome, but it is also flagged as one of the most vulnerable assumptions in the model, meaning if coordination overhead turns out to be worse than assumed, the offshore case weakens further.
-
-What offshore does not do is activate the Local Senior Hire factor at all, so it misses the strongest driver in the model entirely.
-
-The one area where offshore is structurally comparable is Long-Term Team Capability, where both options carry a weak positive connection. But that path has only a weak link to your goal, so it does not compensate for the delivery capacity gap.
-
-In short, offshore trails because it activates a weaker delivery path, adds a coordination risk, and bypasses the model's strongest driver altogether.
-
-The evidence that would most improve confidence is real-world support for the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since it is the assumption most likely to change the outcome.
+The evidence that would most improve confidence is real-world support for the link from 'Local Senior Headcount Added' to 'Engineering Delivery Capacity' rather than the current model estimate, since it is the assumption most likely to change the outcome.
 ```
 Chips:
 - **Explore what would change this** — "Explore what would change the result." action_type=`what_would_flip`
@@ -149,15 +132,17 @@ Chips:
 ### `5_mutate`
 
 ```
-The model is unchanged so far. Tell me the specific factor, edge, option, or value to change, and I'll apply it directly.
+Updated Hiring and Staffing Spend from £0 to £0.5. This makes the last analysis stale. Re-run analysis to see how this affects the results.
+
+This change affects the model. The current analysis may not reflect it. Run the analysis to see updated results.
 ```
 Chips:
-- **Cancel — keep model unchanged** — "Cancel that change — keep the model as it is."
+- **Run analysis again** — "Run the analysis again." action_type=`run_analysis`
 
 ### `6_rerun_analysis`
 
 ```
-Hire Two Senior Engineers Locally currently leads by 58 percentage points, but treat this as provisional: the result is sensitive to Local Senior Hire.
+Hire Two Senior Engineers Locally currently leads by 57 percentage points, but treat this as provisional: the result is sensitive to Local Senior Headcount Added.
 ```
 Chips:
 - **Explain the result** — "Please explain the analysis result in plain language." action_type=`explain_results`
@@ -166,19 +151,19 @@ Chips:
 ### `7_explain_what_changed`
 
 ```
-Hire Two Senior Engineers Locally still leads. The size of its lead is essentially unchanged. If you want to test this further, ask what would change the result.
+Hire Two Senior Engineers Locally still leads. Its lead has widened by about 2 percentage points. The result is now moderately stable, where before it was sensitive to your assumptions. If you want to test this further, ask what would change the result.
 ```
 
 ### `8_reload`
 
 ```
-Hire Two Senior Engineers Locally leads, coming out ahead in 71% of simulations, 58 percentage points clear of the runner-up, Engage Offshore Partner, which leads in only 14% of simulations. The result carries moderate stability, meaning it holds under most plausible variations but is not immune to assumption changes.
+Hire Two Senior Engineers Locally comes out ahead in 73% of simulations, with Engage Offshore Partner as the runner-up at 16% — a margin of 58 percentage points. The result is moderately stable, meaning it holds under most plausible variations but is not immune to assumption changes.
 
-The three strongest drivers are Local Senior Hire, which has a very strong positive influence on Q3 Roadmap Delivery Capacity; Engineering Talent Market Tightness, which pulls in the opposite direction with a moderate negative influence; and Engineering Team Size, which adds a moderate positive influence.
+The three strongest drivers are Local Senior Headcount Added (very strong positive influence), Revenue Uplift from Tiered Pricing (moderate positive influence), and Local Engineering Talent Market Tightness (moderate negative influence).
 
-The most vulnerable assumptions in the model are the relationship between Local Senior Hire and Q3 Roadmap Delivery Capacity, the link from Q3 Roadmap Delivery Capacity to the goal itself, and the connection between Offshore Partnership and Coordination and Integration Overhead. If the first of those turns out to be weaker than assumed, the case for local hiring weakens with it.
+The most vulnerable assumptions in your model are the relationships from Local Senior Headcount Added to Engineering Delivery Capacity, and from Local Senior Headcount Added to Q3 Roadmap Commitment Confidence. If the two new hires take longer to reach full productivity than assumed — which a tight local talent market could worsen — the margin narrows. The relationship between Offshore Partner Engaged and Coordination and Integration Overhead is also flagged as a vulnerable assumption, meaning the offshore option carries more delivery risk than its headline probability suggests.
 
-The evidence that would most improve confidence is real-world validation of how quickly local senior hires actually lift delivery capacity, since that relationship is both the strongest driver and the most vulnerable assumption in the model.
+The evidence that would most improve confidence is real-world support for the link from 'Local Senior Headcount Added' to 'Engineering Delivery Capacity' rather than the current model estimate, since it is the assumption most likely to change the outcome.
 ```
 Chips:
 - **Explore what would change this** — "Explore what would change the result." action_type=`what_would_flip`

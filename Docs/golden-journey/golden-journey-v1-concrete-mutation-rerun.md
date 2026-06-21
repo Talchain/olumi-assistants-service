@@ -48,6 +48,22 @@ instruction: mutate → stale → rerun → fresh → win-probability shift → 
 
 **Component 4 (Typed action/mutation) is NOT a confirmed defect.** No fix lane is opened.
 
+## Promoted into Harness v1 step 5 (2026-06-21)
+
+The harness mutate step now sends the concrete `Set <captured factor> to 0.5`
+(was the vague "make X more important"). A follow-up **in-journey live baseline**
+(scenario `e231ad44-2252-4d76-9610-6020e9692b25`, deleted) confirmed it end-to-end:
+step `5_mutate` → `freshness=stale`, graph hash `eb628374…` → `cea64b54…`
+(**changed**), routed through **`handler_id=set_factor_value`, `exit_path=turn_executor`,
+llm_calls=0** — i.e. the **typed scalar value-edit handler**, not the old
+`edit_graph_generic` no-op. **A3/A4/A7 PASS; A1 PASS** (stale acknowledged). The
+"Mutate = V4-style path only" caveat is replaced by "typed scalar value-edit path
+only" (still NOT typed-ops / add_option apply).
+
+That same run also produced an **incidental A5 FAIL** on `3_explain_leader` (a thin
+84-char, ungrounded response) — LLM variance (the step was richly grounded on the
+prior run), recorded honestly but not a confirmed defect and not this lane.
+
 ## Lane discipline
 
 If future work re-confirms a mutation defect on a concrete, resolvable instruction,

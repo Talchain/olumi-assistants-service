@@ -7,7 +7,7 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 | signal | value |
 |---|---|
 | Mode | replay |
-| Findings: pass / inconclusive / fail | 34 / 1 / 0 |
+| Findings: pass / inconclusive / fail | 35 / 1 / 0 |
 | **Next component to fix** | **1. Context management** (via A2) |
 | Diagnostic-trace flag confirmed ON | yes |
 
@@ -16,7 +16,7 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 - **Mode:** replay
 - **Started at:** replay (deterministic fixture)
 - **Branch:** `claude/unruffled-brahmagupta-c387c7`
-- **Harness commit:** `ecbab45de4d596a4820808de87c6d7b5b4ed27f4`
+- **Harness commit:** `f247d2c34eb947a2a8d4b20741e34046f6defbeb`
 
 ## Core-component matrix
 
@@ -49,7 +49,7 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 | `2_run_analysis` | analysis | 200 | [PASS] pass | http=200 text_len=188 analysis_status=ready freshness=fresh hash_at_run=a1b2c3d4e5 current_hash=a1b2c3d4e5 chips=1 exit_path=chip_click trace=present timings={total:8200} plot={handler_total:7800,req:7600,status:computed} |
 | `3_explain_leader` | explain | 200 | [PASS] pass | http=200 text_len=279 analysis_status=ready freshness=fresh hash_at_run=a1b2c3d4e5 current_hash=a1b2c3d4e5 chips=1 exit_path=turn_executor trace=present timings={total:5400,routing:5100} |
 | `4_follow_up` | follow_up | 200 | [PASS] pass | http=200 text_len=228 analysis_status=ready freshness=fresh hash_at_run=a1b2c3d4e5 current_hash=a1b2c3d4e5 chips=0 exit_path=turn_executor trace=present timings={total:4900} |
-| `5_mutate` | mutate | 200 | [PASS] pass | http=200 text_len=134 chips=1 exit_path=edit_graph trace=present timings={total:6100} |
+| `5_mutate` | mutate | 200 | [PASS] pass | http=200 text_len=125 analysis_status=ready freshness=stale hash_at_run=a1b2c3d4e5 current_hash=b2c3d4e5f6 chips=1 exit_path=turn_executor trace=present timings={total:6100} |
 | `6_rerun_analysis` | rerun_analysis | 200 | [PASS] pass | http=200 text_len=182 analysis_status=ready freshness=fresh hash_at_run=b2c3d4e5f6 current_hash=b2c3d4e5f6 chips=0 exit_path=chip_click trace=present timings={total:8000} plot={handler_total:7700,status:computed} |
 | `7_explain_what_changed` | explain_changed | 200 | [PASS] pass | http=200 text_len=236 analysis_status=ready freshness=fresh hash_at_run=b2c3d4e5f6 current_hash=b2c3d4e5f6 chips=0 exit_path=turn_executor trace=present timings={total:5200} |
 | `8_reload` | reload | 200 | [PASS] pass | http=200 text_len=164 analysis_status=ready freshness=fresh hash_at_run=b2c3d4e5f6 current_hash=b2c3d4e5f6 chips=0 exit_path=turn_executor trace=present timings={total:5000} |
@@ -66,8 +66,8 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 
 | component | caveat | detail |
 |---|---|---|
-| 1. Context management | A2 asserted in-process only | AI-facing context completeness (A2) is proven by the committed in-process test, NOT on the live system — the ContextPack is never serialised on the wire. Priority follow-up (guardrail #2): a flag-gated debug context-summary surface so A2 becomes wire-observable in the live report. |
-| 4. Typed action/mutation | Mutate validates the V4-style path only | The mutate step drives `edit_graph_generic` (the proven deterministic path). This validates the CURRENT path only and is NOT typed-path coverage. Migrate the step to the typed mutation path (typed add_option / typed ops) when that path exists (guardrail #3). |
+| 1. Context management | A2 asserted in-process only | AI-facing context completeness (A2) is proven by the committed in-process test, NOT on the live system — the ContextPack is never serialised on the wire. It stays in-process / wire-inconclusive until the canonical-state M3 `_context_summary` debug surface lands (then A2 becomes wire-observable in the live report). |
+| 4. Typed action/mutation | Mutate covers the typed scalar value-edit path only | The mutate step drives a concrete scalar value-edit (`Set <captured factor> to 0.5`) — a REAL durable mutation that routes through the TYPED scalar handler (observed live: handler_id=`set_factor_value`, exit_path=`turn_executor`, llm_calls=0). This is genuine typed scalar-value coverage — NOT the old vague `edit_graph_generic` no-op, and NOT typed-ops / typed add_option apply coverage. Add a typed-ops / add_option journey when that path exists (guardrail #3). |
 
 ## assistant_text per step (redacted)
 
@@ -104,10 +104,10 @@ Engage an offshore partner sits at about 26%, the runner-up. It trails Hire two 
 ### `5_mutate`
 
 ```
-Updated the model — Budget now has a stronger influence on delivery speed. Re-run the analysis to see how this changes the comparison.
+Updated Budget from 0 to 0.5. This makes the last analysis stale. Re-run the analysis to see how this changes the comparison.
 ```
 Chips:
-- **Re-run analysis** — "Run analysis." action_type=`run_analysis`
+- **Run analysis again** — "Run analysis." action_type=`run_analysis`
 
 ### `6_rerun_analysis`
 

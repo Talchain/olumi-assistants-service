@@ -61,10 +61,14 @@ it, A6 auto-derives expectation from whether any turn actually returned a trace.
 ## What is NOT proven on the live wire
 
 - **A2** is asserted **in-process only** (`tests/unit/golden-journey-harness/context-completeness.test.ts`)
-  because the `ContextPack` is never serialised. The priority follow-up is a
-  flag-gated debug context-summary surface so A2 becomes wire-observable.
-- The **mutate** step drives `edit_graph_generic` (the proven path) — this is
-  **not** typed-path coverage; migrate to the typed mutation path when it exists.
+  because the `ContextPack` is never serialised. It stays wire-inconclusive until
+  the canonical-state **M3 `_context_summary`** debug surface lands.
+- The **mutate** step drives a concrete scalar value-edit (`Set <captured factor>
+  to 0.5`) — a real durable mutation that routes through the **typed scalar
+  handler** (observed live: `handler_id=set_factor_value`,
+  `exit_path=turn_executor`). This is **typed scalar value-edit** coverage,
+  **not** typed-ops / typed `add_option` apply coverage; add a typed-ops journey
+  when that path exists.
 
 ## Layout
 

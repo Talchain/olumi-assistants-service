@@ -7,7 +7,7 @@
     { "step": "2_run_analysis", "role": "analysis", "expect": "analysis_ready.status=ready with freshness + graph_hash trio; win-probabilities present", "components": ["canonical_state", "typed_action_mutation", "observability_recovery"], "invariants": ["A1", "A3", "A6"] },
     { "step": "3_explain_leader", "role": "explain", "expect": "grounded explanation naming the leading option + a probability; no denial of available analysis", "components": ["canonical_state", "science_grounded_coaching"], "invariants": ["A1", "A5"] },
     { "step": "4_follow_up", "role": "follow_up", "expect": "follow-up resolved using recent-turn context (runner-up comparison)", "components": ["context_management", "science_grounded_coaching"], "invariants": ["A1", "A2", "A5"] },
-    { "step": "5_mutate", "role": "mutate", "expect": "edit_graph_generic mutation acknowledged; no false success on a non-applied edit", "components": ["typed_action_mutation", "observability_recovery"], "invariants": ["A3", "A4", "A7"] },
+    { "step": "5_mutate", "role": "mutate", "expect": "concrete scalar value-edit (Set <factor> to 0.5) durably mutates: graph hash changes, freshness goes stale, rerun chip offered, staleness acknowledged (not presented as fresh), success claim is true", "components": ["canonical_state", "typed_action_mutation", "observability_recovery"], "invariants": ["A1", "A3", "A4", "A7"] },
     { "step": "6_rerun_analysis", "role": "rerun_analysis", "expect": "fresh analysis on the mutated graph; current_graph_hash differs from the step-2 baseline", "components": ["typed_action_mutation", "canonical_state"], "invariants": ["A3", "A7"] },
     { "step": "7_explain_what_changed", "role": "explain_changed", "expect": "references the edited factor + honestly describes whether the leader changed", "components": ["science_grounded_coaching", "canonical_state"], "invariants": ["A1", "A5", "A7"] },
     { "step": "8_reload", "role": "reload", "expect": "fresh read turn reloads canonical analysis; not contradicted by prose/chips", "components": ["canonical_state", "context_management"], "invariants": ["A1", "A2"] },
@@ -148,14 +148,27 @@
         "http_status": 200,
         "body": {
           "response_version": 2,
-          "assistant_text": "Updated the model — Budget now has a stronger influence on delivery speed. Re-run the analysis to see how this changes the comparison.",
+          "assistant_text": "Updated Budget from 0 to 0.5. This makes the last analysis stale. Re-run the analysis to see how this changes the comparison.",
           "suggested_actions": [
-            { "id": "chip_rerun", "label": "Re-run analysis", "message": "Run analysis.", "action_type": "run_analysis" }
+            { "id": "chip_rerun", "label": "Run analysis again", "message": "Run analysis.", "action_type": "run_analysis" }
           ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "stale",
+            "freshness_reason": "graph_hash_diverged",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "b2c3d4e5f6a1b2c3"
+          },
           "_diagnostic_trace": {
-            "exit_path": "edit_graph",
+            "exit_path": "turn_executor",
             "correlation_ids": { "request_id": "req-5", "scenario_id": "scn-1", "turn_id": "turn-5" },
-            "coaching_delivery": { "handler": "edit_graph", "composer": "edit_ack", "copy_source": "deterministic", "coaching_fields_used": [] }
+            "coaching_delivery": { "handler": "set_factor_value", "composer": "value_update_ack", "copy_source": "deterministic", "coaching_fields_used": [] }
           },
           "_timings": { "turn": { "total_ms": 6100 } }
         }

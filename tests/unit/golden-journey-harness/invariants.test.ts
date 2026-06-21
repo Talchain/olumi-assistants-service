@@ -19,6 +19,7 @@ import {
   a6DebugExplains,
   a7RecoveryVisible,
   evaluateJourney,
+  evaluateObservation,
   type ContextSnapshot,
 } from '../../../tools/golden-journey-harness/invariants.js';
 import type {
@@ -79,6 +80,32 @@ describe('A1 — analysis coherence (provisional)', () => {
     );
     expect(f[0]!.status).toBe('pass');
     expect(f[0]!.provisional).toBe(true);
+  });
+
+  it('is exercised on a concrete mutate turn: stale acknowledged → A1 pass via dispatch', () => {
+    const findings = evaluateObservation(
+      obs({
+        role: 'mutate',
+        body: {
+          analysis_ready: { status: 'ready', freshness: 'stale' },
+          assistant_text: 'Updated Budget from 0 to 0.5. This makes the last analysis stale. Re-run analysis.',
+          suggested_actions: [{ id: 'c', label: 'Run analysis again', message: 'Run analysis.', action_type: 'run_analysis' }],
+        },
+      }),
+    );
+    const a1 = findings.filter((f) => f.invariant_id === 'A1');
+    expect(a1).toHaveLength(1);
+    expect(a1[0]!.status).toBe('pass');
+  });
+
+  it('flags a mutate that goes stale but presents results as fresh', () => {
+    const f = a1AnalysisCoherence(
+      obs({
+        role: 'mutate',
+        body: { analysis_ready: { status: 'ready', freshness: 'stale' }, assistant_text: 'Budget is now 0.5. The leader still wins at 62%.' },
+      }),
+    );
+    expect(f[0]!.status).toBe('fail');
   });
 });
 
@@ -241,7 +268,7 @@ describe('evaluateJourney — aggregation + caveats', () => {
     const { findings, caveats } = evaluateJourney(observations, { diagnosticTraceExpected: true });
     expect(findings.some((f) => f.invariant_id === 'A2' && f.status === 'inconclusive')).toBe(true);
     expect(caveats.some((c) => c.title.includes('A2 asserted in-process only'))).toBe(true);
-    expect(caveats.some((c) => c.title.includes('V4-style path only'))).toBe(true);
+    expect(caveats.some((c) => c.title.includes('scalar value-edit path only'))).toBe(true);
   });
 
   it('adds a trace-flag caveat when the diagnostic flag is not confirmed', () => {

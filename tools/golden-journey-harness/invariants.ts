@@ -521,6 +521,11 @@ export function evaluateObservation(obs: TurnObservation): Finding[] {
     'rerun_analysis',
     'explain_changed',
     'reload',
+    // A concrete value-edit mutate carries analysis_ready with freshness='stale'
+    // ("…makes the last analysis stale, re-run…") — A1 checks that staleness is
+    // acknowledged (not presented as fresh). A vague no-op mutate carries no
+    // analysis_ready, so a1AnalysisCoherence returns [] for it.
+    'mutate',
   ];
   if (ANALYSIS_BEARING.includes(obs.role)) findings.push(...a1AnalysisCoherence(obs));
   if (obs.role === 'rerun_analysis') findings.push(...a3DurableStateChanged(obs));
@@ -569,26 +574,29 @@ export function evaluateJourney(
       title: 'A2 asserted in-process only',
       detail:
         'AI-facing context completeness (A2) is proven by the committed in-process test, NOT on the live ' +
-        'system — the ContextPack is never serialised on the wire. Priority follow-up (guardrail #2): a ' +
-        'flag-gated debug context-summary surface so A2 becomes wire-observable in the live report.',
+        'system — the ContextPack is never serialised on the wire. It stays in-process / wire-inconclusive ' +
+        'until the canonical-state M3 `_context_summary` debug surface lands (then A2 becomes wire-observable ' +
+        'in the live report).',
     },
     {
       component: 'typed_action_mutation',
-      title: 'Mutate validates the V4-style path only',
+      title: 'Mutate covers the typed scalar value-edit path only',
       detail:
-        'The mutate step drives `edit_graph_generic` (the proven deterministic path). This validates the ' +
-        'CURRENT path only and is NOT typed-path coverage. Migrate the step to the typed mutation path ' +
-        '(typed add_option / typed ops) when that path exists (guardrail #3).',
+        'The mutate step drives a concrete scalar value-edit (`Set <captured factor> to 0.5`) — a REAL ' +
+        'durable mutation that routes through the TYPED scalar handler (observed live: ' +
+        'handler_id=`set_factor_value`, exit_path=`turn_executor`, llm_calls=0). This is genuine typed ' +
+        'scalar-value coverage — NOT the old vague `edit_graph_generic` no-op, and NOT typed-ops / typed ' +
+        'add_option apply coverage. Add a typed-ops / add_option journey when that path exists (guardrail #3).',
     },
   ];
   if (opts.setFactorValueFragile) {
     caveats.push({
       component: 'typed_action_mutation',
-      title: 'set_factor_value too label-fragile for the harness',
+      title: 'Concrete scalar value-edit clarified instead of mutating',
       detail:
-        'The narrow `set_factor_value` mutation path returned a clarification (no mutation) for the drafted ' +
-        'factor label, so the harness fell back to `edit_graph_generic`. Record as a Component-4 finding ' +
-        '(guardrail #3): the typed/narrow value-edit path is not reliably drivable end-to-end.',
+        'The concrete `Set <factor> to 0.5` instruction returned a clarification / no-op rather than a ' +
+        'durable mutation on this run. Record as a Component-4 finding (guardrail #3): the scalar value-edit ' +
+        'path is not reliably drivable end-to-end for the drafted factor label.',
     });
   }
   if (!opts.diagnosticTraceExpected) {

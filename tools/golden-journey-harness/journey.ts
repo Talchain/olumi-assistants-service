@@ -141,15 +141,18 @@ export const GOLDEN_STEPS: readonly GoldenStep[] = [
   {
     name: '5_mutate',
     role: 'mutate',
-    description: 'Mutate the model via edit_graph_generic (proven path; not typed-path coverage).',
-    invariants: ['A3', 'A4', 'A7'],
+    description:
+      'Concrete scalar value-edit ("Set <captured factor> to 0.5") — a real durable mutation. ' +
+      "Drives the deterministic value-update gate so the back half of the journey is meaningful " +
+      '(replaces the old vague "make X more important", which correctly clarified-first and no-op\'d).',
+    invariants: ['A1', 'A3', 'A4', 'A7'],
     depends_on: '1_draft',
     buildPayload: (ctx) => ({
       kind: 'message',
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
       stage: 'frame',
-      message: `Edit the model: make ${requireFactorLabel(ctx)} more important.`,
+      message: `Set ${requireFactorLabel(ctx)} to 0.5`,
       turn_class: 'frame',
       source: 'composer',
     }),
