@@ -109,9 +109,12 @@ describe('chip floor — canonical convergence', () => {
       canonicalState,
     });
     expect(chips).toHaveLength(1);
-    expect(chips[0].id).toBe('chip_prompt_floor_post_analysis_explore');
-    // NOT a "run analysis" / "set values" chip — the analysis is usable.
-    expect(chips[0].action_type).toBeUndefined();
+    // The canonical `canExploreAnalysis` gate fired → Priority-3. On current
+    // staging that rung emits the deterministic EXECUTABLE what_would_flip
+    // chip (P0-B) when the analysis is usable + projection-buildable. NOT a
+    // "run analysis" / "set values" recovery chip — the analysis is usable.
+    expect(chips[0].id).toBe('chip_action_what_would_flip');
+    expect(chips[0].action_type).toBe('what_would_flip');
   });
 
   it('C2: stale analysis → rerun prompt, never the explore chip', () => {
@@ -167,8 +170,10 @@ describe('chip floor — canonical convergence', () => {
       turnOutcome: misleadingTurnOutcome,
       canonicalState,
     });
-    // Canonical 'fresh' wins → explore, not a "set values / run" recovery.
-    expect(chips[0].id).toBe('chip_prompt_floor_post_analysis_explore');
+    // Canonical 'fresh' wins → the floor offers exploration (the executable
+    // what_would_flip chip on current staging), not a "set values / run"
+    // recovery driven by the misleading turnOutcome.
+    expect(chips[0].id).toBe('chip_action_what_would_flip');
   });
 
   it('C4 equivalence: absent canonicalState (correct turnOutcome) === present canonicalState', () => {
