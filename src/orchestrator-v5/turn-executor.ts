@@ -212,7 +212,11 @@ import {
   buildAnalysisProjectionSummary,
   buildStructureProjectionSummary,
 } from './context/projection-summaries.js';
-import { containsMutationLanguage } from './routing/mutation-language.js';
+import {
+  containsMutationLanguage,
+  classifyStructuralClaim,
+  V5_STRUCTURAL_DECLINE_TEXT,
+} from './routing/mutation-language.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
@@ -5195,6 +5199,49 @@ export async function runTurnExecutor(
         handler_id: handlerIdForCommit,
         text_length: composedOk.assistant_text.length,
       });
+    }
+
+    // STEP 6.6 — structural-success-claim honesty gate (Brief 4, ENFORCING).
+    //
+    // Closes the E1 trust failure: an intent-miss / direct-answer turn whose
+    // free-form text claims a structural graph mutation ("I'll add the … option
+    // to your model now") while NO durable typed operation committed and NO
+    // graph changed. Unlike the STEP 6.5 monitor above, this gate:
+    //   (a) has NO handler_id filter — the captured failure committed with
+    //       handler_id === null, so a filter would miss exactly the bug; and
+    //   (b) SWAPS the text to an honest decline.
+    // The "no mutation occurred" predicate mirrors buildTurnOutcome's canonical
+    // graph_mutated (handlerEmittedMutatedGraph || isDraftOrEditGraph),
+    // evaluated by classifyStructuralClaim from the raw signals here — so it
+    // exempts every committed mutation: the D1 scalar handlers
+    // (handlerEmittedMutatedGraph) and draft/edit_graph
+    // (proposedHandlerIdForOutcome). It runs BEFORE proposal-capture and commit
+    // so the swapped text is the single source for every downstream surface
+    // (stored turn, blocks, pending actions, proposal capture). The broad
+    // containsMutationLanguage is used ONLY to surface candidate
+    // false-negatives ('monitor') — never to swap (it catches advisory copy).
+    {
+      const structuralVerdict = classifyStructuralClaim({
+        assistantText: composedOk.assistant_text,
+        handlerEmittedMutatedGraph,
+        proposedHandlerId: proposedHandlerIdForOutcome,
+      });
+      if (structuralVerdict === 'swap') {
+        emit(TelemetryEvents.V5StructuralSuccessClaimSwapped, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: handlerIdForCommit ?? null,
+          text_length: composedOk.assistant_text?.length ?? 0,
+        });
+        composedOk = { ...composedOk, assistant_text: V5_STRUCTURAL_DECLINE_TEXT };
+      } else if (structuralVerdict === 'monitor') {
+        emit(TelemetryEvents.V5StructuralSuccessClaimCandidateMiss, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: handlerIdForCommit ?? null,
+          text_length: composedOk.assistant_text?.length ?? 0,
+        });
+      }
     }
 
     // ==================================================================

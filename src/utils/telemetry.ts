@@ -950,6 +950,19 @@ export const TelemetryEvents = {
   // the final text is NOT mutated at this stage. Payload:
   // { handler_id, text_length }.
   V5MutationLanguageGuard: "v5.mutation_language_guard",
+  // V5StructuralSuccessClaimSwapped — Brief 4 STEP 6.6 ENFORCING gate.
+  // Emitted when a turn that committed NO durable mutation produced a
+  // first-person structural success claim and the gate replaced the text
+  // with the honest decline. Safe metadata only (no raw assistant text).
+  // Payload: { request_id, scenario_id, handler_id, text_length }.
+  V5StructuralSuccessClaimSwapped: "v5.structural_success_claim_swapped",
+  // V5StructuralSuccessClaimCandidateMiss — Brief 4 STEP 6.6 MONITOR.
+  // Non-blocking observability for possible false-negatives: no mutation
+  // committed, broad mutation language is present, but the narrow structural
+  // detector did NOT fire (so no swap). Used to surface novel phrasings the
+  // narrow detector should learn. Safe metadata only.
+  // Payload: { request_id, scenario_id, handler_id, text_length }.
+  V5StructuralSuccessClaimCandidateMiss: "v5.structural_success_claim_candidate_miss",
   // V5ResponseProseSanitised — STEP 6.4 defence-in-depth post-compose
   // prose sanitiser. Emitted when at least one rewrite/match occurred
   // on the final composed assistant_text — covers raw decimal
