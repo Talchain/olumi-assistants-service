@@ -110,7 +110,7 @@ export function containsStructuralSuccessClaim(text: string): boolean {
  * (idempotent under re-evaluation).
  */
 export const V5_STRUCTURAL_DECLINE_TEXT =
-  'I have not changed the model. I cannot make that kind of model-structure change through chat in this version.';
+  'I have not changed the model. I cannot make that kind of structural change to the model in this version.';
 
 /** Gate verdict for `classifyStructuralClaim`. */
 export type StructuralClaimVerdict = 'swap' | 'monitor' | 'pass';
