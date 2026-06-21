@@ -7,8 +7,9 @@ import { describe, expect, it } from 'vitest';
 import {
   containsMutationLanguage,
   containsStructuralSuccessClaim,
+  containsBroadStructuralClaimLanguage,
+  mentionsStructuralEditRequest,
   classifyStructuralClaim,
-  looksLikeStructuralClaimCandidate,
   V5_STRUCTURAL_DECLINE_TEXT,
 } from '../mutation-language.js';
 
@@ -92,7 +93,6 @@ describe('containsStructuralSuccessClaim — MUST MATCH (first-person mutation v
       'I\'ll add the "Coach Internal Developer into Tech Lead Role" option to your model now, connecting it to the relevant factors as discussed.',
     ],
     ['present-perfect completion', "I've added the Coach option."],
-    ['"I have added it to the model"', 'I have added it to the model.'],
     // Edge / relationship claims carrying a structural noun (link/connection/
     // relationship/dependency) — these swap; noun-less entity-pair claims do NOT
     // (see the monitor tests below).
@@ -173,102 +173,111 @@ describe('V5_STRUCTURAL_DECLINE_TEXT — approved copy oracle (Brief 4 req #6)',
   });
 });
 
-describe('classifyStructuralClaim — canonical mutation predicate (mirrors handlerEmittedMutatedGraph || isDraftOrEditGraph)', () => {
-  const CLAIM = 'I have added the Coach option to the model.';
-  const ADVISORY = "I'd suggest adding a competitive risk factor."; // broad-only
+describe('classifyStructuralClaim — intent-gated honesty decision', () => {
+  const NARROW = 'I have added the Coach option.'; // first-person + structural noun
+  const NOUNLESS_EDGE = 'I connected Marketing to Revenue.'; // broad, noun-less
+  const ACTORLESS_STATE = 'Your model now includes the Coach option.'; // broad, actorless
+  const ADVISORY = "I'd suggest adding a competitive risk factor."; // mutation-language only
   const BENIGN = 'Here are the trade-offs.';
+  const base = { handlerEmittedMutatedGraph: false, proposedHandlerId: null as string | null };
 
-  it('no mutation + structural claim → swap', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: CLAIM, handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
-    ).toBe('swap');
+  it('narrow first-person + structural-noun claim → swap (high_confidence), intent irrelevant', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: NARROW })).toEqual({ verdict: 'swap', kind: 'high_confidence' });
+    expect(classifyStructuralClaim({ ...base, assistantText: NARROW, structuralEditIntent: true })).toEqual({ verdict: 'swap', kind: 'high_confidence' });
   });
 
-  it('no mutation + broad-only language (advisory) → monitor (never swap)', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: ADVISORY, handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
-    ).toBe('monitor');
+  // Blocking #1/#3 — noun-less edges + verb synonyms now SWAP when the user
+  // asked for a structural edit (intent), instead of merely being logged.
+  it('broad noun-less edge claim + structural-edit intent → swap (intent_gated)', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: NOUNLESS_EDGE, structuralEditIntent: true }))
+      .toEqual({ verdict: 'swap', kind: 'intent_gated' });
+    expect(classifyStructuralClaim({ ...base, assistantText: 'I connected marketing to revenue.', structuralEditIntent: true }).verdict).toBe('swap');
+  });
+  it('verb-synonym claims (introduced/incorporated/made/included) + intent → swap', () => {
+    for (const t of [
+      'I introduced a new option to the model.',
+      'I incorporated a risk factor into the model.',
+      'I have made a connection between cost and growth.',
+      'I included a new dependency in the graph.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('swap');
+    }
+  });
+  // Blocking #2 — actorless state-success is caught under intent, surfaced (not
+  // silent) without intent.
+  it('actorless "model now includes X" → swap under intent, monitor without', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: ACTORLESS_STATE, structuralEditIntent: true }).verdict).toBe('swap');
+    expect(classifyStructuralClaim({ ...base, assistantText: ACTORLESS_STATE }).verdict).toBe('monitor');
   });
 
-  it('no mutation + benign → pass', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: BENIGN, handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
-    ).toBe('pass');
+  it('broad claim WITHOUT intent → monitor (broad_no_intent), never swap', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: NOUNLESS_EDGE }))
+      .toEqual({ verdict: 'monitor', kind: 'broad_no_intent' });
   });
 
-  // Reverse-trust: a REAL mutation must never be swapped, even with a claim.
-  it('scalar mutation (handlerEmittedMutatedGraph=true) + claim → pass [handler-agnostic: covers set_factor_value, add_constraint, adjust_edge_strength]', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: CLAIM, handlerEmittedMutatedGraph: true, proposedHandlerId: 'set_factor_value' }),
-    ).toBe('pass');
+  // No false declines: idioms / people / read-outs WITHOUT structural-edit
+  // intent are never swapped (monitored at most).
+  it('idioms / people / read-outs without intent are NOT swapped', () => {
+    for (const t of [
+      'I drew a distinction between Cost and Revenue.',
+      'I connected the dots between cost and growth.',
+      'I connected Alice with Bob.',
+      'The model now contains three factors and two options.',
+      'Your model now has four options.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
+    }
+  });
+  // Advisory ("I'd suggest adding") is never swapped — even under intent — because
+  // the broad detector requires the verb to follow the first-person pronoun.
+  it('advisory "I\'d suggest adding" → monitor even under intent (never swap)', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: ADVISORY, structuralEditIntent: true }).verdict).toBe('monitor');
+  });
+  it('benign prose → pass', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: BENIGN }).verdict).toBe('pass');
   });
 
-  it('draft_graph (isDraftOrEditGraph) + claim → pass', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: CLAIM, handlerEmittedMutatedGraph: false, proposedHandlerId: 'draft_graph' }),
-    ).toBe('pass');
+  // Reverse-trust: a REAL mutation is never swapped, even with a claim + intent.
+  it('scalar mutation (handlerEmittedMutatedGraph=true) → pass [covers all D1 handlers]', () => {
+    expect(classifyStructuralClaim({ assistantText: NARROW, handlerEmittedMutatedGraph: true, proposedHandlerId: 'set_factor_value', structuralEditIntent: true }).verdict).toBe('pass');
   });
-
-  it('edit_graph (isDraftOrEditGraph) + claim → pass', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: CLAIM, handlerEmittedMutatedGraph: false, proposedHandlerId: 'edit_graph' }),
-    ).toBe('pass');
+  it('draft_graph / edit_graph (isDraftOrEditGraph) → pass', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: NARROW, proposedHandlerId: 'draft_graph' }).verdict).toBe('pass');
+    expect(classifyStructuralClaim({ ...base, assistantText: NARROW, proposedHandlerId: 'edit_graph' }).verdict).toBe('pass');
   });
-
-  it('there is NO handler_id skip: a non-mutating handler_id with a claim still swaps', () => {
-    // The deployed STEP 6.5 guard skipped when handler_id was null/edit; this
-    // gate must NOT — the canonical failure had handler_id === null, and a
-    // non-mutating registered handler (e.g. explain_results) that somehow
-    // emitted a structural claim with no mutation must also swap.
-    expect(
-      classifyStructuralClaim({ assistantText: CLAIM, handlerEmittedMutatedGraph: false, proposedHandlerId: 'explain_results' }),
-    ).toBe('swap');
+  it('NO handler_id skip: non-mutating handler_id + narrow claim still swaps', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: NARROW, proposedHandlerId: 'explain_results' }).verdict).toBe('swap');
   });
-
   it('empty / nullish text → pass', () => {
-    expect(classifyStructuralClaim({ assistantText: '', handlerEmittedMutatedGraph: false, proposedHandlerId: null })).toBe('pass');
-    expect(classifyStructuralClaim({ assistantText: undefined, handlerEmittedMutatedGraph: false, proposedHandlerId: null })).toBe('pass');
-  });
-
-  // Review round 3 — noun-less edge claims the SWAP detector cannot safely
-  // confirm are surfaced as candidate-misses (monitor), NEVER swapped, so we
-  // avoid false-declining idioms / people / conversational phrasing.
-  it('no mutation + noun-less edge claim ("connected X to Y") → monitor, not swap', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: 'I connected Marketing to Revenue.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
-    ).toBe('monitor');
-  });
-  it('no mutation + lower-case edge claim → monitor (residual FN surfaced, not lost)', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: 'I connected marketing to revenue.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
-    ).toBe('monitor');
-  });
-  it('grounded read-out ("the model now contains three factors") → pass (no swap)', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: 'The model now contains three factors and two options.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
-    ).toBe('pass');
-  });
-  it('idiom with an edge verb ("drew a distinction") → not swapped', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: 'I drew a distinction between Cost and Revenue.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
-    ).not.toBe('swap');
-  });
-  it('people claim with an edge verb ("connected Alice with Bob") → not swapped', () => {
-    expect(
-      classifyStructuralClaim({ assistantText: 'I connected Alice with Bob.', handlerEmittedMutatedGraph: false, proposedHandlerId: null }),
-    ).not.toBe('swap');
+    expect(classifyStructuralClaim({ ...base, assistantText: '' }).verdict).toBe('pass');
+    expect(classifyStructuralClaim({ ...base, assistantText: undefined }).verdict).toBe('pass');
   });
 });
 
-describe('looksLikeStructuralClaimCandidate — monitor-only broad edge detector', () => {
-  it('flags first-person connection/edge verbs (residual FNs)', () => {
-    expect(looksLikeStructuralClaimCandidate('I connected Marketing to Revenue.')).toBe(true);
-    expect(looksLikeStructuralClaimCandidate('I linked churn with retention.')).toBe(true);
-    expect(looksLikeStructuralClaimCandidate("I'll wire capacity to throughput.")).toBe(true);
+describe('containsBroadStructuralClaimLanguage — broad (intent-gated) detector', () => {
+  it('flags edit verbs, synonyms, actorless state-now, and between/and edges', () => {
+    expect(containsBroadStructuralClaimLanguage('I connected Marketing to Revenue.')).toBe(true);
+    expect(containsBroadStructuralClaimLanguage('I introduced a new option.')).toBe(true);
+    expect(containsBroadStructuralClaimLanguage('I have made a connection between cost and growth.')).toBe(true);
+    expect(containsBroadStructuralClaimLanguage('Your model now includes the Coach option.')).toBe(true);
   });
-  it('does not flag grounded read-outs or plain prose', () => {
-    expect(looksLikeStructuralClaimCandidate('Here are the trade-offs.')).toBe(false);
-    expect(looksLikeStructuralClaimCandidate('Your model now has four options.')).toBe(false);
-    expect(looksLikeStructuralClaimCandidate('')).toBe(false);
+  it('does not flag plain prose', () => {
+    expect(containsBroadStructuralClaimLanguage('Here are the trade-offs.')).toBe(false);
+    expect(containsBroadStructuralClaimLanguage('')).toBe(false);
+  });
+});
+
+describe('mentionsStructuralEditRequest — user structural-edit intent', () => {
+  it('detects add / connect / remove of a graph element', () => {
+    expect(mentionsStructuralEditRequest('Add an option called Coach.')).toBe(true);
+    expect(mentionsStructuralEditRequest('1. A new option, "Coach Internal Developer into Tech Lead Role"')).toBe(true);
+    expect(mentionsStructuralEditRequest('connect Marketing to Revenue')).toBe(true);
+    expect(mentionsStructuralEditRequest('remove the churn factor')).toBe(true);
+  });
+  it('does NOT fire on read-only questions or scalar edits', () => {
+    expect(mentionsStructuralEditRequest('what do I have so far?')).toBe(false);
+    expect(mentionsStructuralEditRequest('summarise the model')).toBe(false);
+    expect(mentionsStructuralEditRequest('set the budget to 5')).toBe(false);
+    expect(mentionsStructuralEditRequest('')).toBe(false);
   });
 });

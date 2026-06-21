@@ -215,6 +215,7 @@ import {
 import {
   containsMutationLanguage,
   classifyStructuralClaim,
+  mentionsStructuralEditRequest,
   V5_STRUCTURAL_DECLINE_TEXT,
 } from './routing/mutation-language.js';
 import {
@@ -5203,43 +5204,48 @@ export async function runTurnExecutor(
 
     // STEP 6.6 — structural-success-claim honesty gate (Brief 4, ENFORCING).
     //
-    // Closes the E1 trust failure: an intent-miss / direct-answer turn whose
-    // free-form text claims a structural graph mutation ("I'll add the … option
-    // to your model now") while NO durable typed operation committed and NO
-    // graph changed. Unlike the STEP 6.5 monitor above, this gate:
-    //   (a) has NO handler_id filter — the captured failure committed with
-    //       handler_id === null, so a filter would miss exactly the bug; and
-    //   (b) SWAPS the text to an honest decline.
-    // The "no mutation occurred" predicate mirrors buildTurnOutcome's canonical
-    // graph_mutated (handlerEmittedMutatedGraph || isDraftOrEditGraph),
-    // evaluated by classifyStructuralClaim from the raw signals here — so it
-    // exempts every committed mutation: the D1 scalar handlers
-    // (handlerEmittedMutatedGraph) and draft/edit_graph
-    // (proposedHandlerIdForOutcome). It runs BEFORE proposal-capture and commit
-    // so the swapped text is the single source for every downstream surface
-    // (stored turn, blocks, pending actions, proposal capture). The broad
-    // containsMutationLanguage is used ONLY to surface candidate
-    // false-negatives ('monitor') — never to swap (it catches advisory copy).
+    // Closes the E1 trust failure: a turn whose free-form text claims a
+    // structural graph mutation ("I'll add the … option to your model now")
+    // while NO durable typed operation committed and NO graph changed. Unlike
+    // the STEP 6.5 monitor above, this gate has NO handler_id filter (the
+    // captured failure committed with handler_id === null) and SWAPS the text
+    // to an honest decline. The "no mutation" predicate mirrors buildTurnOutcome
+    // (handlerEmittedMutatedGraph || isDraftOrEditGraph), exempting every
+    // committed mutation. It runs BEFORE proposal-capture/commit so the swapped
+    // text is the single source for every downstream surface.
+    //
+    // Two-layer decision (classifyStructuralClaim):
+    //   • high-confidence first-person + structural-noun claim → swap always;
+    //   • broad structural-success language (noun-less edges / verb synonyms /
+    //     actorless "model now includes…") → swap ONLY when the USER's turn
+    //     requested a structural edit (mentionsStructuralEditRequest); otherwise
+    //     monitored, never swapped — so idioms/people/read-outs/non-graph prose
+    //     ("connected the dots", "Alice with Bob", "model now has four options",
+    //     "add a note to the model documentation") are NOT false-declined.
     {
-      const structuralVerdict = classifyStructuralClaim({
+      const structuralEditIntent = mentionsStructuralEditRequest(payload.message);
+      const decision = classifyStructuralClaim({
         assistantText: composedOk.assistant_text,
         handlerEmittedMutatedGraph,
         proposedHandlerId: proposedHandlerIdForOutcome,
+        structuralEditIntent,
       });
-      if (structuralVerdict === 'swap') {
+      if (decision.verdict === 'swap') {
         emit(TelemetryEvents.V5StructuralSuccessClaimSwapped, {
           request_id: requestId,
           scenario_id: context.session_id,
           handler_id: handlerIdForCommit ?? null,
           text_length: composedOk.assistant_text?.length ?? 0,
+          match_kind: decision.kind,
         });
         composedOk = { ...composedOk, assistant_text: V5_STRUCTURAL_DECLINE_TEXT };
-      } else if (structuralVerdict === 'monitor') {
+      } else if (decision.verdict === 'monitor') {
         emit(TelemetryEvents.V5StructuralSuccessClaimCandidateMiss, {
           request_id: requestId,
           scenario_id: context.session_id,
           handler_id: handlerIdForCommit ?? null,
           text_length: composedOk.assistant_text?.length ?? 0,
+          candidate_kind: decision.kind,
         });
       }
     }

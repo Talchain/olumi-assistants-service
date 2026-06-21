@@ -340,7 +340,7 @@ describe('conservative — advisory and benign phrasing is preserved', () => {
     expect(swapEvents()).toHaveLength(0);
   });
 
-  it('noun-less edge claim ("I connected X to Y") is NOT swapped but IS monitored', async () => {
+  it('noun-less edge claim ("I connected X to Y") with NO edit intent is NOT swapped but IS monitored', async () => {
     const text = 'I connected Marketing to Revenue.';
     const { response } = await runTurnExecutor(
       payload('hook them up', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa13'),
@@ -349,7 +349,34 @@ describe('conservative — advisory and benign phrasing is preserved', () => {
     );
     expect(response.assistant_text).not.toBe(EXPECTED_DECLINE); // not false-declined
     expect(swapEvents()).toHaveLength(0);
-    expect(monitorEvents()).toHaveLength(1); // residual FN surfaced, not lost
+    expect(monitorEvents()).toHaveLength(1); // surfaced, not lost
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Intent-gated rail — noun-less / actorless claims SWAP when the USER requested
+// a structural edit this turn (the round-4 fix).
+// ---------------------------------------------------------------------------
+
+describe('intent-gated — structural-edit request + broad claim → declines', () => {
+  it('user asks to connect + noun-less edge claim → swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Please connect Marketing to Revenue', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14'),
+      'req-intent-edge',
+      { routingAdapter: mockRoutingAdapter('Done, I connected Marketing to Revenue.') },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
+
+  it('user asks to add an option + actorless "model now includes" claim → swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Add a new option called Coach', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa15'),
+      'req-intent-state',
+      { routingAdapter: mockRoutingAdapter('Your model now includes the Coach option.') },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
   });
 });
 
