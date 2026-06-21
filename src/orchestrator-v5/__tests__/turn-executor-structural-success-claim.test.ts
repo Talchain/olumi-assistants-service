@@ -258,6 +258,16 @@ describe('E1 — structural success claim is swapped to an honest decline (no co
     expect(response.assistant_text).toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(1);
   });
+
+  it('first-person edge claim ("I connected X to Y") with no commit → declines', async () => {
+    const { response } = await runTurnExecutor(
+      payload('link those two', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa09'),
+      'req-e1-edge',
+      { routingAdapter: mockRoutingAdapter('I connected Marketing to Revenue for you.') },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -304,6 +314,18 @@ describe('conservative — advisory and benign phrasing is preserved', () => {
     expect((response.assistant_text ?? '').toLowerCase()).toContain('to my notes');
     expect(swapEvents()).toHaveLength(0);
   });
+
+  it('legitimate read-out ("your model now has four options") is NOT swapped', async () => {
+    const text = 'Your model now has four options ready to compare.';
+    const { response } = await runTurnExecutor(
+      payload('what do I have so far?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa10'),
+      'req-readout',
+      { routingAdapter: mockRoutingAdapter(text) },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect((response.assistant_text ?? '').toLowerCase()).toContain('four options');
+    expect(swapEvents()).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -326,5 +348,10 @@ describe('reverse-trust — committed scalar mutation is never swapped', () => {
     // The mutation really committed (handler fact / set_factor_value handler_id).
     const mutationWrite = appendCalls.at(-1)!;
     expect(mutationWrite.handler_id).toBe('set_factor_value');
+    // Durable persistence (Brief 4 review): the COMMITTED graph reflects the
+    // change, not just the derived metadata flag — the factor value moved to 1.
+    const committed = mutationWrite.graph as { nodes?: Array<{ id: string; observed_state?: { value?: number } }> };
+    const mutatedNode = (committed.nodes ?? []).find((n) => n.id === 'fac_local_hire');
+    expect(mutatedNode?.observed_state?.value).toBe(1);
   });
 });

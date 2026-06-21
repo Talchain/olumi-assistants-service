@@ -47,16 +47,20 @@ export function containsMutationLanguage(text: string): boolean {
 // SEPARATE from MUTATION_PATTERNS / containsMutationLanguage above (which feed
 // validateExplanationAnswer and the broad STEP 6.5 monitor — left UNCHANGED).
 // This detector is conservative by design: it fires only on FIRST-PERSON
-// success / commitment / completion claims anchored to a graph object, plus
-// "model now …" state assertions. Advisory ("you could add…", "I'd suggest
-// adding…"), offers ("would you like me to add…") and benign pronoun phrasing
-// ("I'll add that to my notes", "I'll update you on the results") are
-// deliberately NOT matched — they are not claims that a mutation happened.
+// success / commitment / completion claims anchored to a graph object
+// (incl. edge nouns link/connection/relationship/dependency), first-person
+// edge claims that name two entities ("I connected Marketing to Revenue"),
+// and the narrow "model now includes/contains <graph object>" change
+// assertion. Advisory ("you could add…", "I'd suggest adding…"), offers
+// ("would you like me to add…"), benign pronoun phrasing ("I'll add that to
+// my notes", "I'll update you on the results") and legitimate current-state
+// read-outs ("your model now has four options") are deliberately NOT matched
+// — they are not claims that THIS turn changed the model.
 // ---------------------------------------------------------------------------
 
 /** Graph-object nouns that anchor a first-person mutation verb to a STRUCTURAL claim. */
 const GRAPH_OBJECT =
-  '(?:option|options|factor|factors|node|nodes|edge|edges|driver|drivers|constraint|constraints|model|graph|diagram|decision)';
+  '(?:option|options|factor|factors|node|nodes|edge|edges|link|links|connection|connections|relationship|relationships|dependency|dependencies|driver|drivers|constraint|constraints|model|graph|diagram|decision)';
 /** Apostrophe class: straight + typographic (Sonnet emits either). */
 const APOS = "['’]";
 
@@ -86,9 +90,29 @@ const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
     `\\bI\\s+(?:added|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited)\\b[^.?!]*\\b${GRAPH_OBJECT}\\b`,
     'i',
   ),
-  // State-now assertions: "your model now …", "the model now includes/has …".
-  /\byour model now\b/i,
-  /\b(?:the\s+)?(?:model|graph|decision)\s+now\s+(?:includes|has|contains|reflects|shows|features)\b/i,
+  // Edge / relationship claims that name two ENTITIES rather than a graph-object
+  // noun ("I connected Marketing to Revenue", "I linked X to the goal"). The
+  // "between … and …" form is case-insensitive; the bare "X to/with/and Y" form
+  // requires Capitalised entities so conversational "I'll connect you with the
+  // team" (lowercase object) is NOT matched. First-person anchored throughout.
+  new RegExp(
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+)?(?:connected|connecting|linked|linking|wired|wiring|joined|joining|drew|drawing)\\b[^.!?]*\\bbetween\\b[^.!?]*\\band\\b`,
+    'i',
+  ),
+  new RegExp(
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+)?(?:connect|connected|connecting|link|linked|linking|wire|wired|wiring|join|joined|joining)\\s+[A-Z]\\w*(?:\\s+[A-Z]\\w*)*\\s+(?:to|with|and)\\s+(?:the\\s+)?[A-Z]\\w*`,
+    // NB: no 'i' flag — entity tokens must be Capitalised to avoid matching
+    // conversational "connect you with the team".
+  ),
+  // State-now CHANGE assertion — narrowed (Brief 4 review). Only "model now
+  // includes/contains <graph object>" reads as a structural-change claim.
+  // Plain current-state read-outs ("your model now has four options", "your
+  // model now supports a comparison") use other verbs and are deliberately NOT
+  // matched, so legitimate state descriptions are preserved.
+  new RegExp(
+    `\\b(?:your\\s+|the\\s+)?(?:model|graph|decision)\\s+now\\s+(?:includes|contains)\\b[^.!?]*\\b${GRAPH_OBJECT}\\b`,
+    'i',
+  ),
 ];
 
 /**

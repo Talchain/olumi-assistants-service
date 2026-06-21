@@ -93,7 +93,11 @@ describe('containsStructuralSuccessClaim — MUST MATCH (first-person / completi
     ['present-perfect completion', "I've added the Coach option."],
     ['"I have added it to the model"', 'I have added it to the model.'],
     ['state-now includes', 'Your model now includes the Coach option.'],
-    ['state-now has', 'The model now has three options.'],
+    ['edge noun — created a link', 'I created a link between Marketing and Revenue.'],
+    ['edge relation — connected X to Y', 'I connected Marketing to Revenue.'],
+    ['edge noun — wired a dependency', 'I wired a dependency from the budget factor.'],
+    ['edge noun — added a connection', 'I added a connection from Marketing to Revenue.'],
+    ["future edge — I'll connect X to Y", "I'll connect Marketing to Revenue."],
     ['past-tense graph edit', 'I updated the graph.'],
     ['past-tense model edit', 'I changed the model.'],
     ['future commitment + factor', "I'll add a factor for that."],
@@ -119,6 +123,12 @@ describe('containsStructuralSuccessClaim — MUST NOT MATCH (advisory / offer / 
     ['conditional pronoun, no graph ref', "I'll add it once you confirm."],
     ['greeting', 'Hello, how can I help?'],
     ['plain prose', 'Here are the trade-offs between the options.'],
+    // Read-only current-state descriptions (Brief 4 review / Gemini HIGH) —
+    // narrowed state-now must preserve these on no-mutation turns.
+    ['read-out — model now has count', 'Your model now has four options.'],
+    ['read-out — model now supports', 'Your model now supports a comparison of the options.'],
+    ['read-out — model now shows', 'Your model now shows three factors and one goal.'],
+    ['conversational connect with people', "I'll connect you with the team later."],
     ['empty', ''],
   ];
   for (const [name, text] of mustNotMatch) {
