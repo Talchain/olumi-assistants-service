@@ -61,15 +61,14 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type {
-  AnalysisBlockerT,
   AnalysisFreshnessT,
   AnalysisReadyStatusT,
-  ModelAdjustmentT,
 } from '../../schemas/analysis-ready.js';
 import {
   deriveAnalysisFreshness,
   selectDegradedRunAnalysisFact,
   selectRunAnalysisFact,
+  type FreshnessDerivation,
   type FreshnessReason,
 } from './freshness.js';
 
@@ -125,6 +124,29 @@ const ACTIONABLE_BLOCKER_TYPES: ReadonlySet<string> = new Set([
   'missing_connection',
 ]);
 
+/** The canonical analysis-ready status values (mirrors AnalysisReadyStatus). */
+const ANALYSIS_READY_STATUSES: ReadonlySet<string> = new Set([
+  'ready',
+  'needs_user_mapping',
+  'needs_encoding',
+  'needs_user_input',
+  'blocked',
+]);
+
+/**
+ * Coerce a producer-supplied readiness status string to a known
+ * AnalysisReadyStatus, or null for absent / unrecognised values. Different
+ * producers type `status` differently (the structural readiness helper uses
+ * the enum; the egress-emit payload widens it to `string`), so we validate
+ * here rather than trusting the inbound type.
+ */
+function coerceReadyStatus(raw: string | null | undefined): AnalysisReadyStatusT | null {
+  if (raw != null && ANALYSIS_READY_STATUSES.has(raw)) {
+    return raw as AnalysisReadyStatusT;
+  }
+  return null;
+}
+
 /**
  * Minimal structural view of the readiness payload the selector reads.
  * Both `computeStructuralReadiness` output and the full
@@ -132,10 +154,31 @@ const ACTIONABLE_BLOCKER_TYPES: ReadonlySet<string> = new Set([
  * blockers, model adjustments and the goal node id. Kept structural so
  * the selector does not couple to any one producer's concrete type.
  */
+/**
+ * Read a blocker's `blocker_type` defensively. Blockers arrive either as
+ * schema-typed `AnalysisBlocker[]` (from computeStructuralReadiness) or as
+ * `unknown[]` (the egress-emit payload types them that way). This is the
+ * single place that normalises both — returns null for any shape that does
+ * not carry a string `blocker_type`.
+ */
+function readBlockerType(blocker: unknown): string | null {
+  if (blocker !== null && typeof blocker === 'object' && 'blocker_type' in blocker) {
+    const raw = (blocker as { blocker_type?: unknown }).blocker_type;
+    return typeof raw === 'string' ? raw : null;
+  }
+  return null;
+}
+
 export interface ReadinessLike {
-  readonly status?: AnalysisReadyStatusT | null;
-  readonly blockers?: readonly AnalysisBlockerT[];
-  readonly model_adjustments?: readonly ModelAdjustmentT[];
+  /** Producer-supplied status; coerced to a known AnalysisReadyStatus (or
+   *  null) internally, so a wider `string` from the egress payload is fine. */
+  readonly status?: string | null;
+  /** Blockers pass through verbatim; the selector only reads `blocker_type`
+   *  (via readBlockerType), so any producer shape — schema `AnalysisBlocker`
+   *  or the egress payload's `unknown[]` — is accepted without a cast. */
+  readonly blockers?: readonly unknown[];
+  /** Carried through verbatim; the selector never introspects adjustments. */
+  readonly model_adjustments?: readonly unknown[];
   readonly goal_node_id?: string | null;
 }
 
@@ -163,8 +206,8 @@ export interface CanonicalAnalysisState {
   readonly current_graph_hash: string | null;
 
   // ── Readiness detail where available ──
-  readonly blockers: readonly AnalysisBlockerT[];
-  readonly model_adjustments: readonly ModelAdjustmentT[];
+  readonly blockers: readonly unknown[];
+  readonly model_adjustments: readonly unknown[];
   readonly goal_node_id: string | null;
 
   // ── Degraded/failed observability ──
@@ -236,18 +279,79 @@ export function selectCanonicalAnalysisState(
   const selected = selectRunAnalysisFact(unifiedFacts);
   const degraded = selectDegradedRunAnalysisFact(unifiedFacts);
 
-  const status: AnalysisReadyStatusT | null = input.readiness?.status ?? null;
-  const blockers: readonly AnalysisBlockerT[] = input.readiness?.blockers ?? [];
-  const modelAdjustments: readonly ModelAdjustmentT[] =
-    input.readiness?.model_adjustments ?? [];
-  const goalNodeId: string | null = input.readiness?.goal_node_id ?? null;
+  // A newer run failed/partial while an older success would be presented
+  // as current. Only provable when both timestamps are present. (Needs the
+  // raw facts, so it is computed here, not in the shared assembler.)
+  const degradedComputedAt = degraded ? readComputedAt(degraded.fact) : null;
+  const degradedNewerThanSelectedSuccess =
+    degraded !== null &&
+    selected !== null &&
+    degradedComputedAt !== null &&
+    selected.computed_at !== null &&
+    degradedComputedAt > selected.computed_at;
+
+  return assembleCanonicalState({
+    derivation,
+    readiness: input.readiness,
+    degradedStatus: degraded?.status ?? null,
+    degradedNewerThanSelectedSuccess,
+    scenarioClaimsAnalysis: input.scenarioClaimsAnalysis === true,
+  });
+}
+
+/**
+ * Build a canonical analysis state from an already-computed freshness
+ * derivation + readiness, WITHOUT the raw fact chain. Used at the route
+ * seam (`sendFinalised200`) where the turn's `FreshnessDerivation` and
+ * readiness payload are available but the handler-fact array is not.
+ *
+ * Limitation vs `selectCanonicalAnalysisState`: degraded-fact detection
+ * (`degraded_fact_status` + the `fact_status_success_but_degraded_newer`
+ * contradiction) needs the fact chain, so this path reports
+ * `degraded_fact_status = null` and never raises that contradiction. Every
+ * freshness / readiness / predicate field is identical to the fact-based
+ * selector. The full canonical state (with degraded detection) is threaded
+ * from turn-executor in M5.
+ */
+export function canonicalStateFromFreshness(
+  derivation: FreshnessDerivation,
+  opts: { readonly readiness?: ReadinessLike; readonly scenarioClaimsAnalysis?: boolean } = {},
+): CanonicalAnalysisState {
+  return assembleCanonicalState({
+    derivation,
+    readiness: opts.readiness,
+    degradedStatus: null,
+    degradedNewerThanSelectedSuccess: false,
+    scenarioClaimsAnalysis: opts.scenarioClaimsAnalysis === true,
+  });
+}
+
+interface AssembleCanonicalStateParams {
+  readonly derivation: FreshnessDerivation;
+  readonly readiness?: ReadinessLike;
+  readonly degradedStatus: string | null;
+  readonly degradedNewerThanSelectedSuccess: boolean;
+  readonly scenarioClaimsAnalysis: boolean;
+}
+
+/**
+ * Shared predicate + contradiction core. Both `selectCanonicalAnalysisState`
+ * (fact-based) and `canonicalStateFromFreshness` (derivation-based) funnel
+ * through here so the usability rules have exactly ONE implementation.
+ */
+function assembleCanonicalState(params: AssembleCanonicalStateParams): CanonicalAnalysisState {
+  const { derivation } = params;
+  const status: AnalysisReadyStatusT | null = coerceReadyStatus(params.readiness?.status);
+  const blockers: readonly unknown[] = params.readiness?.blockers ?? [];
+  const modelAdjustments: readonly unknown[] = params.readiness?.model_adjustments ?? [];
+  const goalNodeId: string | null = params.readiness?.goal_node_id ?? null;
 
   const hasFact = derivation.selected_fact_index !== null;
 
   // ── Contradictions (fail-loud, never silently reconciled) ──
   const contradictions: CanonicalContradiction[] = [];
 
-  if (input.scenarioClaimsAnalysis === true && !hasFact) {
+  if (params.scenarioClaimsAnalysis && !hasFact) {
     contradictions.push('scenario_claims_analysis_no_fact');
   }
 
@@ -255,7 +359,7 @@ export function selectCanonicalAnalysisState(
   // → the freshness comparison is impossible despite a genuine fact.
   if (
     hasFact &&
-    input.currentGraphHash === null &&
+    derivation.current_graph_hash === null &&
     derivation.graph_hash_at_run !== null
   ) {
     contradictions.push('fact_present_graph_unparseable');
@@ -263,23 +367,15 @@ export function selectCanonicalAnalysisState(
 
   // Actionable blockers on a 'ready' payload are a should-never-happen
   // integrity violation. Advisory constraint_dropped blockers do NOT count.
-  const actionableBlockerCount = blockers.filter((b) =>
-    ACTIONABLE_BLOCKER_TYPES.has(b.blocker_type),
-  ).length;
+  const actionableBlockerCount = blockers.filter((b) => {
+    const type = readBlockerType(b);
+    return type !== null && ACTIONABLE_BLOCKER_TYPES.has(type);
+  }).length;
   if (status === 'ready' && actionableBlockerCount > 0) {
     contradictions.push('status_ready_with_actionable_blockers');
   }
 
-  // A newer run failed/partial while an older success would be presented
-  // as current. Only provable when both timestamps are present.
-  const degradedComputedAt = degraded ? readComputedAt(degraded.fact) : null;
-  if (
-    degraded !== null &&
-    selected !== null &&
-    degradedComputedAt !== null &&
-    selected.computed_at !== null &&
-    degradedComputedAt > selected.computed_at
-  ) {
+  if (params.degradedNewerThanSelectedSuccess) {
     contradictions.push('fact_status_success_but_degraded_newer');
   }
 
@@ -328,7 +424,7 @@ export function selectCanonicalAnalysisState(
     blockers,
     model_adjustments: modelAdjustments,
     goal_node_id: goalNodeId,
-    degraded_fact_status: degraded?.status ?? null,
+    degraded_fact_status: params.degradedStatus,
     contradictions,
     usableForProse,
     usableForChips,
@@ -372,9 +468,10 @@ export interface AnalysisStateSummary {
 export function summariseCanonicalAnalysisState(
   state: CanonicalAnalysisState,
 ): AnalysisStateSummary {
-  const actionableBlockerCount = state.blockers.filter((b) =>
-    ACTIONABLE_BLOCKER_TYPES.has(b.blocker_type),
-  ).length;
+  const actionableBlockerCount = state.blockers.filter((b) => {
+    const type = readBlockerType(b);
+    return type !== null && ACTIONABLE_BLOCKER_TYPES.has(type);
+  }).length;
   return {
     status: state.status,
     freshness: state.freshness,

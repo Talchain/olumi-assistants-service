@@ -31,6 +31,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
 import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import type { V5ContextSummary } from '../orchestrator-v5/context/build-context-summary.js';
 
 const DEBUG_HEADER_NAME = 'x-olumi-debug';
 
@@ -98,6 +99,19 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    * for forward-compatibility; no caller reads it today.
    */
   readonly _diagnostic_trace?: V5DiagnosticTrace;
+  /**
+   * V5 canonical context summary (additive observability). Populated only
+   * when `config.cee.contextSummaryEnabled` (env
+   * `CEE_CONTEXT_SUMMARY_ENABLED=true`) is set. Redacted — statuses /
+   * predicates / counts / hashes only, NO raw user text or graph content.
+   * Stripped before strict `OlumiResponseSchema` validation, re-attached
+   * after — same mechanic as `_diagnostic_trace`. Diagnostic-only: the
+   * Golden-Journey Harness A1/A2 reads it; UI / prose / chip / coaching
+   * paths MUST NOT (enforced by a static guard test). The route's runtime
+   * guard (`coerceV5ContextSummary`) drops malformed shapes before
+   * re-attach.
+   */
+  readonly _context_summary?: V5ContextSummary;
 };
 
 /**

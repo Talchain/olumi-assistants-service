@@ -538,6 +538,13 @@ const ConfigSchema = z.object({
     // + unrecoverable short-circuit ATOMICALLY (no split mode); flag OFF =>
     // byte-identical to today on both sides. CEE_RUN_ANALYSIS_READY_GUARD.
     analysisReadyGuardEnabled: booleanString.default(false),
+    // V5 canonical context summary (CEE_CONTEXT_SUMMARY_ENABLED — staging
+    // diagnostics + Golden-Journey Harness A1/A2 only). When true, the route
+    // attaches a redacted `_context_summary` block (statuses/counts/hashes
+    // only) to turn responses, stripped/re-attached like `_diagnostic_trace`.
+    // Default OFF; never read by UI/prose/chip logic (enforced by a static
+    // guard test). Additive + backward-compatible.
+    contextSummaryEnabled: booleanString.default(false),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
@@ -941,6 +948,7 @@ function parseConfig(): Config {
       timingDebugEnabled: env.V5_TIMING_DEBUG,
       plotEgressScaleNetEnabled: env.CEE_PLOT_EGRESS_SCALE_NET_ENABLED,
       analysisReadyGuardEnabled: env.CEE_RUN_ANALYSIS_READY_GUARD,
+      contextSummaryEnabled: env.CEE_CONTEXT_SUMMARY_ENABLED,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
       promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
       fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,

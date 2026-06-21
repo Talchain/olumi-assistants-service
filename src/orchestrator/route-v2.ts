@@ -92,6 +92,15 @@ import { debugFieldRequested, type OlumiResponseWithDebugFields } from './debug-
 import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
 import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import {
+  canonicalStateFromFreshness,
+  type CanonicalAnalysisState,
+} from '../orchestrator-v5/context/canonical-analysis-state.js';
+import {
+  buildV5ContextSummary,
+  summariseGraphCounts,
+  type V5ContextSummary,
+} from '../orchestrator-v5/context/build-context-summary.js';
 import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
@@ -275,6 +284,16 @@ function sendFinalised200(
      * outside the trace.
      */
     readonly coachingDelivery?: import('../orchestrator-v5/diagnostics/v5-diagnostic-trace.js').V5CoachingDelivery;
+    /**
+     * V5 canonical analysis state for the redacted `_context_summary`
+     * surface. When a dispatch path threads the FULL verdict (with degraded
+     * detection — M5, turn-executor), it is used verbatim. Otherwise the
+     * route composes a partial state from `freshness` + `analysisReady` via
+     * `canonicalStateFromFreshness`. Only consumed when
+     * `config.cee.contextSummaryEnabled` is set; never reaches the wire
+     * body outside the gated `_context_summary` block.
+     */
+    readonly canonicalState?: CanonicalAnalysisState;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -327,7 +346,12 @@ function sendFinalised200(
     const asRecord = candidateFinalised as Record<string, unknown>;
     const hasTimings = '_timings' in asRecord;
     const hasTrace = '_diagnostic_trace' in asRecord;
-    if (!hasTimings && !hasTrace) {
+    // `_context_summary` is always built fresh from `ctx` at the re-attach
+    // gate below — never read off the body. We still strip any body-attached
+    // copy (defence-in-depth: the route's flag gate is the sole authority,
+    // and the strict OlumiResponseSchema must not see an unknown key).
+    const hasContextSummary = '_context_summary' in asRecord;
+    if (!hasTimings && !hasTrace && !hasContextSummary) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
     const cloned = { ...asRecord };
@@ -335,6 +359,7 @@ function sendFinalised200(
     const diagnosticTrace = cloned._diagnostic_trace;
     delete cloned._timings;
     delete cloned._diagnostic_trace;
+    delete cloned._context_summary;
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -474,6 +499,41 @@ function sendFinalised200(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
       ctx,
     );
+  }
+  // Re-attach `_context_summary` post-validation on the success path AND
+  // only when `config.cee.contextSummaryEnabled` is set (single-flag gating,
+  // same shape as the `_diagnostic_trace` gate above). Redacted,
+  // diagnostic-only surface for the Golden-Journey Harness (A1/A2). Built
+  // from the canonical state — `ctx.canonicalState` when a dispatch path
+  // threaded the full verdict (with degraded detection — M5), otherwise
+  // composed from `ctx.freshness` + `ctx.analysisReady` via
+  // `canonicalStateFromFreshness`. The fallback envelope never carries it;
+  // an upstream body-attach with the flag off was dropped by the strip
+  // above. Spreading breaks WeakSet membership (finaliser brand), so we
+  // re-finalise the augmented body for the preSerialization hook.
+  if (egress.ok && config.cee.contextSummaryEnabled) {
+    const canonical: CanonicalAnalysisState | null =
+      ctx.canonicalState ??
+      (ctx.freshness !== undefined
+        ? canonicalStateFromFreshness(
+            ctx.freshness,
+            ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
+          )
+        : null);
+    if (canonical !== null) {
+      const contextSummary: V5ContextSummary = buildV5ContextSummary({
+        canonicalState: canonical,
+        graphCounts: summariseGraphCounts(ctx.graph),
+      });
+      const augmented: OlumiResponseWithDebugFields = {
+        ...wireBody,
+        _context_summary: contextSummary,
+      };
+      wireBody = finaliseV5Response(
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+        ctx,
+      );
+    }
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok);
   return reply.code(200).send(wireBody);
