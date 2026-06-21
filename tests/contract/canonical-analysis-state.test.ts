@@ -332,6 +332,6 @@ describe('summariseCanonicalAnalysisState — redaction (counts only)', () => {
     expect(serialised).not.toContain('needs attention');
     expect(serialised).not.toContain('factor_label');
     expect(serialised).not.toContain('Factor X');
-    expect('blockers' in (summary as Record<string, unknown>)).toBe(false);
+    expect('blockers' in (summary as unknown as Record<string, unknown>)).toBe(false);
   });
 });

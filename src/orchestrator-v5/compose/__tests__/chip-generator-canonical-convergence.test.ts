@@ -40,7 +40,6 @@ function analysisAt(band: string): ContextPackAnalysis {
     robustness_band: band,
     top_drivers: [],
     fragile_edges: [],
-    staleness_reason: null,
   };
 }
 

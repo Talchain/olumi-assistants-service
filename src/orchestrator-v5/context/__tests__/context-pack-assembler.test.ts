@@ -581,8 +581,10 @@ describe('non-production runtime gate', () => {
       failureWith([makeIssue(['version'], 'Required')]),
     );
 
+    // priorFacts: [] so the canonical-state facts-absent warn does not fire —
+    // this test isolates the schema-drift warn.
     expect(() =>
-      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] }),
+      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], priorFacts: [] }),
     ).not.toThrow();
 
     expect(warnSpy).toHaveBeenCalledTimes(1);
