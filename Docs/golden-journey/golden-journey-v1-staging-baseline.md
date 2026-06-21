@@ -2,6 +2,8 @@
 
 Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/). Drives the core PoC journey (draft → run analysis → explain → follow-up → mutate → rerun → explain what changed → reload → verify chips → capture debug) and classifies every assertion into one of the six core components.
 
+> **⚠ Interpretation correction (post-run).** The A3 (Typed action/mutation) FAIL below was produced by a **vague** mutate instruction ("make _<factor>_ more important") that the system correctly answered **clarify-first** ("the model is unchanged… tell me the specific factor/value") — so no mutation happened and the back half of the journey was not strongly tested. A follow-up **concrete-mutation rerun** (`Set <factor> to 0.5`) **mutated correctly** (graph hash changed, freshness stale→fresh, win-probs shifted). **Component 4 is therefore NOT a confirmed defect** — see [golden-journey-v1-concrete-mutation-rerun.md](golden-journey-v1-concrete-mutation-rerun.md). No fix lane is opened. The "next component to fix" verdict in the table below reflects this single ambiguous run and should be read with that correction.
+
 ## Executive verdict
 
 | signal | value |
