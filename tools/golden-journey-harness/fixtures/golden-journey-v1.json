@@ -1,0 +1,249 @@
+{
+  "name": "golden-journey-v1",
+  "description": "Initial golden-journey fixture for the Olumi core PoC journey. Defines the brief, per-step expected milestones with the component each step's assertions guard, and a deterministic REFERENCE transcript (a plausible all-green wire capture) used by `--replay` so the classifier + report are reproducible in CI without a live system. This transcript is SYNTHETIC (hand-authored), not a live capture — the real 'what fails today' baseline comes from a live cee-staging run.",
+  "brief": "We are a 15-person engineering team weighing three options for scaling delivery over the next six months: hire two senior engineers locally, engage an offshore partner, or introduce tiered pricing to hire more gradually. Decision matters for Q3 roadmap commitments.",
+  "expected_milestones": [
+    { "step": "1_draft", "role": "draft", "expect": "draft model returned with post-draft chips; option + factor labels parseable", "components": ["context_management", "observability_recovery"], "invariants": ["A2", "A6"] },
+    { "step": "2_run_analysis", "role": "analysis", "expect": "analysis_ready.status=ready with freshness + graph_hash trio; win-probabilities present", "components": ["canonical_state", "typed_action_mutation", "observability_recovery"], "invariants": ["A1", "A3", "A6"] },
+    { "step": "3_explain_leader", "role": "explain", "expect": "grounded explanation naming the leading option + a probability; no denial of available analysis", "components": ["canonical_state", "science_grounded_coaching"], "invariants": ["A1", "A5"] },
+    { "step": "4_follow_up", "role": "follow_up", "expect": "follow-up resolved using recent-turn context (runner-up comparison)", "components": ["context_management", "science_grounded_coaching"], "invariants": ["A1", "A2", "A5"] },
+    { "step": "5_mutate", "role": "mutate", "expect": "edit_graph_generic mutation acknowledged; no false success on a non-applied edit", "components": ["typed_action_mutation", "observability_recovery"], "invariants": ["A3", "A4", "A7"] },
+    { "step": "6_rerun_analysis", "role": "rerun_analysis", "expect": "fresh analysis on the mutated graph; current_graph_hash differs from the step-2 baseline", "components": ["typed_action_mutation", "canonical_state"], "invariants": ["A3", "A7"] },
+    { "step": "7_explain_what_changed", "role": "explain_changed", "expect": "references the edited factor + honestly describes whether the leader changed", "components": ["science_grounded_coaching", "canonical_state"], "invariants": ["A1", "A5", "A7"] },
+    { "step": "8_reload", "role": "reload", "expect": "fresh read turn reloads canonical analysis; not contradicted by prose/chips", "components": ["canonical_state", "context_management"], "invariants": ["A1", "A2"] },
+    { "step": "9_verify_chips", "role": "evaluation", "expect": "no false-success chips; rerun/refresh affordance present when stale", "components": ["typed_action_mutation", "observability_recovery"], "invariants": ["A4", "A7"] },
+    { "step": "10_capture_debug", "role": "evaluation", "expect": "_diagnostic_trace + _timings captured for every turn", "components": ["observability_recovery"], "invariants": ["A6"] }
+  ],
+  "transcript": {
+    "note": "SYNTHETIC reference capture — a plausible all-green wire journey. Hashes/timestamps are illustrative. Replay over this transcript is the deterministic self-test (expected exit 0; A2 inconclusive by design — not wire-observable).",
+    "diagnostic_trace_enabled": true,
+    "timing_debug_enabled": true,
+    "observations": [
+      {
+        "step": "1_draft",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Your decision model is ready, with three options and a few cost and delivery factors. You can run the analysis whenever you're ready, or refine the options first.",
+          "suggested_actions": [
+            { "id": "chip_run", "label": "Run analysis", "message": "Run analysis.", "action_type": "run_analysis" }
+          ],
+          "draft_graph": {
+            "nodes": [
+              { "id": "goal_delivery", "kind": "goal", "label": "Scale delivery for Q3" },
+              { "id": "opt_hire", "kind": "option", "label": "Hire two senior engineers" },
+              { "id": "opt_offshore", "kind": "option", "label": "Engage an offshore partner" },
+              { "id": "opt_pricing", "kind": "option", "label": "Introduce tiered pricing" },
+              { "id": "fac_budget", "kind": "factor", "label": "Budget" },
+              { "id": "fac_speed", "kind": "factor", "label": "Delivery speed" }
+            ],
+            "edges": [
+              { "from": "opt_hire", "to": "fac_budget" },
+              { "from": "fac_budget", "to": "goal_delivery" }
+            ]
+          },
+          "_diagnostic_trace": {
+            "exit_path": "draft_graph",
+            "correlation_ids": { "request_id": "req-1", "scenario_id": "scn-1", "turn_id": "turn-1" },
+            "coaching_delivery": { "handler": "draft_graph", "composer": "post_draft_narrative", "copy_source": "deterministic", "coaching_fields_used": [] }
+          },
+          "_timings": { "turn": { "total_ms": 52000, "build_turn_context_ms": 80 }, "draft_graph": { "total_ms": 51000, "parse_ms": 32000 } }
+        }
+      },
+      {
+        "step": "2_run_analysis",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Analysis complete. Hire two senior engineers currently leads with about 62% probability against the goal, ahead of Engage an offshore partner. The result is sensitive to the Budget factor.",
+          "suggested_actions": [
+            { "id": "chip_explain", "label": "Explain the result", "message": "Why does the leading option win?", "action_type": "explain_result" }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 },
+              { "option_id": "opt_pricing", "label": "Introduce tiered pricing", "win_probability": 0.12 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2",
+            "factor_sensitivity": [{ "factor_label": "Budget", "sensitivity": 0.41 }],
+            "option_comparison": [{ "label": "Hire two senior engineers", "win_probability": 0.62 }],
+            "robustness": { "level": "medium" },
+            "model_adjustments": []
+          },
+          "_diagnostic_trace": {
+            "exit_path": "chip_click",
+            "correlation_ids": { "request_id": "req-2", "scenario_id": "scn-1", "turn_id": "turn-2" },
+            "coaching_delivery": { "handler": "run_analysis", "composer": "analysis_result_headline", "copy_source": "plot_envelope", "coaching_fields_used": ["win_probability", "margin_pp"] }
+          },
+          "_timings": { "turn": { "total_ms": 8200 }, "run_analysis": { "handler_total_ms": 7800, "plot_request_ms": 7600, "plot_status": "computed" } }
+        }
+      },
+      {
+        "step": "3_explain_leader",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Hire two senior engineers leads at roughly 62% because it improves delivery speed most directly while keeping Budget within range. The margin over Engage an offshore partner is meaningful but the result is sensitive to the Budget factor, so it's worth confirming that assumption.",
+          "suggested_actions": [
+            { "id": "chip_flip", "label": "What would flip this?", "message": "What would flip this?", "action_type": "what_would_flip" }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-3", "scenario_id": "scn-1", "turn_id": "turn-3" },
+            "coaching_delivery": { "handler": "explain_result", "composer": "explain_leader", "copy_source": "analysis_projection", "coaching_fields_used": ["win_probability", "top_drivers"] }
+          },
+          "_timings": { "turn": { "total_ms": 5400, "routing_llm_ms": 5100 } }
+        }
+      },
+      {
+        "step": "4_follow_up",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Engage an offshore partner sits at about 26%, the runner-up. It trails Hire two senior engineers mainly because its effect on delivery speed is weaker for the same Budget. If the Budget assumption changed, that gap would narrow.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-4", "scenario_id": "scn-1", "turn_id": "turn-4" },
+            "coaching_delivery": { "handler": "explain_result", "composer": "explain_leader", "copy_source": "analysis_projection", "coaching_fields_used": ["win_probability"] }
+          },
+          "_timings": { "turn": { "total_ms": 4900 } }
+        }
+      },
+      {
+        "step": "5_mutate",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Updated the model — Budget now has a stronger influence on delivery speed. Re-run the analysis to see how this changes the comparison.",
+          "suggested_actions": [
+            { "id": "chip_rerun", "label": "Re-run analysis", "message": "Run analysis.", "action_type": "run_analysis" }
+          ],
+          "_diagnostic_trace": {
+            "exit_path": "edit_graph",
+            "correlation_ids": { "request_id": "req-5", "scenario_id": "scn-1", "turn_id": "turn-5" },
+            "coaching_delivery": { "handler": "edit_graph", "composer": "edit_ack", "copy_source": "deterministic", "coaching_fields_used": [] }
+          },
+          "_timings": { "turn": { "total_ms": 6100 } }
+        }
+      },
+      {
+        "step": "6_rerun_analysis",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Re-ran the analysis on the updated model. Hire two senior engineers still leads, now at about 58%, with Engage an offshore partner at 30%. The Budget factor matters more than before.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:05:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.58 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.30 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "b2c3d4e5f6a1b2c3",
+            "current_graph_hash": "b2c3d4e5f6a1b2c3"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "chip_click",
+            "correlation_ids": { "request_id": "req-6", "scenario_id": "scn-1", "turn_id": "turn-6" },
+            "coaching_delivery": { "handler": "run_analysis", "composer": "analysis_result_headline", "copy_source": "plot_envelope", "coaching_fields_used": ["win_probability"] }
+          },
+          "_timings": { "turn": { "total_ms": 8000 }, "run_analysis": { "handler_total_ms": 7700, "plot_status": "computed" } }
+        }
+      },
+      {
+        "step": "7_explain_what_changed",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "After making Budget more important, the leading option is unchanged — Hire two senior engineers still leads, though its margin narrowed from about 62% to 58%. Engage an offshore partner gained ground because it is less Budget-sensitive.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:05:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.58 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.30 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "b2c3d4e5f6a1b2c3",
+            "current_graph_hash": "b2c3d4e5f6a1b2c3"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-7", "scenario_id": "scn-1", "turn_id": "turn-7" },
+            "coaching_delivery": { "handler": "explain_result", "composer": "what_changed", "copy_source": "recent_changes", "coaching_fields_used": ["win_probability"] }
+          },
+          "_timings": { "turn": { "total_ms": 5200 } }
+        }
+      },
+      {
+        "step": "8_reload",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Here is the current analysis: Hire two senior engineers leads at about 58%, ahead of Engage an offshore partner at 30%. This reflects the updated Budget importance.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:05:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.58 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.30 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "b2c3d4e5f6a1b2c3",
+            "current_graph_hash": "b2c3d4e5f6a1b2c3"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-8", "scenario_id": "scn-1", "turn_id": "turn-8" },
+            "coaching_delivery": { "handler": "explain_result", "composer": "explain_leader", "copy_source": "analysis_projection", "coaching_fields_used": ["win_probability"] }
+          },
+          "_timings": { "turn": { "total_ms": 5000 } }
+        }
+      }
+    ]
+  }
+}
