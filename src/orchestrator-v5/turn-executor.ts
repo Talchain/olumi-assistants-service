@@ -4909,13 +4909,23 @@ export async function runTurnExecutor(
       // unrecoverable / unparseable, or no graph) → canonical status null, never
       // a false `ready`. `analysisReadyForTurn` is left UNCHANGED for the wire /
       // chip behaviour.
-      const canonicalReadinessForRun: typeof analysisReadyForTurn = ((): typeof analysisReadyForTurn => {
-        if (canonicalReadinessGraphForRun == null) return undefined;
-        const parsedForReadiness = GraphV3.safeParse(canonicalReadinessGraphForRun);
-        return parsedForReadiness.success
-          ? computeStructuralReadiness(parsedForReadiness.data)
-          : undefined;
-      })();
+      const canonicalReadinessForRun: typeof analysisReadyForTurn =
+        // Optimisation: on cold-start the readiness authority IS the request
+        // graph, for which `analysisReadyForTurn` already ran the identical
+        // GraphV3 parse + computeStructuralReadiness — reuse it instead of
+        // recomputing (avoids the redundant parse, including when the
+        // diagnostic flag is off). Otherwise (persisted/canonical graph under
+        // client lag, or the post-mutation graph) derive fresh from that
+        // authority; undefined when it cannot be parsed.
+        canonicalReadinessGraphForRun === graphStateForTurn
+          ? analysisReadyForTurn
+          : ((): typeof analysisReadyForTurn => {
+              if (canonicalReadinessGraphForRun == null) return undefined;
+              const parsedForReadiness = GraphV3.safeParse(canonicalReadinessGraphForRun);
+              return parsedForReadiness.success
+                ? computeStructuralReadiness(parsedForReadiness.data)
+                : undefined;
+            })();
       canonicalStateForRun = selectCanonicalAnalysisState({
         handlerFacts: handlerFactsForCommit,
         priorFacts: context.prior_facts,

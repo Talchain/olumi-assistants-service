@@ -106,15 +106,17 @@ function mkRunResult(opts: { withCanonical: boolean }) {
     effectiveGraph: null,
     ...(opts.withCanonical ? { canonicalState: FULL_CANONICAL } : {}),
     telemetry: {
-      stages_completed: ['orient', 'execute'],
+      // Faithful terminology: the execute case (canonicalState present) is a
+      // handler/execute turn; the fallback case is a non-execute direct-answer
+      // turn (a path that finalises without the post-dispatch assembly).
+      stages_completed: opts.withCanonical ? ['orient', 'execute'] : ['orient'],
       response_emitted: true as const,
       llm_calls_used: 0,
       commit_performed: true,
       failure_type: null,
       wall_clock_ms: 5,
-      // Faithful terminology: this fixture represents an execute (handler) turn.
-      turn_class: 'handler',
-      intent_class: 'execute',
+      turn_class: opts.withCanonical ? 'handler' : 'direct_answer',
+      intent_class: opts.withCanonical ? 'execute' : null,
       coaching_mode: null,
       validation_error_code: null,
     },
