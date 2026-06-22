@@ -112,8 +112,9 @@ function mkRunResult(opts: { withCanonical: boolean }) {
       commit_performed: true,
       failure_type: null,
       wall_clock_ms: 5,
-      turn_class: 'direct_answer',
-      intent_class: null,
+      // Faithful terminology: this fixture represents an execute (handler) turn.
+      turn_class: 'handler',
+      intent_class: 'execute',
       coaching_mode: null,
       validation_error_code: null,
     },

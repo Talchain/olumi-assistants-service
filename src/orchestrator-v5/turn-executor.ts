@@ -621,6 +621,16 @@ export async function runTurnExecutor(
   let canonicalStateForRun: CanonicalAnalysisState | undefined;
   let proposedHandlerIdForOutcome: string | null = null;
   let currentAnalysisGraphHashForTurn: string | null = null;
+  // V5 M5 (read-only / diagnostic): the RAW graph object the freshness hash was
+  // computed from, captured so the M5 canonical state derives its readiness
+  // from the SAME graph authority as its freshness — the persisted/canonical
+  // graph (under client lag, per the H3 stale-aware logic below), the request
+  // graph on cold-start, or the post-mutation graph on a mutation. This keeps
+  // the diagnostic internally consistent instead of pairing the persisted-graph
+  // hash with the request-derived `analysisReadyForTurn`. Null when there is no
+  // parseable authority (→ canonical readiness undefined). NOT used for any
+  // wire / chip behaviour — `analysisReadyForTurn` is left unchanged for that.
+  let canonicalReadinessGraphForRun: unknown = null;
   // P0 V5 golden-path repair (follow-up): hoisted into the function
   // scope so `buildTurnOutcome` (nested below) can read it. Set when a
   // handler outcome carries a non-null `mutated_graph`. Closes the
@@ -850,6 +860,7 @@ export async function runTurnExecutor(
         // Cold-start / first-draft path: no canonical state has been
         // persisted yet, so the request graph is the only signal
         // available. Hashing it is correct here.
+        canonicalReadinessGraphForRun = graphStateForTurn ?? null; // M5 readiness authority
         return computeAnalysisAffectingGraphHash(graphStateForTurn);
       }
       // EP2 (V5 Edit Safety Core), gated atomically with the run-time guard.
@@ -868,6 +879,11 @@ export async function runTurnExecutor(
       }
       const parsed = GraphStateIngressSchema.safeParse(graphForHash);
       if (parsed.success) {
+        // M5 readiness authority: derive canonical readiness from the SAME
+        // persisted/canonical graph this hash is computed from (not the
+        // request graph), so the diagnostic cannot pair this hash with a
+        // stale request-derived readiness under client lag.
+        canonicalReadinessGraphForRun = graphForHash;
         return computeAnalysisAffectingGraphHash(parsed.data);
       }
       // V5 stale-aware explain recovery (Codex round-3 P1): persisted
@@ -4847,6 +4863,12 @@ export async function runTurnExecutor(
             ? { goal_constraints: mutated.goal_constraints }
             : {}),
         };
+        // M5 readiness authority: on a mutation the freshness hash reflects the
+        // post-mutation graph, so canonical readiness must too. Use the handler's
+        // GraphV3 `mutated` projection (computeStructuralReadiness derives option
+        // count / goal presence from nodes-by-kind, so the GraphV3 shape is the
+        // right input — `merged` only restores the ingress shape for hashing).
+        canonicalReadinessGraphForRun = mutated;
         return computeAnalysisAffectingGraphHash(
           merged as GraphStateIngress | null | undefined,
         );
@@ -4869,25 +4891,35 @@ export async function runTurnExecutor(
       );
       // V5 M5 (read-only / diagnostic) — assemble the canonical analysis state
       // from the SAME unified fact set and post-handler graph hash that
-      // `freshness` above derived from, plus this turn's structural readiness.
-      // Pure read-only: no dispatch, no control-flow, no mutation, no I/O. It
-      // is surfaced ONLY through the flag-gated (default-off) redacted
-      // context-summary diagnostic at the route seam — deliberately NOT passed
-      // to `generateChips` below (that would activate M2 chip behaviour, out of
-      // scope here).
+      // `freshness` above derived from. Pure read-only: no dispatch, no
+      // control-flow, no mutation, no I/O. Surfaced ONLY through the flag-gated
+      // (default-off) redacted context-summary diagnostic at the route seam —
+      // deliberately NOT passed to `generateChips` below (that would activate
+      // M2 chip behaviour, out of scope here).
       //
-      // Snapshot invariant: `analysisReadyForTurn` is computed pre-handler,
-      // while `hashForPostHandlerFreshness` is post-mutation. This is a
-      // consistent snapshot for the current D1 mutators (set_factor_value /
-      // add_constraint / adjust_edge_strength) because none of them changes a
-      // readiness dimension (goal presence, option count, intervention
-      // configuration). A FUTURE readiness-changing handler must recompute
-      // structural readiness here before assembling, or this diagnostic could
-      // pair a stale readiness status with a fresh graph hash.
+      // Graph-authority consistency: readiness here is derived from
+      // `canonicalReadinessGraphForRun` — the SAME graph the freshness hash was
+      // computed from — NOT the request-derived `analysisReadyForTurn`. Under
+      // client lag the freshness hash comes from the canonical PERSISTED graph
+      // (H3 stale-aware logic) while the request graph can be older; pairing
+      // that hash with request-derived readiness could report e.g. `ready`
+      // against a persisted graph that now needs mapping. Deriving readiness
+      // from the same authority keeps the diagnostic internally consistent.
+      // `undefined` when there is no parseable authority (persisted graph
+      // unrecoverable / unparseable, or no graph) → canonical status null, never
+      // a false `ready`. `analysisReadyForTurn` is left UNCHANGED for the wire /
+      // chip behaviour.
+      const canonicalReadinessForRun: typeof analysisReadyForTurn = ((): typeof analysisReadyForTurn => {
+        if (canonicalReadinessGraphForRun == null) return undefined;
+        const parsedForReadiness = GraphV3.safeParse(canonicalReadinessGraphForRun);
+        return parsedForReadiness.success
+          ? computeStructuralReadiness(parsedForReadiness.data)
+          : undefined;
+      })();
       canonicalStateForRun = selectCanonicalAnalysisState({
         handlerFacts: handlerFactsForCommit,
         priorFacts: context.prior_facts,
-        readiness: analysisReadyForTurn,
+        readiness: canonicalReadinessForRun,
         currentGraphHash: hashForPostHandlerFreshness,
       });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
