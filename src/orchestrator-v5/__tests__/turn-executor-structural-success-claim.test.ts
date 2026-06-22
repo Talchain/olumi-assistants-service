@@ -605,3 +605,112 @@ describe('Codex round-8 — non-graph qualifiers preserved; passive edge monitor
     expect(monitorEvents()).toHaveLength(1); // surfaced, not silent
   });
 });
+
+// ---------------------------------------------------------------------------
+// Codex round-9 — (1) a graph edit carrying a non-graph PURPOSE still declines
+// (the "to your model" destination overrides the presentation exclusion);
+// (2) ambiguous-edge claims with FULL verb parity (rewired/edited/revised),
+// passive AND first-person active, are monitored — never swapped, even under
+// a structural-edit request in the same turn.
+// ---------------------------------------------------------------------------
+
+describe('Codex round-9 — graph-edit-with-purpose declines; full-parity edge monitored', () => {
+  it('blocker 1: "add the Pricing option to your model for the presentation" → declines (intent)', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Add the Pricing option to your model for the presentation.', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa50'),
+      'req-r9-graph-purpose-intent',
+      { routingAdapter: mockRoutingAdapter('I added the Pricing option to your model for the presentation.') },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
+
+  it('blocker 1: same claim with NO edit intent → still declines (high-confidence, unconditional)', async () => {
+    const { response } = await runTurnExecutor(
+      payload('where are the docs?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa51'),
+      'req-r9-graph-purpose-nointent',
+      { routingAdapter: mockRoutingAdapter('I added the Pricing option to your model for the presentation.') },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
+
+  // Blocker 2 — PASSIVE edge claims with each previously-missing verb. Passives
+  // carry no first-person actor, so the broad layer never catches them; they
+  // resolve to monitor/ambiguous_edge and are NOT swapped EVEN under a real
+  // structural-edit request ("add a Risk option") in the same turn.
+  const passiveEdgeClaims: ReadonlyArray<readonly [string, string]> = [
+    ['passive rewired', 'The relationship was rewired.'],
+    ['passive edited', 'The dependency was edited.'],
+    ['passive revised', 'The connection was revised.'],
+  ];
+  passiveEdgeClaims.forEach(([name, claim], i) => {
+    it(`blocker 2: passive ambiguous edge (${name}) under add-intent → NOT swapped, IS monitored`, async () => {
+      const { response } = await runTurnExecutor(
+        payload(
+          `Add a Risk option and rewire the dependency between Cost and Growth.`,
+          `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa6${i}`,
+        ),
+        `req-r9-edge-${i}`,
+        { routingAdapter: mockRoutingAdapter(claim) },
+      );
+      expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+      expect(swapEvents()).toHaveLength(0);
+      expect(monitorEvents()).toHaveLength(1); // surfaced as ambiguous_edge, not silent
+    });
+  });
+
+  // First-person active edge claim ("I rewired the relationship") with NO edit
+  // intent is still PRESERVED (monitored, not swapped). Under edit intent it is
+  // contained by the broad layer — that is the accepted intent-gating trade-off,
+  // proven separately below.
+  it('blocker 2: first-person active edge with NO intent → NOT swapped, IS monitored', async () => {
+    const { response } = await runTurnExecutor(
+      payload('continue please', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa64'),
+      'req-r9-edge-active-nointent',
+      { routingAdapter: mockRoutingAdapter('I rewired the relationship.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+    expect(monitorEvents()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-9 verb parity (self-audit) — strong structural edit verbs that the
+// monitor learned (rewire/revise/rework) must ALSO decline at the enforcing
+// gate when claimed first-person on an unambiguous structural noun, with NO
+// edit intent in the turn (high-confidence, unconditional).
+// ---------------------------------------------------------------------------
+
+describe('Round-9 verb parity — rewire/revise/rework on a structural noun declines', () => {
+  // NON-edit user messages ('continue please' / 'do that') so the swap rests on
+  // the narrow, intent-irrelevant layer (not intent-gating), and the turn reaches
+  // the LLM compose path rather than a deterministic guard.
+  const claims: ReadonlyArray<readonly [string, string, string]> = [
+    ['rewired edge', 'I rewired the edge.', 'continue please'],
+    ['revised factor', "I've revised the factor.", 'do that'],
+    ['reworked option', 'I reworked the option.', 'continue please'],
+  ];
+  claims.forEach(([name, claim, userMsg], i) => {
+    it(`${name} (no edit intent in the user turn) → declines`, async () => {
+      const { response } = await runTurnExecutor(
+        payload(userMsg, `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa7${i}`),
+        `req-r9-parity-${i}`,
+        { routingAdapter: mockRoutingAdapter(claim) },
+      );
+      expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+      expect(swapEvents()).toHaveLength(1);
+    });
+  });
+
+  it('the same verb in a non-graph context ("I revised the factor in the report") is NOT declined', async () => {
+    const { response } = await runTurnExecutor(
+      payload('do that', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa79'),
+      'req-r9-parity-nongraph',
+      { routingAdapter: mockRoutingAdapter('I revised the factor in the report.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+});

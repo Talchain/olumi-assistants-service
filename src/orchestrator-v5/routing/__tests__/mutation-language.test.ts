@@ -431,3 +431,156 @@ describe('mentionsStructuralEditRequest — user structural-edit intent', () => 
     expect(mentionsStructuralEditRequest('')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round-9 generalisation battery — a single self-audit table covering every
+// class probed across the review rounds, so adjacent variants can't regress.
+// ---------------------------------------------------------------------------
+
+describe('round-9 self-audit battery — classifyStructuralClaim', () => {
+  const base = { handlerEmittedMutatedGraph: false, proposedHandlerId: null as string | null };
+
+  // [text, structuralEditIntent, expectedVerdict]
+  const cases: ReadonlyArray<readonly [string, boolean, 'swap' | 'monitor' | 'pass']> = [
+    // --- High-confidence swaps: first-person verb + UNAMBIGUOUS structural noun.
+    //     The NARROW layer swaps these regardless of intent.
+    ["I've added the Coach option.", false, 'swap'],
+    ['I added a risk factor.', false, 'swap'],
+    ['I updated the graph.', false, 'swap'],
+    ['I changed the model.', false, 'swap'],
+    ['I added an option to your model.', false, 'swap'],
+    ['I added the option.', false, 'swap'],
+    // Blocker 1 (round 9): a graph edit WITH a non-graph PURPOSE still swaps,
+    // because "to your model" is a graph destination that OVERRIDES the
+    // presentation exclusion — both with and without intent.
+    ['I added the Pricing option to your model for the presentation.', true, 'swap'],
+    ['I added the Pricing option to your model for the presentation.', false, 'swap'],
+
+    // --- Intent-gated swaps: BROAD language (noun-less edge / actorless state-now /
+    //     passive structural) swaps ONLY when the user asked for a structural edit.
+    ['I connected Marketing to Revenue.', true, 'swap'],
+    ['Your model now includes the Coach option.', true, 'swap'],
+    ['The option has been added.', true, 'swap'],
+    ['The factor has been changed.', true, 'swap'],
+    // Accepted trade-off (intent-gating): under a structural-edit request, a bare
+    // first-person edit verb with NO structural noun also swaps. Rare false
+    // declines on genuinely non-graph actions are the deliberate price of safety
+    // on this rail; precise no-intent residuals are deferred to #289.
+    ['I added a note about timing.', true, 'swap'],
+
+    // --- BROAD language WITHOUT intent → MONITORED, never swapped (text PRESERVED).
+    //     This is what stops non-graph prose / read-outs from false-declining.
+    ['I added a note about timing.', false, 'monitor'],
+    ['I created a link to the documentation.', false, 'monitor'],
+    ['I added an option to the presentation.', false, 'monitor'],
+    ['I updated the model documentation.', false, 'monitor'],
+    ["I updated the model's documentation.", false, 'monitor'],
+    ['I added an option called "Draft" to the presentation.', false, 'monitor'],
+    ["I'll add that to my notes.", false, 'monitor'],
+    ['Your model now has four options.', false, 'monitor'],
+    ['The model now contains three factors and two options.', false, 'monitor'],
+
+    // --- Conditional / advisory → MONITORED via legacy mutation language, never swapped.
+    ['I would add a risk factor if we needed more sensitivity.', true, 'monitor'],
+    ["I'd suggest adding a competitive risk factor.", true, 'monitor'],
+
+    // --- Blocker 2 (round 9): ambiguous-edge claims are monitor/ambiguous_edge with
+    //     FULL verb parity (rewired/edited/revised), and NEVER swap — even under intent.
+    ['The relationship has been changed.', false, 'monitor'],
+    ['The relationship was rewired.', true, 'monitor'],
+    ['The dependency was edited.', true, 'monitor'],
+    ['The connection was revised.', false, 'monitor'],
+    ['I rewired the relationship.', false, 'monitor'],
+
+    // --- Benign / no edit verb → pass.
+    ['Here are the trade-offs.', false, 'pass'],
+    ['Hello, how can I help?', false, 'pass'],
+  ];
+
+  for (const [text, intent, expected] of cases) {
+    it(`[${expected}${intent ? '|intent' : ''}] ${text.slice(0, 60)}`, () => {
+      expect(
+        classifyStructuralClaim({ ...base, assistantText: text, structuralEditIntent: intent }).verdict,
+      ).toBe(expected);
+    });
+  }
+
+  // Ambiguous-edge passives must never swap even with intent.
+  it('passive edge claims never swap under intent', () => {
+    for (const t of ['The relationship was rewired.', 'The dependency was edited.', 'The connection was revised.']) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).kind).toBe('ambiguous_edge');
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('monitor');
+    }
+  });
+});
+
+describe('round-9 self-audit battery — mentionsStructuralEditRequest', () => {
+  const TRUE_CASES = [
+    'add an option', 'remove the churn factor', 'Can you add an option?',
+    'Could you remove the factor?', 'I want to add a factor', 'Edit the option',
+    'Change the factor', 'Update the model to include a new option', 'Please update the model',
+    'add a new option to the model', 'Add the Pricing option to your model for the presentation',
+  ];
+  const FALSE_CASES = [
+    'Did you add an option?', 'Have you added a factor?', 'Does your model include an option?',
+    'Is the option now included?', 'Can you connect Alice with Bob?', 'connect Marketing to Revenue',
+    'Add a relationship between Cost and Growth', 'Please update the model documentation',
+    "Please update the model's documentation", 'Change the model presentation',
+    'add an option to the presentation', 'add a new option to the presentation',
+    'summarise the model', 'set the budget to 5',
+  ];
+  for (const t of TRUE_CASES) {
+    it(`intent TRUE: ${t.slice(0, 60)}`, () => expect(mentionsStructuralEditRequest(t)).toBe(true));
+  }
+  for (const t of FALSE_CASES) {
+    it(`intent FALSE: ${t.slice(0, 60)}`, () => expect(mentionsStructuralEditRequest(t)).toBe(false));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Round-9 verb parity — the ENFORCING detector must recognise the same strong
+// structural edit verbs (rewire/revise/rework) that PASSIVE_DONE / EDGE_EDIT_VERB
+// gained, so first-person active claims on an UNAMBIGUOUS structural noun cannot
+// leak silently. (Self-audit: "I wired the edge" swapped but "I rewired the edge"
+// previously passed — closed here.)
+// ---------------------------------------------------------------------------
+
+describe('round-9 verb parity — rewire/revise/rework enforce on structural nouns', () => {
+  const base = { handlerEmittedMutatedGraph: false, proposedHandlerId: null as string | null };
+  const v = (t: string, intent = false) =>
+    classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: intent }).verdict;
+
+  it('first-person active rewire/revise/rework + structural noun → swap (intent-irrelevant)', () => {
+    for (const t of [
+      'I rewired the edge.',
+      'I revised the factor.',
+      'I reworked the option.',
+      "I've rewired the edge.",
+      "I'll rewire the option.",
+      "I'm reworking the factors.",
+      'I revised the constraint.',
+    ]) {
+      expect(containsStructuralSuccessClaim(t)).toBe(true);
+      expect(v(t, false)).toBe('swap');
+      expect(v(t, true)).toBe('swap');
+    }
+  });
+
+  it('the SAME verbs in a non-graph context are NOT swapped (preserved, monitored)', () => {
+    // The non-graph PP guard still applies to the new verbs, exactly as for the
+    // existing ones — "in the report" / "for the slides" is not a graph edit.
+    for (const t of ['I revised the factor in the report.', 'I reworked the option for the slides.']) {
+      expect(containsStructuralSuccessClaim(t)).toBe(false);
+      expect(v(t, false)).toBe('monitor'); // broad verb, no intent → observed, not swapped
+    }
+  });
+
+  it('user-intent detector recognises revise/rework on a structural noun (parity with rewire)', () => {
+    expect(mentionsStructuralEditRequest('revise the option')).toBe(true);
+    expect(mentionsStructuralEditRequest('rework the churn factor')).toBe(true);
+    expect(mentionsStructuralEditRequest('rewire the edge between the nodes')).toBe(true);
+    // …but NOT on a non-graph noun.
+    expect(mentionsStructuralEditRequest('revise the report')).toBe(false);
+    expect(mentionsStructuralEditRequest('rework the presentation')).toBe(false);
+  });
+});

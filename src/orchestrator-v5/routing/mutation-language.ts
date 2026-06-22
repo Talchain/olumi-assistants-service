@@ -93,15 +93,30 @@ const NON_GRAPH_CONTEXT =
 /** "<graph|model>['s] <non-graph word>" compound — "the model documentation",
  *  "the model's documentation" (review round 8: possessive form). */
 const NON_GRAPH_COMPOUND = `(?!(?:${APOS}s)?\\s+${NON_GRAPH_CONTEXT}\\b)`;
+/** A GRAPH destination — "to/in/into/onto the model/graph/goal/factor/option/…".
+ *  (Deliberately NOT "for"/"on": "for the model review" must not read as a graph
+ *  anchor.) When present, the claim IS a graph edit even if a non-graph PURPOSE
+ *  also appears ("add the Pricing option to your model for the presentation",
+ *  where "for the presentation" would otherwise exclude it) — review round 9. */
+const GRAPH_DEST =
+  '(?:to|in|into|onto)\\s+(?:the\\s+|your\\s+|my\\s+|our\\s+|this\\s+|that\\s+|a\\s+|an\\s+)?(?:model|graph|diagram|map|decision\\s+(?:model|graph)|goal|goals|option|options|factor|factors|node|nodes|edge|edges|driver|drivers|constraint|constraints)\\b';
 /** "<noun> … to/in/for [the] <non-graph word>" ANYWHERE in the clause — e.g.
  *  "an option to the presentation", "an option called \"Draft\" to the
- *  presentation" (review round 8: qualifiers between the noun and the PP). */
-const NON_GRAPH_PP = `(?![^.?!]*\\b(?:to|in|for|on|into|onto)\\s+(?:the\\s+|a\\s+|an\\s+|my\\s+|our\\s+|your\\s+|this\\s+|that\\s+)?${NON_GRAPH_CONTEXT}\\b)`;
+ *  presentation". A GRAPH destination anywhere in the clause OVERRIDES the
+ *  exclusion (graph edit with a presentation purpose still enforces). */
+const NON_GRAPH_PP = `(?:(?=[^.?!]*\\b${GRAPH_DEST})|(?![^.?!]*\\b(?:to|in|for|on|into|onto)\\s+(?:the\\s+|a\\s+|an\\s+|my\\s+|our\\s+|your\\s+|this\\s+|that\\s+)?${NON_GRAPH_CONTEXT}\\b))`;
+/** Shared passive participle list — kept identical for structural and ambiguous-
+ *  edge passives so they cannot drift (review round 9). */
+const PASSIVE_DONE =
+  '(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|introduced|incorporated|included|changed|updated|modified|edited|rewired|revised|reworked|adjusted|put\\s+in\\s+place|in\\s+place)';
+/** Shared first-person edit-verb list (active, any inflection) for edge claims. */
+const EDGE_EDIT_VERB =
+  '(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|rewir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|remov(?:e|ed|ing)|delet(?:e|ed|ing)|revis(?:e|ed|ing)|rework(?:s|ed|ing)?|adjust(?:s|ed|ing)?|drew|draw(?:ing)?)';
 
 const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   // Future commitment: "I'll add … <structural noun>".
   new RegExp(
-    `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m about to| am about to)\\s+(?:go ahead and\\s+)?(?:add|set|change|update|remove|connect|create|wire|adjust|modify|link|delete|insert)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m about to| am about to)\\s+(?:go ahead and\\s+)?(?:add|set|change|update|remove|connect|create|wire|rewire|adjust|modify|revise|rework|link|delete|insert)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // "let me add … <structural noun>".
@@ -111,17 +126,17 @@ const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   ),
   // In-progress: "I'm adding … <structural noun>".
   new RegExp(
-    `\\bI(?:${APOS}m| am)\\s+(?:adding|setting|changing|updating|removing|connecting|creating|wiring|adjusting|linking|deleting|inserting)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI(?:${APOS}m| am)\\s+(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|linking|deleting|inserting)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Present-perfect completion: "I've added … <structural noun>", "I've set up a connection".
   new RegExp(
-    `\\bI(?:${APOS}ve| have)\\s+(?:added|set|set up|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI(?:${APOS}ve| have)\\s+(?:added|set|set up|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|adjusted|linked|deleted|inserted|edited|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Simple-past completion: "I added … <structural noun>", "I set up a connection".
   new RegExp(
-    `\\bI\\s+(?:added|created|connected|updated|removed|changed|wired|modified|adjusted|linked|deleted|inserted|edited|set up|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI\\s+(?:added|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|adjusted|linked|deleted|inserted|edited|set up|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Direct-object graph/model edit: "I updated the graph", "I changed the model".
@@ -170,7 +185,7 @@ const BROAD_STRUCTURAL_CLAIM_PATTERNS: readonly RegExp[] = [
   // add a factor if …", "I'd add another option if you wanted") is not a success
   // claim; it falls to monitor via containsMutationLanguage, never a swap.
   new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am| just| already)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+|now\\s+)?(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|remov(?:e|ed|ing)|delet(?:e|ed|ing)|drew|draw(?:ing)?)\\b`,
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am| just| already)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+|now\\s+)?(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|rewir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|revis(?:e|ed|ing)|rework(?:s|ed|ing)?|remov(?:e|ed|ing)|delet(?:e|ed|ing)|drew|draw(?:ing)?)\\b`,
     'i',
   ),
   // Actorless state-now success assertion ("your model now includes/has …").
@@ -190,7 +205,7 @@ const BROAD_STRUCTURAL_CLAIM_PATTERNS: readonly RegExp[] = [
   // only swaps under structural-edit intent, so non-graph passives ("the note
   // has been added") never match.
   new RegExp(
-    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${STRUCTURAL_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|introduced|incorporated|included|changed|updated|modified|edited|rewired|revised|reworked|adjusted|put\\s+in\\s+place|in\\s+place)\\b`,
+    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${STRUCTURAL_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+${PASSIVE_DONE}\\b`,
     'i',
   ),
 ];
@@ -202,23 +217,29 @@ export function containsBroadStructuralClaimLanguage(text: string): boolean {
 }
 
 /**
- * MONITOR-ONLY ambiguous-edge detector (review round 8). Edge nouns
- * (link/connection/relationship/dependency) are not enforced (no text
- * discriminator — "between Alice and Bob"), but a success-shaped edge claim must
- * still produce candidate telemetry while enforcement is deferred to #289. This
- * catches the PASSIVE edge claims the broad detector misses ("the relationship
- * has been changed", "the connection is now in place"); first-person edge claims
- * ("I established a relationship") are already covered by the broad detector.
- * This NEVER feeds the swap path.
+ * MONITOR-ONLY ambiguous-edge detector. Edge nouns (link/connection/
+ * relationship/dependency) are not enforced (no text discriminator — "between
+ * Alice and Bob"), but a success-shaped edge claim must still produce candidate
+ * telemetry while enforcement is deferred to #289. Covers BOTH passive ("the
+ * relationship has been changed/rewired/revised") and first-person active ("I
+ * rewired the relationship", "I revised the connection") forms — using the same
+ * shared verb/participle lists as the enforcing patterns so coverage cannot
+ * drift (review round 9). NEVER feeds the swap path.
  */
 const AMBIGUOUS_EDGE_CLAIM_PATTERNS: readonly RegExp[] = [
+  // Passive: "the relationship has been changed", "a connection was revised".
   new RegExp(
-    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${EDGE_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|changed|updated|modified|put\\s+in\\s+place|in\\s+place)\\b`,
+    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${EDGE_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+${PASSIVE_DONE}\\b`,
+    'i',
+  ),
+  // First-person active: "I rewired the relationship", "I revised the connection".
+  new RegExp(
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+)?${EDGE_EDIT_VERB}\\b[^.!?]*\\b${EDGE_NOUN}\\b`,
     'i',
   ),
 ];
 
-/** Monitor-only: a success-shaped PASSIVE claim about an ambiguous edge noun. */
+/** Monitor-only: a success-shaped (passive or first-person) ambiguous-edge claim. */
 export function looksLikeAmbiguousEdgeClaim(text: string): boolean {
   if (typeof text !== 'string' || text.length === 0) return false;
   return AMBIGUOUS_EDGE_CLAIM_PATTERNS.some((p) => p.test(text));
@@ -238,7 +259,7 @@ const STRUCTURAL_EDIT_REQUEST_PATTERNS: readonly RegExp[] = [
   // (link/connection/relationship/dependency) are NOT enforced (deferred to
   // #289); the non-graph PP guard also excludes "an option to the presentation".
   new RegExp(
-    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|revis(?:e|es|ing|ed)|rework(?:s|ing|ed)?|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // "a new <structural noun>" (with the non-graph guard so "a new option to the
