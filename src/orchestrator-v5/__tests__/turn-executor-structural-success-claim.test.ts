@@ -485,6 +485,29 @@ describe('Codex round-5 — preserved (not swapped)', () => {
     expect(response.assistant_text).toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(1);
   });
+
+  // Codex round-15 blocker 1 — em-dash must not detach a condition from a future
+  // action; the offer is preserved.
+  it('em-dash conditional offer ("I\'ll add a factor — if the team approves") → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Could you add a factor?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1f'),
+      'req-emdash-conditional',
+      { routingAdapter: mockRoutingAdapter("I'll add a factor — if the team approves.") },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  // Codex round-15 blocker 2 — progressive conditional offer is preserved.
+  it('progressive conditional offer ("I\'m adding a factor if the team approves") → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Could you add a factor?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa20'),
+      'req-progressive-conditional',
+      { routingAdapter: mockRoutingAdapter("I'm adding a factor if the team approves.") },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

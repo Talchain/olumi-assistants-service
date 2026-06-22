@@ -350,10 +350,12 @@ describe('classifyStructuralClaim — PRECISION-FIRST honesty decision (final co
   });
 
   // Unconditional future commitments separated from a sibling conditional offer
-  // by a dash / semicolon / coordinator still swap.
-  it('an unconditional commitment swaps when separated from a sibling offer', () => {
+  // by a semicolon / coordinator still swap. (Em-dash and colon are deliberately
+  // NOT proposition boundaries — see "condition/action attachment" below — so a
+  // future+future em-dash pair is monitored, not split; that is the accepted
+  // trade-off of keeping conditions attached and is not a required swap control.)
+  it('an unconditional commitment swaps when separated by a semicolon / coordinator', () => {
     for (const t of [
-      "I'll add a factor — I'll explain if you want.",
       "I'll add a factor; I'll explain if you want.",
       "I'll add a factor, and I'll explain if you want.",
     ]) {
@@ -365,6 +367,39 @@ describe('classifyStructuralClaim — PRECISION-FIRST honesty decision (final co
   it('verb / noun coordination is not over-split (still swaps)', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: "I'll add or remove an option." }).verdict).toBe('swap');
     expect(classifyStructuralClaim({ ...base, assistantText: 'I added a risk and reward factor.' }).verdict).toBe('swap');
+  });
+
+  // Codex round-15 blocker 1 — an em-dash / colon must NOT detach a condition from
+  // the future structural action it governs (these are conditional offers → preserve).
+  it('em-dash / colon do not detach a condition from a future action → preserve', () => {
+    for (const t of [
+      'If the team approves — I\'ll add a factor.',
+      'I\'ll add a factor — if the team approves.',
+      'If the team approves: I\'ll add a factor.',
+      'I\'ll add a factor: if the team approves.',
+    ]) {
+      expect(containsStructuralSuccessClaim(t)).toBe(false);
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
+    }
+  });
+
+  // Codex round-15 blocker 2 — PROGRESSIVE forms are commitment/offer-class, NOT
+  // condition-proof completions: a condition-governed progressive must preserve.
+  it('progressive conditional forms → preserve (not condition-proof completions)', () => {
+    for (const t of [
+      'I\'m adding a factor if the team approves.',
+      'If the team approves, I\'m updating the model.',
+      'I\'m reworking the model when approval comes through.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
+    }
+  });
+
+  // …but an UNCONDITIONAL progressive still swaps (existing intended behaviour).
+  it('unconditional progressive forms still swap', () => {
+    for (const t of ['I\'m adding the option now.', 'I\'m updating the model.', 'I\'m reworking the factors.']) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('swap');
+    }
   });
 
   it('tightly-bound completion claims still swap (E1 protection intact)', () => {

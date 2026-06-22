@@ -5214,14 +5214,17 @@ export async function runTurnExecutor(
     // committed mutation. It runs BEFORE proposal-capture/commit so the swapped
     // text is the single source for every downstream surface.
     //
-    // Two-layer decision (classifyStructuralClaim):
-    //   • high-confidence first-person + structural-noun claim → swap always;
-    //   • broad structural-success language (noun-less edges / verb synonyms /
-    //     actorless "model now includes…") → swap ONLY when the USER's turn
-    //     requested a structural edit (mentionsStructuralEditRequest); otherwise
-    //     monitored, never swapped — so idioms/people/read-outs/non-graph prose
-    //     ("connected the dots", "Alice with Bob", "model now has four options",
-    //     "add a note to the model documentation") are NOT false-declined.
+    // PRECISION-FIRST decision (classifyStructuralClaim): the ONLY swap trigger is
+    // a tightly-bound, unambiguous first-person structural claim — a past/perfect
+    // COMPLETION ("I added a factor", "I updated the model") or an UNCONDITIONAL
+    // future/in-progress COMMITMENT ("I'll add a factor", "I'm adding a node").
+    // Everything else is MONITOR-ONLY telemetry, never swapped: broad / noun-less /
+    // passive / actorless language, ambiguous edges, and CONDITIONAL offers
+    // ("I'll add a factor if you approve") — so idioms/people/read-outs/non-graph
+    // prose and conditional offers are NOT false-declined. Structural-edit INTENT
+    // is computed below and passed as telemetry context but does NOT drive the
+    // swap (the intent-gated broad arm was removed); recall for the monitored
+    // residual is owned by the durable follow-ups #288/#289.
     {
       const structuralEditIntent = mentionsStructuralEditRequest(payload.message);
       const decision = classifyStructuralClaim({

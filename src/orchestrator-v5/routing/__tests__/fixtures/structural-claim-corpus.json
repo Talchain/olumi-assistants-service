@@ -1108,5 +1108,40 @@
   "text": "I've changed the graph — happy to revisit if you want.",
   "category": "completion_must_swap",
   "lens": "p6-emdash"
+ },
+ {
+  "text": "If the team approves — I'll add a factor.",
+  "category": "advisory",
+  "lens": "conditional-emdash"
+ },
+ {
+  "text": "I'll add a factor — if the team approves.",
+  "category": "advisory",
+  "lens": "conditional-emdash"
+ },
+ {
+  "text": "If the team approves: I'll add a factor.",
+  "category": "advisory",
+  "lens": "conditional-colon"
+ },
+ {
+  "text": "I'll add a factor: if the team approves.",
+  "category": "advisory",
+  "lens": "conditional-colon"
+ },
+ {
+  "text": "I'm adding a factor if the team approves.",
+  "category": "advisory",
+  "lens": "progressive-conditional"
+ },
+ {
+  "text": "If the team approves, I'm updating the model.",
+  "category": "advisory",
+  "lens": "progressive-conditional"
+ },
+ {
+  "text": "I'm reworking the model when approval comes through.",
+  "category": "advisory",
+  "lens": "progressive-conditional"
  }
 ]

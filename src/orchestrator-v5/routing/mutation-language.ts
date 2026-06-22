@@ -155,29 +155,32 @@ const TIGHT_TO_NOUN =
   `\\s+(?:(?:a|an|the|your|our|my|its|their|this|that|another|one|some|new|each|several|two|three|four|\\d+)\\s+)?` +
   `(?:"[^"]*"\\s+|“[^”]*”\\s+|(?!${NP_BOUNDARY}\\b)[A-Za-z][\\w’'-]+\\s+){0,6}?`;
 
-/** Graph/model edit verbs, DONE forms (past / perfect / in-progress) → completion. */
-const GRAPH_VERB_DONE =
-  '(?:updated|updating|changed|changing|edited|editing|modified|modifying|revised|revising|rewired|rewiring|rebuilt|rebuilding|reworked|reworking|redrew|redrawn|redrawing|restructured|restructuring|reconfigured|reconfiguring|reorganized|reorganised|reorganizing|reorganising)';
+/** Graph/model edit verbs, PAST / PERFECT forms → condition-proof completion. */
+const GRAPH_VERB_PAST =
+  '(?:updated|changed|edited|modified|revised|rewired|rebuilt|reworked|redrew|redrawn|restructured|reconfigured|reorganized|reorganised)';
+/** Graph/model edit verbs, PROGRESSIVE (-ing) forms → commitment/offer class (a
+ *  progressive can be condition-governed, so it is NOT condition-proof). */
+const GRAPH_VERB_ING =
+  '(?:updating|changing|editing|modifying|revising|rewiring|rebuilding|reworking|redrawing|restructuring|reconfiguring|reorganizing|reorganising)';
 /** Graph/model edit verbs, BASE forms → future commitment. */
 const GRAPH_VERB_BASE =
   '(?:update|change|edit|modify|revise|rewire|rebuild|rework|redraw|restructure|reconfigure|reorganize|reorganise)';
 
 /**
- * COMPLETION claims — a structural change is asserted as DONE or in progress
- * ("I added a factor", "I've changed the option", "I'm adding a node", "I updated
- * the model"). A completion is NEVER conditional (you cannot conditionally have
+ * COMPLETION claims — a structural change is asserted as already DONE
+ * ("I added a factor", "I've changed the option", "I updated the model"). A
+ * PAST / PERFECT completion is NEVER conditional (you cannot conditionally have
  * already done something), so these swap whenever asserted — evaluated on the
  * whole text. Tight binding (TIGHT_TO_NOUN / direct graph-model object) keeps a
  * match from spanning a clause, so a completion is detected even when a later
  * conditional offer shares the sentence ("I added a factor, I'll explain if you
  * want." / "I added a factor — I'll add another if you confirm.").
+ *
+ * NB: PROGRESSIVE forms ("I'm adding …", "I'm reworking the model") are NOT here —
+ * a progressive CAN be condition-governed ("I'm adding a factor if you approve"),
+ * so it is commitment/offer-class (below), checked per proposition.
  */
 const COMPLETION_CLAIM_PATTERNS: readonly RegExp[] = [
-  // In-progress: "I'm adding … <structural noun>".
-  new RegExp(
-    `\\bI(?:${APOS}m| am)\\s+${LEAD_ADVERB}(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|modifying|editing|establishing|linking|deleting|inserting)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
-    'i',
-  ),
   // Present-perfect: "I've added … <structural noun>".
   new RegExp(
     `\\bI(?:${APOS}ve| have)\\s+${LEAD_ADVERB}(?:added|set|set up|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrawn|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|established)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
@@ -189,19 +192,20 @@ const COMPLETION_CLAIM_PATTERNS: readonly RegExp[] = [
     'i',
   ),
   // Direct-object graph/model completion: "I updated the graph", "I've changed the
-  // model", "I'm reworking the model". DONE verb forms + a non-future subject. The
+  // model". PAST/PERFECT verb forms + a non-future, non-progressive subject. The
   // compound guard excludes "changed the model documentation" / "the decision log".
   new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}m| am)?\\s+${LEAD_ADVERB}${GRAPH_VERB_DONE}\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
+    `\\bI(?:${APOS}ve| have)?\\s+${LEAD_ADVERB}${GRAPH_VERB_PAST}\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
     'i',
   ),
 ];
 
 /**
- * COMMITMENT claims — a FUTURE / offer to make a structural change ("I'll add a
- * factor", "let me add the option", "I'll update the model"). Unlike completions,
- * a commitment CAN be a conditional offer, so the gate swaps it only when it is
- * NOT governed by a condition (see containsStructuralSuccessClaim, per proposition).
+ * COMMITMENT / offer claims — a FUTURE or IN-PROGRESS structural change ("I'll add
+ * a factor", "let me add the option", "I'll update the model", "I'm adding a
+ * node", "I'm reworking the model"). Unlike a finished completion, these CAN be a
+ * conditional offer, so the gate swaps them only when the proposition is NOT
+ * governed by a condition (see containsStructuralSuccessClaim, per proposition).
  */
 const COMMITMENT_CLAIM_PATTERNS: readonly RegExp[] = [
   // Future commitment: "I'll add / I'm going to add … <structural noun>".
@@ -214,10 +218,21 @@ const COMMITMENT_CLAIM_PATTERNS: readonly RegExp[] = [
     `\\blet me\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
+  // In-progress: "I'm adding … <structural noun>" (progressive → offer-class).
+  new RegExp(
+    `\\bI(?:${APOS}m| am)\\s+${LEAD_ADVERB}(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|modifying|editing|establishing|linking|deleting|inserting)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    'i',
+  ),
   // Future direct-object graph/model edit: "I'll update the graph", "let me rework
   // the model". BASE verb forms + a future subject.
   new RegExp(
     `(?:${FUTURE_SUBJECT}|\\blet me)\\s+${LEAD_ADVERB}${GRAPH_VERB_BASE}\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
+    'i',
+  ),
+  // In-progress direct-object graph/model edit: "I'm updating the model", "I'm
+  // reworking the graph" (progressive → offer-class).
+  new RegExp(
+    `\\bI(?:${APOS}m| am)\\s+${LEAD_ADVERB}${GRAPH_VERB_ING}\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
     'i',
   ),
 ];
@@ -230,29 +245,35 @@ const CONDITION_CLAUSE =
   '\\b(?:once|after|when|if|unless|provided|assuming|pending|as soon as|should)\\s+' +
   '(?:the\\s+|a\\s+|an\\s+|your\\s+|our\\s+|their\\s+|this\\s+|that\\s+|my\\s+)?' +
   "(?:you|we|they|i|he|she|it|[A-Za-z][\\w'-]+)\\b";
-/** A first-person FUTURE / offer commitment ("I'll", "I will", "I can/could",
- *  "I'm going to", "let me"). A future commitment GOVERNED by a condition — in
- *  EITHER order ("once you confirm, I'll add a factor" / "I'll add a factor once
- *  you confirm") — is an OFFER, not a completed change, and must be preserved.
- *  Past completions ("I added a factor"; "when you asked, I added …") are NOT
- *  future commitments, so they are unaffected. */
-const FUTURE_COMMIT = `(?:\\bI(?:${APOS}ll| will| can| could| would|${APOS}m going to| am going to|${APOS}m gonna| am gonna|${APOS}m about to| am about to)|\\blet me)`;
+/** A first-person FUTURE / IN-PROGRESS offer commitment ("I'll", "I will",
+ *  "I can/could", "I'm going to", "I'm" [progressive], "let me"). A commitment
+ *  GOVERNED by a condition — in EITHER order ("once you confirm, I'll add a
+ *  factor" / "I'll add a factor once you confirm" / "I'm adding a factor if you
+ *  approve") — is an OFFER, not a completed change, and must be preserved. Past
+ *  completions ("I added a factor"; "when you asked, I added …") are NOT
+ *  commitments, so they are unaffected. */
+const FUTURE_COMMIT = `(?:\\bI(?:${APOS}ll| will| can| could| would|${APOS}m going to| am going to|${APOS}m gonna| am gonna|${APOS}m about to| am about to|${APOS}m| am)|\\blet me)`;
 const CONDITIONAL_OFFER = new RegExp(
   `${CONDITION_CLAUSE}[^.?!;]*${FUTURE_COMMIT}|${FUTURE_COMMIT}[^.?!;]*${CONDITION_CLAUSE}`,
   'i',
 );
 
-/** Proposition boundary for the COMMITMENT pass: sentence punctuation / `;` / `:`,
- *  an em/en dash or a spaced hyphen (clause dashes), OR a clause-level coordinator
- *  (and/but/or/…) that introduces a NEW clause — detected by a following
- *  clause-starter ("I", a condition conjunction, or a subject/article). This
- *  separates an unconditional commitment from a sibling conditional offer ("I'll
- *  add a factor, and I'll explain if you want" → two propositions), WITHOUT
- *  splitting verb/noun coordination ("add or remove an option", "risk and reward
- *  factor") or breaking a prefix condition from its claim ("once you confirm, I'll
- *  add a factor" — the comma there has no coordinator, so it is NOT a boundary). */
+/** Proposition boundary for the COMMITMENT pass: sentence punctuation / `;`, OR a
+ *  clause-level coordinator (and/but/or/…) that introduces a NEW clause — detected
+ *  by a following clause-starter ("I", a condition conjunction, or a subject/
+ *  article). This separates an unconditional commitment from a sibling conditional
+ *  offer ("I'll add a factor, and I'll explain if you want" → two propositions),
+ *  WITHOUT splitting verb/noun coordination ("add or remove an option") or
+ *  breaking a prefix condition from its claim ("once you confirm, I'll add a
+ *  factor" — the comma has no coordinator, so it is NOT a boundary).
+ *
+ *  NB: em/en dash, spaced hyphen and colon are DELIBERATELY NOT boundaries — they
+ *  must not detach a condition from the future action it governs ("If the team
+ *  approves — I'll add a factor", "I'll add a factor: if the team approves").
+ *  CONDITIONAL_OFFER spans them via `[^.?!;]*`, so such offers are preserved; and
+ *  completions joined across them still swap via the whole-text completion pass. */
 const PROPOSITION_SPLIT =
-  /[.?!;:]+(?=\s|$)|\s*[—–]\s*|\s+-\s+|,?\s+(?:and|but|or|nor|yet|so|then|plus)\s+(?=(?:I['’]|I\s|if\b|once\b|when\b|after\b|unless\b|provided\b|assuming\b|should\b|you\b|we\b|they\b|it\b|the\b|this\b|that\b|your\b|our\b|let me\b))/i;
+  /[.?!;]+(?=\s|$)|,?\s+(?:and|but|or|nor|yet|so|then|plus)\s+(?=(?:I['’]|I\s|if\b|once\b|when\b|after\b|unless\b|provided\b|assuming\b|should\b|you\b|we\b|they\b|it\b|the\b|this\b|that\b|your\b|our\b|let me\b))/i;
 
 /**
  * Narrow detector for the enforcing honesty gate (Brief 4). Returns true only
