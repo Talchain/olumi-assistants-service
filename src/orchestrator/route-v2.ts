@@ -2078,6 +2078,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       scenarioId: ingress.scenario_id,
       turnId: ingress.turn_id,
       ...(run.coachingDelivery ? { coachingDelivery: run.coachingDelivery } : {}),
+      // V5 M5 (read-only): thread the turn-executor's full canonical analysis
+      // state into the flag-gated `_context_summary` diagnostic. When present
+      // it supersedes the route's freshness-derived partial state (adds
+      // degraded detection + contradictions over the unified fact chain).
+      ...(run.canonicalState ? { canonicalState: run.canonicalState } : {}),
     });
   });
 }

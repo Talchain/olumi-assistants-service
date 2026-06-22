@@ -180,6 +180,10 @@ import {
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import {
+  selectCanonicalAnalysisState,
+  type CanonicalAnalysisState,
+} from './context/canonical-analysis-state.js';
 import { buildFlipProposalEmit, type FactorNodeInfo } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
@@ -286,6 +290,18 @@ export interface TurnExecutorRunResult {
    * every other path. Never reaches the wire body directly.
    */
   coachingDelivery?: V5CoachingDelivery;
+  /**
+   * V5 M5 (read-only / diagnostic). The unified canonical analysis state for
+   * this turn — freshness + structural readiness + degraded/contradiction
+   * verdict, composed over the current-turn handler facts + prior facts.
+   * Assembled post-dispatch (pure read-only, no side effects) and surfaced
+   * ONLY via the flag-gated, default-off `_context_summary` diagnostic at the
+   * route seam. NEVER feeds chips, prose, or any product logic. Present on the
+   * execute (tool/action) path; absent on paths that finalise before the
+   * post-dispatch assembly point — route-v2 then falls back to the
+   * freshness-derived partial state for the diagnostic surface.
+   */
+  canonicalState?: CanonicalAnalysisState;
   /**
    * V5 Conversation Context Reliability: the authoritative graph this turn
    * reasoned over (request graphState parsed, or the persisted-graph fallback).
@@ -598,6 +614,11 @@ export async function runTurnExecutor(
   // finalizeRun() surfaces; `routingFreshness` is internal-only.
   let routingFreshness: FreshnessDerivation | null = null;
   let freshness: FreshnessDerivation | null = null;
+  // V5 M5 (read-only / diagnostic): unified canonical analysis state, assembled
+  // post-dispatch from the SAME fact set + post-handler graph hash that
+  // `freshness` uses. Outer-let so `finalizeRun` can surface it on the run
+  // result; stays undefined until the post-dispatch assembly point.
+  let canonicalStateForRun: CanonicalAnalysisState | undefined;
   let proposedHandlerIdForOutcome: string | null = null;
   let currentAnalysisGraphHashForTurn: string | null = null;
   // P0 V5 golden-path repair (follow-up): hoisted into the function
@@ -4846,6 +4867,19 @@ export async function runTurnExecutor(
           current_turn_fact_count: handlerFactsForCommit.length,
         },
       );
+      // V5 M5 (read-only / diagnostic) — assemble the canonical analysis state
+      // from the SAME unified fact set and post-handler graph hash that
+      // `freshness` above derived from, plus this turn's structural readiness.
+      // Pure read-only: no dispatch, no control-flow, no mutation, no I/O. It
+      // is surfaced ONLY through the flag-gated (default-off) `_context_summary`
+      // diagnostic at the route seam — deliberately NOT passed to `generateChips`
+      // below (that would activate M2 chip behaviour, out of scope here).
+      canonicalStateForRun = selectCanonicalAnalysisState({
+        handlerFacts: handlerFactsForCommit,
+        priorFacts: context.prior_facts,
+        readiness: analysisReadyForTurn,
+        currentGraphHash: hashForPostHandlerFreshness,
+      });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop
@@ -5695,6 +5729,10 @@ export async function runTurnExecutor(
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),
       ...(coachingDelivery ? { coachingDelivery } : {}),
+      // V5 M5 read-only canonical state for the route's flag-gated
+      // `_context_summary` diagnostic. Absent on paths that finalise before
+      // the post-dispatch assembly (route-v2 falls back to the partial state).
+      ...(canonicalStateForRun ? { canonicalState: canonicalStateForRun } : {}),
       // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
       // so wire label resolution matches the durable-text scrub at commit.
       effectiveGraph: effectiveTurnGraph,
