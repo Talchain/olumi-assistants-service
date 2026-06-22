@@ -1,0 +1,118 @@
+{
+  "factor_sensitivity": [
+    { "factor_id": "fac_a", "factor_label": "Factor A", "influence_score": 0.42, "influence_rank": 1, "sensitivity_score": 0.38, "elasticity": 0.21, "direction": "increase", "importance_rank": 1, "value_of_information": 0.12, "confidence": 0.66, "confidence_source": "structural", "confidence_components": { "structural_certainty": 0.7, "sampling_stability": 0.62 }, "source": "isl", "flip_risk_category": "low", "attribution_stability": "stable", "elasticity_std": 0.04, "rank_flip_rate": 0.02, "stability_method": "bootstrap", "evpi_percentage_points": 1.5, "evpi_method": "monte_carlo", "range_derivation_source": "defaults" },
+    { "factor_id": "fac_b", "factor_label": "Factor B", "influence_score": 0.31, "influence_rank": 2, "sensitivity_score": 0.27, "elasticity": 0.15, "direction": "increase", "importance_rank": 2, "value_of_information": 0.09, "confidence": 0.58, "confidence_source": "structural", "confidence_components": { "structural_certainty": 0.6, "sampling_stability": 0.55 }, "source": "isl", "flip_risk_category": "low", "attribution_stability": "stable", "elasticity_std": 0.05, "rank_flip_rate": 0.03, "stability_method": "bootstrap", "evpi_percentage_points": 1.1, "evpi_method": "monte_carlo", "range_derivation_source": "defaults" },
+    { "factor_id": "fac_c", "factor_label": "Factor C", "influence_score": 0.22, "influence_rank": 3, "sensitivity_score": 0.19, "elasticity": 0.1, "direction": "decrease", "importance_rank": 3, "value_of_information": 0.07, "confidence": 0.52, "confidence_source": "structural", "confidence_components": { "structural_certainty": 0.55, "sampling_stability": 0.5 }, "source": "isl", "flip_risk_category": "moderate", "attribution_stability": "moderate", "elasticity_std": 0.06, "rank_flip_rate": 0.05, "stability_method": "bootstrap", "evpi_percentage_points": 0.8, "evpi_method": "monte_carlo", "range_derivation_source": "defaults" },
+    { "factor_id": "fac_d", "factor_label": "Factor D", "influence_score": 0.14, "influence_rank": 4, "sensitivity_score": 0.12, "elasticity": 0.07, "direction": "increase", "importance_rank": 4, "value_of_information": 0.05, "confidence": 0.48, "confidence_source": "structural", "confidence_components": { "structural_certainty": 0.5, "sampling_stability": 0.46 }, "source": "isl", "flip_risk_category": "moderate", "attribution_stability": "moderate", "elasticity_std": 0.07, "rank_flip_rate": 0.06, "stability_method": "bootstrap", "evpi_percentage_points": 0.6, "evpi_method": "monte_carlo", "range_derivation_source": "defaults" },
+    { "factor_id": "fac_e", "factor_label": "Factor E", "influence_score": 0.09, "influence_rank": 5, "sensitivity_score": 0.08, "elasticity": 0.04, "direction": "decrease", "importance_rank": 5, "value_of_information": 0.03, "confidence": 0.44, "confidence_source": "structural", "confidence_components": { "structural_certainty": 0.46, "sampling_stability": 0.42 }, "source": "isl", "flip_risk_category": "high", "attribution_stability": "unstable", "elasticity_std": 0.08, "rank_flip_rate": 0.09, "stability_method": "bootstrap", "evpi_percentage_points": 0.4, "evpi_method": "monte_carlo", "range_derivation_source": "defaults" },
+    { "factor_id": "fac_f", "factor_label": "Factor F", "influence_score": 0.05, "influence_rank": 6, "sensitivity_score": 0.04, "elasticity": 0.02, "direction": "increase", "importance_rank": 6, "value_of_information": 0.01, "confidence": 0.4, "confidence_source": "structural", "confidence_components": { "structural_certainty": 0.42, "sampling_stability": 0.38 }, "source": "isl", "flip_risk_category": "high", "attribution_stability": "unstable", "elasticity_std": 0.09, "rank_flip_rate": 0.11, "stability_method": "bootstrap", "evpi_percentage_points": 0.2, "evpi_method": "monte_carlo", "range_derivation_source": "defaults" }
+  ],
+  "factor_stability": [
+    { "factor_id": "fac_a", "factor_label": "Factor A", "elasticity_std": 0.04, "attribution_stability": "stable", "rank_flip_rate": 0.02, "stability_method": "bootstrap" },
+    { "factor_id": "fac_b", "factor_label": "Factor B", "elasticity_std": 0.05, "attribution_stability": "stable", "rank_flip_rate": 0.03, "stability_method": "bootstrap" },
+    { "factor_id": "fac_c", "factor_label": "Factor C", "elasticity_std": 0.06, "attribution_stability": "moderate", "rank_flip_rate": 0.05, "stability_method": "bootstrap" },
+    { "factor_id": "fac_d", "factor_label": "Factor D", "elasticity_std": 0.07, "attribution_stability": "moderate", "rank_flip_rate": 0.06, "stability_method": "bootstrap" },
+    { "factor_id": "fac_e", "factor_label": "Factor E", "elasticity_std": 0.08, "attribution_stability": "unstable", "rank_flip_rate": 0.09, "stability_method": "bootstrap" },
+    { "factor_id": "fac_f", "factor_label": "Factor F", "elasticity_std": 0.09, "attribution_stability": "unstable", "rank_flip_rate": 0.11, "stability_method": "bootstrap" }
+  ],
+  "edge_sensitivity": [],
+  "edge_e_values": [],
+  "stability_thresholds": { "high_moderate_boundary": 0.1, "moderate_low_boundary": 0.3, "version": "v1.0-operational-defaults", "provisional": true },
+  "robustness": {
+    "fragile_edges": [
+      { "edge_id": "edge_1", "from_id": "fac_a", "to_id": "out_x", "switch_probability": 0.18, "marginal_switch_probability": 0.06, "alternative_winner_id": "opt_b", "from_label": "Factor A", "to_label": "Outcome", "severity": "low", "alternative_winner_label": "Option B" },
+      { "edge_id": "edge_2", "from_id": "fac_b", "to_id": "out_x", "switch_probability": 0.16, "marginal_switch_probability": 0.05, "alternative_winner_id": "opt_b", "from_label": "Factor B", "to_label": "Outcome", "severity": "low", "alternative_winner_label": "Option B" },
+      { "edge_id": "edge_3", "from_id": "fac_c", "to_id": "out_x", "switch_probability": 0.14, "marginal_switch_probability": 0.04, "alternative_winner_id": "opt_c", "from_label": "Factor C", "to_label": "Outcome", "severity": "low", "alternative_winner_label": "Option C" },
+      { "edge_id": "edge_4", "from_id": "fac_d", "to_id": "out_x", "switch_probability": 0.12, "marginal_switch_probability": 0.04, "alternative_winner_id": "opt_c", "from_label": "Factor D", "to_label": "Outcome", "severity": "moderate", "alternative_winner_label": "Option C" },
+      { "edge_id": "edge_5", "from_id": "fac_e", "to_id": "out_x", "switch_probability": 0.1, "marginal_switch_probability": 0.03, "alternative_winner_id": "opt_b", "from_label": "Factor E", "to_label": "Outcome", "severity": "moderate", "alternative_winner_label": "Option B" },
+      { "edge_id": "edge_6", "from_id": "fac_f", "to_id": "out_x", "switch_probability": 0.09, "marginal_switch_probability": 0.03, "alternative_winner_id": "opt_d", "from_label": "Factor F", "to_label": "Outcome", "severity": "moderate", "alternative_winner_label": "Option D" },
+      { "edge_id": "edge_7", "from_id": "fac_a", "to_id": "fac_b", "switch_probability": 0.07, "marginal_switch_probability": 0.02, "alternative_winner_id": "opt_b", "from_label": "Factor A", "to_label": "Factor B", "severity": "high", "alternative_winner_label": "Option B" },
+      { "edge_id": "edge_8", "from_id": "fac_b", "to_id": "fac_c", "switch_probability": 0.05, "marginal_switch_probability": 0.02, "alternative_winner_id": "opt_c", "from_label": "Factor B", "to_label": "Factor C", "severity": "high", "alternative_winner_label": "Option C" },
+      { "edge_id": "edge_9", "from_id": "fac_c", "to_id": "fac_d", "switch_probability": 0.03, "marginal_switch_probability": 0.01, "alternative_winner_id": "opt_d", "from_label": "Factor C", "to_label": "Factor D", "severity": "high", "alternative_winner_label": "Option D" }
+    ],
+    "robust_edges": [],
+    "recommendation_stability": 0.81,
+    "is_robust": true,
+    "level": "moderate",
+    "confidence": 0.72,
+    "recommended_option_id": "opt_a",
+    "recommended_option_label": "Option A",
+    "near_tie": { "is_tie": false, "top_option_id": "opt_a", "second_option_id": "opt_c", "tied_option_ids": ["opt_a"], "gap": 0.494, "threshold": 0.1 }
+  },
+  "robustness_synthesis": null,
+  "robustness_status": "computed",
+  "option_comparison": [
+    { "option_id": "opt_a", "option_label": "Option A", "id": "opt_a", "label": "Option A", "outcome": { "mean": 0.72, "std": 0.11, "p10": 0.55, "p50": 0.73, "p90": 0.88, "n_samples": 1000, "n_valid_samples": 1000, "validity_ratio": 1.0 }, "status": "computed", "win_probability": 0.72 },
+    { "option_id": "opt_b", "option_label": "Option B", "id": "opt_b", "label": "Option B", "outcome": { "mean": 0.41, "std": 0.13, "p10": 0.22, "p50": 0.4, "p90": 0.61, "n_samples": 1000, "n_valid_samples": 1000, "validity_ratio": 1.0 }, "status": "computed", "win_probability": 0.05 },
+    { "option_id": "opt_c", "option_label": "Option C", "id": "opt_c", "label": "Option C", "outcome": { "mean": 0.55, "std": 0.12, "p10": 0.36, "p50": 0.55, "p90": 0.74, "n_samples": 1000, "n_valid_samples": 1000, "validity_ratio": 1.0 }, "status": "computed", "win_probability": 0.12 },
+    { "option_id": "opt_d", "option_label": "Option D", "id": "opt_d", "label": "Option D", "outcome": { "mean": 0.48, "std": 0.14, "p10": 0.28, "p50": 0.47, "p90": 0.69, "n_samples": 1000, "n_valid_samples": 1000, "validity_ratio": 1.0 }, "status": "computed", "win_probability": 0.11 }
+  ],
+  "option_comparison_status": "computed",
+  "conditional_winners": [],
+  "flip_thresholds": [
+    { "factor_id": "fac_a", "factor_label": "Factor A", "current_value": 0.5, "flip_value": null, "direction": "increase", "unit": "ratio", "alternative_winner_id": null, "alternative_winner_label": null, "flip_reason": "no_effect_within_bounds", "iterations_used": 12 },
+    { "factor_id": "fac_b", "factor_label": "Factor B", "current_value": 0.3, "flip_value": null, "direction": "decrease", "unit": "ratio", "alternative_winner_id": null, "alternative_winner_label": null, "flip_reason": "no_effect_within_bounds", "iterations_used": 12 },
+    { "factor_id": "fac_c", "factor_label": "Factor C", "current_value": 0.2, "flip_value": null, "direction": "increase", "unit": "ratio", "alternative_winner_id": null, "alternative_winner_label": null, "flip_reason": "no_effect_within_bounds", "iterations_used": 12 }
+  ],
+  "identifiability": { "status": "identifiable", "method": "backdoor", "pairs_checked": 3, "pairs_identifiable": 3 },
+  "confidence_tier": "needs_work",
+  "decision_quality": null,
+  "inference_warnings": [],
+  "m1_coaching": {
+    "story_headlines": { "primary": "A generic headline about the leading option.", "secondary": "A generic supporting headline." },
+    "evidence_gaps": [
+      { "factor_id": "fac_c", "factor_label": "Factor C", "voi_score": 0.07, "confidence": 0.52, "confidence_display": "moderate", "confidence_defaulted": false, "influence": 0.22, "influence_display": "moderate", "suggestion": "Gather more evidence for this factor.", "notes": [], "evpi_percentage_points": 0.8, "evpi_method": "monte_carlo" },
+      { "factor_id": "fac_d", "factor_label": "Factor D", "voi_score": 0.05, "confidence": 0.48, "confidence_display": "low", "confidence_defaulted": false, "influence": 0.14, "influence_display": "low", "suggestion": "Gather more evidence for this factor.", "notes": [], "evpi_percentage_points": 0.6, "evpi_method": "monte_carlo" },
+      { "factor_id": "fac_e", "factor_label": "Factor E", "voi_score": 0.03, "confidence": 0.44, "confidence_display": "low", "confidence_defaulted": false, "influence": 0.09, "influence_display": "low", "suggestion": "Gather more evidence for this factor.", "notes": [], "evpi_percentage_points": 0.4, "evpi_method": "monte_carlo" }
+    ],
+    "model_critiques": [],
+    "next_actions": [
+      { "priority": 1, "action": "Review the leading option.", "rationale": "A generic rationale.", "target_type": "option", "target_id": "opt_a", "target_label": "Option A" }
+    ],
+    "readiness": "needs_evidence",
+    "headline_type": "leading_option",
+    "top_fragile_edge": { "edge_id": "edge_1", "switch_probability": 0.18 },
+    "assumptions_ledger": { "assumptions": [] },
+    "thresholds_used": { "high_moderate_boundary": 0.1, "moderate_low_boundary": 0.3 },
+    "readiness_signals": { "has_options": true, "has_factors": true },
+    "key_drivers": [
+      { "factor_id": "fac_a", "factor_label": "Factor A", "influence_score": 0.42, "normalised_impact": 1.0, "impact_display": "high", "direction": "increase", "rank": 1 }
+    ],
+    "executive_summary": { "headline": "A generic executive summary.", "detail": "Generic detail." },
+    "coaching_version": "m1-v1",
+    "computed_at": "2026-01-01T00:00:00.000Z"
+  },
+  "m1_review": null,
+  "improvement_guidance": null,
+  "critiques": [
+    { "id": "00000000-0000-4000-8000-000000000000", "code": "OPTION_NODE_FILTERED", "severity": "info", "message": "An option node was filtered before analysis.", "source": "ISL", "blocks_analysis": false, "user_message": "Some inputs were not used in this analysis." },
+    { "id": "00000000-0000-4000-8000-000000000000", "code": "OPTION_NODE_FILTERED", "severity": "info", "message": "An option node was filtered before analysis.", "source": "ISL", "blocks_analysis": false, "user_message": "Some inputs were not used in this analysis." },
+    { "id": "00000000-0000-4000-8000-000000000000", "code": "OPTION_NODE_FILTERED", "severity": "info", "message": "An option node was filtered before analysis.", "source": "ISL", "blocks_analysis": false, "user_message": "Some inputs were not used in this analysis." },
+    { "id": "00000000-0000-4000-8000-000000000000", "code": "OPTION_NODE_FILTERED", "severity": "info", "message": "An option node was filtered before analysis.", "source": "ISL", "blocks_analysis": false, "user_message": "Some inputs were not used in this analysis." }
+  ],
+  "review_cards": [
+    { "card_id": "card_1", "card_type": "evidence", "review_phase": "post_analysis", "what": "A generic review finding.", "why": "A generic rationale for the finding.", "supporting_refs": [], "priority": 1, "priority_band": "medium", "suggested_action": "Review the inputs.", "provenance": { "source": "cee" }, "items": [] }
+  ],
+  "review_status": "skipped",
+  "review_skip_reason": "BRIEF_MISSING",
+  "decision_brief": { "brief_id": "00000000-0000-4000-8000-000000000000", "version": "v15", "graph_hash": "0000000000000000", "seed": 12345, "created_at": "2026-01-01T00:00:00.000Z", "headline": "A generic decision-brief headline.", "options": [{ "id": "opt_a", "label": "Option A" }, { "id": "opt_b", "label": "Option B" }], "top_drivers": [], "key_assumptions": [], "what_would_change": [], "robustness": "moderate", "warnings": [], "lineage": {} },
+  "insights": null,
+  "rationale": null,
+  "analysis_status": "computed",
+  "drivers_status": "computed",
+  "isl_analysis_status": "computed",
+  "cee_status": "skipped",
+  "fact_objects": [
+    { "content_hash": "0000000000000000", "data": {}, "fact_id": "00000000-0000-4000-8000-000000000000", "fact_key": { "kind": "analysis" }, "fact_type": "run_analysis", "lineage": {} },
+    { "content_hash": "0000000000000000", "data": {}, "fact_id": "00000000-0000-4000-8000-000000000000", "fact_key": { "kind": "analysis" }, "fact_type": "run_analysis", "lineage": {} }
+  ],
+  "downstream_calls": {},
+  "processing_time_ms": 0,
+  "request_id": "00000000-0000-4000-8000-000000000000",
+  "response_hash": "0000000000000000",
+  "request_schema_version": "v3",
+  "endpoint_version": "v2/run",
+  "preflight_version": "2025-12-26",
+  "_meta": { "source_path": "redacted", "repairs_applied": [], "request_id": "00000000-0000-4000-8000-000000000000", "plot_build": "0000000", "hash_version": 2, "response_hash": "0000000000000000", "builds": {}, "payloads": {}, "request_id_chain": { "ui": "00000000-0000-4000-8000-000000000000", "plot": "00000000-0000-4000-8000-000000000000", "isl": "00000000-0000-4000-8000-000000000000", "isl_echoed": "00000000-0000-4000-8000-000000000000" }, "range_derivation_sources": {}, "feature_flags_snapshot": {}, "decision_brief_assembled": true, "review_cards_count": 1, "evidence_priority_card_present": false },
+  "meta": { "seed_used": "12345", "seed_source": "fixed", "n_samples": 1000, "detail_level": "standard", "latency_ms": 0, "normalization_ms": 0, "validation_ms": 0, "isl_ms": 0, "cee_ms": 0, "build": "0000000", "computed_at": "2026-01-01T00:00:00.000Z", "request_id_chain": {}, "feature_flags": {} }
+}
