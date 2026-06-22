@@ -87,8 +87,10 @@ export function summariseGraphCounts(
   let options = 0;
   let goals = 0;
   for (const node of nodes) {
-    if (node.kind === 'option') options += 1;
-    else if (node.kind === 'goal') goals += 1;
+    // Optional chaining: a null/undefined element in the array must not crash
+    // the count (graph content reaches here as permissive passthrough).
+    if (node?.kind === 'option') options += 1;
+    else if (node?.kind === 'goal') goals += 1;
   }
   return {
     nodes: nodes.length,

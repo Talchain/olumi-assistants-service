@@ -173,7 +173,10 @@ const KNOWN_DEGRADED_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 function normaliseDegradedStatus(raw: string | null): string | null {
-  if (raw === null) return null;
+  // Defensive type guard: the declared input is `string | null`, but this
+  // value originates from an upstream PLoT status read — guard against any
+  // non-string slipping through an `as` cast so `.trim()` can never throw.
+  if (typeof raw !== 'string') return null;
   const trimmed = raw.trim().toLowerCase();
   if (trimmed === '') return null;
   return KNOWN_DEGRADED_STATUSES.has(trimmed) ? trimmed : 'other';

@@ -180,6 +180,10 @@ import {
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import {
+  selectCanonicalAnalysisState,
+  type CanonicalAnalysisState,
+} from './context/canonical-analysis-state.js';
 import { buildFlipProposalEmit, type FactorNodeInfo } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
@@ -286,6 +290,18 @@ export interface TurnExecutorRunResult {
    * every other path. Never reaches the wire body directly.
    */
   coachingDelivery?: V5CoachingDelivery;
+  /**
+   * V5 M5 (read-only / diagnostic). The unified canonical analysis state for
+   * this turn — freshness + structural readiness + degraded/contradiction
+   * verdict, composed over the current-turn handler facts + prior facts.
+   * Assembled post-dispatch (pure read-only, no side effects) and surfaced
+   * ONLY via the flag-gated, default-off redacted context-summary diagnostic
+   * at the route seam. NEVER feeds chips, prose, or any product logic. Present on the
+   * execute (tool/action) path; absent on paths that finalise before the
+   * post-dispatch assembly point — route-v2 then falls back to the
+   * freshness-derived partial state for the diagnostic surface.
+   */
+  canonicalState?: CanonicalAnalysisState;
   /**
    * V5 Conversation Context Reliability: the authoritative graph this turn
    * reasoned over (request graphState parsed, or the persisted-graph fallback).
@@ -598,8 +614,23 @@ export async function runTurnExecutor(
   // finalizeRun() surfaces; `routingFreshness` is internal-only.
   let routingFreshness: FreshnessDerivation | null = null;
   let freshness: FreshnessDerivation | null = null;
+  // V5 M5 (read-only / diagnostic): unified canonical analysis state, assembled
+  // post-dispatch from the SAME fact set + post-handler graph hash that
+  // `freshness` uses. Outer-let so `finalizeRun` can surface it on the run
+  // result; stays undefined until the post-dispatch assembly point.
+  let canonicalStateForRun: CanonicalAnalysisState | undefined;
   let proposedHandlerIdForOutcome: string | null = null;
   let currentAnalysisGraphHashForTurn: string | null = null;
+  // V5 M5 (read-only / diagnostic): the RAW graph object the freshness hash was
+  // computed from, captured so the M5 canonical state derives its readiness
+  // from the SAME graph authority as its freshness — the persisted/canonical
+  // graph (under client lag, per the H3 stale-aware logic below), the request
+  // graph on cold-start, or the post-mutation graph on a mutation. This keeps
+  // the diagnostic internally consistent instead of pairing the persisted-graph
+  // hash with the request-derived `analysisReadyForTurn`. Null when there is no
+  // parseable authority (→ canonical readiness undefined). NOT used for any
+  // wire / chip behaviour — `analysisReadyForTurn` is left unchanged for that.
+  let canonicalReadinessGraphForRun: unknown = null;
   // P0 V5 golden-path repair (follow-up): hoisted into the function
   // scope so `buildTurnOutcome` (nested below) can read it. Set when a
   // handler outcome carries a non-null `mutated_graph`. Closes the
@@ -829,6 +860,7 @@ export async function runTurnExecutor(
         // Cold-start / first-draft path: no canonical state has been
         // persisted yet, so the request graph is the only signal
         // available. Hashing it is correct here.
+        canonicalReadinessGraphForRun = graphStateForTurn ?? null; // M5 readiness authority
         return computeAnalysisAffectingGraphHash(graphStateForTurn);
       }
       // EP2 (V5 Edit Safety Core), gated atomically with the run-time guard.
@@ -847,6 +879,11 @@ export async function runTurnExecutor(
       }
       const parsed = GraphStateIngressSchema.safeParse(graphForHash);
       if (parsed.success) {
+        // M5 readiness authority: derive canonical readiness from the SAME
+        // persisted/canonical graph this hash is computed from (not the
+        // request graph), so the diagnostic cannot pair this hash with a
+        // stale request-derived readiness under client lag.
+        canonicalReadinessGraphForRun = graphForHash;
         return computeAnalysisAffectingGraphHash(parsed.data);
       }
       // V5 stale-aware explain recovery (Codex round-3 P1): persisted
@@ -4826,6 +4863,12 @@ export async function runTurnExecutor(
             ? { goal_constraints: mutated.goal_constraints }
             : {}),
         };
+        // M5 readiness authority: on a mutation the freshness hash reflects the
+        // post-mutation graph, so canonical readiness must too. Use the handler's
+        // GraphV3 `mutated` projection (computeStructuralReadiness derives option
+        // count / goal presence from nodes-by-kind, so the GraphV3 shape is the
+        // right input — `merged` only restores the ingress shape for hashing).
+        canonicalReadinessGraphForRun = mutated;
         return computeAnalysisAffectingGraphHash(
           merged as GraphStateIngress | null | undefined,
         );
@@ -4846,6 +4889,49 @@ export async function runTurnExecutor(
           current_turn_fact_count: handlerFactsForCommit.length,
         },
       );
+      // V5 M5 (read-only / diagnostic) — assemble the canonical analysis state
+      // from the SAME unified fact set and post-handler graph hash that
+      // `freshness` above derived from. Pure read-only: no dispatch, no
+      // control-flow, no mutation, no I/O. Surfaced ONLY through the flag-gated
+      // (default-off) redacted context-summary diagnostic at the route seam —
+      // deliberately NOT passed to `generateChips` below (that would activate
+      // M2 chip behaviour, out of scope here).
+      //
+      // Graph-authority consistency: readiness here is derived from
+      // `canonicalReadinessGraphForRun` — the SAME graph the freshness hash was
+      // computed from — NOT the request-derived `analysisReadyForTurn`. Under
+      // client lag the freshness hash comes from the canonical PERSISTED graph
+      // (H3 stale-aware logic) while the request graph can be older; pairing
+      // that hash with request-derived readiness could report e.g. `ready`
+      // against a persisted graph that now needs mapping. Deriving readiness
+      // from the same authority keeps the diagnostic internally consistent.
+      // `undefined` when there is no parseable authority (persisted graph
+      // unrecoverable / unparseable, or no graph) → canonical status null, never
+      // a false `ready`. `analysisReadyForTurn` is left UNCHANGED for the wire /
+      // chip behaviour.
+      const canonicalReadinessForRun: typeof analysisReadyForTurn =
+        // Optimisation: on cold-start the readiness authority IS the request
+        // graph, for which `analysisReadyForTurn` already ran the identical
+        // GraphV3 parse + computeStructuralReadiness — reuse it instead of
+        // recomputing (avoids the redundant parse, including when the
+        // diagnostic flag is off). Otherwise (persisted/canonical graph under
+        // client lag, or the post-mutation graph) derive fresh from that
+        // authority; undefined when it cannot be parsed.
+        canonicalReadinessGraphForRun === graphStateForTurn
+          ? analysisReadyForTurn
+          : ((): typeof analysisReadyForTurn => {
+              if (canonicalReadinessGraphForRun == null) return undefined;
+              const parsedForReadiness = GraphV3.safeParse(canonicalReadinessGraphForRun);
+              return parsedForReadiness.success
+                ? computeStructuralReadiness(parsedForReadiness.data)
+                : undefined;
+            })();
+      canonicalStateForRun = selectCanonicalAnalysisState({
+        handlerFacts: handlerFactsForCommit,
+        priorFacts: context.prior_facts,
+        readiness: canonicalReadinessForRun,
+        currentGraphHash: hashForPostHandlerFreshness,
+      });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop
@@ -5695,6 +5781,10 @@ export async function runTurnExecutor(
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),
       ...(coachingDelivery ? { coachingDelivery } : {}),
+      // V5 M5 read-only canonical state for the route's flag-gated redacted
+      // context-summary diagnostic. Absent on paths that finalise before the
+      // post-dispatch assembly (route-v2 falls back to the partial state).
+      ...(canonicalStateForRun ? { canonicalState: canonicalStateForRun } : {}),
       // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
       // so wire label resolution matches the durable-text scrub at commit.
       effectiveGraph: effectiveTurnGraph,

@@ -115,6 +115,15 @@ describe('summariseGraphCounts', () => {
     };
     expect(summariseGraphCounts(graph)).toEqual({ nodes: 4, edges: 3, options: 2, goals: 1 });
   });
+
+  it('null/undefined elements in the nodes array do not crash (optional chaining)', () => {
+    const graph = {
+      nodes: [{ kind: 'goal' }, null, { kind: 'option' }, undefined, { kind: 'option' }],
+      edges: [{}],
+    } as unknown as Parameters<typeof summariseGraphCounts>[0];
+    // node count is the array length; null/undefined elements contribute no kind.
+    expect(summariseGraphCounts(graph)).toEqual({ nodes: 5, edges: 1, options: 2, goals: 1 });
+  });
 });
 
 describe('buildV5ContextSummary — redaction + honest nullability', () => {
