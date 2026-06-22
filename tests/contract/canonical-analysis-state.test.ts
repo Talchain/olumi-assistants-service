@@ -288,7 +288,24 @@ describe('selectCanonicalAnalysisState — contradictions (fail loud, no silent 
     });
     expect(state.contradictions).not.toContain('fact_status_success_but_degraded_newer');
     expect(state.usableForChips).toBe(true); // fresh + no contradiction
-    expect(state.degraded_fact_status).toBe('partial');
+    // The degraded fact is NOT provably newer than the success, so it is
+    // treated as superseded/historical → degraded_fact_status is null (the
+    // latest analysis is the success; there is no CURRENT degradation).
+    expect(state.degraded_fact_status).toBeNull();
+  });
+
+  it('degraded_fact_status is null when an older degraded fact is superseded by a newer success', () => {
+    // Explicit timestamps: success (t2) is newer than the degraded run (t1).
+    const degradedOlder = mkRunAnalysisFact({ status: 'failed', graph_hash_at_run: HASH_A, computed_at: '2026-04-30T01:00:00.000Z' });
+    const successNewer = mkRunAnalysisFact({ status: 'computed', graph_hash_at_run: HASH_A, computed_at: '2026-04-30T02:00:00.000Z' });
+    const state = selectCanonicalAnalysisState({
+      priorFacts: [successNewer, degradedOlder], // newest-first
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    expect(state.freshness).toBe('fresh');
+    expect(state.contradictions).not.toContain('fact_status_success_but_degraded_newer');
+    expect(state.degraded_fact_status).toBeNull(); // historical failure, not current
   });
 
   it('degraded_fact_status is normalised to a bounded token (unknown upstream PLoT status → other)', () => {

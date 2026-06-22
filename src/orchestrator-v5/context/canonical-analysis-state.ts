@@ -243,7 +243,12 @@ export interface CanonicalAnalysisState {
   readonly goal_node_id: string | null;
 
   // ── Degraded/failed observability ──
-  /** Non-null when the newest run_analysis fact was a non-success status. */
+  /** Status of the CURRENT degradation only: the latest run_analysis fact
+   *  when it is a non-success that is NOT superseded by a newer success
+   *  (i.e. no success exists, OR the degraded run is newer than the selected
+   *  success). Null otherwise — an older failure sitting behind a newer
+   *  success is historical, not current, so the field never reads as
+   *  "currently degraded" when the most recent run actually succeeded. */
   readonly degraded_fact_status: string | null;
 
   // ── Contradictions (fail-loud, never silently reconciled) ──
@@ -406,6 +411,14 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
     contradictions.push('fact_status_success_but_degraded_newer');
   }
 
+  // `degraded_fact_status` reports CURRENT degradation only: a non-success
+  // run that is the latest analysis state — either no success exists
+  // (!hasFact) or the degraded run is newer than the selected success. An
+  // older degraded fact superseded by a newer success is historical and
+  // reported as null, so the field is never misread as "currently degraded"
+  // when the most recent run actually succeeded.
+  const degradedIsCurrent = !hasFact || params.degradedNewerThanSelectedSuccess;
+
   // ── Predicates ──
   // Hard block: nothing is usable.
   const blockedUnusable =
@@ -450,7 +463,9 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
     blockers,
     model_adjustments: modelAdjustments,
     goal_node_id: goalNodeId,
-    degraded_fact_status: normaliseDegradedStatus(params.degradedStatus),
+    degraded_fact_status: degradedIsCurrent
+      ? normaliseDegradedStatus(params.degradedStatus)
+      : null,
     contradictions,
     usableForProse,
     usableForChips,
