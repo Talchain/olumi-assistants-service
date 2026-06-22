@@ -10,8 +10,8 @@
  *  - READ-ONLY: never mutates its input. `view.raw` is the SAME object
  *    reference that was passed in — preservation is byte-for-byte.
  *  - PURE: no I/O, no telemetry, no fs, no persistence. Unlike
- *    context/freshness.ts (which has an `emit()` companion) this module has
- *    NO side-effecting path at all.
+ *    context/freshness.ts (which has a telemetry-emitting companion) this
+ *    module has NO side-effecting path at all.
  *  - CEE-LOCAL TYPES ONLY: the live shape is NOT the richer repo-typed
  *    `V2RunResponse`/`V2RunResponseEnvelope` (which puts
  *    results/factor_sensitivity/robustness at the TOP level, not under
