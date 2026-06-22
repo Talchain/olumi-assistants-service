@@ -295,8 +295,8 @@ export interface TurnExecutorRunResult {
    * this turn — freshness + structural readiness + degraded/contradiction
    * verdict, composed over the current-turn handler facts + prior facts.
    * Assembled post-dispatch (pure read-only, no side effects) and surfaced
-   * ONLY via the flag-gated, default-off `_context_summary` diagnostic at the
-   * route seam. NEVER feeds chips, prose, or any product logic. Present on the
+   * ONLY via the flag-gated, default-off redacted context-summary diagnostic
+   * at the route seam. NEVER feeds chips, prose, or any product logic. Present on the
    * execute (tool/action) path; absent on paths that finalise before the
    * post-dispatch assembly point — route-v2 then falls back to the
    * freshness-derived partial state for the diagnostic surface.
@@ -4871,9 +4871,19 @@ export async function runTurnExecutor(
       // from the SAME unified fact set and post-handler graph hash that
       // `freshness` above derived from, plus this turn's structural readiness.
       // Pure read-only: no dispatch, no control-flow, no mutation, no I/O. It
-      // is surfaced ONLY through the flag-gated (default-off) `_context_summary`
-      // diagnostic at the route seam — deliberately NOT passed to `generateChips`
-      // below (that would activate M2 chip behaviour, out of scope here).
+      // is surfaced ONLY through the flag-gated (default-off) redacted
+      // context-summary diagnostic at the route seam — deliberately NOT passed
+      // to `generateChips` below (that would activate M2 chip behaviour, out of
+      // scope here).
+      //
+      // Snapshot invariant: `analysisReadyForTurn` is computed pre-handler,
+      // while `hashForPostHandlerFreshness` is post-mutation. This is a
+      // consistent snapshot for the current D1 mutators (set_factor_value /
+      // add_constraint / adjust_edge_strength) because none of them changes a
+      // readiness dimension (goal presence, option count, intervention
+      // configuration). A FUTURE readiness-changing handler must recompute
+      // structural readiness here before assembling, or this diagnostic could
+      // pair a stale readiness status with a fresh graph hash.
       canonicalStateForRun = selectCanonicalAnalysisState({
         handlerFacts: handlerFactsForCommit,
         priorFacts: context.prior_facts,
@@ -5729,9 +5739,9 @@ export async function runTurnExecutor(
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),
       ...(coachingDelivery ? { coachingDelivery } : {}),
-      // V5 M5 read-only canonical state for the route's flag-gated
-      // `_context_summary` diagnostic. Absent on paths that finalise before
-      // the post-dispatch assembly (route-v2 falls back to the partial state).
+      // V5 M5 read-only canonical state for the route's flag-gated redacted
+      // context-summary diagnostic. Absent on paths that finalise before the
+      // post-dispatch assembly (route-v2 falls back to the partial state).
       ...(canonicalStateForRun ? { canonicalState: canonicalStateForRun } : {}),
       // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
       // so wire label resolution matches the durable-text scrub at commit.
