@@ -54,6 +54,13 @@ import {
 import { isProduction, isTest } from '../../config/index.js';
 import { ContextPackSchema } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
+import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
+import {
+  selectCanonicalAnalysisState,
+  summariseCanonicalAnalysisState,
+  type AnalysisStateSummary,
+  type CanonicalAnalysisState,
+} from './canonical-analysis-state.js';
 
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
 // five for token budget. Any trim beyond is caller's concern.
@@ -248,6 +255,21 @@ export interface ContextPack {
    */
   readonly parsed_quantities: readonly QuantityExtractionResult[];
   readonly system_event: unknown | null;
+  /**
+   * Redacted canonical analysis state (additive observability). Derived from
+   * the single canonical selector so prose / chips / context / diagnostics
+   * all read one verdict. Statuses / predicates / counts / hashes only — no
+   * raw blocker messages, labels, or user text.
+   *
+   * Null when the assembler had no canonical source on this turn. Pre-M5 the
+   * production compacted-graph path passes `graph: undefined`, so the
+   * assembler cannot recompute a freshness-comparable hash and emits null
+   * rather than a misleadingly-stale verdict — the AUTHORITATIVE verdict
+   * ships on the wire via the route's redacted context-summary surface
+   * (turn-executor's raw-graph freshness). M5 threads `canonicalState` in so
+   * this populates on every turn.
+   */
+  readonly analysis_state: AnalysisStateSummary | null;
 }
 
 export interface AssembleContextPackInput {
@@ -303,6 +325,15 @@ export interface AssembleContextPackInput {
    *  calling the assembler; keeps the assembler synchronous. Defaults to
    *  EMPTY_COACHING_CACHE when not supplied. */
   readonly coaching?: CoachingCache;
+  /**
+   * V5 canonical analysis state, pre-computed by the dispatch path (M5,
+   * turn-executor — which has the raw graph + freshness). When provided it
+   * is authoritative for the ContextPack `analysis_state`. When absent, the
+   * assembler best-effort derives it from `priorFacts` + the turn graph, and
+   * emits null when no freshness-comparable hash is available here. Additive;
+   * existing callers omit it (call site unchanged until M5).
+   */
+  readonly canonicalState?: CanonicalAnalysisState;
 }
 
 /**
@@ -339,6 +370,54 @@ export function assembleContextPack(input: AssembleContextPackInput): ContextPac
   return assembleContextPackWithSummary(input).contextPack;
 }
 
+/**
+ * Derive the redacted canonical analysis-state summary for the ContextPack.
+ *
+ * Source order:
+ *   1. `input.canonicalState` (M5 — authoritative, threaded by the dispatch
+ *      path which has the raw graph + freshness).
+ *   2. Best-effort from `input.priorFacts` + a freshness hash of the turn
+ *      graph — ONLY when a raw graph is available here. The production
+ *      compacted-graph path passes `graph: undefined`; hashing a compacted
+ *      projection would not match `graph_hash_at_run`, so we return null
+ *      rather than emit a misleadingly-stale verdict. The authoritative
+ *      verdict ships on the wire via the route's redacted context-summary
+ *      surface.
+ *
+ * Critical-omission diagnostic: when `priorFacts` is absent entirely, emit a
+ * structured warning rather than silently returning an authoritative-looking
+ * 'none' — production callers (turn-executor) always thread facts.
+ */
+function deriveContextPackAnalysisState(
+  input: AssembleContextPackInput,
+): AnalysisStateSummary | null {
+  if (input.canonicalState) {
+    return summariseCanonicalAnalysisState(input.canonicalState);
+  }
+  if (input.priorFacts === undefined) {
+    log.warn(
+      {
+        event: 'context_pack.canonical_state_facts_absent',
+        scenario_id: input.payload.scenario_id,
+      },
+      'ContextPack assembled without prior_facts — canonical analysis_state omitted',
+    );
+    return null;
+  }
+  // Only the RAW (non-compacted) graph yields a freshness-comparable hash.
+  const rawGraph = input.graph ?? null;
+  if (rawGraph === null) return null;
+  const currentGraphHash = computeAnalysisAffectingGraphHash(
+    rawGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+  );
+  const canonical = selectCanonicalAnalysisState({
+    priorFacts: input.priorFacts,
+    currentGraphHash,
+    scenarioClaimsAnalysis: input.analysis != null,
+  });
+  return summariseCanonicalAnalysisState(canonical);
+}
+
 export function assembleContextPackWithSummary(
   input: AssembleContextPackInput,
 ): AssembleContextPackResult {
@@ -355,6 +434,7 @@ export function assembleContextPackWithSummary(
   const projectedGraph: ContextPackGraph = input.compactedGraph
     ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
     : projectGraph(input.graph ?? null);
+  const analysisStateSummary = deriveContextPackAnalysisState(input);
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
@@ -378,6 +458,7 @@ export function assembleContextPackWithSummary(
     compound_pattern_matched: compound.telemetry.pattern_matched,
     parsed_quantities: extraction.results,
     system_event: input.systemEvent ?? null,
+    analysis_state: analysisStateSummary,
   };
   const contextPack =
     compound.detected && compound.segments

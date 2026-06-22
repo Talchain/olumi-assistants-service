@@ -748,15 +748,23 @@ function buildUserMessage(contextPack: ContextPack, message: string): string {
   // `exists` floats, internal node numeric fields) and surface their
   // display-safe counterparts under the same keys so prompt instructions
   // referencing graph edges and analysis fields continue to resolve.
+  //
+  // `analysis_state` (the redacted canonical analysis summary) is ALSO
+  // stripped: it is structured pipeline state for chips / diagnostics /
+  // (M5) prose-derivation, carrying opaque graph-hash digests that have no
+  // business in the prompt and must never reach prose (behaviour-10 leak
+  // contract). The LLM continues to see freshness via `display_analysis`.
   const {
     analysis: _rawAnalysis,
     display_analysis,
     graph: _rawGraph,
     display_graph,
+    analysis_state: _analysisState,
     ...rest
   } = contextPack;
   void _rawAnalysis;
   void _rawGraph;
+  void _analysisState;
   const llmFacing = { ...rest, analysis: display_analysis, graph: display_graph };
   return [
     '## ContextPack',

@@ -110,6 +110,22 @@ export interface ChipGeneratorInput {
    * fewer fields). When omitted, the chip suppresses (safe default).
    */
   readonly turnOutcome?: import('../turn-outcome.js').TurnOutcome;
+  /**
+   * V5 canonical analysis state (M2 convergence). When present, the chip
+   * floor and the post-mutation / stale-recovery rules derive
+   * `hasAnyRunAnalysisFact`, `freshness` and the rerun affordance from this
+   * single composed verdict (built over the UNIFIED current-turn + prior
+   * fact chain) instead of the local `handlerFacts` / `priorFacts` /
+   * `turnOutcome` reads. This closes the documented split where a turn that
+   * just ran `run_analysis` reported `hasAnyRunAnalysisFact === true` while
+   * `deriveAnalysisFreshness(priorFacts)` returned `'none'`.
+   *
+   * Optional + additive: when omitted, every rule falls back to the prior
+   * local expressions with ZERO behaviour change. Live activation (turn-
+   * executor threading the canonical state in) lands in M5 (post-#287);
+   * M2 ships the mechanism + the unit-level convergence proof.
+   */
+  readonly canonicalState?: import('../context/canonical-analysis-state.js').CanonicalAnalysisState;
 }
 
 const MAX_CHIPS = 3;
@@ -227,20 +243,38 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
 function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   const readyStatus = input.analysisReady?.status;
   const readyStatusLabel: string = readyStatus ?? 'unknown';
-  const hasCurrentRunAnalysisFact = (input.handlerFacts ?? []).some(
-    isSuccessfulRunAnalysisFact,
-  );
-  const hasPriorRunAnalysisFact = (input.priorFacts ?? []).some(
-    isSuccessfulRunAnalysisFact,
-  );
-  const hasAnyRunAnalysisFact = hasCurrentRunAnalysisFact || hasPriorRunAnalysisFact;
-  const freshness = input.turnOutcome?.analysis_freshness;
+  // M2 convergence: when the canonical analysis state is threaded, the
+  // floor reads `hasAnyRunAnalysisFact` / `freshness` / the rerun + explore
+  // affordances from the single composed verdict (unified current+prior
+  // facts) so it cannot disagree with `deriveAnalysisFreshness`. Absent →
+  // the prior local expressions, byte-for-byte unchanged.
+  const cs = input.canonicalState;
+  const hasAnyRunAnalysisFact = cs
+    ? cs.selected_fact_index !== null
+    : (input.handlerFacts ?? []).some(isSuccessfulRunAnalysisFact) ||
+      (input.priorFacts ?? []).some(isSuccessfulRunAnalysisFact);
+  const freshness = cs ? cs.freshness : input.turnOutcome?.analysis_freshness;
+  // Rerun affordance. Canonical: `requiresRerun` (stale OR trust-downgrade).
+  // Fallback: the prior exact condition (a fact present AND stale).
+  const requiresRerun = cs
+    ? cs.requiresRerun
+    : hasAnyRunAnalysisFact && freshness === 'stale';
+  // Exploration affordance. Canonical: only when the analysis is usable for
+  // follow-up context (fresh/stale, not blocked/contradictory). Fallback:
+  // any run_analysis fact present (prior behaviour).
+  const canExploreAnalysis = cs ? cs.usableForFollowupContext : hasAnyRunAnalysisFact;
   const stage = input.stage;
 
-  // Priority 1: stale post-edit → conversational re-run prompt.
-  if (hasAnyRunAnalysisFact && freshness === 'stale') {
+  // Priority 1: rerun-required → conversational re-run prompt. The reason
+  // label distinguishes a true staleness rerun from a trust-downgrade rerun
+  // (actionable-blocker / degraded-newer contradiction on otherwise-fresh
+  // analysis) so the floor-applied telemetry stream is not misleading once
+  // canonicalState is threaded (M5).
+  if (requiresRerun) {
+    const rerunReason =
+      cs && cs.freshness !== 'stale' ? 'trust_downgrade_rerun' : 'stale_post_edit';
     emit(TelemetryEvents.V5ChipsFloorApplied, {
-      reason: 'stale_post_edit',
+      reason: rerunReason,
       stage,
       analysis_ready_status: readyStatusLabel,
       has_run_analysis_fact: true,
@@ -274,8 +308,12 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
     }
   }
 
-  // Priority 3: any run_analysis fact present → "What could change the
-  // outcome?".
+  // Priority 3: usable analysis present → "What could change the outcome?".
+  //
+  // M2 convergence: gate on `canExploreAnalysis` (canonical
+  // `usableForFollowupContext` when threaded; else `hasAnyRunAnalysisFact`,
+  // byte-identical to before) so a blocked / contradictory analysis state
+  // does not offer exploration.
   //
   // V5 P0-B — this chip must dispatch DETERMINISTICALLY. It was previously a
   // bare promptChip with no `action_type`, so a click routed through the LLM /
@@ -291,11 +329,11 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   // on the chip-click path that input is non-null iff
   // `buildAnalysisFromPriorFacts` is non-null — so projection-buildability is
   // the faithful 'execute' predicate. Freshness is already non-stale here
-  // (Priority 1 diverted `hasAnyRunAnalysisFact && stale` to the re-run
-  // prompt), but we assert it defensively. When the precondition would NOT be
-  // met, we keep the conversational promptChip (status quo) so a click never
-  // lands the user on a "no analysis run yet" handler template.
-  if (hasAnyRunAnalysisFact) {
+  // (Priority 1 diverted the rerun-required case to the re-run prompt), but we
+  // assert it defensively. When the precondition would NOT be met, we keep the
+  // conversational promptChip (status quo) so a click never lands the user on
+  // a "no analysis run yet" handler template.
+  if (canExploreAnalysis) {
     const combinedFacts: readonly HandlerFact[] = [
       ...(input.handlerFacts ?? []),
       ...(input.priorFacts ?? []),
@@ -390,6 +428,15 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     input.handlerFacts,
   );
 
+  // M2 convergence: a single canonical-aware freshness signal reused by the
+  // post-mutation and stale-recovery rules below. When the canonical state
+  // is threaded it is authoritative (unified current+prior facts);
+  // otherwise the prior `turnOutcome` read, unchanged.
+  const canonicalState = input.canonicalState;
+  const effectiveFreshness = canonicalState
+    ? canonicalState.freshness
+    : input.turnOutcome?.analysis_freshness;
+
   // Rule: after run_analysis succeeds, prompt for the follow-ups that don't
   // require a new handler. Both executable chips emit `action_type` so the
   // chip-click path resolves deterministically via `dispatchDeterministicChipClick`
@@ -477,10 +524,14 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     successfulMutationOnCurrentTurn &&
     input.analysisReady?.status === 'ready'
   ) {
-    const hasPriorRunAnalysis = (input.priorFacts ?? []).some(
-      isSuccessfulRunAnalysisFact,
-    );
-    const freshness = input.turnOutcome?.analysis_freshness;
+    // M2 convergence: prefer the canonical verdict when threaded. On a
+    // mutation turn the current handlerFacts hold the mutation (not a
+    // run_analysis), so `selected_fact_index !== null` reflects a prior
+    // run_analysis exactly like the local priorFacts scan.
+    const hasPriorRunAnalysis = canonicalState
+      ? canonicalState.selected_fact_index !== null
+      : (input.priorFacts ?? []).some(isSuccessfulRunAnalysisFact);
+    const freshness = effectiveFreshness;
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysisRegistered = curated.find(
       (c) => c.handler_id === 'run_analysis',
@@ -528,7 +579,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // staleness recovery wins for turns that have a stale analysis.
   if (
     noopExplanationHandlerJustRan != null &&
-    input.turnOutcome?.analysis_freshness === 'stale' &&
+    effectiveFreshness === 'stale' &&
     input.analysisReady?.status === 'ready'
   ) {
     const curated = curatedHandlerChips(input.validationRegistry);

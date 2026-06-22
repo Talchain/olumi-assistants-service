@@ -188,6 +188,32 @@ const DisplaySafeAnalysisSchema = z.record(z.unknown()).nullable();
  */
 const DisplaySafeGraphSchema = z.record(z.unknown());
 
+/**
+ * Redacted canonical analysis-state summary (additive observability).
+ * Statuses / predicates / counts / hashes only — the same shape the
+ * diagnostic context-summary wire surface carries. Strict so a new field
+ * cannot silently appear in the prompt-facing pack without review.
+ */
+const AnalysisStateSummarySchema = z
+  .object({
+    status: z.string().nullable(),
+    freshness: z.string(),
+    freshness_reason: z.string(),
+    usable_for_prose: z.boolean(),
+    usable_for_chips: z.boolean(),
+    usable_for_followup_context: z.boolean(),
+    requires_rerun: z.boolean(),
+    blocked_unusable: z.boolean(),
+    blocker_count: z.number().int().nonnegative(),
+    actionable_blocker_count: z.number().int().nonnegative(),
+    selected_fact_index: z.number().int().nullable(),
+    graph_hash_at_run: z.string().nullable(),
+    current_graph_hash: z.string().nullable(),
+    degraded_fact_status: z.string().nullable(),
+    contradiction_codes: z.array(z.string()).readonly(),
+  })
+  .strict();
+
 export const ContextPackSchema = z
   .object({
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
@@ -214,6 +240,12 @@ export const ContextPackSchema = z
      */
     parsed_quantities: z.array(QuantityExtractionResultSchema).readonly(),
     system_event: z.unknown().nullable(),
+    /**
+     * Redacted canonical analysis state (additive observability). Null when
+     * the assembler had no canonical source on this turn (e.g. the
+     * compacted-graph path before M5 threads the authoritative verdict).
+     */
+    analysis_state: AnalysisStateSummarySchema.nullable(),
   })
   // Allow additive fields without immediate schema bumps — tighten later
   // by switching to `.strict()` once the contract is fully fixed.

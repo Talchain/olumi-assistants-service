@@ -31,6 +31,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
 import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import type { V5ContextSummary } from '../orchestrator-v5/context/build-context-summary.js';
 
 const DEBUG_HEADER_NAME = 'x-olumi-debug';
 
@@ -98,6 +99,22 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    * for forward-compatibility; no caller reads it today.
    */
   readonly _diagnostic_trace?: V5DiagnosticTrace;
+  /**
+   * V5 canonical context summary (additive observability). Populated only
+   * when `config.cee.contextSummaryEnabled` (env
+   * `CEE_CONTEXT_SUMMARY_ENABLED=true`) is set. Redacted — statuses /
+   * predicates / counts / hashes only, NO raw user text or graph content.
+   * Stripped before strict `OlumiResponseSchema` validation, re-attached
+   * after — same mechanic as `_diagnostic_trace`. Diagnostic-only: the
+   * Golden-Journey Harness A1/A2 reads it; UI / prose / chip / coaching
+   * paths MUST NOT (enforced by a static guard test). Unlike `_timings` /
+   * `_diagnostic_trace` (which may arrive body-attached upstream and are
+   * coerced), this value is BUILT FRESH at the route gate from the canonical
+   * state (`buildV5ContextSummary`); any body-attached copy is dropped by
+   * the strip step, so the attached value is well-formed by construction and
+   * needs no runtime coercion.
+   */
+  readonly _context_summary?: V5ContextSummary;
 };
 
 /**
