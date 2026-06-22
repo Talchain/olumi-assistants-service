@@ -77,19 +77,26 @@ export function containsMutationLanguage(text: string): boolean {
  *  the rail no longer references them. */
 const STRUCTURAL_NOUN =
   '(?:option|options|factor|factors|node|nodes|edge|edges|driver|drivers|constraint|constraints)';
+/** Ambiguous edge nouns — never enforced (no text discriminator). Used only by
+ *  the MONITOR-ONLY ambiguous-edge candidate path so passive edge claims still
+ *  produce telemetry while enforcement is deferred to #289 (review round 8). */
+const EDGE_NOUN =
+  '(?:link|links|connection|connections|relationship|relationships|dependency|dependencies)';
 /** Apostrophe class: straight + typographic (Sonnet emits either). */
 const APOS = "['’]";
 
 /** Non-graph artefacts a structural noun may belong to — "model documentation",
  *  "an option to the presentation", "the decision log". Used to EXCLUDE such
- *  prose CONSISTENTLY across the narrow, intent and graph/model patterns (review
- *  round 7). */
+ *  prose CONSISTENTLY across the narrow, intent and graph/model patterns. */
 const NON_GRAPH_CONTEXT =
   '(?:presentation|slides?|deck|decks|email|emails|e-mail|doc|docs|document|documents|documentation|report|reports|write-?up|notes?|notebook|agenda|meeting|minutes|spec|specs|readme|wiki|page|pages|chat|conversation|thread|ticket|backlog|roadmap|log|logs|file|files|approach|strateg(?:y|ies)|version|versions|name|names|template|templates|prompt|prompts)';
-/** "<graph|model> <non-graph word>" compound — e.g. "the model documentation". */
-const NON_GRAPH_COMPOUND = `(?!\\s+${NON_GRAPH_CONTEXT}\\b)`;
-/** "<noun> to/in/for [the] <non-graph word>" — e.g. "an option to the presentation". */
-const NON_GRAPH_PP = `(?!\\s+(?:to|in|for|on|of|into|onto)\\s+(?:the\\s+|a\\s+|an\\s+|my\\s+|our\\s+|your\\s+|this\\s+|that\\s+)?${NON_GRAPH_CONTEXT}\\b)`;
+/** "<graph|model>['s] <non-graph word>" compound — "the model documentation",
+ *  "the model's documentation" (review round 8: possessive form). */
+const NON_GRAPH_COMPOUND = `(?!(?:${APOS}s)?\\s+${NON_GRAPH_CONTEXT}\\b)`;
+/** "<noun> … to/in/for [the] <non-graph word>" ANYWHERE in the clause — e.g.
+ *  "an option to the presentation", "an option called \"Draft\" to the
+ *  presentation" (review round 8: qualifiers between the noun and the PP). */
+const NON_GRAPH_PP = `(?![^.?!]*\\b(?:to|in|for|on|into|onto)\\s+(?:the\\s+|a\\s+|an\\s+|my\\s+|our\\s+|your\\s+|this\\s+|that\\s+)?${NON_GRAPH_CONTEXT}\\b)`;
 
 const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   // Future commitment: "I'll add … <structural noun>".
@@ -195,6 +202,29 @@ export function containsBroadStructuralClaimLanguage(text: string): boolean {
 }
 
 /**
+ * MONITOR-ONLY ambiguous-edge detector (review round 8). Edge nouns
+ * (link/connection/relationship/dependency) are not enforced (no text
+ * discriminator — "between Alice and Bob"), but a success-shaped edge claim must
+ * still produce candidate telemetry while enforcement is deferred to #289. This
+ * catches the PASSIVE edge claims the broad detector misses ("the relationship
+ * has been changed", "the connection is now in place"); first-person edge claims
+ * ("I established a relationship") are already covered by the broad detector.
+ * This NEVER feeds the swap path.
+ */
+const AMBIGUOUS_EDGE_CLAIM_PATTERNS: readonly RegExp[] = [
+  new RegExp(
+    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${EDGE_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|changed|updated|modified|put\\s+in\\s+place|in\\s+place)\\b`,
+    'i',
+  ),
+];
+
+/** Monitor-only: a success-shaped PASSIVE claim about an ambiguous edge noun. */
+export function looksLikeAmbiguousEdgeClaim(text: string): boolean {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  return AMBIGUOUS_EDGE_CLAIM_PATTERNS.some((p) => p.test(text));
+}
+
+/**
  * STRUCTURAL-EDIT INTENT in the USER's message — did the user ask to add /
  * connect / remove a graph element this turn? This gate is what makes the BROAD
  * detector safe to swap on. Scoped to STRUCTURAL edits (add/remove/connect
@@ -204,14 +234,16 @@ export function containsBroadStructuralClaimLanguage(text: string): boolean {
 const STRUCTURAL_EDIT_REQUEST_PATTERNS: readonly RegExp[] = [
   // edit verb (any inflection, incl. edit/change/update/modify/set up/establish)
   // + UNAMBIGUOUS structural noun: "add an option", "remove the churn factor",
-  // "connect the two nodes", "edit the constraint". (Edge nouns need relational
-  // framing — see pattern 4.)
+  // "connect the two nodes", "edit the constraint". Ambiguous edge nouns
+  // (link/connection/relationship/dependency) are NOT enforced (deferred to
+  // #289); the non-graph PP guard also excludes "an option to the presentation".
   new RegExp(
     `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
-  // "a new <structural noun>".
-  new RegExp(`\\b(?:a |an |another )?new\\s+${STRUCTURAL_NOUN}\\b`, 'i'),
+  // "a new <structural noun>" (with the non-graph guard so "a new option to the
+  // presentation" does NOT create intent — review round 8).
+  new RegExp(`\\b(?:a |an |another )?new\\s+${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`, 'i'),
   // edit verb directly on the graph/model: "update the model", "edit the graph",
   // "change the decision model". The non-graph compound guard excludes
   // "the model documentation" / "the model presentation" (review round 7).
@@ -257,7 +289,8 @@ export type StructuralClaimKind =
   | 'high_confidence'
   | 'intent_gated'
   | 'broad_no_intent'
-  | 'mutation_language';
+  | 'mutation_language'
+  | 'ambiguous_edge';
 export interface StructuralClaimDecision {
   readonly verdict: StructuralClaimVerdict;
   readonly kind: StructuralClaimKind;
@@ -286,6 +319,8 @@ export interface ClassifyStructuralClaimInput {
  *  - monitor/broad_no_intent  : broad structural language, no edit intent →
  *                               candidate false-negative (no swap).
  *  - monitor/mutation_language: legacy broad mutation language only.
+ *  - monitor/ambiguous_edge   : passive edge-noun claim (deferred to #289) —
+ *                               surfaced, never swapped.
  *  - pass                 : a mutation committed, or no claim / benign.
  */
 export function classifyStructuralClaim(input: ClassifyStructuralClaimInput): StructuralClaimDecision {
@@ -299,5 +334,9 @@ export function classifyStructuralClaim(input: ClassifyStructuralClaimInput): St
   if (broad && structuralEditIntent === true) return { verdict: 'swap', kind: 'intent_gated' };
   if (broad) return { verdict: 'monitor', kind: 'broad_no_intent' };
   if (containsMutationLanguage(assistantText)) return { verdict: 'monitor', kind: 'mutation_language' };
+  // Ambiguous edge nouns (link/connection/relationship/dependency) are never
+  // swapped (deferred to #289) but passive edge claims are surfaced as
+  // candidate-misses so the residual is observable, not silent.
+  if (looksLikeAmbiguousEdgeClaim(assistantText)) return { verdict: 'monitor', kind: 'ambiguous_edge' };
   return { verdict: 'pass', kind: 'none' };
 }

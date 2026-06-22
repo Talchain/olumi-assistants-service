@@ -8,6 +8,7 @@ import {
   containsMutationLanguage,
   containsStructuralSuccessClaim,
   containsBroadStructuralClaimLanguage,
+  looksLikeAmbiguousEdgeClaim,
   mentionsStructuralEditRequest,
   classifyStructuralClaim,
   V5_STRUCTURAL_DECLINE_TEXT,
@@ -150,6 +151,9 @@ describe('containsStructuralSuccessClaim — MUST NOT MATCH (advisory / offer / 
     ['non-graph — option to the presentation', 'I added an option to the presentation.'],
     ['non-graph — model documentation', 'I updated the model documentation.'],
     ['non-graph — model presentation', 'I changed the model presentation.'],
+    // Round 8 — possessive compound + qualified PP.
+    ["non-graph — model's documentation (possessive)", "I updated the model's documentation."],
+    ['non-graph — option called "Draft" to the presentation', 'I added an option called "Draft" to the presentation.'],
     ['empty', ''],
   ];
   for (const [name, text] of mustNotMatch) {
@@ -249,6 +253,20 @@ describe('classifyStructuralClaim — intent-gated honesty decision', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: 'I established a connection with the team.' }).verdict).not.toBe('swap');
   });
 
+  // Round-8 blocker 2 — passive edge claims are MONITOR-ONLY (never swap, even
+  // under intent), but must produce candidate telemetry (not silent pass).
+  it('passive edge claim → monitor/ambiguous_edge, never swap (even under intent)', () => {
+    for (const t of [
+      'The relationship has been changed.',
+      'The connection is now in place.',
+      'A new dependency was created.',
+      'The link has been added.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t })).toEqual({ verdict: 'monitor', kind: 'ambiguous_edge' });
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('monitor');
+    }
+  });
+
   it('broad claim WITHOUT intent → monitor (broad_no_intent), never swap', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: NOUNLESS_EDGE }))
       .toEqual({ verdict: 'monitor', kind: 'broad_no_intent' });
@@ -323,6 +341,19 @@ describe('containsBroadStructuralClaimLanguage — broad (intent-gated) detector
   });
 });
 
+describe('looksLikeAmbiguousEdgeClaim — monitor-only passive edge detector', () => {
+  it('flags passive edge claims (link/connection/relationship/dependency)', () => {
+    expect(looksLikeAmbiguousEdgeClaim('The relationship has been changed.')).toBe(true);
+    expect(looksLikeAmbiguousEdgeClaim('The connection is now in place.')).toBe(true);
+    expect(looksLikeAmbiguousEdgeClaim('A new dependency was created.')).toBe(true);
+  });
+  it('does not flag structural-noun passives or plain prose', () => {
+    expect(looksLikeAmbiguousEdgeClaim('The option has been added.')).toBe(false); // structural → handled elsewhere
+    expect(looksLikeAmbiguousEdgeClaim('The team has been notified.')).toBe(false);
+    expect(looksLikeAmbiguousEdgeClaim('')).toBe(false);
+  });
+});
+
 describe('mentionsStructuralEditRequest — user structural-edit intent', () => {
   it('detects request-shaped structural edits (add/create/remove + noun, "new <noun>")', () => {
     expect(mentionsStructuralEditRequest('Add an option called Coach.')).toBe(true);
@@ -357,13 +388,19 @@ describe('mentionsStructuralEditRequest — user structural-edit intent', () => 
     expect(mentionsStructuralEditRequest('Could you remove the churn factor?')).toBe(true);
   });
 
-  // Review round 7 — non-graph compound / PP targets do NOT create intent.
+  // Review round 7/8 — non-graph compound / possessive / qualified-PP / new-noun
+  // targets do NOT create intent.
   it('does NOT create intent for non-graph documentation/presentation targets', () => {
     expect(mentionsStructuralEditRequest('Please update the model documentation.')).toBe(false);
     expect(mentionsStructuralEditRequest('Change the model presentation.')).toBe(false);
     expect(mentionsStructuralEditRequest('Can you add an option to the presentation?')).toBe(false);
-    // …but a genuine graph target still does.
+    // round 8 — possessive compound, "new <noun>" PP, and qualified PP.
+    expect(mentionsStructuralEditRequest("Please update the model's documentation.")).toBe(false);
+    expect(mentionsStructuralEditRequest('Add a new option to the presentation.')).toBe(false);
+    expect(mentionsStructuralEditRequest('Add an option called "Draft" to the presentation')).toBe(false);
+    // …but genuine graph targets still do.
     expect(mentionsStructuralEditRequest('Add an option to your model')).toBe(true);
+    expect(mentionsStructuralEditRequest('Add a new option to the model')).toBe(true);
   });
 
   // Codex blocker 1 — state/read-out questions must NOT create intent,

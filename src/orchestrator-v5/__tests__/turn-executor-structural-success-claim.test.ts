@@ -567,3 +567,41 @@ describe('Codex round-7 — non-graph context & ambiguous edges preserved', () =
     expect(swapEvents()).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Codex round-8 — possessive/new/qualified non-graph context preserved; passive
+// edge claims monitored (not silent), never swapped.
+// ---------------------------------------------------------------------------
+
+describe('Codex round-8 — non-graph qualifiers preserved; passive edge monitored', () => {
+  it('possessive "the model\'s documentation" → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload("Please update the model's documentation.", 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa40'),
+      'req-model-poss-docs',
+      { routingAdapter: mockRoutingAdapter("I updated the model's documentation.") },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('"add a new option to the presentation" → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Add a new option to the presentation.', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa41'),
+      'req-new-option-pres',
+      { routingAdapter: mockRoutingAdapter('Your model now includes the new option.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  it('passive edge claim ("The relationship has been changed.") → NOT swapped, IS monitored', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Create a relationship between Cost and Growth.', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa42'),
+      'req-passive-edge',
+      { routingAdapter: mockRoutingAdapter('The relationship has been changed.') },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+    expect(monitorEvents()).toHaveLength(1); // surfaced, not silent
+  });
+});
