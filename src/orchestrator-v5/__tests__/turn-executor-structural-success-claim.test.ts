@@ -354,40 +354,44 @@ describe('conservative — advisory and benign phrasing is preserved', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Intent-gated rail — noun-less / actorless claims SWAP when the USER requested
-// a structural edit this turn (the round-4 fix).
+// PRECISION-FIRST (final contract): noun-less / actorless / pronoun claims are
+// MONITOR-ONLY — they are NOT swapped, even when the USER requested a structural
+// edit this turn. Structural-edit intent no longer drives a swap. Owned by
+// #288/#289. (Replaces the round-4 intent-gated swap behaviour.)
 // ---------------------------------------------------------------------------
 
-describe('intent-gated — structural-edit request + broad claim → declines', () => {
-  it('add-option intent + noun-less edge claim → swapped', async () => {
+describe('precision-first — broad / noun-less / pronoun claims are monitored, not declined', () => {
+  it('add-option intent + noun-less edge claim → NOT swapped, IS monitored', async () => {
     const { response } = await runTurnExecutor(
       payload('Add a new option, then hook it up', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14'),
       'req-intent-edge',
       { routingAdapter: mockRoutingAdapter('Done, I connected Marketing to Revenue.') },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+    expect(monitorEvents()).toHaveLength(1);
   });
 
-  it('add-option request + actorless "model now includes" claim → swapped', async () => {
+  it('add-option request + actorless "model now includes" claim → NOT swapped, IS monitored', async () => {
     const { response } = await runTurnExecutor(
       payload('Add a new option called Coach', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa15'),
       'req-intent-state',
       { routingAdapter: mockRoutingAdapter('Your model now includes the Coach option.') },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+    expect(monitorEvents()).toHaveLength(1);
   });
 
-  // Codex blocker 4 — edit/update request on the model + vague false success.
-  it('"Update the model to include a new option" + "I updated it" → swapped', async () => {
+  it('"Update the model to include a new option" + vague "I updated it" → NOT swapped, IS monitored', async () => {
     const { response } = await runTurnExecutor(
       payload('Update the model to include a new option', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa16'),
       'req-intent-edit',
       { routingAdapter: mockRoutingAdapter('Done, I updated it.') },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+    expect(monitorEvents()).toHaveLength(1);
   });
 });
 
@@ -470,24 +474,27 @@ describe('Codex round-6 — state query, passive success, ambiguous edge', () =>
     expect(swapEvents()).toHaveLength(0);
   });
 
-  it('passive success ("The option has been added.") under add-intent → swapped', async () => {
+  it('passive success ("The option has been added.") under add-intent → NOT swapped (monitor)', async () => {
     const { response } = await runTurnExecutor(
       payload('Add a new option called Coach', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa21'),
       'req-passive-add',
       { routingAdapter: mockRoutingAdapter('The option has been added.') },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    // Precision-first: passive/actorless claims are monitor-only, never swapped.
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+    expect(monitorEvents()).toHaveLength(1);
   });
 
-  it('passive structural success ("The factor has been changed.") under intent → swapped', async () => {
+  it('passive structural success ("The factor has been changed.") under intent → NOT swapped (monitor)', async () => {
     const { response } = await runTurnExecutor(
       payload('Change the churn factor structure', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa22'),
       'req-passive-struct',
       { routingAdapter: mockRoutingAdapter('The factor has been changed.') },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+    expect(monitorEvents()).toHaveLength(1);
   });
 
   it('non-graph doc link ("I created a link to the documentation") → NOT swapped', async () => {

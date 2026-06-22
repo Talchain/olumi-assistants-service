@@ -94,12 +94,11 @@ describe('containsStructuralSuccessClaim — MUST MATCH (first-person mutation v
       'I\'ll add the "Coach Internal Developer into Tech Lead Role" option to your model now, connecting it to the relevant factors as discussed.',
     ],
     ['present-perfect completion', "I've added the Coach option."],
-    // Claims anchored to an UNAMBIGUOUS structural noun (option/factor/node/
-    // edge/driver/constraint) swap unconditionally. Edge nouns (link/connection/
-    // relationship/dependency) are ambiguous and intent-gated (see classify
-    // tests); they still swap here when an unambiguous noun is also present.
-    ['edge claim w/ factor anchor', 'I wired a dependency from the budget factor.'],
-    ['edge claim w/ factors anchor', 'I removed the relationship between the two factors.'],
+    // Precision-first: the structural noun must be the verb's tightly-bound
+    // OBJECT. An edit verb whose object is an edge noun, with the structural noun
+    // only reachable across a preposition ("a dependency FROM the budget factor",
+    // "the relationship BETWEEN the two factors"), is an AMBIGUOUS-EDGE claim and
+    // is monitor-only — see the precision-first classify tests, not here.
     ['past-tense graph edit', 'I updated the graph.'],
     ['past-tense model edit', 'I changed the model.'],
     ['option to your model (graph target, not excluded)', 'I added an option to your model.'],
@@ -186,76 +185,72 @@ describe('V5_STRUCTURAL_DECLINE_TEXT — approved copy oracle (Brief 4 req #6)',
   });
 });
 
-describe('classifyStructuralClaim — intent-gated honesty decision', () => {
-  const NARROW = 'I have added the Coach option.'; // first-person + structural noun
+describe('classifyStructuralClaim — PRECISION-FIRST honesty decision (final contract)', () => {
+  const NARROW = 'I have added the Coach option.'; // tightly-bound first-person + structural noun
   const NOUNLESS_EDGE = 'I connected Marketing to Revenue.'; // broad, noun-less
   const ACTORLESS_STATE = 'Your model now includes the Coach option.'; // broad, actorless
   const ADVISORY = "I'd suggest adding a competitive risk factor."; // mutation-language only
   const BENIGN = 'Here are the trade-offs.';
   const base = { handlerEmittedMutatedGraph: false, proposedHandlerId: null as string | null };
 
-  it('narrow first-person + structural-noun claim → swap (high_confidence), intent irrelevant', () => {
+  it('tightly-bound first-person completion claim → swap (high_confidence), intent irrelevant', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: NARROW })).toEqual({ verdict: 'swap', kind: 'high_confidence' });
     expect(classifyStructuralClaim({ ...base, assistantText: NARROW, structuralEditIntent: true })).toEqual({ verdict: 'swap', kind: 'high_confidence' });
   });
 
-  // Blocking #1/#3 — noun-less edges + verb synonyms now SWAP when the user
-  // asked for a structural edit (intent), instead of merely being logged.
-  it('broad noun-less edge claim + structural-edit intent → swap (intent_gated)', () => {
-    expect(classifyStructuralClaim({ ...base, assistantText: NOUNLESS_EDGE, structuralEditIntent: true }))
-      .toEqual({ verdict: 'swap', kind: 'intent_gated' });
-    expect(classifyStructuralClaim({ ...base, assistantText: 'I connected marketing to revenue.', structuralEditIntent: true }).verdict).toBe('swap');
+  // CONTRACT: structural-edit INTENT no longer drives a swap. Broad / noun-less /
+  // verb-synonym / actorless-state claims are MONITOR-ONLY regardless of intent
+  // (owned by #288/#289) — never a false decline.
+  it('broad noun-less edge claim → monitor, NEVER swap (even under intent)', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: NOUNLESS_EDGE }).verdict).toBe('monitor');
+    expect(classifyStructuralClaim({ ...base, assistantText: NOUNLESS_EDGE, structuralEditIntent: true }).verdict).toBe('monitor');
   });
-  it('verb-synonym claims (introduced/incorporated/made/included) + intent → swap', () => {
+  it('verb-synonym claims (introduced/incorporated/made/included) → monitor, never swap', () => {
     for (const t of [
       'I introduced a new option to the model.',
       'I incorporated a risk factor into the model.',
       'I have made a connection between cost and growth.',
       'I included a new dependency in the graph.',
     ]) {
-      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('swap');
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).not.toBe('swap');
     }
   });
-  // Blocking #2 — actorless state-success is caught under intent, surfaced (not
-  // silent) without intent.
-  it('actorless "model now includes X" → swap under intent, monitor without', () => {
-    expect(classifyStructuralClaim({ ...base, assistantText: ACTORLESS_STATE, structuralEditIntent: true }).verdict).toBe('swap');
+  it('actorless "model now includes X" → monitor, never swap (even under intent)', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: ACTORLESS_STATE, structuralEditIntent: true }).verdict).toBe('monitor');
     expect(classifyStructuralClaim({ ...base, assistantText: ACTORLESS_STATE }).verdict).toBe('monitor');
   });
 
-  // Round-6 blocker 2 — PASSIVE structural success ("the option has been added",
-  // "the relationship is now in place") swaps under intent, monitored without.
-  it('passive structural success (incl. change/update verbs) → swap under intent, monitor without', () => {
+  // Passive structural success is MONITOR-ONLY under the precision-first contract
+  // (it is not a tightly-bound first-person completion claim).
+  it('passive structural success → monitor, never swap (even under intent)', () => {
     for (const t of [
       'The option has been added.',
       'The factor has been changed.',
       'A new option was created.',
       'The option has now been updated.',
     ]) {
-      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('swap');
       expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('monitor');
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('monitor');
     }
   });
 
-  // Round-6 blocker 3 — ambiguous edge nouns swap under intent, but are NEVER
-  // unconditionally swapped (doc links / social connections preserved).
-  it('edge-noun claims (link/connection) → swap under intent, never unconditionally', () => {
+  // Ambiguous edge nouns (link/connection/relationship/dependency) are MONITOR-
+  // ONLY — never swapped, with or without intent (deferred to #289).
+  it('edge-noun claims (link/connection) → monitor, never swap', () => {
     for (const t of [
       'I created a link between Marketing and Revenue.',
       'I added a connection from Marketing to Revenue.',
       'I set up a connection between cost and growth.',
+      'I created a link to the documentation.',
+      'I established a connection with the team.',
     ]) {
-      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).toBe('swap');
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).not.toBe('swap');
     }
   });
-  it('ambiguous doc link / social connection WITHOUT intent are NOT swapped', () => {
-    expect(classifyStructuralClaim({ ...base, assistantText: 'I created a link to the documentation.' }).verdict).not.toBe('swap');
-    expect(classifyStructuralClaim({ ...base, assistantText: 'I established a connection with the team.' }).verdict).not.toBe('swap');
-  });
 
-  // Round-8 blocker 2 — passive edge claims are MONITOR-ONLY (never swap, even
-  // under intent), but must produce candidate telemetry (not silent pass).
-  it('passive edge claim → monitor/ambiguous_edge, never swap (even under intent)', () => {
+  it('passive edge claim → monitor/ambiguous_edge, never swap', () => {
     for (const t of [
       'The relationship has been changed.',
       'The connection is now in place.',
@@ -267,43 +262,29 @@ describe('classifyStructuralClaim — intent-gated honesty decision', () => {
     }
   });
 
-  it('broad claim WITHOUT intent → monitor (broad_no_intent), never swap', () => {
-    expect(classifyStructuralClaim({ ...base, assistantText: NOUNLESS_EDGE }))
-      .toEqual({ verdict: 'monitor', kind: 'broad_no_intent' });
-  });
-
-  // No false declines: idioms / people / read-outs WITHOUT structural-edit
-  // intent are never swapped (monitored at most).
-  it('idioms / people / read-outs without intent are NOT swapped', () => {
+  // No false declines: idioms / people / read-outs / advisory / conditional are
+  // never swapped — with OR without intent.
+  it('idioms / people / read-outs / advisory / conditional are NEVER swapped', () => {
     for (const t of [
       'I drew a distinction between Cost and Revenue.',
       'I connected the dots between cost and growth.',
+      'I connected the dots on the churn factor.',
       'I connected Alice with Bob.',
+      'I connected you with the analyst who owns the Coach option.',
       'The model now contains three factors and two options.',
       'Your model now has four options.',
-    ]) {
-      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
-    }
-  });
-  // Advisory ("I'd suggest adding") is never swapped — even under intent — because
-  // the broad detector requires the verb to follow the first-person pronoun.
-  it('advisory "I\'d suggest adding" → monitor even under intent (never swap)', () => {
-    expect(classifyStructuralClaim({ ...base, assistantText: ADVISORY, structuralEditIntent: true }).verdict).toBe('monitor');
-  });
-
-  // Codex blocker 3 — conditional advice ("I would add … if …") is NOT a success
-  // claim and must never swap, even when the user requested a structural edit.
-  it('conditional advice ("I would add … if …") is never swapped, even under intent', () => {
-    for (const t of [
+      ADVISORY,
       'I would add a risk factor if we needed more sensitivity.',
       "I'd add another option if you wanted to explore that.",
-      'I would include a dependency in a fuller model.',
+      'Once you confirm, I\'ll rebuild the graph around the new objective.',
     ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
       expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).not.toBe('swap');
     }
   });
-  it('high-confidence success claims still swap (not weakened by the conditional fix)', () => {
-    for (const t of ["I've added the option.", 'I added a risk factor.', 'I updated the model.']) {
+
+  it('tightly-bound completion claims still swap (E1 protection intact)', () => {
+    for (const t of ["I've added the option.", 'I added a risk factor.', 'I updated the model.', 'I changed the Pricing factor.']) {
       expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('swap');
     }
   });
@@ -311,7 +292,7 @@ describe('classifyStructuralClaim — intent-gated honesty decision', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: BENIGN }).verdict).toBe('pass');
   });
 
-  // Reverse-trust: a REAL mutation is never swapped, even with a claim + intent.
+  // Reverse-trust: a REAL mutation is never swapped.
   it('scalar mutation (handlerEmittedMutatedGraph=true) → pass [covers all D1 handlers]', () => {
     expect(classifyStructuralClaim({ assistantText: NARROW, handlerEmittedMutatedGraph: true, proposedHandlerId: 'set_factor_value', structuralEditIntent: true }).verdict).toBe('pass');
   });
@@ -456,17 +437,16 @@ describe('round-9 self-audit battery — classifyStructuralClaim', () => {
     ['I added the Pricing option to your model for the presentation.', true, 'swap'],
     ['I added the Pricing option to your model for the presentation.', false, 'swap'],
 
-    // --- Intent-gated swaps: BROAD language (noun-less edge / actorless state-now /
-    //     passive structural) swaps ONLY when the user asked for a structural edit.
-    ['I connected Marketing to Revenue.', true, 'swap'],
-    ['Your model now includes the Coach option.', true, 'swap'],
-    ['The option has been added.', true, 'swap'],
-    ['The factor has been changed.', true, 'swap'],
-    // Accepted trade-off (intent-gating): under a structural-edit request, a bare
-    // first-person edit verb with NO structural noun also swaps. Rare false
-    // declines on genuinely non-graph actions are the deliberate price of safety
-    // on this rail; precise no-intent residuals are deferred to #289.
-    ['I added a note about timing.', true, 'swap'],
+    // --- PRECISION-FIRST (final contract): BROAD language (noun-less edge /
+    //     actorless state-now / passive structural) is MONITOR-ONLY — never swaps,
+    //     with OR without intent. Owned by #288/#289.
+    ['I connected Marketing to Revenue.', true, 'monitor'],
+    ['Your model now includes the Coach option.', true, 'monitor'],
+    ['The option has been added.', true, 'monitor'],
+    ['The factor has been changed.', true, 'monitor'],
+    // A bare first-person edit verb with NO structural noun is monitored, never
+    // swapped — even under a structural-edit request (no more intent-gated swap).
+    ['I added a note about timing.', true, 'monitor'],
 
     // --- BROAD language WITHOUT intent → MONITORED, never swapped (text PRESERVED).
     //     This is what stops non-graph prose / read-outs from false-declining.
@@ -710,7 +690,10 @@ describe('round-9c sweep hardening — newly-closed under-enforcement classes', 
     }
   });
 
-  it('passive success on a LABELLED / quantified structural noun → intent-gated swap', () => {
+  it('passive success on a LABELLED / quantified structural noun → MONITOR-only (precision-first)', () => {
+    // Passive/actorless claims are not tightly-bound first-person completion
+    // claims, so under the final contract they are observed but NEVER swapped —
+    // with or without intent. Owned by #288/#289.
     for (const t of [
       'The Brand Risk factor has been added.',
       'A Coach Hire option was created.',
@@ -720,19 +703,19 @@ describe('round-9c sweep hardening — newly-closed under-enforcement classes', 
       'The Regulatory Risk node has been reconfigured.',
       'The edges have been redrawn.',
     ]) {
-      expect(v(t, true)).toBe('swap'); // structural-edit request present
-      expect(v(t, false)).toBe('monitor'); // observed, never silently dropped
+      expect(v(t, true)).toBe('monitor');
+      expect(v(t, false)).toBe('monitor');
     }
   });
 
-  it('actorless state-now ("now your model has …") and passive graph/model edits → intent-gated', () => {
+  it('actorless state-now / passive graph/model edits → MONITOR-only (never swap)', () => {
     for (const t of [
       'Now your model has the Coach option.',
       'Now your model includes the Coach Hire driver.',
       'The decision graph has been restructured around the new options.',
       'The model has been reorganised around the revised objective.',
     ]) {
-      expect(v(t, true)).toBe('swap');
+      expect(v(t, true)).toBe('monitor');
       expect(v(t, false)).toBe('monitor');
     }
   });
@@ -765,17 +748,27 @@ describe('round-9c residuals (#289) — known text-only limits, characterised', 
   const v = (t: string, intent = false) =>
     classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: intent }).verdict;
 
-  it('#289 OVER-enforce: idiom/social with a trailing structural noun currently declines', () => {
-    // "connected the dots on the churn factor" is analysis, not a graph edit, but
-    // the verb binds to the later noun. Needs object/graph-label binding (#289).
-    expect(v('I connected the dots on the churn factor.')).toBe('swap');
-    expect(v('I connected you with the analyst who owns the Coach option.')).toBe('swap');
+  it('precision-first FIXED the idiom/social over-enforce — now monitor-only, not declined', () => {
+    // These previously false-declined (verb bound to a trailing noun). Tight
+    // object-binding now preserves them: monitored, never swapped.
+    expect(v('I connected the dots on the churn factor.')).not.toBe('swap');
+    expect(v('I connected you with the analyst who owns the Coach option.')).not.toBe('swap');
   });
 
-  it('#289 UNDER-enforce: bare "set" / parenthetical / relative-clause currently pass', () => {
+  it('#289 OVER-enforce residual: idiom/compound object that still binds to a structural noun', () => {
+    // Two rare residuals need true syntactic/semantic parsing (#289): a mental-
+    // model idiom ("reworked the model in my head") and a noun-noun compound where
+    // the structural word is a modifier ("option scores"). Characterised so a
+    // future fix is noticed.
+    expect(v('I reworked the model in my head and the second option clearly wins.')).toBe('swap');
+    expect(v('I added the option scores together to rank them.')).toBe('swap');
+  });
+
+  it('#289 UNDER-enforce: bare "set" / parenthetical currently pass (monitor-only territory)', () => {
     // Bare "set" overlaps the scalar value path and listing idioms ("set out the
-    // options"); a parenthetical or relative clause separates subject from verb.
-    expect(v('I set a new constraint on spend.')).toBe('pass');
-    expect(v('I have, as requested, added the Coach Hire option.')).toBe('pass');
+    // options"); a parenthetical separates subject from verb. Per precision-first
+    // these are acceptable non-swaps (not false declines).
+    expect(v('I set a new constraint on spend.')).not.toBe('swap');
+    expect(v('I have, as requested, added the Coach Hire option.')).not.toBe('swap');
   });
 });

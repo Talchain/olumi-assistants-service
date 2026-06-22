@@ -42,29 +42,32 @@ export function containsMutationLanguage(text: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Brief 4 — structural-success-claim detectors + intent-gated honesty gate.
+// Brief 4 — structural-success-claim honesty gate. PRECISION-FIRST (final
+// contract). Delivers ONE trust guarantee: never tell the user the model changed
+// when no durable mutation committed — without false-declining ordinary replies.
 //
 // SEPARATE from MUTATION_PATTERNS / containsMutationLanguage above (which feed
 // validateExplanationAnswer and the STEP 6.5 monitor — left UNCHANGED).
 //
-// Two layers (see classifyStructuralClaim):
-//   1. NARROW (containsStructuralSuccessClaim): high-precision — a first-person
-//      mutation verb anchored to a STRUCTURAL graph noun (option/factor/node/
-//      edge/link/connection/relationship/dependency/constraint/driver), plus a
-//      direct-object "I updated/changed the graph|model". Swaps UNCONDITIONALLY.
-//   2. BROAD (containsBroadStructuralClaimLanguage): any first-person edit verb,
-//      actorless "model now includes/has …", or "…between X and Y". Swaps ONLY
-//      when the user's turn requested a structural edit (mentionsStructuralEdit-
-//      Request); otherwise it is MONITORED, not swapped.
+// SWAP (decline) fires on ONE thing only: a TIGHTLY-BOUND, unambiguous first-
+// person COMPLETION / near-future assertion whose OBJECT is a structural graph
+// noun (option/factor/node/edge/driver/constraint) or the graph/model itself —
+// see containsStructuralSuccessClaim. "Tightly bound" = the structural noun is
+// the verb's direct object (TIGHT_TO_NOUN), not something reached across a
+// preposition / relative / idiom ("connected the dots ON the churn factor").
 //
-// Intent-gating is what lets the broad layer catch noun-less edges ("I connected
-// Marketing to Revenue"), verb synonyms ("I introduced an option", "I made a
-// connection") and actorless state-now ("your model now includes the Coach
-// option") WITHOUT false-declining idioms/people ("connected the dots", "Alice
-// with Bob"), grounded read-outs ("model now has four options") or non-graph
-// prose ("add a note to the model documentation") — those occur with no edit
-// intent, so they pass (or are monitored), never swapped. (#289 would add graph-
-// label matching for the rare no-intent residuals.)
+// EVERYTHING ELSE IS MONITOR-ONLY telemetry, never a swap — and is owned by the
+// durable follow-ups (#288 typed edits + composer contract; #289 graph-label
+// context): broad first-person edit verbs without a bound object, passive /
+// actorless claims ("the option has been added", "your model now includes …"),
+// ambiguous edge nouns (link/connection/relationship/dependency), desire /
+// intent / conditional forms ("I want to add", "I would add … if …"), and legacy
+// mutation language. Structural-edit INTENT does NOT drive a swap: a false
+// decline is a visible trust failure on every occurrence, whereas a missed
+// broad/edge claim is observable here and cured upstream. Rationale: a text-only
+// detector cannot be both complete and precise, so on the deterministic path we
+// choose PRECISION (bias to never false-decline) and let the monitor + #288/#289
+// carry recall.
 // ---------------------------------------------------------------------------
 
 /** UNAMBIGUOUS structural graph nouns — the ONLY nouns that enforce a swap.
@@ -132,30 +135,50 @@ const LEAD_ADVERB =
  *  unconditionally (they are monitor-only — see classifyStructuralClaim). */
 const FUTURE_SUBJECT = `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m gonna| am gonna|${APOS}m about to| am about to)`;
 
+/** Words that END a noun phrase / signal the structural noun is NOT the verb's
+ *  direct object — prepositions, object pronouns and relative/connective markers.
+ *  Used to keep the verb→noun binding TIGHT (precision-first contract): the
+ *  structural noun must be the verb's object, not something reached across a
+ *  prepositional / relative / idiomatic phrase. This is what stops
+ *  "connected the dots ON the churn factor" and "connected you WITH the analyst
+ *  who owns the Coach option" from false-declining — the object is "dots" / "you",
+ *  not the trailing structural noun. */
+const NP_BOUNDARY =
+  '(?:to|in|on|of|for|with|from|at|by|between|into|onto|about|around|over|under|within|inside|across|through|against|toward|towards|you|me|us|him|her|them|it|together|back|why|how|what|when|where|who|whom|whose|which|that|so|after|before|while|because|although|though|if|unless|since|until)';
+/** TIGHTLY-BOUND gap from an edit verb to its structural-noun OBJECT: an optional
+ *  determiner, then a bounded run of modifier words (adjectives / a quoted option
+ *  label) that are NOT noun-phrase boundaries. Replaces the old clause-spanning
+ *  `[^.?!]*`, which bound verbs to distant nouns and caused the idiom/social
+ *  false-decline class. A quoted label ("…") counts as one modifier so the E1
+ *  capture `add the "Coach … into … Role" option` still binds. */
+const TIGHT_TO_NOUN =
+  `\\s+(?:(?:a|an|the|your|our|my|its|their|this|that|another|one|some|new|each|several|two|three|four|\\d+)\\s+)?` +
+  `(?:"[^"]*"\\s+|“[^”]*”\\s+|(?!${NP_BOUNDARY}\\b)[A-Za-z][\\w’'-]+\\s+){0,6}?`;
+
 const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   // Future commitment / stated intent: "I'll add / I want to add … <structural noun>".
   new RegExp(
-    `${FUTURE_SUBJECT}\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `${FUTURE_SUBJECT}\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // "let me add … <structural noun>" (incl. "let me go ahead and / just / now …").
   new RegExp(
-    `\\blet me\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\blet me\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // In-progress: "I'm adding … <structural noun>".
   new RegExp(
-    `\\bI(?:${APOS}m| am)\\s+${LEAD_ADVERB}(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|modifying|editing|establishing|linking|deleting|inserting)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI(?:${APOS}m| am)\\s+${LEAD_ADVERB}(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|modifying|editing|establishing|linking|deleting|inserting)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Present-perfect completion: "I've added … <structural noun>", "I've set up a connection".
   new RegExp(
-    `\\bI(?:${APOS}ve| have)\\s+${LEAD_ADVERB}(?:added|set|set up|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrawn|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI(?:${APOS}ve| have)\\s+${LEAD_ADVERB}(?:added|set|set up|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrawn|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|established)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Simple-past completion: "I added … <structural noun>", "I went ahead and added a factor".
   new RegExp(
-    `\\bI\\s+${LEAD_ADVERB}(?:added|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrew|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|set up|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI\\s+${LEAD_ADVERB}(?:added|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrew|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|set up|established)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Direct-object graph/model edit: "I updated the graph", "I changed the model",
@@ -171,14 +194,24 @@ const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   ),
 ];
 
+/** Conditional / offer frame — a future-modal claim GOVERNED by a condition
+ *  ("once you confirm, I'll rebuild the graph", "if you approve, I'll add a
+ *  factor"). This is an OFFER, not a completed/committed change, so it must be
+ *  preserved (monitored), never swapped. Only matches when a conditional clause
+ *  precedes a first-person future modal — a past completion ("when you asked, I
+ *  added …") is unaffected. */
+const CONDITIONAL_OFFER =
+  /\b(?:once|after|when|if|unless|provided|assuming|as soon as|should)\s+(?:you|we|they|the user|i)\b[^.?!]*\bI(?:['’]ll| will| can| could| would)\b/i;
+
 /**
  * Narrow detector for the enforcing honesty gate (Brief 4). Returns true only
- * when `text` makes a first-person structural success / commitment / completion
- * claim, or asserts the model now reflects a structural change. Conservative:
- * advisory / offer / benign-pronoun phrasing returns false.
+ * when `text` makes a TIGHTLY-BOUND first-person structural completion / near-
+ * future assertion on a graph object. Conservative by contract: advisory, offer,
+ * conditional, idiom, social and non-graph phrasing returns false (monitor-only).
  */
 export function containsStructuralSuccessClaim(text: string): boolean {
   if (typeof text !== 'string' || text.length === 0) return false;
+  if (CONDITIONAL_OFFER.test(text)) return false; // offers/conditionals are not completion claims
   return STRUCTURAL_SUCCESS_CLAIM_PATTERNS.some((p) => p.test(text));
 }
 
@@ -291,7 +324,7 @@ const STRUCTURAL_EDIT_REQUEST_PATTERNS: readonly RegExp[] = [
   // (link/connection/relationship/dependency) are NOT enforced (deferred to
   // #289); the non-graph PP guard also excludes "an option to the presentation".
   new RegExp(
-    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|revis(?:e|es|ing|ed)|rework(?:s|ing|ed)?|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\b(?:add(?:ing|ed)?|creat(?:e|es|ing|ed)|insert(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|incorporat(?:e|es|ing|ed)|includ(?:e|es|ing|ed)|connect(?:s|ing|ed)?|link(?:s|ing|ed)?|wir(?:e|es|ing|ed)|join(?:s|ing|ed)?|attach(?:es|ing|ed)?|remov(?:e|es|ing|ed)|delet(?:e|es|ing|ed)|drop(?:s|ping|ped)?|renam(?:e|es|ing|ed)|rewir(?:e|es|ing|ed)|revis(?:e|es|ing|ed)|rework(?:s|ing|ed)?|hook(?:s|ing|ed)? up|edit(?:s|ing|ed)?|chang(?:e|es|ing|ed)|updat(?:e|es|ing|ed)|modif(?:y|ies|ying|ied)|set up|establish(?:es|ing|ed)?)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // "a new <structural noun>" (with the non-graph guard so "a new option to the
@@ -366,30 +399,36 @@ export interface ClassifyStructuralClaimInput {
  * `handlerEmittedMutatedGraph || isDraftOrEditGraph`, from raw signals at the
  * swap site. NO handler_id skip (the E1 failure committed handler_id === null).
  *
- *  - swap/high_confidence : narrow first-person + structural-noun claim.
- *  - swap/intent_gated    : user requested a structural edit AND broad
- *                           structural-success language is present.
- *  - monitor/broad_no_intent  : broad structural language, no edit intent →
- *                               candidate false-negative (no swap).
+ * PRECISION-FIRST (Brief 4 final contract). The ONLY swap trigger is a tightly-
+ * bound, unambiguous first-person COMPLETION / near-future assertion on a
+ * structural graph object (containsStructuralSuccessClaim). Everything else is
+ * MONITOR-ONLY telemetry — never a swap — and is owned by the durable follow-ups
+ * (#288 typed edits + composer contract; #289 graph-label context). Structural-
+ * edit INTENT no longer drives a swap (the intent-gated broad arm was removed):
+ * a false decline is a visible trust failure on every occurrence, whereas a
+ * missed broad/passive/edge claim is observable here and cured upstream.
+ *
+ *  - swap/high_confidence     : tightly-bound first-person structural completion.
+ *  - monitor/broad_no_intent  : broad / passive structural language (no swap).
  *  - monitor/mutation_language: legacy broad mutation language only.
- *  - monitor/ambiguous_edge   : passive edge-noun claim (deferred to #289) —
- *                               surfaced, never swapped.
- *  - pass                 : a mutation committed, or no claim / benign.
+ *  - monitor/ambiguous_edge   : edge-noun claim (link/connection/relationship/
+ *                               dependency), deferred to #289 — surfaced only.
+ *  - pass                     : a mutation committed, or no claim / benign.
+ *
+ * `structuralEditIntent` is accepted for telemetry context but DELIBERATELY does
+ * not affect the swap decision (precision-first).
  */
 export function classifyStructuralClaim(input: ClassifyStructuralClaimInput): StructuralClaimDecision {
-  const { assistantText, handlerEmittedMutatedGraph, proposedHandlerId, structuralEditIntent } = input;
+  const { assistantText, handlerEmittedMutatedGraph, proposedHandlerId } = input;
   if (typeof assistantText !== 'string' || assistantText.length === 0) return { verdict: 'pass', kind: 'none' };
   const isDraftOrEditGraph =
     proposedHandlerId === 'draft_graph' || proposedHandlerId === 'edit_graph';
   if (handlerEmittedMutatedGraph || isDraftOrEditGraph) return { verdict: 'pass', kind: 'none' };
+  // Sole swap path: high-precision, tightly-bound structural completion claim.
   if (containsStructuralSuccessClaim(assistantText)) return { verdict: 'swap', kind: 'high_confidence' };
-  const broad = containsBroadStructuralClaimLanguage(assistantText);
-  if (broad && structuralEditIntent === true) return { verdict: 'swap', kind: 'intent_gated' };
-  if (broad) return { verdict: 'monitor', kind: 'broad_no_intent' };
+  // Everything below is MONITOR-ONLY (observed, never swapped; owned by #288/#289).
+  if (containsBroadStructuralClaimLanguage(assistantText)) return { verdict: 'monitor', kind: 'broad_no_intent' };
   if (containsMutationLanguage(assistantText)) return { verdict: 'monitor', kind: 'mutation_language' };
-  // Ambiguous edge nouns (link/connection/relationship/dependency) are never
-  // swapped (deferred to #289) but passive edge claims are surfaced as
-  // candidate-misses so the residual is observable, not silent.
   if (looksLikeAmbiguousEdgeClaim(assistantText)) return { verdict: 'monitor', kind: 'ambiguous_edge' };
   return { verdict: 'pass', kind: 'none' };
 }
