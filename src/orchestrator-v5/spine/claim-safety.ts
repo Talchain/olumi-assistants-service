@@ -212,9 +212,13 @@ function asString(v: unknown): string | null {
 const SUCCESS_STATUSES: ReadonlySet<string> = new Set(['computed', 'completed', 'ready']);
 
 /**
- * Map historical / non-canonical status values to the success set, mirroring the
- * allowlist+normalise idea in context/freshness.ts (idiom only — not imported).
- * Returns null for unknown / non-success values.
+ * Map historical / non-canonical status values to the canonical success set
+ * {computed, completed, ready}, mirroring the allowlist+normalise idiom in
+ * context/freshness.ts (idiom only — not imported). `complete`, `ok` and
+ * `success` are accepted INTENTIONALLY as historical success synonyms (parity
+ * with freshness.ts's normaliseAnalysisStatus); everything else — including
+ * unknown and absent — returns null so the caller treats it as not-computed
+ * (fail-closed).
  */
 function normaliseStatus(raw: string | null): string | null {
   if (raw === null) return null;
@@ -269,7 +273,9 @@ function computeDisputeContext(raw: Record<string, unknown>): Map<string, Set<Di
   //    more claim-safe than data carrying an explicit failure status. Absence is
   //    treated as "not confirmed computed", so the guarded fields are disputed.
   for (const [companion, fields] of Object.entries(STATUS_COMPANIONS)) {
-    const confirmedComputed = companion in raw && isSuccessStatus(raw[companion]);
+    // Object.hasOwn (not `in`): an inherited prototype property must not count
+    // as a present, successful status — fail-closed.
+    const confirmedComputed = Object.hasOwn(raw, companion) && isSuccessStatus(raw[companion]);
     if (!confirmedComputed) {
       for (const f of fields) addSignal(map, f, 'status_not_computed');
     }

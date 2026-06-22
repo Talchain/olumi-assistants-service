@@ -187,31 +187,40 @@ describe('disputed fields marked provisional (re-derived on read, never persiste
 });
 
 describe('fail-closed: an ABSENT status companion disputes its guarded fields', () => {
-  it('absent option_comparison_status → option_comparison provisional', () => {
-    const f = loadFixture();
-    delete f.option_comparison_status;
-    const idx = classifyEnrichmentByField(f);
-    expect(idx.option_comparison.disputed).toBe(true);
-    expect(idx.option_comparison.disputeSignals).toContain('status_not_computed');
+  // Minimal fixtures isolate the status_not_computed mapping: no
+  // stability_thresholds (so thresholds_provisional cannot fire), no near_tie,
+  // no review_status — the ONLY possible dispute source is the absent companion.
+  // This proves each companion→field mapping individually (the full fixture has
+  // stability_thresholds.provisional=true, which would mask the status signal on
+  // factor_stability / robustness_synthesis).
+  it('absent option_comparison_status → option_comparison disputed solely via status_not_computed', () => {
+    const idx = classifyEnrichmentByField({ option_comparison: [] });
+    expect(idx.option_comparison.disputeSignals).toEqual(['status_not_computed']);
     expect(idx.option_comparison.claimSafety).toBe('provisional');
   });
 
-  it('absent robustness_status → robustness & robustness_synthesis provisional', () => {
-    const f = loadFixture();
-    delete f.robustness_status;
-    const idx = classifyEnrichmentByField(f);
-    expect(idx.robustness.disputeSignals).toContain('status_not_computed');
-    expect(idx.robustness.claimSafety).toBe('provisional');
-    expect(idx.robustness_synthesis.claimSafety).toBe('provisional');
+  it('absent robustness_status → robustness & robustness_synthesis disputed solely via status_not_computed', () => {
+    const idx = classifyEnrichmentByField({ robustness: {}, robustness_synthesis: 'x' });
+    for (const f of ['robustness', 'robustness_synthesis']) {
+      expect(idx[f].disputeSignals, f).toEqual(['status_not_computed']);
+      expect(idx[f].claimSafety, f).toBe('provisional');
+    }
   });
 
-  it('absent drivers_status → factor_sensitivity & factor_stability provisional', () => {
+  it('absent drivers_status → factor_sensitivity & factor_stability disputed solely via status_not_computed', () => {
+    const idx = classifyEnrichmentByField({ factor_sensitivity: [], factor_stability: [] });
+    for (const f of ['factor_sensitivity', 'factor_stability']) {
+      expect(idx[f].disputeSignals, f).toEqual(['status_not_computed']);
+      expect(idx[f].claimSafety, f).toBe('provisional');
+    }
+  });
+
+  it('also fires on the full live fixture when a companion is deleted', () => {
     const f = loadFixture();
-    delete f.drivers_status;
+    delete f.option_comparison_status; // near_tie.is_tie is false in the fixture, so this isolates the status signal
     const idx = classifyEnrichmentByField(f);
-    expect(idx.factor_sensitivity.disputeSignals).toContain('status_not_computed');
-    expect(idx.factor_sensitivity.claimSafety).toBe('provisional');
-    expect(idx.factor_stability.claimSafety).toBe('provisional');
+    expect(idx.option_comparison.disputeSignals).toContain('status_not_computed');
+    expect(idx.option_comparison.claimSafety).toBe('provisional');
   });
 
   it('incomplete data is never MORE claim-safe than data with an explicit failure', () => {
