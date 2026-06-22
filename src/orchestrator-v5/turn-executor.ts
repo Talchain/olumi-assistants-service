@@ -212,7 +212,12 @@ import {
   buildAnalysisProjectionSummary,
   buildStructureProjectionSummary,
 } from './context/projection-summaries.js';
-import { containsMutationLanguage } from './routing/mutation-language.js';
+import {
+  containsMutationLanguage,
+  classifyStructuralClaim,
+  mentionsStructuralEditRequest,
+  V5_STRUCTURAL_DECLINE_TEXT,
+} from './routing/mutation-language.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
@@ -5195,6 +5200,57 @@ export async function runTurnExecutor(
         handler_id: handlerIdForCommit,
         text_length: composedOk.assistant_text.length,
       });
+    }
+
+    // STEP 6.6 — structural-success-claim honesty gate (Brief 4, ENFORCING).
+    //
+    // Closes the E1 trust failure: a turn whose free-form text claims a
+    // structural graph mutation ("I'll add the … option to your model now")
+    // while NO durable typed operation committed and NO graph changed. Unlike
+    // the STEP 6.5 monitor above, this gate has NO handler_id filter (the
+    // captured failure committed with handler_id === null) and SWAPS the text
+    // to an honest decline. The "no mutation" predicate mirrors buildTurnOutcome
+    // (handlerEmittedMutatedGraph || isDraftOrEditGraph), exempting every
+    // committed mutation. It runs BEFORE proposal-capture/commit so the swapped
+    // text is the single source for every downstream surface.
+    //
+    // PRECISION-FIRST decision (classifyStructuralClaim): the ONLY swap trigger is
+    // a tightly-bound, unambiguous first-person structural claim — a past/perfect
+    // COMPLETION ("I added a factor", "I updated the model") or an UNCONDITIONAL
+    // future/in-progress COMMITMENT ("I'll add a factor", "I'm adding a node").
+    // Everything else is MONITOR-ONLY telemetry, never swapped: broad / noun-less /
+    // passive / actorless language, ambiguous edges, and CONDITIONAL offers
+    // ("I'll add a factor if you approve") — so idioms/people/read-outs/non-graph
+    // prose and conditional offers are NOT false-declined. Structural-edit INTENT
+    // is computed below and passed as telemetry context but does NOT drive the
+    // swap (the intent-gated broad arm was removed); recall for the monitored
+    // residual is owned by the durable follow-ups #288/#289.
+    {
+      const structuralEditIntent = mentionsStructuralEditRequest(payload.message);
+      const decision = classifyStructuralClaim({
+        assistantText: composedOk.assistant_text,
+        handlerEmittedMutatedGraph,
+        proposedHandlerId: proposedHandlerIdForOutcome,
+        structuralEditIntent,
+      });
+      if (decision.verdict === 'swap') {
+        emit(TelemetryEvents.V5StructuralSuccessClaimSwapped, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: handlerIdForCommit ?? null,
+          text_length: composedOk.assistant_text?.length ?? 0,
+          match_kind: decision.kind,
+        });
+        composedOk = { ...composedOk, assistant_text: V5_STRUCTURAL_DECLINE_TEXT };
+      } else if (decision.verdict === 'monitor') {
+        emit(TelemetryEvents.V5StructuralSuccessClaimCandidateMiss, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: handlerIdForCommit ?? null,
+          text_length: composedOk.assistant_text?.length ?? 0,
+          candidate_kind: decision.kind,
+        });
+      }
     }
 
     // ==================================================================

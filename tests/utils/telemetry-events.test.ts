@@ -468,6 +468,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // V5-LANE-B-STRUCTURAL-01 — "what to validate" beat mechanism record.
         V5ExplanationValidationBeat: "v5.explanation.validation_beat",
         V5MutationLanguageGuard: "v5.mutation_language_guard",
+        // Brief 4 — structural-success-claim honesty gate (STEP 6.6).
+        V5StructuralSuccessClaimSwapped: "v5.structural_success_claim_swapped",
+        V5StructuralSuccessClaimCandidateMiss: "v5.structural_success_claim_candidate_miss",
         V5PromptCache: "v5.prompt_cache",
         V5ResponseProseSanitised: "v5.response.prose_sanitised",
         V5PromptResolved: "v5.prompt_resolved",
@@ -575,7 +578,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.no_operations$|v5\.(brief_text|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_pack|continuation|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|egress|frame_stage_no_brief_guard|fresh_analysis_followup_guard|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|session)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.no_operations$|v5\.(brief_text|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_pack|continuation|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|egress|frame_stage_no_brief_guard|fresh_analysis_followup_guard|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|session)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1098,6 +1101,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5ExplanationValidationBeat,
         TelemetryEvents.V5UnexpectedExplanationPayload,
         TelemetryEvents.V5MutationLanguageGuard,
+        // Brief 4 — diagnostic-only; no Datadog metric mapping yet.
+        TelemetryEvents.V5StructuralSuccessClaimSwapped,
+        TelemetryEvents.V5StructuralSuccessClaimCandidateMiss,
         TelemetryEvents.V5DeterministicValueUpdate,
         // PMS-tracked prompt resolution. Structured-log only; not yet wired
         // into Datadog (intentionally, until cardinality is bounded by the
@@ -1757,6 +1763,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.graph_persist.intercept_repair",
         "v5.run_analysis.timings",
         "v5.turn_executor.stage_timings",
+        "v5.structural_success_claim_swapped",
+        "v5.structural_success_claim_candidate_miss",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
