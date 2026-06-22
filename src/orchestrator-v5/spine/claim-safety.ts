@@ -230,7 +230,12 @@ function isSuccessStatus(v: unknown): boolean {
   return normaliseStatus(asString(v)) !== null;
 }
 
-/** Status companion → the fields it guards. */
+/**
+ * Status companion → the fields it guards. A guarded field is disputed
+ * (`status_not_computed`) when its companion is ABSENT or carries a
+ * non-success value — fail-closed, so incomplete data is never treated as more
+ * claim-safe than data with an explicit failure status.
+ */
 const STATUS_COMPANIONS: Readonly<Record<string, readonly string[]>> = {
   option_comparison_status: ['option_comparison'],
   robustness_status: ['robustness', 'robustness_synthesis'],
@@ -259,9 +264,13 @@ function addSignal(map: Map<string, Set<DisputeSignal>>, field: string, signal: 
 function computeDisputeContext(raw: Record<string, unknown>): Map<string, Set<DisputeSignal>> {
   const map = new Map<string, Set<DisputeSignal>>();
 
-  // 1. status_not_computed — companion status not in the success set.
+  // 1. status_not_computed — companion status ABSENT or not in the success set.
+  //    Fail-closed: a missing companion status must not make incomplete data
+  //    more claim-safe than data carrying an explicit failure status. Absence is
+  //    treated as "not confirmed computed", so the guarded fields are disputed.
   for (const [companion, fields] of Object.entries(STATUS_COMPANIONS)) {
-    if (companion in raw && !isSuccessStatus(raw[companion])) {
+    const confirmedComputed = companion in raw && isSuccessStatus(raw[companion]);
+    if (!confirmedComputed) {
       for (const f of fields) addSignal(map, f, 'status_not_computed');
     }
   }

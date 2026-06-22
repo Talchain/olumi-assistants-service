@@ -185,3 +185,40 @@ describe('disputed fields marked provisional (re-derived on read, never persiste
     expect(base.factor_stability.claimSafety).toBe('provisional');
   });
 });
+
+describe('fail-closed: an ABSENT status companion disputes its guarded fields', () => {
+  it('absent option_comparison_status → option_comparison provisional', () => {
+    const f = loadFixture();
+    delete f.option_comparison_status;
+    const idx = classifyEnrichmentByField(f);
+    expect(idx.option_comparison.disputed).toBe(true);
+    expect(idx.option_comparison.disputeSignals).toContain('status_not_computed');
+    expect(idx.option_comparison.claimSafety).toBe('provisional');
+  });
+
+  it('absent robustness_status → robustness & robustness_synthesis provisional', () => {
+    const f = loadFixture();
+    delete f.robustness_status;
+    const idx = classifyEnrichmentByField(f);
+    expect(idx.robustness.disputeSignals).toContain('status_not_computed');
+    expect(idx.robustness.claimSafety).toBe('provisional');
+    expect(idx.robustness_synthesis.claimSafety).toBe('provisional');
+  });
+
+  it('absent drivers_status → factor_sensitivity & factor_stability provisional', () => {
+    const f = loadFixture();
+    delete f.drivers_status;
+    const idx = classifyEnrichmentByField(f);
+    expect(idx.factor_sensitivity.disputeSignals).toContain('status_not_computed');
+    expect(idx.factor_sensitivity.claimSafety).toBe('provisional');
+    expect(idx.factor_stability.claimSafety).toBe('provisional');
+  });
+
+  it('incomplete data is never MORE claim-safe than data with an explicit failure', () => {
+    const missing = classifyEnrichmentByField({ option_comparison: [] });
+    const failed = classifyEnrichmentByField({ option_comparison: [], option_comparison_status: 'failed' });
+    expect(missing.option_comparison.claimSafety).toBe('provisional');
+    expect(failed.option_comparison.claimSafety).toBe('provisional');
+    expect(missing.option_comparison.claimSafety).toBe(failed.option_comparison.claimSafety);
+  });
+});
