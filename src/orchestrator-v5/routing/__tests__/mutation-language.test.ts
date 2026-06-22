@@ -333,6 +333,34 @@ describe('classifyStructuralClaim — PRECISION-FIRST honesty decision (final co
     expect(classifyStructuralClaim({ ...base, assistantText: "I'll add a factor, but if you want I can explain why." }).verdict).toBe('swap');
   });
 
+  // Codex round-14 — a COMPLETION is never conditional, so it must swap when
+  // masked by a later conditional offer joined by ANY separator (em/en dash,
+  // colon, bare comma-splice), incl. graph/model (P6) completions.
+  it('completions are not masked by a later offer across ANY separator', () => {
+    for (const t of [
+      "I added a factor — I'll add another if you confirm.",
+      'I added a factor: I\'ll explain if you want.',
+      'I added a factor, I\'ll explain if you want.', // bare comma-splice
+      'I updated the model, I\'ll explain if you want.', // P6 + bare comma
+      "I've changed the graph — happy to revisit if you want.",
+      'I\'m reworking the model, and I\'ll confirm once you approve.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('swap');
+    }
+  });
+
+  // Unconditional future commitments separated from a sibling conditional offer
+  // by a dash / semicolon / coordinator still swap.
+  it('an unconditional commitment swaps when separated from a sibling offer', () => {
+    for (const t of [
+      "I'll add a factor — I'll explain if you want.",
+      "I'll add a factor; I'll explain if you want.",
+      "I'll add a factor, and I'll explain if you want.",
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('swap');
+    }
+  });
+
   // Coordination at verb/noun level must NOT be over-split into false negatives.
   it('verb / noun coordination is not over-split (still swaps)', () => {
     expect(classifyStructuralClaim({ ...base, assistantText: "I'll add or remove an option." }).verdict).toBe('swap');

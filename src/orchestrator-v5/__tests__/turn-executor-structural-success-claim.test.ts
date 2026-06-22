@@ -463,6 +463,28 @@ describe('Codex round-5 — preserved (not swapped)', () => {
     expect(response.assistant_text).toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(1);
   });
+
+  // Codex round-14 — completion masked by a bare comma-splice / em-dash offer
+  // must STILL decline (a completion is never conditional).
+  it('completion + bare comma-splice offer ("I added a factor, I\'ll explain if you want") → declines', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Add a churn factor', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1d'),
+      'req-completion-comma-splice',
+      { routingAdapter: mockRoutingAdapter("I added a factor, I'll explain if you want.") },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
+
+  it('graph/model completion masked by an em-dash offer → declines', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Update the model', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1e'),
+      'req-p6-emdash-offer',
+      { routingAdapter: mockRoutingAdapter("I updated the model — I'll add more if you confirm.") },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

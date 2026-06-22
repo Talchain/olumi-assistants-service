@@ -1083,5 +1083,30 @@
   "text": "I've updated the model, and if you want I can outline the rationale.",
   "category": "completion_must_swap",
   "lens": "mixed-clause"
+ },
+ {
+  "text": "I added a factor — I'll add another if you confirm.",
+  "category": "completion_must_swap",
+  "lens": "separator-emdash"
+ },
+ {
+  "text": "I added a factor, I'll explain if you want.",
+  "category": "completion_must_swap",
+  "lens": "separator-comma-splice"
+ },
+ {
+  "text": "I added a factor: I'll explain if you want.",
+  "category": "completion_must_swap",
+  "lens": "separator-colon"
+ },
+ {
+  "text": "I updated the model, I'll explain if you want.",
+  "category": "completion_must_swap",
+  "lens": "p6-comma-splice"
+ },
+ {
+  "text": "I've changed the graph — happy to revisit if you want.",
+  "category": "completion_must_swap",
+  "lens": "p6-emdash"
  }
 ]

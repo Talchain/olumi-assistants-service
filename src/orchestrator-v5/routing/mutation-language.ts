@@ -155,8 +155,56 @@ const TIGHT_TO_NOUN =
   `\\s+(?:(?:a|an|the|your|our|my|its|their|this|that|another|one|some|new|each|several|two|three|four|\\d+)\\s+)?` +
   `(?:"[^"]*"\\s+|“[^”]*”\\s+|(?!${NP_BOUNDARY}\\b)[A-Za-z][\\w’'-]+\\s+){0,6}?`;
 
-const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
-  // Future commitment / stated intent: "I'll add / I want to add … <structural noun>".
+/** Graph/model edit verbs, DONE forms (past / perfect / in-progress) → completion. */
+const GRAPH_VERB_DONE =
+  '(?:updated|updating|changed|changing|edited|editing|modified|modifying|revised|revising|rewired|rewiring|rebuilt|rebuilding|reworked|reworking|redrew|redrawn|redrawing|restructured|restructuring|reconfigured|reconfiguring|reorganized|reorganised|reorganizing|reorganising)';
+/** Graph/model edit verbs, BASE forms → future commitment. */
+const GRAPH_VERB_BASE =
+  '(?:update|change|edit|modify|revise|rewire|rebuild|rework|redraw|restructure|reconfigure|reorganize|reorganise)';
+
+/**
+ * COMPLETION claims — a structural change is asserted as DONE or in progress
+ * ("I added a factor", "I've changed the option", "I'm adding a node", "I updated
+ * the model"). A completion is NEVER conditional (you cannot conditionally have
+ * already done something), so these swap whenever asserted — evaluated on the
+ * whole text. Tight binding (TIGHT_TO_NOUN / direct graph-model object) keeps a
+ * match from spanning a clause, so a completion is detected even when a later
+ * conditional offer shares the sentence ("I added a factor, I'll explain if you
+ * want." / "I added a factor — I'll add another if you confirm.").
+ */
+const COMPLETION_CLAIM_PATTERNS: readonly RegExp[] = [
+  // In-progress: "I'm adding … <structural noun>".
+  new RegExp(
+    `\\bI(?:${APOS}m| am)\\s+${LEAD_ADVERB}(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|modifying|editing|establishing|linking|deleting|inserting)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    'i',
+  ),
+  // Present-perfect: "I've added … <structural noun>".
+  new RegExp(
+    `\\bI(?:${APOS}ve| have)\\s+${LEAD_ADVERB}(?:added|set|set up|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrawn|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|established)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    'i',
+  ),
+  // Simple-past: "I added … <structural noun>", "I went ahead and added a factor".
+  new RegExp(
+    `\\bI\\s+${LEAD_ADVERB}(?:added|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrew|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|set up|established)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    'i',
+  ),
+  // Direct-object graph/model completion: "I updated the graph", "I've changed the
+  // model", "I'm reworking the model". DONE verb forms + a non-future subject. The
+  // compound guard excludes "changed the model documentation" / "the decision log".
+  new RegExp(
+    `\\bI(?:${APOS}ve| have|${APOS}m| am)?\\s+${LEAD_ADVERB}${GRAPH_VERB_DONE}\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
+    'i',
+  ),
+];
+
+/**
+ * COMMITMENT claims — a FUTURE / offer to make a structural change ("I'll add a
+ * factor", "let me add the option", "I'll update the model"). Unlike completions,
+ * a commitment CAN be a conditional offer, so the gate swaps it only when it is
+ * NOT governed by a condition (see containsStructuralSuccessClaim, per proposition).
+ */
+const COMMITMENT_CLAIM_PATTERNS: readonly RegExp[] = [
+  // Future commitment: "I'll add / I'm going to add … <structural noun>".
   new RegExp(
     `${FUTURE_SUBJECT}\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
@@ -166,33 +214,14 @@ const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
     `\\blet me\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
-  // In-progress: "I'm adding … <structural noun>".
+  // Future direct-object graph/model edit: "I'll update the graph", "let me rework
+  // the model". BASE verb forms + a future subject.
   new RegExp(
-    `\\bI(?:${APOS}m| am)\\s+${LEAD_ADVERB}(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|modifying|editing|establishing|linking|deleting|inserting)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
-    'i',
-  ),
-  // Present-perfect completion: "I've added … <structural noun>", "I've set up a connection".
-  new RegExp(
-    `\\bI(?:${APOS}ve| have)\\s+${LEAD_ADVERB}(?:added|set|set up|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrawn|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|established)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
-    'i',
-  ),
-  // Simple-past completion: "I added … <structural noun>", "I went ahead and added a factor".
-  new RegExp(
-    `\\bI\\s+${LEAD_ADVERB}(?:added|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrew|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|set up|established)${TIGHT_TO_NOUN}${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
-    'i',
-  ),
-  // Direct-object graph/model edit: "I updated the graph", "I changed the model",
-  // "let me rework the model". The edit verb sits directly on the graph/model;
-  // a negative lookahead excludes compound nouns so "changed the model
-  // documentation" / "updated the decision log" / "created a diagram for the
-  // presentation" do NOT match. Subject covers first-person AND "let me", and the
-  // verb list mirrors the active edit verbs (incl. rewire/revise/rework) so it
-  // cannot drift from the structural-noun patterns above.
-  new RegExp(
-    `(?:${FUTURE_SUBJECT}|\\bI(?:${APOS}ve| have|${APOS}m| am)?|\\blet me)\\s+${LEAD_ADVERB}(?:updated|update|changed|change|edited|edit|modified|modify|revised|revise|rewired|rewire|rebuilt|rebuild|reworked|rework|redrew|redrawn|redraw|restructured|restructure|reconfigured|reconfigure|reorganized|reorganised|reorganize|reorganise)\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
+    `(?:${FUTURE_SUBJECT}|\\blet me)\\s+${LEAD_ADVERB}${GRAPH_VERB_BASE}\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
     'i',
   ),
 ];
+
 
 /** A conditional clause — a condition conjunction + its subject. The subject is
  *  GENERAL (a pronoun OR any noun phrase: "if you", "if the team approves", "when
@@ -213,35 +242,42 @@ const CONDITIONAL_OFFER = new RegExp(
   'i',
 );
 
-/** Proposition boundary: sentence punctuation / semicolon, OR a clause-level
- *  coordinator (and/but/or/…) that introduces a NEW clause — detected by a
- *  following clause-starter ("I", a condition conjunction, or a subject/article).
- *  This splits "I added a factor, and I'll explain if you want" into two
- *  propositions (so the completion is not masked by the later offer), WITHOUT
+/** Proposition boundary for the COMMITMENT pass: sentence punctuation / `;` / `:`,
+ *  an em/en dash or a spaced hyphen (clause dashes), OR a clause-level coordinator
+ *  (and/but/or/…) that introduces a NEW clause — detected by a following
+ *  clause-starter ("I", a condition conjunction, or a subject/article). This
+ *  separates an unconditional commitment from a sibling conditional offer ("I'll
+ *  add a factor, and I'll explain if you want" → two propositions), WITHOUT
  *  splitting verb/noun coordination ("add or remove an option", "risk and reward
  *  factor") or breaking a prefix condition from its claim ("once you confirm, I'll
  *  add a factor" — the comma there has no coordinator, so it is NOT a boundary). */
 const PROPOSITION_SPLIT =
-  /[.?!;]+(?=\s|$)|,?\s+(?:and|but|or|nor|yet|so|then|plus)\s+(?=(?:I['’]|I\s|if\b|once\b|when\b|after\b|unless\b|provided\b|assuming\b|should\b|you\b|we\b|they\b|it\b|the\b|this\b|that\b|your\b|our\b))/i;
+  /[.?!;:]+(?=\s|$)|\s*[—–]\s*|\s+-\s+|,?\s+(?:and|but|or|nor|yet|so|then|plus)\s+(?=(?:I['’]|I\s|if\b|once\b|when\b|after\b|unless\b|provided\b|assuming\b|should\b|you\b|we\b|they\b|it\b|the\b|this\b|that\b|your\b|our\b|let me\b))/i;
 
 /**
  * Narrow detector for the enforcing honesty gate (Brief 4). Returns true only
- * when `text` makes a TIGHTLY-BOUND first-person structural completion / near-
- * future assertion on a graph object. Conservative by contract: advisory, offer,
- * conditional, idiom, social and non-graph phrasing returns false (monitor-only).
+ * when `text` makes a TIGHTLY-BOUND first-person structural claim on a graph
+ * object. Conservative by contract: advisory, offer, conditional, idiom, social
+ * and non-graph phrasing returns false (monitor-only).
  *
- * Evaluated PER PROPOSITION: the text is split at sentence/clause boundaries so a
- * conditional offer is associated with its OWN proposition only. A real completion
- * sharing a sentence with a later conditional offer still swaps ("I added a
- * factor, and I'll explain more if you want." → swap on the first proposition),
- * and a prefix/suffix condition still suppresses the proposition it governs.
+ * Two-pass, because the two claim types relate to conditions differently:
+ *  1. COMPLETION ("I added/updated …"): a finished/in-progress change is NEVER
+ *     conditional, so it swaps whenever asserted ANYWHERE — robust to any
+ *     separator that might join it to a later conditional offer. Tight binding
+ *     keeps the match within a clause, so this cannot over-reach.
+ *  2. COMMITMENT ("I'll add …", "let me add …"): a future offer CAN be
+ *     conditional, so it is checked PER PROPOSITION and suppressed only when that
+ *     proposition is a conditional offer (prefix or suffix).
  */
 export function containsStructuralSuccessClaim(text: string): boolean {
   if (typeof text !== 'string' || text.length === 0) return false;
+  // Pass 1 — completions are unconditional; a single match anywhere is enough.
+  if (COMPLETION_CLAIM_PATTERNS.some((p) => p.test(text))) return true;
+  // Pass 2 — commitments swap only when NOT a conditional offer in their proposition.
   for (const proposition of text.split(PROPOSITION_SPLIT)) {
     if (!proposition || !proposition.trim()) continue;
-    if (CONDITIONAL_OFFER.test(proposition)) continue; // this proposition is an offer, not a completion
-    if (STRUCTURAL_SUCCESS_CLAIM_PATTERNS.some((p) => p.test(proposition))) return true;
+    if (CONDITIONAL_OFFER.test(proposition)) continue; // this proposition is an offer, not a commitment
+    if (COMMITMENT_CLAIM_PATTERNS.some((p) => p.test(proposition))) return true;
   }
   return false;
 }
@@ -404,7 +440,6 @@ export type StructuralClaimVerdict = 'swap' | 'monitor' | 'pass';
 export type StructuralClaimKind =
   | 'none'
   | 'high_confidence'
-  | 'intent_gated'
   | 'broad_no_intent'
   | 'mutation_language'
   | 'ambiguous_edge';
