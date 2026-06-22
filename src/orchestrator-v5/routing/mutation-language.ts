@@ -124,11 +124,13 @@ const STRUCT_EDIT_VERB_BASE =
  *  sweep, round 9). Closed set — does not weaken the structural-noun anchor. */
 const LEAD_ADVERB =
   '(?:(?:go ahead and|gone ahead and|went ahead and|just|now|quickly|also|then|already|finally|simply)\\s+)?';
-/** First-person future / intent subject forms — commitment to edit ("I'll",
- *  "I'm going to", "I want to", "I plan to", "I'd like to"). Anchored to a
- *  structural noun + NON_GRAPH_PP downstream, so the desire forms are as safe as
- *  "I'll". */
-const FUTURE_SUBJECT = `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m gonna| am gonna|${APOS}m about to| am about to| want to| wanna| plan to| need to| intend to|${APOS}d like to| would like to)`;
+/** First-person ASSERTIVE near-future commitment subjects — the action is
+ *  asserted to be happening / about to happen ("I'll", "I will", "I'm going to",
+ *  "I'm gonna", "I'm about to"). DESIRE / INTENT / CONDITIONAL forms ("I want to",
+ *  "I plan to", "I'd like to", "I would add … if …") are DELIBERATELY EXCLUDED:
+ *  they assert a wish, not a completed/committed change, so they must never swap
+ *  unconditionally (they are monitor-only — see classifyStructuralClaim). */
+const FUTURE_SUBJECT = `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m gonna| am gonna|${APOS}m about to| am about to)`;
 
 const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   // Future commitment / stated intent: "I'll add / I want to add … <structural noun>".
@@ -205,7 +207,7 @@ const BROAD_STRUCTURAL_CLAIM_PATTERNS: readonly RegExp[] = [
   // add a factor if …", "I'd add another option if you wanted") is not a success
   // claim; it falls to monitor via containsMutationLanguage, never a swap.
   new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am| just| already| want to| wanna| plan to| need to| intend to)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+|went ahead and\\s+|now\\s+|quickly\\s+)?(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|rewir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|revis(?:e|ed|ing)|rework(?:s|ed|ing)?|reconfigur(?:e|ed|ing)|restructur(?:e|ed|ing)|reorganiz(?:e|ed|ing)|reorganis(?:e|ed|ing)|redraw(?:s|n|ing)?|redrew|remov(?:e|ed|ing)|delet(?:e|ed|ing)|drew|draw(?:ing)?)\\b`,
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am| just| already)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+|went ahead and\\s+|now\\s+|quickly\\s+)?(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|rewir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|revis(?:e|ed|ing)|rework(?:s|ed|ing)?|reconfigur(?:e|ed|ing)|restructur(?:e|ed|ing)|reorganiz(?:e|ed|ing)|reorganis(?:e|ed|ing)|redraw(?:s|n|ing)?|redrew|remov(?:e|ed|ing)|delet(?:e|ed|ing)|drew|draw(?:ing)?)\\b`,
     'i',
   ),
   // Actorless state-now success assertion ("your model now includes/has …" AND the

@@ -663,19 +663,35 @@ describe('round-9c sweep hardening — newly-closed under-enforcement classes', 
   const v = (t: string, intent = false) =>
     classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: intent }).verdict;
 
-  it('intent/desire subject forms (want to / plan to / need to / gonna / would like to) → swap', () => {
+  it('ASSERTIVE near-future commitments (I\'ll / going to / gonna / about to) → swap', () => {
+    // The action is asserted as happening / imminent — misleading if the system
+    // cannot perform it, so swap unconditionally (same class as "I'll add").
     for (const t of [
-      'I want to add an option for the fallback plan.',
-      'I plan to add a constraint on the budget.',
-      'I need to add a node for demand.',
-      'I intend to add a driver for churn.',
-      "I'd like to add a Pricing option.",
-      'I would like to add a churn factor.',
+      "I'll add an option for the fallback plan.",
+      "I'm going to add a constraint on the budget.",
       "I'm gonna add a Risk factor.",
-      'I wanna add an option.',
+      "I'm about to add a driver for churn.",
     ]) {
       expect(containsStructuralSuccessClaim(t)).toBe(true);
       expect(v(t, false)).toBe('swap');
+    }
+  });
+
+  it('DESIRE / INTENT / CONDITIONAL forms (want to / plan to / would like to / … if) → NEVER swap', () => {
+    // Codex round-11: these assert a WISH, not a completed/committed change. They
+    // must be preserved (monitor or pass), never declined — matching the
+    // long-standing "I would add … if …" preservation rule.
+    for (const t of [
+      'I want to add a factor after we confirm the assumptions.',
+      'I plan to revise the model when you approve.',
+      'I would like to add a factor if it helps.',
+      "I'd like to add a Pricing option.",
+      'I intend to add a driver once scoping is done.',
+      'I need to add a node for demand at some point.',
+    ]) {
+      expect(containsStructuralSuccessClaim(t)).toBe(false); // not in the unconditional detector
+      expect(v(t, false)).not.toBe('swap');
+      expect(v(t, true)).not.toBe('swap'); // monitor-only even under an edit request
     }
   });
 
