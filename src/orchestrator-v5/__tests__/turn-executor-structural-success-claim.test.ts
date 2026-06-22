@@ -429,6 +429,17 @@ describe('Codex round-5 — preserved (not swapped)', () => {
     expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(0);
   });
+
+  // Codex round-12 — SUFFIX conditional offer (condition AFTER the claim).
+  it('suffix conditional offer ("I\'ll add a factor once you confirm") → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Could you add a factor?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1a'),
+      'req-suffix-conditional',
+      { routingAdapter: mockRoutingAdapter("I'll add a factor once you confirm.") },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

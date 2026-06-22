@@ -200,19 +200,38 @@ const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
  *  preserved (monitored), never swapped. Only matches when a conditional clause
  *  precedes a first-person future modal — a past completion ("when you asked, I
  *  added …") is unaffected. */
-const CONDITIONAL_OFFER =
-  /\b(?:once|after|when|if|unless|provided|assuming|as soon as|should)\s+(?:you|we|they|the user|i)\b[^.?!]*\bI(?:['’]ll| will| can| could| would)\b/i;
+const CONDITION_CLAUSE =
+  '\\b(?:once|after|when|if|unless|provided|assuming|pending|as soon as|should)\\s+(?:you|we|they|i|the user|it|ready|approved|confirmed|needed|helpful|required|wanted|necessary)\\b';
+/** A first-person FUTURE / offer commitment ("I'll", "I will", "I can/could",
+ *  "I'm going to", "let me"). A future commitment GOVERNED by a condition — in
+ *  EITHER order ("once you confirm, I'll add a factor" / "I'll add a factor once
+ *  you confirm") — is an OFFER, not a completed change, and must be preserved.
+ *  Past completions ("I added a factor"; "when you asked, I added …") are NOT
+ *  future commitments, so they are unaffected. */
+const FUTURE_COMMIT = `(?:\\bI(?:${APOS}ll| will| can| could| would|${APOS}m going to| am going to|${APOS}m gonna| am gonna|${APOS}m about to| am about to)|\\blet me)`;
+const CONDITIONAL_OFFER = new RegExp(
+  `${CONDITION_CLAUSE}[^.?!;]*${FUTURE_COMMIT}|${FUTURE_COMMIT}[^.?!;]*${CONDITION_CLAUSE}`,
+  'i',
+);
 
 /**
  * Narrow detector for the enforcing honesty gate (Brief 4). Returns true only
  * when `text` makes a TIGHTLY-BOUND first-person structural completion / near-
  * future assertion on a graph object. Conservative by contract: advisory, offer,
  * conditional, idiom, social and non-graph phrasing returns false (monitor-only).
+ *
+ * Evaluated PER CLAUSE so a conditional offer in one clause cannot mask a real
+ * completion in another ("I added a factor; I'll explain more if you want." still
+ * swaps), and a leading completion cannot drag a conditional offer into a swap.
  */
 export function containsStructuralSuccessClaim(text: string): boolean {
   if (typeof text !== 'string' || text.length === 0) return false;
-  if (CONDITIONAL_OFFER.test(text)) return false; // offers/conditionals are not completion claims
-  return STRUCTURAL_SUCCESS_CLAIM_PATTERNS.some((p) => p.test(text));
+  for (const clause of text.split(/[.?!;]+(?=\s|$)/)) {
+    if (!clause.trim()) continue;
+    if (CONDITIONAL_OFFER.test(clause)) continue; // this clause is an offer, not a completion
+    if (STRUCTURAL_SUCCESS_CLAIM_PATTERNS.some((p) => p.test(clause))) return true;
+  }
+  return false;
 }
 
 /**

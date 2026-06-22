@@ -283,6 +283,31 @@ describe('classifyStructuralClaim — PRECISION-FIRST honesty decision (final co
     }
   });
 
+  // Codex round-12 — SUFFIX conditional offers (condition AFTER the claim) must
+  // be preserved just like prefix conditionals. Direct-object cases on
+  // option/factor/model/graph.
+  it('suffix conditional offers ("I\'ll add a factor once you confirm") are NEVER swapped', () => {
+    for (const t of [
+      "I'll add a factor once you confirm.",
+      'I will update the model if you approve.',
+      'Let me change the factor after you approve.',
+      "I'll add the Pricing option once you give the go-ahead.",
+      "I'm going to add a node when you're ready.",
+      'I will change the factor unless you object.',
+    ]) {
+      expect(containsStructuralSuccessClaim(t)).toBe(false);
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
+      expect(classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: true }).verdict).not.toBe('swap');
+    }
+  });
+
+  // Clause-scoped: a conditional offer in one clause must not mask a real
+  // completion claim in another, and vice-versa.
+  it('mixed clauses — a real completion still swaps despite a separate conditional offer', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: "I added a factor; I'll explain more if you want." }).verdict).toBe('swap');
+    expect(classifyStructuralClaim({ ...base, assistantText: "I added the option. Once you confirm, I'll add another." }).verdict).toBe('swap');
+  });
+
   it('tightly-bound completion claims still swap (E1 protection intact)', () => {
     for (const t of ["I've added the option.", 'I added a risk factor.', 'I updated the model.', 'I changed the Pricing factor.']) {
       expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('swap');

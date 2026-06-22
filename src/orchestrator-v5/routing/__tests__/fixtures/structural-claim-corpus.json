@@ -1028,5 +1028,35 @@
   "text": "I have added, per your request, the Coach Hire constraint.",
   "category": "false_success_structural",
   "lens": "robustness"
+ },
+ {
+  "text": "I'll add a factor once you confirm.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "I will update the model if you approve.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "Let me change the factor after you approve.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "I'll add the Pricing option once you give the go-ahead.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "I'm going to add a node when you're ready.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
+ },
+ {
+  "text": "I will change the factor unless you object.",
+  "category": "advisory",
+  "lens": "conditional-suffix"
  }
 ]
