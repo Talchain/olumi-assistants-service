@@ -584,3 +584,182 @@ describe('round-9 verb parity — rewire/revise/rework enforce on structural nou
     expect(mentionsStructuralEditRequest('rework the presentation')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round-9b active-verb parity matrix — the ENFORCING detector must recognise
+// rewire/revise/rework across EVERY active construction (future, "let me",
+// continuous, present-perfect, simple-past) and the direct graph/model path,
+// so a verb in one subject-form can't leak in another. (Codex caught the
+// "let me" + graph/model paths were missed; this matrix locks all of them.)
+// ---------------------------------------------------------------------------
+
+describe('round-9b active-verb parity — rewire/revise/rework across all constructions', () => {
+  const base = { handlerEmittedMutatedGraph: false, proposedHandlerId: null as string | null };
+  const verdict = (t: string, intent = false) =>
+    classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: intent }).verdict;
+
+  // Each strong verb in every subject-form + an unambiguous structural noun →
+  // unconditional swap (intent-irrelevant). {base}/{ving}/{ved} inflections.
+  const verbs = [
+    { base: 'rewire', ving: 'rewiring', ved: 'rewired' },
+    { base: 'revise', ving: 'revising', ved: 'revised' },
+    { base: 'rework', ving: 'reworking', ved: 'reworked' },
+  ];
+  for (const { base: b, ving, ved } of verbs) {
+    const onNoun = [
+      `I'll ${b} the option.`,
+      `Let me ${b} the factor.`,
+      `Let me go ahead and ${b} the edge.`,
+      `I'll go ahead and ${b} the constraint.`,
+      `I'm ${ving} the option.`,
+      `I've ${ved} the factor.`,
+      `I ${ved} the edge.`,
+    ];
+    const onGraph = [
+      `I ${ved} the graph.`,
+      `I've ${ved} the model.`,
+      `Let me ${b} the model.`,
+      `I'll ${b} the graph.`,
+    ];
+    for (const t of [...onNoun, ...onGraph]) {
+      it(`swap (intent-irrelevant): ${t}`, () => {
+        expect(containsStructuralSuccessClaim(t)).toBe(true);
+        expect(verdict(t, false)).toBe('swap');
+        expect(verdict(t, true)).toBe('swap');
+      });
+    }
+
+    // Same verbs in a non-graph context must NOT swap unconditionally — the
+    // NON_GRAPH_PP / NON_GRAPH_COMPOUND guards still apply in every construction.
+    it(`non-graph guard holds for "${b}"`, () => {
+      expect(containsStructuralSuccessClaim(`I ${ved} the option in the report.`)).toBe(false);
+      expect(containsStructuralSuccessClaim(`Let me ${b} the option in the slides.`)).toBe(false);
+      expect(containsStructuralSuccessClaim(`Let me ${b} the model documentation.`)).toBe(false);
+      // No graph object at all → not a structural success claim.
+      expect(containsStructuralSuccessClaim(`Let me ${b} the report.`)).toBe(false);
+      expect(verdict(`Let me ${b} the report.`, false)).not.toBe('swap');
+    });
+  }
+
+  it('"let me" base-verb parity with "I\'ll" (shared verb list, no drift)', () => {
+    for (const v of ['add', 'wire', 'rewire', 'revise', 'rework', 'connect', 'remove']) {
+      // Both subjects, same verb, same noun → identical (swap) verdict.
+      expect(verdict(`I'll ${v} the option.`, false)).toBe(verdict(`Let me ${v} the option.`, false));
+      expect(verdict(`Let me ${v} the option.`, false)).toBe('swap');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-9c adversarial-sweep hardening — a 7-lens adversarial corpus (206 items)
+// was generated and run through the real classifier; these lock the CLASSES that
+// were under-enforcing. Fixes are intent-gated (broad) or precision-improving,
+// so over-enforcement did not rise. The irreducible semantic tail is documented
+// as #289 residuals below.
+// ---------------------------------------------------------------------------
+
+describe('round-9c sweep hardening — newly-closed under-enforcement classes', () => {
+  const base = { handlerEmittedMutatedGraph: false, proposedHandlerId: null as string | null };
+  const v = (t: string, intent = false) =>
+    classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: intent }).verdict;
+
+  it('intent/desire subject forms (want to / plan to / need to / gonna / would like to) → swap', () => {
+    for (const t of [
+      'I want to add an option for the fallback plan.',
+      'I plan to add a constraint on the budget.',
+      'I need to add a node for demand.',
+      'I intend to add a driver for churn.',
+      "I'd like to add a Pricing option.",
+      'I would like to add a churn factor.',
+      "I'm gonna add a Risk factor.",
+      'I wanna add an option.',
+    ]) {
+      expect(containsStructuralSuccessClaim(t)).toBe(true);
+      expect(v(t, false)).toBe('swap');
+    }
+  });
+
+  it('adverb / lead-phrase between subject and verb (just / now / quickly / went ahead and) → swap', () => {
+    for (const t of [
+      'Let me just add a quick option for that scenario.',
+      'Let me now connect the two nodes.',
+      'Let me quickly add a factor for seasonality.',
+      'I have now added the Coach option.',
+      'I went ahead and added a churn factor for you.',
+      "I'll quickly rewire the constraints to break the cycle.",
+      'Let me hook up a driver for demand.',
+    ]) {
+      expect(containsStructuralSuccessClaim(t)).toBe(true);
+      expect(v(t, false)).toBe('swap');
+    }
+  });
+
+  it('passive success on a LABELLED / quantified structural noun → intent-gated swap', () => {
+    for (const t of [
+      'The Brand Risk factor has been added.',
+      'A Coach Hire option was created.',
+      'The new Coach Hire option has been added.',
+      'Your Pricing option has been updated.',
+      'Two new options have been added to the model.',
+      'The Regulatory Risk node has been reconfigured.',
+      'The edges have been redrawn.',
+    ]) {
+      expect(v(t, true)).toBe('swap'); // structural-edit request present
+      expect(v(t, false)).toBe('monitor'); // observed, never silently dropped
+    }
+  });
+
+  it('actorless state-now ("now your model has …") and passive graph/model edits → intent-gated', () => {
+    for (const t of [
+      'Now your model has the Coach option.',
+      'Now your model includes the Coach Hire driver.',
+      'The decision graph has been restructured around the new options.',
+      'The model has been reorganised around the revised objective.',
+    ]) {
+      expect(v(t, true)).toBe('swap');
+      expect(v(t, false)).toBe('monitor');
+    }
+  });
+
+  it('active graph/model re-verbs (reconfigure / restructure / redraw) → swap', () => {
+    for (const t of ['I reconfigured the graph.', 'Let me restructure the model.', "I've redrawn the decision model."]) {
+      expect(containsStructuralSuccessClaim(t)).toBe(true);
+      expect(v(t, false)).toBe('swap');
+    }
+  });
+
+  it('non-graph context precision — verb bound to a document artefact is NOT swapped', () => {
+    for (const t of [
+      'I reworked the options section of the deck.',
+      'I revised the factors part of the report.',
+      'I added an option under the appendix of the presentation.',
+      'I updated the options list within the slides.',
+    ]) {
+      expect(v(t, false)).not.toBe('swap');
+    }
+  });
+});
+
+// Characterisation of the IRREDUCIBLE text-only residuals (tracked as #289 —
+// graph-label / semantic binding). These are asserted at their CURRENT verdict so
+// a future semantic fix is NOTICED (the test will fail and must be updated). They
+// are NOT silently ignored.
+describe('round-9c residuals (#289) — known text-only limits, characterised', () => {
+  const base = { handlerEmittedMutatedGraph: false, proposedHandlerId: null as string | null };
+  const v = (t: string, intent = false) =>
+    classifyStructuralClaim({ ...base, assistantText: t, structuralEditIntent: intent }).verdict;
+
+  it('#289 OVER-enforce: idiom/social with a trailing structural noun currently declines', () => {
+    // "connected the dots on the churn factor" is analysis, not a graph edit, but
+    // the verb binds to the later noun. Needs object/graph-label binding (#289).
+    expect(v('I connected the dots on the churn factor.')).toBe('swap');
+    expect(v('I connected you with the analyst who owns the Coach option.')).toBe('swap');
+  });
+
+  it('#289 UNDER-enforce: bare "set" / parenthetical / relative-clause currently pass', () => {
+    // Bare "set" overlaps the scalar value path and listing idioms ("set out the
+    // options"); a parenthetical or relative clause separates subject from verb.
+    expect(v('I set a new constraint on spend.')).toBe('pass');
+    expect(v('I have, as requested, added the Coach Hire option.')).toBe('pass');
+  });
+});

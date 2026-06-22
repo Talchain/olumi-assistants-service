@@ -89,7 +89,7 @@ const APOS = "['’]";
  *  "an option to the presentation", "the decision log". Used to EXCLUDE such
  *  prose CONSISTENTLY across the narrow, intent and graph/model patterns. */
 const NON_GRAPH_CONTEXT =
-  '(?:presentation|slides?|deck|decks|email|emails|e-mail|doc|docs|document|documents|documentation|report|reports|write-?up|notes?|notebook|agenda|meeting|minutes|spec|specs|readme|wiki|page|pages|chat|conversation|thread|ticket|backlog|roadmap|log|logs|file|files|approach|strateg(?:y|ies)|version|versions|name|names|template|templates|prompt|prompts)';
+  '(?:presentation|slides?|deck|decks|email|emails|e-mail|doc|docs|document|documents|documentation|report|reports|write-?up|notes?|notebook|agenda|meeting|minutes|spec|specs|readme|wiki|page|pages|chat|conversation|thread|ticket|backlog|roadmap|log|logs|file|files|approach|strateg(?:y|ies)|version|versions|name|names|template|templates|prompt|prompts|section|sections|portion|portions|column|columns|proposal|proposals|spreadsheet|spreadsheets|dashboard|dashboards|appendix|briefing|briefings|changelog|changelogs|methodology)';
 /** "<graph|model>['s] <non-graph word>" compound — "the model documentation",
  *  "the model's documentation" (review round 8: possessive form). */
 const NON_GRAPH_COMPOUND = `(?!(?:${APOS}s)?\\s+${NON_GRAPH_CONTEXT}\\b)`;
@@ -104,47 +104,67 @@ const GRAPH_DEST =
  *  "an option to the presentation", "an option called \"Draft\" to the
  *  presentation". A GRAPH destination anywhere in the clause OVERRIDES the
  *  exclusion (graph edit with a presentation purpose still enforces). */
-const NON_GRAPH_PP = `(?:(?=[^.?!]*\\b${GRAPH_DEST})|(?![^.?!]*\\b(?:to|in|for|on|into|onto)\\s+(?:the\\s+|a\\s+|an\\s+|my\\s+|our\\s+|your\\s+|this\\s+|that\\s+)?${NON_GRAPH_CONTEXT}\\b))`;
+const NON_GRAPH_PP = `(?:(?=[^.?!]*\\b${GRAPH_DEST})|(?![^.?!]*\\b(?:to|in|for|on|of|into|onto|within|under|with|inside)\\s+(?:the\\s+|a\\s+|an\\s+|my\\s+|our\\s+|your\\s+|this\\s+|that\\s+)?${NON_GRAPH_CONTEXT}\\b))`;
 /** Shared passive participle list — kept identical for structural and ambiguous-
  *  edge passives so they cannot drift (review round 9). */
 const PASSIVE_DONE =
-  '(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|introduced|incorporated|included|changed|updated|modified|edited|rewired|revised|reworked|adjusted|put\\s+in\\s+place|in\\s+place)';
+  '(?:added|created|connected|inserted|established|set\\s+up|wired|linked|removed|deleted|introduced|incorporated|included|changed|updated|modified|edited|rewired|revised|reworked|reconfigured|restructured|redrawn|reconnected|rearranged|reorganized|reorganised|adjusted|put\\s+in\\s+place|in\\s+place)';
 /** Shared first-person edit-verb list (active, any inflection) for edge claims. */
 const EDGE_EDIT_VERB =
   '(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|rewir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|remov(?:e|ed|ing)|delet(?:e|ed|ing)|revis(?:e|ed|ing)|rework(?:s|ed|ing)?|adjust(?:s|ed|ing)?|drew|draw(?:ing)?)';
 
+/** Shared base-form edit-verb list for the future ("I'll …") and "let me …"
+ *  narrow patterns — kept IDENTICAL so they cannot drift (the round-9 leak was
+ *  rewire/revise/rework reaching the "I'll" list but not the "let me" list). */
+const STRUCT_EDIT_VERB_BASE =
+  '(?:add|set|change|update|remove|connect|create|wire|rewire|adjust|modify|revise|rework|reconfigure|restructure|reorganize|reorganise|redraw|hook up|link|delete|insert)';
+/** Optional adverb/lead phrase between the subject and the verb — "I'll JUST add",
+ *  "let me NOW connect", "I have NOW added", "I WENT AHEAD AND added". Shared so a
+ *  benign adverb can't slip a real first-person claim past the gate (adversarial
+ *  sweep, round 9). Closed set — does not weaken the structural-noun anchor. */
+const LEAD_ADVERB =
+  '(?:(?:go ahead and|gone ahead and|went ahead and|just|now|quickly|also|then|already|finally|simply)\\s+)?';
+/** First-person future / intent subject forms — commitment to edit ("I'll",
+ *  "I'm going to", "I want to", "I plan to", "I'd like to"). Anchored to a
+ *  structural noun + NON_GRAPH_PP downstream, so the desire forms are as safe as
+ *  "I'll". */
+const FUTURE_SUBJECT = `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m gonna| am gonna|${APOS}m about to| am about to| want to| wanna| plan to| need to| intend to|${APOS}d like to| would like to)`;
+
 const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
-  // Future commitment: "I'll add … <structural noun>".
+  // Future commitment / stated intent: "I'll add / I want to add … <structural noun>".
   new RegExp(
-    `\\bI(?:${APOS}ll| will|${APOS}m going to| am going to|${APOS}m about to| am about to)\\s+(?:go ahead and\\s+)?(?:add|set|change|update|remove|connect|create|wire|rewire|adjust|modify|revise|rework|link|delete|insert)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `${FUTURE_SUBJECT}\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
-  // "let me add … <structural noun>".
+  // "let me add … <structural noun>" (incl. "let me go ahead and / just / now …").
   new RegExp(
-    `\\blet me\\s+(?:add|set|change|update|remove|connect|create|wire|adjust|modify|link|delete|insert)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\blet me\\s+${LEAD_ADVERB}${STRUCT_EDIT_VERB_BASE}\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // In-progress: "I'm adding … <structural noun>".
   new RegExp(
-    `\\bI(?:${APOS}m| am)\\s+(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|linking|deleting|inserting)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI(?:${APOS}m| am)\\s+${LEAD_ADVERB}(?:adding|setting|changing|updating|removing|connecting|creating|wiring|rewiring|adjusting|revising|reworking|modifying|editing|establishing|linking|deleting|inserting)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
   // Present-perfect completion: "I've added … <structural noun>", "I've set up a connection".
   new RegExp(
-    `\\bI(?:${APOS}ve| have)\\s+(?:added|set|set up|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|adjusted|linked|deleted|inserted|edited|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI(?:${APOS}ve| have)\\s+${LEAD_ADVERB}(?:added|set|set up|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrawn|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
-  // Simple-past completion: "I added … <structural noun>", "I set up a connection".
+  // Simple-past completion: "I added … <structural noun>", "I went ahead and added a factor".
   new RegExp(
-    `\\bI\\s+(?:added|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|adjusted|linked|deleted|inserted|edited|set up|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
+    `\\bI\\s+${LEAD_ADVERB}(?:added|created|connected|updated|removed|changed|wired|rewired|modified|revised|reworked|reconfigured|restructured|redrew|reconnected|rearranged|reorganized|reorganised|adjusted|linked|deleted|inserted|edited|set up|established)\\b[^.?!]*\\b${STRUCTURAL_NOUN}\\b${NON_GRAPH_PP}`,
     'i',
   ),
-  // Direct-object graph/model edit: "I updated the graph", "I changed the model".
-  // The edit verb sits directly on the graph/model, and a negative lookahead
-  // excludes compound nouns so "changed the model documentation" / "updated the
-  // decision log" / "created a diagram for the presentation" do NOT match.
+  // Direct-object graph/model edit: "I updated the graph", "I changed the model",
+  // "let me rework the model". The edit verb sits directly on the graph/model;
+  // a negative lookahead excludes compound nouns so "changed the model
+  // documentation" / "updated the decision log" / "created a diagram for the
+  // presentation" do NOT match. Subject covers first-person AND "let me", and the
+  // verb list mirrors the active edit verbs (incl. rewire/revise/rework) so it
+  // cannot drift from the structural-noun patterns above.
   new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am)?\\s+(?:just\\s+|already\\s+)?(?:updated|update|changed|change|edited|edit|modified|modify|revised|revise|rebuilt|rebuild|reworked|rework|redrew|redraw)\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
+    `(?:${FUTURE_SUBJECT}|\\bI(?:${APOS}ve| have|${APOS}m| am)?|\\blet me)\\s+${LEAD_ADVERB}(?:updated|update|changed|change|edited|edit|modified|modify|revised|revise|rewired|rewire|rebuilt|rebuild|reworked|rework|redrew|redrawn|redraw|restructured|restructure|reconfigured|reconfigure|reorganized|reorganised|reorganize|reorganise)\\s+(?:the|your)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}`,
     'i',
   ),
 ];
@@ -185,12 +205,13 @@ const BROAD_STRUCTURAL_CLAIM_PATTERNS: readonly RegExp[] = [
   // add a factor if …", "I'd add another option if you wanted") is not a success
   // claim; it falls to monitor via containsMutationLanguage, never a swap.
   new RegExp(
-    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am| just| already)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+|now\\s+)?(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|rewir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|revis(?:e|ed|ing)|rework(?:s|ed|ing)?|remov(?:e|ed|ing)|delet(?:e|ed|ing)|drew|draw(?:ing)?)\\b`,
+    `\\bI(?:${APOS}ve| have|${APOS}ll| will|${APOS}m| am| just| already| want to| wanna| plan to| need to| intend to)?\\s+(?:just\\s+|already\\s+|gone ahead and\\s+|went ahead and\\s+|now\\s+|quickly\\s+)?(?:add(?:ed|ing)?|creat(?:e|ed|ing)|connect(?:ed|ing)?|link(?:ed|ing)?|wir(?:e|ed|ing)|rewir(?:e|ed|ing)|join(?:ed|ing)?|insert(?:ed|ing)?|introduc(?:e|ed|ing)|incorporat(?:e|ed|ing)|includ(?:e|ed|ing)|made|make|making|built|build|building|attach(?:ed|ing)?|establish(?:ed|ing)?|set up|updat(?:e|ed|ing)|chang(?:e|ed|ing)|edit(?:ed|ing)?|modif(?:y|ied|ying)|revis(?:e|ed|ing)|rework(?:s|ed|ing)?|reconfigur(?:e|ed|ing)|restructur(?:e|ed|ing)|reorganiz(?:e|ed|ing)|reorganis(?:e|ed|ing)|redraw(?:s|n|ing)?|redrew|remov(?:e|ed|ing)|delet(?:e|ed|ing)|drew|draw(?:ing)?)\\b`,
     'i',
   ),
-  // Actorless state-now success assertion ("your model now includes/has …").
+  // Actorless state-now success assertion ("your model now includes/has …" AND the
+  // "now your model has/includes …" word order — adversarial sweep, round 9).
   new RegExp(
-    `\\b(?:your\\s+|the\\s+)?(?:model|graph|decision)\\s+now\\s+(?:includes|contains|has|features|shows|reflects)\\b`,
+    `\\b(?:(?:your\\s+|the\\s+)?(?:model|graph|decision)\\s+now|now\\s+(?:your\\s+|the\\s+)?(?:model|graph|decision))\\s+(?:includes|contains|has|have|features|shows|reflects)\\b`,
     'i',
   ),
   // Edge relation phrasing with an edit verb: "connected … between X and Y".
@@ -205,7 +226,13 @@ const BROAD_STRUCTURAL_CLAIM_PATTERNS: readonly RegExp[] = [
   // only swaps under structural-edit intent, so non-graph passives ("the note
   // has been added") never match.
   new RegExp(
-    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${STRUCTURAL_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+${PASSIVE_DONE}\\b`,
+    `\\b(?:the|a|an|your|this|that|another|two|three|four|five|both|several|multiple|\\d+)\\s+(?:new\\s+)?(?:[A-Za-z][\\w’'-]*\\s+){0,4}?${STRUCTURAL_NOUN}\\s+(?:(?:has|have)\\s+(?:(?:now|both|also|recently|since|just)\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+${PASSIVE_DONE}\\b`,
+    'i',
+  ),
+  // Passive graph/model edit ("the model has been restructured", "the decision
+  // graph was redrawn"). Compound guard excludes "the model documentation has …".
+  new RegExp(
+    `\\b(?:the|your|this|that)\\s+(?:decision\\s+)?(?:graph|model)\\b${NON_GRAPH_COMPOUND}\\s+(?:(?:has|have)\\s+(?:(?:now|recently|since|just)\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+${PASSIVE_DONE}\\b`,
     'i',
   ),
 ];
@@ -227,9 +254,12 @@ export function containsBroadStructuralClaimLanguage(text: string): boolean {
  * drift (review round 9). NEVER feeds the swap path.
  */
 const AMBIGUOUS_EDGE_CLAIM_PATTERNS: readonly RegExp[] = [
-  // Passive: "the relationship has been changed", "a connection was revised".
+  // Passive: "the relationship has been changed", "a connection was revised",
+  // "the dependency between Pricing and Demand has been removed" (qualifier
+  // between the edge noun and the auxiliary). Monitor-only, so the loose
+  // qualifier carries no swap risk.
   new RegExp(
-    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${EDGE_NOUN}\\s+(?:(?:has|have)\\s+(?:now\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+${PASSIVE_DONE}\\b`,
+    `\\b(?:the|a|an|your|this|that|another)\\s+(?:new\\s+)?${EDGE_NOUN}\\s+(?:[A-Za-z][\\w’'-]*\\s+){0,6}?(?:(?:has|have)\\s+(?:(?:now|both|also|recently|since|just)\\s+)?been|was|were|is\\s+now|are\\s+now)\\s+${PASSIVE_DONE}\\b`,
     'i',
   ),
   // First-person active: "I rewired the relationship", "I revised the connection".
