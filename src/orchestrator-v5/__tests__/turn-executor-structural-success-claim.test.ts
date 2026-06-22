@@ -440,6 +440,29 @@ describe('Codex round-5 — preserved (not swapped)', () => {
     expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
     expect(swapEvents()).toHaveLength(0);
   });
+
+  // Codex round-13 (hole 2) — arbitrary condition subject preserved.
+  it('conditional offer with an arbitrary condition subject ("if the team approves") → NOT swapped', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Could you add a factor?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1b'),
+      'req-arbitrary-condition',
+      { routingAdapter: mockRoutingAdapter("I'll add a factor if the team approves.") },
+    );
+    expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(0);
+  });
+
+  // Codex round-13 (hole 1) — a real completion joined to a later conditional
+  // offer by ", and" must STILL decline (core guarantee).
+  it('completion + later conditional offer ("I added a factor, and I\'ll explain if you want") → declines', async () => {
+    const { response } = await runTurnExecutor(
+      payload('Add a churn factor', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1c'),
+      'req-completion-then-offer',
+      { routingAdapter: mockRoutingAdapter("I added a factor, and I'll explain more if you want.") },
+    );
+    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
+    expect(swapEvents()).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

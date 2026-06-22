@@ -57,4 +57,15 @@ describe('FROZEN corpus — precision-first preservation guarantee', () => {
       expect(verdict(text, false)).toBe('swap');
     }
   });
+
+  // Core guarantee: a real completion claim must swap even when it shares a
+  // sentence with a later conditional offer (comma/conjunction). Frozen here so
+  // the under-enforcement hole cannot silently reopen.
+  it('completion_must_swap items always swap (no mutation → must decline)', () => {
+    const mustSwap = corpus.filter((c) => c.category === 'completion_must_swap');
+    expect(mustSwap.length).toBeGreaterThanOrEqual(2);
+    for (const { text } of mustSwap) {
+      expect(verdict(text, false)).toBe('swap');
+    }
+  });
 });

@@ -1058,5 +1058,30 @@
   "text": "I will change the factor unless you object.",
   "category": "advisory",
   "lens": "conditional-suffix"
+ },
+ {
+  "text": "If the team approves, I'll add a factor.",
+  "category": "advisory",
+  "lens": "conditional-subject"
+ },
+ {
+  "text": "I'll update the model when approval comes through.",
+  "category": "advisory",
+  "lens": "conditional-subject"
+ },
+ {
+  "text": "Once scoping is done, I'll add a driver.",
+  "category": "advisory",
+  "lens": "conditional-subject"
+ },
+ {
+  "text": "I added a factor, and I'll explain more if you want.",
+  "category": "completion_must_swap",
+  "lens": "mixed-clause"
+ },
+ {
+  "text": "I've updated the model, and if you want I can outline the rationale.",
+  "category": "completion_must_swap",
+  "lens": "mixed-clause"
  }
 ]

@@ -194,14 +194,13 @@ const STRUCTURAL_SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   ),
 ];
 
-/** Conditional / offer frame — a future-modal claim GOVERNED by a condition
- *  ("once you confirm, I'll rebuild the graph", "if you approve, I'll add a
- *  factor"). This is an OFFER, not a completed/committed change, so it must be
- *  preserved (monitored), never swapped. Only matches when a conditional clause
- *  precedes a first-person future modal — a past completion ("when you asked, I
- *  added …") is unaffected. */
+/** A conditional clause — a condition conjunction + its subject. The subject is
+ *  GENERAL (a pronoun OR any noun phrase: "if you", "if the team approves", "when
+ *  approval comes through", "once scoping is done"), not a finite allow-list. */
 const CONDITION_CLAUSE =
-  '\\b(?:once|after|when|if|unless|provided|assuming|pending|as soon as|should)\\s+(?:you|we|they|i|the user|it|ready|approved|confirmed|needed|helpful|required|wanted|necessary)\\b';
+  '\\b(?:once|after|when|if|unless|provided|assuming|pending|as soon as|should)\\s+' +
+  '(?:the\\s+|a\\s+|an\\s+|your\\s+|our\\s+|their\\s+|this\\s+|that\\s+|my\\s+)?' +
+  "(?:you|we|they|i|he|she|it|[A-Za-z][\\w'-]+)\\b";
 /** A first-person FUTURE / offer commitment ("I'll", "I will", "I can/could",
  *  "I'm going to", "let me"). A future commitment GOVERNED by a condition — in
  *  EITHER order ("once you confirm, I'll add a factor" / "I'll add a factor once
@@ -214,22 +213,35 @@ const CONDITIONAL_OFFER = new RegExp(
   'i',
 );
 
+/** Proposition boundary: sentence punctuation / semicolon, OR a clause-level
+ *  coordinator (and/but/or/…) that introduces a NEW clause — detected by a
+ *  following clause-starter ("I", a condition conjunction, or a subject/article).
+ *  This splits "I added a factor, and I'll explain if you want" into two
+ *  propositions (so the completion is not masked by the later offer), WITHOUT
+ *  splitting verb/noun coordination ("add or remove an option", "risk and reward
+ *  factor") or breaking a prefix condition from its claim ("once you confirm, I'll
+ *  add a factor" — the comma there has no coordinator, so it is NOT a boundary). */
+const PROPOSITION_SPLIT =
+  /[.?!;]+(?=\s|$)|,?\s+(?:and|but|or|nor|yet|so|then|plus)\s+(?=(?:I['’]|I\s|if\b|once\b|when\b|after\b|unless\b|provided\b|assuming\b|should\b|you\b|we\b|they\b|it\b|the\b|this\b|that\b|your\b|our\b))/i;
+
 /**
  * Narrow detector for the enforcing honesty gate (Brief 4). Returns true only
  * when `text` makes a TIGHTLY-BOUND first-person structural completion / near-
  * future assertion on a graph object. Conservative by contract: advisory, offer,
  * conditional, idiom, social and non-graph phrasing returns false (monitor-only).
  *
- * Evaluated PER CLAUSE so a conditional offer in one clause cannot mask a real
- * completion in another ("I added a factor; I'll explain more if you want." still
- * swaps), and a leading completion cannot drag a conditional offer into a swap.
+ * Evaluated PER PROPOSITION: the text is split at sentence/clause boundaries so a
+ * conditional offer is associated with its OWN proposition only. A real completion
+ * sharing a sentence with a later conditional offer still swaps ("I added a
+ * factor, and I'll explain more if you want." → swap on the first proposition),
+ * and a prefix/suffix condition still suppresses the proposition it governs.
  */
 export function containsStructuralSuccessClaim(text: string): boolean {
   if (typeof text !== 'string' || text.length === 0) return false;
-  for (const clause of text.split(/[.?!;]+(?=\s|$)/)) {
-    if (!clause.trim()) continue;
-    if (CONDITIONAL_OFFER.test(clause)) continue; // this clause is an offer, not a completion
-    if (STRUCTURAL_SUCCESS_CLAIM_PATTERNS.some((p) => p.test(clause))) return true;
+  for (const proposition of text.split(PROPOSITION_SPLIT)) {
+    if (!proposition || !proposition.trim()) continue;
+    if (CONDITIONAL_OFFER.test(proposition)) continue; // this proposition is an offer, not a completion
+    if (STRUCTURAL_SUCCESS_CLAIM_PATTERNS.some((p) => p.test(proposition))) return true;
   }
   return false;
 }

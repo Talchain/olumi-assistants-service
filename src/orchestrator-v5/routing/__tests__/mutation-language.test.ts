@@ -301,11 +301,42 @@ describe('classifyStructuralClaim — PRECISION-FIRST honesty decision (final co
     }
   });
 
-  // Clause-scoped: a conditional offer in one clause must not mask a real
-  // completion claim in another, and vice-versa.
-  it('mixed clauses — a real completion still swaps despite a separate conditional offer', () => {
-    expect(classifyStructuralClaim({ ...base, assistantText: "I added a factor; I'll explain more if you want." }).verdict).toBe('swap');
-    expect(classifyStructuralClaim({ ...base, assistantText: "I added the option. Once you confirm, I'll add another." }).verdict).toBe('swap');
+  // Codex round-13 (hole 2) — condition subject is GENERAL, not a finite list:
+  // arbitrary noun-phrase / impersonal conditions must be preserved.
+  it('conditional offers with an ARBITRARY condition subject are NEVER swapped', () => {
+    for (const t of [
+      'If the team approves, I\'ll add a factor.',
+      "I'll add a factor if the team approves.",
+      'I\'ll update the model when approval comes through.',
+      'Once scoping is done, I\'ll add a driver.',
+      'I\'ll add a constraint provided the budget holds.',
+    ]) {
+      expect(containsStructuralSuccessClaim(t)).toBe(false);
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).not.toBe('swap');
+    }
+  });
+
+  // Codex round-13 (hole 1) — a real completion must NOT be masked by a SEPARATE
+  // conditional offer joined with a comma + coordinator. These directly protect
+  // the core guarantee (no mutation, yet a completion claim allowed through).
+  it('a real completion is NOT masked by a later conditional offer (comma/conjunction)', () => {
+    for (const t of [
+      "I added a factor, and I'll explain more if you want.",
+      "I've updated the model, and if you want I can outline the rationale.",
+      "I added a factor; I'll explain more if you want.",
+      'I added the option. Once you confirm, I\'ll add another.',
+    ]) {
+      expect(classifyStructuralClaim({ ...base, assistantText: t }).verdict).toBe('swap');
+    }
+    // An UNCONDITIONAL future commitment also swaps even when a separate
+    // conditional offer follows.
+    expect(classifyStructuralClaim({ ...base, assistantText: "I'll add a factor, but if you want I can explain why." }).verdict).toBe('swap');
+  });
+
+  // Coordination at verb/noun level must NOT be over-split into false negatives.
+  it('verb / noun coordination is not over-split (still swaps)', () => {
+    expect(classifyStructuralClaim({ ...base, assistantText: "I'll add or remove an option." }).verdict).toBe('swap');
+    expect(classifyStructuralClaim({ ...base, assistantText: 'I added a risk and reward factor.' }).verdict).toBe('swap');
   });
 
   it('tightly-bound completion claims still swap (E1 protection intact)', () => {
