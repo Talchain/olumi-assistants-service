@@ -88,3 +88,26 @@ describe('buildV5ContextSummary — coaching_state_pack opt-in', () => {
     expect(onWithoutCoaching).toEqual(off);
   });
 });
+
+describe('buildV5ContextSummary — canonical_state_source provenance', () => {
+  it('omits canonical_state_source when not threaded', () => {
+    const summary = buildV5ContextSummary({ canonicalState: canonical() });
+    expect('canonical_state_source' in (summary as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it('records turn_executor provenance when threaded', () => {
+    const summary = buildV5ContextSummary({
+      canonicalState: canonical(),
+      canonicalStateSource: 'turn_executor',
+    });
+    expect(summary.canonical_state_source).toBe('turn_executor');
+  });
+
+  it('records route_fallback provenance when threaded', () => {
+    const summary = buildV5ContextSummary({
+      canonicalState: canonical(),
+      canonicalStateSource: 'route_fallback',
+    });
+    expect(summary.canonical_state_source).toBe('route_fallback');
+  });
+});

@@ -48,6 +48,23 @@ import {
 
 export const V5_CONTEXT_SUMMARY_VERSION = '1.0.0';
 
+/**
+ * Provenance of the canonical state this summary projects. Determined by the
+ * route's `ctx.canonicalState ? 'turn_executor' : 'route_fallback'` predicate —
+ * i.e. by whether the dispatch path threaded a full verdict, NOT by entry path.
+ *   - `turn_executor` — the FULL verdict assembled in turn-executor (execute
+ *     post-dispatch OR the non-execute finalize fallback), graph-authority-
+ *     consistent, with degraded-fact detection.
+ *   - `route_fallback` — the PARTIAL `canonicalStateFromFreshness` verdict the
+ *     route composes whenever the dispatch path did NOT thread `canonicalState`
+ *     (today: every non-turn-executor exit — chip-click, system-event,
+ *     edit-graph recovery, draft, …): freshness/readiness only, NO degraded
+ *     detection.
+ * A consumer must NOT treat a `route_fallback` summary as full graph-authority
+ * state. Diagnostic-only; never product logic.
+ */
+export type CanonicalStateSource = 'turn_executor' | 'route_fallback';
+
 /** Integer counts of the analysis-relevant graph entities. No content. */
 export interface ContextSummaryGraphCounts {
   readonly nodes: number;
@@ -72,12 +89,21 @@ export interface V5ContextSummary {
   /** Whether capabilities were present in the context, or null if not threaded. */
   readonly capabilities_present: boolean | null;
   /**
-   * Redacted, hash-free coaching/non-execute state pack. OMITTED entirely
-   * unless the caller opts in (route gates on `coachingStatePackEnabled` AND
-   * the enclosing `contextSummaryEnabled`). Absent → the coaching pack is
-   * disabled at this surface; never read by any prompt / chip / product path.
-   * Named `coaching_state_pack` (not `coaching_state`) to stay disjoint from
-   * the unrelated coaching-lifecycle `coaching_state` feature.
+   * Provenance of `analysis_state` (and, when present, `coaching_state_pack`):
+   * `turn_executor` for the full graph-authority verdict, `route_fallback` for
+   * the partial freshness-only fallback. Omitted only when the caller does not
+   * thread it (the route always does). See {@link CanonicalStateSource}.
+   */
+  readonly canonical_state_source?: CanonicalStateSource;
+  /**
+   * Redacted, hash-free coaching state pack, projected from the SAME canonical
+   * state as `analysis_state` (so its provenance is `canonical_state_source` —
+   * it is NOT restricted to non-execute turns). OMITTED entirely unless the
+   * caller opts in (route gates on `coachingStatePackEnabled` AND the enclosing
+   * `contextSummaryEnabled`). Absent → the coaching pack is disabled at this
+   * surface; never read by any prompt / chip / product path. Named
+   * `coaching_state_pack` (not `coaching_state`) to stay disjoint from the
+   * unrelated coaching-lifecycle `coaching_state` feature.
    */
   readonly coaching_state_pack?: CoachingStatePack;
 }
@@ -125,6 +151,13 @@ export interface BuildV5ContextSummaryInput {
    * (pure) projection. When falsy, `coaching_state_pack` is OMITTED.
    */
   readonly includeCoachingState?: boolean;
+  /**
+   * Provenance of the supplied `canonicalState` (the route knows whether it
+   * threaded the full turn-executor verdict or composed the partial fallback).
+   * Surfaced verbatim as `canonical_state_source`; omitted from the output when
+   * not provided.
+   */
+  readonly canonicalStateSource?: CanonicalStateSource;
 }
 
 /**
@@ -142,6 +175,11 @@ export function buildV5ContextSummary(
     recent_turn_count: input.recentTurnCount ?? null,
     recent_change_count: input.recentChangeCount ?? null,
     capabilities_present: input.capabilitiesPresent ?? null,
+    // Provenance of the verdict (full turn-executor vs partial route fallback);
+    // omitted when the caller does not thread it.
+    ...(input.canonicalStateSource
+      ? { canonical_state_source: input.canonicalStateSource }
+      : {}),
     // Diagnostic-only, double-gated: only present when the caller opts in
     // (route requires BOTH contextSummaryEnabled + coachingStatePackEnabled).
     ...(input.includeCoachingState

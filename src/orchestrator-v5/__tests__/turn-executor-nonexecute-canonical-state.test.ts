@@ -108,6 +108,26 @@ const PERSISTED_1OPT: GraphStateIngress = {
 // graph == PERSISTED_1OPT, whose hash turn-executor computes internally) cases.
 const HASH_2OPT = computeAnalysisAffectingGraphHash(REQUEST_2OPT as never)!;
 
+// Persisted graph that fails GraphStateIngress parse (node missing required
+// `label`) but still loads as context.persistedGraph → the H3 IIFE returns a
+// null hash → freshness resolves to 'unknown' (current_graph_hash_unavailable),
+// never a false 'fresh'.
+const MALFORMED_PERSISTED = {
+  nodes: [{ id: 'goal_1', kind: 'goal' }],
+  edges: [],
+} as unknown as GraphStateIngress;
+
+// Request graph whose nodes ALL have unknown kinds → buildGraphLookup drops
+// everything ('all_dropped') and the executor returns BEFORE routing freshness
+// is derived (the pre-freshness early exit).
+const ALL_UNKNOWN_GRAPH = {
+  nodes: [
+    { id: 'n1', kind: 'unknown_xyz', label: 'X' },
+    { id: 'n2', kind: 'invalid_kind', label: 'Y' },
+  ],
+  edges: [],
+} as unknown as GraphStateIngress;
+
 function priorRunAnalysisTurn(): SessionTurn {
   return {
     id: 'row-prior-1',
@@ -247,5 +267,37 @@ describe('TurnExecutor — non-execute canonical-state fallback (finalizeRun)', 
     expect(result.canonicalState!.requiresRerun).toBe(true);
     expect(result.canonicalState!.usableForChips).toBe(false);
     expect(result.canonicalState!.usableForProse).toBe(true); // stale prose allowed (caveated)
+  });
+
+  // ── C2 contract: 'freshness !== null' — "state unknown" still assembles an
+  //    honest verdict; "no state derived yet" (pre-freshness exit) stays absent.
+
+  it('unparseable persisted graph → freshness UNKNOWN, state still assembled (never false-fresh)', async () => {
+    // Persisted graph fails ingress parse → null current hash. With a prior
+    // run_analysis fact this is freshness 'unknown' (non-null), so the finalize
+    // fallback assembles an honest unknown verdict rather than skipping.
+    const result = await runConverse('req-nx-unparseable', {
+      persisted: MALFORMED_PERSISTED,
+      priorFactHash: HASH_2OPT,
+    });
+    expect(result.canonicalState).toBeDefined();
+    expect(result.canonicalState!.freshness).toBe('unknown');
+    expect(result.canonicalState!.selected_fact_index).not.toBeNull(); // prior fact still seen
+    expect(result.canonicalState!.usableForChips).toBe(false); // unknown is never chip-safe
+    expect(result.canonicalState!.requiresRerun).toBe(false); // unknown ≠ stale
+    expect(result.canonicalState!.status).toBeNull(); // readiness undefined (no parseable authority)
+  });
+
+  it('pre-freshness early exit (all-dropped graph) → canonicalState ABSENT (no state yet)', async () => {
+    // Every node has an unknown kind → graph lookup drops all → the executor
+    // returns BEFORE routing freshness is derived. `freshness` is still null at
+    // finalizeRun, so the 'freshness !== null' guard skips assembly: honestly
+    // absent, never a fabricated verdict.
+    const result = await runConverse('req-nx-alldropped', { request: ALL_UNKNOWN_GRAPH });
+    expect(result.canonicalState).toBeUndefined();
+    // Proves we exited BEFORE routing freshness was derived (not merely that
+    // assembly was skipped for some other reason): freshness is still null, so
+    // finalizeRun surfaces no freshness either.
+    expect(result.freshness).toBeUndefined();
   });
 });

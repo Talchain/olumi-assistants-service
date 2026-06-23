@@ -536,9 +536,11 @@ export function summariseCanonicalAnalysisState(
 }
 
 /**
- * Coaching/non-execute state pack — the NARROWEST, hash-free projection of the
- * canonical state, intended as the foundation for a future, separately-approved
- * LLM-facing coaching surface.
+ * Coaching state pack — the NARROWEST, hash-free projection of the canonical
+ * state, intended as the foundation for a future, separately-approved LLM-facing
+ * coaching surface. It projects WHATEVER canonical state the caller holds (full
+ * turn-executor verdict OR the route's partial fallback — the `_context_summary`
+ * `canonical_state_source` field records which); it is NOT non-execute-specific.
  *
  * It is strictly narrower than {@link AnalysisStateSummary}: it deliberately
  * OMITS `graph_hash_at_run` / `current_graph_hash` (opaque digests),
