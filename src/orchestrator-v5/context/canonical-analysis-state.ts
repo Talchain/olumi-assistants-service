@@ -534,3 +534,66 @@ export function summariseCanonicalAnalysisState(
     contradiction_codes: state.contradictions,
   };
 }
+
+/**
+ * Coaching state pack — the NARROWEST, hash-free projection of the canonical
+ * state, intended as the foundation for a future, separately-approved LLM-facing
+ * coaching surface. It projects WHATEVER canonical state the caller holds (full
+ * turn-executor verdict OR the route's partial fallback — the `_context_summary`
+ * `canonical_state_source` field records which); it is NOT non-execute-specific.
+ *
+ * It is strictly narrower than {@link AnalysisStateSummary}: it deliberately
+ * OMITS `graph_hash_at_run` / `current_graph_hash` (opaque digests),
+ * `selected_fact_index` (a raw index), `degraded_fact_status` and
+ * `contradiction_codes`. Only closed enums, booleans and counts remain, so the
+ * pack carries no hashes, indices, raw values, units, free text, graph content
+ * or scientific claims — narrow enough to sit even on a prompt boundary (the
+ * `buildUserMessage` behaviour-10 leak contract bars hash-bearing state).
+ *
+ * This lane uses it ONLY as a diagnostic `_context_summary` sub-block, gated by
+ * BOTH `contextSummaryEnabled` and `coachingStatePackEnabled`. It is NOT wired
+ * to any prompt / PMS / chip / UI / product path here.
+ */
+export interface CoachingStatePack {
+  /** A selectable run_analysis fact exists (boolean — never the index/value). */
+  readonly analysis_present: boolean;
+  /** Freshness verdict (closed enum). */
+  readonly freshness: AnalysisFreshnessT;
+  /** Structural readiness status (closed enum), or null when none supplied. */
+  readonly readiness_status: AnalysisReadyStatusT | null;
+  /** A rerun affordance is warranted (stale or trust-downgraded). */
+  readonly rerun_required: boolean;
+  /** Analysis may be referenced in prose (with a caveat when stale). */
+  readonly usable_for_prose: boolean;
+  /** Analysis is fresh + trustworthy enough for result-exploration chips. */
+  readonly usable_for_chips: boolean;
+  /** Analysis is unusable — blocked status or a hard contradiction. */
+  readonly blocked: boolean;
+  /** Count of ACTIONABLE blockers (number only — never the blocker objects). */
+  readonly actionable_blocker_count: number;
+}
+
+/**
+ * Project the canonical state to the redacted, hash-free coaching pack. Pure.
+ * Reuses the SAME predicates the rest of the system reads, so the pack can
+ * never disagree with chips / prose / `_context_summary` about freshness or
+ * usability.
+ */
+export function summariseCoachingStatePack(
+  state: CanonicalAnalysisState,
+): CoachingStatePack {
+  const actionableBlockerCount = state.blockers.filter((b) => {
+    const type = readBlockerType(b);
+    return type !== null && ACTIONABLE_BLOCKER_TYPES.has(type);
+  }).length;
+  return {
+    analysis_present: state.selected_fact_index !== null,
+    freshness: state.freshness,
+    readiness_status: state.status,
+    rerun_required: state.requiresRerun,
+    usable_for_prose: state.usableForProse,
+    usable_for_chips: state.usableForChips,
+    blocked: state.blockedUnusable,
+    actionable_blocker_count: actionableBlockerCount,
+  };
+}

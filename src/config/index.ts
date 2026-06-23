@@ -545,6 +545,16 @@ const ConfigSchema = z.object({
     // Default OFF; never read by UI/prose/chip logic (enforced by a static
     // guard test). Additive + backward-compatible.
     contextSummaryEnabled: booleanString.default(false),
+    // V5 coaching-state pack (CEE_COACHING_STATE_PACK_ENABLED — diagnostics
+    // only). When true (AND contextSummaryEnabled is also true), the route adds
+    // a redacted, hash-free `coaching_state_pack` sub-block to `_context_summary`
+    // (closed enums / booleans / counts only — no hashes, indices, values, units
+    // or text), projected from the same canonical state as `analysis_state`
+    // (whose provenance the sibling `canonical_state_source` field records).
+    // Default OFF; diagnostic-only this lane — NOT wired to prompt/PMS/chips/UI/
+    // product behaviour. Reserved as the single seam for a future,
+    // separately-approved LLM-facing behavioural-activation step.
+    coachingStatePackEnabled: booleanString.default(false),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
@@ -949,6 +959,7 @@ function parseConfig(): Config {
       plotEgressScaleNetEnabled: env.CEE_PLOT_EGRESS_SCALE_NET_ENABLED,
       analysisReadyGuardEnabled: env.CEE_RUN_ANALYSIS_READY_GUARD,
       contextSummaryEnabled: env.CEE_CONTEXT_SUMMARY_ENABLED,
+      coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
       promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
       fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,

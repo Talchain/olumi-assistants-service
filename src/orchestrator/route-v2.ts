@@ -524,6 +524,17 @@ function sendFinalised200(
       const contextSummary: V5ContextSummary = buildV5ContextSummary({
         canonicalState: canonical,
         graphCounts: summariseGraphCounts(ctx.graph),
+        // Provenance: `ctx.canonicalState` present ⇒ the full graph-authority
+        // verdict from turn-executor (execute OR the non-execute fallback);
+        // otherwise we composed the partial `canonicalStateFromFreshness`
+        // fallback above for a non-turn-executor dispatch path. Lets a future
+        // consumer avoid misreading partial state as full graph authority.
+        canonicalStateSource: ctx.canonicalState ? 'turn_executor' : 'route_fallback',
+        // Second gate (default-off) for the redacted, hash-free
+        // `coaching_state_pack` sub-block — projected from the SAME canonical
+        // state as `analysis_state` (NOT non-execute-specific); diagnostic-only,
+        // never read by prompt/chip/product logic.
+        includeCoachingState: config.cee.coachingStatePackEnabled,
       });
       const augmented: OlumiResponseWithDebugFields = {
         ...wireBody,

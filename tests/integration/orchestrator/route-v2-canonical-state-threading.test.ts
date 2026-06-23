@@ -173,6 +173,8 @@ describe('route-v2 — canonical state hand-off (turn_executor exit)', () => {
     expect(as.degraded_fact_status).toBe('partial');
     expect(as.contradiction_codes).toContain('fact_status_success_but_degraded_newer');
     expect(as.freshness).toBe('fresh');
+    // Provenance: the route threaded the full turn-executor verdict.
+    expect(body._context_summary.canonical_state_source).toBe('turn_executor');
   });
 
   it('non-execute result (no canonicalState) → _context_summary retains the freshness-only partial fallback', async () => {
@@ -187,6 +189,8 @@ describe('route-v2 — canonical state hand-off (turn_executor exit)', () => {
     expect(as.freshness).toBe('fresh');
     expect(as.degraded_fact_status).toBeNull();
     expect(as.contradiction_codes).not.toContain('fact_status_success_but_degraded_newer');
+    // Provenance: no canonicalState threaded → the partial route fallback.
+    expect(body._context_summary.canonical_state_source).toBe('route_fallback');
   });
 
   it('flag OFF → no `_context_summary` even with canonicalState present', async () => {

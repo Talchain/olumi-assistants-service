@@ -19,7 +19,12 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 const configHolder = {
-  cee: { timingDebugEnabled: false, turnDebugEnabled: false, contextSummaryEnabled: false },
+  cee: {
+    timingDebugEnabled: false,
+    turnDebugEnabled: false,
+    contextSummaryEnabled: false,
+    coachingStatePackEnabled: false,
+  },
   features: { optionShortcutRepair: true, diagnosticTraceEnabled: false },
 };
 vi.mock('../../../src/config/index.js', () => ({
@@ -137,6 +142,7 @@ describe('route-v2 — flag-gated `_context_summary`', () => {
     dispatchDraftGraphMock.mockResolvedValue(makeDraftResult({ withFreshness: true }));
     appendMock.mockClear();
     configHolder.cee.contextSummaryEnabled = false;
+    configHolder.cee.coachingStatePackEnabled = false;
   });
 
   it('flag OFF → no `_context_summary`, and prose carries no hash/diagnostic field', async () => {
@@ -223,5 +229,55 @@ describe('route-v2 — flag-gated `_context_summary`', () => {
     expect(body).not.toHaveProperty('_context_summary');
     // Fallback envelope still satisfies the schema (response_version: 2).
     expect(body.response_version).toBe(2);
+  });
+
+  // ── Double-gate matrix: coaching_state_pack appears ONLY when BOTH
+  //    contextSummaryEnabled AND coachingStatePackEnabled are on. The draft
+  //    dispatch threads freshness but NO canonicalState, so the route composes
+  //    the partial fallback ⇒ canonical_state_source === 'route_fallback'.
+
+  it('both flags OFF → no `_context_summary` (so no coaching_state_pack)', async () => {
+    configHolder.cee.contextSummaryEnabled = false;
+    configHolder.cee.coachingStatePackEnabled = false;
+    const { status, body } = await postTurn(app, '66666666-6666-4666-8666-666666666606');
+    expect(status).toBe(200);
+    expect(body).not.toHaveProperty('_context_summary');
+  });
+
+  it('contextSummary OFF + pack ON → outer gate dominates: still no `_context_summary`', async () => {
+    // The pack flag must NOT leak the diagnostic envelope past the first gate.
+    configHolder.cee.contextSummaryEnabled = false;
+    configHolder.cee.coachingStatePackEnabled = true;
+    const { status, body } = await postTurn(app, '66666666-6666-4666-8666-666666666607');
+    expect(status).toBe(200);
+    expect(body).not.toHaveProperty('_context_summary');
+  });
+
+  it('contextSummary ON + pack OFF → `_context_summary` present, NO coaching_state_pack', async () => {
+    configHolder.cee.contextSummaryEnabled = true;
+    configHolder.cee.coachingStatePackEnabled = false;
+    const { status, body } = await postTurn(app, '66666666-6666-4666-8666-666666666608');
+    expect(status).toBe(200);
+    expect(body).toHaveProperty('_context_summary');
+    const cs = body._context_summary as Record<string, unknown>;
+    expect('coaching_state_pack' in cs).toBe(false);
+    // Provenance recorded even without the pack: draft path == partial fallback.
+    expect(cs.canonical_state_source).toBe('route_fallback');
+  });
+
+  it('BOTH flags ON → `_context_summary` carries a redacted coaching_state_pack', async () => {
+    configHolder.cee.contextSummaryEnabled = true;
+    configHolder.cee.coachingStatePackEnabled = true;
+    const { status, body } = await postTurn(app, '66666666-6666-4666-8666-666666666609');
+    expect(status).toBe(200);
+    const cs = body._context_summary as Record<string, any>;
+    expect(cs.coaching_state_pack).toBeDefined();
+    expect(cs.coaching_state_pack.freshness).toBe('fresh');
+    expect(cs.coaching_state_pack.analysis_present).toBe(true);
+    expect(cs.canonical_state_source).toBe('route_fallback');
+    // Redaction: the hash-free pack must not carry the graph hash digest.
+    expect(JSON.stringify(cs.coaching_state_pack)).not.toContain('HASH_A');
+    // And no graph content / brief leaks via the pack.
+    expect(JSON.stringify(cs.coaching_state_pack)).not.toContain(LEAK_CANARY);
   });
 });
