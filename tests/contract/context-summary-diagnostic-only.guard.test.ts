@@ -133,3 +133,44 @@ describe('`coaching_state_pack` is diagnostic-only (static guard)', () => {
     }
   });
 });
+
+/**
+ * The `canonical_state_source` provenance discriminator (a sibling field of
+ * `_context_summary`) gets the same dedicated guard. The whole envelope is
+ * already protected, so this is not a current escape — it prevents a FUTURE
+ * product path from reading the provenance discriminator directly outside the
+ * diagnostic plane. The snake-case literal must appear only in diagnostic-plane
+ * files (the route threads it via the camelCase `canonicalStateSource` input,
+ * which does not contain the `canonical_state_source` substring).
+ */
+const SOURCE_WIRE_KEY = 'canonical_state_source';
+const SOURCE_ALLOWLIST = new Set<string>([
+  'orchestrator-v5/context/build-context-summary.ts', // defines + attaches the field
+  'orchestrator-v5/context/canonical-analysis-state.ts', // doc cross-reference only
+  'config/index.ts', // the coachingStatePackEnabled flag doc cross-reference
+]);
+
+describe('`canonical_state_source` is diagnostic-only (static guard)', () => {
+  it('appears only in allowlisted diagnostic-plane files', () => {
+    const offenders: string[] = [];
+    for (const file of walkTsFiles(SRC_ROOT)) {
+      const text = readFileSync(file, 'utf8');
+      if (!text.includes(SOURCE_WIRE_KEY)) continue;
+      const rel = relative(SRC_ROOT, file).split('\\').join('/');
+      if (!SOURCE_ALLOWLIST.has(rel)) offenders.push(rel);
+    }
+    expect(
+      offenders,
+      `'${SOURCE_WIRE_KEY}' must not be read outside the diagnostic plane. ` +
+        `Unexpected files: ${offenders.join(', ')}. The provenance discriminator is ` +
+        `diagnostic-only; no prompt / chip / coaching / handler path may read it.`,
+    ).toEqual([]);
+  });
+
+  it('allowlist entry still references the key (no stale allowlisting)', () => {
+    for (const rel of SOURCE_ALLOWLIST) {
+      const text = readFileSync(join(SRC_ROOT, rel), 'utf8');
+      expect(text.includes(SOURCE_WIRE_KEY), `${rel} no longer mentions ${SOURCE_WIRE_KEY}`).toBe(true);
+    }
+  });
+});
