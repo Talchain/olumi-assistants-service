@@ -56,8 +56,12 @@
 #       failure / misuse.
 #
 # `set -e` is intentionally omitted (matching scripts/ci/typecheck-ratchet.sh):
-# the gate relies on grep's no-match exit code (1) in several places, and `-e`
-# would risk false failures in a merge-relevant check. `-u`/pipefail are kept.
+# the gate relies on grep's no-match exit code (1) in several places, so global
+# `-e` would risk false failures in a merge-relevant check. Instead, every
+# baseline-validation pipeline checks its own exit status EXPLICITLY (grep:
+# 0/1 are valid outcomes, >1 = error -> die; sort/uniq/sed: any non-zero =
+# error -> die) so a failed validation step fails CLOSED rather than being
+# mistaken for benign-empty output. `-u` and pipefail are kept.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -147,20 +151,33 @@ baseline_for() {
 validate_baseline() {
   [[ -f "$BASELINE" ]] || die "Missing baseline file: $BASELINE"
 
-  local entries
-  entries="$(grep -vE '^[[:space:]]*(#|$)' "$BASELINE" || true)"
+  # Entry lines = non-comment, non-blank. grep exit 0 (found) or 1 (none) are
+  # both valid; >1 is a read error and must fail closed (declared separately so
+  # `local` does not mask the substitution's exit status in $?).
+  local entries rc
+  entries="$(grep -vE '^[[:space:]]*(#|$)' "$BASELINE")"; rc=$?
+  [[ $rc -le 1 ]] || die "Failed to read baseline file $BASELINE (grep exit $rc)."
   [[ -n "$entries" ]] || die "Baseline $BASELINE contains no entries."
 
-  # Every entry must be exactly KEY=INTEGER (no whitespace, no trailing junk).
+  # Every entry must be exactly KEY=INTEGER. grep -v exit: 1 = all lines conform
+  # (good), 0 = some malformed, >1 = error (fail closed).
   local bad
-  bad="$(printf '%s\n' "$entries" | grep -vE '^[A-Za-z_][A-Za-z0-9_]*=[0-9]+$' || true)"
+  bad="$(printf '%s\n' "$entries" | grep -vE '^[A-Za-z_][A-Za-z0-9_]*=[0-9]+$')"; rc=$?
+  [[ $rc -le 1 ]] || die "Failed to validate baseline line format (grep exit $rc)."
   [[ -z "$bad" ]] || die "Malformed baseline line(s): $(printf '%s' "$bad" | tr '\n' '|')"
 
+  # sed/sort/uniq have no benign non-zero outcome here: any failure means we
+  # could not actually validate, so it must fail closed rather than be read as
+  # "no problem".
   local keys
-  keys="$(printf '%s\n' "$entries" | sed -E 's/=.*//')"
+  if ! keys="$(printf '%s\n' "$entries" | sed -E 's/=.*//')"; then
+    die "Failed to extract baseline keys."
+  fi
 
   local dupes
-  dupes="$(printf '%s\n' "$keys" | sort | uniq -d)"
+  if ! dupes="$(printf '%s\n' "$keys" | sort | uniq -d)"; then
+    die "Unable to validate baseline for duplicate keys (sort/uniq failed)."
+  fi
   [[ -z "$dupes" ]] || die "Duplicate baseline key(s): $(printf '%s' "$dupes" | tr '\n' ' ')"
 
   local k
