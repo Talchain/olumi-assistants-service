@@ -40,6 +40,7 @@ import { D1HandlerError } from './d1-shared/errors.js';
 import {
   applyFactorValueOperator,
   evaluateFactorValueProposal,
+  resolveExistingRawValue,
 } from './d1-shared/evaluate-factor-value-proposal.js';
 import { formatFactorChange } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
@@ -248,18 +249,27 @@ export function createSetFactorValueHandler(): HandlerFn {
     const operator = valueParam.operator ?? 'set';
     const before = snapshotObservedState(targetNode);
 
+    // The "current value" against which delta operators apply is the
+    // USER-UNIT raw value. `resolveExistingRawValue` de-normalises it: it
+    // returns `raw_value` when present, else `value * cap` for a capped
+    // factor (since value = raw / cap), else `value` for an uncapped factor.
+    // Critically, it does NOT use the normalised `value` directly on a
+    // CAPPED factor — a legacy factor that stored only `{ value: 0.4, cap:
+    // 100000 }` (= £40,000) must apply the operator against 40,000, not 0.4,
+    // or "× 0.3" corrupts to £0.12 instead of £12,000. Shared with the
+    // validator + executor precheck so all three resolve the LHS identically.
+    const existingRaw = resolveExistingRawValue(before);
+
     // Defense-in-depth parity (review follow-up). The handler pre-applies
-    // the operator below and then calls `normaliseFactorValue` with
-    // `operator: 'set'` and the POST-operator value — so guards that read
-    // the user's STATED right-hand side (notably `bare_ratio_on_unit_factor`,
-    // which gates on `rawInput`, and the delta guards) never see the
-    // original operator/RHS at the handler. A direct handler call to
-    // "increase £40,000 by 0.3" would otherwise evaluate 40,000.3 and slip
-    // past the guard, mutating despite the validator/precheck rejecting the
-    // same proposal. Run the shared predicate here against the ORIGINAL
-    // operator + RHS so the handler enforces exactly what the validator and
-    // executor precheck do (AC.1 parity); mirrors the validator's
-    // `preexecuteSetFactorValue` call shape (same factorExistingRaw fallback).
+    // the operator below and then calls `normaliseFactorValue` with the
+    // POST-operator value — so guards that read the user's STATED right-hand
+    // side (notably `bare_ratio_on_unit_factor`, which gates on `rawInput`,
+    // and the delta guards) never see the original operator/RHS at the
+    // handler. A direct handler call to "increase £40,000 by 0.3" would
+    // otherwise evaluate 40,000.3 and slip past the guard, mutating despite
+    // the validator/precheck rejecting the same proposal. Run the shared
+    // predicate here against the ORIGINAL operator + RHS so the handler
+    // enforces exactly what the validator and executor precheck do (AC.1).
     const preEvaluation = evaluateFactorValueProposal({
       rawInput: parsed.numeric,
       operator,
@@ -267,11 +277,7 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
-      ...(before.raw_value !== undefined
-        ? { factorExistingRaw: before.raw_value }
-        : before.value !== undefined
-          ? { factorExistingRaw: before.value }
-          : {}),
+      ...(existingRaw !== undefined ? { factorExistingRaw: existingRaw } : {}),
       inputHasUnit: parsed.inputHasUnit,
     });
     if (!preEvaluation.ok) {
@@ -285,16 +291,7 @@ export function createSetFactorValueHandler(): HandlerFn {
       });
     }
 
-    // The "current value" against which operators apply is the user-unit
-    // raw_value when present, falling back to the model-unit value. This
-    // matches the user's mental model: "increase by 1000" on a £-factor
-    // should increase raw_value by 1000, not value (which is a ratio).
-    const currentRaw =
-      before.raw_value !== undefined
-        ? before.raw_value
-        : before.value !== undefined
-          ? before.value
-          : 0;
+    const currentRaw = existingRaw ?? 0;
 
     const newRaw = applyFactorValueOperator(currentRaw, operator, parsed.numeric);
 
@@ -403,24 +400,22 @@ export function createSetFactorValueHandler(): HandlerFn {
     }
 
     const label = targetNode.label;
-    // Defensive narration hardening: the receipt must never render a
-    // normalised model-unit `value` (a 0–1 ratio) as if it were a
-    // user-unit amount — that would fabricate a false claim like "£0.4".
-    // Attach the unit ONLY when a genuine user-unit `raw_value` is
-    // present; when we must fall back to `value`, render the bare number
-    // with no unit. The legitimate unitless factor case (e.g. value=0.7,
-    // no unit → "0.7") is unaffected — it has no unit to drop. The
-    // acceptance guard refuses the bare-ratio mutation upstream; this is
-    // the belt-and-braces layer for any other path reaching the narrator.
+    // Narration uses the DE-NORMALISED user-unit value via the same
+    // `resolveExistingRawValue` the operator LHS uses (raw_value, else
+    // value*cap for capped, else value for uncapped). This renders the
+    // honest user-unit amount on both sides — e.g. a legacy capped
+    // `{ value: 0.4, cap: 100000, £ }` narrates "£40,000", not a fabricated
+    // "£0.4" (the normalised ratio) nor a bare "0.4". When no value is
+    // resolvable, fall back to 0 with no unit.
     const narrationSide = (
       snap: ObservedSnapshot,
-    ): { readonly raw_value: number; readonly unit?: string } =>
-      snap.raw_value !== undefined
-        ? {
-            raw_value: snap.raw_value,
-            ...(snap.unit !== undefined ? { unit: snap.unit } : {}),
-          }
-        : { raw_value: snap.value ?? 0 };
+    ): { readonly raw_value: number; readonly unit?: string } => {
+      const resolved = resolveExistingRawValue(snap);
+      if (resolved === undefined) return { raw_value: 0 };
+      return snap.unit !== undefined
+        ? { raw_value: resolved, unit: snap.unit }
+        : { raw_value: resolved };
+    };
     const baseText = formatFactorChange({
       label,
       before: narrationSide(before),

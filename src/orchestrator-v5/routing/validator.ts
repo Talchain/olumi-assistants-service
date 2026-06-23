@@ -47,6 +47,7 @@ import { z } from 'zod';
 import { describeSchema } from '../compose/helpers.js';
 import {
   evaluateFactorValueProposal,
+  resolveExistingRawValue,
   type FactorValueOperator,
 } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { EntityKind, ProposalAction, ProposalEntity, ProposalParameter } from './types.js';
@@ -608,6 +609,15 @@ function preexecuteSetFactorValue(
     ? graph.findFactorObservedState(proposal.entity.id)
     : null;
 
+  // De-normalise the delta LHS identically to the handler (raw_value, else
+  // value*cap for capped, else value) so validator and handler agree on the
+  // existing value — never feed the normalised `value` as the raw LHS.
+  const factorExistingRaw = resolveExistingRawValue({
+    ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
+    ...(obs?.value !== undefined ? { value: obs.value } : {}),
+    ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
+    ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
+  });
   const evaluation = evaluateFactorValueProposal({
     rawInput: parsed.numeric,
     operator,
@@ -615,11 +625,7 @@ function preexecuteSetFactorValue(
     ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
     ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
     ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
-    ...(obs?.raw_value !== undefined
-      ? { factorExistingRaw: obs.raw_value }
-      : obs?.value !== undefined
-        ? { factorExistingRaw: obs.value }
-        : {}),
+    ...(factorExistingRaw !== undefined ? { factorExistingRaw } : {}),
     inputHasUnit: parsed.inputHasUnit,
   });
 

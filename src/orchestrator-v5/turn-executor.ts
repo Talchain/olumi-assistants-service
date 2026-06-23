@@ -83,6 +83,7 @@ import {
 } from './routing/deterministic-value-update.js';
 import {
   evaluateFactorValueProposal,
+  resolveExistingRawValue,
   type FactorValueOperator,
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -2722,16 +2723,17 @@ export async function runTurnExecutor(
           const obs = observedState.observed_state;
           const factorCap = typeof obs?.cap === 'number' ? obs.cap : undefined;
           const factorUnit = typeof obs?.unit === 'string' ? obs.unit : undefined;
-          // Match `set-factor-value.ts` precedence: raw_value when
-          // present, then value, then undefined. The predicate's
-          // `delta_no_existing_value` guard then catches "neither
-          // present" for delta operators (AC.3).
-          const factorExistingRaw =
-            typeof obs?.raw_value === 'number'
-              ? obs.raw_value
-              : typeof obs?.value === 'number'
-                ? obs.value
-                : undefined;
+          // De-normalise the delta LHS identically to the handler +
+          // validator via `resolveExistingRawValue` (raw_value, else
+          // value*cap for capped, else value) — never feed the normalised
+          // `value` as the raw LHS. The predicate's `delta_no_existing_value`
+          // guard catches "neither present" for delta operators (AC.3).
+          const factorExistingRaw = resolveExistingRawValue({
+            ...(typeof obs?.raw_value === 'number' ? { raw_value: obs.raw_value } : {}),
+            ...(typeof obs?.value === 'number' ? { value: obs.value } : {}),
+            ...(factorUnit !== undefined ? { unit: factorUnit } : {}),
+            ...(factorCap !== undefined ? { cap: factorCap } : {}),
+          });
           const inputHasUnit = unit !== undefined && unit.length > 0;
           const evaluation = evaluateFactorValueProposal({
             rawInput: userUnitValue,

@@ -25,7 +25,7 @@
 
 import { D1HandlerError } from './errors.js';
 import {
-  evaluateFactorValueProposal,
+  evaluatePostOperatorFactorValue,
   type ProposalRejectionReason,
 } from './evaluate-factor-value-proposal.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './user-guidance.js';
@@ -75,28 +75,21 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
   const { rawInput, unit, proposalCap, factorCap, factorUnit, inputHasUnit } =
     input;
 
-  // Delegate to the shared predicate. By construction this exercises
-  // the same guards the validator + pre-synthesis paths run, so a
-  // proposal accepted by both upstream gates cannot fail here on
-  // parameter grounds (AC.1 parity invariant).
-  const evaluation = evaluateFactorValueProposal({
-    rawInput,
-    // The handler has already applied the operator into `rawInput` —
-    // pass `'set'` so the predicate treats `rawInput` as the final
-    // effectiveRaw without recomputing operator math.
-    operator: 'set',
+  // `rawInput` here is the POST-operator computed value (the handler has
+  // already applied the operator), not the user's stated number. Use the
+  // dedicated post-operator validation API: it checks finiteness / cap /
+  // range but NOT the bare-ratio gate — that gate judges the user's stated
+  // RHS and already ran upstream (validator precheck + handler
+  // `preEvaluation`). Re-running it on a computed product would falsely
+  // reject honest results in (0,1) (e.g. `4% × 0.1 = 0.4%`) and break
+  // validator/handler parity (AC.1).
+  const evaluation = evaluatePostOperatorFactorValue({
+    computedRaw: rawInput,
     ...(unit !== undefined ? { unit } : {}),
     ...(proposalCap !== undefined ? { proposalCap } : {}),
     ...(factorCap !== undefined ? { factorCap } : {}),
     ...(factorUnit !== undefined ? { factorUnit } : {}),
     inputHasUnit,
-    // `rawInput` here is the POST-operator computed value, not the user's
-    // stated number, so the bare-ratio "looks like a proportion" gate must
-    // NOT run — it already ran against the stated RHS at the validator
-    // precheck and the handler's `preEvaluation`. Without this, an honest
-    // product that lands in (0,1) (e.g. `4% × 0.1 = 0.4%`) would be
-    // falsely rejected at execute, breaking validator/handler parity.
-    suppressBareRatioGate: true,
   });
 
   if (!evaluation.ok) {

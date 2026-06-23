@@ -107,18 +107,6 @@ export interface EvaluateFactorValueProposalInput {
    * `value_exceeds_cap`).
    */
   readonly inputHasUnit: boolean;
-  /**
-   * Suppresses the `bare_ratio_on_unit_factor` gate (3c). Set ONLY by
-   * `normaliseFactorValue`, which runs this predicate against the
-   * POST-operator computed value (with `operator: 'set'`). The bare-ratio
-   * gate judges whether the USER'S STATED number looks like a proportion;
-   * that check already happened upstream against the original RHS (at the
-   * validator precheck and the handler's `preEvaluation`). Re-applying it
-   * to a computed product would falsely reject legitimate honest results
-   * whose value lands in (0,1) — e.g. `4% × 0.1 = 0.4%`, or
-   * `decrease £5.30 by £5 = £0.30`. Default (undefined/false): gate active.
-   */
-  readonly suppressBareRatioGate?: boolean;
 }
 
 /**
@@ -149,6 +137,50 @@ export function applyFactorValueOperator(
 }
 
 /**
+ * Resolve a factor's current USER-UNIT raw value from its observed_state,
+ * for use as the left-hand side of delta operators (increase / decrease /
+ * multiply) and for change narration. This is the INVERSE of
+ * `normaliseFactorValue`'s contract, and mirrors the de-normalisation divisor
+ * convention in `graph-data-integrity.ts` (`unit === '%' ? 100 : cap`):
+ *
+ *   - `raw_value` present       → use it directly (canonical user-unit value).
+ *   - `value > 1`               → already in user units; use it directly.
+ *                                 A normalised value is always in [0,1], so a
+ *                                 stored value > 1 is an off-contract graph
+ *                                 carrying a raw value (e.g. {value:200000,
+ *                                 cap:500000}); de-normalising it would corrupt.
+ *   - percentage (`unit === '%'`) → raw = value * 100 (display convention; a
+ *                                 normalised 0.04 renders/edits as "4%").
+ *   - capped (cap present)      → raw = value * cap (because value = raw / cap).
+ *   - uncapped                  → raw = value (uncapped stores value === raw).
+ *   - no value at all           → undefined (delta guards then fail closed via
+ *                                 `delta_no_existing_value`).
+ *
+ * Without this de-normalisation, a legacy/capped factor that stored only the
+ * normalised `value` (e.g. `{ value: 0.4, cap: 100000 }` = £40,000) would have
+ * its delta computed against `0.4` instead of `40000` — corrupting the result
+ * (`× 0.3` → £0.12 instead of £12,000) and narrating "from 0.4 to £0.12".
+ * Shared so the validator precheck, the executor precheck, and the handler all
+ * resolve the LHS identically (validator/handler parity).
+ */
+export function resolveExistingRawValue(snapshot: {
+  readonly raw_value?: number;
+  readonly value?: number;
+  readonly unit?: string;
+  readonly cap?: number;
+}): number | undefined {
+  if (snapshot.raw_value !== undefined) return snapshot.raw_value;
+  if (snapshot.value === undefined) return undefined;
+  // A normalised value is always in [0,1]; a value already > 1 is in user
+  // units (off-contract graph) — treat it as already-raw rather than
+  // de-normalising it to a wildly wrong product.
+  if (snapshot.value > 1) return snapshot.value;
+  if (snapshot.unit === '%') return snapshot.value * 100;
+  if (snapshot.cap !== undefined) return snapshot.value * snapshot.cap;
+  return snapshot.value;
+}
+
+/**
  * Pre-execute evaluation of a `set_factor_value` proposal. Returns
  * `{ ok: true }` when the handler's `normaliseFactorValue` would
  * accept these inputs without throwing; returns `{ ok: false, reason,
@@ -171,6 +203,18 @@ export function applyFactorValueOperator(
 export function evaluateFactorValueProposal(
   input: EvaluateFactorValueProposalInput,
 ): FactorValueProposalEvaluation {
+  // Public entry point: always enforces the full guard set, including the
+  // stated-value `bare_ratio_on_unit_factor` gate. The bare-ratio suppression
+  // is reachable ONLY through `evaluatePostOperatorFactorValue` (which calls
+  // the non-exported impl) — there is no parameter on this signature to
+  // disable a safety gate, so an arbitrary caller cannot bypass it.
+  return evaluateFactorValueProposalImpl(input, false);
+}
+
+function evaluateFactorValueProposalImpl(
+  input: EvaluateFactorValueProposalInput,
+  suppressBareRatioGate: boolean,
+): FactorValueProposalEvaluation {
   const {
     rawInput,
     operator: rawOperator,
@@ -180,7 +224,6 @@ export function evaluateFactorValueProposal(
     factorUnit,
     factorExistingRaw,
     inputHasUnit,
-    suppressBareRatioGate,
   } = input;
 
   const operator: FactorValueOperator = rawOperator ?? 'set';
@@ -249,16 +292,17 @@ export function evaluateFactorValueProposal(
       };
     }
 
-    // 3b. delta_no_cap_and_no_unit. An uncapped, unitless `increase`/
-    //     `decrease` delta has no bounded interpretation ("increase by 10"
-    //     — 10 of what?). Surface as a clarification rather than writing a
-    //     boundless value. `multiply` is EXCLUDED: its right-hand side is a
-    //     dimensionless scaling factor, so "multiply by 0.3" (= ×0.3) is
-    //     fully bounded by the existing finite value (guaranteed by gate 3a)
-    //     regardless of cap or unit — and asking for "a unit" would be wrong
-    //     guidance for a scaling operation. Uncapped multiply therefore
-    //     passes through to the finite/cap-range guards below.
-    if (operator !== 'multiply' && cap === undefined && !inputHasUnit) {
+    // 3b. delta_no_cap_and_no_unit. An uncapped, unitless delta has no
+    //     bounded interpretation ("increase by 10" — 10 of what?). Surface
+    //     as a clarification rather than writing a boundless value. This
+    //     INCLUDES `multiply`: an UNCAPPED multiply has no upper or lower
+    //     bound (no cap-range guard runs below to contain it), so a bare
+    //     `× -0.5` or `× 1e9` would otherwise write a nonsensical or
+    //     unbounded value (e.g. `12 people × -0.5 = -6 people`). Capped
+    //     multiply is unaffected (cap is defined here) and is exempted from
+    //     the bare-ratio gate at 3c instead, where the cap-range guard
+    //     contains it.
+    if (cap === undefined && !inputHasUnit) {
       return {
         ok: false,
         reason: 'delta_no_cap_and_no_unit',
@@ -280,12 +324,21 @@ export function evaluateFactorValueProposal(
   //     fully-specified amount, not the bare-number ambiguity).
   //
   //     `multiply` is EXCLUDED: its right-hand side is a dimensionless
-  //     scaling factor, never a value in the factor's unit. "multiply by
-  //     0.3" unambiguously means ×0.3 ("scale to 30%", e.g. a £100k-capped
-  //     £40,000 → £12,000) — there is no proportion-vs-unit ambiguity, and
-  //     the "give me a £ amount" clarification would be wrong guidance for
-  //     a scaling operation. Sub-1 multipliers are the normal way to scale
-  //     down, so they pass to the cap-range guards.
+  //     scaling factor, never a value in the factor's unit. On a CAPPED
+  //     factor "multiply by 0.3" unambiguously means ×0.3 ("scale to 30%",
+  //     e.g. £40,000 → £12,000) — there is no proportion-vs-unit ambiguity,
+  //     and the "give me a £ amount" clarification would be wrong guidance
+  //     for a scaling operation. Sub-1 multipliers are the normal way to
+  //     scale down, so on a capped factor they pass to the cap-range guard
+  //     below (which contains overshoot/negative products). An UNCAPPED
+  //     multiply is rejected earlier at gate 3b (no cap to bound it).
+  //
+  //     NOTE on multiply + explicit unit: a multiply RHS is treated as a
+  //     pure scalar — its unit is NOT dimensionally validated. A unit that
+  //     MATCHES the factor (e.g. `£40,000 × £0.3`) is harmlessly ignored
+  //     (the math is ×0.3 → £12,000); a unit that DIFFERS is still caught
+  //     by `unit_mismatch` (2b) above. Multiplying by a money/percent
+  //     amount is incoherent input, but the numeric result is honest.
   //
   //     This gate judges the USER'S STATED `rawInput`, so it must only run
   //     where `rawInput` is that stated number — i.e. the validator
@@ -365,4 +418,42 @@ export function evaluateFactorValueProposal(
   }
 
   return { ok: true };
+}
+
+/**
+ * Dedicated post-operator validation API. The handler has already applied
+ * the operator into `computedRaw` and enforced the STATED-value guards
+ * (bare_ratio, unit_mismatch, delta guards) at `preEvaluation` against the
+ * original RHS. This validates the resulting COMPUTED value against only the
+ * value-level guards (finiteness, positive cap, cap range) — it never
+ * re-runs the bare-ratio gate, because that gate judges the user's stated
+ * input, not a computed product (re-running it would falsely reject honest
+ * results in (0,1), e.g. `4% × 0.1 = 0.4%`).
+ *
+ * This is the ONLY place the bare-ratio gate is suppressed: it calls the
+ * non-exported impl directly. The public `evaluateFactorValueProposal` exposes
+ * no suppression parameter, so no other caller can disable the gate.
+ */
+export function evaluatePostOperatorFactorValue(input: {
+  readonly computedRaw: number;
+  readonly unit?: string;
+  readonly proposalCap?: number;
+  readonly factorCap?: number;
+  readonly factorUnit?: string;
+  readonly inputHasUnit: boolean;
+}): FactorValueProposalEvaluation {
+  return evaluateFactorValueProposalImpl(
+    {
+      rawInput: input.computedRaw,
+      // The operator was already applied into `computedRaw`; treat it as a
+      // final `set` value so the predicate does not re-apply operator math.
+      operator: 'set',
+      ...(input.unit !== undefined ? { unit: input.unit } : {}),
+      ...(input.proposalCap !== undefined ? { proposalCap: input.proposalCap } : {}),
+      ...(input.factorCap !== undefined ? { factorCap: input.factorCap } : {}),
+      ...(input.factorUnit !== undefined ? { factorUnit: input.factorUnit } : {}),
+      inputHasUnit: input.inputHasUnit,
+    },
+    true,
+  );
 }

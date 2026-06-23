@@ -40,6 +40,7 @@ import { validateToolCall } from '../validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
 import {
   evaluateFactorValueProposal,
+  resolveExistingRawValue,
   type FactorValueOperator,
   type ProposalRejectionReason,
 } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -262,11 +263,18 @@ const CASES: readonly PropertyCase[] = [
     expected: { kind: 'accept' },
   },
   {
-    label: 'bare sub-1 MULTIPLY on an UNCAPPED count factor (excluded from unitless-delta guard — accepted)',
-    entityId: 'f-uncapped', // 12 * 0.3 = 3.6, no cap
+    label: 'bare MULTIPLY on an UNCAPPED count factor (no cap to bound it — rejected)',
+    entityId: 'f-uncapped', // no cap → delta_no_cap_and_no_unit
     value: 0.3,
     operator: 'multiply',
-    expected: { kind: 'accept' },
+    expected: { kind: 'reject', reason: 'delta_no_cap_and_no_unit' },
+  },
+  {
+    label: 'NEGATIVE bare MULTIPLY on an UNCAPPED count factor (no -6 people)',
+    entityId: 'f-uncapped', // 12 * -0.5 = -6 would be nonsensical — rejected
+    value: -0.5,
+    operator: 'multiply',
+    expected: { kind: 'reject', reason: 'delta_no_cap_and_no_unit' },
   },
   {
     label: 'MULTIPLY overshoot on a capped currency factor (contained by cap-range guard)',
@@ -327,9 +335,11 @@ const CASES: readonly PropertyCase[] = [
   // this PR's scope.
 ];
 
-describe('AC.1 — validator/executor parity property table', () => {
-  const handler = createSetFactorValueHandler();
-  const graph = buildD1Fixture();
+// Build a GraphLookup from a graph. Used to mint a FRESH graph + lookup per
+// case so no case can observe another's state (the handler clones its input,
+// but per-case freshness makes the table robust to that and self-evidently
+// correct — each comment like "4 × 0.1 = 0.4" is the value the handler sees).
+function makeLookup(graph: GraphV3T) {
   const buildResult = buildGraphLookup({
     nodes: graph.nodes.map((n) => ({
       id: n.id,
@@ -342,7 +352,13 @@ describe('AC.1 — validator/executor parity property table', () => {
   if (buildResult.kind !== 'ok') {
     throw new Error('Test fixture failed to build a GraphLookup');
   }
-  const graphLookup = buildResult.lookup;
+  return buildResult.lookup;
+}
+
+describe('AC.1 — validator/executor parity property table', () => {
+  const handler = createSetFactorValueHandler();
+  // Shared lookup for the standalone (non-mutating) validator-only tests below.
+  const graphLookup = makeLookup(buildD1Fixture());
 
   // ---- Blocking #1 fix: missing-value proposal MUST be rejected by validator ----
   it('proposal with no value parameter → validator rejects with missing_value (Blocking #1)', async () => {
@@ -452,6 +468,9 @@ describe('AC.1 — validator/executor parity property table', () => {
 
   for (const c of CASES) {
     it(`${c.label} — validator + predicate + handler agree`, async () => {
+      // Fresh graph + lookup per case so each is self-contained.
+      const graph = buildD1Fixture();
+      const caseLookup = makeLookup(graph);
       const proposal = makeProposal({
         entityId: c.entityId,
         value: c.value,
@@ -461,12 +480,14 @@ describe('AC.1 — validator/executor parity property table', () => {
       // 1. Validator
       const validation = validateToolCall(
         proposal,
-        graphLookup,
+        caseLookup,
         HANDLER_VALIDATION_REGISTRY,
       );
 
-      // 2. Predicate cross-check (independent of validator wiring)
-      const obs = graphLookup.findFactorObservedState?.(c.entityId) ?? null;
+      // 2. Predicate cross-check (independent of validator wiring). Resolves
+      // the delta LHS via `resolveExistingRawValue`, exactly as the validator
+      // and handler do.
+      const obs = caseLookup.findFactorObservedState?.(c.entityId) ?? null;
       const valueParam = proposal.parameters[0]!.value;
       const parsedNumeric =
         typeof valueParam === 'number'
@@ -477,17 +498,19 @@ describe('AC.1 — validator/executor parity property table', () => {
           ? (valueParam as { unit?: string }).unit
           : undefined;
       const inputHasUnit = typeof parsedUnit === 'string' && parsedUnit.length > 0;
+      const factorExistingRaw = resolveExistingRawValue({
+        ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
+        ...(obs?.value !== undefined ? { value: obs.value } : {}),
+        ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
+        ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
+      });
       const evaluation = evaluateFactorValueProposal({
         rawInput: parsedNumeric,
         operator: c.operator ?? 'set',
         ...(parsedUnit !== undefined ? { unit: parsedUnit } : {}),
         ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
         ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
-        ...(obs?.raw_value !== undefined
-          ? { factorExistingRaw: obs.raw_value }
-          : obs?.value !== undefined
-            ? { factorExistingRaw: obs.value }
-            : {}),
+        ...(factorExistingRaw !== undefined ? { factorExistingRaw } : {}),
         inputHasUnit,
       });
 
@@ -539,6 +562,7 @@ describe('AC.1 — validator/executor parity property table', () => {
   // -----------------------------------------------------------------
   it('cross-cutting: validator verdict and predicate verdict never disagree on accept/reject', async () => {
     for (const c of CASES) {
+      const caseLookup = makeLookup(buildD1Fixture());
       const proposal = makeProposal({
         entityId: c.entityId,
         value: c.value,
@@ -546,10 +570,10 @@ describe('AC.1 — validator/executor parity property table', () => {
       });
       const validation = validateToolCall(
         proposal,
-        graphLookup,
+        caseLookup,
         HANDLER_VALIDATION_REGISTRY,
       );
-      const obs = graphLookup.findFactorObservedState?.(c.entityId) ?? null;
+      const obs = caseLookup.findFactorObservedState?.(c.entityId) ?? null;
       const valueParam = proposal.parameters[0]!.value;
       const parsedNumeric =
         typeof valueParam === 'number'
@@ -560,22 +584,70 @@ describe('AC.1 — validator/executor parity property table', () => {
           ? (valueParam as { unit?: string }).unit
           : undefined;
       const inputHasUnit = typeof parsedUnit === 'string' && parsedUnit.length > 0;
+      const factorExistingRaw = resolveExistingRawValue({
+        ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
+        ...(obs?.value !== undefined ? { value: obs.value } : {}),
+        ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
+        ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
+      });
       const evaluation = evaluateFactorValueProposal({
         rawInput: parsedNumeric,
         operator: c.operator ?? 'set',
         ...(parsedUnit !== undefined ? { unit: parsedUnit } : {}),
         ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
         ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
-        ...(obs?.raw_value !== undefined
-          ? { factorExistingRaw: obs.raw_value }
-          : obs?.value !== undefined
-            ? { factorExistingRaw: obs.value }
-            : {}),
+        ...(factorExistingRaw !== undefined ? { factorExistingRaw } : {}),
         inputHasUnit,
       });
       expect(validation.valid, `validator disagrees with predicate on ${c.label}`).toBe(
         evaluation.ok,
       );
+    }
+  });
+
+  // -----------------------------------------------------------------
+  // Legacy capped factor (value-only, no raw_value) — drives the
+  // de-normalisation (value*cap) through validator + predicate + handler
+  // together. buildD1Fixture's factors all carry raw_value, so this
+  // dedicated case is the only place the value*cap branch is exercised
+  // across all three layers (closing the parity-coverage gap).
+  // -----------------------------------------------------------------
+  describe('legacy capped factor (value-only) — de-normalisation parity', () => {
+    function legacyGraph(): GraphV3T {
+      const graph = buildD1Fixture();
+      graph.nodes.push({
+        id: 'f-legacy',
+        kind: 'factor',
+        label: 'Legacy budget',
+        observed_state: { value: 0.4, unit: '£', cap: 100000 }, // = £40,000, no raw_value
+      });
+      return graph;
+    }
+    const deltas: ReadonlyArray<{
+      op: FactorValueOperator;
+      value: unknown;
+      expectedRaw: number;
+    }> = [
+      { op: 'multiply', value: 0.3, expectedRaw: 12000 }, // £40,000 × 0.3
+      { op: 'increase', value: { value: 5000, unit: '£' }, expectedRaw: 45000 },
+      { op: 'decrease', value: { value: 10000, unit: '£' }, expectedRaw: 30000 },
+    ];
+    for (const d of deltas) {
+      it(`${d.op} on a value-only £40,000 factor → validator accepts + handler computes £${d.expectedRaw} (de-normalised LHS)`, async () => {
+        const graph = legacyGraph();
+        const lookup = makeLookup(graph);
+        const proposal = makeProposal({ entityId: 'f-legacy', value: d.value, operator: d.op });
+
+        const validation = validateToolCall(proposal, lookup, HANDLER_VALIDATION_REGISTRY);
+        expect(validation.valid).toBe(true);
+
+        const outcome = await handler(buildInvocation(graph, proposal));
+        const node = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-legacy');
+        expect(node?.observed_state?.raw_value).toBe(d.expectedRaw);
+        // Honest narration: de-normalised before-value (£40,000), never "£0.4".
+        expect(outcome.assistant_text).toContain('£40,000');
+        expect(outcome.assistant_text).not.toMatch(/£0\.\d/);
+      });
     }
   });
 });

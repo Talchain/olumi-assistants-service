@@ -266,21 +266,75 @@ describe('set_factor_value handler', () => {
     ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
   });
 
-  it('narration hardening: a unit factor with no raw_value never renders its normalised value as currency', async () => {
-    const handler = createSetFactorValueHandler();
-    // Legacy/degenerate node: has a unit and a normalised value but no
-    // raw_value. Setting it to an explicit £ amount must NOT render the
-    // 0.4 model-value as "£0.4" on the before side of the receipt.
+  // --- Legacy factor without raw_value: delta LHS must de-normalise -----
+  // A capped factor that stored only the normalised `value` (e.g.
+  // { value: 0.4, cap: 100000 } = £40,000) must apply delta operators
+  // against the de-normalised £40,000, not the raw 0.4 — otherwise the
+  // result is corrupted (× 0.3 → £0.12 instead of £12,000) and narrated
+  // "from 0.4 to £0.12". Each case builds a fresh legacy graph.
+  function buildLegacyCappedGraph(): GraphV3T {
     const graph = buildD1Fixture();
     graph.nodes.push({
       id: 'f-legacy',
       kind: 'factor',
       label: 'Legacy budget',
-      observed_state: { value: 0.4, unit: '£' },
+      observed_state: { value: 0.4, unit: '£', cap: 100000 }, // = £40,000, no raw_value
     });
+    return graph;
+  }
+
+  it('legacy capped factor (value-only) — MULTIPLY de-normalises the LHS (£40,000 × 0.3 = £12,000)', async () => {
+    const handler = createSetFactorValueHandler();
     const outcome = await handler(
       buildInvocation(
-        graph,
+        buildLegacyCappedGraph(),
+        makeProposal({ entityId: 'f-legacy', value: 0.3, operator: 'multiply' }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Legacy budget from £40,000 to £12,000.');
+    const budget = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-legacy');
+    expect(budget?.observed_state?.raw_value).toBe(12000);
+  });
+
+  it('legacy capped factor (value-only) — INCREASE de-normalises the LHS (£40,000 + £5,000 = £45,000)', async () => {
+    const handler = createSetFactorValueHandler();
+    const outcome = await handler(
+      buildInvocation(
+        buildLegacyCappedGraph(),
+        makeProposal({
+          entityId: 'f-legacy',
+          value: { value: 5000, unit: '£', cap: 100000 },
+          operator: 'increase',
+        }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Legacy budget from £40,000 to £45,000.');
+    const budget = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-legacy');
+    expect(budget?.observed_state?.raw_value).toBe(45000);
+  });
+
+  it('legacy capped factor (value-only) — DECREASE de-normalises the LHS (£40,000 - £10,000 = £30,000)', async () => {
+    const handler = createSetFactorValueHandler();
+    const outcome = await handler(
+      buildInvocation(
+        buildLegacyCappedGraph(),
+        makeProposal({
+          entityId: 'f-legacy',
+          value: { value: 10000, unit: '£', cap: 100000 },
+          operator: 'decrease',
+        }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Legacy budget from £40,000 to £30,000.');
+    const budget = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-legacy');
+    expect(budget?.observed_state?.raw_value).toBe(30000);
+  });
+
+  it('narration: a legacy capped factor renders the de-normalised before-value, never a fabricated "£0.4"', async () => {
+    const handler = createSetFactorValueHandler();
+    const outcome = await handler(
+      buildInvocation(
+        buildLegacyCappedGraph(),
         makeProposal({
           entityId: 'f-legacy',
           value: { value: 30000, unit: '£', cap: 100000 },
@@ -288,8 +342,8 @@ describe('set_factor_value handler', () => {
         }),
       ),
     );
-    expect(outcome.assistant_text).toContain('£30,000');
-    // The fabricated currency render of the normalised before-value is gone.
+    // Before side is the de-normalised £40,000 (0.4 × 100000), not "£0.4"/"0.4".
+    expect(outcome.assistant_text).toBe('Updated Legacy budget from £40,000 to £30,000.');
     expect(outcome.assistant_text).not.toMatch(/£0\.\d/);
   });
 

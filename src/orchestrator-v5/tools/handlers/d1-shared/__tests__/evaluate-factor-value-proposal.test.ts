@@ -17,7 +17,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   evaluateFactorValueProposal,
+  evaluatePostOperatorFactorValue,
   applyFactorValueOperator,
+  resolveExistingRawValue,
   type ProposalRejectionReason,
 } from '../evaluate-factor-value-proposal.js';
 import { normaliseFactorValue } from '../normalise-factor-value.js';
@@ -346,9 +348,12 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
       expect(r.ok).toBe(true);
     });
 
-    it('ACCEPTS a bare sub-1 MULTIPLY on an UNCAPPED factor (multiply is excluded from the unitless-delta guard too)', () => {
-      // 12 people * 0.3 = 3.6 — bounded by the existing finite value, so an
-      // uncapped multiply must not be refused as delta_no_cap_and_no_unit.
+    it('rejects a bare MULTIPLY on an UNCAPPED factor (no cap to bound it → delta_no_cap_and_no_unit)', () => {
+      // An uncapped multiply has no cap-range guard to contain it, so a bare
+      // multiplier (× -0.5 → -6, or × 1e9) could write a nonsensical /
+      // unbounded value. It is rejected at gate 3b like any uncapped bare
+      // delta. (Capped multiply is exempted at gate 3c, where the cap-range
+      // guard contains the product.)
       const r = evaluateFactorValueProposal({
         rawInput: 0.3,
         operator: 'multiply',
@@ -357,7 +362,51 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
         inputHasUnit: false,
         // no cap
       });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('delta_no_cap_and_no_unit');
+    });
+
+    it('rejects a NEGATIVE bare MULTIPLY on an UNCAPPED factor (no -6 people)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: -0.5,
+        operator: 'multiply',
+        factorUnit: 'people',
+        factorExistingRaw: 12,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('delta_no_cap_and_no_unit');
+    });
+
+    it('ACCEPTS an explicit MATCHING-unit MULTIPLY (RHS unit not dimensionally validated, treated as scalar)', () => {
+      // `£40,000 × £0.3` — the £ on the multiplier is incoherent but is
+      // ignored; the math is ×0.3 → £12,000 (honest). Documented behaviour.
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'multiply',
+        unit: '£',
+        factorUnit: '£',
+        factorCap: 100000,
+        factorExistingRaw: 40000,
+        inputHasUnit: true,
+      });
       expect(r.ok).toBe(true);
+    });
+
+    it('rejects an explicit MISMATCHED-unit MULTIPLY (unit_mismatch still applies)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'multiply',
+        unit: '%',
+        factorUnit: '£',
+        factorCap: 100000,
+        factorExistingRaw: 40000,
+        inputHasUnit: true,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe<ProposalRejectionReason>('unit_mismatch');
     });
 
     it('rejects a MULTIPLY whose product OVERSHOOTS the cap (falls through to the cap-range guard, not bare_ratio)', () => {
@@ -414,19 +463,30 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
         expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
     });
 
-    it('does NOT fire on the POST-operator computed value when suppressBareRatioGate is set (normalise path)', () => {
-      // Mirrors how normaliseFactorValue invokes the predicate: operator
-      // 'set' on a computed product that lands in (0,1), with the gate
-      // suppressed. Must accept (the stated-value check ran upstream).
-      const r = evaluateFactorValueProposal({
-        rawInput: 0.4, // e.g. 4% * 0.1
-        operator: 'set',
+    it('evaluatePostOperatorFactorValue does NOT fire bare_ratio on a computed product in (0,1)', () => {
+      // Mirrors normaliseFactorValue: a computed product 0.4 (e.g. 4% × 0.1)
+      // must be accepted — the bare-ratio gate judges the stated RHS, which
+      // ran upstream. The dedicated API encapsulates the suppression.
+      const r = evaluatePostOperatorFactorValue({
+        computedRaw: 0.4,
         factorUnit: '%',
         factorCap: 100,
         inputHasUnit: false,
-        suppressBareRatioGate: true,
       });
       expect(r.ok).toBe(true);
+    });
+
+    it('evaluatePostOperatorFactorValue STILL enforces the cap-range guard on the computed value', () => {
+      // Suppressing bare_ratio must not suppress cap containment.
+      const r = evaluatePostOperatorFactorValue({
+        computedRaw: 200000, // > cap 100000
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
     });
 
     it('rejects a negative bare sub-1 number on a unit-bearing factor (fires before the cap-range guard)', () => {
@@ -484,6 +544,35 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
         inputHasUnit: false,
       });
       expect(r.ok).toBe(true);
+    });
+  });
+
+  // De-normalisation of the delta LHS — the inverse of normaliseFactorValue.
+  // Guards the legacy-factor corruption fix (capped factor with only `value`).
+  describe('resolveExistingRawValue', () => {
+    it('uses raw_value directly when present', () => {
+      expect(
+        resolveExistingRawValue({ raw_value: 40000, value: 0.4, cap: 100000 }),
+      ).toBe(40000);
+    });
+    it('de-normalises value * cap on a capped factor without raw_value (the legacy bug fix)', () => {
+      expect(resolveExistingRawValue({ value: 0.4, cap: 100000, unit: '£' })).toBe(40000);
+    });
+    it('uses value directly on an uncapped factor without raw_value (value === raw)', () => {
+      expect(resolveExistingRawValue({ value: 12 })).toBe(12);
+    });
+    it('treats a stored value > 1 on a capped factor as already-raw (off-contract graph, no double-scaling)', () => {
+      // {value:200000, cap:500000} is off-contract (normalised value is always
+      // ≤1); value*cap would be 1e11 — use the already-raw 200000 instead.
+      expect(resolveExistingRawValue({ value: 200000, cap: 500000, unit: '£' })).toBe(200000);
+    });
+    it('de-normalises a percentage factor as value * 100 (display convention), capped or not', () => {
+      // 0.04 renders/edits as "4%" — the raw user-unit value is 4.
+      expect(resolveExistingRawValue({ value: 0.04, unit: '%' })).toBe(4);
+      expect(resolveExistingRawValue({ value: 0.04, unit: '%', cap: 100 })).toBe(4);
+    });
+    it('returns undefined when there is no value at all (delta guards then fail closed)', () => {
+      expect(resolveExistingRawValue({})).toBeUndefined();
     });
   });
 
