@@ -13,6 +13,7 @@ import type { HandlerInvocation } from '../registry.js';
 import {
   isSuccessfulRunAnalysisFact,
   selectDegradedRunAnalysisFact,
+  type AnalysisFreshness,
 } from '../../context/freshness.js';
 
 /**
@@ -132,7 +133,11 @@ export function decideExplanationPrecondition(
   invocation: {
     readonly context: { readonly prior_facts: readonly HandlerFact[] }
     readonly analysisProjection?: unknown
-    readonly analysisFreshness?: { readonly freshness: string }
+    // Real freshness union (not bare `string`) so the verdict comparisons
+    // below stay exhaustiveness-checked against AnalysisFreshness — a typo or
+    // a future verdict value becomes a compile error, matching the canonical
+    // FreshnessDerivation the turn-executor actually threads.
+    readonly analysisFreshness?: { readonly freshness: AnalysisFreshness }
   },
 ): ExplanationPreconditionVerdict {
   const priorFacts = invocation.context.prior_facts
