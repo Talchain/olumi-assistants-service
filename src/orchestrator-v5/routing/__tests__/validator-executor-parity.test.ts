@@ -650,4 +650,64 @@ describe('AC.1 — validator/executor parity property table', () => {
       });
     }
   });
+
+  // -----------------------------------------------------------------
+  // Legacy percentage factor (value-only, no raw_value). The % divisor is
+  // unambiguous for uncapped (extractor value=raw/100) and cap === 100
+  // (value*100 === value*cap) → reconstruct + accept. A capped % with
+  // cap !== 100 is ambiguous (normalise /cap vs extractor/display /100) → fail
+  // closed at all layers. Driven validator + handler + narration.
+  // -----------------------------------------------------------------
+  describe('legacy percentage factor (value-only) — scale-contract parity', () => {
+    function pctGraph(observed: Record<string, unknown>): GraphV3T {
+      const graph = buildD1Fixture();
+      graph.nodes.push({
+        id: 'f-pct-legacy',
+        kind: 'factor',
+        label: 'Legacy churn',
+        observed_state: observed as never,
+      });
+      return graph;
+    }
+    for (const ok of [
+      { label: 'no cap (extractor value=raw/100)', state: { value: 0.04, unit: '%' } },
+      { label: 'cap === 100', state: { value: 0.04, unit: '%', cap: 100 } },
+    ]) {
+      it(`${ok.label} → increase 1% on value-only 4% factor accepts + computes 5%`, async () => {
+        const graph = pctGraph(ok.state); // = 4%, no raw_value
+        const lookup = makeLookup(graph);
+        const proposal = makeProposal({
+          entityId: 'f-pct-legacy',
+          value: { value: 1, unit: '%' },
+          operator: 'increase',
+        });
+        expect(validateToolCall(proposal, lookup, HANDLER_VALIDATION_REGISTRY).valid).toBe(true);
+        const outcome = await handler(buildInvocation(graph, proposal));
+        const node = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-pct-legacy');
+        expect(node?.observed_state?.raw_value).toBe(5);
+        expect(outcome.assistant_text).toBe('Updated Legacy churn from 4% to 5%.');
+      });
+    }
+    for (const observed of [
+      { label: 'cap === 50 (ambiguous divisor)', state: { value: 0.1, unit: '%', cap: 50 } },
+    ]) {
+      it(`${observed.label} → increase fails closed at validator AND handler (no corruption)`, async () => {
+        const graph = pctGraph(observed.state);
+        const lookup = makeLookup(graph);
+        const proposal = makeProposal({
+          entityId: 'f-pct-legacy',
+          value: { value: 1, unit: '%' },
+          operator: 'increase',
+        });
+        const validation = validateToolCall(proposal, lookup, HANDLER_VALIDATION_REGISTRY);
+        expect(validation.valid).toBe(false);
+        if (!validation.valid) {
+          expect(validation.error.details?.rejection_reason).toBe('delta_no_existing_value');
+        }
+        await expect(handler(buildInvocation(graph, proposal))).rejects.toBeInstanceOf(
+          HandlerInvocationFailedError,
+        );
+      });
+    }
+  });
 });

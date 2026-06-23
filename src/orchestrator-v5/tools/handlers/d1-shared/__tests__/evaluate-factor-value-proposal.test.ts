@@ -566,10 +566,25 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
       // ≤1); value*cap would be 1e11 — use the already-raw 200000 instead.
       expect(resolveExistingRawValue({ value: 200000, cap: 500000, unit: '£' })).toBe(200000);
     });
-    it('de-normalises a percentage factor as value * 100 (display convention), capped or not', () => {
-      // 0.04 renders/edits as "4%" — the raw user-unit value is 4.
+    it('treats a stored value < 0 as already-raw too (symmetric off-contract handling)', () => {
+      expect(resolveExistingRawValue({ value: -0.5, cap: 100000, unit: '£' })).toBe(-0.5);
+    });
+    // Percentage scale: normaliseFactorValue stores value = raw/cap for EVERY
+    // capped factor, so the % divisor is only unambiguous when cap === 100.
+    it('reconstructs a percentage factor only when cap === 100 (value*100 === value*cap)', () => {
+      expect(resolveExistingRawValue({ value: 0.05, unit: '%', cap: 100 })).toBe(5);
+    });
+    it('reconstructs an UNCAPPED percentage factor as value*100 (brief-extractor convention; handler-produced always has raw_value)', () => {
+      // {value:0.04, %} with no raw_value/cap is the canonical extracted shape
+      // for "4%" — unambiguously raw 4 (handler-produced % always carries
+      // raw_value and short-circuits, so this branch is extractor-only).
       expect(resolveExistingRawValue({ value: 0.04, unit: '%' })).toBe(4);
-      expect(resolveExistingRawValue({ value: 0.04, unit: '%', cap: 100 })).toBe(4);
+      expect(resolveExistingRawValue({ value: 5, unit: '%' })).toBe(500); // 500% → value 5
+    });
+    it('FAILS CLOSED for a CAPPED percentage factor with cap !== 100 (ambiguous divisor: display /100 vs normalise /cap)', () => {
+      // {value:0.1, %, cap:50} = raw 5 under normalise (raw/cap), but 10 under
+      // the /100 display convention — ambiguous, so do not guess.
+      expect(resolveExistingRawValue({ value: 0.1, unit: '%', cap: 50 })).toBeUndefined();
     });
     it('returns undefined when there is no value at all (delta guards then fail closed)', () => {
       expect(resolveExistingRawValue({})).toBeUndefined();

@@ -137,24 +137,35 @@ export function applyFactorValueOperator(
 }
 
 /**
- * Resolve a factor's current USER-UNIT raw value from its observed_state,
- * for use as the left-hand side of delta operators (increase / decrease /
- * multiply) and for change narration. This is the INVERSE of
- * `normaliseFactorValue`'s contract, and mirrors the de-normalisation divisor
- * convention in `graph-data-integrity.ts` (`unit === '%' ? 100 : cap`):
+ * Resolve a factor's current USER-UNIT raw value from its observed_state, for
+ * use as the left-hand side of delta operators (increase / decrease / multiply)
+ * and for change narration. This is the EXACT INVERSE of `normaliseFactorValue`,
+ * which stores `value = raw / cap` for EVERY capped factor (including `%`) and
+ * `value === raw` when uncapped:
  *
- *   - `raw_value` present       → use it directly (canonical user-unit value).
- *   - `value > 1`               → already in user units; use it directly.
- *                                 A normalised value is always in [0,1], so a
- *                                 stored value > 1 is an off-contract graph
- *                                 carrying a raw value (e.g. {value:200000,
- *                                 cap:500000}); de-normalising it would corrupt.
- *   - percentage (`unit === '%'`) → raw = value * 100 (display convention; a
- *                                 normalised 0.04 renders/edits as "4%").
- *   - capped (cap present)      → raw = value * cap (because value = raw / cap).
- *   - uncapped                  → raw = value (uncapped stores value === raw).
- *   - no value at all           → undefined (delta guards then fail closed via
- *                                 `delta_no_existing_value`).
+ *   - `raw_value` present        → use it directly (canonical user-unit value).
+ *   - `value` outside [0,1]      → already in user units; use it directly. A
+ *                                  normalised value is always in [0,1], so a
+ *                                  stored value > 1 (e.g. {value:200000,
+ *                                  cap:500000}) or < 0 is an off-contract graph
+ *                                  carrying a raw value. Symmetric for both
+ *                                  bounds; the cap-range guard contains any
+ *                                  out-of-range result.
+ *   - percentage (`unit === '%'`) → a HANDLER-produced % factor always carries
+ *                                  `raw_value` (so it short-circuits above); a
+ *                                  raw-value-less % factor comes only from the
+ *                                  brief extractor, which stores `value=raw/100`.
+ *                                  Reconstruct as `value*100` for uncapped (no
+ *                                  cap) and `cap === 100` (where it equals
+ *                                  `value*cap`). Only a capped % with
+ *                                  `cap !== 100` is ambiguous (normalise /cap vs
+ *                                  extractor/display /100) → FAIL CLOSED
+ *                                  (undefined → delta guards reject).
+ *   - capped non-%               → raw = value * cap (inverse of normalise);
+ *                                  off-contract value∉[0,1] → already-raw.
+ *   - uncapped non-%             → raw = value (uncapped stores value === raw).
+ *   - no value at all            → undefined (delta guards then fail closed via
+ *                                  `delta_no_existing_value`).
  *
  * Without this de-normalisation, a legacy/capped factor that stored only the
  * normalised `value` (e.g. `{ value: 0.4, cap: 100000 }` = £40,000) would have
@@ -169,15 +180,28 @@ export function resolveExistingRawValue(snapshot: {
   readonly unit?: string;
   readonly cap?: number;
 }): number | undefined {
-  if (snapshot.raw_value !== undefined) return snapshot.raw_value;
-  if (snapshot.value === undefined) return undefined;
-  // A normalised value is always in [0,1]; a value already > 1 is in user
-  // units (off-contract graph) — treat it as already-raw rather than
-  // de-normalising it to a wildly wrong product.
-  if (snapshot.value > 1) return snapshot.value;
-  if (snapshot.unit === '%') return snapshot.value * 100;
-  if (snapshot.cap !== undefined) return snapshot.value * snapshot.cap;
-  return snapshot.value;
+  const { raw_value, value, unit, cap } = snapshot;
+  if (raw_value !== undefined) return raw_value;
+  if (value === undefined) return undefined;
+  // Percentage scale. A HANDLER-produced % factor always carries `raw_value`
+  // (normaliseFactorValue writes it), so it short-circuits above; a
+  // raw-value-less % factor therefore comes only from the brief extractor,
+  // which stores `value = raw/100`. That convention equals the value*cap
+  // contract for uncapped (no cap) and `cap === 100`, so reconstruct as
+  // value*100 there — any magnitude (a 500% factor is value=5). A capped %
+  // with `cap !== 100` is genuinely ambiguous (normalise divides by cap; the
+  // extractor/display divide by 100), so fail closed rather than guess.
+  if (unit === '%') {
+    return cap === undefined || cap === 100 ? value * 100 : undefined;
+  }
+  // Non-%: a normalised capped value is always in [0,1]; a value outside that
+  // range is an off-contract graph carrying an already-raw value (normalisation
+  // never produces >1 or <0). Handle > 1 and < 0 symmetrically; the downstream
+  // cap-range guard contains any out-of-range result.
+  if (value < 0 || value > 1) return value;
+  // capped → value*cap (inverse of normaliseFactorValue); uncapped →
+  // value === raw_value.
+  return cap !== undefined ? value * cap : value;
 }
 
 /**
