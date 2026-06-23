@@ -45,10 +45,11 @@ jobs:
           # Minimal env for validation (uses defaults)
           LLM_PROVIDER: fixtures
       - name: Forbidden-boundary-pattern gate
-        # Containment ratchet: blocks NEW high-risk boundary usages
-        # (warnOnInvalid, `as unknown as` double-casts, naive science-field
-        # null/zero fallbacks) past a frozen baseline. Grep-only, no deps.
-        # Part of this required job, so growth past baseline blocks merge.
+        # Containment ratchet: blocks growth in high-risk boundary usages
+        # (warnOnInvalid, `as unknown as` double-casts, science-field constant
+        # fallbacks) vs an exact frozen baseline. Grep-only, no deps. Runs in
+        # this job; it only blocks MERGE once `staging` branch protection
+        # requires the `CI / Lint, TypeCheck, Unit Tests` status check.
         run: bash scripts/check-forbidden-boundary-patterns.sh
       - name: Run required test subset
         # Deterministic, in-process suite that is currently green (see

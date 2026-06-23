@@ -389,10 +389,10 @@ check_response_finaliser_contract() {
 }
 
 # ---------------------------------------------------------------------------
-# 16. Forbidden-boundary-pattern containment gate — blocks NEW high-risk
-#     usages (warnOnInvalid, `as unknown as` double-casts, naive science-field
-#     null/zero fallbacks) past a frozen baseline. Containment only; does not
-#     cure or vouch for the existing population. See
+# 16. Forbidden-boundary-pattern containment gate — blocks growth in high-risk
+#     usages (warnOnInvalid, `as unknown as` double-casts, science-field
+#     constant fallbacks) vs an exact frozen baseline. Containment only; does
+#     not cure or vouch for the existing population. See
 #     scripts/check-forbidden-boundary-patterns.sh and
 #     scripts/ci/forbidden-boundary-baseline.txt.
 # ---------------------------------------------------------------------------
