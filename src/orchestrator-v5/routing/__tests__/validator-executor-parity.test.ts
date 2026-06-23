@@ -220,6 +220,47 @@ const CASES: readonly PropertyCase[] = [
     expected: { kind: 'reject', reason: 'unit_mismatch' },
   },
 
+  // ---- bare sub-1 ratio on a unit-bearing factor (value/unit honesty) ----
+  // The live defect: "Set …Budget… to 0.3" was applied as raw £0.3 and
+  // narrated "£20,000 → £0.3". A bare number below 1 on a factor that has
+  // a unit reads as a normalised proportion, not a value in that unit.
+  {
+    label: 'bare sub-1 on a capped currency factor (proportion guard)',
+    entityId: 'f-budget', // cap=100000, unit='£'
+    value: 0.3, // bare number, no unit → inputHasUnit=false
+    operator: 'set',
+    expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
+  },
+  {
+    label: 'bare sub-1 delta (increase) on a capped currency factor (proportion guard)',
+    entityId: 'f-budget',
+    value: 0.3,
+    operator: 'increase',
+    expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
+  },
+  {
+    label: 'bare sub-1 on an uncapped count/person-like factor (proportion guard)',
+    entityId: 'f-uncapped', // no cap, unit='people'
+    value: 0.3,
+    operator: 'set',
+    expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
+  },
+  // ---- positive locks: the guard must NOT over-refuse legitimate input ----
+  {
+    label: 'bare normal currency value >= 1 (no false reject)',
+    entityId: 'f-budget',
+    value: 50000, // bare, but >= 1 → not proportion-looking
+    operator: 'set',
+    expected: { kind: 'accept' },
+  },
+  {
+    label: 'bare sub-1 on a UNITLESS factor (ratio-in-[0,1], accepted)',
+    entityId: 'f-quality', // no unit, no cap, value in [0,1]
+    value: 0.7,
+    operator: 'set',
+    expected: { kind: 'accept' },
+  },
+
   // ---- missing / malformed value parameter (Blocking #1 fix, 2026-05-20) ----
   // Review surfaced that a proposal with no `value` parameter slipped
   // through the precheck → handler threw `parameter_invalid_at_execute`.

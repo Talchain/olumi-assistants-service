@@ -625,6 +625,11 @@ function preexecuteSetFactorValue(
 
   if (evaluation.ok) return null;
 
+  // Surface the effective unit (proposal unit, else the factor's stored
+  // unit) so the recoverable composer can render unit-aware clarify copy
+  // (e.g. the `bare_ratio_on_unit_factor` branch). A short symbol like
+  // '£' / '%' / 'people' — never user prose.
+  const effectiveUnit = parsed.unit ?? obs?.unit;
   return {
     code: 'PARAMETER_INVALID',
     message: evaluation.specific_issue,
@@ -633,6 +638,7 @@ function preexecuteSetFactorValue(
       rejection_reason: evaluation.reason,
       issue: evaluation.specific_issue,
       handler_id: 'set_factor_value',
+      ...(effectiveUnit !== undefined ? { unit: effectiveUnit } : {}),
     },
   };
 }

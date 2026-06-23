@@ -258,6 +258,122 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
     });
   });
 
+  // Value/unit honesty guard — a bare (unit-less) number below 1 on a
+  // factor that HAS a unit reads as a normalised proportion (0.3), not a
+  // value in that unit. Refuse rather than persist + narrate the
+  // misleading "£0.3" / "0.3 people".
+  describe('bare_ratio_on_unit_factor', () => {
+    it('rejects a bare sub-1 number on a currency factor', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'set',
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
+    });
+
+    it('rejects a bare sub-1 number on a percentage factor', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'set',
+        factorUnit: '%',
+        factorCap: 100,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
+    });
+
+    it('rejects a bare sub-1 number on a count/person-like factor (uncapped)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'set',
+        factorUnit: 'people',
+        inputHasUnit: false,
+        // no cap — a headcount-style factor
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
+    });
+
+    it('rejects a bare sub-1 delta (increase) on a capped currency factor', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'increase',
+        factorUnit: '£',
+        factorCap: 100000,
+        factorExistingRaw: 40000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
+    });
+
+    it('rejects a negative bare sub-1 number on a unit-bearing factor (fires before the cap-range guard)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: -0.5,
+        operator: 'set',
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
+    });
+
+    it('ACCEPTS bare 0 on a unit-bearing factor (zeroing is unambiguous)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0,
+        operator: 'set',
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it('ACCEPTS a bare sub-1 number on a UNITLESS factor (no unit to misrender)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.7,
+        operator: 'set',
+        inputHasUnit: false,
+        // no factorUnit, no cap — a ratio-in-[0,1] factor
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it('ACCEPTS an explicit sub-1 currency value (the unit asserts the scale)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'set',
+        unit: '£',
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: true,
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it('ACCEPTS a normal bare currency value >= 1 (no false reject)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 50000,
+        operator: 'set',
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(true);
+    });
+  });
+
   // AC.1 — PARITY WITH normaliseFactorValue (handler-side guard)
   // For every input that the predicate rejects with a cap/range/non-finite
   // reason, `normaliseFactorValue` must also throw a D1HandlerError. (The
@@ -303,6 +419,16 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
           rawInput: Number.POSITIVE_INFINITY,
           operator: 'set',
           factorCap: 100,
+          inputHasUnit: false,
+        },
+      },
+      {
+        label: 'bare sub-1 ratio on a unit-bearing (currency) factor',
+        input: {
+          rawInput: 0.3,
+          operator: 'set',
+          factorUnit: '£',
+          factorCap: 100000,
           inputHasUnit: false,
         },
       },

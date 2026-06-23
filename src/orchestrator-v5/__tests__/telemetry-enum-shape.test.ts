@@ -77,6 +77,7 @@ const PROPOSAL_REJECTION_REASONS = new Set<string>([
   'value_exceeds_cap',
   'delta_no_existing_value',
   'delta_no_cap_and_no_unit',
+  'bare_ratio_on_unit_factor',
 ]);
 
 const EXECUTION_PRECHECK_RESULT_VALUES = new Set<string>([

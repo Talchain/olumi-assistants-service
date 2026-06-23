@@ -59,7 +59,8 @@ export type ProposalRejectionReason =
   | 'delta_no_existing_value' // operator !== 'set' AND factor has no finite raw_value
   | 'delta_no_cap_and_no_unit' // operator !== 'set' AND no cap AND no unit (ambiguous)
   | 'bare_number_outside_cap' // !inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
-  | 'value_exceeds_cap'; // inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
+  | 'value_exceeds_cap' // inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
+  | 'bare_ratio_on_unit_factor'; // !inputHasUnit AND factor has a unit AND 0 < |rawInput| < 1 (looks like a normalised proportion)
 
 /**
  * Result of evaluating a proposal. `ok: true` means the handler's
@@ -245,6 +246,32 @@ export function evaluateFactorValueProposal(
         specific_issue: "This change can't be applied without a unit.",
       };
     }
+  }
+
+  // 3c. bare_ratio_on_unit_factor. A bare (unit-less) number below 1 in
+  //     magnitude, applied to a factor that HAS a unit, reads as a
+  //     normalised proportion (0.3), not a value in that unit. Accepting
+  //     it would persist raw_value=0.3 and narrate the misleading
+  //     "£0.3" / "0.3 people" — a false user-visible claim. Gate on the
+  //     user's stated number (rawInput), not effectiveRaw, so
+  //     "increase budget by 0.3" is caught too. `rawInput === 0` is
+  //     unambiguous ("zero it") and is allowed through; an explicit unit
+  //     (`inputHasUnit`) means the user asserted the scale, so it is left
+  //     to the cap-range guards below (e.g. an explicit "£0.30" is a
+  //     fully-specified amount, not the bare-number ambiguity).
+  if (
+    !inputHasUnit &&
+    effectiveUnit !== undefined &&
+    rawInput !== 0 &&
+    Math.abs(rawInput) < 1
+  ) {
+    return {
+      ok: false,
+      reason: 'bare_ratio_on_unit_factor',
+      specific_issue:
+        `${rawInput} looks like a proportion, not a value in ${effectiveUnit}. ` +
+        `Tell me the amount in ${effectiveUnit}.`,
+    };
   }
 
   // 4. Compute `effectiveRaw`. For `'set'` operator this is just

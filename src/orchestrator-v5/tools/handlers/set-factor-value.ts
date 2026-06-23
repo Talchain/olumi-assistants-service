@@ -363,16 +363,28 @@ export function createSetFactorValueHandler(): HandlerFn {
     }
 
     const label = targetNode.label;
+    // Defensive narration hardening: the receipt must never render a
+    // normalised model-unit `value` (a 0–1 ratio) as if it were a
+    // user-unit amount — that would fabricate a false claim like "£0.4".
+    // Attach the unit ONLY when a genuine user-unit `raw_value` is
+    // present; when we must fall back to `value`, render the bare number
+    // with no unit. The legitimate unitless factor case (e.g. value=0.7,
+    // no unit → "0.7") is unaffected — it has no unit to drop. The
+    // acceptance guard refuses the bare-ratio mutation upstream; this is
+    // the belt-and-braces layer for any other path reaching the narrator.
+    const narrationSide = (
+      snap: ObservedSnapshot,
+    ): { readonly raw_value: number; readonly unit?: string } =>
+      snap.raw_value !== undefined
+        ? {
+            raw_value: snap.raw_value,
+            ...(snap.unit !== undefined ? { unit: snap.unit } : {}),
+          }
+        : { raw_value: snap.value ?? 0 };
     const baseText = formatFactorChange({
       label,
-      before: {
-        raw_value: before.raw_value ?? before.value ?? 0,
-        ...(before.unit !== undefined ? { unit: before.unit } : {}),
-      },
-      after: {
-        raw_value: after.raw_value ?? after.value ?? 0,
-        ...(after.unit !== undefined ? { unit: after.unit } : {}),
-      },
+      before: narrationSide(before),
+      after: narrationSide(after),
     });
 
     // P0 V5 golden-path repair (Wave 2): when a prior successful analysis

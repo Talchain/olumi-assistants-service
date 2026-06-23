@@ -167,6 +167,49 @@ describe('set_factor_value handler', () => {
     ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
   });
 
+  it('rejects a bare sub-1 number on a currency factor (no misleading £0.3 narration)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // The live defect: "Set Marketing budget to 0.3" — a bare proportion
+    // on a £ factor. Must refuse rather than persist raw_value=0.3 and
+    // narrate "£40,000 → £0.3". Routes to the recoverable clarify path.
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-budget', value: 0.3, operator: 'set' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
+  it('narration hardening: a unit factor with no raw_value never renders its normalised value as currency', async () => {
+    const handler = createSetFactorValueHandler();
+    // Legacy/degenerate node: has a unit and a normalised value but no
+    // raw_value. Setting it to an explicit £ amount must NOT render the
+    // 0.4 model-value as "£0.4" on the before side of the receipt.
+    const graph = buildD1Fixture();
+    graph.nodes.push({
+      id: 'f-legacy',
+      kind: 'factor',
+      label: 'Legacy budget',
+      observed_state: { value: 0.4, unit: '£' },
+    });
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({
+          entityId: 'f-legacy',
+          value: { value: 30000, unit: '£', cap: 100000 },
+          operator: 'set',
+        }),
+      ),
+    );
+    expect(outcome.assistant_text).toContain('£30,000');
+    // The fabricated currency render of the normalised before-value is gone.
+    expect(outcome.assistant_text).not.toMatch(/£0\.\d/);
+  });
+
   it('rejects target with wrong kind', async () => {
     const handler = createSetFactorValueHandler();
     const graph = buildD1Fixture();
