@@ -6,7 +6,7 @@
 # Olumi's recurring silent-drop / schema-drift failure mode at service
 # boundaries. It does NOT cure existing violations and does NOT prove current
 # boundaries are safe — it freezes the current population (an exact committed
-# baseline) so growth blocks merge and cleanup keeps the baseline honest.
+# baseline) so growth blocks the gate and cleanup keeps the baseline honest.
 #
 # Patterns (curated, narrow on purpose — see the baseline file):
 #   1. warnOnInvalid                    — zero-tolerance (baseline hard-required 0).
@@ -19,32 +19,45 @@
 #                                         before the fallback). Partial by design.
 #
 # Scope: src/ TypeScript only, excluding tests (**/__tests__/**, *.test.ts),
-# generated code (src/generated/**), comment-only lines, and any line carrying a
-# `// forbidden-exempt: <reason>` marker WITH A NON-EMPTY REASON (single-line
-# escape hatch; a bare marker is NOT honoured). Mirrors
-# scripts/check-no-direct-analysis-ready.sh.
+# generated code (src/generated/**), and comment-only lines (a line whose first
+# non-space token is `//`, `/*`, or `*`).
+#
+# Exemption (escape hatch): place a dedicated comment on the line IMMEDIATELY
+# ABOVE the offending line:
+#       // forbidden-exempt: <non-empty reason>
+#       const x = y as unknown as Z;
+# The marker must be a real preceding comment line (starts with `//`) AND carry
+# a non-empty reason. A trailing marker, a bare marker, or marker text inside a
+# string literal / URL on the code line does NOT grant an exemption.
 #
 # Baseline: scripts/ci/forbidden-boundary-baseline.txt (`<key>=<count>` lines).
 # Validated strictly (exactly one of each expected key; no duplicate/unknown
 # keys; integer values; warnOnInvalid must be 0). The gate FAILS when any
-# current count != its baseline — i.e. growth blocks merge, and a real cleanup
-# requires lowering the baseline in the SAME PR so an inflated/stale baseline
+# current count != its baseline — growth blocks the gate, and a real cleanup
+# requires lowering the baseline in the SAME PR, so an inflated/stale baseline
 # can never silently disable the ratchet.
 #
-# Enforcement reality: this script blocks local `git push` (pre-push hook, check
-# #16) and runs in the `CI / Lint, TypeCheck, Unit Tests` job. CI is only truly
-# merge-blocking once `staging` branch protection / a ruleset REQUIRES that
-# status check — putting the step in the workflow is necessary but not
-# sufficient. See the PR description.
+# Enforcement reality (no over-claim): this script is NOT auto-installed or
+# auto-required.
+#   - Pre-push: it runs as check #16 in scripts/validate-prepush.sh, which gates
+#     `git push` ONLY for developers who have run scripts/install-hooks.sh. A
+#     fresh checkout has no .git/hooks/pre-push and no package.json lifecycle
+#     installs it, so pre-push enforcement is per-developer, not universal.
+#   - CI: it runs in the `CI / Lint, TypeCheck, Unit Tests` job, which blocks
+#     MERGE only once `staging` branch protection / a ruleset REQUIRES that
+#     status check. Until that setting exists, a red gate does not block merge.
 #
 # Usage:
 #   bash scripts/check-forbidden-boundary-patterns.sh             # run the gate
-#   bash scripts/check-forbidden-boundary-patterns.sh --self-test # prove detectors fire
+#   bash scripts/check-forbidden-boundary-patterns.sh --self-test # prove behaviour
 #   bash scripts/check-forbidden-boundary-patterns.sh --help
 #
 # Exit: 0 = pass / self-test OK; 1 = violation / malformed baseline / self-test
-#       detector failure / misuse.
-
+#       failure / misuse.
+#
+# `set -e` is intentionally omitted (matching scripts/ci/typecheck-ratchet.sh):
+# the gate relies on grep's no-match exit code (1) in several places, and `-e`
+# would risk false failures in a merge-relevant check. `-u`/pipefail are kept.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,46 +66,66 @@ cd "$REPO_ROOT"
 BASELINE="scripts/ci/forbidden-boundary-baseline.txt"
 SCAN_DIR="src"
 
-# Science-field constant-fallback regex (ERE). Matches `<sciencefield> ?? <c>`
-# and `<sciencefield> || <c>` where <c> is null or a zero-leading number
-# (0, 0.5, 0.8, ...). The operator must immediately follow the identifier
-# (modulo whitespace) — deliberately tight to stay high-signal.
+# Science-field constant-fallback regex (ERE): `<sciencefield> ?? <c>` or
+# `<sciencefield> || <c>` where <c> is null or a zero-leading number (0, 0.5,
+# 0.8, ...). Operator must immediately follow the identifier (modulo spaces).
 SCIENCE_ERE='(robustness|confidence|freshness|evpi|value_of_information|stale)[A-Za-z0-9_]*[[:space:]]*(\?\?|\|\|)[[:space:]]*(null|0)'
+
+# Exemption marker: a preceding comment LINE (starts with `//`) + non-empty reason.
+EXEMPT_RE='^[[:space:]]*//[[:space:]]*forbidden-exempt:[[:space:]]*[^[:space:]]'
 
 # Expected baseline keys (also the report order). warnOnInvalid is zero-tolerance.
 PATTERN_KEYS=(warnOnInvalid as_unknown_as science_field_default_fallback)
 
 die() { echo "::error::$*" >&2; exit 1; }
 
-# ── Filters ────────────────────────────────────────────────────────────────
-# Drop out-of-scope / false-positive / validly-exempted lines from a
-# `path:line:content` stream. The exemption requires a NON-EMPTY reason after
-# the marker: `// forbidden-exempt: <reason>`. A bare `// forbidden-exempt:`
-# (no reason) is NOT honoured and remains a violation.
-gate_filter() {
+# ── Match production ─────────────────────────────────────────────────────────
+# Scope filter: drop out-of-scope + comment-only lines from a `path:line:content`
+# stream (the comment-only test covers `//`, `/*`, and `*` openers).
+scope_filter() {
   grep -v '/__tests__/' \
   | grep -v '\.test\.ts:' \
   | grep -v '/src/generated/' \
-  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)' \
-  | grep -vE '//[[:space:]]*forbidden-exempt:[[:space:]]*[^[:space:]]'
+  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|\*)'
 }
 
-# Emit matching `path:line:content` for <key> under <path>. Tolerant of grep's
-# no-match exit (1) so `set -uo pipefail` does not abort the run.
+# Exemption: drop a match when the line IMMEDIATELY ABOVE it is a dedicated
+# `// forbidden-exempt: <reason>` comment. Reading the *preceding comment line*
+# (not a trailing substring) means a marker inside a string literal/URL on the
+# code line cannot grant an exemption.
+apply_exemptions() {
+  local match file rest lineno prev
+  while IFS= read -r match; do
+    [[ -z "$match" ]] && continue
+    file="${match%%:*}"
+    rest="${match#*:}"
+    lineno="${rest%%:*}"
+    if [[ "$lineno" =~ ^[0-9]+$ ]] && [[ "$lineno" -gt 1 ]]; then
+      prev="$(sed -n "$((lineno - 1))p" "$file" 2>/dev/null || true)"
+      if printf '%s' "$prev" | grep -qE "$EXEMPT_RE"; then
+        continue
+      fi
+    fi
+    printf '%s\n' "$match"
+  done
+}
+
+# Emit in-scope, unexempted `path:line:content` for <key> under <path>. `-H`
+# forces the filename prefix even when <path> is a single file (self-test).
 scan() {
   local key="$1" path="$2"
   {
     case "$key" in
       warnOnInvalid)
-        grep -rn --include='*.ts' 'warnOnInvalid' "$path" 2>/dev/null ;;
+        grep -rnH --include='*.ts' 'warnOnInvalid' "$path" 2>/dev/null ;;
       as_unknown_as)
-        grep -rn --include='*.ts' 'as unknown as' "$path" 2>/dev/null ;;
+        grep -rnH --include='*.ts' 'as unknown as' "$path" 2>/dev/null ;;
       science_field_default_fallback)
-        grep -rnE --include='*.ts' "$SCIENCE_ERE" "$path" 2>/dev/null ;;
+        grep -rnHE --include='*.ts' "$SCIENCE_ERE" "$path" 2>/dev/null ;;
       *)
         echo "INTERNAL ERROR: unknown pattern key '$key'" >&2; return 2 ;;
     esac
-  } | gate_filter || true
+  } | scope_filter | apply_exemptions || true
 }
 
 count() { scan "$1" "$2" | grep -c '' || true; }
@@ -114,7 +147,6 @@ baseline_for() {
 validate_baseline() {
   [[ -f "$BASELINE" ]] || die "Missing baseline file: $BASELINE"
 
-  # Non-comment, non-blank lines are the entries.
   local entries
   entries="$(grep -vE '^[[:space:]]*(#|$)' "$BASELINE" || true)"
   [[ -n "$entries" ]] || die "Baseline $BASELINE contains no entries."
@@ -127,12 +159,10 @@ validate_baseline() {
   local keys
   keys="$(printf '%s\n' "$entries" | sed -E 's/=.*//')"
 
-  # No duplicate keys.
   local dupes
   dupes="$(printf '%s\n' "$keys" | sort | uniq -d)"
   [[ -z "$dupes" ]] || die "Duplicate baseline key(s): $(printf '%s' "$dupes" | tr '\n' ' ')"
 
-  # No unknown keys.
   local k
   for k in $keys; do
     case " ${PATTERN_KEYS[*]} " in
@@ -141,25 +171,24 @@ validate_baseline() {
     esac
   done
 
-  # Every expected key present (exactly once — duplicates already rejected).
   local ek
   for ek in "${PATTERN_KEYS[@]}"; do
     printf '%s\n' "$keys" | grep -Fqx "$ek" || die "Missing baseline key: '$ek'"
   done
 
-  # Zero-tolerance: warnOnInvalid baseline must be exactly 0.
   [[ "$(baseline_for warnOnInvalid)" == "0" ]] \
     || die "warnOnInvalid baseline must be 0 (zero-tolerance); got '$(baseline_for warnOnInvalid)'."
 }
 
-# ── Self-test: prove the three detectors fire on synthetic known-bad input ──
+# ── Self-test: prove detector + exemption + comment behaviour ────────────────
+SELFTEST_TMP=""
 run_self_test() {
-  local tmp
-  tmp="$(mktemp -d)"
-  # shellcheck disable=SC2064
-  trap "rm -rf '$tmp'" RETURN
-  cat > "$tmp/fixture.ts" <<'EOF'
-// Synthetic known-bad fixture for --self-test. Not part of the codebase.
+  SELFTEST_TMP="$(mktemp -d)"
+  trap 'rm -rf "$SELFTEST_TMP"' EXIT
+  local failures=0 key c
+
+  # (a) each detector fires on a bare violation.
+  cat > "$SELFTEST_TMP/fire.ts" <<'EOF'
 export function bad(input: { confidence?: number }) {
   const meta = (input as unknown as Record<string, unknown>);
   const options = { warnOnInvalid: true };
@@ -167,35 +196,49 @@ export function bad(input: { confidence?: number }) {
   return { meta, options, belief };
 }
 EOF
-  local failures=0 key c
-  echo "self-test: scanning a synthetic fixture that contains one of each pattern"
+  echo "self-test:"
   for key in "${PATTERN_KEYS[@]}"; do
-    c="$(count "$key" "$tmp/fixture.ts")"
-    if [[ "$c" -ge 1 ]]; then
-      printf '  OK   %-32s detector fired (%s match)\n' "$key" "$c"
-    else
-      printf '  FAIL %-32s detector did NOT fire on known-bad input\n' "$key"
-      failures=$((failures + 1))
-    fi
+    c="$(count "$key" "$SELFTEST_TMP/fire.ts")"
+    if [[ "$c" -ge 1 ]]; then printf '  OK   %-28s detector fired (%s)\n' "$key" "$c"
+    else printf '  FAIL %-28s did NOT fire\n' "$key"; failures=$((failures + 1)); fi
   done
-  # The exemption escape hatch must honour a reason but NOT a bare marker.
-  cat > "$tmp/exempt.ts" <<'EOF'
-const a = (x as unknown as Record<string, unknown>); // forbidden-exempt: legacy bridge, tracked in TICKET-1
-const b = (y as unknown as Record<string, unknown>); // forbidden-exempt:
+
+  # (b) reasoned preceding comment exempts; bare preceding marker and a string-
+  # literal marker on the code line do NOT.  Lines 2/4/6 carry `as unknown as`;
+  # only line 2 (reasoned preceding comment) is exempt ⇒ 2 violations remain.
+  cat > "$SELFTEST_TMP/exempt.ts" <<'EOF'
+// forbidden-exempt: reasoned exemption, tracked in TICKET-1
+const a = (p as unknown as Record<string, unknown>);
+// forbidden-exempt:
+const b = (q as unknown as Record<string, unknown>);
+const note = "see https://x.invalid// forbidden-exempt: still inside a string";
+const c = (r as unknown as Record<string, unknown>);
 EOF
-  local exempt_count
-  exempt_count="$(count as_unknown_as "$tmp/exempt.ts")"
-  if [[ "$exempt_count" -eq 1 ]]; then
-    printf '  OK   %-32s reason honoured, bare marker still flagged\n' "exemption"
-  else
-    printf '  FAIL %-32s expected exactly 1 unexempted match, got %s\n' "exemption" "$exempt_count"
-    failures=$((failures + 1))
-  fi
+  c="$(count as_unknown_as "$SELFTEST_TMP/exempt.ts")"
+  if [[ "$c" -eq 2 ]]; then printf '  OK   %-28s reasoned-comment exempts; bare+string do not (2)\n' "exemption"
+  else printf '  FAIL %-28s expected 2 unexempted, got %s\n' "exemption" "$c"; failures=$((failures + 1)); fi
+
+  # (c) the reviewer's exact one-line string-literal exploit must be counted.
+  cat > "$SELFTEST_TMP/exploit.ts" <<'EOF'
+export const x = value as unknown as Record<string, unknown>; const note = "https://example.invalid// forbidden-exempt: not a comment";
+EOF
+  c="$(count as_unknown_as "$SELFTEST_TMP/exploit.ts")"
+  if [[ "$c" -eq 1 ]]; then printf '  OK   %-28s string-literal marker does not exempt\n' "string-exploit"
+  else printf '  FAIL %-28s exploit wrongly exempted (got %s)\n' "string-exploit" "$c"; failures=$((failures + 1)); fi
+
+  # (d) a block-comment opener line is treated as a comment, not code.
+  cat > "$SELFTEST_TMP/comment.ts" <<'EOF'
+/* example: const z = a as unknown as B in a block-comment opener */
+EOF
+  c="$(count as_unknown_as "$SELFTEST_TMP/comment.ts")"
+  if [[ "$c" -eq 0 ]]; then printf '  OK   %-28s block-comment opener not counted\n' "comment-only"
+  else printf '  FAIL %-28s block comment counted (got %s)\n' "comment-only" "$c"; failures=$((failures + 1)); fi
+
   if [[ "$failures" -ne 0 ]]; then
-    echo "SELF-TEST FAILED: $failures check(s) did not behave as expected — the gate is not enforcing." >&2
+    echo "SELF-TEST FAILED: $failures check(s) misbehaved — the gate is not enforcing." >&2
     return 1
   fi
-  echo "SELF-TEST PASSED: detectors fire on injected violations; exemptions require a reason."
+  echo "SELF-TEST PASSED: detectors fire; exemptions are preceding-comment-only with a reason; string-literal & block-comment cases handled."
   return 0
 }
 
@@ -203,13 +246,12 @@ print_usage() {
   cat <<'EOF'
 check-forbidden-boundary-patterns.sh — Brief 3 Gate 1 containment ratchet.
 
-  (no args)     run the gate (exit 1 if any pattern != baseline or baseline malformed)
-  --self-test   prove the detectors fire on synthetic violations (exit 0 = OK)
+  (no args)     run the gate (exit 1 if any pattern != baseline, or baseline malformed)
+  --self-test   prove detector + exemption + comment behaviour (exit 0 = OK)
   --help, -h    this message
 
-Patterns: warnOnInvalid (zero-tolerance), `as unknown as`, science-field
-constant fallback. Baseline: scripts/ci/forbidden-boundary-baseline.txt.
-Exempt a single line with a NON-EMPTY  // forbidden-exempt: <reason>  marker.
+Exempt a line by putting  // forbidden-exempt: <reason>  on the line ABOVE it.
+Baseline: scripts/ci/forbidden-boundary-baseline.txt.
 EOF
 }
 
@@ -232,9 +274,9 @@ for key in "${PATTERN_KEYS[@]}"; do
     FAILURES=$((FAILURES + 1))
     echo "FAIL: ${label}"
     echo "      current=${cur} > baseline=${base}  (+$((cur - base)) NEW)"
-    echo "      Remove the new occurrence(s), or append a NON-EMPTY"
-    echo "      // forbidden-exempt: <reason>  on the offending line (a bare"
-    echo "      marker is not honoured). Do NOT raise the baseline to hide growth."
+    echo "      Remove the new occurrence(s), or add a preceding"
+    echo "      // forbidden-exempt: <reason>  comment line above it (a bare or"
+    echo "      in-string marker is not honoured). Do NOT raise the baseline to hide growth."
     echo "      Current matches:"
     scan "$key" "$SCAN_DIR" | sed 's/^/        /'
     echo

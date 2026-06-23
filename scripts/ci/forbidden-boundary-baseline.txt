@@ -8,8 +8,9 @@
 # warnOnInvalid MUST be 0. Anything else makes the gate fail closed (exit 1).
 #
 # The gate counts current occurrences in src/ (excluding tests, generated code,
-# comment-only lines, and lines carrying a NON-EMPTY `// forbidden-exempt:
-# <reason>` marker) and FAILS when any current count != its baseline here:
+# comment-only lines, and lines exempted by a `// forbidden-exempt: <reason>`
+# comment on the line IMMEDIATELY ABOVE them) and FAILS when any current count
+# != its baseline here:
 #   - current > baseline  -> NEW high-risk usage introduced; remove or exempt it.
 #   - current < baseline  -> real cleanup; LOWER the baseline in the SAME PR.
 # Exact match (not <=) is deliberate: it keeps the baseline honest and means an
@@ -27,9 +28,11 @@
 # pattern TOTAL count, not a per-line identity set. Swapping one occurrence for
 # another (net total unchanged) is not caught; any change in total IS caught.
 #
-# Enforcement: this baseline backs a gate wired into the pre-push hook (blocks
-# local push) and the CI `Lint, TypeCheck, Unit Tests` job. CI only blocks merge
-# once `staging` branch protection / a ruleset REQUIRES that status check.
+# Enforcement (no over-claim): the gate is NOT auto-installed or auto-required.
+# Pre-push (validate-prepush.sh check #16) gates `git push` only for developers
+# who ran scripts/install-hooks.sh — a fresh checkout has no hook. CI runs it in
+# `Lint, TypeCheck, Unit Tests`, which blocks merge only once `staging` branch
+# protection / a ruleset REQUIRES that status check.
 #
 # Captured from clean origin/staging 8968a601a8faf410268dd46686aa782af3f79f29.
 

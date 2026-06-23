@@ -397,11 +397,12 @@ check_response_finaliser_contract() {
 #     scripts/ci/forbidden-boundary-baseline.txt.
 # ---------------------------------------------------------------------------
 check_forbidden_boundary_patterns() {
-  if bash scripts/check-forbidden-boundary-patterns.sh > /dev/null 2>&1; then
+  local out
+  if out="$(bash scripts/check-forbidden-boundary-patterns.sh 2>&1)"; then
     print_check "forbidden-boundary-patterns" "OK"
   else
     print_check "forbidden-boundary-patterns" "FAIL"
-    bash scripts/check-forbidden-boundary-patterns.sh 2>&1 | sed 's/^/      /'
+    printf '%s\n' "$out" | sed 's/^/      /'
     FAILURES=$((FAILURES + 1))
   fi
 }
