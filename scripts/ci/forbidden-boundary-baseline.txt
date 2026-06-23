@@ -1,0 +1,50 @@
+# Forbidden-boundary-pattern baseline.
+#
+# Consumed by scripts/check-forbidden-boundary-patterns.sh (Brief 3, Gate 1).
+#
+# Format: each non-comment, non-blank line is exactly `<key>=<integer>`. The
+# baseline is validated strictly — exactly one entry for each of the three
+# expected keys, no duplicate or unknown keys, integer values only, and
+# warnOnInvalid MUST be 0. Anything else makes the gate fail closed (exit 1).
+#
+# The gate counts current occurrences in src/ (excluding tests, generated code,
+# comment-only lines, and lines exempted by a `// forbidden-exempt: <reason>`
+# comment on the line IMMEDIATELY ABOVE them) and FAILS when any current count
+# != its baseline here:
+#   - current > baseline  -> NEW high-risk usage introduced; remove or exempt it.
+#   - current < baseline  -> real cleanup; LOWER the baseline in the SAME PR.
+# Exact match (not <=) is deliberate: it keeps the baseline honest and means an
+# inflated/stale baseline can never silently disable the ratchet.
+#
+# This is a CONTAINMENT ratchet, not a cure:
+#   - It freezes the *current* population so growth blocks merge.
+#   - It does NOT reduce the existing population, and it does NOT assert that
+#     the existing occurrences are safe. Baselined != acceptable.
+#   - The remedy for the underlying silent-drop / schema-drift failure mode
+#     remains shared schema unification and a typed/validated PLoT -> CEE
+#     enrichment contract (plus the other product-critical boundary seams).
+#
+# Known limitation (same trade-off as scripts/ci/typecheck-ratchet.sh): per-
+# pattern TOTAL count, not a per-line identity set. Swapping one occurrence for
+# another (net total unchanged) is not caught; any change in total IS caught.
+#
+# Enforcement (no over-claim): the gate is NOT auto-installed or auto-required.
+# Pre-push (validate-prepush.sh check #16) gates `git push` only for developers
+# who ran scripts/install-hooks.sh — a fresh checkout has no hook. CI runs it in
+# `Lint, TypeCheck, Unit Tests`, which blocks merge only once `staging` branch
+# protection / a ruleset REQUIRES that status check.
+#
+# Captured from clean origin/staging 8968a601a8faf410268dd46686aa782af3f79f29.
+
+# Zero-tolerance: must remain 0. Any introduction blocks merge.
+warnOnInvalid=0
+
+# Exact ratchet: distinctive double-cast that erases types at boundaries.
+as_unknown_as=95
+
+# Exact ratchet: constant fallback on a science field — `field ?? null|0|0.x`
+# or `field || null|0|0.x`. HIGH-SIGNAL (catches fabricated defaults like
+# `confidence ?? 0.8`) but PARTIAL — it misses laundered cases (field
+# destructured, renamed, mapped, or cast before the fallback). A low count
+# means "not detected by this cheap gate", NOT "safe".
+science_field_default_fallback=17

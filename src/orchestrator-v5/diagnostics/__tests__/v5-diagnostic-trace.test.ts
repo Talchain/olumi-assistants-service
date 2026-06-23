@@ -15,10 +15,13 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
+  buildV5DiagnosticTrace,
   buildMinimalV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
   emptyV5DiagnosticTrace,
 } from '../v5-diagnostic-trace.js';
+import type { DraftGraphResult } from '../../../orchestrator/tools/draft-graph.js';
+import type { CommitResult } from '../../commit.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -274,5 +277,160 @@ describe('emptyV5DiagnosticTrace', () => {
     expect(trace.fallback_trace).toEqual([]);
     expect(trace.provider_resolution).toEqual([]);
     expect(trace.correlation_ids.request_id).toBe(REQUEST_ID);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Brief 3 / Gate 2 — feature-flag LIVENESS gate for `_diagnostic_trace`.
+//
+// The tests above cover the minimal / error / empty builders and assert SHAPE.
+// They do NOT assert that the PRIMARY draft_graph builder
+// (`buildV5DiagnosticTrace`) emits a NON-EMPTY, fully-populated trace when the
+// flag is ON and a real draft turn produced LLM telemetry — the silent-drop
+// failure mode this gate guards: flag ON but the emitted output is empty,
+// null-only, or missing required core fields.
+//
+// Liveness contract proven here:
+//   - flag OFF                    → undefined (output is genuinely gated)
+//   - flag ON + telemetry present → defined trace, NON-EMPTY llm_calls[], and
+//                                   all required core fields populated
+//
+// Deterministic: a pure builder call over an in-memory DraftGraphResult
+// fixture — no LLM, no network, no Redis/Supabase — so it runs in the required
+// `pnpm test:required` set and blocks merge on regression.
+//
+// Scope note: this proves the liveness-gate MECHANISM on ONE diagnostic
+// surface. It does NOT close liveness for _context_summary, S1 / Decision Data
+// Spine, coaching, freshness, or run-delta — those need equivalent flag-ON
+// meaningful-output gates as they land.
+// ───────────────────────────────────────────────────────────────────────────
+
+const TOOL_TELEMETRY = {
+  tool: 'draft_graph',
+  model: 'claude-opus-4-7',
+  provider: 'anthropic',
+  input_tokens: 1234,
+  output_tokens: 567,
+  cache_read_input_tokens: 100,
+  cache_creation_input_tokens: 50,
+  latency_ms: 4200,
+  stop_reason: 'end_turn',
+  thinking_enabled: false,
+  structured_outputs_used: true,
+  prompt_version: 'draft_graph@v196',
+  prompt_hash: 'sha256:promptdeadbeef',
+} as const;
+
+function makeDraftResult(opts: Partial<DraftGraphResult> = {}): DraftGraphResult {
+  return {
+    blocks: [],
+    assistantText: 'Drafted a decision graph.',
+    latencyMs: 1234,
+    strengthenItems: [],
+    coachingSummary: null,
+    coachingWideningLog: null,
+    coachingBiasSignals: null,
+    draftWarnings: [],
+    graphOutput: null,
+    ...opts,
+  } as DraftGraphResult;
+}
+
+// buildV5DiagnosticTrace reads only draftResult + timing inputs; commitResult
+// is part of the input type but unused by the builder, so a minimal stand-in
+// satisfies the signature.
+const COMMIT_RESULT = {
+  response: {},
+  performed: true,
+  persisted_row_id: 'row-1',
+  graphPersisted: true,
+} as CommitResult;
+
+describe('buildV5DiagnosticTrace — flag-on liveness (Gate 2)', () => {
+  const originalFlag = process.env.CEE_DIAGNOSTIC_TRACE_ENABLED;
+
+  beforeEach(() => {
+    delete process.env.CEE_DIAGNOSTIC_TRACE_ENABLED;
+  });
+
+  afterEach(() => {
+    if (originalFlag === undefined) delete process.env.CEE_DIAGNOSTIC_TRACE_ENABLED;
+    else process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = originalFlag;
+  });
+
+  it('returns undefined when the flag is off (output is gated, not merely shaped)', () => {
+    delete process.env.CEE_DIAGNOSTIC_TRACE_ENABLED;
+    const trace = buildV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      draftResult: makeDraftResult({ toolLLMTelemetry: TOOL_TELEMETRY }),
+      commitResult: COMMIT_RESULT,
+      persistenceMs: 12,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+    });
+    expect(trace).toBeUndefined();
+  });
+
+  it('flag on + draft telemetry present → LIVE trace: non-empty llm_calls[] + all required core fields', () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildV5DiagnosticTrace({
+      startedAt: Date.now() - 80,
+      draftResult: makeDraftResult({ toolLLMTelemetry: TOOL_TELEMETRY }),
+      commitResult: COMMIT_RESULT,
+      persistenceMs: 12,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+    });
+
+    // Emitted at all.
+    expect(trace).toBeDefined();
+
+    // LIVENESS: the draft LLM call must be present, not silently dropped.
+    expect(trace!.llm_calls.length).toBeGreaterThanOrEqual(1);
+    const call = trace!.llm_calls[0]!;
+    expect(call.role).toBe('draft_graph');
+    expect(call.provider).toBe('anthropic');
+    expect(call.model).toBe('claude-opus-4-7');
+    expect(call.input_tokens).toBe(1234);
+    expect(call.output_tokens).toBe(567);
+    expect(call.latency_ms).toBe(4200);
+
+    // Required correlation IDs — all populated (not empty).
+    expect(trace!.correlation_ids.request_id).toBe(REQUEST_ID);
+    expect(trace!.correlation_ids.scenario_id).toBe(SCENARIO_ID);
+    expect(trace!.correlation_ids.turn_id).toBe(TURN_ID);
+    expect(trace!.correlation_ids.prompt_hash).toBe('sha256:promptdeadbeef');
+
+    // Required benchmarking + envelope identity.
+    expect(trace!.benchmarking.total_duration_ms).toBeGreaterThanOrEqual(0);
+    expect(trace!.exit_path).toBe('draft_graph');
+    expect(trace!.trace_version).toBe(1);
+
+    // Telemetry present ⇒ structured-output config + prompt identity recorded —
+    // further proof the upstream signal was threaded, not discarded.
+    expect(trace!.structured_output_config).not.toBeNull();
+    expect(trace!.prompt_identity).not.toBeNull();
+  });
+
+  it('regression guard: with telemetry dropped, llm_calls collapses to empty — exactly what the liveness assertion forbids', () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    // No toolLLMTelemetry → the builder has nothing to record. This documents
+    // the silent-drop shape the liveness test catches if a real draft turn ever
+    // stops threading telemetry while the flag is on. It also proves the
+    // liveness assertion above is non-trivial: the builder genuinely CAN emit
+    // an empty llm_calls[], and only fills it when the signal is threaded.
+    const trace = buildV5DiagnosticTrace({
+      startedAt: Date.now() - 80,
+      draftResult: makeDraftResult(),
+      commitResult: COMMIT_RESULT,
+      persistenceMs: 12,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+    });
+    expect(trace).toBeDefined();
+    expect(trace!.llm_calls).toEqual([]);
   });
 });

@@ -389,6 +389,25 @@ check_response_finaliser_contract() {
 }
 
 # ---------------------------------------------------------------------------
+# 16. Forbidden-boundary-pattern containment gate — blocks growth in high-risk
+#     usages (warnOnInvalid, `as unknown as` double-casts, science-field
+#     constant fallbacks) vs an exact frozen baseline. Containment only; does
+#     not cure or vouch for the existing population. See
+#     scripts/check-forbidden-boundary-patterns.sh and
+#     scripts/ci/forbidden-boundary-baseline.txt.
+# ---------------------------------------------------------------------------
+check_forbidden_boundary_patterns() {
+  local out
+  if out="$(bash scripts/check-forbidden-boundary-patterns.sh 2>&1)"; then
+    print_check "forbidden-boundary-patterns" "OK"
+  else
+    print_check "forbidden-boundary-patterns" "FAIL"
+    printf '%s\n' "$out" | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
 echo ""
@@ -410,6 +429,7 @@ check_state_write_invariant
 check_handler_ownership
 check_phase_1_5_invariants
 check_response_finaliser_contract
+check_forbidden_boundary_patterns
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
