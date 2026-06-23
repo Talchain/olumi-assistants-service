@@ -334,6 +334,21 @@ describe('decideExplanationPrecondition', () => {
     ).toBe('execute');
   });
 
+  // The 'fresh' switch arm: a current fact with no buildable projection
+  // degrades honestly (never 'missing'), completing branch coverage of the
+  // exhaustive currency switch.
+  it('successful fact + NULL projection + freshness=fresh → degraded', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: undefined,
+          freshness: 'fresh',
+        }),
+      ),
+    ).toBe('degraded');
+  });
+
   // Tier 0 doctrine: 'unknown' (legacy fact missing its run-time hash, or the
   // current graph hash unavailable this turn) is treated as stale for user-
   // facing freshness — it must NOT execute as if fresh. Distinct 'unconfirmed'

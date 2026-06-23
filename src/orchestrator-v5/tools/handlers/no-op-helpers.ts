@@ -133,10 +133,10 @@ export function decideExplanationPrecondition(
   invocation: {
     readonly context: { readonly prior_facts: readonly HandlerFact[] }
     readonly analysisProjection?: unknown
-    // Real freshness union (not bare `string`) so the verdict comparisons
-    // below stay exhaustiveness-checked against AnalysisFreshness — a typo or
-    // a future verdict value becomes a compile error, matching the canonical
-    // FreshnessDerivation the turn-executor actually threads.
+    // Restrict to the canonical freshness literals (not bare `string`) so
+    // invalid caller/fixture values and misspelled comparison literals fail
+    // typechecking. (Variant-exhaustiveness — a future verdict forcing a
+    // decision here — is enforced by the switch below, not by this type.)
     readonly analysisFreshness?: { readonly freshness: AnalysisFreshness }
   },
 ): ExplanationPreconditionVerdict {
@@ -156,18 +156,28 @@ export function decideExplanationPrecondition(
 
   // A successful fact EXISTS — 'missing' is unreachable from here (invariant).
   // Judge currency from the canonical verdict BEFORE the projection guard.
-  if (fd?.freshness === 'stale') {
-    return 'stale'
+  // The switch is exhaustive over AnalysisFreshness (plus `undefined` for the
+  // fallback path where the derivation is not threaded), so a future freshness
+  // variant trips the `never` guard and forces an explicit decision here
+  // rather than silently falling through to 'execute'.
+  const freshness = fd?.freshness
+  switch (freshness) {
+    case 'stale':
+      return 'stale' // the model has changed (hashes known to differ)
+    case 'unknown':
+      return 'unconfirmed' // Tier 0: can't confirm currency, treat as stale
+    case 'fresh':
+    case 'none': // unreachable once hasSuccessfulFact; kept for exhaustiveness
+    case undefined: // derivation absent — local fallback path
+      // Current analysis, but only summarisable when a projection was built.
+      return invocation.analysisProjection == null ? 'degraded' : 'execute'
+    default: {
+      // Compile-time guard: a new AnalysisFreshness variant must add a case
+      // above instead of inheriting the fresh/execute path by default.
+      const _exhaustive: never = freshness
+      return _exhaustive
+    }
   }
-  if (fd?.freshness === 'unknown') {
-    return 'unconfirmed'
-  }
-
-  if (invocation.analysisProjection == null) {
-    return 'degraded'
-  }
-
-  return 'execute'
 }
 
 /**
