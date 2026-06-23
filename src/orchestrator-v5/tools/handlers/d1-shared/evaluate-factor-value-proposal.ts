@@ -137,35 +137,50 @@ export function applyFactorValueOperator(
 }
 
 /**
+ * Tagged result of resolving a factor's current user-unit raw value. Making
+ * the three outcomes explicit (rather than collapsing to `number | undefined`)
+ * keeps the delta and narration policies honest:
+ *   - `resolved`  → a reliable user-unit value; usable as a delta LHS and as
+ *                   the "from" side of a change receipt.
+ *   - `missing`   → the factor has no recorded value at all.
+ *   - `ambiguous` → the factor HAS a value but its scale cannot be reliably
+ *                   recovered (e.g. a raw-value-less `%` whose divisor is
+ *                   unknown). Distinct from `missing` so narration never
+ *                   fabricates a numeric "from" value for it.
+ * Both `missing` and `ambiguous` fail closed for delta operators and produce a
+ * one-sided ("to X") receipt — but the distinction is preserved for clarity
+ * and telemetry.
+ */
+export type ExistingRawResolution =
+  | { readonly kind: 'resolved'; readonly raw: number }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'ambiguous' };
+
+/**
  * Resolve a factor's current USER-UNIT raw value from its observed_state, for
  * use as the left-hand side of delta operators (increase / decrease / multiply)
- * and for change narration. This is the EXACT INVERSE of `normaliseFactorValue`,
+ * and for change narration. This is the INVERSE of `normaliseFactorValue`,
  * which stores `value = raw / cap` for EVERY capped factor (including `%`) and
  * `value === raw` when uncapped:
  *
- *   - `raw_value` present        → use it directly (canonical user-unit value).
- *   - `value` outside [0,1]      → already in user units; use it directly. A
- *                                  normalised value is always in [0,1], so a
- *                                  stored value > 1 (e.g. {value:200000,
- *                                  cap:500000}) or < 0 is an off-contract graph
- *                                  carrying a raw value. Symmetric for both
- *                                  bounds; the cap-range guard contains any
- *                                  out-of-range result.
- *   - percentage (`unit === '%'`) → a HANDLER-produced % factor always carries
- *                                  `raw_value` (so it short-circuits above); a
- *                                  raw-value-less % factor comes only from the
- *                                  brief extractor, which stores `value=raw/100`.
- *                                  Reconstruct as `value*100` for uncapped (no
- *                                  cap) and `cap === 100` (where it equals
- *                                  `value*cap`). Only a capped % with
- *                                  `cap !== 100` is ambiguous (normalise /cap vs
- *                                  extractor/display /100) → FAIL CLOSED
- *                                  (undefined → delta guards reject).
- *   - capped non-%               → raw = value * cap (inverse of normalise);
- *                                  off-contract value∉[0,1] → already-raw.
- *   - uncapped non-%             → raw = value (uncapped stores value === raw).
- *   - no value at all            → undefined (delta guards then fail closed via
- *                                  `delta_no_existing_value`).
+ *   - `raw_value` present         → `resolved` (canonical user-unit value).
+ *   - percentage (`unit === '%'`) → reconstruct as `value*100` ONLY when the
+ *                                   value is a normalised proportion in [0,1]
+ *                                   AND the divisor is unambiguous (no cap, or
+ *                                   `cap === 100`). A `%` value OUTSIDE [0,1]
+ *                                   (e.g. 5 → 500% via extractor `raw/100`, or
+ *                                   5% as a legacy raw value — both plausible)
+ *                                   or a `cap !== 100` is `ambiguous` → fail
+ *                                   closed; there is no reliable scale provenance.
+ *   - non-% value outside [0,1]   → `resolved` as already-raw. A normalised
+ *                                   value is always in [0,1], so a stored value
+ *                                   >1 (e.g. {value:200000, cap:500000}) or <0
+ *                                   is an off-contract graph carrying a raw
+ *                                   value (symmetric; the cap-range guard
+ *                                   contains out-of-range results).
+ *   - capped non-%                → `resolved` = value * cap (inverse of normalise).
+ *   - uncapped non-%              → `resolved` = value (uncapped stores value===raw).
+ *   - no value at all             → `missing`.
  *
  * Without this de-normalisation, a legacy/capped factor that stored only the
  * normalised `value` (e.g. `{ value: 0.4, cap: 100000 }` = £40,000) would have
@@ -179,29 +194,33 @@ export function resolveExistingRawValue(snapshot: {
   readonly value?: number;
   readonly unit?: string;
   readonly cap?: number;
-}): number | undefined {
+}): ExistingRawResolution {
   const { raw_value, value, unit, cap } = snapshot;
-  if (raw_value !== undefined) return raw_value;
-  if (value === undefined) return undefined;
-  // Percentage scale. A HANDLER-produced % factor always carries `raw_value`
-  // (normaliseFactorValue writes it), so it short-circuits above; a
-  // raw-value-less % factor therefore comes only from the brief extractor,
-  // which stores `value = raw/100`. That convention equals the value*cap
-  // contract for uncapped (no cap) and `cap === 100`, so reconstruct as
-  // value*100 there — any magnitude (a 500% factor is value=5). A capped %
-  // with `cap !== 100` is genuinely ambiguous (normalise divides by cap; the
-  // extractor/display divide by 100), so fail closed rather than guess.
+  if (raw_value !== undefined) return { kind: 'resolved', raw: raw_value };
+  if (value === undefined) return { kind: 'missing' };
+
   if (unit === '%') {
-    return cap === undefined || cap === 100 ? value * 100 : undefined;
+    // A raw-value-less % factor has no reliable scale provenance: a handler-
+    // produced % always carries raw_value (short-circuited above), so this is
+    // an extractor/legacy state. value=raw/100 is only safe to invert when the
+    // value is a normalised proportion in [0,1] and the divisor is unambiguous
+    // (no cap, or cap===100). A value outside [0,1] (5 → 500%? or legacy 5%?)
+    // or cap!==100 is genuinely ambiguous.
+    const unambiguousDivisor = cap === undefined || cap === 100;
+    if (unambiguousDivisor && value >= 0 && value <= 1) {
+      return { kind: 'resolved', raw: value * 100 };
+    }
+    return { kind: 'ambiguous' };
   }
+
   // Non-%: a normalised capped value is always in [0,1]; a value outside that
   // range is an off-contract graph carrying an already-raw value (normalisation
   // never produces >1 or <0). Handle > 1 and < 0 symmetrically; the downstream
   // cap-range guard contains any out-of-range result.
-  if (value < 0 || value > 1) return value;
+  if (value < 0 || value > 1) return { kind: 'resolved', raw: value };
   // capped → value*cap (inverse of normaliseFactorValue); uncapped →
   // value === raw_value.
-  return cap !== undefined ? value * cap : value;
+  return { kind: 'resolved', raw: cap !== undefined ? value * cap : value };
 }
 
 /**

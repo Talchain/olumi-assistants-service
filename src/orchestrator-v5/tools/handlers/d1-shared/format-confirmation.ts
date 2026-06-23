@@ -76,6 +76,21 @@ export function formatFactorChange(input: FactorChangeInput): string {
   return `Updated ${input.label} from ${before} to ${after}.`;
 }
 
+/**
+ * One-sided "set" confirmation for when the prior value is unresolvable (a
+ * raw-value-less factor whose scale can't be reliably recovered). Omits the
+ * "from X" clause entirely rather than fabricating a numeric prior (a "from 0"
+ * would be a false claim). Only used on `set` — deltas require a resolved
+ * current value and reject otherwise.
+ */
+export function formatFactorValueSet(input: {
+  readonly label: string;
+  readonly after: { readonly raw_value: number; readonly unit?: string };
+}): string {
+  const after = formatValueWithUnit(input.after.raw_value, input.after.unit);
+  return `Updated ${input.label} to ${after}.`;
+}
+
 export interface ConstraintAddedInput {
   readonly targetLabel: string;
   readonly operator: '>=' | '<=';

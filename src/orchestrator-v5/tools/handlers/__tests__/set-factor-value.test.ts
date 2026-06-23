@@ -347,6 +347,53 @@ describe('set_factor_value handler', () => {
     expect(outcome.assistant_text).not.toMatch(/£0\.\d/);
   });
 
+  it('SET on a factor with an UNRESOLVABLE prior value emits a one-sided receipt — never a fabricated "from 0"', async () => {
+    const handler = createSetFactorValueHandler();
+    // {value:0.1, %, cap:50} has no raw_value and an ambiguous % divisor
+    // (cap !== 100) → the prior value is unresolvable. A SET is allowed (it
+    // overwrites), but the receipt must NOT claim "from 0" (a false prior).
+    const graph = buildD1Fixture();
+    graph.nodes.push({
+      id: 'f-pct-legacy',
+      kind: 'factor',
+      label: 'Legacy churn',
+      observed_state: { value: 0.1, unit: '%', cap: 50 },
+    });
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({
+          entityId: 'f-pct-legacy',
+          value: { value: 5, unit: '%', cap: 100 },
+          operator: 'set',
+        }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Legacy churn to 5%.');
+    expect(outcome.assistant_text).not.toMatch(/from 0\b/);
+  });
+
+  it('rejects a DELTA on a factor with an unresolvable prior value (ambiguous % outside [0,1])', async () => {
+    const handler = createSetFactorValueHandler();
+    // {value:5, %} (no raw_value) is ambiguous: 500% (extractor) or 5% (legacy
+    // raw)? A delta has no reliable LHS → fail closed rather than guess.
+    const graph = buildD1Fixture();
+    graph.nodes.push({
+      id: 'f-pct-amb',
+      kind: 'factor',
+      label: 'Ambiguous churn',
+      observed_state: { value: 5, unit: '%' },
+    });
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-pct-amb', value: { value: 1, unit: '%' }, operator: 'increase' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
   it('rejects target with wrong kind', async () => {
     const handler = createSetFactorValueHandler();
     const graph = buildD1Fixture();

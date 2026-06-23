@@ -2728,7 +2728,7 @@ export async function runTurnExecutor(
           // value*cap for capped, else value) — never feed the normalised
           // `value` as the raw LHS. The predicate's `delta_no_existing_value`
           // guard catches "neither present" for delta operators (AC.3).
-          const factorExistingRaw = resolveExistingRawValue({
+          const existing = resolveExistingRawValue({
             ...(typeof obs?.raw_value === 'number' ? { raw_value: obs.raw_value } : {}),
             ...(typeof obs?.value === 'number' ? { value: obs.value } : {}),
             ...(factorUnit !== undefined ? { unit: factorUnit } : {}),
@@ -2741,7 +2741,7 @@ export async function runTurnExecutor(
             ...(unit !== undefined ? { unit } : {}),
             ...(factorCap !== undefined ? { factorCap } : {}),
             ...(factorUnit !== undefined ? { factorUnit } : {}),
-            ...(factorExistingRaw !== undefined ? { factorExistingRaw } : {}),
+            ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
             inputHasUnit,
           });
           if (!evaluation.ok) {

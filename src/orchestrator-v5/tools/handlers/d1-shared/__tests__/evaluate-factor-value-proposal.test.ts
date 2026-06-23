@@ -553,41 +553,62 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
     it('uses raw_value directly when present', () => {
       expect(
         resolveExistingRawValue({ raw_value: 40000, value: 0.4, cap: 100000 }),
-      ).toBe(40000);
+      ).toEqual({ kind: 'resolved', raw: 40000 });
     });
     it('de-normalises value * cap on a capped factor without raw_value (the legacy bug fix)', () => {
-      expect(resolveExistingRawValue({ value: 0.4, cap: 100000, unit: '£' })).toBe(40000);
+      expect(resolveExistingRawValue({ value: 0.4, cap: 100000, unit: '£' })).toEqual({
+        kind: 'resolved',
+        raw: 40000,
+      });
     });
     it('uses value directly on an uncapped factor without raw_value (value === raw)', () => {
-      expect(resolveExistingRawValue({ value: 12 })).toBe(12);
+      expect(resolveExistingRawValue({ value: 12 })).toEqual({ kind: 'resolved', raw: 12 });
     });
     it('treats a stored value > 1 on a capped factor as already-raw (off-contract graph, no double-scaling)', () => {
       // {value:200000, cap:500000} is off-contract (normalised value is always
       // ≤1); value*cap would be 1e11 — use the already-raw 200000 instead.
-      expect(resolveExistingRawValue({ value: 200000, cap: 500000, unit: '£' })).toBe(200000);
+      expect(resolveExistingRawValue({ value: 200000, cap: 500000, unit: '£' })).toEqual({
+        kind: 'resolved',
+        raw: 200000,
+      });
     });
     it('treats a stored value < 0 as already-raw too (symmetric off-contract handling)', () => {
-      expect(resolveExistingRawValue({ value: -0.5, cap: 100000, unit: '£' })).toBe(-0.5);
+      expect(resolveExistingRawValue({ value: -0.5, cap: 100000, unit: '£' })).toEqual({
+        kind: 'resolved',
+        raw: -0.5,
+      });
     });
     // Percentage scale: normaliseFactorValue stores value = raw/cap for EVERY
     // capped factor, so the % divisor is only unambiguous when cap === 100.
     it('reconstructs a percentage factor only when cap === 100 (value*100 === value*cap)', () => {
-      expect(resolveExistingRawValue({ value: 0.05, unit: '%', cap: 100 })).toBe(5);
+      expect(resolveExistingRawValue({ value: 0.05, unit: '%', cap: 100 })).toEqual({
+        kind: 'resolved',
+        raw: 5,
+      });
     });
-    it('reconstructs an UNCAPPED percentage factor as value*100 (brief-extractor convention; handler-produced always has raw_value)', () => {
+    it('reconstructs an UNCAPPED in-[0,1] percentage as value*100 (brief-extractor convention; handler-produced always has raw_value)', () => {
       // {value:0.04, %} with no raw_value/cap is the canonical extracted shape
       // for "4%" — unambiguously raw 4 (handler-produced % always carries
       // raw_value and short-circuits, so this branch is extractor-only).
-      expect(resolveExistingRawValue({ value: 0.04, unit: '%' })).toBe(4);
-      expect(resolveExistingRawValue({ value: 5, unit: '%' })).toBe(500); // 500% → value 5
+      expect(resolveExistingRawValue({ value: 0.04, unit: '%' })).toEqual({
+        kind: 'resolved',
+        raw: 4,
+      });
     });
-    it('FAILS CLOSED for a CAPPED percentage factor with cap !== 100 (ambiguous divisor: display /100 vs normalise /cap)', () => {
+    it('is AMBIGUOUS for a % value OUTSIDE [0,1] (5 → 500%? or legacy raw 5%? — no reliable scale provenance)', () => {
+      // The display fallback treats {value:5,'%'} as "5%", the extractor
+      // convention as 500% — genuinely ambiguous, so fail closed.
+      expect(resolveExistingRawValue({ value: 5, unit: '%' })).toEqual({ kind: 'ambiguous' });
+    });
+    it('is AMBIGUOUS for a CAPPED percentage factor with cap !== 100 (display /100 vs normalise /cap)', () => {
       // {value:0.1, %, cap:50} = raw 5 under normalise (raw/cap), but 10 under
       // the /100 display convention — ambiguous, so do not guess.
-      expect(resolveExistingRawValue({ value: 0.1, unit: '%', cap: 50 })).toBeUndefined();
+      expect(resolveExistingRawValue({ value: 0.1, unit: '%', cap: 50 })).toEqual({
+        kind: 'ambiguous',
+      });
     });
-    it('returns undefined when there is no value at all (delta guards then fail closed)', () => {
-      expect(resolveExistingRawValue({})).toBeUndefined();
+    it('is MISSING when there is no value at all (delta guards then fail closed)', () => {
+      expect(resolveExistingRawValue({})).toEqual({ kind: 'missing' });
     });
   });
 

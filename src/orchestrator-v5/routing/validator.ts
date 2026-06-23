@@ -611,8 +611,10 @@ function preexecuteSetFactorValue(
 
   // De-normalise the delta LHS identically to the handler (raw_value, else
   // value*cap for capped, else value) so validator and handler agree on the
-  // existing value — never feed the normalised `value` as the raw LHS.
-  const factorExistingRaw = resolveExistingRawValue({
+  // existing value — never feed the normalised `value` as the raw LHS. Only a
+  // `resolved` value is a usable LHS; `missing`/`ambiguous` omit it so the
+  // delta guard rejects (fail closed).
+  const existing = resolveExistingRawValue({
     ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
     ...(obs?.value !== undefined ? { value: obs.value } : {}),
     ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
@@ -625,7 +627,7 @@ function preexecuteSetFactorValue(
     ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
     ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
     ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
-    ...(factorExistingRaw !== undefined ? { factorExistingRaw } : {}),
+    ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
     inputHasUnit: parsed.inputHasUnit,
   });
 

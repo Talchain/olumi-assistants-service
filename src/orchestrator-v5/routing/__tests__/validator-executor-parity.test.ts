@@ -498,12 +498,14 @@ describe('AC.1 — validator/executor parity property table', () => {
           ? (valueParam as { unit?: string }).unit
           : undefined;
       const inputHasUnit = typeof parsedUnit === 'string' && parsedUnit.length > 0;
-      const factorExistingRaw = resolveExistingRawValue({
+      const existingRes = resolveExistingRawValue({
         ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
         ...(obs?.value !== undefined ? { value: obs.value } : {}),
         ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
         ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
       });
+      const factorExistingRaw =
+        existingRes.kind === 'resolved' ? existingRes.raw : undefined;
       const evaluation = evaluateFactorValueProposal({
         rawInput: parsedNumeric,
         operator: c.operator ?? 'set',
@@ -584,12 +586,14 @@ describe('AC.1 — validator/executor parity property table', () => {
           ? (valueParam as { unit?: string }).unit
           : undefined;
       const inputHasUnit = typeof parsedUnit === 'string' && parsedUnit.length > 0;
-      const factorExistingRaw = resolveExistingRawValue({
+      const existingRes = resolveExistingRawValue({
         ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
         ...(obs?.value !== undefined ? { value: obs.value } : {}),
         ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
         ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
       });
+      const factorExistingRaw =
+        existingRes.kind === 'resolved' ? existingRes.raw : undefined;
       const evaluation = evaluateFactorValueProposal({
         rawInput: parsedNumeric,
         operator: c.operator ?? 'set',
