@@ -16,6 +16,7 @@ import {
   buildAnalysisAbsentTemplate,
   buildAnalysisDegradedTemplate,
   buildAnalysisStaleTemplate,
+  buildAnalysisUnconfirmedTemplate,
   buildPreconditionAssistantText,
   decideExplanationPrecondition,
   resolveOptionCount,
@@ -235,6 +236,36 @@ describe('buildAnalysisDegradedTemplate', () => {
   });
 });
 
+describe('buildAnalysisUnconfirmedTemplate (Tier 0 unknown→stale)', () => {
+  it('contains no FORBIDDEN_USER_FACING_PHRASES entry', () => {
+    expect(findForbiddenPhraseHit(buildAnalysisUnconfirmedTemplate())).toBeNull();
+  });
+
+  it('uses "the last analysis" — not the forbidden "previous/prior analysis"', () => {
+    const text = buildAnalysisUnconfirmedTemplate();
+    expect(text).toMatch(/the last analysis/i);
+    expect(text).not.toMatch(/\bprevious\s+analysis\b/i);
+    expect(text).not.toMatch(/\bprior\s+analysis\b/i);
+  });
+
+  it('says it cannot confirm the analysis still matches the current model', () => {
+    expect(buildAnalysisUnconfirmedTemplate()).toMatch(
+      /can'?t confirm it still matches the current model/i,
+    );
+  });
+
+  it('does NOT assert the model has changed (distinct from the stale template)', () => {
+    // For 'unknown' we lack evidence of a change; claiming one would be a
+    // false statement. Only the stale template (known hash divergence) may say
+    // "the model has changed".
+    expect(buildAnalysisUnconfirmedTemplate()).not.toMatch(/the model has changed/i);
+  });
+
+  it('offers a re-run recovery affordance so the user has a path forward', () => {
+    expect(buildAnalysisUnconfirmedTemplate()).toMatch(/re-run analysis/i);
+  });
+});
+
 describe('decideExplanationPrecondition', () => {
   it('no run_analysis fact at all → missing', () => {
     expect(decideExplanationPrecondition(makePreconditionInvocation({}))).toBe('missing');
@@ -248,7 +279,12 @@ describe('decideExplanationPrecondition', () => {
     ).toBe('degraded');
   });
 
-  it('successful fact + null projection → missing (defensive)', () => {
+  // Invariant: 'missing' ⟺ no successful fact. A successful fact with no
+  // buildable projection (and no freshness derivation threaded) must NOT be
+  // denied as "no analysis"; it degrades honestly instead. (Previously this
+  // returned 'missing' → "No analysis has been run", which violated the Tier
+  // 0 rule that Olumi must not deny analysis that has run.)
+  it('successful fact + null projection (no freshness derivation) → degraded, never missing', () => {
     expect(
       decideExplanationPrecondition(
         makePreconditionInvocation({
@@ -256,7 +292,7 @@ describe('decideExplanationPrecondition', () => {
           analysisProjection: undefined,
         }),
       ),
-    ).toBe('missing');
+    ).toBe('degraded');
   });
 
   it('successful fact + projection + freshness=stale → stale', () => {
@@ -265,6 +301,21 @@ describe('decideExplanationPrecondition', () => {
         makePreconditionInvocation({
           priorFacts: [makeRunAnalysisFactWithStatus('computed')],
           analysisProjection: { status: 'complete' },
+          freshness: 'stale',
+        }),
+      ),
+    ).toBe('stale');
+  });
+
+  // THE BUG-FIX PROOF: a stale fact whose projection failed to build must be
+  // labelled stale (currency judged BEFORE the projection guard), NOT denied
+  // as "no analysis". This is the live-path defect this lane fixes.
+  it('successful fact + NULL projection + freshness=stale → stale (never "no analysis")', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: undefined,
           freshness: 'stale',
         }),
       ),
@@ -283,13 +334,74 @@ describe('decideExplanationPrecondition', () => {
     ).toBe('execute');
   });
 
-  it('legacy fact (status=null) + projection → execute', () => {
+  // The 'fresh' switch arm: a current fact with no buildable projection
+  // degrades honestly (never 'missing'), completing branch coverage of the
+  // exhaustive currency switch.
+  it('successful fact + NULL projection + freshness=fresh → degraded', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: undefined,
+          freshness: 'fresh',
+        }),
+      ),
+    ).toBe('degraded');
+  });
+
+  // Tier 0 doctrine: 'unknown' (legacy fact missing its run-time hash, or the
+  // current graph hash unavailable this turn) is treated as stale for user-
+  // facing freshness — it must NOT execute as if fresh. Distinct 'unconfirmed'
+  // verdict so the copy can say "can't confirm" rather than "model changed".
+  it('legacy/unknown fact + projection + freshness=unknown → unconfirmed (not execute)', () => {
     expect(
       decideExplanationPrecondition(
         makePreconditionInvocation({
           priorFacts: [makeRunAnalysisFactWithStatus(null)],
           analysisProjection: { status: 'complete' },
           freshness: 'unknown',
+        }),
+      ),
+    ).toBe('unconfirmed');
+  });
+
+  it('successful fact + NULL projection + freshness=unknown → unconfirmed (currency before projection)', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: undefined,
+          freshness: 'unknown',
+        }),
+      ),
+    ).toBe('unconfirmed');
+  });
+
+  // Single source of truth: when the canonical derivation reports freshness
+  // 'none' (no successful fact selected), the verdict is missing/degraded even
+  // though a raw prior fact is present — the precondition trusts the verdict,
+  // not an independent prior_facts scan.
+  it('freshness=none drives missing even when a (degraded) prior fact is present', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('partial')],
+          analysisProjection: { status: 'complete' },
+          freshness: 'none',
+        }),
+      ),
+    ).toBe('degraded');
+  });
+
+  // Graceful fallback: when no freshness derivation is threaded (chip-click
+  // fixtures / legacy callers), the local prior_facts scan + projection guard
+  // still produce a sensible verdict.
+  it('no freshness derivation + successful fact + projection → execute (fallback)', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: { status: 'complete' },
         }),
       ),
     ).toBe('execute');
@@ -306,6 +418,12 @@ describe('buildPreconditionAssistantText', () => {
   it('stale → stale template', () => {
     expect(buildPreconditionAssistantText('stale', 2, 'ready')).toMatch(
       /model has changed since the last analysis/,
+    );
+  });
+
+  it('unconfirmed → unconfirmed template', () => {
+    expect(buildPreconditionAssistantText('unconfirmed', 2, 'ready')).toMatch(
+      /can'?t confirm it still matches the current model/i,
     );
   });
 
