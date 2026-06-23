@@ -356,11 +356,20 @@ const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
  * in debug-on mode, where the response-finaliser's prose scrub is bypassed.
  * NOTE: legitimate science metadata keys like `confidence_provenance` /
  * `confidence_source` are NOT in this set — they are kept structural fields.
+ * `isl_response` (raw ISL HTTP response payload) and `isl_engine` (internal
+ * engine identifier) are forward-guard carrier KEYS (review follow-up): today
+ * they appear only under already-denylisted carriers (`_meta.payloads`) or as a
+ * value, but denylisting them makes the recovered science fields robust if a
+ * future upstream shape nests either carrier directly inside a kept field.
+ * (The `isl_engine` *value* form — `source_service: 'isl_engine'` — is handled
+ * by deferring its only known carrier `m1_coaching`, NOT by broad value-scrub,
+ * which would corrupt legit science labels.)
  */
 const INTERNAL_ENRICHMENT_KEYS: ReadonlySet<string> = new Set([
   '_meta', 'meta', '_diagnostics', 'ceeTrace', 'cee_trace', 'debug',
   'payloads', 'downstream_calls', 'graph', 'graph_hash', 'graph_hash_at_run',
   'feature_flags', 'feature_flags_snapshot', 'lineage', 'seed',
+  'isl_response', 'isl_engine',
 ]);
 
 /**

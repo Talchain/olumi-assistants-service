@@ -435,6 +435,42 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect(JSON.stringify(enr)).not.toContain('0.401163');
   });
 
+  it('CONTRACT GUARD: isl_response / isl_engine carrier keys nested inside a recovered field are deep-stripped (forward guard)', () => {
+    // Review follow-up: today these carriers appear only under already-stripped
+    // _meta.payloads / as a value. This guards the future shape where an upstream
+    // change embeds either carrier KEY directly inside a recovered keep-list
+    // field — they must be stripped while legit science leaves survive.
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [
+        {
+          edge_id: 'fac_a->out_x',
+          e_value: 1.2,
+          isl_response: { raw: { secret: 'internal' } },
+          isl_engine: { build: 'isl-v9' },
+        },
+      ],
+      flip_thresholds: [
+        { factor_id: 'fac_a', flip_value: null, isl_engine: 'should-not-ship' },
+      ],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    const ev = enr.edge_e_values as Array<Record<string, unknown>>;
+    // Legit science leaves survive; carrier keys gone at any depth.
+    expect(ev[0]!.edge_id).toBe('fac_a->out_x');
+    expect(ev[0]!.e_value).toBe(1.2);
+    expect('isl_response' in ev[0]!).toBe(false);
+    expect('isl_engine' in ev[0]!).toBe(false);
+    const ft = enr.flip_thresholds as Array<Record<string, unknown>>;
+    expect(ft[0]!.factor_id).toBe('fac_a');
+    expect(ft[0]!.flip_value).toBeNull();
+    expect('isl_engine' in ft[0]!).toBe(false);
+    const enrJson = JSON.stringify(enr);
+    expect(enrJson).not.toContain('isl_response');
+    expect(enrJson).not.toContain('isl_engine');
+    expect(enrJson).not.toContain('internal');
+  });
+
   it('NULL PRESERVED: flip_thresholds flip_value:null survives as an honest source null', () => {
     const fact = factWithEnrichment({
       option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
