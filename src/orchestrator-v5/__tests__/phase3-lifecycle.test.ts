@@ -16,6 +16,8 @@
  * chip-click integration suite.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -469,6 +471,51 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect(enrJson).not.toContain('isl_response');
     expect(enrJson).not.toContain('isl_engine');
     expect(enrJson).not.toContain('internal');
+  });
+
+  it('CROSS-SERVICE CONTRACT: real captured payload — the 4 recovered fields pass through verbatim while every internal carrier is stripped', () => {
+    // Fixture-backed contract anchor over the real cross-service capture (same
+    // fixture used by tests/contract/*). Drives the actual transport with the
+    // raw upstream enrichment so any future shape drift (a recovered field
+    // changing, or a new internal carrier appearing) is caught here.
+    const captured = JSON.parse(
+      readFileSync(
+        new URL(
+          '../../../tests/fixtures/cross-service/v5-turn.run-analysis.staging.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    ) as { blocks: Array<{ enrichment?: Record<string, unknown> }> };
+    const sourceEnrichment = captured.blocks[0]!.enrichment!;
+    expect(sourceEnrichment).toBeDefined();
+
+    const enr = analysisResultBlockFor(factWithEnrichment(sourceEnrichment), { currentTurn: false })!.enrichment ?? {};
+
+    // Faithful pass-through: each recovered field equals its source value
+    // verbatim (edge_e_values/inference_warnings empty [] in this capture;
+    // confidence_tier populated; flip_thresholds populated incl. flip_value:null).
+    expect(enr.edge_e_values).toEqual(sourceEnrichment.edge_e_values);
+    expect(enr.inference_warnings).toEqual(sourceEnrichment.inference_warnings);
+    expect(enr.confidence_tier).toEqual(sourceEnrichment.confidence_tier);
+    expect(enr.flip_thresholds).toEqual(sourceEnrichment.flip_thresholds);
+
+    // The populated internal edge_e_values copy (15 entries under
+    // _meta.payloads.isl_response / downstream_calls) is NOT rehydrated — the
+    // top-level value stays exactly [] as upstream sent it (asserted verbatim
+    // above). (Note: the edge_id strings also appear legitimately in the kept
+    // `robustness.fragile_edges`, so a string-absence check would be wrong —
+    // the verbatim [] equality is the precise no-rehydration proof.)
+
+    // Every internal carrier / deferred field is stripped at transport.
+    for (const k of ['_meta', 'meta', 'downstream_calls', 'fact_objects', 'graph', 'm1_coaching', 'dominant_factor']) {
+      expect(k in enr).toBe(false);
+    }
+    const enrJson = JSON.stringify(enr);
+    // isl_engine lives only under the dropped m1_coaching; [REDACTED] only under
+    // stripped _meta/meta (and is value-scrubbed anywhere). Both must be gone.
+    expect(enrJson.toLowerCase()).not.toContain('isl_engine');
+    expect(enrJson).not.toContain('[REDACTED]');
   });
 
   it('NULL PRESERVED: flip_thresholds flip_value:null survives as an honest source null', () => {
