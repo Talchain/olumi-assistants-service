@@ -537,7 +537,10 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
     expect(outcome.suppress_orientation).toBe(true);
   });
 
-  it('defensive: successful fact + null projection → absent template (no degraded explanation)', async () => {
+  it('defensive: successful (fresh) fact + null projection → degraded template, never "no analysis"', async () => {
+    // Invariant: 'missing' ⟺ no successful fact. A successful (fresh) fact that
+    // cannot be summarised (null projection) must degrade honestly — it must
+    // NOT deny that analysis has run (Tier 0).
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
@@ -547,10 +550,14 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),
     );
-    expect(outcome.assistant_text).toMatch(/No analysis has been run on your model yet/);
+    expect(outcome.assistant_text).toMatch(/didn't produce a usable result/);
+    expect(outcome.assistant_text).not.toMatch(/No analysis has been run/);
   });
 
-  it('legacy: status=null + non-null projection + unknown freshness → executes', async () => {
+  it('legacy: status=null + unknown freshness → unconfirmed template (Tier 0: never executes as fresh)', async () => {
+    // Tier 0 doctrine: 'unknown' is treated as stale for user-facing freshness.
+    // A legacy fact whose currency cannot be confirmed must NOT be explained as
+    // if current; it returns the "can't confirm it still matches" copy instead.
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
@@ -567,7 +574,9 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
         },
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_WITH_BEAT);
+    expect(outcome.assistant_text).toMatch(/can'?t confirm it still matches the current model/i);
+    expect(outcome.assistant_text).not.toBe(VALID_ANSWER_WITH_BEAT);
+    expect(outcome.assistant_text).not.toMatch(/the model has changed/i);
   });
 
   it('fresh: successful fact + freshness=fresh → executes normally', async () => {

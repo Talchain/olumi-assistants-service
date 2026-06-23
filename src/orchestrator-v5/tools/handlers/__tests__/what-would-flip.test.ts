@@ -406,7 +406,9 @@ describe('what_would_flip — P0 combined precondition (missing / degraded / sta
     expect(outcome.assistant_text).not.toContain('Engineering Capacity');
   });
 
-  it('defensive: successful fact + null projection → absent template', async () => {
+  it('defensive: successful (fresh) fact + null projection → degraded template, never "no analysis"', async () => {
+    // Invariant: 'missing' ⟺ no successful fact. A fresh fact that cannot be
+    // summarised degrades honestly rather than denying analysis has run (Tier 0).
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
@@ -416,7 +418,8 @@ describe('what_would_flip — P0 combined precondition (missing / degraded / sta
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),
     );
-    expect(outcome.assistant_text).toMatch(/No analysis has been run on your model yet/);
+    expect(outcome.assistant_text).toMatch(/didn't produce a usable result/);
+    expect(outcome.assistant_text).not.toMatch(/No analysis has been run/);
   });
 
   it('fresh: successful fact + freshness=fresh → executes normally', async () => {

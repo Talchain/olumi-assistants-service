@@ -578,3 +578,109 @@ describe('computeAnalysisAffectingGraphHash', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tier 0 staleness narrowing — POSITIVE EVIDENCE that every mutation type the
+// freshness lane relies on actually diverges the analysis-affecting hash.
+//
+// The whole lane is "narrow" precisely because staleness is implicit: a
+// successful mutation persists a new graph, the next turn's hash diverges from
+// the fact's stored `graph_hash_at_run`, and `deriveAnalysisFreshness` returns
+// 'stale'. That only holds if EACH mutation type below moves the hash. We
+// demonstrate it here rather than assert it in prose. (value / weight /
+// option-intervention also have dedicated cases above; the add/remove cases
+// are the ones not otherwise proven for the analysis-affecting hash.)
+// ---------------------------------------------------------------------------
+describe('computeAnalysisAffectingGraphHash — mutation taxonomy (Tier 0 staleness proof)', () => {
+  const baseTwoNode = () =>
+    buildGraph({
+      nodes: [baseFactor('a', 10), baseFactor('b', 20)],
+      edges: [baseEdge('a', 'b', 0.5)],
+    });
+
+  it('value edit (observed_state.value) → hash changes', () => {
+    const before = baseTwoNode();
+    const after = buildGraph({
+      nodes: [baseFactor('a', 10), baseFactor('b', 99)],
+      edges: [baseEdge('a', 'b', 0.5)],
+    });
+    expect(computeAnalysisAffectingGraphHash(before)).not.toBe(
+      computeAnalysisAffectingGraphHash(after),
+    );
+  });
+
+  it('weight edit (edge strength.mean / std) → hash changes', () => {
+    const before = baseTwoNode();
+    const afterMean = buildGraph({
+      nodes: [baseFactor('a', 10), baseFactor('b', 20)],
+      edges: [baseEdge('a', 'b', 0.9)],
+    });
+    const afterStd = buildGraph({
+      nodes: [baseFactor('a', 10), baseFactor('b', 20)],
+      edges: [{ from: 'a', to: 'b', strength: { mean: 0.5, std: 0.5 }, exists_probability: 0.9, effect_direction: 'positive' }],
+    });
+    const h = computeAnalysisAffectingGraphHash(before);
+    expect(h).not.toBe(computeAnalysisAffectingGraphHash(afterMean));
+    expect(h).not.toBe(computeAnalysisAffectingGraphHash(afterStd));
+  });
+
+  it('option / intervention edit → hash changes', () => {
+    const before = buildGraph({
+      nodes: [baseFactor('a', 10)],
+      edges: [],
+      options: [{ id: 'opt-1', status: 'ready', interventions: { a: { value: 1 } } }],
+    });
+    const after = buildGraph({
+      nodes: [baseFactor('a', 10)],
+      edges: [],
+      options: [{ id: 'opt-1', status: 'ready', interventions: { a: { value: 2 } } }],
+    });
+    expect(computeAnalysisAffectingGraphHash(before)).not.toBe(
+      computeAnalysisAffectingGraphHash(after),
+    );
+  });
+
+  it('structural node add → hash changes', () => {
+    const before = buildGraph({ nodes: [baseFactor('a', 10)], edges: [] });
+    const after = buildGraph({ nodes: [baseFactor('a', 10), baseFactor('b', 20)], edges: [] });
+    expect(computeAnalysisAffectingGraphHash(before)).not.toBe(
+      computeAnalysisAffectingGraphHash(after),
+    );
+  });
+
+  it('structural node remove → hash changes', () => {
+    const before = buildGraph({ nodes: [baseFactor('a', 10), baseFactor('b', 20)], edges: [] });
+    const after = buildGraph({ nodes: [baseFactor('a', 10)], edges: [] });
+    expect(computeAnalysisAffectingGraphHash(before)).not.toBe(
+      computeAnalysisAffectingGraphHash(after),
+    );
+  });
+
+  it('structural edge add → hash changes', () => {
+    const before = buildGraph({
+      nodes: [baseFactor('a', 10), baseFactor('b', 20)],
+      edges: [],
+    });
+    const after = buildGraph({
+      nodes: [baseFactor('a', 10), baseFactor('b', 20)],
+      edges: [baseEdge('a', 'b', 0.5)],
+    });
+    expect(computeAnalysisAffectingGraphHash(before)).not.toBe(
+      computeAnalysisAffectingGraphHash(after),
+    );
+  });
+
+  it('structural edge remove → hash changes', () => {
+    const before = buildGraph({
+      nodes: [baseFactor('a', 10), baseFactor('b', 20)],
+      edges: [baseEdge('a', 'b', 0.5)],
+    });
+    const after = buildGraph({
+      nodes: [baseFactor('a', 10), baseFactor('b', 20)],
+      edges: [],
+    });
+    expect(computeAnalysisAffectingGraphHash(before)).not.toBe(
+      computeAnalysisAffectingGraphHash(after),
+    );
+  });
+});

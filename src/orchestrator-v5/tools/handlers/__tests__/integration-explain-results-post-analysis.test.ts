@@ -29,6 +29,8 @@ import { generateChips } from '../../../compose/chip-generator.js';
 import type { ContextPackAnalysis } from '../../../context/context-pack-assembler.js';
 import type { AnalysisProjectionSummary } from '../../../context/projection-summaries.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
+import { deriveAnalysisFreshness } from '../../../context/freshness.js';
+import type { TurnOutcome } from '../../../turn-outcome.js';
 
 const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const REQUEST_ID = 'req-explain-results-post-analysis';
@@ -211,5 +213,159 @@ describe('integration: explain_results post-analysis chip surfacing', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBe('run_analysis');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 0 single-verdict journey — run → mutate → explain → rerun.
+//
+// One `deriveAnalysisFreshness` verdict drives BOTH the explanation prose
+// (handler precondition) AND the rerun chip, with no independent re-derivation.
+// Demonstrates requirements: stale prose never denies analysis (#9), chips
+// offer no fresh-result action when stale + a rerun chip when runnable (#8),
+// rerun returns the verdict to fresh (#7), and the verdict is a pure recompute
+// from facts + current hash so it is identical across reloads (#6).
+// ---------------------------------------------------------------------------
+describe('integration: run → mutate → explain → rerun single-verdict journey', () => {
+  const HASH_RUN = 'a1a1a1a1a1a1a1a1'; // graph hash at the time analysis ran
+  const HASH_EDITED = 'b2b2b2b2b2b2b2b2'; // graph hash after a value/weight/option edit
+
+  function runFact(hash: string, computedAt: string): RunAnalysisHandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_1',
+        summary: 'Analysis complete.',
+        enrichment: { analysis_status: 'computed' },
+        graph_hash_at_run: hash,
+        computed_at: computedAt,
+      },
+    } as RunAnalysisHandlerFact;
+  }
+
+  function journeyInvocation(
+    priorFacts: readonly HandlerFact[],
+    freshness: ReturnType<typeof deriveAnalysisFreshness>,
+    withProjection: boolean,
+  ): HandlerInvocation {
+    const inv = makePostAnalysisInvocation(priorFacts, { withProjection });
+    return { ...inv, analysisFreshness: freshness };
+  }
+
+  function turnOutcomeFor(freshness: ReturnType<typeof deriveAnalysisFreshness>): TurnOutcome {
+    return {
+      graph_mutated: false,
+      analysis_run: false,
+      analysis_selected_fact_index: freshness.selected_fact_index,
+      analysis_freshness: freshness.freshness,
+      freshness_reason: freshness.reason,
+    };
+  }
+
+  it('FRESH (graph unchanged): explain executes; no rerun chip — driven by one verdict', async () => {
+    const facts = [runFact(HASH_RUN, '2026-06-23T10:00:00.000Z')];
+    const fd = deriveAnalysisFreshness(facts, HASH_RUN);
+    expect(fd.freshness).toBe('fresh');
+
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(journeyInvocation(facts, fd, true));
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.precondition_unmet).toBe(false); // executed, not a template
+    }
+    expect(outcome.assistant_text).not.toMatch(/No analysis has been run/);
+    expect(outcome.assistant_text).not.toMatch(/out of date/i);
+
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: outcome.handler_facts,
+      priorFacts: facts,
+      analysis: populatedAnalysis(),
+      analysisReady: { status: 'ready', options: [], goal_node_id: GOAL_ID } as never,
+      validationRegistry: HANDLER_VALIDATION_REGISTRY,
+      turnOutcome: turnOutcomeFor(fd),
+    });
+    for (const c of chips) {
+      expect(c.id).not.toBe('chip_action_rerun_analysis');
+    }
+  });
+
+  it('STALE (after edit): explain says out-of-date, NEVER "no analysis"; chips offer ONLY rerun', async () => {
+    const facts = [runFact(HASH_RUN, '2026-06-23T10:00:00.000Z')];
+    // The graph was edited (value/weight/option/structural) → current hash diverges.
+    const fd = deriveAnalysisFreshness(facts, HASH_EDITED);
+    expect(fd.freshness).toBe('stale');
+
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(journeyInvocation(facts, fd, true));
+    // Prose: out-of-date, must not deny analysis exists.
+    expect(outcome.assistant_text).toMatch(
+      /These results may be out of date because the model has changed/,
+    );
+    expect(outcome.assistant_text).not.toMatch(/No analysis has been run/);
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.precondition_unmet).toBe(true);
+    }
+
+    // Chips: exactly one chip, the executable rerun — no fresh-result action.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: outcome.handler_facts,
+      priorFacts: facts,
+      analysis: populatedAnalysis(),
+      analysisReady: { status: 'ready', options: [], goal_node_id: GOAL_ID } as never,
+      validationRegistry: HANDLER_VALIDATION_REGISTRY,
+      turnOutcome: turnOutcomeFor(fd),
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+    for (const c of chips) {
+      expect(c.action_type).not.toBe('what_would_flip');
+      expect(c.action_type).not.toBe('explain_results');
+    }
+  });
+
+  it('RERUN → FRESH: a new fact on the edited graph returns the verdict to fresh', async () => {
+    // Newest-first per loader convention: the rerun fact (hash matches the
+    // edited graph) is prepended; freshness returns to fresh.
+    const facts = [
+      runFact(HASH_EDITED, '2026-06-23T11:00:00.000Z'), // rerun on the edited graph
+      runFact(HASH_RUN, '2026-06-23T10:00:00.000Z'), // the now-superseded run
+    ];
+    const fd = deriveAnalysisFreshness(facts, HASH_EDITED);
+    expect(fd.freshness).toBe('fresh');
+
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(journeyInvocation(facts, fd, true));
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.precondition_unmet).toBe(false);
+    }
+    expect(outcome.assistant_text).not.toMatch(/out of date/i);
+
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: outcome.handler_facts,
+      priorFacts: facts,
+      analysis: populatedAnalysis(),
+      analysisReady: { status: 'ready', options: [], goal_node_id: GOAL_ID } as never,
+      validationRegistry: HANDLER_VALIDATION_REGISTRY,
+      turnOutcome: turnOutcomeFor(fd),
+    });
+    for (const c of chips) {
+      expect(c.id).not.toBe('chip_action_rerun_analysis');
+    }
+  });
+
+  it('reload preserves the verdict: identical facts + hash → identical freshness (pure recompute)', () => {
+    const facts = [runFact(HASH_RUN, '2026-06-23T10:00:00.000Z')];
+    // Same inputs reconstructed on a later turn (no persisted freshness flag).
+    expect(deriveAnalysisFreshness(facts, HASH_EDITED).freshness).toBe('stale');
+    expect(deriveAnalysisFreshness(facts, HASH_EDITED).freshness).toBe('stale');
+    expect(deriveAnalysisFreshness(facts, HASH_RUN).freshness).toBe('fresh');
   });
 });

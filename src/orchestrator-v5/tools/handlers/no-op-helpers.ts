@@ -95,19 +95,37 @@ export type ExplanationPreconditionVerdict =
   | 'missing'
   | 'degraded'
   | 'stale'
+  | 'unconfirmed'
   | 'execute';
 
 /**
  * Decide the precondition verdict from the handler invocation.
  *
+ * Single source of truth: when the turn-executor threads the canonical
+ * `analysisFreshness` derivation (the HandlerInvocation contract), both
+ * "does a successful analysis exist" and "is it still current" are read
+ * from that one verdict rather than re-derived from local signals. The
+ * local prior_facts scan is kept only as a graceful fallback for callers
+ * that omit `analysisFreshness` (chip-click fixtures / unit tests).
+ *
+ * Invariant — `'missing'` ⟺ NO successful run_analysis fact exists. Once a
+ * successful fact is present we never deny it (Tier 0: Olumi must not say
+ * "no analysis" after analysis has run). Currency is judged BEFORE the
+ * projection-buildability guard, so a stale-but-unprojectable fact is
+ * labelled stale, not "no analysis".
+ *
  * Decision tree:
- *   1. No successful run_analysis fact in prior_facts:
+ *   1. No successful run_analysis fact:
  *      - Degraded fact present → 'degraded'.
- *      - Otherwise → 'missing'.
- *   2. Successful fact exists but `analysisProjection` is null/undefined
- *      → 'missing' (defensive — composer would otherwise hit its
- *      generic-line fallback without a recovery chip).
- *   3. Freshness === 'stale' → 'stale'.
+ *      - Otherwise            → 'missing'.
+ *   2. Successful fact exists; judge currency from the canonical verdict:
+ *      - freshness 'stale'   → 'stale'       (the model has changed).
+ *      - freshness 'unknown' → 'unconfirmed' (Tier 0: insufficient evidence
+ *        to confirm the analysis still matches the current model — treated
+ *        as stale for user-facing freshness, with distinct copy that does
+ *        NOT assert the model changed).
+ *   3. Successful + current (fresh / legacy-usable) but no `analysisProjection`
+ *      to summarise → 'degraded' (honest "no usable result"; never 'missing').
  *   4. Otherwise → 'execute'.
  */
 export function decideExplanationPrecondition(
@@ -118,18 +136,30 @@ export function decideExplanationPrecondition(
   },
 ): ExplanationPreconditionVerdict {
   const priorFacts = invocation.context.prior_facts
-  const hasSuccessfulFact = priorFacts.some(isSuccessfulRunAnalysisFact)
+  const fd = invocation.analysisFreshness
+
+  // Prefer the canonical freshness derivation as the single source of truth
+  // for "a successful analysis fact exists"; fall back to a local scan only
+  // when the derivation is absent (optional per the HandlerInvocation contract).
+  const hasSuccessfulFact = fd
+    ? fd.freshness !== 'none'
+    : priorFacts.some(isSuccessfulRunAnalysisFact)
 
   if (!hasSuccessfulFact) {
     return selectDegradedRunAnalysisFact(priorFacts) !== null ? 'degraded' : 'missing'
   }
 
-  if (invocation.analysisProjection == null) {
-    return 'missing'
+  // A successful fact EXISTS — 'missing' is unreachable from here (invariant).
+  // Judge currency from the canonical verdict BEFORE the projection guard.
+  if (fd?.freshness === 'stale') {
+    return 'stale'
+  }
+  if (fd?.freshness === 'unknown') {
+    return 'unconfirmed'
   }
 
-  if (invocation.analysisFreshness?.freshness === 'stale') {
-    return 'stale'
+  if (invocation.analysisProjection == null) {
+    return 'degraded'
   }
 
   return 'execute'
@@ -149,6 +179,8 @@ export function buildPreconditionAssistantText(
       return buildAnalysisAbsentTemplate(optionCount, readinessStatus)
     case 'stale':
       return buildAnalysisStaleTemplate()
+    case 'unconfirmed':
+      return buildAnalysisUnconfirmedTemplate()
     case 'degraded':
       return buildAnalysisDegradedTemplate()
   }
@@ -181,6 +213,30 @@ export function buildAnalysisStaleTemplate(): string {
     `These results may be out of date because the model has changed ` +
     `since the last analysis. Would you like to re-run analysis to see ` +
     `how your changes affect the results?`
+  );
+}
+
+/**
+ * Unconfirmed-freshness template. Used by the V5 explanation handlers when
+ * a successful prior analysis exists but its currency cannot be confirmed
+ * (freshness 'unknown' — a legacy fact missing its run-time graph hash, or
+ * the current graph hash could not be computed this turn).
+ *
+ * Tier 0 doctrine: treat 'unknown' as stale for user-facing freshness, but
+ * do NOT assert the model has changed — we don't know that. Say only that
+ * we cannot confirm the last analysis still matches the current model, and
+ * offer a re-run. Distinct from `buildAnalysisStaleTemplate`, which DOES
+ * assert the change because the hashes are known to differ.
+ *
+ * Hard-fail prose: uses "the last analysis" (the forbidden list bans
+ * "previous analysis" / "prior analysis"); "may be out of date" is the
+ * brief's approved phrasing. No FORBIDDEN_USER_FACING_PHRASES entry, no
+ * internal terms (no graph hash, fact_type, analysis_status).
+ */
+export function buildAnalysisUnconfirmedTemplate(): string {
+  return (
+    `The last analysis may be out of date because I can't confirm it ` +
+    `still matches the current model. Re-run analysis to see the current result.`
   );
 }
 
