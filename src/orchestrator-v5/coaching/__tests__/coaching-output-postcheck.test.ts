@@ -137,6 +137,27 @@ describe('checkCoachingOutput — confident advice under unsafe state', () => {
     );
   });
 
+  it('review fix: "I would recommend X" and "X is preferable" degrade under unsafe state', () => {
+    for (const [prose, pack] of [
+      ['I would recommend Option A.', STALE],
+      ['Option A is preferable.', UNKNOWN],
+      ['Option A is the better option.', BLOCKED],
+      ['Option A remains the winner.', STALE],
+    ] as const) {
+      expectViolation(checkCoachingOutput(prose, pack), 'confident_advice_under_unsafe_state');
+    }
+  });
+
+  it('review fix: the same recommendations are ALLOWED under fresh + usable state', () => {
+    expect(checkCoachingOutput('I would recommend Option A.', FRESH)).toEqual({ safe: true });
+    expect(checkCoachingOutput('Option A is preferable.', FRESH)).toEqual({ safe: true });
+    // Process advice with a superlative but no option noun must NOT fire even
+    // under unsafe state (no over-blocking).
+    expect(
+      checkCoachingOutput('Honestly, this is the best way to think it through.', STALE),
+    ).toEqual({ safe: true });
+  });
+
   it('directional advice fires even WITH a caveat (caveat-independent)', () => {
     // The brief's exact requirement: a caveat does not license confident
     // directional advice under unsafe state.
@@ -193,6 +214,9 @@ describe('checkCoachingOutput — always-unsafe rules fire regardless of state',
       'Done — I changed the graph.',
       'I updated the model.',
       'The model has been updated.',
+      // Review fix: `created` is a mutation verb when it acts on a graph object.
+      'I created a new option for you.',
+      'The graph was created.',
     ]) {
       expectViolation(checkCoachingOutput(prose, FRESH), 'invented_mutation_success');
     }
@@ -215,6 +239,9 @@ describe('checkCoachingOutput — always-unsafe rules fire regardless of state',
       'I set the budget to £50k.',
       'I changed the timeline from 12 months to 18 months.',
       'I updated churn to 5%.',
+      // Review fix: `by` / `at` value-change prepositions, not just `to`/`from`.
+      'I increased the budget by £50k.',
+      'I set the budget at £50k.',
     ]) {
       expectViolation(checkCoachingOutput(prose, FRESH), 'value_change_narration');
     }

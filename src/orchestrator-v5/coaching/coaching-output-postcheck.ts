@@ -103,9 +103,12 @@ const GRAPH_MUTATION_OBJECT =
   '(?:graph|model|factor|option|constraint|edge|node|link|weight|driver|assumption|parameter|value|scenario)s?';
 
 /** Past/perfective completion verbs that, on a non-execute coaching turn, would
- *  falsely assert a change. Shared by the mutation-claim + value-change rules. */
+ *  falsely assert a change. Shared by the mutation-claim + value-change rules.
+ *  `creat(e|ed)` is included: it is safe here because the mutation-claim rule
+ *  additionally requires a GRAPH/MODEL object, so "created a summary" stays safe
+ *  while "created a new option" / "the graph was created" degrade. */
 const MUTATION_VERB =
-  '(?:updated?|chang(?:e|ed)|set|added?|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|increas(?:e|ed)|decreas(?:e|ed)|rais(?:e|ed)|lower(?:ed)?|reduc(?:e|ed))';
+  '(?:updated?|chang(?:e|ed)|set|added?|creat(?:e|ed)|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|increas(?:e|ed)|decreas(?:e|ed)|rais(?:e|ed)|lower(?:ed)?|reduc(?:e|ed))';
 
 /** First-person completed-action claim prefix ("I've", "I have", "I", "we…",
  *  "successfully"). Anchors the change to a CLAIM the model made, so
@@ -132,7 +135,7 @@ const COACHING_MUTATION_CLAIM_ACTIVE = new RegExp(
 const COACHING_MUTATION_CLAIM_PASSIVE = new RegExp(
   `\\b(?:the|your|that|this|its|my|our)\\s+(?:\\w+\\s+){0,2}?${GRAPH_MUTATION_OBJECT}\\b\\s+` +
     `(?:has\\s+been|have\\s+been|was|were|is\\s+now|are\\s+now)\\s+` +
-    `(?:updated|chang(?:e|ed)|set|added|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|saved|committed)\\b`,
+    `(?:updated|chang(?:e|ed)|set|added|created|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|saved|committed)\\b`,
   'i',
 );
 
@@ -143,17 +146,18 @@ function isMutationSuccessClaim(text: string): boolean {
 /**
  * Value-CHANGE narration — a first-person completion verb that asserts a value
  * was moved: "I set the budget to £50k", "I changed the timeline from 12 months
- * to 18 months", "I updated churn to 5%". Keyed on the claim subject + change
- * verb + a `to`/`from` + a number, so DESCRIPTIVE mentions of display-safe
+ * to 18 months", "I updated churn to 5%", "I increased the budget by £50k", "I
+ * set the budget at £50k". Keyed on the claim subject + change verb + a
+ * `to`/`from`/`by`/`at` + a number, so DESCRIPTIVE mentions of display-safe
  * values ("Your budget is £50k", "An 18 month timeline", "A 5% churn
  * assumption") — which the LLM legitimately receives via `display_graph`'s
  * `display_value` — are NOT degraded, and hypotheticals ("I'd set X to £50k",
- * "increasing churn to 5% would…") never match. DETECTION only; all value/unit
- * formatting / normalisation stays owned by #296 — this rule resolves nothing.
+ * "increasing churn to 5% would…") never match. Lexical DETECTION only; all
+ * value/unit formatting / normalisation stays owned by #296 — resolves nothing.
  */
 const COACHING_VALUE_CHANGE = new RegExp(
   `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b` +
-    `[^.!?]{0,40}?\\b(?:to|from)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?(?:[£$€]\\s?)?\\d`,
+    `[^.!?]{0,40}?\\b(?:to|from|by|at)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?(?:[£$€]\\s?)?\\d`,
   'i',
 );
 
@@ -171,10 +175,18 @@ const EVIDENCE_CONFIDENCE_PATTERN =
  * Confident DIRECTIONAL / SUPERLATIVE advice — recommend-an-option language.
  * Gated on `stateUnsafe` by the caller, NOT on freshness wording: this is the
  * brief's primary firing case ("go with X" under stale state, even with no
- * false "fresh" claim and even when paired with a caveat).
+ * false "fresh" claim and even when paired with a caveat). Covers:
+ *   - first-person recommendation incl. "I would / I'd / we would recommend",
+ *     "I'd suggest/advise/favour/propose/go with/choose/pick/opt for/prefer/lean";
+ *   - second-person imperative ("you should/ought to/could choose/go with…");
+ *   - imperative pick ("go with X", "opt for X", "stick with X");
+ *   - a superlative + option NOUN ("the best/better/preferable… option/choice");
+ *   - a copula + inherently-option judgement ("is preferable/superior/the
+ *     winner/leader"). Superlatives that are NOT followed by an option noun
+ *     ("this is the best WAY to think about it") deliberately do NOT fire.
  */
 const DIRECTIONAL_ADVICE_PATTERN =
-  /\b(?:you\s+should\s+(?:choose|pick|go\s+with|select|opt\s+for|prefer)|i['’]?d\s+(?:recommend|suggest|go\s+with|pick|choose)|i\s+recommend|my\s+recommendation|go\s+with\s+\w+|opt\s+for\s+\w+|stick\s+with\s+\w+|the\s+(?:best|strongest|safest|optimal|right|winning|leading)\s+(?:option|choice|bet|move|pick)|is\s+(?:clearly\s+|by\s+far\s+)?the\s+(?:best|strongest|winner|front[- ]runner)|remains\s+the\s+(?:best|winner|front[- ]runner|leader)|clearly\s+the\s+winner|your\s+best\s+(?:option|bet|choice))\b/i;
+  /\b(?:(?:i|we)(?:['’]d)?\s+(?:would\s+|really\s+|strongly\s+|definitely\s+)?(?:recommend|suggest|advise|favou?r|propose|go\s+with|choose|pick|opt\s+for|select|prefer|lean)|my\s+(?:recommendation|advice|suggestion|pick|choice)|you\s+(?:should|['’]d|ought\s+to|could|may\s+want\s+to|need\s+to)\s+(?:choose|pick|go\s+with|select|opt\s+for|prefer|favou?r)|go\s+with\s+\w+|opt\s+for\s+\w+|stick\s+with\s+\w+|the\s+(?:best|strongest|safest|optimal|right|winning|leading|preferable|better|superior|preferred)\s+(?:option|choice|bet|move|pick|call|one)|(?:is|are|remains?|stays?)\s+(?:clearly\s+|by\s+far\s+|obviously\s+|still\s+|the\s+)?(?:preferable|superior|winner|front[- ]runner|leader)|clearly\s+the\s+winner|your\s+best\s+(?:option|bet|choice))\b/i;
 
 /**
  * Presenting an analysis RESULT as current — probabilities, win/lead/ahead
