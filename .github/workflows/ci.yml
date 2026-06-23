@@ -44,6 +44,12 @@ jobs:
         env:
           # Minimal env for validation (uses defaults)
           LLM_PROVIDER: fixtures
+      - name: Forbidden-boundary-pattern gate
+        # Containment ratchet: blocks NEW high-risk boundary usages
+        # (warnOnInvalid, `as unknown as` double-casts, naive science-field
+        # null/zero fallbacks) past a frozen baseline. Grep-only, no deps.
+        # Part of this required job, so growth past baseline blocks merge.
+        run: bash scripts/check-forbidden-boundary-patterns.sh
       - name: Run required test subset
         # Deterministic, in-process suite that is currently green (see
         # vitest.required.config.ts). The full suite + coverage and the

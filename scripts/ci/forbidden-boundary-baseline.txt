@@ -1,0 +1,40 @@
+# Forbidden-boundary-pattern baseline.
+#
+# Consumed by scripts/check-forbidden-boundary-patterns.sh (Brief 3, Gate 1).
+#
+# Each non-comment line is `<pattern_key>=<count>`. The gate counts current
+# occurrences in src/ (excluding tests, generated code, comment-only lines, and
+# lines carrying a `// forbidden-exempt:` marker) and FAILS when the current
+# count for any key EXCEEDS its baseline here. Counts at or below baseline pass.
+#
+# This is a CONTAINMENT ratchet, not a cure:
+#   - It freezes the *current* population so NEW high-risk usages block merge.
+#   - It does NOT reduce the existing population, and it does NOT assert that
+#     the existing occurrences are safe. Baselined ≠ acceptable.
+#   - The remedy for the underlying silent-drop / schema-drift failure mode
+#     remains typing & validating the PLoT → CEE enrichment contract and the
+#     other confirmed product-critical boundary seams.
+#
+# Known limitation (intentional, same trade-off as scripts/ci/typecheck-ratchet.sh):
+# detection is a per-pattern TOTAL count, not a per-line identity set. Removing
+# one occurrence while adding another (net total unchanged) is not caught; any
+# NET increase is caught.
+#
+# To intentionally lower a baseline after real cleanup, re-run the gate — it
+# prints the new (lower) count — and edit the value here downward in the same PR.
+# Raising a baseline requires an explicit, reviewed justification in the PR.
+#
+# Captured from clean origin/staging 8968a601a8faf410268dd46686aa782af3f79f29
+# (Brief 3 — cheap enforcement gates).
+
+# Zero-tolerance: must remain 0. Any introduction blocks merge.
+warnOnInvalid=0
+
+# Ratchet: distinctive double-cast that erases types at boundaries.
+as_unknown_as=95
+
+# Ratchet: naive name-based null/zero fallback on science fields. HIGH-SIGNAL but
+# PARTIAL — catches `field ?? 0|null` / `field || 0|null`; misses laundered cases
+# (field destructured, renamed, mapped, or cast before the fallback). A low count
+# means "not detected by this cheap gate", NOT "safe".
+science_field_null_zero_fallback=17
