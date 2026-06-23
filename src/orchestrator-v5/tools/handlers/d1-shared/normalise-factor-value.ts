@@ -90,6 +90,13 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     ...(factorCap !== undefined ? { factorCap } : {}),
     ...(factorUnit !== undefined ? { factorUnit } : {}),
     inputHasUnit,
+    // `rawInput` here is the POST-operator computed value, not the user's
+    // stated number, so the bare-ratio "looks like a proportion" gate must
+    // NOT run — it already ran against the stated RHS at the validator
+    // precheck and the handler's `preEvaluation`. Without this, an honest
+    // product that lands in (0,1) (e.g. `4% × 0.1 = 0.4%`) would be
+    // falsely rejected at execute, breaking validator/handler parity.
+    suppressBareRatioGate: true,
   });
 
   if (!evaluation.ok) {

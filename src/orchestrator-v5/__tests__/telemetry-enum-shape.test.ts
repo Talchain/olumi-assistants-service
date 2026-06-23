@@ -221,6 +221,42 @@ describe('AC.4 — V5DeterministicValueUpdate telemetry enum shape', () => {
     }
   });
 
+  it('precheck-reject (bare_ratio_on_unit_factor) — bare sub-1 on a unit factor emits the new reason', async () => {
+    const cappedGraph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Profit' },
+        {
+          id: 'fac_budget',
+          kind: 'factor',
+          label: 'Marketing budget',
+          observed_state: {
+            value: 0.4,
+            raw_value: 40000,
+            unit: '£',
+            cap: 100000,
+          },
+        },
+      ],
+      edges: [],
+    };
+    await runTurnExecutor(
+      payload('Set Marketing budget to 0.3'),
+      'req-enum-bare-ratio',
+      { routingAdapter: noopRoutingAdapter(), graphState: cappedGraph },
+    );
+    const ev = findDeterministicEvents();
+    expect(ev.length).toBeGreaterThan(0);
+    for (const e of ev) {
+      assertEnumShape(e.data);
+    }
+    // End-to-end proof the NEW reason is actually emitted on the wire-facing
+    // telemetry path (not merely admitted by the locked Set).
+    const emittedNewReason = ev.some(
+      (e) => e.data.failure_reason === 'bare_ratio_on_unit_factor',
+    );
+    expect(emittedNewReason).toBe(true);
+  });
+
   it('ambiguous_quantity (multi-quantity) — skip_reason and execution_precheck_result both enum-only', async () => {
     const cappedGraph = {
       nodes: [

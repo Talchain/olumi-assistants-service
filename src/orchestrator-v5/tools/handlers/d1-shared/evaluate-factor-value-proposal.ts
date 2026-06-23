@@ -107,6 +107,18 @@ export interface EvaluateFactorValueProposalInput {
    * `value_exceeds_cap`).
    */
   readonly inputHasUnit: boolean;
+  /**
+   * Suppresses the `bare_ratio_on_unit_factor` gate (3c). Set ONLY by
+   * `normaliseFactorValue`, which runs this predicate against the
+   * POST-operator computed value (with `operator: 'set'`). The bare-ratio
+   * gate judges whether the USER'S STATED number looks like a proportion;
+   * that check already happened upstream against the original RHS (at the
+   * validator precheck and the handler's `preEvaluation`). Re-applying it
+   * to a computed product would falsely reject legitimate honest results
+   * whose value lands in (0,1) — e.g. `4% × 0.1 = 0.4%`, or
+   * `decrease £5.30 by £5 = £0.30`. Default (undefined/false): gate active.
+   */
+  readonly suppressBareRatioGate?: boolean;
 }
 
 /**
@@ -168,6 +180,7 @@ export function evaluateFactorValueProposal(
     factorUnit,
     factorExistingRaw,
     inputHasUnit,
+    suppressBareRatioGate,
   } = input;
 
   const operator: FactorValueOperator = rawOperator ?? 'set';
@@ -236,10 +249,16 @@ export function evaluateFactorValueProposal(
       };
     }
 
-    // 3b. delta_no_cap_and_no_unit. An uncapped, unitless delta has no
-    //     bounded interpretation. Surface as a clarification rather
-    //     than writing a boundless value.
-    if (cap === undefined && !inputHasUnit) {
+    // 3b. delta_no_cap_and_no_unit. An uncapped, unitless `increase`/
+    //     `decrease` delta has no bounded interpretation ("increase by 10"
+    //     — 10 of what?). Surface as a clarification rather than writing a
+    //     boundless value. `multiply` is EXCLUDED: its right-hand side is a
+    //     dimensionless scaling factor, so "multiply by 0.3" (= ×0.3) is
+    //     fully bounded by the existing finite value (guaranteed by gate 3a)
+    //     regardless of cap or unit — and asking for "a unit" would be wrong
+    //     guidance for a scaling operation. Uncapped multiply therefore
+    //     passes through to the finite/cap-range guards below.
+    if (operator !== 'multiply' && cap === undefined && !inputHasUnit) {
       return {
         ok: false,
         reason: 'delta_no_cap_and_no_unit',
@@ -259,7 +278,26 @@ export function evaluateFactorValueProposal(
   //     (`inputHasUnit`) means the user asserted the scale, so it is left
   //     to the cap-range guards below (e.g. an explicit "£0.30" is a
   //     fully-specified amount, not the bare-number ambiguity).
+  //
+  //     `multiply` is EXCLUDED: its right-hand side is a dimensionless
+  //     scaling factor, never a value in the factor's unit. "multiply by
+  //     0.3" unambiguously means ×0.3 ("scale to 30%", e.g. a £100k-capped
+  //     £40,000 → £12,000) — there is no proportion-vs-unit ambiguity, and
+  //     the "give me a £ amount" clarification would be wrong guidance for
+  //     a scaling operation. Sub-1 multipliers are the normal way to scale
+  //     down, so they pass to the cap-range guards.
+  //
+  //     This gate judges the USER'S STATED `rawInput`, so it must only run
+  //     where `rawInput` is that stated number — i.e. the validator
+  //     precheck and the handler's `preEvaluation`. `normaliseFactorValue`
+  //     re-runs this predicate against the POST-operator computed value
+  //     (with `operator: 'set'`); it sets `suppressBareRatioGate` so a
+  //     legitimate honest product that lands in (0,1) — e.g. `4% × 0.1 =
+  //     0.4%`, or `decrease £5.30 by £5 = £0.30` — is not falsely rejected
+  //     at execute (the stated-value check already happened upstream).
   if (
+    !suppressBareRatioGate &&
+    operator !== 'multiply' &&
     !inputHasUnit &&
     effectiveUnit !== undefined &&
     rawInput !== 0 &&

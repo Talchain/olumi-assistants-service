@@ -239,6 +239,50 @@ const CASES: readonly PropertyCase[] = [
     expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
   },
   {
+    label: 'bare sub-1 delta (decrease) on a capped currency factor (proportion guard)',
+    entityId: 'f-budget',
+    value: 0.3,
+    operator: 'decrease',
+    expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
+  },
+  {
+    label: 'bare sub-1 MULTIPLY on a currency factor (dimensionless scaling — accepted)',
+    entityId: 'f-budget', // 40000 * 0.3 = 12000, in [0, cap]
+    value: 0.3,
+    operator: 'multiply',
+    expected: { kind: 'accept' },
+  },
+  {
+    // Execute-time parity lock: 4 * 0.1 = 0.4 lands in (0,1). The validator
+    // accepts; the handler must NOT trip bare_ratio at the normalise step.
+    label: 'MULTIPLY whose product lands in (0,1) on a capped % factor (parity at execute)',
+    entityId: 'f-churn', // 4 * 0.1 = 0.4, in [0, 100]
+    value: 0.1,
+    operator: 'multiply',
+    expected: { kind: 'accept' },
+  },
+  {
+    label: 'bare sub-1 MULTIPLY on an UNCAPPED count factor (excluded from unitless-delta guard — accepted)',
+    entityId: 'f-uncapped', // 12 * 0.3 = 3.6, no cap
+    value: 0.3,
+    operator: 'multiply',
+    expected: { kind: 'accept' },
+  },
+  {
+    label: 'MULTIPLY overshoot on a capped currency factor (contained by cap-range guard)',
+    entityId: 'f-budget', // 40000 * 5 = 200000 > cap
+    value: 5,
+    operator: 'multiply',
+    expected: { kind: 'reject', reason: 'bare_number_outside_cap' },
+  },
+  {
+    label: 'NEGATIVE MULTIPLY on a capped currency factor (product < 0, contained)',
+    entityId: 'f-budget', // 40000 * -0.5 = -20000 < 0
+    value: -0.5,
+    operator: 'multiply',
+    expected: { kind: 'reject', reason: 'bare_number_outside_cap' },
+  },
+  {
     label: 'bare sub-1 on an uncapped count/person-like factor (proportion guard)',
     entityId: 'f-uncapped', // no cap, unit='people'
     value: 0.3,

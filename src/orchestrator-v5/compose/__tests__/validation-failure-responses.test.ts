@@ -379,6 +379,91 @@ describe('composeValidationFailure — PARAMETER_INVALID missing_value (Fix B)',
 });
 
 // ---------------------------------------------------------------------------
+// Value/unit honesty — bare_ratio_on_unit_factor clarification branch.
+// A bare sub-1 value on a unit-bearing factor reads as a proportion, not a
+// value in that unit. The copy must be honest, unit-aware, NOT currency-
+// specific, and never leak the "unknown" sentinel.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID bare_ratio_on_unit_factor', () => {
+  it('currency unit (£) → names the unit, no "unknown" leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: '0.3 looks like a proportion',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_ratio_on_unit_factor',
+        unit: '£',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_ratio_on_unit_factor');
+    expect(response.assistant_text).toContain('proportion');
+    expect(response.assistant_text).toContain('value in £');
+    expect(response.assistant_text).toContain('amount in £');
+    expect(response.assistant_text).not.toContain('unknown');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+    assertStyle(response.assistant_text);
+  });
+
+  it('percentage unit (%) → reads as "a percentage", not "value in %"', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'proportion',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_ratio_on_unit_factor',
+        unit: '%',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_ratio_on_unit_factor');
+    expect(response.assistant_text).toContain('a percentage');
+    expect(response.assistant_text).toContain('the percentage');
+    // Must not produce the awkward / currency-shaped "value in %".
+    expect(response.assistant_text).not.toContain('value in %');
+    expect(response.assistant_text).not.toContain('unknown');
+    assertStyle(response.assistant_text);
+  });
+
+  it('count-like unit (people) → names the unit, not currency-shaped', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'proportion',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_ratio_on_unit_factor',
+        unit: 'people',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_ratio_on_unit_factor');
+    expect(response.assistant_text).toContain('value in people');
+    expect(response.assistant_text).toContain('amount in people');
+    expect(response.assistant_text).not.toContain('£');
+    expect(response.assistant_text).not.toContain('unknown');
+    assertStyle(response.assistant_text);
+  });
+
+  it('missing unit → unit-neutral fallback with multi-unit examples, no "unknown" leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'proportion',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_ratio_on_unit_factor',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_ratio_on_unit_factor');
+    expect(response.assistant_text).toContain('with its unit');
+    expect(response.assistant_text).not.toContain('unknown');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+    assertStyle(response.assistant_text);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // task_99f83f0d — "You gave unknown." leak must die for ANY PARAMETER_INVALID
 // path that omits actual_value (invalid_operator, graph predicates), not only
 // the missing_value branch. The clause drops; the constraint guidance stays.

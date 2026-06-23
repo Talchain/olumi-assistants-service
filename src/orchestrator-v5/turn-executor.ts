@@ -2900,7 +2900,8 @@ export async function runTurnExecutor(
         //       missing_value, invalid_operator, non_finite,
         //       cap_non_positive, unit_mismatch,
         //       bare_number_outside_cap, value_exceeds_cap,
-        //       delta_no_existing_value, delta_no_cap_and_no_unit.
+        //       delta_no_existing_value, delta_no_cap_and_no_unit,
+        //       bare_ratio_on_unit_factor.
         //     Additions require a plan amendment AND a matching
         //     update to the telemetry-enum-shape test allowed set.
         //

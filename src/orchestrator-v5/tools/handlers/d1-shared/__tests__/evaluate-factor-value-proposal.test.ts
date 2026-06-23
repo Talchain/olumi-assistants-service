@@ -316,6 +316,119 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
         expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
     });
 
+    it('rejects a bare sub-1 delta (decrease) on a capped currency factor', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'decrease',
+        factorUnit: '£',
+        factorCap: 100000,
+        factorExistingRaw: 40000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
+    });
+
+    it('ACCEPTS a bare sub-1 MULTIPLY on a CAPPED factor (dimensionless scaling factor, not a unit value)', () => {
+      // "multiply by 0.3" = scale to 30%. The RHS is a multiplier, never a
+      // value in the factor's unit, so there is no proportion-vs-unit
+      // ambiguity — the guard must not fire. effectiveRaw 40000*0.3=12000
+      // stays in [0, cap] and is accepted.
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'multiply',
+        factorUnit: '£',
+        factorCap: 100000,
+        factorExistingRaw: 40000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it('ACCEPTS a bare sub-1 MULTIPLY on an UNCAPPED factor (multiply is excluded from the unitless-delta guard too)', () => {
+      // 12 people * 0.3 = 3.6 — bounded by the existing finite value, so an
+      // uncapped multiply must not be refused as delta_no_cap_and_no_unit.
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.3,
+        operator: 'multiply',
+        factorUnit: 'people',
+        factorExistingRaw: 12,
+        inputHasUnit: false,
+        // no cap
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it('rejects a MULTIPLY whose product OVERSHOOTS the cap (falls through to the cap-range guard, not bare_ratio)', () => {
+      // 40000 * 5 = 200000 > cap 100000; bare multiplier → bare_number_outside_cap.
+      const r = evaluateFactorValueProposal({
+        rawInput: 5,
+        operator: 'multiply',
+        factorUnit: '£',
+        factorCap: 100000,
+        factorExistingRaw: 40000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
+    });
+
+    it('rejects a NEGATIVE MULTIPLY (product below 0, contained by the cap-range guard)', () => {
+      // 40000 * -0.5 = -20000 < 0 → bare_number_outside_cap.
+      const r = evaluateFactorValueProposal({
+        rawInput: -0.5,
+        operator: 'multiply',
+        factorUnit: '£',
+        factorCap: 100000,
+        factorExistingRaw: 40000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
+    });
+
+    it('ACCEPTS bare rawInput exactly 1 on a unit-bearing factor (boundary — not sub-1)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 1,
+        operator: 'set',
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it('rejects bare rawInput just below 1 on a unit-bearing factor (boundary — locks the < 1 cutoff)', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.999999,
+        operator: 'set',
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
+    });
+
+    it('does NOT fire on the POST-operator computed value when suppressBareRatioGate is set (normalise path)', () => {
+      // Mirrors how normaliseFactorValue invokes the predicate: operator
+      // 'set' on a computed product that lands in (0,1), with the gate
+      // suppressed. Must accept (the stated-value check ran upstream).
+      const r = evaluateFactorValueProposal({
+        rawInput: 0.4, // e.g. 4% * 0.1
+        operator: 'set',
+        factorUnit: '%',
+        factorCap: 100,
+        inputHasUnit: false,
+        suppressBareRatioGate: true,
+      });
+      expect(r.ok).toBe(true);
+    });
+
     it('rejects a negative bare sub-1 number on a unit-bearing factor (fires before the cap-range guard)', () => {
       const r = evaluateFactorValueProposal({
         rawInput: -0.5,
@@ -422,16 +535,13 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
           inputHasUnit: false,
         },
       },
-      {
-        label: 'bare sub-1 ratio on a unit-bearing (currency) factor',
-        input: {
-          rawInput: 0.3,
-          operator: 'set',
-          factorUnit: '£',
-          factorCap: 100000,
-          inputHasUnit: false,
-        },
-      },
+      // NOTE: `bare_ratio_on_unit_factor` is intentionally NOT in this list.
+      // It judges the user's STATED value and is enforced upstream (validator
+      // precheck + the handler's `preEvaluation`). `normaliseFactorValue`
+      // runs on the POST-operator computed value and sets
+      // `suppressBareRatioGate`, so it does NOT throw bare_ratio — that would
+      // falsely reject honest products that land in (0,1). Full-handler
+      // parity for bare_ratio is covered by validator-executor-parity.test.ts.
     ];
 
     for (const { label, input } of parityCases) {

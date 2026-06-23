@@ -37,7 +37,10 @@ import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-v
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
-import { applyFactorValueOperator } from './d1-shared/evaluate-factor-value-proposal.js';
+import {
+  applyFactorValueOperator,
+  evaluateFactorValueProposal,
+} from './d1-shared/evaluate-factor-value-proposal.js';
 import { formatFactorChange } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
@@ -244,6 +247,43 @@ export function createSetFactorValueHandler(): HandlerFn {
     const parsed = parseProposalValue(valueParam.value);
     const operator = valueParam.operator ?? 'set';
     const before = snapshotObservedState(targetNode);
+
+    // Defense-in-depth parity (review follow-up). The handler pre-applies
+    // the operator below and then calls `normaliseFactorValue` with
+    // `operator: 'set'` and the POST-operator value — so guards that read
+    // the user's STATED right-hand side (notably `bare_ratio_on_unit_factor`,
+    // which gates on `rawInput`, and the delta guards) never see the
+    // original operator/RHS at the handler. A direct handler call to
+    // "increase £40,000 by 0.3" would otherwise evaluate 40,000.3 and slip
+    // past the guard, mutating despite the validator/precheck rejecting the
+    // same proposal. Run the shared predicate here against the ORIGINAL
+    // operator + RHS so the handler enforces exactly what the validator and
+    // executor precheck do (AC.1 parity); mirrors the validator's
+    // `preexecuteSetFactorValue` call shape (same factorExistingRaw fallback).
+    const preEvaluation = evaluateFactorValueProposal({
+      rawInput: parsed.numeric,
+      operator,
+      ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
+      ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
+      ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
+      ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorExistingRaw: before.raw_value }
+        : before.value !== undefined
+          ? { factorExistingRaw: before.value }
+          : {}),
+      inputHasUnit: parsed.inputHasUnit,
+    });
+    if (!preEvaluation.ok) {
+      throw new D1HandlerError('PARAMETER_INVALID', preEvaluation.specific_issue, {
+        details: {
+          handler_id: 'set_factor_value',
+          target_id: targetId,
+          rejection_reason: preEvaluation.reason,
+        },
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
 
     // The "current value" against which operators apply is the user-unit
     // raw_value when present, falling back to the model-unit value. This

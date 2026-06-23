@@ -183,6 +183,89 @@ describe('set_factor_value handler', () => {
     ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
   });
 
+  it('rejects a bare sub-1 INCREASE on a currency factor (handler parity — no bypass via post-operator value)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // "Increase Marketing budget by 0.3" — the handler pre-applies the
+    // operator (40000 + 0.3 = 40000.3) then normalises as `set`, so the
+    // bare sub-1 guard must run against the ORIGINAL stated RHS (0.3) or
+    // the proposal slips through and mutates to £40,000.30.
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-budget', value: 0.3, operator: 'increase' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
+  it('rejects a bare sub-1 DECREASE on a currency factor (handler parity)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-budget', value: 0.3, operator: 'decrease' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
+  it('ACCEPTS a bare sub-1 MULTIPLY (dimensionless scaling — honest result, no false claim)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // "Multiply Marketing budget by 0.3" = scale to 30% → £12,000. The
+    // multiplier is dimensionless, so there is no proportion-vs-unit
+    // ambiguity and the narration is honest. The guard must NOT refuse it.
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget', value: 0.3, operator: 'multiply' }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Marketing budget from £40,000 to £12,000.');
+    const mutated = outcome.mutated_graph as GraphV3T;
+    const budget = mutated.nodes.find((n) => n.id === 'f-budget');
+    expect(budget?.observed_state?.raw_value).toBe(12000);
+    expect(budget?.observed_state?.value).toBeCloseTo(0.12, 10);
+  });
+
+  it('ACCEPTS a MULTIPLY whose product lands in (0,1) — execute-time parity (no false bare_ratio at the normalise step)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // f-churn is 4% (cap 100). "multiply by 0.1" → 0.4% — an honest sub-1
+    // product. The handler pre-applies the operator then normalises with
+    // operator:'set'; without suppressing the bare-ratio gate at that step,
+    // the 0.4 product would be wrongly refused at execute even though the
+    // validator accepted the proposal (the AC.1 parity break this fixes).
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-churn', value: 0.1, operator: 'multiply' }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Customer churn from 4% to 0.4%.');
+    const mutated = outcome.mutated_graph as GraphV3T;
+    const churn = mutated.nodes.find((n) => n.id === 'f-churn');
+    expect(churn?.observed_state?.raw_value).toBeCloseTo(0.4, 10);
+  });
+
+  it('rejects a MULTIPLY that overshoots the cap (contained, not narrated as a bare ratio)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // 40000 * 5 = 200000 > cap 100000 → contained at execute.
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-budget', value: 5, operator: 'multiply' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
   it('narration hardening: a unit factor with no raw_value never renders its normalised value as currency', async () => {
     const handler = createSetFactorValueHandler();
     // Legacy/degenerate node: has a unit and a normalised value but no
