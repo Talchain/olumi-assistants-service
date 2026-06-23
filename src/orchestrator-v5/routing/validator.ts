@@ -47,6 +47,7 @@ import { z } from 'zod';
 import { describeSchema } from '../compose/helpers.js';
 import {
   evaluateFactorValueProposal,
+  resolveExistingRawValue,
   type FactorValueOperator,
 } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { EntityKind, ProposalAction, ProposalEntity, ProposalParameter } from './types.js';
@@ -608,6 +609,17 @@ function preexecuteSetFactorValue(
     ? graph.findFactorObservedState(proposal.entity.id)
     : null;
 
+  // De-normalise the delta LHS identically to the handler (raw_value, else
+  // value*cap for capped, else value) so validator and handler agree on the
+  // existing value — never feed the normalised `value` as the raw LHS. Only a
+  // `resolved` value is a usable LHS; `missing`/`ambiguous` omit it so the
+  // delta guard rejects (fail closed).
+  const existing = resolveExistingRawValue({
+    ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
+    ...(obs?.value !== undefined ? { value: obs.value } : {}),
+    ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
+    ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
+  });
   const evaluation = evaluateFactorValueProposal({
     rawInput: parsed.numeric,
     operator,
@@ -615,16 +627,17 @@ function preexecuteSetFactorValue(
     ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
     ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
     ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
-    ...(obs?.raw_value !== undefined
-      ? { factorExistingRaw: obs.raw_value }
-      : obs?.value !== undefined
-        ? { factorExistingRaw: obs.value }
-        : {}),
+    ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
     inputHasUnit: parsed.inputHasUnit,
   });
 
   if (evaluation.ok) return null;
 
+  // Surface the effective unit (proposal unit, else the factor's stored
+  // unit) so the recoverable composer can render unit-aware clarify copy
+  // (e.g. the `bare_ratio_on_unit_factor` branch). A short symbol like
+  // '£' / '%' / 'people' — never user prose.
+  const effectiveUnit = parsed.unit ?? obs?.unit;
   return {
     code: 'PARAMETER_INVALID',
     message: evaluation.specific_issue,
@@ -633,6 +646,7 @@ function preexecuteSetFactorValue(
       rejection_reason: evaluation.reason,
       issue: evaluation.specific_issue,
       handler_id: 'set_factor_value',
+      ...(effectiveUnit !== undefined ? { unit: effectiveUnit } : {}),
     },
   };
 }

@@ -167,6 +167,233 @@ describe('set_factor_value handler', () => {
     ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
   });
 
+  it('rejects a bare sub-1 number on a currency factor (no misleading £0.3 narration)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // The live defect: "Set Marketing budget to 0.3" — a bare proportion
+    // on a £ factor. Must refuse rather than persist raw_value=0.3 and
+    // narrate "£40,000 → £0.3". Routes to the recoverable clarify path.
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-budget', value: 0.3, operator: 'set' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
+  it('rejects a bare sub-1 INCREASE on a currency factor (handler parity — no bypass via post-operator value)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // "Increase Marketing budget by 0.3" — the handler pre-applies the
+    // operator (40000 + 0.3 = 40000.3) then normalises as `set`, so the
+    // bare sub-1 guard must run against the ORIGINAL stated RHS (0.3) or
+    // the proposal slips through and mutates to £40,000.30.
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-budget', value: 0.3, operator: 'increase' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
+  it('rejects a bare sub-1 DECREASE on a currency factor (handler parity)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-budget', value: 0.3, operator: 'decrease' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
+  it('ACCEPTS a bare sub-1 MULTIPLY (dimensionless scaling — honest result, no false claim)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // "Multiply Marketing budget by 0.3" = scale to 30% → £12,000. The
+    // multiplier is dimensionless, so there is no proportion-vs-unit
+    // ambiguity and the narration is honest. The guard must NOT refuse it.
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget', value: 0.3, operator: 'multiply' }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Marketing budget from £40,000 to £12,000.');
+    const mutated = outcome.mutated_graph as GraphV3T;
+    const budget = mutated.nodes.find((n) => n.id === 'f-budget');
+    expect(budget?.observed_state?.raw_value).toBe(12000);
+    expect(budget?.observed_state?.value).toBeCloseTo(0.12, 10);
+  });
+
+  it('ACCEPTS a MULTIPLY whose product lands in (0,1) — execute-time parity (no false bare_ratio at the normalise step)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // f-churn is 4% (cap 100). "multiply by 0.1" → 0.4% — an honest sub-1
+    // product. The handler pre-applies the operator then normalises with
+    // operator:'set'; without suppressing the bare-ratio gate at that step,
+    // the 0.4 product would be wrongly refused at execute even though the
+    // validator accepted the proposal (the AC.1 parity break this fixes).
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-churn', value: 0.1, operator: 'multiply' }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Customer churn from 4% to 0.4%.');
+    const mutated = outcome.mutated_graph as GraphV3T;
+    const churn = mutated.nodes.find((n) => n.id === 'f-churn');
+    expect(churn?.observed_state?.raw_value).toBeCloseTo(0.4, 10);
+  });
+
+  it('rejects a MULTIPLY that overshoots the cap (contained, not narrated as a bare ratio)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    // 40000 * 5 = 200000 > cap 100000 → contained at execute.
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-budget', value: 5, operator: 'multiply' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
+  // --- Legacy factor without raw_value: delta LHS must de-normalise -----
+  // A capped factor that stored only the normalised `value` (e.g.
+  // { value: 0.4, cap: 100000 } = £40,000) must apply delta operators
+  // against the de-normalised £40,000, not the raw 0.4 — otherwise the
+  // result is corrupted (× 0.3 → £0.12 instead of £12,000) and narrated
+  // "from 0.4 to £0.12". Each case builds a fresh legacy graph.
+  function buildLegacyCappedGraph(): GraphV3T {
+    const graph = buildD1Fixture();
+    graph.nodes.push({
+      id: 'f-legacy',
+      kind: 'factor',
+      label: 'Legacy budget',
+      observed_state: { value: 0.4, unit: '£', cap: 100000 }, // = £40,000, no raw_value
+    });
+    return graph;
+  }
+
+  it('legacy capped factor (value-only) — MULTIPLY de-normalises the LHS (£40,000 × 0.3 = £12,000)', async () => {
+    const handler = createSetFactorValueHandler();
+    const outcome = await handler(
+      buildInvocation(
+        buildLegacyCappedGraph(),
+        makeProposal({ entityId: 'f-legacy', value: 0.3, operator: 'multiply' }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Legacy budget from £40,000 to £12,000.');
+    const budget = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-legacy');
+    expect(budget?.observed_state?.raw_value).toBe(12000);
+  });
+
+  it('legacy capped factor (value-only) — INCREASE de-normalises the LHS (£40,000 + £5,000 = £45,000)', async () => {
+    const handler = createSetFactorValueHandler();
+    const outcome = await handler(
+      buildInvocation(
+        buildLegacyCappedGraph(),
+        makeProposal({
+          entityId: 'f-legacy',
+          value: { value: 5000, unit: '£', cap: 100000 },
+          operator: 'increase',
+        }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Legacy budget from £40,000 to £45,000.');
+    const budget = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-legacy');
+    expect(budget?.observed_state?.raw_value).toBe(45000);
+  });
+
+  it('legacy capped factor (value-only) — DECREASE de-normalises the LHS (£40,000 - £10,000 = £30,000)', async () => {
+    const handler = createSetFactorValueHandler();
+    const outcome = await handler(
+      buildInvocation(
+        buildLegacyCappedGraph(),
+        makeProposal({
+          entityId: 'f-legacy',
+          value: { value: 10000, unit: '£', cap: 100000 },
+          operator: 'decrease',
+        }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Legacy budget from £40,000 to £30,000.');
+    const budget = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-legacy');
+    expect(budget?.observed_state?.raw_value).toBe(30000);
+  });
+
+  it('narration: a legacy capped factor renders the de-normalised before-value, never a fabricated "£0.4"', async () => {
+    const handler = createSetFactorValueHandler();
+    const outcome = await handler(
+      buildInvocation(
+        buildLegacyCappedGraph(),
+        makeProposal({
+          entityId: 'f-legacy',
+          value: { value: 30000, unit: '£', cap: 100000 },
+          operator: 'set',
+        }),
+      ),
+    );
+    // Before side is the de-normalised £40,000 (0.4 × 100000), not "£0.4"/"0.4".
+    expect(outcome.assistant_text).toBe('Updated Legacy budget from £40,000 to £30,000.');
+    expect(outcome.assistant_text).not.toMatch(/£0\.\d/);
+  });
+
+  it('SET on a factor with an UNRESOLVABLE prior value emits a one-sided receipt — never a fabricated "from 0"', async () => {
+    const handler = createSetFactorValueHandler();
+    // {value:0.1, %, cap:50} has no raw_value and an ambiguous % divisor
+    // (cap !== 100) → the prior value is unresolvable. A SET is allowed (it
+    // overwrites), but the receipt must NOT claim "from 0" (a false prior).
+    const graph = buildD1Fixture();
+    graph.nodes.push({
+      id: 'f-pct-legacy',
+      kind: 'factor',
+      label: 'Legacy churn',
+      observed_state: { value: 0.1, unit: '%', cap: 50 },
+    });
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({
+          entityId: 'f-pct-legacy',
+          value: { value: 5, unit: '%', cap: 100 },
+          operator: 'set',
+        }),
+      ),
+    );
+    expect(outcome.assistant_text).toBe('Updated Legacy churn to 5%.');
+    expect(outcome.assistant_text).not.toMatch(/from 0\b/);
+  });
+
+  it('rejects a DELTA on a factor with an unresolvable prior value (ambiguous % outside [0,1])', async () => {
+    const handler = createSetFactorValueHandler();
+    // {value:5, %} (no raw_value) is ambiguous: 500% (extractor) or 5% (legacy
+    // raw)? A delta has no reliable LHS → fail closed rather than guess.
+    const graph = buildD1Fixture();
+    graph.nodes.push({
+      id: 'f-pct-amb',
+      kind: 'factor',
+      label: 'Ambiguous churn',
+      observed_state: { value: 5, unit: '%' },
+    });
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({ entityId: 'f-pct-amb', value: { value: 1, unit: '%' }, operator: 'increase' }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+  });
+
   it('rejects target with wrong kind', async () => {
     const handler = createSetFactorValueHandler();
     const graph = buildD1Fixture();

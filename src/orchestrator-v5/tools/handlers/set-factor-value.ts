@@ -37,8 +37,12 @@ import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-v
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
-import { applyFactorValueOperator } from './d1-shared/evaluate-factor-value-proposal.js';
-import { formatFactorChange } from './d1-shared/format-confirmation.js';
+import {
+  applyFactorValueOperator,
+  evaluateFactorValueProposal,
+  resolveExistingRawValue,
+} from './d1-shared/evaluate-factor-value-proposal.js';
+import { formatFactorChange, formatFactorValueSet } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
@@ -245,16 +249,53 @@ export function createSetFactorValueHandler(): HandlerFn {
     const operator = valueParam.operator ?? 'set';
     const before = snapshotObservedState(targetNode);
 
-    // The "current value" against which operators apply is the user-unit
-    // raw_value when present, falling back to the model-unit value. This
-    // matches the user's mental model: "increase by 1000" on a £-factor
-    // should increase raw_value by 1000, not value (which is a ratio).
-    const currentRaw =
-      before.raw_value !== undefined
-        ? before.raw_value
-        : before.value !== undefined
-          ? before.value
-          : 0;
+    // The "current value" against which delta operators apply is the
+    // USER-UNIT raw value. `resolveExistingRawValue` de-normalises it (the
+    // inverse of normaliseFactorValue): `raw_value` when present, else
+    // `value * cap` for a capped factor, else `value` for an uncapped factor;
+    // it returns `ambiguous`/`missing` when the scale cannot be recovered (a
+    // legacy `{ value: 0.4, cap: 100000 }` = £40,000 must apply the operator
+    // against 40,000, not 0.4, or "× 0.3" corrupts to £0.12 instead of
+    // £12,000). Shared with the validator + executor precheck so all three
+    // resolve the LHS identically; only a `resolved` value is a usable LHS.
+    const existing = resolveExistingRawValue(before);
+
+    // Defense-in-depth parity (review follow-up). The handler pre-applies
+    // the operator below and then calls `normaliseFactorValue` with the
+    // POST-operator value — so guards that read the user's STATED right-hand
+    // side (notably `bare_ratio_on_unit_factor`, which gates on `rawInput`,
+    // and the delta guards) never see the original operator/RHS at the
+    // handler. A direct handler call to "increase £40,000 by 0.3" would
+    // otherwise evaluate 40,000.3 and slip past the guard, mutating despite
+    // the validator/precheck rejecting the same proposal. Run the shared
+    // predicate here against the ORIGINAL operator + RHS so the handler
+    // enforces exactly what the validator and executor precheck do (AC.1).
+    // A non-`resolved` existing value omits `factorExistingRaw`, so any delta
+    // fails closed via `delta_no_existing_value`.
+    const preEvaluation = evaluateFactorValueProposal({
+      rawInput: parsed.numeric,
+      operator,
+      ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
+      ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
+      ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
+      ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
+      ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
+      inputHasUnit: parsed.inputHasUnit,
+    });
+    if (!preEvaluation.ok) {
+      throw new D1HandlerError('PARAMETER_INVALID', preEvaluation.specific_issue, {
+        details: {
+          handler_id: 'set_factor_value',
+          target_id: targetId,
+          rejection_reason: preEvaluation.reason,
+        },
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
+
+    // Only reached for `set` when `existing` is non-resolved (deltas already
+    // rejected above); `set` ignores the LHS, so 0 is a safe unused default.
+    const currentRaw = existing.kind === 'resolved' ? existing.raw : 0;
 
     const newRaw = applyFactorValueOperator(currentRaw, operator, parsed.numeric);
 
@@ -363,17 +404,27 @@ export function createSetFactorValueHandler(): HandlerFn {
     }
 
     const label = targetNode.label;
-    const baseText = formatFactorChange({
-      label,
-      before: {
-        raw_value: before.raw_value ?? before.value ?? 0,
-        ...(before.unit !== undefined ? { unit: before.unit } : {}),
-      },
-      after: {
-        raw_value: after.raw_value ?? after.value ?? 0,
-        ...(after.unit !== undefined ? { unit: after.unit } : {}),
-      },
-    });
+    // Narration uses the DE-NORMALISED user-unit value via the same
+    // `resolveExistingRawValue` the operator LHS uses, rendering the honest
+    // user-unit amount — e.g. a legacy capped `{ value: 0.4, cap: 100000, £ }`
+    // narrates "£40,000", not a fabricated "£0.4" (the normalised ratio).
+    // The AFTER value is always `resolved` (normaliseFactorValue wrote
+    // raw_value). The BEFORE value may be `missing`/`ambiguous`: in that case
+    // we must NOT fabricate a numeric "from" (a "from 0" would be a false
+    // claim) — emit a one-sided "Updated X to Y." receipt instead. Only `set`
+    // reaches narration with a non-resolved before (deltas already rejected).
+    const narrationSide = (
+      snap: ObservedSnapshot,
+    ): { readonly raw_value: number; readonly unit?: string } => {
+      const res = resolveExistingRawValue(snap);
+      const raw = res.kind === 'resolved' ? res.raw : 0;
+      return snap.unit !== undefined ? { raw_value: raw, unit: snap.unit } : { raw_value: raw };
+    };
+    const beforeResolution = resolveExistingRawValue(before);
+    const baseText =
+      beforeResolution.kind === 'resolved'
+        ? formatFactorChange({ label, before: narrationSide(before), after: narrationSide(after) })
+        : formatFactorValueSet({ label, after: narrationSide(after) });
 
     // P0 V5 golden-path repair (Wave 2): when a prior successful analysis
     // exists and this turn actually mutated the factor (non-noop), append

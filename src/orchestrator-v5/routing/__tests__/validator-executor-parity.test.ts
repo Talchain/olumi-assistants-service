@@ -40,6 +40,7 @@ import { validateToolCall } from '../validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
 import {
   evaluateFactorValueProposal,
+  resolveExistingRawValue,
   type FactorValueOperator,
   type ProposalRejectionReason,
 } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -220,6 +221,98 @@ const CASES: readonly PropertyCase[] = [
     expected: { kind: 'reject', reason: 'unit_mismatch' },
   },
 
+  // ---- bare sub-1 ratio on a unit-bearing factor (value/unit honesty) ----
+  // The live defect: "Set …Budget… to 0.3" was applied as raw £0.3 and
+  // narrated "£20,000 → £0.3". A bare number below 1 on a factor that has
+  // a unit reads as a normalised proportion, not a value in that unit.
+  {
+    label: 'bare sub-1 on a capped currency factor (proportion guard)',
+    entityId: 'f-budget', // cap=100000, unit='£'
+    value: 0.3, // bare number, no unit → inputHasUnit=false
+    operator: 'set',
+    expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
+  },
+  {
+    label: 'bare sub-1 delta (increase) on a capped currency factor (proportion guard)',
+    entityId: 'f-budget',
+    value: 0.3,
+    operator: 'increase',
+    expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
+  },
+  {
+    label: 'bare sub-1 delta (decrease) on a capped currency factor (proportion guard)',
+    entityId: 'f-budget',
+    value: 0.3,
+    operator: 'decrease',
+    expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
+  },
+  {
+    label: 'bare sub-1 MULTIPLY on a currency factor (dimensionless scaling — accepted)',
+    entityId: 'f-budget', // 40000 * 0.3 = 12000, in [0, cap]
+    value: 0.3,
+    operator: 'multiply',
+    expected: { kind: 'accept' },
+  },
+  {
+    // Execute-time parity lock: 4 * 0.1 = 0.4 lands in (0,1). The validator
+    // accepts; the handler must NOT trip bare_ratio at the normalise step.
+    label: 'MULTIPLY whose product lands in (0,1) on a capped % factor (parity at execute)',
+    entityId: 'f-churn', // 4 * 0.1 = 0.4, in [0, 100]
+    value: 0.1,
+    operator: 'multiply',
+    expected: { kind: 'accept' },
+  },
+  {
+    label: 'bare MULTIPLY on an UNCAPPED count factor (no cap to bound it — rejected)',
+    entityId: 'f-uncapped', // no cap → delta_no_cap_and_no_unit
+    value: 0.3,
+    operator: 'multiply',
+    expected: { kind: 'reject', reason: 'delta_no_cap_and_no_unit' },
+  },
+  {
+    label: 'NEGATIVE bare MULTIPLY on an UNCAPPED count factor (no -6 people)',
+    entityId: 'f-uncapped', // 12 * -0.5 = -6 would be nonsensical — rejected
+    value: -0.5,
+    operator: 'multiply',
+    expected: { kind: 'reject', reason: 'delta_no_cap_and_no_unit' },
+  },
+  {
+    label: 'MULTIPLY overshoot on a capped currency factor (contained by cap-range guard)',
+    entityId: 'f-budget', // 40000 * 5 = 200000 > cap
+    value: 5,
+    operator: 'multiply',
+    expected: { kind: 'reject', reason: 'bare_number_outside_cap' },
+  },
+  {
+    label: 'NEGATIVE MULTIPLY on a capped currency factor (product < 0, contained)',
+    entityId: 'f-budget', // 40000 * -0.5 = -20000 < 0
+    value: -0.5,
+    operator: 'multiply',
+    expected: { kind: 'reject', reason: 'bare_number_outside_cap' },
+  },
+  {
+    label: 'bare sub-1 on an uncapped count/person-like factor (proportion guard)',
+    entityId: 'f-uncapped', // no cap, unit='people'
+    value: 0.3,
+    operator: 'set',
+    expected: { kind: 'reject', reason: 'bare_ratio_on_unit_factor' },
+  },
+  // ---- positive locks: the guard must NOT over-refuse legitimate input ----
+  {
+    label: 'bare normal currency value >= 1 (no false reject)',
+    entityId: 'f-budget',
+    value: 50000, // bare, but >= 1 → not proportion-looking
+    operator: 'set',
+    expected: { kind: 'accept' },
+  },
+  {
+    label: 'bare sub-1 on a UNITLESS factor (ratio-in-[0,1], accepted)',
+    entityId: 'f-quality', // no unit, no cap, value in [0,1]
+    value: 0.7,
+    operator: 'set',
+    expected: { kind: 'accept' },
+  },
+
   // ---- missing / malformed value parameter (Blocking #1 fix, 2026-05-20) ----
   // Review surfaced that a proposal with no `value` parameter slipped
   // through the precheck → handler threw `parameter_invalid_at_execute`.
@@ -242,9 +335,11 @@ const CASES: readonly PropertyCase[] = [
   // this PR's scope.
 ];
 
-describe('AC.1 — validator/executor parity property table', () => {
-  const handler = createSetFactorValueHandler();
-  const graph = buildD1Fixture();
+// Build a GraphLookup from a graph. Used to mint a FRESH graph + lookup per
+// case so no case can observe another's state (the handler clones its input,
+// but per-case freshness makes the table robust to that and self-evidently
+// correct — each comment like "4 × 0.1 = 0.4" is the value the handler sees).
+function makeLookup(graph: GraphV3T) {
   const buildResult = buildGraphLookup({
     nodes: graph.nodes.map((n) => ({
       id: n.id,
@@ -257,7 +352,13 @@ describe('AC.1 — validator/executor parity property table', () => {
   if (buildResult.kind !== 'ok') {
     throw new Error('Test fixture failed to build a GraphLookup');
   }
-  const graphLookup = buildResult.lookup;
+  return buildResult.lookup;
+}
+
+describe('AC.1 — validator/executor parity property table', () => {
+  const handler = createSetFactorValueHandler();
+  // Shared lookup for the standalone (non-mutating) validator-only tests below.
+  const graphLookup = makeLookup(buildD1Fixture());
 
   // ---- Blocking #1 fix: missing-value proposal MUST be rejected by validator ----
   it('proposal with no value parameter → validator rejects with missing_value (Blocking #1)', async () => {
@@ -367,6 +468,9 @@ describe('AC.1 — validator/executor parity property table', () => {
 
   for (const c of CASES) {
     it(`${c.label} — validator + predicate + handler agree`, async () => {
+      // Fresh graph + lookup per case so each is self-contained.
+      const graph = buildD1Fixture();
+      const caseLookup = makeLookup(graph);
       const proposal = makeProposal({
         entityId: c.entityId,
         value: c.value,
@@ -376,12 +480,14 @@ describe('AC.1 — validator/executor parity property table', () => {
       // 1. Validator
       const validation = validateToolCall(
         proposal,
-        graphLookup,
+        caseLookup,
         HANDLER_VALIDATION_REGISTRY,
       );
 
-      // 2. Predicate cross-check (independent of validator wiring)
-      const obs = graphLookup.findFactorObservedState?.(c.entityId) ?? null;
+      // 2. Predicate cross-check (independent of validator wiring). Resolves
+      // the delta LHS via `resolveExistingRawValue`, exactly as the validator
+      // and handler do.
+      const obs = caseLookup.findFactorObservedState?.(c.entityId) ?? null;
       const valueParam = proposal.parameters[0]!.value;
       const parsedNumeric =
         typeof valueParam === 'number'
@@ -392,17 +498,21 @@ describe('AC.1 — validator/executor parity property table', () => {
           ? (valueParam as { unit?: string }).unit
           : undefined;
       const inputHasUnit = typeof parsedUnit === 'string' && parsedUnit.length > 0;
+      const existingRes = resolveExistingRawValue({
+        ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
+        ...(obs?.value !== undefined ? { value: obs.value } : {}),
+        ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
+        ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
+      });
+      const factorExistingRaw =
+        existingRes.kind === 'resolved' ? existingRes.raw : undefined;
       const evaluation = evaluateFactorValueProposal({
         rawInput: parsedNumeric,
         operator: c.operator ?? 'set',
         ...(parsedUnit !== undefined ? { unit: parsedUnit } : {}),
         ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
         ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
-        ...(obs?.raw_value !== undefined
-          ? { factorExistingRaw: obs.raw_value }
-          : obs?.value !== undefined
-            ? { factorExistingRaw: obs.value }
-            : {}),
+        ...(factorExistingRaw !== undefined ? { factorExistingRaw } : {}),
         inputHasUnit,
       });
 
@@ -454,6 +564,7 @@ describe('AC.1 — validator/executor parity property table', () => {
   // -----------------------------------------------------------------
   it('cross-cutting: validator verdict and predicate verdict never disagree on accept/reject', async () => {
     for (const c of CASES) {
+      const caseLookup = makeLookup(buildD1Fixture());
       const proposal = makeProposal({
         entityId: c.entityId,
         value: c.value,
@@ -461,10 +572,10 @@ describe('AC.1 — validator/executor parity property table', () => {
       });
       const validation = validateToolCall(
         proposal,
-        graphLookup,
+        caseLookup,
         HANDLER_VALIDATION_REGISTRY,
       );
-      const obs = graphLookup.findFactorObservedState?.(c.entityId) ?? null;
+      const obs = caseLookup.findFactorObservedState?.(c.entityId) ?? null;
       const valueParam = proposal.parameters[0]!.value;
       const parsedNumeric =
         typeof valueParam === 'number'
@@ -475,22 +586,132 @@ describe('AC.1 — validator/executor parity property table', () => {
           ? (valueParam as { unit?: string }).unit
           : undefined;
       const inputHasUnit = typeof parsedUnit === 'string' && parsedUnit.length > 0;
+      const existingRes = resolveExistingRawValue({
+        ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
+        ...(obs?.value !== undefined ? { value: obs.value } : {}),
+        ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
+        ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
+      });
+      const factorExistingRaw =
+        existingRes.kind === 'resolved' ? existingRes.raw : undefined;
       const evaluation = evaluateFactorValueProposal({
         rawInput: parsedNumeric,
         operator: c.operator ?? 'set',
         ...(parsedUnit !== undefined ? { unit: parsedUnit } : {}),
         ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
         ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
-        ...(obs?.raw_value !== undefined
-          ? { factorExistingRaw: obs.raw_value }
-          : obs?.value !== undefined
-            ? { factorExistingRaw: obs.value }
-            : {}),
+        ...(factorExistingRaw !== undefined ? { factorExistingRaw } : {}),
         inputHasUnit,
       });
       expect(validation.valid, `validator disagrees with predicate on ${c.label}`).toBe(
         evaluation.ok,
       );
+    }
+  });
+
+  // -----------------------------------------------------------------
+  // Legacy capped factor (value-only, no raw_value) — drives the
+  // de-normalisation (value*cap) through validator + predicate + handler
+  // together. buildD1Fixture's factors all carry raw_value, so this
+  // dedicated case is the only place the value*cap branch is exercised
+  // across all three layers (closing the parity-coverage gap).
+  // -----------------------------------------------------------------
+  describe('legacy capped factor (value-only) — de-normalisation parity', () => {
+    function legacyGraph(): GraphV3T {
+      const graph = buildD1Fixture();
+      graph.nodes.push({
+        id: 'f-legacy',
+        kind: 'factor',
+        label: 'Legacy budget',
+        observed_state: { value: 0.4, unit: '£', cap: 100000 }, // = £40,000, no raw_value
+      });
+      return graph;
+    }
+    const deltas: ReadonlyArray<{
+      op: FactorValueOperator;
+      value: unknown;
+      expectedRaw: number;
+    }> = [
+      { op: 'multiply', value: 0.3, expectedRaw: 12000 }, // £40,000 × 0.3
+      { op: 'increase', value: { value: 5000, unit: '£' }, expectedRaw: 45000 },
+      { op: 'decrease', value: { value: 10000, unit: '£' }, expectedRaw: 30000 },
+    ];
+    for (const d of deltas) {
+      it(`${d.op} on a value-only £40,000 factor → validator accepts + handler computes £${d.expectedRaw} (de-normalised LHS)`, async () => {
+        const graph = legacyGraph();
+        const lookup = makeLookup(graph);
+        const proposal = makeProposal({ entityId: 'f-legacy', value: d.value, operator: d.op });
+
+        const validation = validateToolCall(proposal, lookup, HANDLER_VALIDATION_REGISTRY);
+        expect(validation.valid).toBe(true);
+
+        const outcome = await handler(buildInvocation(graph, proposal));
+        const node = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-legacy');
+        expect(node?.observed_state?.raw_value).toBe(d.expectedRaw);
+        // Honest narration: de-normalised before-value (£40,000), never "£0.4".
+        expect(outcome.assistant_text).toContain('£40,000');
+        expect(outcome.assistant_text).not.toMatch(/£0\.\d/);
+      });
+    }
+  });
+
+  // -----------------------------------------------------------------
+  // Legacy percentage factor (value-only, no raw_value). The % divisor is
+  // unambiguous for uncapped (extractor value=raw/100) and cap === 100
+  // (value*100 === value*cap) → reconstruct + accept. A capped % with
+  // cap !== 100 is ambiguous (normalise /cap vs extractor/display /100) → fail
+  // closed at all layers. Driven validator + handler + narration.
+  // -----------------------------------------------------------------
+  describe('legacy percentage factor (value-only) — scale-contract parity', () => {
+    function pctGraph(observed: Record<string, unknown>): GraphV3T {
+      const graph = buildD1Fixture();
+      graph.nodes.push({
+        id: 'f-pct-legacy',
+        kind: 'factor',
+        label: 'Legacy churn',
+        observed_state: observed as never,
+      });
+      return graph;
+    }
+    for (const ok of [
+      { label: 'no cap (extractor value=raw/100)', state: { value: 0.04, unit: '%' } },
+      { label: 'cap === 100', state: { value: 0.04, unit: '%', cap: 100 } },
+    ]) {
+      it(`${ok.label} → increase 1% on value-only 4% factor accepts + computes 5%`, async () => {
+        const graph = pctGraph(ok.state); // = 4%, no raw_value
+        const lookup = makeLookup(graph);
+        const proposal = makeProposal({
+          entityId: 'f-pct-legacy',
+          value: { value: 1, unit: '%' },
+          operator: 'increase',
+        });
+        expect(validateToolCall(proposal, lookup, HANDLER_VALIDATION_REGISTRY).valid).toBe(true);
+        const outcome = await handler(buildInvocation(graph, proposal));
+        const node = (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-pct-legacy');
+        expect(node?.observed_state?.raw_value).toBe(5);
+        expect(outcome.assistant_text).toBe('Updated Legacy churn from 4% to 5%.');
+      });
+    }
+    for (const observed of [
+      { label: 'cap === 50 (ambiguous divisor)', state: { value: 0.1, unit: '%', cap: 50 } },
+    ]) {
+      it(`${observed.label} → increase fails closed at validator AND handler (no corruption)`, async () => {
+        const graph = pctGraph(observed.state);
+        const lookup = makeLookup(graph);
+        const proposal = makeProposal({
+          entityId: 'f-pct-legacy',
+          value: { value: 1, unit: '%' },
+          operator: 'increase',
+        });
+        const validation = validateToolCall(proposal, lookup, HANDLER_VALIDATION_REGISTRY);
+        expect(validation.valid).toBe(false);
+        if (!validation.valid) {
+          expect(validation.error.details?.rejection_reason).toBe('delta_no_existing_value');
+        }
+        await expect(handler(buildInvocation(graph, proposal))).rejects.toBeInstanceOf(
+          HandlerInvocationFailedError,
+        );
+      });
     }
   });
 });

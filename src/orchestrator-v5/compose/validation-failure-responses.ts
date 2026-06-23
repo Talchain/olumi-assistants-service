@@ -301,6 +301,44 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
     };
   }
 
+  // Value/unit honesty (set_factor_value): a bare number below 1 on a
+  // factor that has a unit reads as a normalised proportion, not a value
+  // in that unit. The predicate refused it before mutating; clarify
+  // honestly without ever rendering the misleading "£0.3". Unit-aware and
+  // NOT currency-specific — `details.unit` is a short symbol ('£', '%',
+  // 'people') threaded by the validator. Falls back to unit-neutral copy
+  // if the unit is somehow absent.
+  if (readString(details.rejection_reason) === 'bare_ratio_on_unit_factor') {
+    const unit = readString(details.unit);
+    const isPercent = unit === '%';
+    const valuePhrase = !unit
+      ? 'the value to use'
+      : isPercent
+        ? 'a percentage'
+        : `a value in ${sanitiseForUser(unit)}`;
+    const askPhrase = !unit
+      ? 'Tell me the value you want, with its unit (for example £6,000, 5%, or 12 months)'
+      : isPercent
+        ? 'Tell me the percentage you want'
+        : `Tell me the amount in ${sanitiseForUser(unit)} you want`;
+    return {
+      body: {
+        assistant_text:
+          `That looks like a proportion rather than ${valuePhrase}, so I ` +
+          `haven't changed anything. ${askPhrase}, and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-supply-ratio-value'),
+            label: 'Tell me the value',
+            message: `Use a specific value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_bare_ratio_on_unit_factor',
+      chip_type: 'text_prompt',
+    };
+  }
+
   const constraint = sanitiseForUser(details.constraint_description ?? 'a valid value');
   const actual = sanitiseForUser(details.actual_value);
   // V5 edit_graph P0 (task_99f83f0d) — kill the "You gave unknown." leak.
