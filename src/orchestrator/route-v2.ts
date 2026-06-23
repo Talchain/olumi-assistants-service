@@ -524,6 +524,10 @@ function sendFinalised200(
       const contextSummary: V5ContextSummary = buildV5ContextSummary({
         canonicalState: canonical,
         graphCounts: summariseGraphCounts(ctx.graph),
+        // Second gate (default-off) for the redacted, hash-free
+        // `coaching_state_pack` sub-block — diagnostic-only, never read by
+        // prompt/chip/product logic.
+        includeCoachingState: config.cee.coachingStatePackEnabled,
       });
       const augmented: OlumiResponseWithDebugFields = {
         ...wireBody,

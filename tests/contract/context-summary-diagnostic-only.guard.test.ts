@@ -92,3 +92,44 @@ describe('`_context_summary` is diagnostic-only (static guard)', () => {
     }
   });
 });
+
+/**
+ * The `coaching_state_pack` sub-block of `_context_summary` is held to the same
+ * contract: it is a redacted diagnostic ONLY, never a product signal. The
+ * wire literal must appear in exactly one diagnostic-plane file — the builder
+ * that defines + attaches it. (It is deliberately named `coaching_state_pack`,
+ * NOT `coaching_state`, to stay disjoint from the unrelated coaching-lifecycle
+ * `coaching_state` feature; the route gates it via the camelCase
+ * `includeCoachingState` / `coachingStatePackEnabled`, so this scan is precise.)
+ */
+const COACHING_WIRE_KEY = 'coaching_state_pack';
+const COACHING_ALLOWLIST = new Set<string>([
+  'orchestrator-v5/context/build-context-summary.ts', // defines + attaches the sub-block
+  'orchestrator/route-v2.ts', // the second (default-off) gate, in a comment
+  'config/index.ts', // the CEE_COACHING_STATE_PACK_ENABLED flag doc
+]);
+
+describe('`coaching_state_pack` is diagnostic-only (static guard)', () => {
+  it('appears only in the allowlisted diagnostic-plane builder', () => {
+    const offenders: string[] = [];
+    for (const file of walkTsFiles(SRC_ROOT)) {
+      const text = readFileSync(file, 'utf8');
+      if (!text.includes(COACHING_WIRE_KEY)) continue;
+      const rel = relative(SRC_ROOT, file).split('\\').join('/');
+      if (!COACHING_ALLOWLIST.has(rel)) offenders.push(rel);
+    }
+    expect(
+      offenders,
+      `'${COACHING_WIRE_KEY}' must not be read outside the diagnostic plane. ` +
+        `Unexpected files: ${offenders.join(', ')}. The coaching pack is a ` +
+        `diagnostic sub-block; no prompt / chip / coaching / handler path may read it.`,
+    ).toEqual([]);
+  });
+
+  it('allowlist entry still references the key (no stale allowlisting)', () => {
+    for (const rel of COACHING_ALLOWLIST) {
+      const text = readFileSync(join(SRC_ROOT, rel), 'utf8');
+      expect(text.includes(COACHING_WIRE_KEY), `${rel} no longer mentions ${COACHING_WIRE_KEY}`).toBe(true);
+    }
+  });
+});

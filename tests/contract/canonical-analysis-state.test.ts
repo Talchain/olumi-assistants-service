@@ -20,7 +20,9 @@ import { deriveAnalysisFreshness } from '../../src/orchestrator-v5/context/fresh
 import {
   selectCanonicalAnalysisState,
   summariseCanonicalAnalysisState,
+  summariseCoachingStatePack,
   CANONICAL_ANALYSIS_STATE_VERSION,
+  type CoachingStatePack,
   type ReadinessLike,
 } from '../../src/orchestrator-v5/context/canonical-analysis-state.js';
 import type { AnalysisBlockerT } from '../../src/schemas/analysis-ready.js';
@@ -404,5 +406,174 @@ describe('summariseCanonicalAnalysisState — redaction (counts only)', () => {
     expect(serialised).not.toContain('factor_label');
     expect(serialised).not.toContain('Factor X');
     expect('blockers' in (summary as unknown as Record<string, unknown>)).toBe(false);
+  });
+});
+
+// ─── Coaching state pack (hash-free, non-execute foundation) ──────────────
+
+const COACHING_PACK_KEYS = [
+  'analysis_present',
+  'freshness',
+  'readiness_status',
+  'rerun_required',
+  'usable_for_prose',
+  'usable_for_chips',
+  'blocked',
+  'actionable_blocker_count',
+].sort();
+
+describe('summariseCoachingStatePack — redacted, hash-free coaching pack', () => {
+  it('exposes EXACTLY the allowed closed-enum/boolean/count keys', () => {
+    const state = selectCanonicalAnalysisState({
+      priorFacts: chain(mkRunAnalysisFact({ graph_hash_at_run: HASH_A })),
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    const pack = summariseCoachingStatePack(state);
+    expect(Object.keys(pack).sort()).toEqual(COACHING_PACK_KEYS);
+  });
+
+  it('carries NO hashes, indices, degraded status, contradiction codes, values, units or text', () => {
+    // Stale + actionable-blocker + degraded-newer state: a "busy" canonical
+    // state whose summary carries hashes/index/degraded/contradiction — the
+    // pack must drop ALL of them.
+    const state = selectCanonicalAnalysisState({
+      priorFacts: chain(
+        mkRunAnalysisFact({ graph_hash_at_run: HASH_A, computed_at: '2026-04-30T01:00:00.000Z' }),
+        mkRunAnalysisFact({ status: 'failed', computed_at: '2026-04-30T02:00:00.000Z' }),
+      ),
+      currentGraphHash: HASH_B, // diverged → stale
+      readiness: { status: 'ready', goal_node_id: 'goal', blockers: [mkBlocker('missing_value')] },
+    });
+    const pack = summariseCoachingStatePack(state);
+    const serialised = JSON.stringify(pack);
+
+    // Forbidden keys are absent.
+    for (const k of [
+      'graph_hash_at_run',
+      'current_graph_hash',
+      'selected_fact_index',
+      'degraded_fact_status',
+      'contradiction_codes',
+      'blockers',
+      'model_adjustments',
+      'goal_node_id',
+    ]) {
+      expect(k in (pack as unknown as Record<string, unknown>)).toBe(false);
+    }
+    // No hash-shaped strings (12+ hex). HASH_A/HASH_B must not leak.
+    expect(serialised).not.toMatch(/[0-9a-f]{12,}/i);
+    expect(serialised).not.toContain(HASH_A);
+    expect(serialised).not.toContain(HASH_B);
+    // No free text / blocker prose.
+    expect(serialised).not.toContain('needs attention');
+    // Every value is a closed enum, boolean or number — never an arbitrary string.
+    for (const [key, value] of Object.entries(pack)) {
+      if (key === 'freshness') {
+        expect(['fresh', 'stale', 'unknown', 'none']).toContain(value);
+      } else if (key === 'readiness_status') {
+        expect(value === null || typeof value === 'string').toBe(true);
+      } else if (key === 'actionable_blocker_count') {
+        expect(typeof value).toBe('number');
+      } else {
+        expect(typeof value).toBe('boolean');
+      }
+    }
+  });
+
+  it('predicate fidelity: pack mirrors the canonical predicates the rest of the system reads', () => {
+    const state = selectCanonicalAnalysisState({
+      priorFacts: chain(mkRunAnalysisFact({ graph_hash_at_run: HASH_A })),
+      currentGraphHash: HASH_B, // stale
+      readiness: READY,
+    });
+    const pack: CoachingStatePack = summariseCoachingStatePack(state);
+    expect(pack.analysis_present).toBe(state.selected_fact_index !== null);
+    expect(pack.freshness).toBe(state.freshness);
+    expect(pack.readiness_status).toBe(state.status);
+    expect(pack.rerun_required).toBe(state.requiresRerun);
+    expect(pack.usable_for_prose).toBe(state.usableForProse);
+    expect(pack.usable_for_chips).toBe(state.usableForChips);
+    expect(pack.blocked).toBe(state.blockedUnusable);
+  });
+});
+
+// ─── Non-execute verdict honesty (Codex correctness claim #1) ──────────────
+//
+// The finalizeRun fallback assembles the canonical state with `handlerFacts:
+// []` + `priorFacts: context.prior_facts`. These tests prove that shape yields
+// an HONEST verdict that reflects PRE-EXISTING analysis without inventing a
+// current-turn fact.
+
+describe('non-execute assembly shape — handlerFacts:[] + priorFacts honesty', () => {
+  it('a prior fresh fact is selected (analysis_present) — not invented, just observed', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [], // non-execute: this turn produced no analysis fact
+      priorFacts: chain(mkRunAnalysisFact({ graph_hash_at_run: HASH_A })),
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    expect(state.selected_fact_index).not.toBeNull();
+    expect(state.freshness).toBe('fresh');
+    expect(summariseCoachingStatePack(state).analysis_present).toBe(true);
+  });
+
+  it('no prior fact → freshness none, analysis_present false (never fabricates a current-turn fact)', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [],
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    expect(state.freshness).toBe('none');
+    expect(state.selected_fact_index).toBeNull();
+    expect(summariseCoachingStatePack(state).analysis_present).toBe(false);
+  });
+
+  it('handlerFacts:[] + priorFacts:[f] === handlerFacts:[f] + priorFacts:[] (empty current is a true no-op)', () => {
+    const f = mkRunAnalysisFact({ graph_hash_at_run: HASH_A, computed_at: '2026-04-30T01:00:00.000Z' });
+    const asPrior = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [f],
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    const asCurrent = selectCanonicalAnalysisState({
+      handlerFacts: [f],
+      priorFacts: [],
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    expect(summariseCoachingStatePack(asPrior)).toEqual(summariseCoachingStatePack(asCurrent));
+  });
+
+  it('stale prior analysis is NOT treated as fresh — rerun required, chips withheld', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: chain(mkRunAnalysisFact({ graph_hash_at_run: HASH_A })),
+      currentGraphHash: HASH_B, // graph diverged since the run
+      readiness: READY,
+    });
+    const pack = summariseCoachingStatePack(state);
+    expect(pack.freshness).toBe('stale');
+    expect(pack.rerun_required).toBe(true);
+    expect(pack.usable_for_chips).toBe(false);
+    expect(pack.usable_for_prose).toBe(true); // stale prose is allowed (caveated)
+  });
+
+  it('degraded prior fact newer than the selected success → rerun required, chips withheld', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: chain(
+        mkRunAnalysisFact({ graph_hash_at_run: HASH_A, computed_at: '2026-04-30T01:00:00.000Z' }),
+        mkRunAnalysisFact({ status: 'failed', computed_at: '2026-04-30T02:00:00.000Z' }),
+      ),
+      currentGraphHash: HASH_A,
+      readiness: READY,
+    });
+    expect(state.contradictions).toContain('fact_status_success_but_degraded_newer');
+    const pack = summariseCoachingStatePack(state);
+    expect(pack.rerun_required).toBe(true);
+    expect(pack.usable_for_chips).toBe(false);
   });
 });

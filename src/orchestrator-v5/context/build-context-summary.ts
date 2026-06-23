@@ -39,8 +39,12 @@
 import type {
   AnalysisStateSummary,
   CanonicalAnalysisState,
+  CoachingStatePack,
 } from './canonical-analysis-state.js';
-import { summariseCanonicalAnalysisState } from './canonical-analysis-state.js';
+import {
+  summariseCanonicalAnalysisState,
+  summariseCoachingStatePack,
+} from './canonical-analysis-state.js';
 
 export const V5_CONTEXT_SUMMARY_VERSION = '1.0.0';
 
@@ -67,6 +71,15 @@ export interface V5ContextSummary {
   readonly recent_change_count: number | null;
   /** Whether capabilities were present in the context, or null if not threaded. */
   readonly capabilities_present: boolean | null;
+  /**
+   * Redacted, hash-free coaching/non-execute state pack. OMITTED entirely
+   * unless the caller opts in (route gates on `coachingStatePackEnabled` AND
+   * the enclosing `contextSummaryEnabled`). Absent → the coaching pack is
+   * disabled at this surface; never read by any prompt / chip / product path.
+   * Named `coaching_state_pack` (not `coaching_state`) to stay disjoint from
+   * the unrelated coaching-lifecycle `coaching_state` feature.
+   */
+  readonly coaching_state_pack?: CoachingStatePack;
 }
 
 /** Minimal structural graph view for counting — content is never read. */
@@ -106,6 +119,12 @@ export interface BuildV5ContextSummaryInput {
   readonly recentTurnCount?: number | null;
   readonly recentChangeCount?: number | null;
   readonly capabilitiesPresent?: boolean | null;
+  /**
+   * Opt-in for the redacted `coaching_state_pack` sub-block. The caller sets
+   * this from `config.cee.coachingStatePackEnabled`; the module performs the
+   * (pure) projection. When falsy, `coaching_state_pack` is OMITTED.
+   */
+  readonly includeCoachingState?: boolean;
 }
 
 /**
@@ -123,5 +142,10 @@ export function buildV5ContextSummary(
     recent_turn_count: input.recentTurnCount ?? null,
     recent_change_count: input.recentChangeCount ?? null,
     capabilities_present: input.capabilitiesPresent ?? null,
+    // Diagnostic-only, double-gated: only present when the caller opts in
+    // (route requires BOTH contextSummaryEnabled + coachingStatePackEnabled).
+    ...(input.includeCoachingState
+      ? { coaching_state_pack: summariseCoachingStatePack(input.canonicalState) }
+      : {}),
   };
 }
