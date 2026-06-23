@@ -16,6 +16,8 @@
  * chip-click integration suite.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -225,6 +227,9 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
           factor_sensitivity: [{ factor_id: 'fac_x', influence_score: 0.5 }],
           robustness: { level: 'fragile', fragile_edges: [] },
           results: [{ option_id: 'opt_a' }],
+          // Recovered top-level science field (kept): carries an honest
+          // `flip_value: null` that must survive verbatim, not be coerced.
+          flip_thresholds: [{ factor_id: 'fac_x', flip_value: null }],
         };
     if (!opts?.onlyLeak && opts?.withDecisionReview !== false) {
       enrichment.decision_review = { narrative_summary: 'ok' };
@@ -238,7 +243,6 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     enrichment.downstream_calls = { isl: [{ request_payload: { graph: { nodes: [] } } }] };
     enrichment.graph = { nodes: [] };
     enrichment.critiques = [{ code: 'MONTE_CARLO_FAILED', message: 'internal' }];
-    enrichment.flip_thresholds = [{ factor_id: 'fac_x', flip_value: null }];
     return {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -275,12 +279,13 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const block = analysisResultBlockFor(richRunAnalysisFact(), { currentTurn: false });
     expect(block).toBeDefined();
     const enr = block!.enrichment ?? {};
-    // Only panel-aware keep-list fields survive.
+    // Only panel-aware keep-list fields survive. `flip_thresholds` is now a
+    // recovered top-level science field (kept), not a dropped leak carrier.
     expect(Object.keys(enr).sort()).toEqual([
-      'decision_review', 'factor_sensitivity', 'option_comparison', 'results', 'robustness',
+      'decision_review', 'factor_sensitivity', 'flip_thresholds', 'option_comparison', 'results', 'robustness',
     ]);
-    // Leak carriers dropped.
-    for (const k of ['_meta', 'meta', 'm1_coaching', 'decision_brief', 'fact_objects', 'downstream_calls', 'graph', 'critiques', 'flip_thresholds']) {
+    // Leak carriers dropped (flip_thresholds is no longer in this set).
+    for (const k of ['_meta', 'meta', 'm1_coaching', 'decision_brief', 'fact_objects', 'downstream_calls', 'graph', 'critiques']) {
       expect(k in enr).toBe(false);
     }
     // No leak markers survive ANYWHERE in the kept enrichment.
@@ -296,7 +301,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const block = analysisResultBlockFor(richRunAnalysisFact({ withDecisionReview: false }), { currentTurn: false });
     const enr = block!.enrichment ?? {};
     expect(Object.keys(enr).sort()).toEqual([
-      'factor_sensitivity', 'option_comparison', 'results', 'robustness',
+      'factor_sensitivity', 'flip_thresholds', 'option_comparison', 'results', 'robustness',
     ]);
   });
 
@@ -339,6 +344,207 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect('_meta' in enr).toBe(false);
     expect('downstream_calls' in enr).toBe(false);
     expect(JSON.stringify(enr)).not.toContain('[REDACTED]');
+  });
+
+  // V5 — recover four top-level, leak-free PLoT V2 science fields at the
+  // safe-transport keep-list (edge_e_values, inference_warnings, confidence_tier,
+  // flip_thresholds), confirmed top-level against the real captured payload
+  // (tests/fixtures/cross-service/v5-turn.run-analysis.staging.json). Faithful
+  // pass-through only — no semantic reconstruction, no internal rehydration.
+  function factWithEnrichment(enrichment: Record<string, unknown>): RunAnalysisHandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: SOURCE_GRAPH_HASH,
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment,
+      },
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  it('KEEP-LIST (recover): the four top-level science fields survive verbatim when present', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [
+        { edge_id: 'fac_a->out_x', e_value: 1.2, flip_direction: 'decrease', current_mean: 0.65, flip_mean: 0.4 },
+      ],
+      inference_warnings: [{ node_id: 'fac_a', code: 'LOW_SAMPLES', message: 'few samples' }],
+      confidence_tier: 'needs_work',
+      flip_thresholds: [{ factor_id: 'fac_a', flip_value: 0.42, direction: 'decrease' }],
+      // leak carrier must still be dropped
+      _meta: { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } },
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    expect(enr.edge_e_values).toEqual([
+      { edge_id: 'fac_a->out_x', e_value: 1.2, flip_direction: 'decrease', current_mean: 0.65, flip_mean: 0.4 },
+    ]);
+    expect(enr.inference_warnings).toEqual([{ node_id: 'fac_a', code: 'LOW_SAMPLES', message: 'few samples' }]);
+    expect(enr.confidence_tier).toBe('needs_work');
+    expect(enr.flip_thresholds).toEqual([{ factor_id: 'fac_a', flip_value: 0.42, direction: 'decrease' }]);
+    expect('_meta' in enr).toBe(false);
+    expect(JSON.stringify(enr)).not.toContain('[REDACTED]');
+  });
+
+  it('KEEP-LIST (recover): absence is preserved — recovered fields omitted, never fabricated', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    for (const k of ['edge_e_values', 'inference_warnings', 'confidence_tier', 'flip_thresholds']) {
+      expect(k in enr).toBe(false);
+    }
+    // No fabricated 0/null/[]/text snuck in for the absent fields.
+    expect(Object.keys(enr).sort()).toEqual(['option_comparison']);
+  });
+
+  it('KEEP-LIST (recover): empty top-level edge_e_values / inference_warnings are preserved AS empty arrays', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [],
+      inference_warnings: [],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    // Present-but-empty is an honest source state: preserved as [], NOT dropped
+    // to absent and NOT fabricated into content.
+    expect(enr.edge_e_values).toEqual([]);
+    expect(enr.inference_warnings).toEqual([]);
+  });
+
+  it('NO REHYDRATION: populated edge_e_values inside stripped internal carriers is NOT reintroduced when the top level is empty', () => {
+    // Mirrors the real captured payload: top-level edge_e_values is [] while the
+    // populated copy lives only inside _meta / downstream_calls (both stripped).
+    const populated = [
+      { edge_id: 'fac_eng_capacity->out_delivery_throughput', e_value: 1, flip_direction: 'decrease', current_mean: 0.65, flip_mean: 0.401163 },
+    ];
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [],
+      inference_warnings: [],
+      _meta: { payloads: { isl_response: { robustness: { edge_e_values: populated } } } },
+      downstream_calls: { isl: [{ response_payload: { robustness: { edge_e_values: populated } } }] },
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    expect(enr.edge_e_values).toEqual([]);
+    expect('_meta' in enr).toBe(false);
+    expect('downstream_calls' in enr).toBe(false);
+    // The populated internal copy must NOT be surfaced anywhere.
+    expect(JSON.stringify(enr)).not.toContain('fac_eng_capacity->out_delivery_throughput');
+    expect(JSON.stringify(enr)).not.toContain('0.401163');
+  });
+
+  it('CONTRACT GUARD: isl_response / isl_engine carrier keys nested inside a recovered field are deep-stripped (forward guard)', () => {
+    // Review follow-up: today these carriers appear only under already-stripped
+    // _meta.payloads / as a value. This guards the future shape where an upstream
+    // change embeds either carrier KEY directly inside a recovered keep-list
+    // field — they must be stripped while legit science leaves survive.
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      edge_e_values: [
+        {
+          edge_id: 'fac_a->out_x',
+          e_value: 1.2,
+          isl_response: { raw: { secret: 'internal' } },
+          isl_engine: { build: 'isl-v9' },
+        },
+      ],
+      flip_thresholds: [
+        { factor_id: 'fac_a', flip_value: null, isl_engine: 'should-not-ship' },
+      ],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    const ev = enr.edge_e_values as Array<Record<string, unknown>>;
+    // Legit science leaves survive; carrier keys gone at any depth.
+    expect(ev[0]!.edge_id).toBe('fac_a->out_x');
+    expect(ev[0]!.e_value).toBe(1.2);
+    expect('isl_response' in ev[0]!).toBe(false);
+    expect('isl_engine' in ev[0]!).toBe(false);
+    const ft = enr.flip_thresholds as Array<Record<string, unknown>>;
+    expect(ft[0]!.factor_id).toBe('fac_a');
+    expect(ft[0]!.flip_value).toBeNull();
+    expect('isl_engine' in ft[0]!).toBe(false);
+    const enrJson = JSON.stringify(enr);
+    expect(enrJson).not.toContain('isl_response');
+    expect(enrJson).not.toContain('isl_engine');
+    expect(enrJson).not.toContain('internal');
+  });
+
+  it('CROSS-SERVICE CONTRACT: real captured payload — the 4 recovered fields pass through verbatim while every internal carrier is stripped', () => {
+    // Fixture-backed contract anchor over the real cross-service capture (same
+    // fixture used by tests/contract/*). Drives the actual transport with the
+    // raw upstream enrichment so any future shape drift (a recovered field
+    // changing, or a new internal carrier appearing) is caught here.
+    const captured = JSON.parse(
+      readFileSync(
+        new URL(
+          '../../../tests/fixtures/cross-service/v5-turn.run-analysis.staging.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    ) as { blocks: Array<{ enrichment?: Record<string, unknown> }> };
+    const sourceEnrichment = captured.blocks[0]!.enrichment!;
+    expect(sourceEnrichment).toBeDefined();
+
+    const enr = analysisResultBlockFor(factWithEnrichment(sourceEnrichment), { currentTurn: false })!.enrichment ?? {};
+
+    // Faithful pass-through: each recovered field equals its source value
+    // verbatim (edge_e_values/inference_warnings empty [] in this capture;
+    // confidence_tier populated; flip_thresholds populated incl. flip_value:null).
+    expect(enr.edge_e_values).toEqual(sourceEnrichment.edge_e_values);
+    expect(enr.inference_warnings).toEqual(sourceEnrichment.inference_warnings);
+    expect(enr.confidence_tier).toEqual(sourceEnrichment.confidence_tier);
+    expect(enr.flip_thresholds).toEqual(sourceEnrichment.flip_thresholds);
+
+    // The populated internal edge_e_values copy (15 entries under
+    // _meta.payloads.isl_response / downstream_calls) is NOT rehydrated — the
+    // top-level value stays exactly [] as upstream sent it (asserted verbatim
+    // above). (Note: the edge_id strings also appear legitimately in the kept
+    // `robustness.fragile_edges`, so a string-absence check would be wrong —
+    // the verbatim [] equality is the precise no-rehydration proof.)
+
+    // Every internal carrier / deferred field is stripped at transport.
+    for (const k of ['_meta', 'meta', 'downstream_calls', 'fact_objects', 'graph', 'm1_coaching', 'dominant_factor']) {
+      expect(k in enr).toBe(false);
+    }
+    const enrJson = JSON.stringify(enr);
+    // isl_engine lives only under the dropped m1_coaching; [REDACTED] only under
+    // stripped _meta/meta (and is value-scrubbed anywhere). Both must be gone.
+    expect(enrJson.toLowerCase()).not.toContain('isl_engine');
+    expect(enrJson).not.toContain('[REDACTED]');
+  });
+
+  it('NULL PRESERVED: flip_thresholds flip_value:null survives as an honest source null', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      flip_thresholds: [
+        { factor_id: 'fac_eng', factor_label: 'Engineering Capacity', flip_value: null, flip_reason: 'no_effect_within_bounds' },
+      ],
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    expect(enr.flip_thresholds).toEqual([
+      { factor_id: 'fac_eng', factor_label: 'Engineering Capacity', flip_value: null, flip_reason: 'no_effect_within_bounds' },
+    ]);
+    const ft = enr.flip_thresholds as Array<Record<string, unknown>>;
+    expect(ft[0]!.flip_value).toBeNull();
+  });
+
+  it('DEFERRED: m1_coaching (carries isl_engine) and dominant_factor remain unrecovered', () => {
+    const fact = factWithEnrichment({
+      option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
+      confidence_tier: 'needs_work',
+      m1_coaching: { assumptions_ledger: { assumptions: [{ source_service: 'isl_engine' }] } },
+      dominant_factor: 'fac_a',
+    });
+    const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
+    expect(enr.confidence_tier).toBe('needs_work');
+    expect('m1_coaching' in enr).toBe(false);
+    expect('dominant_factor' in enr).toBe(false);
+    expect(JSON.stringify(enr).toLowerCase()).not.toContain('isl_engine');
   });
 
   it('DEDUPE CONSISTENCY: the current-turn run_analysis block and the reused follow-up block carry IDENTICAL enrichment for the same fact', () => {

@@ -308,6 +308,27 @@ const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   // (`conditional_winners` stays a follow-up: valuable but not currently read.)
   'option_comparison_status',
   'conditional_probabilities',
+  // Top-level PLoT V2 science fields, confirmed present at this seam against a
+  // real staging-captured run_analysis payload
+  // (tests/fixtures/cross-service/v5-turn.run-analysis.staging.json) and
+  // leak-free at the top level. Faithful pass-through ONLY: the existing
+  // `undefined`-guard omits them when absent, `[]`/`null` source values are
+  // preserved verbatim (no coercion, no fabricated defaults), and
+  // `stripInternalKeysDeep` still removes any nested internal carrier.
+  //   - `confidence_tier` — top-level scalar (e.g. 'needs_work').
+  //   - `flip_thresholds` — top-level array (distinct from the per-factor
+  //     `results[].factor_sensitivity[].flip_threshold`); entries may carry an
+  //     honest `flip_value: null`, which is preserved as-is.
+  //   - `edge_e_values` / `inference_warnings` — top-level science arrays. NOTE:
+  //     in the captured payload these are EMPTY at the top level; their populated
+  //     copies exist only inside stripped internal carriers (`_meta`,
+  //     `downstream_calls`) and are deliberately NOT rehydrated here. Recovering
+  //     the top-level keys makes transport ready; surfacing populated content is
+  //     an upstream PLoT/Track-S emission follow-up, not a CEE seam change.
+  'edge_e_values',
+  'inference_warnings',
+  'confidence_tier',
+  'flip_thresholds',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
@@ -315,11 +336,16 @@ const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
 // fields carry potentially-valuable coaching signals the frontend does not
 // render today; the value-led coaching contract should decide which to surface
 // (cleaned) rather than this transport shape deciding by omission:
-//   flip_thresholds, decision_quality, improvement_guidance, review_cards,
+//   decision_quality, improvement_guidance, review_cards,
 //   insights, decision_brief, conditional_winners, identifiability,
 //   robustness_synthesis, m1_review, m1_coaching, factor_stability,
-//   edge_sensitivity, confidence_tier.
+//   edge_sensitivity.
 // Tracked as a separate coaching-contract workstream item.
+// NOTE: `confidence_tier` and `flip_thresholds` were previously listed here but
+// are now transported via the keep-list above — proven top-level + leak-free
+// against the real captured payload. `m1_coaching` stays deferred because it
+// carries the internal `isl_engine` provenance token (its cleaned form already
+// ships via `decision_review`).
 
 /**
  * Internal/debug carrier KEYS that must never ship inside a kept field, at any
@@ -330,11 +356,20 @@ const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
  * in debug-on mode, where the response-finaliser's prose scrub is bypassed.
  * NOTE: legitimate science metadata keys like `confidence_provenance` /
  * `confidence_source` are NOT in this set — they are kept structural fields.
+ * `isl_response` (raw ISL HTTP response payload) and `isl_engine` (internal
+ * engine identifier) are forward-guard carrier KEYS (review follow-up): today
+ * they appear only under already-denylisted carriers (`_meta.payloads`) or as a
+ * value, but denylisting them makes the recovered science fields robust if a
+ * future upstream shape nests either carrier directly inside a kept field.
+ * (The `isl_engine` *value* form — `source_service: 'isl_engine'` — is handled
+ * by deferring its only known carrier `m1_coaching`, NOT by broad value-scrub,
+ * which would corrupt legit science labels.)
  */
 const INTERNAL_ENRICHMENT_KEYS: ReadonlySet<string> = new Set([
   '_meta', 'meta', '_diagnostics', 'ceeTrace', 'cee_trace', 'debug',
   'payloads', 'downstream_calls', 'graph', 'graph_hash', 'graph_hash_at_run',
   'feature_flags', 'feature_flags_snapshot', 'lineage', 'seed',
+  'isl_response', 'isl_engine',
 ]);
 
 /**
