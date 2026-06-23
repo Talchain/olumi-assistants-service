@@ -419,6 +419,31 @@ export interface RunTurnExecutorOptions {
 }
 
 /**
+ * Derive canonical readiness from the SAME graph authority the freshness hash
+ * was computed from (`canonicalReadinessGraph`) — NOT the request-derived
+ * `analysisReadyForTurn`. Shared by the post-dispatch execute assembly and the
+ * non-execute `finalizeRun` fallback so both reason over ONE authority; the
+ * diagnostic can never pair a persisted-graph hash with request-derived
+ * readiness under client lag.
+ *
+ * Reuses `requestReadiness` when the authority IS the request graph (the
+ * identical GraphV3 parse + `computeStructuralReadiness` already ran for it);
+ * otherwise parses the authority fresh. `undefined` when there is no parseable
+ * authority (no graph, or an unrecoverable/unparseable persisted graph) → the
+ * canonical status resolves to null, never a false `ready`. Pure.
+ */
+function deriveCanonicalReadiness(
+  canonicalReadinessGraph: unknown,
+  requestGraph: GraphStateIngress | null,
+  requestReadiness: NonNullable<GraphPatchBlockData['analysis_ready']> | undefined,
+): NonNullable<GraphPatchBlockData['analysis_ready']> | undefined {
+  if (canonicalReadinessGraph === requestGraph) return requestReadiness;
+  if (canonicalReadinessGraph == null) return undefined;
+  const parsed = GraphV3.safeParse(canonicalReadinessGraph);
+  return parsed.success ? computeStructuralReadiness(parsed.data) : undefined;
+}
+
+/**
  * Run a single V5 turn end-to-end. Always returns a well-formed
  * OlumiResponse; internal runtime failures map to a typed response with an
  * ErrorBlock — never thrown past this function.
@@ -4909,23 +4934,16 @@ export async function runTurnExecutor(
       // unrecoverable / unparseable, or no graph) → canonical status null, never
       // a false `ready`. `analysisReadyForTurn` is left UNCHANGED for the wire /
       // chip behaviour.
-      const canonicalReadinessForRun: typeof analysisReadyForTurn =
-        // Optimisation: on cold-start the readiness authority IS the request
-        // graph, for which `analysisReadyForTurn` already ran the identical
-        // GraphV3 parse + computeStructuralReadiness — reuse it instead of
-        // recomputing (avoids the redundant parse, including when the
-        // diagnostic flag is off). Otherwise (persisted/canonical graph under
-        // client lag, or the post-mutation graph) derive fresh from that
-        // authority; undefined when it cannot be parsed.
-        canonicalReadinessGraphForRun === graphStateForTurn
-          ? analysisReadyForTurn
-          : ((): typeof analysisReadyForTurn => {
-              if (canonicalReadinessGraphForRun == null) return undefined;
-              const parsedForReadiness = GraphV3.safeParse(canonicalReadinessGraphForRun);
-              return parsedForReadiness.success
-                ? computeStructuralReadiness(parsedForReadiness.data)
-                : undefined;
-            })();
+      // Readiness from the same authority as the freshness hash (see
+      // deriveCanonicalReadiness). On cold-start the authority IS the request
+      // graph, so `analysisReadyForTurn` (the identical parse) is reused;
+      // otherwise the persisted/canonical or post-mutation graph is parsed
+      // fresh. Shared verbatim with the non-execute finalise fallback.
+      const canonicalReadinessForRun = deriveCanonicalReadiness(
+        canonicalReadinessGraphForRun,
+        graphStateForTurn,
+        analysisReadyForTurn,
+      );
       canonicalStateForRun = selectCanonicalAnalysisState({
         handlerFacts: handlerFactsForCommit,
         priorFacts: context.prior_facts,
@@ -5775,15 +5793,52 @@ export async function runTurnExecutor(
         }
       }
     }
+    // Non-execute shared-state foundation: every non-execute exit (clarify,
+    // converse, coaching, recovery, explanation) finalises BEFORE the
+    // post-dispatch execute assembly, so `canonicalStateForRun` is still
+    // undefined here. Assemble it now from the SAME graph authority + fact
+    // chain the routing freshness used, so non-execute turns get a
+    // graph-authority-consistent verdict (with degraded detection over prior
+    // facts) instead of route-v2's partial freshness-only fallback. Read-only /
+    // diagnostic — surfaced ONLY via the route's flag-gated context-summary
+    // diagnostic; `analysisReadyForTurn` (wire/chips) and dispatch are untouched.
+    //
+    //   - `handlerFacts: []`  — a non-execute turn dispatched no mutation/run
+    //     handler, so it produced NO current-turn analysis facts. The verdict
+    //     is derived purely from `priorFacts` (existing persisted analysis,
+    //     incl. any degraded run); we never invent a current-turn fact.
+    //   - `freshness !== null` — mirrors route-v2's `ctx.freshness !== undefined`
+    //     gate. `freshness` is null ONLY before the routing-freshness derivation
+    //     runs (the same point `currentAnalysisGraphHashForTurn` is computed),
+    //     so an early exit (e.g. the graph-drift hard-fail) stays honestly
+    //     absent. Once derived, `freshness` is non-null even when its verdict is
+    //     `unknown`, so "state unknown" still assembles an honest unknown
+    //     verdict — distinct from "no state derived yet" (skipped). No path
+    //     fabricates freshness/readiness; both come from the real fact chain +
+    //     hash via deriveAnalysisFreshness / deriveCanonicalReadiness.
+    if (canonicalStateForRun === undefined && freshness !== null) {
+      canonicalStateForRun = selectCanonicalAnalysisState({
+        handlerFacts: [],
+        priorFacts: context.prior_facts,
+        readiness: deriveCanonicalReadiness(
+          canonicalReadinessGraphForRun,
+          graphStateForTurn,
+          analysisReadyForTurn,
+        ),
+        currentGraphHash: currentAnalysisGraphHashForTurn,
+      });
+    }
     return {
       response,
       analysisReady: analysisReadyForTurn,
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),
       ...(coachingDelivery ? { coachingDelivery } : {}),
-      // V5 M5 read-only canonical state for the route's flag-gated redacted
-      // context-summary diagnostic. Absent on paths that finalise before the
-      // post-dispatch assembly (route-v2 falls back to the partial state).
+      // V5 read-only canonical state for the route's flag-gated redacted
+      // context-summary diagnostic. Present on execute turns (post-dispatch
+      // assembly) AND non-execute turns (the finalise fallback above); absent
+      // only on early exits before routing freshness is derived (route-v2 then
+      // falls back to its partial freshness-only state).
       ...(canonicalStateForRun ? { canonicalState: canonicalStateForRun } : {}),
       // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
       // so wire label resolution matches the durable-text scrub at commit.
