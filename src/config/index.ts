@@ -555,6 +555,19 @@ const ConfigSchema = z.object({
     // product behaviour. Reserved as the single seam for a future,
     // separately-approved LLM-facing behavioural-activation step.
     coachingStatePackEnabled: booleanString.default(false),
+    // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED — first
+    // narrow coaching activation on the trust path). When true, the turn-executor
+    // injects a redacted, hash-free `coaching_context` pack (the 8
+    // CoachingStatePack closed-enum / boolean / count fields, pinned to the live
+    // `deriveAnalysisFreshness` verdict) into the LLM routing prompt for coaching
+    // turns, and a deterministic post-check degrades coaching prose that would
+    // present stale / unknown / blocked analysis as current or give confident
+    // directional advice under unsafe state. Default OFF; flag-off is
+    // byte-identical (no pack injected, no post-check invoked, no prompt / prose /
+    // chip change, no new telemetry). Distinct from CEE_COACHING_CONTEXT_ENABLED
+    // (the always-on coaching policy engine) and CEE_COACHING_STATE_PACK_ENABLED
+    // (the diagnostic-only `_context_summary` sub-block).
+    coachingContextPromptEnabled: booleanString.default(false),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
@@ -960,6 +973,7 @@ function parseConfig(): Config {
       analysisReadyGuardEnabled: env.CEE_RUN_ANALYSIS_READY_GUARD,
       contextSummaryEnabled: env.CEE_CONTEXT_SUMMARY_ENABLED,
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
+      coachingContextPromptEnabled: env.CEE_COACHING_CONTEXT_PROMPT_ENABLED,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
       promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
       fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,

@@ -214,6 +214,37 @@ const AnalysisStateSummarySchema = z
   })
   .strict();
 
+/**
+ * Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED). The
+ * hash-free, prompt-safe projection of the canonical analysis state the LLM
+ * may RECEIVE for coaching (never author). Strictly narrower than
+ * `AnalysisStateSummarySchema`: closed enums / booleans / one count only — no
+ * hashes, indices, `freshness_reason`, `degraded_fact_status`, or
+ * contradiction codes. Mirrors `CoachingStatePack` in
+ * `./canonical-analysis-state.ts`. `.strict()` so a hash/value/label field can
+ * never silently appear in the prompt-facing pack without review.
+ */
+const CoachingStatePackSchema = z
+  .object({
+    analysis_present: z.boolean(),
+    freshness: z.enum(['fresh', 'stale', 'unknown', 'none']),
+    readiness_status: z
+      .enum([
+        'ready',
+        'needs_user_mapping',
+        'needs_encoding',
+        'needs_user_input',
+        'blocked',
+      ])
+      .nullable(),
+    rerun_required: z.boolean(),
+    usable_for_prose: z.boolean(),
+    usable_for_chips: z.boolean(),
+    blocked: z.boolean(),
+    actionable_blocker_count: z.number().int().nonnegative(),
+  })
+  .strict();
+
 export const ContextPackSchema = z
   .object({
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
@@ -246,6 +277,14 @@ export const ContextPackSchema = z
      * compacted-graph path before M5 threads the authoritative verdict).
      */
     analysis_state: AnalysisStateSummarySchema.nullable(),
+    /**
+     * Coaching Context Pack v1 (additive, flag-gated by
+     * CEE_COACHING_CONTEXT_PROMPT_ENABLED). Present ONLY when the behaviour
+     * flag is on; absent otherwise (flag-off byte-identity). Unlike
+     * `analysis_state` this projection IS prompt-safe (hash-free), so it is
+     * the only canonical-state surface allowed to reach the LLM.
+     */
+    coaching_context: CoachingStatePackSchema.optional(),
   })
   // Allow additive fields without immediate schema bumps — tighten later
   // by switching to `.strict()` once the contract is fully fixed.

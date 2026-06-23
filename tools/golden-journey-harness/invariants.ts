@@ -15,8 +15,11 @@
  * two cannot drift in spirit.
  *
  * Dispatch guardrails baked in:
- *   #1 A1 is PROVISIONAL (marked on every A1 finding) until the
- *      canonical-state lane finalises the coherence contract.
+ *   #1 A1 is PROVISIONAL (marked on most A1 findings) until the
+ *      canonical-state lane finalises the coherence contract — EXCEPT the
+ *      deterministic stale-as-fresh finding (Contradiction 2), which is
+ *      GATING and wire-grounded to the live `deriveAnalysisFreshness` verdict
+ *      (Coaching Context Pack v1). See `a1AnalysisCoherence`.
  *   #4 Missing observability (no trace / no `current_graph_hash`) →
  *      `inconclusive` AND a high-severity Component-6 finding, never a
  *      silent pass.
@@ -107,6 +110,15 @@ export function a1AnalysisCoherence(obs: TurnObservation): Finding[] {
 
   // Contradiction 2: graph diverged (stale) but the turn presents results
   // without any staleness caveat or rerun affordance → stale-as-fresh.
+  //
+  // GATING (Coaching Context Pack v1): unlike the rest of A1 (provisional /
+  // advisory while the coherence contract settles), this single finding is a
+  // hard gate. It is wire-grounded to the live `deriveAnalysisFreshness`
+  // verdict — `getFreshness` reads `analysis_ready.freshness`, which the route
+  // stamps from `ctx.freshness` (the runtime derivation), so the harness gate
+  // and the deployed runtime agree on what "stale" means (no test-local
+  // staleness notion). Stale-as-fresh is deterministic and safety-critical, so
+  // it is NOT LLM-variance-prone like the semantic A1 checks → no `provisional`.
   if (freshness === 'stale' && !denial && !hasStalenessSignal(obs.body)) {
     return [
       makeFinding(
@@ -114,7 +126,7 @@ export function a1AnalysisCoherence(obs: TurnObservation): Finding[] {
         'fail',
         'high',
         `analysis_ready.freshness="stale" but no staleness caveat or rerun chip — stale results presented as fresh`,
-        { step: obs.step, provisional: true },
+        { step: obs.step },
       ),
     ];
   }

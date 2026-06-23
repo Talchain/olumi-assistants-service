@@ -74,7 +74,7 @@ const ASSISTANT_TEXT =
  * turn-executor.ts:1277–1284 (the what_would_flip stale recovery path)
  * so the run_analysis chip looks identical to other rerun nudges.
  */
-const RERUN_ACTION: StaleRerunSuggestedAction = Object.freeze({
+export const RERUN_ACTION: StaleRerunSuggestedAction = Object.freeze({
   id: 'chip_action_rerun_analysis',
   label: 'Re-run analysis',
   message: 'Re-run the analysis.',

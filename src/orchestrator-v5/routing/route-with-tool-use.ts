@@ -766,14 +766,34 @@ function buildUserMessage(contextPack: ContextPack, message: string): string {
   void _rawGraph;
   void _analysisState;
   const llmFacing = { ...rest, analysis: display_analysis, graph: display_graph };
-  return [
-    '## ContextPack',
-    JSON.stringify(llmFacing, null, 2),
-    '',
-    '## User turn',
-    message,
-  ].join('\n');
+  const parts: string[] = ['## ContextPack', JSON.stringify(llmFacing, null, 2)];
+  // Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): a narrow,
+  // additive receive-vs-author instruction, appended ONLY when the deterministic
+  // `coaching_context` pack was injected (flag on). Flag-off → the field is
+  // absent → this block is skipped → the serialised prompt is byte-identical to
+  // today. The instruction is soft guidance; the hard guarantee is the
+  // deterministic post-check in the turn-executor coaching branches.
+  if (contextPack.coaching_context) {
+    parts.push('', COACHING_CONTEXT_INSTRUCTION);
+  }
+  parts.push('', '## User turn', message);
+  return parts.join('\n');
 }
+
+/**
+ * Narrow receive-vs-author instruction for Coaching Context Pack v1. British
+ * English. Expresses: use the supplied deterministic state as the source of
+ * truth; if the analysis is not current/usable, caveat + suggest re-running
+ * rather than giving confident advice; never invent freshness / confidence /
+ * evidence / values / units / mutation / science; never quote internal fields.
+ */
+const COACHING_CONTEXT_INSTRUCTION = [
+  '## Coaching state (deterministic — authoritative)',
+  'The `coaching_context` block above is the system’s verified state of the analysis. Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',
+  '- If `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not recommend one option over another. Say the analysis may be out of date and suggest re-running it before giving confident advice.',
+  '- Never invent freshness, confidence, evidence, provenance, scientific or bias claims, numeric values or units, and never claim a change was applied. State only what the supplied context or analysis already contains.',
+  '- Never quote hashes, identifiers, or internal field names.',
+].join('\n');
 
 // -----------------------------------------------------------------------
 // Adapter error → RoutingError

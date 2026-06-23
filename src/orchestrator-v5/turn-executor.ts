@@ -183,8 +183,14 @@ import {
 } from './context/freshness.js';
 import {
   selectCanonicalAnalysisState,
+  canonicalStateFromFreshness,
+  summariseCoachingStatePack,
   type CanonicalAnalysisState,
 } from './context/canonical-analysis-state.js';
+import {
+  checkCoachingOutput,
+  buildCoachingDegradeResponse,
+} from './coaching/coaching-output-postcheck.js';
 import { buildFlipProposalEmit, type FactorNodeInfo } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
@@ -645,6 +651,13 @@ export async function runTurnExecutor(
   // `freshness` uses. Outer-let so `finalizeRun` can surface it on the run
   // result; stays undefined until the post-dispatch assembly point.
   let canonicalStateForRun: CanonicalAnalysisState | undefined;
+  // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): the
+  // canonical verdict assembled pre-dispatch for the flag-gated coaching prompt
+  // pack. Reused in the coaching compose branches for the deterministic
+  // post-check + chip threading so the prompt, the enforcement and the chips
+  // read ONE live `deriveAnalysisFreshness` verdict. Null when the flag is off
+  // or freshness was not derived → no pack, no post-check, no chip threading.
+  let coachingPromptCanonical: CanonicalAnalysisState | null = null;
   let proposedHandlerIdForOutcome: string | null = null;
   let currentAnalysisGraphHashForTurn: string | null = null;
   // V5 M5 (read-only / diagnostic): the RAW graph object the freshness hash was
@@ -672,6 +685,47 @@ export async function runTurnExecutor(
   let proposedHandlerIdForLog: string | null = null;
   let sonnetTextForLog = '';
   let contextPackForLog: ContextPack | null = null;
+  /**
+   * V5 Coaching Context Pack v1 — shared deterministic post-check for the two
+   * LLM-authored coaching compose branches (coach / converse). When the
+   * behaviour flag projected a canonical verdict this turn
+   * (`coachingPromptCanonical`), inspect the LLM prose against it; on a boundary
+   * violation, emit `v5.coaching.output_postcheck` and DEGRADE-TO-SAFE — a
+   * verdict-correct deterministic trust response (the #298 stale / unconfirmed /
+   * degraded / absent copy) + the existing `chip_action_rerun_analysis` chip. It
+   * never surgically rewrites the model's prose. When the flag is off
+   * (`coachingPromptCanonical === null`) it is an identity pass-through, so the
+   * coaching branches are byte-identical to today (no post-check, no telemetry).
+   */
+  const applyCoachingOutputGuard = (
+    prose: string,
+    baseChips: readonly SuggestedAction[],
+  ): { assistant_text: string; suggested_actions: readonly SuggestedAction[] } => {
+    if (coachingPromptCanonical === null) {
+      return { assistant_text: prose, suggested_actions: baseChips };
+    }
+    const pack = summariseCoachingStatePack(coachingPromptCanonical);
+    const verdict = checkCoachingOutput(prose, pack);
+    if (verdict.safe) {
+      return { assistant_text: prose, suggested_actions: baseChips };
+    }
+    emit(TelemetryEvents.V5CoachingOutputPostcheck, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      violation: verdict.violation,
+      freshness: pack.freshness,
+      rerun_required: pack.rerun_required,
+      usable_for_chips: pack.usable_for_chips,
+      blocked: pack.blocked,
+    });
+    const degrade = buildCoachingDegradeResponse(pack, {
+      optionCount: contextPackForLog?.graph.counts.options ?? 0,
+    });
+    return {
+      assistant_text: degrade.assistant_text,
+      suggested_actions: [...degrade.suggested_actions],
+    };
+  };
   let cqeSummaryForLog: CqeExtractionSummary | null = null;
   let contextReadiness: ContextReadiness | null = null;
   // Scope C: copy-source delivery diagnostics for the deterministic
@@ -1074,6 +1128,22 @@ export async function runTurnExecutor(
         ? (graphStateForTurn?.goal_constraints ?? null)
         : null;
       const contextPackStartedAt = timingsEnabled ? Date.now() : 0;
+      // Coaching Context Pack v1: project the live `deriveAnalysisFreshness`
+      // verdict (already computed this turn) + readiness into the hash-free,
+      // prompt-safe `CoachingStatePack`. Assembled ONLY when the behaviour flag
+      // is on AND a freshness verdict exists; otherwise the field is omitted so
+      // the assembled pack — and the serialised prompt — is byte-identical to
+      // today. `canonicalStateFromFreshness` is the named pre-dispatch seam the
+      // route fallback also uses; `summariseCoachingStatePack` ignores the
+      // hash / degraded fields it does not carry.
+      if (config.cee.coachingContextPromptEnabled && freshness !== null) {
+        coachingPromptCanonical = canonicalStateFromFreshness(freshness, {
+          readiness: analysisReadyForTurn,
+        });
+      }
+      const coachingContext = coachingPromptCanonical
+        ? summariseCoachingStatePack(coachingPromptCanonical)
+        : undefined;
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
@@ -1089,6 +1159,8 @@ export async function runTurnExecutor(
         analysis: analysisSummary,
         analysisStalenessReason,
         coaching: coachingCache,
+        // Flag-gated, prompt-safe coaching pack (undefined ⇒ field omitted).
+        coachingContext,
       });
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
@@ -5148,6 +5220,10 @@ export async function runTurnExecutor(
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
+        // Coaching Context Pack v1 (carry-in #3): thread the live canonical
+        // verdict so the rerun/explore chips agree with it. Flag-gated —
+        // null when the flag is off ⇒ omitted ⇒ chips byte-identical to today.
+        ...(coachingPromptCanonical ? { canonicalState: coachingPromptCanonical } : {}),
       });
       // Phase 2 workstream A: post-analysis coaching wrapper for the
       // `analyse` stage direct_answer path. Mines the latest fresh
@@ -5170,10 +5246,14 @@ export async function runTurnExecutor(
       // variant in the pinned version, and supabase-store.readFactsFor
       // strict-parses every persisted fact through HandlerFactSchema —
       // an unschemaed row would poison the entire scenario's chain.
+      // Coaching Context Pack v1 deterministic post-check (flag-gated). On a
+      // boundary violation, degrade to a safe rerun response; otherwise pass
+      // the LLM prose + chips through unchanged.
+      const coachGuarded = applyCoachingOutputGuard(sanitised.output, coachComposedChips);
       composedOk = composeDirectAnswerResponse({
-        assistant_text: sanitised.output,
+        assistant_text: coachGuarded.assistant_text,
         stage: context.stage,
-        suggested_actions: coachComposedChips,
+        suggested_actions: coachGuarded.suggested_actions,
       });
       stagesCompleted.push('compose');
     } else {
@@ -5200,6 +5280,10 @@ export async function runTurnExecutor(
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
+        // Coaching Context Pack v1 (carry-in #3): thread the live canonical
+        // verdict so the rerun/explore chips agree with it. Flag-gated —
+        // null when the flag is off ⇒ omitted ⇒ chips byte-identical to today.
+        ...(coachingPromptCanonical ? { canonicalState: coachingPromptCanonical } : {}),
       });
       // Phase 2 workstream A: same wrapper as the coach path. Catches
       // the LLM's text-only direct_answer in `analyse` stage and
@@ -5216,10 +5300,17 @@ export async function runTurnExecutor(
         ? [...converseWrapper.chips, ...converseChips]
         : converseChips;
       // See coach-path comment above re: telemetry-only recovery state.
+      // Coaching Context Pack v1 deterministic post-check (flag-gated). On a
+      // boundary violation, degrade to a safe rerun response; otherwise pass
+      // the LLM prose + chips through unchanged.
+      const converseGuarded = applyCoachingOutputGuard(
+        sanitised.output,
+        converseComposedChips,
+      );
       composedOk = composeDirectAnswerResponse({
-        assistant_text: sanitised.output,
+        assistant_text: converseGuarded.assistant_text,
         stage: context.stage,
-        suggested_actions: converseComposedChips,
+        suggested_actions: converseGuarded.suggested_actions,
       });
       stagesCompleted.push('compose');
     }

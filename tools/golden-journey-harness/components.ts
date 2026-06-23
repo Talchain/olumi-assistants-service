@@ -146,14 +146,22 @@ export function makeFinding(
 /**
  * Advisory invariants are semantic / LLM-variance-prone: a single live fail
  * is NOT a hard regression by itself (the deterministic replay is the stable
- * gate). A5 (coaching grounding) is advisory; A1 is advisory while provisional.
- * The A5 flap probe (5× explain on a constant scenario) reproduced zero thin
- * responses with stable analysis context — consistent with LLM variance — so
- * a lone A5 fail must not hard-gate a live run.
+ * gate). A5 (coaching grounding) is advisory; A1 is advisory while provisional
+ * — EXCEPT its deterministic stale-as-fresh finding (Contradiction 2), which is
+ * emitted WITHOUT `provisional` and therefore gates (Coaching Context Pack v1).
+ * That finding is wire-grounded to the live `deriveAnalysisFreshness` verdict
+ * (`analysis_ready.freshness`), so the harness gate and the runtime agree on
+ * "stale". The A5 flap probe (5× explain on a constant scenario) reproduced
+ * zero thin responses with stable analysis context — consistent with LLM
+ * variance — so a lone A5 fail must not hard-gate a live run.
  */
 export const ADVISORY_INVARIANTS: ReadonlySet<InvariantId> = new Set<InvariantId>(['A5']);
 
-/** True when a finding should be treated as advisory (non-gating). */
+/**
+ * True when a finding should be treated as advisory (non-gating). A1 stays
+ * advisory ONLY while its findings carry `provisional`; the gating stale-as-
+ * fresh finding drops that flag, so it is counted as a hard fail.
+ */
 export function isAdvisoryFinding(f: Finding): boolean {
   return ADVISORY_INVARIANTS.has(f.invariant_id) || f.provisional === true;
 }
