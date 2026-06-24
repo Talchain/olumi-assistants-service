@@ -420,6 +420,34 @@ describe('checkCoachingOutput — label-aware mutation / directional detection',
     }
   });
 
+  it('review round 5: bare imperative recommendations on a known label degrade', () => {
+    for (const prose of ['Choose Plan A.', 'Pick Plan A.', 'Select Plan A.', 'Go for Plan A.']) {
+      expectViolation(checkCoachingOutput(prose, STALE, opts), 'confident_advice_under_unsafe_state');
+    }
+  });
+
+  it('review round 5: "got" and contracted "’s been" passive mutations degrade', () => {
+    for (const prose of [
+      'Pricing got updated.',
+      'Pricing’s been updated.',
+      "Pricing's been changed.",
+      'Pricing is being updated.',
+    ]) {
+      expectViolation(checkCoachingOutput(prose, FRESH, opts), 'invented_mutation_success');
+    }
+  });
+
+  it('review round 5: bare verbs / passive auxiliaries do NOT over-fire without a real claim', () => {
+    // Bare verb with no known label, and label + non-mutation predicate.
+    for (const prose of [
+      'Choose wisely and weigh both sides.',
+      'Pricing got complicated this quarter.',
+      'Pricing’s important to your goal.',
+    ]) {
+      expect(checkCoachingOutput(prose, STALE, opts), prose).toEqual({ safe: true });
+    }
+  });
+
   it('review round 4: label-as-subject judgement does NOT over-fire on non-option superlatives', () => {
     // A factor label as subject of a NON-option superlative is process talk.
     expect(checkCoachingOutput('Pricing is the best metric to track here.', STALE, opts)).toEqual({

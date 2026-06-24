@@ -289,7 +289,11 @@ function buildLabelDetectors(labels: readonly string[] | undefined): LabelDetect
   return {
     verbObject: new RegExp(`^["“”'‘’]?${label}(?![\\w])`),
     subjectMut: new RegExp(
-      `(?<![\\w])["“”'‘’]?${label}["“”'‘’]?(?![\\w])\\s+(?:has\\s+been|have\\s+been|was|were|is\\s+now|are\\s+now)\\s+` +
+      // Two subject forms: an ATTACHED contraction ("Pricing's been updated",
+      // "Plans've been changed"), or a SPACED auxiliary ("Pricing was/got/has
+      // been/is being updated"). Both then take a passive mutation verb.
+      `(?:(?<![\\w])["“”'‘’]?${label}['’](?:s|ve)\\s+been` +
+        `|(?<![\\w])["“”'‘’]?${label}["“”'‘’]?(?![\\w])\\s+(?:has\\s+been|have\\s+been|was|were|got|is\\s+now|are\\s+now|is\\s+being|are\\s+being))\\s+` +
         `(?:updated|chang(?:e|ed)|set|added|created|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|saved|committed)\\b`,
     ),
     subjectJudge: new RegExp(
@@ -318,7 +322,7 @@ const RECOMMEND_VERB_CONTEXT = new RegExp(
     `|(?:let['’]?s|let\\s+us)\\s+(?:go\\s+with|choose|pick|opt\\s+for|select)` +
     `|(?:you|we)\\s+(?:should|['’]d|ought\\s+to|could|may\\s+want\\s+to|need\\s+to|must)\\s+` +
     `(?:choose|pick|go\\s+with|select|opt\\s+for|prefer|favou?r)` +
-    `|(?:go\\s+with|opt\\s+for|stick\\s+with))\\b\\s+` +
+    `|(?:go\\s+with|go\\s+for|opt\\s+for|stick\\s+with|choose|pick|select))\\b\\s+` +
     `(?:(?:going\\s+with|opting\\s+for|sticking\\s+with|the)\\s+)?`,
   'ig',
 );
