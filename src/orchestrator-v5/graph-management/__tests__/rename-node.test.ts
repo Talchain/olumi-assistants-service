@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { classifyProposal } from '../classify-proposal.js';
 import { currentAnalysisHash } from '../base-hash-gate.js';
-import { buildReadyGraph } from './fixtures.js';
+import { buildReadyGraph, buildReadyGraphWithTopLevelOptions } from './fixtures.js';
 import type { RenameNodeProposal } from '../proposal-types.js';
 
 describe('rename_node — would_apply', () => {
@@ -51,5 +51,23 @@ describe('rename_node — would_apply', () => {
     expect(r.verdict).toBe('held');
     expect(r.blocker?.code).toBe('ENTITY_NOT_FOUND');
     expect(r.candidate).toBeUndefined();
+  });
+
+  it('the exposed candidate is fully referentially separate from the input (rich graph: top-level options[])', () => {
+    const graph = buildReadyGraphWithTopLevelOptions();
+    const r = classifyProposal(
+      { kind: 'rename_node', base_graph_hash: currentAnalysisHash(graph), node_id: 'g-profit', new_label: 'Net' },
+      graph,
+    );
+    const cand = r.candidate as { options?: unknown[]; nodes: Array<{ label: string }> };
+
+    // Distinct top-level options[] array (the V5 helper shallow-copies it; the spike deep-clones).
+    expect(cand.options).not.toBe(graph.options);
+
+    // Mutating the candidate must not bleed into the input.
+    (cand.options as unknown[]).push({ id: 'injected' });
+    cand.nodes[0].label = 'MUTATED';
+    expect(graph.options.some((o) => (o as { id?: string }).id === 'injected')).toBe(false);
+    expect(graph.nodes[0].label).toBe('Profit');
   });
 });

@@ -47,7 +47,11 @@ export function buildRenameCandidate(
       node.label = proposal.new_label;
       return { before, after: { label: proposal.new_label } };
     });
-    return { candidate: mutatedGraph };
+    // Deep-clone before exposing: the V5 helper shallow-copies undeclared
+    // top-level fields (e.g. `options`, `meta`), so the returned candidate would
+    // otherwise alias those arrays from the input. Cloning makes the candidate
+    // fully referentially separate (structuredClone handles BigInt etc.).
+    return { candidate: structuredClone(mutatedGraph) };
   } catch (err) {
     return { error: toBlocker(err) };
   }
@@ -90,25 +94,42 @@ export function buildAddOptionCandidate(
       }
       return { before: null, after: { option_id: proposal.option.id } };
     });
-    return { candidate: mutatedGraph };
+    // Deep-clone before exposing: the V5 helper shallow-copies undeclared
+    // top-level fields (e.g. `options`, `meta`), so the returned candidate would
+    // otherwise alias those arrays from the input. Cloning makes the candidate
+    // fully referentially separate (structuredClone handles BigInt etc.).
+    return { candidate: structuredClone(mutatedGraph) };
   } catch (err) {
     return { error: toBlocker(err) };
   }
 }
 
 /**
- * Whether `optionId` is a member of the candidate's TOP-LEVEL options[] array.
- * The persist-base merge keeps options[] base-only, so a genuinely-new option is
- * absent here even though it survives as a node and is analysable by run-analysis
- * (which reads option nodes). That absence — against a graph carrying top-level
- * options[] preferred by the context-pack assembler — is the divergence
- * add_option is held on.
+ * Whether the graph carries a TOP-LEVEL options[] array. This is the add_option
+ * held-reason discriminator: with a top-level options[] present, applying a new
+ * option diverges it (kept base-only by the merge, preferred by the context-pack
+ * assembler) from the node-derived set -> OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE.
+ * Absent -> both consumers fall back to nodes, so there is no divergence and the
+ * hold is ADD_OPTION_APPLY_UNWIRED.
  */
-export function optionPresentInModelState(
-  candidate: Record<string, unknown>,
-  optionId: string,
-): boolean {
-  const options = candidate.options;
+export function graphHasTopLevelOptions(graph: unknown): boolean {
+  return (
+    graph !== null &&
+    typeof graph === 'object' &&
+    Array.isArray((graph as { options?: unknown }).options)
+  );
+}
+
+/**
+ * Whether `optionId` is already a member of the TOP-LEVEL options[] array. Used to
+ * avoid a false divergence claim: if the new id is ALREADY in options[] (e.g. a
+ * phantom options[] entry with no node), adding the node CONVERGES the two views
+ * rather than diverging them — so that case is ADD_OPTION_APPLY_UNWIRED, not
+ * OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE.
+ */
+export function topLevelOptionsContainsId(graph: unknown, optionId: string): boolean {
+  if (graph === null || typeof graph !== 'object') return false;
+  const options = (graph as { options?: unknown }).options;
   if (!Array.isArray(options)) return false;
   return options.some(
     (o) => o !== null && typeof o === 'object' && (o as { id?: unknown }).id === optionId,

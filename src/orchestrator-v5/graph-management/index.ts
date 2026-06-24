@@ -7,8 +7,9 @@ export { checkBaseHash, isStale, currentAnalysisHash, isGraphLike } from './base
 export {
   buildRenameCandidate,
   buildAddOptionCandidate,
-  optionPresentInModelState,
   graphHasNodeId,
+  graphHasTopLevelOptions,
+  topLevelOptionsContainsId,
   type CandidateBuildResult,
 } from './candidate-graph.js';
 export { assessCandidate, ep2VerdictForRepresentable, type Ep2Assessment } from './readiness-parity.js';

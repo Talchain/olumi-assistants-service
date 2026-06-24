@@ -7,16 +7,17 @@
  * boundary contract, so no Zod/OpenAPI schema.
  *
  * Pinned staging facts (origin/staging c382c9da) this spike encodes:
- *  - add_option is HELD-only. NOT because the option is unrepresentable: the new
- *    option survives as a graph NODE through candidate construction and the
- *    persist-base merge, and run-analysis derives its PLoT options from option
- *    NODES (computeStructuralReadiness), so the node IS analysable. It is held
- *    because applying creates a TOP-LEVEL options[] / context divergence:
- *    run-analysis reads node-derived options, while the context-pack assembler
- *    prefers top-level options[] (kept base-only by the persist-base merge), so
- *    consumers disagree about the option set. Resolving the canonical
- *    node <-> options[] contract is the apply-wiring spike's job; this spike
- *    refuses to apply divergent state.
+ *  - add_option NEVER reaches would_apply. It is `held` — or `stale` if its
+ *    base_graph_hash no longer matches the current graph (the INV-1 stale gate
+ *    applies to EVERY kind; a stale proposal is rejected, not applied). The new
+ *    option survives as a graph NODE and is analysable by run-analysis (which
+ *    reads option NODES), so it is NOT unrepresentable. The held REASON is
+ *    accurate to the graph: OPTION_ID_COLLISION (id already a node);
+ *    OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE (a top-level options[] exists and does
+ *    NOT already contain the id, so applying diverges it from the node-derived
+ *    set the context-pack assembler prefers); otherwise ADD_OPTION_APPLY_UNWIRED
+ *    (no divergence, but the apply path / canonical node <-> options[] contract is
+ *    unbuilt). The apply-wiring spike owns these.
  *  - rename_node can reach would_apply (label-only; analysis-hash-neutral).
  *  - EP2 (assessAnalysisReadiness) is the readiness parity target; the canonical
  *    analysis-state selector does not wrap it on this path.
@@ -27,21 +28,36 @@ export type ProposalKind = 'add_option' | 'rename_node';
 export type ProposalVerdict = 'would_apply' | 'held' | 'clarify_required' | 'stale';
 
 /**
- * Held reason for add_option: applying would diverge the top-level options[]
- * from the node-derived option set. The new option survives as a node
- * (analysable by run-analysis, which reads option nodes), but the top-level
- * options[] — preferred by the context-pack assembler — is kept base-only by the
- * persist-base merge. Auto-applying that split state is unsafe; the canonical
- * node <-> options[] contract is deferred to the apply-wiring spike.
+ * Held reason for add_option WHEN the graph carries a top-level options[]:
+ * applying would diverge that array (kept base-only by the persist-base merge,
+ * and preferred by the context-pack assembler) from the node-derived option set
+ * that run-analysis reads. Reserved for graphs that actually have a top-level
+ * options[] — otherwise there is no split (see ADD_OPTION_APPLY_UNWIRED).
  */
 export const OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE =
   'OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE' as const;
 
+/**
+ * Held reason for add_option when the graph has NO top-level options[]: both
+ * run-analysis and the context-pack assembler derive options from nodes, so the
+ * new option would be consistent — but this spike does not build the apply path
+ * (the canonical node <-> options[] persist contract is unresolved). No divergence
+ * is claimed; the option is simply not yet wired for apply.
+ */
+export const ADD_OPTION_APPLY_UNWIRED = 'ADD_OPTION_APPLY_UNWIRED' as const;
+
 /** Held reason: the proposed option id already exists as a node in the graph. */
 export const OPTION_ID_COLLISION = 'OPTION_ID_COLLISION' as const;
 
-/** Held reason: the current graph could not be read as a graph (no nodes array). */
+/** Held reason: the current graph could not be read OR hashed (no nodes array, or hashing threw). */
 export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
+
+/**
+ * Held reason: classification failed unexpectedly (e.g. a Proxy / throwing getter
+ * on the input, or a malformed proposal). Fail-CLOSED — any uncaught error in the
+ * body resolves to this held verdict so classifyProposal never throws.
+ */
+export const CLASSIFY_FAILED = 'CLASSIFY_FAILED' as const;
 
 export interface ProposalBlocker {
   readonly code: string;
@@ -92,6 +108,13 @@ export interface BaseHashCheck {
   readonly expected: string | null;
   readonly actual: string | null;
   readonly match: boolean;
+  /**
+   * False when the current graph could not be hashed — either not graph-like, or
+   * hashing threw (e.g. an unhashable analysis value). MUST be treated as
+   * unreadable (held), NEVER as a matching `null` hash (which is the legitimate
+   * hash of an empty graph). Guards against a fail-open stale gate.
+   */
+  readonly readable: boolean;
 }
 
 export interface ClassificationResult {
