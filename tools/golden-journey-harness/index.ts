@@ -172,8 +172,11 @@ function finishAndExit(input: RunReportInput, redact: (v: unknown) => string): n
     `findings: ${input.findings.length} (fail=${fails} [gating=${gatingFails} advisory=${advisoryFails}] inconclusive=${inconclusive})`,
   );
   // Only GATING fails set a non-zero exit code. Advisory fails (A5 / provisional
-  // A1 — semantic, LLM-variance-prone) are reported but do not hard-gate a single
-  // live run; the deterministic replay is the stable regression gate.
+  // A1 except the wire-grounded stale-as-fresh finding — semantic, LLM-variance-
+  // prone) are reported but do not hard-gate a single live run; the deterministic
+  // replay is the stable regression gate. The A1 stale-as-fresh finding is
+  // emitted WITHOUT `provisional`, so it counts toward `gatingFails` and a
+  // stale-results-presented-as-fresh turn fails the run (Coaching Context Pack v1).
   process.exit(gatingFails > 0 ? 1 : 0);
 }
 

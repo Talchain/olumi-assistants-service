@@ -111,6 +111,72 @@ describe('A1 — analysis coherence (provisional)', () => {
   });
 });
 
+describe('A1 — stale-as-fresh is GATING + wire-grounded (Coaching Context Pack v1)', () => {
+  const staleAsFreshBody: WireBody = {
+    analysis_ready: { status: 'ready', freshness: 'stale' },
+    assistant_text: 'Option A leads at 62%.',
+  };
+
+  it('the stale-as-fresh finding carries no `provisional` flag — it gates', () => {
+    const f = a1AnalysisCoherence(obs({ role: 'explain', body: staleAsFreshBody }));
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.provisional).toBeUndefined();
+    expect(isAdvisoryFinding(f[0]!)).toBe(false);
+  });
+
+  it('the OTHER A1 findings stay advisory (provisional)', () => {
+    const denied = a1AnalysisCoherence(
+      obs({
+        role: 'explain',
+        body: { analysis_ready: { status: 'ready' }, assistant_text: "The results aren't back yet." },
+      }),
+    );
+    expect(denied[0]!.provisional).toBe(true);
+    expect(isAdvisoryFinding(denied[0]!)).toBe(true);
+
+    const pass = a1AnalysisCoherence(
+      obs({
+        role: 'explain',
+        body: { analysis_ready: { status: 'ready', freshness: 'fresh' }, assistant_text: 'Option A leads.' },
+      }),
+    );
+    expect(pass[0]!.provisional).toBe(true);
+    expect(isAdvisoryFinding(pass[0]!)).toBe(true);
+  });
+
+  it('a stale-as-fresh turn yields a GATING fail in the whole-journey evaluation', () => {
+    const { findings } = evaluateJourney([obs({ role: 'explain', body: staleAsFreshBody })], {
+      diagnosticTraceExpected: true,
+    });
+    const gatingFails = findings.filter((f) => f.status === 'fail' && !isAdvisoryFinding(f));
+    expect(gatingFails.some((f) => f.invariant_id === 'A1')).toBe(true);
+  });
+
+  it('is wire-grounded: the gate reads analysis_ready.freshness (the live deriveAnalysisFreshness verdict)', () => {
+    // A staleness caveat on the prose flips the gate off; the SAME prose under
+    // a wire `freshness: 'fresh'` is not a stale-as-fresh fail. The harness's
+    // "stale" is exactly analysis_ready.freshness — no test-local heuristic.
+    const withCaveat = a1AnalysisCoherence(
+      obs({
+        role: 'explain',
+        body: {
+          analysis_ready: { status: 'ready', freshness: 'stale' },
+          assistant_text: 'These results may be out of date — re-run analysis. Option A led at 62%.',
+        },
+      }),
+    );
+    expect(withCaveat[0]!.status).toBe('pass');
+
+    const freshWire = a1AnalysisCoherence(
+      obs({
+        role: 'explain',
+        body: { analysis_ready: { status: 'ready', freshness: 'fresh' }, assistant_text: 'Option A leads at 62%.' },
+      }),
+    );
+    expect(freshWire[0]!.status).toBe('pass');
+  });
+});
+
 describe('A2 — context completeness', () => {
   const base: ContextSnapshot = {
     graph: true,

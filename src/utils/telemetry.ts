@@ -638,6 +638,14 @@ export const TelemetryEvents = {
   //   freshness: 'fresh' | 'stale' | 'unknown' | 'none'  (for cross-ref with analysis_freshness.derived)
   V5CoachingStateDerived: "v5.coaching_state.derived",
 
+  // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED). Emitted
+  // when the deterministic coaching-output post-check fires on an LLM-authored
+  // coaching turn and the response is degraded to safe. Privacy: correlation
+  // IDs + the closed-enum `violation` + the pack's closed-enum / boolean state
+  // (freshness / rerun_required / usable_for_chips / blocked) ONLY — never the
+  // model prose or any decision content.
+  V5CoachingOutputPostcheck: "v5.coaching.output_postcheck",
+
   // V5 Coaching State Spine — Stage 2B-1b. Emitted once per turn AFTER the turn's
   // state is successfully persisted (post-append_turn_atomic). Same privacy
   // contract as V5CoachingStateDerived: correlation IDs + counts / closed-enum

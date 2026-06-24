@@ -455,6 +455,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5CoachingStatePersisted: "v5.coaching_state.persisted",
         V5CoachingStateLifecycleDerived: "v5.coaching_state.lifecycle_derived",
         V5CoachingSignalFired: "v5.coaching.signal_fired",
+        V5CoachingOutputPostcheck: "v5.coaching.output_postcheck",
         V5DecisionReviewDegraded: "v5.decision_review_degraded",
         V5DecisionReviewFailed: "v5.decision_review.failed",
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
@@ -1242,6 +1243,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Track S 0.13c-4 — persist-site intercept repair summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5GraphPersistInterceptRepair,
+        // Coaching Context Pack v1 — coaching-output post-check degrade summary
+        // (diagnostic-only; redacted closed-enum violation + state booleans; no
+        // Datadog metric in emit()).
+        TelemetryEvents.V5CoachingOutputPostcheck,
       ];
 
       for (const event of allEvents) {
@@ -1654,6 +1659,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching_state.persisted",
         "v5.coaching_state.lifecycle_derived",
         "v5.coaching.signal_fired",
+        "v5.coaching.output_postcheck",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",

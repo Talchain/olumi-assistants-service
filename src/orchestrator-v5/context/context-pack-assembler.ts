@@ -60,6 +60,7 @@ import {
   summariseCanonicalAnalysisState,
   type AnalysisStateSummary,
   type CanonicalAnalysisState,
+  type CoachingStatePack,
 } from './canonical-analysis-state.js';
 
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
@@ -270,6 +271,17 @@ export interface ContextPack {
    * this populates on every turn.
    */
   readonly analysis_state: AnalysisStateSummary | null;
+  /**
+   * Coaching Context Pack v1 — the hash-free, prompt-safe projection of the
+   * canonical analysis state the LLM may RECEIVE for coaching (never author).
+   * Present ONLY when `CEE_COACHING_CONTEXT_PROMPT_ENABLED` is on (the
+   * turn-executor supplies it via `AssembleContextPackInput.coachingContext`);
+   * absent otherwise, so flag-off `buildUserMessage` output is byte-identical.
+   * Unlike `analysis_state` (stripped from the prompt for its graph-hash
+   * digests) this projection carries no hashes/indices/values/units/labels/text,
+   * so it is the ONLY canonical-state surface allowed to reach the prompt.
+   */
+  readonly coaching_context?: CoachingStatePack;
 }
 
 export interface AssembleContextPackInput {
@@ -334,6 +346,15 @@ export interface AssembleContextPackInput {
    * existing callers omit it (call site unchanged until M5).
    */
   readonly canonicalState?: CanonicalAnalysisState;
+  /**
+   * Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED). The
+   * hash-free, prompt-safe `CoachingStatePack` the turn-executor projects from
+   * the live `deriveAnalysisFreshness` verdict for coaching turns. When
+   * present, it is surfaced verbatim as `ContextPack.coaching_context` (and
+   * thereby into the LLM routing prompt). Omitted when the flag is off / no
+   * freshness was derived → the field is absent → flag-off byte-identity.
+   */
+  readonly coachingContext?: CoachingStatePack;
 }
 
 /**
@@ -460,10 +481,16 @@ export function assembleContextPackWithSummary(
     system_event: input.systemEvent ?? null,
     analysis_state: analysisStateSummary,
   };
-  const contextPack =
+  const withSegments =
     compound.detected && compound.segments
       ? { ...base, compound_segments: compound.segments }
       : base;
+  // Coaching Context Pack v1: additive, flag-gated. When the caller supplies
+  // the pack (flag on), surface it verbatim; otherwise the field is absent so
+  // the assembled pack is byte-identical to today (flag-off byte-identity).
+  const contextPack: ContextPack = input.coachingContext
+    ? { ...withSegments, coaching_context: input.coachingContext }
+    : withSegments;
   // Non-production contract gate. Production assembly path stays cost-free
   // — `safeParse` is only invoked when `isProduction()` is false, so live
   // traffic pays the price of a single config read and nothing more. See
