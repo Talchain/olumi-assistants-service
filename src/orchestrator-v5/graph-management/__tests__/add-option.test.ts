@@ -6,6 +6,7 @@ import {
   OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
   ADD_OPTION_APPLY_UNWIRED,
   OPTION_ID_COLLISION,
+  GRAPH_OPTIONS_MALFORMED,
 } from '../proposal-types.js';
 import type { AddOptionProposal, AddOptionInterventionSpec } from '../proposal-types.js';
 
@@ -110,7 +111,10 @@ describe('add_option — never would_apply (held with an accurate reason, or sta
     expect(r.blocker?.code).toBe(OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE);
   });
 
-  it('a non-array (malformed) `options` is treated as no options[] array -> ADD_OPTION_APPLY_UNWIRED', () => {
+  it('a malformed (present non-array) `options` is HELD as GRAPH_OPTIONS_MALFORMED, not ADD_OPTION_APPLY_UNWIRED', () => {
+    // The context-pack assembler does `graph.options ?? nodes`, so it RETAINS a truthy
+    // non-array value (no fallback to nodes) and would corrupt its options view — that
+    // is malformed, neither "absent" nor safely unwired.
     const base = buildReadyGraph();
     const graph = { ...base, options: { not: 'an array' } };
     const r = classifyProposal(
@@ -118,6 +122,6 @@ describe('add_option — never would_apply (held with an accurate reason, or sta
       graph,
     );
     expect(r.verdict).toBe('held');
-    expect(r.blocker?.code).toBe(ADD_OPTION_APPLY_UNWIRED);
+    expect(r.blocker?.code).toBe(GRAPH_OPTIONS_MALFORMED);
   });
 });

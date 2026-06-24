@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { classifyProposal } from '../classify-proposal.js';
 import { currentAnalysisHash, isStale } from '../base-hash-gate.js';
 import { buildReadyGraph } from './fixtures.js';
-import { CURRENT_GRAPH_UNREADABLE, CLASSIFY_FAILED, type RenameNodeProposal } from '../proposal-types.js';
+import {
+  CURRENT_GRAPH_UNREADABLE,
+  CLASSIFY_FAILED,
+  GRAPH_OPTIONS_MALFORMED,
+  type RenameNodeProposal,
+} from '../proposal-types.js';
 
 function rename(baseHash: string | null): RenameNodeProposal {
   return { kind: 'rename_node', base_graph_hash: baseHash, node_id: 'g-profit', new_label: 'X' };
@@ -136,6 +141,36 @@ describe('totality over the declared `unknown` graph input (P2)', () => {
       option: { id: 'o-c', label: 'C', parent_decision_id: 'd-choice', edges: [{ to_factor_id: 'f-spend' }] },
     };
     const r = classifyProposal(proposal, evilGraph);
+    expect(r.verdict).toBe('held');
+    expect(r.blocker?.code).toBe(CLASSIFY_FAILED);
+  });
+
+  it('a malformed (non-array) top-level options is held GRAPH_OPTIONS_MALFORMED for every kind, before the stale gate', () => {
+    const graph = { ...buildReadyGraph(), options: 'not-an-array' };
+    const baseHash = currentAnalysisHash(graph);
+
+    // rename, hash matches -> malformed (not would_apply)
+    const rRename = classifyProposal(
+      { kind: 'rename_node', base_graph_hash: baseHash, node_id: 'g-profit', new_label: 'X' },
+      graph,
+    );
+    expect(rRename.verdict).toBe('held');
+    expect(rRename.blocker?.code).toBe(GRAPH_OPTIONS_MALFORMED);
+
+    // even when the hash is stale, malformed takes precedence (the guard runs first)
+    const rStale = classifyProposal(
+      { kind: 'rename_node', base_graph_hash: 'stale-not-matching', node_id: 'g-profit', new_label: 'X' },
+      graph,
+    );
+    expect(rStale.verdict).toBe('held');
+    expect(rStale.blocker?.code).toBe(GRAPH_OPTIONS_MALFORMED);
+  });
+
+  it('totality: a malformed kind with a stale hash is CLASSIFY_FAILED (kind guard runs before the stale gate)', () => {
+    const graph = buildReadyGraph();
+    const malformed = { kind: 'delete_node', base_graph_hash: 'stale-not-matching', node_id: 'g-profit' };
+    // @ts-expect-error intentionally invalid proposal kind (untrusted runtime input)
+    const r = classifyProposal(malformed, graph);
     expect(r.verdict).toBe('held');
     expect(r.blocker?.code).toBe(CLASSIFY_FAILED);
   });

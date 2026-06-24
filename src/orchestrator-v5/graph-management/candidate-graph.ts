@@ -109,22 +109,31 @@ export function buildAddOptionCandidate(
 }
 
 /**
- * Whether the graph carries a TOP-LEVEL options[] array. This is the add_option
- * held-reason discriminator: with a top-level options[] present, applying a new
- * option diverges it (kept base-only by the merge, preferred by the context-pack
- * assembler) from the node-derived set -> OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE.
- * Absent -> both consumers fall back to nodes, so there is no divergence and the
- * hold is ADD_OPTION_APPLY_UNWIRED.
+ * Whether the graph carries a TOP-LEVEL options[] ARRAY. The add_option held-reason
+ * discriminator, evaluated AFTER the malformed-options guard (so `options` is
+ * array-or-absent here): an ARRAY (even empty) -> OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE
+ * (the context-pack assembler prefers it via `graph.options ?? nodes` while
+ * run-analysis reads option NODES, so the two views can diverge — e.g. options:[]
+ * => context sees 0, run-analysis sees the option nodes); ABSENT -> both fall back
+ * to nodes, so ADD_OPTION_APPLY_UNWIRED. A present-but-non-array `options` never
+ * reaches here — it is held earlier as GRAPH_OPTIONS_MALFORMED.
  */
 export function graphHasTopLevelOptions(graph: unknown): boolean {
   if (graph === null || typeof graph !== 'object') return false;
-  // A genuine top-level options[] ARRAY. When present (even empty), the
-  // context-pack assembler prefers it (`graph.options ?? nodes`) while run-analysis
-  // reads option NODES — so the two views can diverge (e.g. options:[] => context
-  // sees 0, run-analysis sees the option nodes). A non-array `options` is malformed,
-  // not an options[]: treat it as absent (-> ADD_OPTION_APPLY_UNWIRED), so the
-  // blocker message ("top-level options[]") stays literally accurate.
   return Array.isArray((graph as { options?: unknown }).options);
+}
+
+/**
+ * Whether the graph's top-level `options` is PRESENT but NOT an array — a malformed
+ * graph. The context-pack assembler retains a truthy non-array value (`graph.options
+ * ?? nodes` does NOT fall back to nodes for a truthy value), so it is neither absent
+ * nor safely unwired; the spine holds it as GRAPH_OPTIONS_MALFORMED rather than
+ * mis-classifying it as ADD_OPTION_APPLY_UNWIRED.
+ */
+export function graphOptionsAreMalformed(graph: unknown): boolean {
+  if (graph === null || typeof graph !== 'object') return false;
+  const options = (graph as { options?: unknown }).options;
+  return options !== null && options !== undefined && !Array.isArray(options);
 }
 
 /**

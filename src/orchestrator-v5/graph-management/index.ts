@@ -9,6 +9,7 @@ export {
   buildAddOptionCandidate,
   graphHasNodeId,
   graphHasTopLevelOptions,
+  graphOptionsAreMalformed,
   type CandidateBuildResult,
 } from './candidate-graph.js';
 export { assessCandidate, ep2VerdictForRepresentable, type Ep2Assessment } from './readiness-parity.js';

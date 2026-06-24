@@ -8,8 +8,11 @@
  * TOTAL: the ENTIRE body is wrapped, and the catch reads fallback metadata through
  * a guarded helper, so ANY input — a throwing Proxy/getter on the proposal OR the
  * graph, a malformed or null/undefined proposal — resolves to `held`
- * (CLASSIFY_FAILED) and never throws. Fail-CLOSED: an unreadable/unhashable graph
- * is `held` (CURRENT_GRAPH_UNREADABLE), never a null-hash match.
+ * (CLASSIFY_FAILED) and never throws. Fail-CLOSED on validity, before the stale
+ * gate: an unknown proposal kind -> CLASSIFY_FAILED; an unreadable/unhashable graph
+ * -> CURRENT_GRAPH_UNREADABLE (never a null-hash match); a present-but-non-array
+ * top-level `options` (which the context-pack assembler would retain) ->
+ * GRAPH_OPTIONS_MALFORMED.
  *
  * Outcome by kind:
  *  - rename_node -> would_apply (EP2 parity), or held/stale.
@@ -26,6 +29,7 @@ import {
   buildAddOptionCandidate,
   graphHasNodeId,
   graphHasTopLevelOptions,
+  graphOptionsAreMalformed,
 } from './candidate-graph.js';
 import { assessCandidate, ep2VerdictForRepresentable } from './readiness-parity.js';
 import {
@@ -33,6 +37,7 @@ import {
   ADD_OPTION_APPLY_UNWIRED,
   OPTION_ID_COLLISION,
   CURRENT_GRAPH_UNREADABLE,
+  GRAPH_OPTIONS_MALFORMED,
   CLASSIFY_FAILED,
   type Proposal,
   type ProposalKind,
@@ -97,6 +102,14 @@ export function classifyProposal(
   currentPersistedGraph: unknown,
 ): ClassificationResult {
   try {
+    // 0. Defensive kind guard: an unknown proposal kind fails closed (even with a
+    //    stale hash), so the "malformed proposal -> CLASSIFY_FAILED" contract holds
+    //    regardless of staleness.
+    const proposalKind = (proposal as { kind?: unknown }).kind;
+    if (proposalKind !== 'rename_node' && proposalKind !== 'add_option') {
+      return failClosed(proposal);
+    }
+
     // 1. INV-1 stale gate (readable-aware). Unreadable/unhashable -> held, never a
     //    null-hash match. Stale (readable but mismatch) applies to EVERY kind.
     const base_hash_check = checkBaseHash(currentPersistedGraph, proposal.base_graph_hash);
@@ -111,6 +124,25 @@ export function classifyProposal(
         },
       };
     }
+
+    // 1b. Malformed graph: a present-but-non-array top-level `options` is RETAINED by
+    //     the context-pack assembler (`graph.options ?? nodes` keeps a truthy value),
+    //     so it is neither absent nor safely unwired. Held as malformed (for EVERY
+    //     kind, before the stale gate) rather than mis-classified as apply-unwired.
+    if (graphOptionsAreMalformed(currentPersistedGraph)) {
+      return {
+        verdict: 'held',
+        kind: proposal.kind,
+        base_hash_check,
+        blocker: {
+          code: GRAPH_OPTIONS_MALFORMED,
+          message:
+            'The graph top-level `options` is present but not an array (malformed); the context-pack ' +
+            'assembler would retain it (it does not fall back to nodes). Held as malformed.',
+        },
+      };
+    }
+
     if (!base_hash_check.match) {
       return { verdict: 'stale', kind: proposal.kind, base_hash_check };
     }

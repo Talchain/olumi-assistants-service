@@ -52,6 +52,15 @@ export const OPTION_ID_COLLISION = 'OPTION_ID_COLLISION' as const;
 export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
 
 /**
+ * Held reason: the graph's top-level `options` is present but NOT an array — a
+ * malformed graph. The context-pack assembler does `graph.options ?? nodes`, so a
+ * truthy non-array value is RETAINED (it does NOT fall back to nodes) and would
+ * corrupt its options view. Held as malformed — distinct from "no options[] array"
+ * (ADD_OPTION_APPLY_UNWIRED) and from "unhashable" (CURRENT_GRAPH_UNREADABLE).
+ */
+export const GRAPH_OPTIONS_MALFORMED = 'GRAPH_OPTIONS_MALFORMED' as const;
+
+/**
  * Held reason: classification failed unexpectedly (e.g. a Proxy / throwing getter
  * on the input, or a malformed proposal). Fail-CLOSED — any uncaught error in the
  * body resolves to this held verdict so classifyProposal never throws.
