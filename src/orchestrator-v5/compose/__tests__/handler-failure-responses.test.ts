@@ -103,6 +103,24 @@ describe('composeHandlerFailure — per cause_kind', () => {
     expect(chip_type).toBe('text_prompt');
   });
 
+  it('analysis_not_ready (NO_GRAPH) surfaces the draft-a-model next-step as prose + recovery chip', () => {
+    const err = build('analysis_not_ready', false, {
+      reason_code: 'NO_GRAPH',
+      next_step: 'Draft or save a model first, then run analysis.',
+    });
+    const { response, template_id, chip_type } = composeHandlerFailure(err, CTX, 'frame');
+    expect(template_id).toBe('analysis_not_ready');
+    // The honest, no-internal-ID next-step is surfaced verbatim as the prose.
+    expect(response.assistant_text).toBe('Draft or save a model first, then run analysis.');
+    // KNOWN COPY LIMITATION: the recovery chip is the shared analysis-not-ready
+    // "Review the model" chip — no dedicated "draft a model" chip exists yet. The
+    // PROSE is correct for the no-model case; only the chip label leans "fix" rather
+    // than "create". A dedicated chip is a follow-up (needs UI/DGAI coordination).
+    expect(response.suggested_actions[0]?.id).toBe('chip_prompt_fix_before_analysis');
+    expect(chip_type).toBe('text_prompt');
+    assertStyle(response.assistant_text);
+  });
+
   it('options_not_configured with first_option_label quotes it in the chip', () => {
     const err = build('options_not_configured', false, {
       first_option_label: 'Keep current plan',

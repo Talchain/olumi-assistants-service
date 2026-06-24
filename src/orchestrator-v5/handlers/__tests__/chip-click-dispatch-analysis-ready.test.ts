@@ -322,13 +322,18 @@ describe('chip-click-dispatch — analysisReady surfacing (V5 finaliser brief)',
   });
 
   it('omits analysisReady when the persisted snapshot fails to load (no goal node, parse failure, or scenario not found) — and logs the reason', async () => {
-    const loadError = new Error('No persisted graph found for scenario');
+    // A GENERIC reader failure (transport down / parse failure / missing goal node) —
+    // NOT the null-persisted-graph case, which now throws AnalysisNotReadyError and
+    // classifies as `analysis_not_ready`, not `scenario_read_failed`. This test mocks
+    // both the reader and the handler, so it exercises dispatch outcome classification
+    // independent of the real reader's contract.
+    const loadError = new Error('Supabase unreachable');
     loadScenarioSnapshotForRunAnalysisMock.mockRejectedValueOnce(loadError);
 
-    // The handler-reader will re-throw the cached load error → handler's
-    // own catch ladder wraps as HandlerInvocationFailedError(scenario_read_failed).
-    // Stub the handler invocation to throw the corresponding error so we
-    // can observe the dispatch's outcome classification.
+    // The handler-reader re-throws the cached load error → handler's own catch ladder
+    // wraps a generic read failure as HandlerInvocationFailedError(scenario_read_failed).
+    // Stub the handler invocation to throw the corresponding error so we can observe
+    // the dispatch's outcome classification.
     const { HandlerInvocationFailedError } = await import('../../tools/handler-errors.js');
     handlerFnMock.mockRejectedValueOnce(
       new HandlerInvocationFailedError('Scenario read failed', {

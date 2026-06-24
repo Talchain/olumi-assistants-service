@@ -538,6 +538,15 @@ const ConfigSchema = z.object({
     // + unrecoverable short-circuit ATOMICALLY (no split mode); flag OFF =>
     // byte-identical to today on both sides. CEE_RUN_ANALYSIS_READY_GUARD.
     analysisReadyGuardEnabled: booleanString.default(false),
+    // NULL persisted-graph recovery kill-switch (CEE_RUN_ANALYSIS_NULL_GRAPH_RECOVERABLE).
+    // Default ON. When ON, run_analysis on a scenario whose persisted graph is NULL
+    // returns a typed `analysis_not_ready` recoverable 200 (honest "draft a model
+    // first" + chip) instead of a raw `scenario_read_failed` 500. INDEPENDENT of EP2
+    // (`analysisReadyGuardEnabled`): the deployed V5 path runs EP2 OFF, so this fix
+    // must NOT be gated on it. Set to `false` for a code-free rollback to the legacy
+    // raw-500 if typed recovery ever misbehaves. Only controls the NULL-graph branch;
+    // a present-but-broken graph is still EP2's (default-off) concern.
+    runAnalysisNullGraphRecoverable: booleanString.default(true),
     // V5 canonical context summary (CEE_CONTEXT_SUMMARY_ENABLED — staging
     // diagnostics + Golden-Journey Harness A1/A2 only). When true, the route
     // attaches a redacted `_context_summary` block (statuses/counts/hashes
@@ -971,6 +980,7 @@ function parseConfig(): Config {
       timingDebugEnabled: env.V5_TIMING_DEBUG,
       plotEgressScaleNetEnabled: env.CEE_PLOT_EGRESS_SCALE_NET_ENABLED,
       analysisReadyGuardEnabled: env.CEE_RUN_ANALYSIS_READY_GUARD,
+      runAnalysisNullGraphRecoverable: env.CEE_RUN_ANALYSIS_NULL_GRAPH_RECOVERABLE,
       contextSummaryEnabled: env.CEE_CONTEXT_SUMMARY_ENABLED,
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
       coachingContextPromptEnabled: env.CEE_COACHING_CONTEXT_PROMPT_ENABLED,

@@ -1019,8 +1019,35 @@ export async function loadScenarioSnapshotForRunAnalysis(
   requestId: string,
   sessionStore?: SessionStore,
 ): Promise<RunAnalysisScenarioSnapshot> {
-  const persistedGraph = await loadPersistedGraph(scenarioId, requestId, sessionStore);
-  if (!persistedGraph) {
+  // STRICT read: a store/RPC failure must PROPAGATE (→ the handler's retryable
+  // `scenario_read_failed`), NOT be swallowed to null. The non-strict
+  // `loadPersistedGraph` collapses store errors into null (loadPersistedScenarioState
+  // catches and degrades), which would let the NULL-graph recovery below misclassify a
+  // transient outage as `analysis_not_ready` ("draft a model first" 200) — masking the
+  // infra failure and dropping retry guidance. `loadPersistedGraphStrict` returns null
+  // ONLY when the store is reachable and no graph is stored (the genuine no-model
+  // case); it throws SessionReadError on a DB/RPC failure.
+  const persistedGraph = await loadPersistedGraphStrict(scenarioId, sessionStore);
+  // `== null` (not a truthy check): scope the recovery to a GENUINELY absent graph
+  // (null/undefined). A present-but-corrupt falsy value (e.g. `0` / `""`) is malformed,
+  // not missing — it falls through to GraphV3.safeParse below and fails into
+  // scenario_read_failed like any other malformed graph, so we never tell a user who
+  // has a (corrupt) graph to "draft a model first".
+  if (persistedGraph == null) {
+    // GENUINELY no persisted graph (store reachable, scenarios.graph absent) — e.g. a
+    // guest scenario that never drafted/saved a model; deployed V5 run_analysis sends
+    // no graph_state to fall back to. Convert the legacy raw-500 into a typed
+    // RECOVERABLE failure: AnalysisNotReadyError → the run_analysis handler maps it to
+    // `analysis_not_ready` (a 200 with an honest "draft a model first" next-step +
+    // recovery chip). This throw is BEFORE the PLoT payload build and before any
+    // run_analysis handler fact. INDEPENDENT of EP2 (`analysisReadyGuardEnabled`) — the
+    // deployed path runs EP2 OFF — and gated only by its own default-ON kill-switch
+    // (`runAnalysisNullGraphRecoverable`) so a code-free rollback to the raw 500 stays
+    // available. A store/RPC failure does NOT reach here (it threw above → propagates
+    // to scenario_read_failed). The EP2 guard below still runs only on a non-null graph.
+    if (config.cee.runAnalysisNullGraphRecoverable) {
+      throw new AnalysisNotReadyError(assessAnalysisReadiness(null));
+    }
     throw new Error(`No persisted graph found for scenario ${scenarioId}`);
   }
 
