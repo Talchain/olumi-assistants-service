@@ -3,7 +3,7 @@
  * OFF-PATH: no live V5 code imports this module.
  */
 export * from './proposal-types.js';
-export { checkBaseHash, isStale, currentAnalysisHash, isGraphLike } from './base-hash-gate.js';
+export { checkBaseHash, isStale, currentAnalysisHash } from './base-hash-gate.js';
 export {
   buildRenameCandidate,
   buildAddOptionCandidate,

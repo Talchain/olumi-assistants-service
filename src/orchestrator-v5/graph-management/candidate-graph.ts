@@ -10,8 +10,8 @@
  *  - buildAddOptionCandidate: adds the option as a graph NODE + edges. Pinned
  *    fact: this CANNOT introduce a top-level options[] entry — the mutator only
  *    sees the GraphV3 clone (nodes/edges/goal_constraints), and the seam merges
- *    options[] from the base verbatim. `optionPresentInModelState` makes that
- *    measurable so the spine can HELD-classify honestly.
+ *    options[] from the base verbatim. `graphHasTopLevelOptions` lets the spine
+ *    classify the hold reason honestly (divergence vs apply-unwired).
  */
 import { applyAndValidateMutation } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
@@ -33,6 +33,32 @@ function toBlocker(err: unknown): ProposalBlocker {
 
 const DEFAULT_STRENGTH = { mean: 0.5, std: 0.1 } as const;
 
+/**
+ * Deep-clone the mutated graph before exposing it. The V5 helper shallow-copies
+ * undeclared top-level fields (e.g. `options`, `meta`), so the returned candidate
+ * would otherwise alias those arrays from the input; structuredClone makes it
+ * fully referentially separate (and handles BigInt etc.).
+ */
+function exposeCandidate(mutatedGraph: Record<string, unknown>): Record<string, unknown> {
+  return structuredClone(mutatedGraph);
+}
+
+/** Build a valid EdgeV3T, defaulting strength/direction so GraphV3 parse accepts it. */
+function makeEdge(
+  from: string,
+  to: string,
+  strength?: { readonly mean: number; readonly std: number },
+  effectDirection?: 'positive' | 'negative',
+): EdgeV3T {
+  return {
+    from,
+    to,
+    strength: strength ? { ...strength } : { ...DEFAULT_STRENGTH },
+    exists_probability: 0.9,
+    effect_direction: effectDirection ?? 'positive',
+  };
+}
+
 export function buildRenameCandidate(
   persistedGraph: unknown,
   proposal: RenameNodeProposal,
@@ -47,11 +73,7 @@ export function buildRenameCandidate(
       node.label = proposal.new_label;
       return { before, after: { label: proposal.new_label } };
     });
-    // Deep-clone before exposing: the V5 helper shallow-copies undeclared
-    // top-level fields (e.g. `options`, `meta`), so the returned candidate would
-    // otherwise alias those arrays from the input. Cloning makes the candidate
-    // fully referentially separate (structuredClone handles BigInt etc.).
-    return { candidate: structuredClone(mutatedGraph) };
+    return { candidate: exposeCandidate(mutatedGraph) };
   } catch (err) {
     return { error: toBlocker(err) };
   }
@@ -73,32 +95,14 @@ export function buildAddOptionCandidate(
       };
       clone.nodes.push(optionNode);
       if (proposal.option.parent_decision_id) {
-        const decisionEdge: EdgeV3T = {
-          from: proposal.option.parent_decision_id,
-          to: proposal.option.id,
-          strength: { ...DEFAULT_STRENGTH },
-          exists_probability: 0.9,
-          effect_direction: 'positive',
-        };
-        clone.edges.push(decisionEdge);
+        clone.edges.push(makeEdge(proposal.option.parent_decision_id, proposal.option.id));
       }
       for (const e of proposal.option.edges) {
-        const edge: EdgeV3T = {
-          from: proposal.option.id,
-          to: e.to_factor_id,
-          strength: e.strength ? { ...e.strength } : { ...DEFAULT_STRENGTH },
-          exists_probability: 0.9,
-          effect_direction: e.effect_direction ?? 'positive',
-        };
-        clone.edges.push(edge);
+        clone.edges.push(makeEdge(proposal.option.id, e.to_factor_id, e.strength, e.effect_direction));
       }
       return { before: null, after: { option_id: proposal.option.id } };
     });
-    // Deep-clone before exposing: the V5 helper shallow-copies undeclared
-    // top-level fields (e.g. `options`, `meta`), so the returned candidate would
-    // otherwise alias those arrays from the input. Cloning makes the candidate
-    // fully referentially separate (structuredClone handles BigInt etc.).
-    return { candidate: structuredClone(mutatedGraph) };
+    return { candidate: exposeCandidate(mutatedGraph) };
   } catch (err) {
     return { error: toBlocker(err) };
   }

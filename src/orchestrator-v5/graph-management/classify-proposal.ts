@@ -36,6 +36,7 @@ import {
   CLASSIFY_FAILED,
   type Proposal,
   type ProposalKind,
+  type ProposalBlocker,
   type ClassificationResult,
 } from './proposal-types.js';
 
@@ -64,6 +65,31 @@ function failClosed(proposal: Proposal): ClassificationResult {
       message: 'Classification failed unexpectedly while reading the proposal or graph.',
     },
   };
+}
+
+/**
+ * The add_option hold reason that is true for the graph: divergence when a
+ * top-level options[] ARRAY is present (the merge keeps it base-only while the new
+ * option enters the node-derived set), else apply-unwired (no options[] array).
+ * Never infers content-convergence from id equality.
+ */
+function addOptionHoldBlocker(hasTopLevelOptions: boolean): ProposalBlocker {
+  return hasTopLevelOptions
+    ? {
+        code: OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
+        message:
+          'A top-level options[] array is present and the persist-base merge keeps it base-only, ' +
+          'while the new option enters the node-derived set run-analysis reads — so the two views ' +
+          'can diverge (an id match does not prove their content converges). Holding until the ' +
+          'apply-wiring spike fixes the node <-> options[] contract.',
+      }
+    : {
+        code: ADD_OPTION_APPLY_UNWIRED,
+        message:
+          'No top-level options[] array is present; held because this spike does not build the ' +
+          'apply path (the canonical node <-> options[] persist contract is unresolved). Pending ' +
+          'the apply-wiring spike.',
+      };
 }
 
 export function classifyProposal(
@@ -128,22 +154,7 @@ export function classifyProposal(
       return { verdict: 'held', kind: proposal.kind, base_hash_check, blocker: built.error };
     }
     const ep2 = assessCandidate(built.candidate);
-    const blocker = graphHasTopLevelOptions(currentPersistedGraph)
-      ? {
-          code: OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
-          message:
-            'A top-level options[] array is present and the persist-base merge keeps it base-only, ' +
-            'while the new option enters the node-derived set run-analysis reads — so the two views ' +
-            'can diverge (an id match does not prove their content converges). Holding until the ' +
-            'apply-wiring spike fixes the node <-> options[] contract.',
-        }
-      : {
-          code: ADD_OPTION_APPLY_UNWIRED,
-          message:
-            'No top-level options[] array is present; held because this spike does not build the ' +
-            'apply path (the canonical node <-> options[] persist contract is unresolved). Pending ' +
-            'the apply-wiring spike.',
-        };
+    const blocker = addOptionHoldBlocker(graphHasTopLevelOptions(currentPersistedGraph));
     return {
       verdict: 'held',
       kind: proposal.kind,

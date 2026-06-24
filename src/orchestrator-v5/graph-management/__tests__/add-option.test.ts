@@ -26,7 +26,7 @@ function addOption(
   };
 }
 
-describe('add_option — HELD-only, with the reason ACTUALLY true for the graph', () => {
+describe('add_option — never would_apply (held with an accurate reason, or stale)', () => {
   it('NO top-level options[] -> held ADD_OPTION_APPLY_UNWIRED (no divergence is claimed)', () => {
     const graph = buildReadyGraph(); // node-only options; no top-level options[]
     const r = classifyProposal(addOption(currentAnalysisHash(graph), { interventions: { 'f-spend': { value: 0.5 } } }), graph);

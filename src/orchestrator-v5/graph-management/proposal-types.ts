@@ -13,11 +13,11 @@
  *    option survives as a graph NODE and is analysable by run-analysis (which
  *    reads option NODES), so it is NOT unrepresentable. The held REASON is
  *    accurate to the graph: OPTION_ID_COLLISION (id already a node);
- *    OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE (a top-level options[] exists and does
- *    NOT already contain the id, so applying diverges it from the node-derived
- *    set the context-pack assembler prefers); otherwise ADD_OPTION_APPLY_UNWIRED
- *    (no divergence, but the apply path / canonical node <-> options[] contract is
- *    unbuilt). The apply-wiring spike owns these.
+ *    OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE (a top-level options[] ARRAY is present,
+ *    so the merge keeps it base-only while the new option enters the node-derived
+ *    set the context-pack assembler diverges from); otherwise
+ *    ADD_OPTION_APPLY_UNWIRED (no options[] array; the apply path / canonical
+ *    node <-> options[] contract is unbuilt). The apply-wiring spike owns these.
  *  - rename_node can reach would_apply (label-only; analysis-hash-neutral).
  *  - EP2 (assessAnalysisReadiness) is the readiness parity target; the canonical
  *    analysis-state selector does not wrap it on this path.
@@ -38,18 +38,17 @@ export const OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE =
   'OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE' as const;
 
 /**
- * Held reason for add_option when the graph has NO top-level options[]: both
- * run-analysis and the context-pack assembler derive options from nodes, so the
- * new option would be consistent — but this spike does not build the apply path
- * (the canonical node <-> options[] persist contract is unresolved). No divergence
- * is claimed; the option is simply not yet wired for apply.
+ * Held reason for add_option when the graph has NO top-level options[] ARRAY
+ * (absent, or a malformed non-array value). This spike does not build the apply
+ * path — the canonical node <-> options[] persist contract is unresolved — so the
+ * option is simply not yet wired for apply. No divergence is claimed.
  */
 export const ADD_OPTION_APPLY_UNWIRED = 'ADD_OPTION_APPLY_UNWIRED' as const;
 
 /** Held reason: the proposed option id already exists as a node in the graph. */
 export const OPTION_ID_COLLISION = 'OPTION_ID_COLLISION' as const;
 
-/** Held reason: the current graph could not be read OR hashed (no nodes array, or hashing threw). */
+/** Held reason: the current graph could not be read or hashed (not graph-like, or an unhashable analysis value). */
 export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
 
 /**

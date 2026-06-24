@@ -19,8 +19,8 @@ import type { BaseHashCheck } from './proposal-types.js';
 
 type HashInput = Parameters<typeof computeAnalysisAffectingGraphHash>[0];
 
-/** Minimal shape a graph must have to be hashable / mutatable: an object with a `nodes` array. */
-export function isGraphLike(graph: unknown): graph is { nodes: unknown[]; edges?: unknown[] } {
+/** Minimal shape a graph must have to be hashable / mutatable: an object with a `nodes` array. (Module-internal.) */
+function isGraphLike(graph: unknown): graph is { nodes: unknown[]; edges?: unknown[] } {
   return (
     graph !== null &&
     typeof graph === 'object' &&
