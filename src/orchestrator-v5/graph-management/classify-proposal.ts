@@ -5,18 +5,20 @@
  *   (V5-owned seam) -> EP2 parity (INV-3) -> verdict
  *   { would_apply | held | clarify_required | stale }.
  *
- * TOTAL over its declared `unknown` graph input AND defensive against malformed
- * proposals: the whole body is wrapped, so any unexpected throw (a Proxy/getter
- * that throws, a malformed proposal) resolves to `held` (CLASSIFY_FAILED) — never
- * an exception. Fail-CLOSED: an unreadable/unhashable graph is `held`
- * (CURRENT_GRAPH_UNREADABLE), never a null-hash match.
+ * TOTAL: the ENTIRE body is wrapped, and the catch reads fallback metadata through
+ * a guarded helper, so ANY input — a throwing Proxy/getter on the proposal OR the
+ * graph, a malformed or null/undefined proposal — resolves to `held`
+ * (CLASSIFY_FAILED) and never throws. Fail-CLOSED: an unreadable/unhashable graph
+ * is `held` (CURRENT_GRAPH_UNREADABLE), never a null-hash match.
  *
  * Outcome by kind:
  *  - rename_node -> would_apply (EP2 parity), or held/stale.
- *  - add_option -> NEVER would_apply. `held` (reason accurate to the graph:
- *    OPTION_ID_COLLISION / OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE /
- *    ADD_OPTION_APPLY_UNWIRED), or `stale` if its base_graph_hash moved (INV-1
- *    applies to every kind — a stale proposal is rejected, not applied).
+ *  - add_option -> NEVER would_apply. `held` (OPTION_ID_COLLISION; or
+ *    OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE when a top-level options[] ARRAY exists —
+ *    the merge keeps it base-only while the new option enters the node-derived set,
+ *    so the two views can diverge; else ADD_OPTION_APPLY_UNWIRED), or `stale` if its
+ *    base_graph_hash moved (INV-1 applies to every kind). The held reason does NOT
+ *    infer content-convergence from id equality.
  */
 import { checkBaseHash } from './base-hash-gate.js';
 import {
@@ -24,7 +26,6 @@ import {
   buildAddOptionCandidate,
   graphHasNodeId,
   graphHasTopLevelOptions,
-  topLevelOptionsContainsId,
 } from './candidate-graph.js';
 import { assessCandidate, ep2VerdictForRepresentable } from './readiness-parity.js';
 import {
@@ -34,8 +35,36 @@ import {
   CURRENT_GRAPH_UNREADABLE,
   CLASSIFY_FAILED,
   type Proposal,
+  type ProposalKind,
   type ClassificationResult,
 } from './proposal-types.js';
+
+/**
+ * Fail-closed result. Reads `kind`/`base_graph_hash` defensively (its own
+ * try/catch) so it never throws — even when the proposal is a Proxy / throwing
+ * getter. Keeps best-effort metadata when safely readable, hard fallbacks otherwise.
+ */
+function failClosed(proposal: Proposal): ClassificationResult {
+  let kind: ProposalKind = 'rename_node';
+  let expected: string | null = null;
+  try {
+    const k = (proposal as { kind?: unknown } | null | undefined)?.kind;
+    if (k === 'add_option' || k === 'rename_node') kind = k;
+    const h = (proposal as { base_graph_hash?: unknown } | null | undefined)?.base_graph_hash;
+    if (typeof h === 'string' || h === null) expected = h;
+  } catch {
+    /* proposal unreadable (throwing getter / Proxy); keep hard fallbacks */
+  }
+  return {
+    verdict: 'held',
+    kind,
+    base_hash_check: { expected, actual: null, match: false, readable: false },
+    blocker: {
+      code: CLASSIFY_FAILED,
+      message: 'Classification failed unexpectedly while reading the proposal or graph.',
+    },
+  };
+}
 
 export function classifyProposal(
   proposal: Proposal,
@@ -91,31 +120,29 @@ export function classifyProposal(
       };
     }
     //    (b) build + EP2-assess for transparency, then hold with the reason that is
-    //        ACTUALLY true for this graph. Divergence only when a top-level options[]
-    //        exists AND does not already contain the id (else applying converges).
+    //        true for this graph. Divergence iff a top-level options[] ARRAY is
+    //        present (the merge keeps it base-only; an id match does NOT prove
+    //        content convergence, so we never claim convergence).
     const built = buildAddOptionCandidate(currentPersistedGraph, proposal);
     if (!built.candidate) {
       return { verdict: 'held', kind: proposal.kind, base_hash_check, blocker: built.error };
     }
     const ep2 = assessCandidate(built.candidate);
-    const diverges =
-      graphHasTopLevelOptions(currentPersistedGraph) &&
-      !topLevelOptionsContainsId(currentPersistedGraph, proposal.option.id);
-    const blocker = diverges
+    const blocker = graphHasTopLevelOptions(currentPersistedGraph)
       ? {
           code: OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
           message:
-            'Applying this option would diverge canonical state: it survives as a graph node ' +
-            '(analysable by run-analysis, which derives options from nodes), but the existing ' +
-            'top-level options[] — preferred by the context-pack assembler — is kept base-only by ' +
-            'the persist-base merge. Holding until the apply-wiring spike fixes the node <-> options[] contract.',
+            'A top-level options[] array is present and the persist-base merge keeps it base-only, ' +
+            'while the new option enters the node-derived set run-analysis reads — so the two views ' +
+            'can diverge (an id match does not prove their content converges). Holding until the ' +
+            'apply-wiring spike fixes the node <-> options[] contract.',
         }
       : {
           code: ADD_OPTION_APPLY_UNWIRED,
           message:
-            'No divergence (no top-level options[], or it already contains this id), but this spike ' +
-            'does not build the apply path — the canonical node <-> options[] persist contract is ' +
-            'unresolved. Held pending the apply-wiring spike.',
+            'No top-level options[] array is present; held because this spike does not build the ' +
+            'apply path (the canonical node <-> options[] persist contract is unresolved). Pending ' +
+            'the apply-wiring spike.',
         };
     return {
       verdict: 'held',
@@ -127,16 +154,8 @@ export function classifyProposal(
       blocker,
     };
   } catch {
-    // Fail-CLOSED: any uncaught error (throwing Proxy/getter, malformed proposal)
-    // resolves to a held verdict so classifyProposal is total.
-    return {
-      verdict: 'held',
-      kind: proposal.kind,
-      base_hash_check: { expected: proposal.base_graph_hash, actual: null, match: false, readable: false },
-      blocker: {
-        code: CLASSIFY_FAILED,
-        message: 'Classification failed unexpectedly while reading the proposal or graph.',
-      },
-    };
+    // Fail-CLOSED: any uncaught error resolves to a held verdict via the guarded
+    // helper (which itself never throws, even on a throwing-getter proposal).
+    return failClosed(proposal);
   }
 }

@@ -82,12 +82,41 @@ describe('add_option — HELD-only, with the reason ACTUALLY true for the graph'
     expect(r.verdict).not.toBe('would_apply');
   });
 
-  it('phantom options[] (id present in options[] but NOT as a node) -> ADD_OPTION_APPLY_UNWIRED, not a false divergence', () => {
-    // A top-level options[] containing 'o-c' but with no 'o-c' node: adding the node
-    // CONVERGES the two views, so no divergence may be claimed.
+  it('same id in top-level options[] with DIFFERENT content still DIVERGES (id equality != content convergence)', () => {
+    // Reviewer's case: top-level options[] o-c = "Old plan" (value 0.1); proposal adds
+    // node o-c = "Plan C" (value 0.5). The merge keeps the old options[] entry AND adds
+    // the new node -> the two views disagree. Must NOT be claimed convergent/unwired.
     const base = buildReadyGraph();
-    const graph = { ...base, options: [{ id: 'o-c', status: 'ready', interventions: {} }] };
-    const r = classifyProposal(addOption(currentAnalysisHash(graph), { interventions: { 'f-spend': { value: 0.5 } } }), graph);
+    const graph = {
+      ...base,
+      options: [{ id: 'o-c', label: 'Old plan', status: 'ready', interventions: { 'f-spend': { value: 0.1 } } }],
+    };
+    const r = classifyProposal(
+      addOption(currentAnalysisHash(graph), { interventions: { 'f-spend': { value: 0.5 } } }),
+      graph,
+    );
+    expect(r.verdict).toBe('held');
+    expect(r.blocker?.code).toBe(OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE);
+  });
+
+  it('an EMPTY top-level options[] still DIVERGES (context-pack reads [] = 0; run-analysis reads the option nodes)', () => {
+    const base = buildReadyGraph();
+    const graph = { ...base, options: [] as unknown[] };
+    const r = classifyProposal(
+      addOption(currentAnalysisHash(graph), { interventions: { 'f-spend': { value: 0.5 } } }),
+      graph,
+    );
+    expect(r.verdict).toBe('held');
+    expect(r.blocker?.code).toBe(OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE);
+  });
+
+  it('a non-array (malformed) `options` is treated as no options[] array -> ADD_OPTION_APPLY_UNWIRED', () => {
+    const base = buildReadyGraph();
+    const graph = { ...base, options: { not: 'an array' } };
+    const r = classifyProposal(
+      addOption(currentAnalysisHash(graph), { interventions: { 'f-spend': { value: 0.5 } } }),
+      graph,
+    );
     expect(r.verdict).toBe('held');
     expect(r.blocker?.code).toBe(ADD_OPTION_APPLY_UNWIRED);
   });

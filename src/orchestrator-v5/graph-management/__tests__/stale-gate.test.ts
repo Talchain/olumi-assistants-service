@@ -139,4 +139,36 @@ describe('totality over the declared `unknown` graph input (P2)', () => {
     expect(r.verdict).toBe('held');
     expect(r.blocker?.code).toBe(CLASSIFY_FAILED);
   });
+
+  it('totality: a null or undefined proposal is held (CLASSIFY_FAILED), never thrown', () => {
+    const graph = buildReadyGraph();
+    for (const bad of [null, undefined]) {
+      // @ts-expect-error intentionally invalid proposal (untrusted runtime input)
+      const r = classifyProposal(bad, graph);
+      expect(r.verdict).toBe('held');
+      expect(r.blocker?.code).toBe(CLASSIFY_FAILED);
+    }
+  });
+
+  it('totality: a Proxy / throwing-getter PROPOSAL is held (CLASSIFY_FAILED), never thrown', () => {
+    const graph = buildReadyGraph();
+
+    const throwingProposal = new Proxy({}, { get() { throw new Error('evil proposal'); } });
+    // @ts-expect-error intentionally hostile proposal (untrusted runtime input)
+    const r1 = classifyProposal(throwingProposal, graph);
+    expect(r1.verdict).toBe('held');
+    expect(r1.blocker?.code).toBe(CLASSIFY_FAILED);
+
+    const getterProposal: Record<string, unknown> = { base_graph_hash: null };
+    Object.defineProperty(getterProposal, 'kind', {
+      get() {
+        throw new Error('boom on kind');
+      },
+      enumerable: true,
+    });
+    // @ts-expect-error intentionally hostile proposal (untrusted runtime input)
+    const r2 = classifyProposal(getterProposal, graph);
+    expect(r2.verdict).toBe('held');
+    expect(r2.blocker?.code).toBe(CLASSIFY_FAILED);
+  });
 });

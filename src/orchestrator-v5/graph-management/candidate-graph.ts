@@ -113,27 +113,14 @@ export function buildAddOptionCandidate(
  * hold is ADD_OPTION_APPLY_UNWIRED.
  */
 export function graphHasTopLevelOptions(graph: unknown): boolean {
-  return (
-    graph !== null &&
-    typeof graph === 'object' &&
-    Array.isArray((graph as { options?: unknown }).options)
-  );
-}
-
-/**
- * Whether `optionId` is already a member of the TOP-LEVEL options[] array. Used to
- * avoid a false divergence claim: if the new id is ALREADY in options[] (e.g. a
- * phantom options[] entry with no node), adding the node CONVERGES the two views
- * rather than diverging them — so that case is ADD_OPTION_APPLY_UNWIRED, not
- * OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE.
- */
-export function topLevelOptionsContainsId(graph: unknown, optionId: string): boolean {
   if (graph === null || typeof graph !== 'object') return false;
-  const options = (graph as { options?: unknown }).options;
-  if (!Array.isArray(options)) return false;
-  return options.some(
-    (o) => o !== null && typeof o === 'object' && (o as { id?: unknown }).id === optionId,
-  );
+  // A genuine top-level options[] ARRAY. When present (even empty), the
+  // context-pack assembler prefers it (`graph.options ?? nodes`) while run-analysis
+  // reads option NODES — so the two views can diverge (e.g. options:[] => context
+  // sees 0, run-analysis sees the option nodes). A non-array `options` is malformed,
+  // not an options[]: treat it as absent (-> ADD_OPTION_APPLY_UNWIRED), so the
+  // blocker message ("top-level options[]") stays literally accurate.
+  return Array.isArray((graph as { options?: unknown }).options);
 }
 
 /**
