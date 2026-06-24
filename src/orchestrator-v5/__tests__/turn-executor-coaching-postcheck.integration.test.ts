@@ -135,6 +135,46 @@ describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () =
     expect(response.assistant_text).toBe(safe);
     expect(postcheckEvent()).toBeUndefined();
   });
+
+  // A graph whose labels ("Plan A", "Pricing") are NOT type nouns — only the
+  // label-aware path can catch references to them, so these prove the
+  // turn-executor actually threads the graph's real labels into the post-check.
+  const LABELLED_GRAPH = {
+    nodes: [
+      { id: 'goal_g', kind: 'goal', label: 'Goal' },
+      { id: 'dec_d', kind: 'decision', label: 'Decision' },
+      { id: 'opt_plan_a', kind: 'option', label: 'Plan A' },
+      { id: 'opt_plan_b', kind: 'option', label: 'Plan B' },
+      { id: 'f_pricing', kind: 'factor', label: 'Pricing' },
+    ],
+    goal_node_id: 'goal_g',
+    edges: [
+      { from: 'dec_d', to: 'opt_plan_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'opt_plan_a', to: 'goal_g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    ],
+  };
+
+  it('threads the graph’s real option label: "I recommend Plan A" degrades (end-to-end)', async () => {
+    setFlag(true);
+    const { response } = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'what should I do about my decision?' },
+      'req-coach-label-dir',
+      { routingAdapter: mockRoutingAdapter('I recommend Plan A.'), graphState: LABELLED_GRAPH as never },
+    );
+    expect(response.assistant_text).not.toBe('I recommend Plan A.');
+    expect(postcheckEvent()?.data.violation).toBe('confident_advice_under_unsafe_state');
+  });
+
+  it('threads the graph’s real factor label: "I updated Pricing" degrades (end-to-end)', async () => {
+    setFlag(true);
+    const { response } = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'help me think about this' },
+      'req-coach-label-mut',
+      { routingAdapter: mockRoutingAdapter('I updated Pricing.'), graphState: LABELLED_GRAPH as never },
+    );
+    expect(response.assistant_text).not.toBe('I updated Pricing.');
+    expect(postcheckEvent()?.data.violation).toBe('invented_mutation_success');
+  });
 });
 
 describe('turn-executor — Coaching Context Pack v1 (flag OFF = byte-identical)', () => {
