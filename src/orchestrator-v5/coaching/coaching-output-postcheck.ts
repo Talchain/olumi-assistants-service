@@ -179,14 +179,14 @@ function isMutationSuccessClaim(text: string): boolean {
 const VALUE_SHAPE =
   '(?:[£$€]\\s?\\d|\\d+(?:[.,]\\d+)?\\s?%|\\d+(?:[.,]\\d+)?\\s?(?:percent|pp|bps|k|m|bn|gbp|usd|eur|dollars?|pounds?|euros?|months?|years?|weeks?|days?|hours?|hrs?|mins?|minutes?|kg|km|miles?|tonnes?|litres?|units?|x)\\b|\\d+\\.\\d+(?!\\s?[ap]m\\b))';
 // A bare integer that is NOT a clock time ("5pm", "5:30", "5 o'clock"). Allowed
-// ONLY after `to`/`from`, where "set headcount to 10" / "from 12 to 18" are
-// genuine value changes; NOT after `at`/`by` (which take times / quantities, so
-// "changed my mind at 5pm" stays safe).
+// after `to`/`from`/`by`, where "set headcount to 10" / "from 12 to 18" /
+// "increased headcount by 5" are genuine value changes; NOT after `at` (which
+// takes clock times, so "changed my mind at 5pm" stays safe).
 const BARE_INT_NOT_TIME = "\\d+(?![:.]\\d)(?!\\s?[ap]m\\b)(?!\\s?o['’]?clock\\b)";
 const COACHING_VALUE_CHANGE = new RegExp(
   `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b[^.!?]{0,40}?` +
-    `(?:\\b(?:to|from)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?(?:${VALUE_SHAPE}|${BARE_INT_NOT_TIME})` +
-    `|\\b(?:by|at)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?${VALUE_SHAPE})`,
+    `(?:\\b(?:to|from|by)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?(?:${VALUE_SHAPE}|${BARE_INT_NOT_TIME})` +
+    `|\\bat\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?${VALUE_SHAPE})`,
   'i',
 );
 
@@ -252,14 +252,26 @@ function isDirectionalOptionAdvice(text: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a CASE-SENSITIVE, anchored matcher for the supplied decision labels.
- * Tested against the slice of prose immediately AFTER a mutation/recommendation
- * verb, so it asserts "the verb's object IS a known label". Case sensitivity is
- * the disambiguator: a Title-Case label ("Value", "Pricing") matches a named
- * reference but NOT the lowercase idiom ("added value"). Trivial (<3 char)
- * labels are skipped as too noisy. Returns null when nothing usable remains.
+ * CASE-SENSITIVE label detectors built from the supplied decision labels. Case
+ * sensitivity is the disambiguator: a Title-Case label ("Value", "Pricing")
+ * matches a named reference but NOT the lowercase idiom ("added value").
+ * Trivial (<3 char) labels are skipped as too noisy. Returns null when nothing
+ * usable remains. Three forms:
+ *   - `verbObject`  — label as the direct object of a verb (tested against the
+ *     post-verb slice; tolerates a leading quote, e.g. `recommend "Plan A"`);
+ *   - `subjectMut`  — label as the subject of a PASSIVE mutation ("Pricing was
+ *     updated", "Plan A has been changed");
+ *   - `subjectJudge`— label as the subject of an option JUDGEMENT ("Plan A is
+ *     the best", "Plan A is our top choice") — only superlatives that are
+ *     option-shaped (followed by an option noun, or clause-final) so "Pricing
+ *     is the best metric" stays safe.
  */
-function buildLabelMatcher(labels: readonly string[] | undefined): RegExp | null {
+interface LabelDetectors {
+  readonly verbObject: RegExp;
+  readonly subjectMut: RegExp;
+  readonly subjectJudge: RegExp;
+}
+function buildLabelDetectors(labels: readonly string[] | undefined): LabelDetectors | null {
   if (!labels || labels.length === 0) return null;
   const escaped = Array.from(
     new Set(
@@ -270,10 +282,23 @@ function buildLabelMatcher(labels: readonly string[] | undefined): RegExp | null
     ),
   ).map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   if (escaped.length === 0) return null;
-  // Longest-first so a specific label wins over a prefix; anchored at `^` (start
-  // of the post-verb slice) so the label must be the verb's direct object.
-  escaped.sort((a, b) => b.length - a.length);
-  return new RegExp(`^(?:${escaped.join('|')})(?![\\w])`);
+  escaped.sort((a, b) => b.length - a.length); // longest-first: specific wins
+  const alt = escaped.join('|');
+  const label = `(?:${alt})`;
+  // All CASE-SENSITIVE (no `i` flag): the label casing is the named-reference signal.
+  return {
+    verbObject: new RegExp(`^["“”'‘’]?${label}(?![\\w])`),
+    subjectMut: new RegExp(
+      `(?<![\\w])["“”'‘’]?${label}["“”'‘’]?(?![\\w])\\s+(?:has\\s+been|have\\s+been|was|were|is\\s+now|are\\s+now)\\s+` +
+        `(?:updated|chang(?:e|ed)|set|added|created|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|saved|committed)\\b`,
+    ),
+    subjectJudge: new RegExp(
+      `(?<![\\w])["“”'‘’]?${label}["“”'‘’]?(?![\\w])\\s+(?:is|are|['’]s|remains?|stays?|seems?|looks?|would\\s+be)\\s+` +
+        `(?:clearly\\s+|by\\s+far\\s+|the\\s+|our\\s+|my\\s+|your\\s+|a\\s+)*` +
+        `(?:(?:best|strongest|top|optimal|winning|leading|safest|preferred|ideal|right)\\s+(?:choice|option|pick|one|bet|move|call)` +
+        `|(?:best|strongest|top|optimal|winning|leading|safest|preferred|ideal|winner)(?=[\\s]*[.,!?;:]|\\s*$))`,
+    ),
+  };
 }
 
 /** Claim-subject + mutation verb + optional determiner; global so we can scan
@@ -284,13 +309,16 @@ const MUTATION_VERB_CONTEXT = new RegExp(
   'ig',
 );
 
-/** Recommendation / selection verb (+ optional "going with"/"the"); global so
- *  we can scan the following slice for a known option label. */
+/** Recommendation / selection verb (incl. "let's", bare imperative, "lean
+ *  towards"), + optional "going with"/"the"; global so we can scan the
+ *  following slice for a known option label. */
 const RECOMMEND_VERB_CONTEXT = new RegExp(
   `\\b(?:(?:i|we)(?:['’]d)?\\s+(?:would\\s+|really\\s+|strongly\\s+|definitely\\s+)?` +
-    `(?:recommend|suggest|advise|propose|go\\s+with|choose|pick|opt\\s+for|select|prefer|favou?r)` +
+    `(?:recommend|suggest|advise|propose|go\\s+with|choose|pick|opt\\s+for|select|prefer|favou?r|lean\\s+towards?)` +
+    `|(?:let['’]?s|let\\s+us)\\s+(?:go\\s+with|choose|pick|opt\\s+for|select)` +
     `|(?:you|we)\\s+(?:should|['’]d|ought\\s+to|could|may\\s+want\\s+to|need\\s+to|must)\\s+` +
-    `(?:choose|pick|go\\s+with|select|opt\\s+for|prefer|favou?r))\\b\\s+` +
+    `(?:choose|pick|go\\s+with|select|opt\\s+for|prefer|favou?r)` +
+    `|(?:go\\s+with|opt\\s+for|stick\\s+with))\\b\\s+` +
     `(?:(?:going\\s+with|opting\\s+for|sticking\\s+with|the)\\s+)?`,
   'ig',
 );
@@ -309,6 +337,22 @@ function labelIsVerbObject(
     if (m.index === contextRegex.lastIndex) contextRegex.lastIndex += 1; // guard
   }
   return false;
+}
+
+/** Label-aware mutation claim: a mutation verb whose object is a known label,
+ *  OR a known label as the subject of a passive mutation ("Pricing was updated"). */
+function isLabelMutationClaim(text: string, det: LabelDetectors): boolean {
+  return (
+    labelIsVerbObject(text, MUTATION_VERB_CONTEXT, det.verbObject) || det.subjectMut.test(text)
+  );
+}
+
+/** Label-aware directional advice: a recommendation whose object is a known
+ *  label, OR a known label as the subject of an option judgement. */
+function isLabelDirectionalAdvice(text: string, det: LabelDetectors): boolean {
+  return (
+    labelIsVerbObject(text, RECOMMEND_VERB_CONTEXT, det.verbObject) || det.subjectJudge.test(text)
+  );
 }
 
 /**
@@ -364,7 +408,7 @@ export function checkCoachingOutput(
 ): CoachingPostcheckResult {
   const text = prose ?? '';
   if (text.trim().length === 0) return { safe: true };
-  const labelMatcher = buildLabelMatcher(opts.decisionLabels);
+  const labelDet = buildLabelDetectors(opts.decisionLabels);
 
   // Always-unsafe rules (independent of freshness): the pack never supplies
   // internal fields, mutation outcomes, value-changes, or science claims.
@@ -373,7 +417,7 @@ export function checkCoachingOutput(
   }
   if (
     isMutationSuccessClaim(text) ||
-    (labelMatcher !== null && labelIsVerbObject(text, MUTATION_VERB_CONTEXT, labelMatcher))
+    (labelDet !== null && isLabelMutationClaim(text, labelDet))
   ) {
     // Coaching turns dispatch no mutation — a claim that the graph/model was
     // changed is false by construction (no handler fact backs it). Descriptive
@@ -397,7 +441,7 @@ export function checkCoachingOutput(
   if (isStateUnsafe(pack)) {
     if (
       isDirectionalOptionAdvice(text) ||
-      (labelMatcher !== null && labelIsVerbObject(text, RECOMMEND_VERB_CONTEXT, labelMatcher))
+      (labelDet !== null && isLabelDirectionalAdvice(text, labelDet))
     ) {
       // Fires regardless of any caveat — confident directional advice under
       // unsafe state is the dangerous case, independent of freshness wording.

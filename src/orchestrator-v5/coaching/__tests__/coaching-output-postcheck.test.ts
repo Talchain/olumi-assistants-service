@@ -275,6 +275,10 @@ describe('checkCoachingOutput — always-unsafe rules fire regardless of state',
       // Review round 3: unit-less integers after to/from are value changes.
       'I set the headcount to 10.',
       'I changed the timeline from 12 to 18.',
+      // Review round 4: unit-less integers after `by` too (not a clock-time risk).
+      'I increased the headcount by 5.',
+      'I reduced the timeline by 3.',
+      'I updated churn by 2.',
     ]) {
       expectViolation(checkCoachingOutput(prose, FRESH), 'value_change_narration');
     }
@@ -397,6 +401,33 @@ describe('checkCoachingOutput — label-aware mutation / directional detection',
       checkCoachingOutput('I’d go with Plan B.', UNKNOWN, opts),
       'confident_advice_under_unsafe_state',
     );
+  });
+
+  it('review round 4: quoted / passive / subject-judgement / let-us / lean forms degrade', () => {
+    // Mutation forms (always-on): quoted object + passive label subject.
+    for (const prose of ['I updated "Pricing".', 'Pricing was updated.', '“Pricing” has been changed.']) {
+      expectViolation(checkCoachingOutput(prose, FRESH, opts), 'invented_mutation_success');
+    }
+    // Directional forms (under unsafe state): quoted, let's, lean, label-subject.
+    for (const prose of [
+      'I recommend "Plan A".',
+      'Let’s go with Plan A.',
+      'I would lean towards Plan A.',
+      'Plan A is the best.',
+      'Plan A is our top choice.',
+    ]) {
+      expectViolation(checkCoachingOutput(prose, STALE, opts), 'confident_advice_under_unsafe_state');
+    }
+  });
+
+  it('review round 4: label-as-subject judgement does NOT over-fire on non-option superlatives', () => {
+    // A factor label as subject of a NON-option superlative is process talk.
+    expect(checkCoachingOutput('Pricing is the best metric to track here.', STALE, opts)).toEqual({
+      safe: true,
+    });
+    expect(checkCoachingOutput('Pricing was discussed at length today.', FRESH, opts)).toEqual({
+      safe: true,
+    });
   });
 
   it('the same option recommendation is allowed under fresh + usable state', () => {
