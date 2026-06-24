@@ -178,9 +178,15 @@ function isMutationSuccessClaim(text: string): boolean {
 // so the rule stays value-change-only, not "any number after a preposition".
 const VALUE_SHAPE =
   '(?:[£$€]\\s?\\d|\\d+(?:[.,]\\d+)?\\s?%|\\d+(?:[.,]\\d+)?\\s?(?:percent|pp|bps|k|m|bn|gbp|usd|eur|dollars?|pounds?|euros?|months?|years?|weeks?|days?|hours?|hrs?|mins?|minutes?|kg|km|miles?|tonnes?|litres?|units?|x)\\b|\\d+\\.\\d+(?!\\s?[ap]m\\b))';
+// A bare integer that is NOT a clock time ("5pm", "5:30", "5 o'clock"). Allowed
+// ONLY after `to`/`from`, where "set headcount to 10" / "from 12 to 18" are
+// genuine value changes; NOT after `at`/`by` (which take times / quantities, so
+// "changed my mind at 5pm" stays safe).
+const BARE_INT_NOT_TIME = "\\d+(?![:.]\\d)(?!\\s?[ap]m\\b)(?!\\s?o['’]?clock\\b)";
 const COACHING_VALUE_CHANGE = new RegExp(
-  `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b` +
-    `[^.!?]{0,40}?\\b(?:to|from|by|at)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?${VALUE_SHAPE}`,
+  `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b[^.!?]{0,40}?` +
+    `(?:\\b(?:to|from)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?(?:${VALUE_SHAPE}|${BARE_INT_NOT_TIME})` +
+    `|\\b(?:by|at)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?${VALUE_SHAPE})`,
   'i',
 );
 
@@ -237,6 +243,74 @@ function isDirectionalOptionAdvice(text: string): boolean {
   return RECOMMENDATION_VERB.test(text) && OPTION_SELECTION_SIGNAL.test(text);
 }
 
+// ---------------------------------------------------------------------------
+// Label-aware detection — the type-noun patterns above know "option"/"factor",
+// but not the graph's ACTUAL display labels ("Plan A", "Pricing"). The caller
+// supplies the live option/factor/node labels so "I recommend Plan A" (option)
+// and "I updated Pricing" (factor) degrade. Pure: the labels are deterministic
+// graph state; no #296 resolver logic, no value formatting.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a CASE-SENSITIVE, anchored matcher for the supplied decision labels.
+ * Tested against the slice of prose immediately AFTER a mutation/recommendation
+ * verb, so it asserts "the verb's object IS a known label". Case sensitivity is
+ * the disambiguator: a Title-Case label ("Value", "Pricing") matches a named
+ * reference but NOT the lowercase idiom ("added value"). Trivial (<3 char)
+ * labels are skipped as too noisy. Returns null when nothing usable remains.
+ */
+function buildLabelMatcher(labels: readonly string[] | undefined): RegExp | null {
+  if (!labels || labels.length === 0) return null;
+  const escaped = Array.from(
+    new Set(
+      labels
+        .filter((l): l is string => typeof l === 'string')
+        .map((l) => l.trim())
+        .filter((l) => l.length >= 3),
+    ),
+  ).map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (escaped.length === 0) return null;
+  // Longest-first so a specific label wins over a prefix; anchored at `^` (start
+  // of the post-verb slice) so the label must be the verb's direct object.
+  escaped.sort((a, b) => b.length - a.length);
+  return new RegExp(`^(?:${escaped.join('|')})(?![\\w])`);
+}
+
+/** Claim-subject + mutation verb + optional determiner; global so we can scan
+ *  the slice that follows each occurrence for a known label. */
+const MUTATION_VERB_CONTEXT = new RegExp(
+  `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b\\s+` +
+    `(?:the\\s+|a\\s+|an\\s+|your\\s+|its\\s+|my\\s+|our\\s+|that\\s+|this\\s+)?`,
+  'ig',
+);
+
+/** Recommendation / selection verb (+ optional "going with"/"the"); global so
+ *  we can scan the following slice for a known option label. */
+const RECOMMEND_VERB_CONTEXT = new RegExp(
+  `\\b(?:(?:i|we)(?:['’]d)?\\s+(?:would\\s+|really\\s+|strongly\\s+|definitely\\s+)?` +
+    `(?:recommend|suggest|advise|propose|go\\s+with|choose|pick|opt\\s+for|select|prefer|favou?r)` +
+    `|(?:you|we)\\s+(?:should|['’]d|ought\\s+to|could|may\\s+want\\s+to|need\\s+to|must)\\s+` +
+    `(?:choose|pick|go\\s+with|select|opt\\s+for|prefer|favou?r))\\b\\s+` +
+    `(?:(?:going\\s+with|opting\\s+for|sticking\\s+with|the)\\s+)?`,
+  'ig',
+);
+
+/** True when a known label is the direct object of a verb match (the label is
+ *  matched case-sensitively at the start of the slice following the verb). */
+function labelIsVerbObject(
+  text: string,
+  contextRegex: RegExp,
+  labelMatcher: RegExp,
+): boolean {
+  contextRegex.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = contextRegex.exec(text)) !== null) {
+    if (labelMatcher.test(text.slice(m.index + m[0].length))) return true;
+    if (m.index === contextRegex.lastIndex) contextRegex.lastIndex += 1; // guard
+  }
+  return false;
+}
+
 /**
  * Presenting an analysis RESULT as current — probabilities, win/lead/ahead
  * claims. Under `stateUnsafe` AND with no staleness caveat, this is
@@ -267,6 +341,18 @@ function isStateUnsafe(pack: CoachingStatePack): boolean {
   );
 }
 
+/** Optional detection context for {@link checkCoachingOutput}. */
+export interface CheckCoachingOutputOptions {
+  /**
+   * The turn's live decision labels (option / factor / node display labels),
+   * supplied by the caller from deterministic graph state. Lets the post-check
+   * recognise the graph's ACTUAL labels ("I recommend Plan A", "I updated
+   * Pricing"), not just the type nouns ("option", "factor"). Omitted ⇒
+   * type-noun / named-entity detection only.
+   */
+  readonly decisionLabels?: readonly string[];
+}
+
 /**
  * Inspect coaching prose against the deterministic pack. Returns the first
  * violation in severity order, or `{ safe: true }`. Pure.
@@ -274,19 +360,25 @@ function isStateUnsafe(pack: CoachingStatePack): boolean {
 export function checkCoachingOutput(
   prose: string,
   pack: CoachingStatePack,
+  opts: CheckCoachingOutputOptions = {},
 ): CoachingPostcheckResult {
   const text = prose ?? '';
   if (text.trim().length === 0) return { safe: true };
+  const labelMatcher = buildLabelMatcher(opts.decisionLabels);
 
   // Always-unsafe rules (independent of freshness): the pack never supplies
   // internal fields, mutation outcomes, value-changes, or science claims.
   if (hasInternalExposure(text)) {
     return { safe: false, violation: 'internal_field_exposed' };
   }
-  if (isMutationSuccessClaim(text)) {
+  if (
+    isMutationSuccessClaim(text) ||
+    (labelMatcher !== null && labelIsVerbObject(text, MUTATION_VERB_CONTEXT, labelMatcher))
+  ) {
     // Coaching turns dispatch no mutation — a claim that the graph/model was
     // changed is false by construction (no handler fact backs it). Descriptive
-    // coaching ("I've created a summary") is NOT a mutation claim.
+    // coaching ("I've created a summary") is NOT a mutation claim. A mutation
+    // verb acting on a KNOWN label ("I updated Pricing") also degrades.
     return { safe: false, violation: 'invented_mutation_success' };
   }
   if (COACHING_VALUE_CHANGE.test(text)) {
@@ -303,10 +395,14 @@ export function checkCoachingOutput(
   // current. When state IS fresh + usable, directional advice and result
   // presentation are allowed — ordinary coaching is never degraded.
   if (isStateUnsafe(pack)) {
-    if (isDirectionalOptionAdvice(text)) {
+    if (
+      isDirectionalOptionAdvice(text) ||
+      (labelMatcher !== null && labelIsVerbObject(text, RECOMMEND_VERB_CONTEXT, labelMatcher))
+    ) {
       // Fires regardless of any caveat — confident directional advice under
       // unsafe state is the dangerous case, independent of freshness wording.
-      // Recovery/rerun guidance is exempt (it is the desired behaviour).
+      // A recommendation pointing at a KNOWN option label ("I recommend Plan A")
+      // also degrades. Recovery/rerun guidance is exempt (the desired behaviour).
       return { safe: false, violation: 'confident_advice_under_unsafe_state' };
     }
     if (

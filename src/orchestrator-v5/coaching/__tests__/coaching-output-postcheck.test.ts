@@ -272,6 +272,9 @@ describe('checkCoachingOutput — always-unsafe rules fire regardless of state',
       // Review fix: `by` / `at` value-change prepositions, not just `to`/`from`.
       'I increased the budget by £50k.',
       'I set the budget at £50k.',
+      // Review round 3: unit-less integers after to/from are value changes.
+      'I set the headcount to 10.',
+      'I changed the timeline from 12 to 18.',
     ]) {
       expectViolation(checkCoachingOutput(prose, FRESH), 'value_change_narration');
     }
@@ -363,6 +366,66 @@ describe('checkCoachingOutput — always-unsafe rules fire regardless of state',
         FRESH,
       ),
     ).toEqual({ safe: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Label-aware detection — the graph's ACTUAL option / factor labels
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — label-aware mutation / directional detection', () => {
+  const LABELS = ['Plan A', 'Plan B', 'Pricing', 'Headcount'];
+  const opts = { decisionLabels: LABELS };
+
+  it('a mutation verb acting on a known factor label degrades', () => {
+    expectViolation(
+      checkCoachingOutput('I updated Pricing for you.', FRESH, opts),
+      'invented_mutation_success',
+    );
+    expectViolation(
+      checkCoachingOutput('I’ve changed Headcount.', FRESH, opts),
+      'invented_mutation_success',
+    );
+  });
+
+  it('a recommendation pointing at a known option label degrades under unsafe state', () => {
+    expectViolation(
+      checkCoachingOutput('I recommend Plan A.', STALE, opts),
+      'confident_advice_under_unsafe_state',
+    );
+    expectViolation(
+      checkCoachingOutput('I’d go with Plan B.', UNKNOWN, opts),
+      'confident_advice_under_unsafe_state',
+    );
+  });
+
+  it('the same option recommendation is allowed under fresh + usable state', () => {
+    expect(checkCoachingOutput('I recommend Plan A.', FRESH, opts)).toEqual({ safe: true });
+  });
+
+  it('recovery guidance is still safe even with labels supplied', () => {
+    // The label is NOT the verb's object — recovery advice must survive.
+    expect(
+      checkCoachingOutput('I recommend re-running the analysis before Plan A vs Plan B.', STALE, opts),
+    ).toEqual({ safe: true });
+    expect(checkCoachingOutput('My advice is to re-run the analysis.', STALE, opts)).toEqual({
+      safe: true,
+    });
+  });
+
+  it('case-sensitive: a lowercase common word matching a label is NOT a mutation', () => {
+    // Factor labelled "Pricing"/"Headcount" must not degrade lowercase idiom.
+    expect(checkCoachingOutput('I’ve added real value while weighing pricing.', FRESH, opts)).toEqual(
+      { safe: true },
+    );
+    expect(
+      checkCoachingOutput('I changed my mind about the headcount question.', FRESH, opts),
+    ).toEqual({ safe: true });
+  });
+
+  it('without supplied labels, arbitrary labels are not recognised (unchanged behaviour)', () => {
+    expect(checkCoachingOutput('I recommend Plan A.', STALE)).toEqual({ safe: true });
+    expect(checkCoachingOutput('I updated Pricing.', FRESH)).toEqual({ safe: true });
   });
 });
 

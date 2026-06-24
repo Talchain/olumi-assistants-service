@@ -705,7 +705,21 @@ export async function runTurnExecutor(
       return { assistant_text: prose, suggested_actions: baseChips };
     }
     const pack = summariseCoachingStatePack(coachingPromptCanonical);
-    const verdict = checkCoachingOutput(prose, pack);
+    // Supply the turn's live decision labels (raw, case-preserved) so the
+    // post-check recognises the graph's ACTUAL option/factor labels — "I
+    // recommend Plan A" / "I updated Pricing" — not just the type nouns.
+    const decisionLabels: string[] = [];
+    for (const option of analysisReadyForTurn?.options ?? []) {
+      const label = (option as { label?: unknown } | null | undefined)?.label;
+      if (typeof label === 'string') decisionLabels.push(label);
+    }
+    for (const node of contextPackForLog?.graph.nodes ?? []) {
+      if (node !== null && typeof node === 'object' && 'label' in node) {
+        const label = (node as { label?: unknown }).label;
+        if (typeof label === 'string') decisionLabels.push(label);
+      }
+    }
+    const verdict = checkCoachingOutput(prose, pack, { decisionLabels });
     if (verdict.safe) {
       return { assistant_text: prose, suggested_actions: baseChips };
     }
