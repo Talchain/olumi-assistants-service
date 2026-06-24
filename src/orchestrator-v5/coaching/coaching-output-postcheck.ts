@@ -126,21 +126,38 @@ const CLAIM_SUBJECT = "(?:i['’]ve|i\\s+have|i|we['’]ve|we\\s+have|we|success
  */
 const COACHING_MUTATION_CLAIM_ACTIVE = new RegExp(
   `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b\\s+` +
-    `(?:the|a|an|your|that|this|its|my|our|both|two|all)\\s+(?:\\w+\\s+){0,2}?${GRAPH_MUTATION_OBJECT}\\b`,
+    // `[\w-]+` (not `\w+`) so hyphenated modifiers ("the high-priority factor")
+    // are tolerated between the determiner and the graph object.
+    `(?:the|a|an|your|that|this|its|my|our|both|two|all)\\s+(?:[\\w-]+\\s+){0,2}?${GRAPH_MUTATION_OBJECT}\\b`,
   'i',
 );
 
-/** Passive mutation claim — "the model has been updated", "your graph was
- *  changed". Object precedes the verb, so it needs its own pattern. */
+/** Passive mutation claim — "the model has been updated", "your high-priority
+ *  factor was changed". Object precedes the verb, so it needs its own pattern. */
 const COACHING_MUTATION_CLAIM_PASSIVE = new RegExp(
-  `\\b(?:the|your|that|this|its|my|our)\\s+(?:\\w+\\s+){0,2}?${GRAPH_MUTATION_OBJECT}\\b\\s+` +
+  `\\b(?:the|your|that|this|its|my|our)\\s+(?:[\\w-]+\\s+){0,2}?${GRAPH_MUTATION_OBJECT}\\b\\s+` +
     `(?:has\\s+been|have\\s+been|was|were|is\\s+now|are\\s+now)\\s+` +
     `(?:updated|chang(?:e|ed)|set|added|created|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|saved|committed)\\b`,
   'i',
 );
 
+/**
+ * Directly-named graph-entity mutation — "I created Option A", "We updated
+ * Factor 3", "I removed Node X". A named entity (a Capitalised graph noun + a
+ * Capital/number label) needs no determiner, so this complements the
+ * determiner-gated active pattern. CASE-SENSITIVE (no `i` flag): the
+ * capitalised noun + label is the named-entity signal, so ordinary lowercase
+ * prose ("between option a and b", "I changed option settings") does NOT match.
+ */
+const COACHING_MUTATION_CLAIM_NAMED =
+  /\b(?:[Ii]|[Ww]e)(?:['’]ve|\s+have)?\s+(?:just\s+|now\s+|already\s+)?(?:[Uu]pdated?|[Cc]hanged?|[Cc]reated?|[Ss]et|[Aa]dded?|[Rr]emoved?|[Dd]eleted?|[Aa]djusted?|[Mm]odified|[Aa]pplied)\s+(?:Option|Factor|Node|Edge|Constraint|Driver|Assumption|Parameter|Weight|Link|Goal|Scenario|Model|Graph)\s+["“]?[A-Z0-9]/;
+
 function isMutationSuccessClaim(text: string): boolean {
-  return COACHING_MUTATION_CLAIM_ACTIVE.test(text) || COACHING_MUTATION_CLAIM_PASSIVE.test(text);
+  return (
+    COACHING_MUTATION_CLAIM_ACTIVE.test(text) ||
+    COACHING_MUTATION_CLAIM_PASSIVE.test(text) ||
+    COACHING_MUTATION_CLAIM_NAMED.test(text)
+  );
 }
 
 /**
@@ -155,9 +172,15 @@ function isMutationSuccessClaim(text: string): boolean {
  * "increasing churn to 5% would…") never match. Lexical DETECTION only; all
  * value/unit formatting / normalisation stays owned by #296 — resolves nothing.
  */
+// A VALUE shape (not just any digit): currency, a number+unit, or a bare
+// decimal ratio (the "£0.3" set-defect shape). This deliberately EXCLUDES
+// clock times ("5pm", "5am") and unit-less integers ("at 5pm", "at 3 today")
+// so the rule stays value-change-only, not "any number after a preposition".
+const VALUE_SHAPE =
+  '(?:[£$€]\\s?\\d|\\d+(?:[.,]\\d+)?\\s?%|\\d+(?:[.,]\\d+)?\\s?(?:percent|pp|bps|k|m|bn|gbp|usd|eur|dollars?|pounds?|euros?|months?|years?|weeks?|days?|hours?|hrs?|mins?|minutes?|kg|km|miles?|tonnes?|litres?|units?|x)\\b|\\d+\\.\\d+(?!\\s?[ap]m\\b))';
 const COACHING_VALUE_CHANGE = new RegExp(
   `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b` +
-    `[^.!?]{0,40}?\\b(?:to|from|by|at)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?(?:[£$€]\\s?)?\\d`,
+    `[^.!?]{0,40}?\\b(?:to|from|by|at)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?${VALUE_SHAPE}`,
   'i',
 );
 
@@ -172,21 +195,47 @@ const EVIDENCE_CONFIDENCE_PATTERN =
   /\b(?:peer[- ]reviewed|statistically\s+significant|p\s*[<=]\s*0?\.\d|confidence\s+interval|scientifically\s+(?:proven|valid|sound|rigorous)|the\s+evidence\s+(?:shows|suggests|strongly|clearly|supports|indicates)|strong\s+evidence|robust\s+evidence|provenance|cognitive\s+bias|confirmation\s+bias|anchoring\s+bias|availability\s+bias|with\s+high\s+confidence|high(?:ly)?\s+confiden(?:t|ce))\b/i;
 
 /**
- * Confident DIRECTIONAL / SUPERLATIVE advice — recommend-an-option language.
- * Gated on `stateUnsafe` by the caller, NOT on freshness wording: this is the
- * brief's primary firing case ("go with X" under stale state, even with no
- * false "fresh" claim and even when paired with a caveat). Covers:
- *   - first-person recommendation incl. "I would / I'd / we would recommend",
- *     "I'd suggest/advise/favour/propose/go with/choose/pick/opt for/prefer/lean";
- *   - second-person imperative ("you should/ought to/could choose/go with…");
- *   - imperative pick ("go with X", "opt for X", "stick with X");
- *   - a superlative + option NOUN ("the best/better/preferable… option/choice");
- *   - a copula + inherently-option judgement ("is preferable/superior/the
- *     winner/leader"). Superlatives that are NOT followed by an option noun
- *     ("this is the best WAY to think about it") deliberately do NOT fire.
+ * Confident DIRECTIONAL / SUPERLATIVE advice about an OPTION — the brief's
+ * primary firing case under unsafe state (independent of freshness wording, and
+ * even when paired with a caveat). See {@link isDirectionalOptionAdvice}; this
+ * is split into two tiers so generic recommendation language is directional
+ * ONLY when it points at an option, and recovery/rerun guidance — the DESIRED
+ * unsafe-state behaviour — is never a violation.
+ *
+ * Tier 1 — unambiguous option judgement (fires on its own): a superlative + an
+ * option NOUN ("the best/better/preferable… option/choice"), or a copula + an
+ * inherently-option judgement ("is preferable/superior/the winner/better").
+ * `(?!\s+to\b)` keeps process advice ("it is better TO wait") out; superlatives
+ * with no option noun ("this is the best WAY") never reach here.
  */
-const DIRECTIONAL_ADVICE_PATTERN =
-  /\b(?:(?:i|we)(?:['’]d)?\s+(?:would\s+|really\s+|strongly\s+|definitely\s+)?(?:recommend|suggest|advise|favou?r|propose|go\s+with|choose|pick|opt\s+for|select|prefer|lean)|my\s+(?:recommendation|advice|suggestion|pick|choice)|you\s+(?:should|['’]d|ought\s+to|could|may\s+want\s+to|need\s+to)\s+(?:choose|pick|go\s+with|select|opt\s+for|prefer|favou?r)|go\s+with\s+\w+|opt\s+for\s+\w+|stick\s+with\s+\w+|the\s+(?:best|strongest|safest|optimal|right|winning|leading|preferable|better|superior|preferred)\s+(?:option|choice|bet|move|pick|call|one)|(?:is|are|remains?|stays?)\s+(?:clearly\s+|by\s+far\s+|obviously\s+|still\s+|the\s+)?(?:preferable|superior|winner|front[- ]runner|leader)|clearly\s+the\s+winner|your\s+best\s+(?:option|bet|choice))\b/i;
+const UNAMBIGUOUS_OPTION_ADVICE =
+  /\b(?:the\s+(?:best|strongest|safest|optimal|right|winning|leading|preferable|better|superior|preferred)\s+(?:option|choice|bet|move|pick|call|one)|(?:is|are|remains?|stays?|seems?|looks?)\s+(?:clearly\s+|by\s+far\s+|obviously\s+|still\s+|the\s+)?(?:preferable|superior|winner|front[- ]runner|leader|better|stronger|safer)\b(?!\s+to\b)|clearly\s+the\s+winner|your\s+best\s+(?:option|bet|choice))\b/i;
+
+/**
+ * Tier 2 — recommendation / selection language ("I('d/ would) recommend/suggest/
+ * advise/go with/choose/pick…", "you/we should choose…", "my advice…", "go with
+ * X"). Directional ONLY when {@link OPTION_SELECTION_SIGNAL} is also present, so
+ * "I recommend re-running the analysis" / "my advice is to re-run" / "I'd go
+ * with re-running" are NOT classified as option-selection advice.
+ */
+const RECOMMENDATION_VERB =
+  /\b(?:(?:i|we)(?:['’]d)?\s+(?:would\s+|really\s+|strongly\s+|definitely\s+)?(?:recommend|suggest|advise|favou?r|propose|go\s+with|choose|pick|opt\s+for|select|prefer|lean)|my\s+(?:recommendation|advice|suggestion|pick|choice)|(?:you|we)\s+(?:should|['’]d|ought\s+to|could|may\s+want\s+to|need\s+to|must)\s+(?:choose|pick|go\s+with|select|opt\s+for|prefer|favou?r)|go\s+with\s+\w+|opt\s+for\s+\w+|stick\s+with\s+\w+)\b/i;
+
+/** Explicit option-selection signal — an option/choice noun or an enumerated
+ *  pick. NOT the selection verbs themselves (those are recovery-agnostic). */
+const OPTION_SELECTION_SIGNAL =
+  /\b(?:options?|choices?|the\s+(?:first|second|third|former|latter)\b)/i;
+
+/**
+ * Is the prose confident directional advice about an OPTION? Tier-1 judgements
+ * fire on their own; recommendation language (tier 2) fires only with an
+ * option-selection signal — so recovery/rerun guidance ("I recommend re-running
+ * the analysis") is never a violation.
+ */
+function isDirectionalOptionAdvice(text: string): boolean {
+  if (UNAMBIGUOUS_OPTION_ADVICE.test(text)) return true;
+  return RECOMMENDATION_VERB.test(text) && OPTION_SELECTION_SIGNAL.test(text);
+}
 
 /**
  * Presenting an analysis RESULT as current — probabilities, win/lead/ahead
@@ -254,9 +303,10 @@ export function checkCoachingOutput(
   // current. When state IS fresh + usable, directional advice and result
   // presentation are allowed — ordinary coaching is never degraded.
   if (isStateUnsafe(pack)) {
-    if (DIRECTIONAL_ADVICE_PATTERN.test(text)) {
+    if (isDirectionalOptionAdvice(text)) {
       // Fires regardless of any caveat — confident directional advice under
       // unsafe state is the dangerous case, independent of freshness wording.
+      // Recovery/rerun guidance is exempt (it is the desired behaviour).
       return { safe: false, violation: 'confident_advice_under_unsafe_state' };
     }
     if (

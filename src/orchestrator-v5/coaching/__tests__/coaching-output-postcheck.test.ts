@@ -137,14 +137,32 @@ describe('checkCoachingOutput — confident advice under unsafe state', () => {
     );
   });
 
-  it('review fix: "I would recommend X" and "X is preferable" degrade under unsafe state', () => {
+  it('review fix: recommendation + option-selection degrades under unsafe state', () => {
     for (const [prose, pack] of [
       ['I would recommend Option A.', STALE],
       ['Option A is preferable.', UNKNOWN],
       ['Option A is the better option.', BLOCKED],
       ['Option A remains the winner.', STALE],
+      // Review round 2: "we should choose" and bare "is better".
+      ['We should choose Option A.', UNKNOWN],
+      ['Option A is better.', STALE],
     ] as const) {
       expectViolation(checkCoachingOutput(prose, pack), 'confident_advice_under_unsafe_state');
+    }
+  });
+
+  it('review round 2: recovery / rerun guidance is NEVER a directional violation', () => {
+    // The prompt asks the model to suggest re-running under unsafe state — this
+    // is the desired behaviour, not confident option-selection advice.
+    for (const pack of [STALE, UNKNOWN, NONE, BLOCKED]) {
+      for (const prose of [
+        'I recommend re-running the analysis.',
+        'I suggest we re-run the analysis before deciding.',
+        'My advice is to re-run the analysis.',
+        'I’d go with re-running the analysis first.',
+      ]) {
+        expect(checkCoachingOutput(prose, pack), prose).toEqual({ safe: true });
+      }
     }
   });
 
@@ -155,6 +173,9 @@ describe('checkCoachingOutput — confident advice under unsafe state', () => {
     // under unsafe state (no over-blocking).
     expect(
       checkCoachingOutput('Honestly, this is the best way to think it through.', STALE),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput('It is better to wait until you have more information.', STALE),
     ).toEqual({ safe: true });
   });
 
@@ -217,6 +238,12 @@ describe('checkCoachingOutput — always-unsafe rules fire regardless of state',
       // Review fix: `created` is a mutation verb when it acts on a graph object.
       'I created a new option for you.',
       'The graph was created.',
+      // Review round 2: hyphenated modifier must not break the object match.
+      'I updated the high-priority factor.',
+      'Your high-priority factor has been updated.',
+      // Review round 2: a directly-named option needs no determiner.
+      'I created Option A.',
+      'We removed Factor 3.',
     ]) {
       expectViolation(checkCoachingOutput(prose, FRESH), 'invented_mutation_success');
     }
@@ -229,6 +256,9 @@ describe('checkCoachingOutput — always-unsafe rules fire regardless of state',
       'All set — here’s my take.',
       'Done.',
       'I’ve added real value to this discussion.',
+      // Named-entity rule is case-sensitive: lowercase prose is not a mutation.
+      'I changed option settings in my head while weighing this.',
+      'Let’s weigh option a against option b before deciding.',
     ]) {
       expect(checkCoachingOutput(prose, FRESH), prose).toEqual({ safe: true });
     }
@@ -255,6 +285,19 @@ describe('checkCoachingOutput — always-unsafe rules fire regardless of state',
       'A 5% churn assumption is material.',
     ]) {
       expect(checkCoachingOutput(prose, FRESH), prose).toEqual({ safe: true });
+    }
+  });
+
+  it('review round 2: clock times are NOT value-change narration', () => {
+    // `at`/`by` must match a VALUE shape, not any number — so times stay safe,
+    // even under unsafe state.
+    for (const prose of [
+      'I changed my mind at 5pm.',
+      'I set up the meeting at 5pm.',
+      'I changed my plan at 3 today.',
+    ]) {
+      expect(checkCoachingOutput(prose, FRESH), prose).toEqual({ safe: true });
+      expect(checkCoachingOutput(prose, STALE), prose).toEqual({ safe: true });
     }
   });
 
