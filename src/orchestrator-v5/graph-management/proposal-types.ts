@@ -12,12 +12,20 @@
  *    applies to EVERY kind; a stale proposal is rejected, not applied). The new
  *    option survives as a graph NODE and is analysable by run-analysis (which
  *    reads option NODES), so it is NOT unrepresentable. The held REASON is
- *    accurate to the graph: OPTION_ID_COLLISION (id already a node);
- *    OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE (a top-level options[] ARRAY is present,
- *    so the merge keeps it base-only while the new option enters the node-derived
- *    set the context-pack assembler diverges from); otherwise
- *    ADD_OPTION_APPLY_UNWIRED (no options[] array; the apply path / canonical
- *    node <-> options[] contract is unbuilt). The apply-wiring spike owns these.
+ *    accurate to the graph's top-level `options`, decided ONLY by that field's
+ *    shape (never by option-id membership):
+ *      - OPTION_ID_COLLISION                 — the proposed id already exists as
+ *        a node;
+ *      - OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE — a top-level options[] ARRAY is
+ *        present (Array.isArray, including an empty []); the persist-base merge
+ *        keeps it base-only while the new option enters the node-derived set, so
+ *        the context-pack assembler's view diverges from run-analysis's;
+ *      - GRAPH_OPTIONS_MALFORMED             — `options` is present but NOT an
+ *        array (the assembler's `graph.options ?? nodes` RETAINS the non-array
+ *        value rather than falling back to nodes, corrupting its options view);
+ *      - ADD_OPTION_APPLY_UNWIRED            — `options` is absent or nullish;
+ *        the apply path / canonical node <-> options[] contract is simply unbuilt.
+ *    The apply-wiring spike owns resolving these.
  *  - rename_node can reach would_apply (label-only; analysis-hash-neutral).
  *  - EP2 (assessAnalysisReadiness) is the readiness parity target; the canonical
  *    analysis-state selector does not wrap it on this path.
@@ -28,20 +36,24 @@ export type ProposalKind = 'add_option' | 'rename_node';
 export type ProposalVerdict = 'would_apply' | 'held' | 'clarify_required' | 'stale';
 
 /**
- * Held reason for add_option WHEN the graph carries a top-level options[]:
- * applying would diverge that array (kept base-only by the persist-base merge,
- * and preferred by the context-pack assembler) from the node-derived option set
- * that run-analysis reads. Reserved for graphs that actually have a top-level
- * options[] — otherwise there is no split (see ADD_OPTION_APPLY_UNWIRED).
+ * Held reason for add_option when the graph carries a top-level options[] ARRAY
+ * (Array.isArray — including an empty []). Applying would diverge that array
+ * (kept base-only by the persist-base merge, and preferred by the context-pack
+ * assembler) from the node-derived option set that run-analysis reads. Decided
+ * purely by the array's PRESENCE, never by whether it already contains the id.
+ * A present non-array `options` is GRAPH_OPTIONS_MALFORMED; an absent/nullish
+ * `options` is ADD_OPTION_APPLY_UNWIRED.
  */
 export const OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE =
   'OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE' as const;
 
 /**
- * Held reason for add_option when the graph has NO top-level options[] ARRAY
- * (absent, or a malformed non-array value). This spike does not build the apply
- * path — the canonical node <-> options[] persist contract is unresolved — so the
- * option is simply not yet wired for apply. No divergence is claimed.
+ * Held reason for add_option when the graph's top-level `options` is ABSENT or
+ * nullish (no array to diverge, and no non-array value to retain). This spike
+ * does not build the apply path — the canonical node <-> options[] persist
+ * contract is unresolved — so the option is simply not yet wired for apply. No
+ * divergence is claimed. (A present array is OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE;
+ * a present non-array value is GRAPH_OPTIONS_MALFORMED.)
  */
 export const ADD_OPTION_APPLY_UNWIRED = 'ADD_OPTION_APPLY_UNWIRED' as const;
 
@@ -52,18 +64,21 @@ export const OPTION_ID_COLLISION = 'OPTION_ID_COLLISION' as const;
 export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
 
 /**
- * Held reason: the graph's top-level `options` is present but NOT an array — a
- * malformed graph. The context-pack assembler does `graph.options ?? nodes`, so a
- * truthy non-array value is RETAINED (it does NOT fall back to nodes) and would
- * corrupt its options view. Held as malformed — distinct from "no options[] array"
- * (ADD_OPTION_APPLY_UNWIRED) and from "unhashable" (CURRENT_GRAPH_UNREADABLE).
+ * Held reason: the graph's top-level `options` is present (non-nullish) but NOT
+ * an array — a malformed graph. The context-pack assembler does
+ * `graph.options ?? nodes`, so a truthy non-array value is RETAINED (it does NOT
+ * fall back to nodes) and would corrupt its options view. Held as malformed —
+ * distinct from an absent/nullish `options` (ADD_OPTION_APPLY_UNWIRED), a present
+ * options[] ARRAY (OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE), and an unhashable graph
+ * (CURRENT_GRAPH_UNREADABLE).
  */
 export const GRAPH_OPTIONS_MALFORMED = 'GRAPH_OPTIONS_MALFORMED' as const;
 
 /**
- * Held reason: classification failed unexpectedly (e.g. a Proxy / throwing getter
- * on the input, or a malformed proposal). Fail-CLOSED — any uncaught error in the
- * body resolves to this held verdict so classifyProposal never throws.
+ * Held reason: classification failed unexpectedly (a Proxy / throwing getter on
+ * the input, an unknown proposal kind, or any other malformed proposal).
+ * Fail-CLOSED — the kind guard and the wrapped body both resolve here, so
+ * classifyProposal never throws and an unknown kind never reaches the stale gate.
  */
 export const CLASSIFY_FAILED = 'CLASSIFY_FAILED' as const;
 
