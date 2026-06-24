@@ -10,49 +10,50 @@ const here = dirname(fileURLToPath(import.meta.url));
 const moduleDir = join(here, '..'); // src/orchestrator-v5/graph-management
 const moduleFiles = readdirSync(moduleDir).filter((f) => f.endsWith('.ts'));
 
-// Forbidden V4 patch/apply machinery (substrings, matched against module source).
-const FORBIDDEN_V4 = [
-  'patch-applier',
-  'tools/edit-graph',
-  'apply' + 'PatchOperations',
-  'deterministic/actions/add-option',
-  'deterministic/pipeline-v4',
-  'handle' + 'EditGraph',
-  'edit-graph-dispatch',
-  'addOption' + 'Action',
-];
+/**
+ * Import-allowlist enforcement (stronger than a forbidden-substring scan — it
+ * cannot be bypassed by aliases, barrels, or unexpected new imports). Every
+ * cross-boundary import in the module MUST be one of these exact specifiers;
+ * everything else must be a local `./` import. Any V4 patch/apply, persistence,
+ * route, or write module would fail because it is simply not on the list.
+ */
+const ALLOWED_CROSS_BOUNDARY = new Set([
+  '../tools/handlers/d1-shared/apply-graph-mutation.js',
+  '../tools/handlers/d1-shared/errors.js',
+  '../tools/handlers/analysis-ready-core.js',
+  '../context/graph-hash.js',
+  '../../schemas/cee-v3.js',
+]);
 
-// Forbidden live runtime write / persistence paths.
-const FORBIDDEN_WRITE = [
-  'commit' + 'DirectAnswer',
-  'append_turn' + '_atomic',
-  'supabase',
-  '/commit.js',
-  'route-v2',
-  'turn-' + 'executor',
-  '.rpc(',
-];
+function staticImportSpecifiers(src: string): string[] {
+  const specs: string[] = [];
+  const re = /\bfrom\s*['"]([^'"]+)['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) specs.push(m[1]);
+  return specs;
+}
 
-describe('isolation guards (no-V4 / no-persistence / off-path)', () => {
+describe('isolation guards (import allowlist / no-persistence / off-path)', () => {
   it('scans more than one module source file', () => {
     expect(moduleFiles.length).toBeGreaterThan(1);
   });
 
-  it('no module file references V4 patch/apply machinery', () => {
+  it('every cross-boundary import is on the allowlist; everything else is local', () => {
     for (const f of moduleFiles) {
       const src = readFileSync(join(moduleDir, f), 'utf8');
-      for (const bad of FORBIDDEN_V4) {
-        expect(src.includes(bad), `${f} must not reference ${bad}`).toBe(false);
+      for (const spec of staticImportSpecifiers(src)) {
+        const isLocal = spec.startsWith('./');
+        const allowed = isLocal || ALLOWED_CROSS_BOUNDARY.has(spec);
+        expect(allowed, `${f} imports disallowed module '${spec}'`).toBe(true);
       }
     }
   });
 
-  it('no module file references a live runtime write / persistence path', () => {
+  it('no module file uses a dynamic import() or require() (no dynamic bypass)', () => {
     for (const f of moduleFiles) {
       const src = readFileSync(join(moduleDir, f), 'utf8');
-      for (const bad of FORBIDDEN_WRITE) {
-        expect(src.includes(bad), `${f} must not reference ${bad}`).toBe(false);
-      }
+      expect(/\bimport\s*\(/.test(src), `${f} must not use dynamic import()`).toBe(false);
+      expect(/\brequire\s*\(/.test(src), `${f} must not use require()`).toBe(false);
     }
   });
 

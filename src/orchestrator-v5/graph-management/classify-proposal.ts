@@ -1,24 +1,32 @@
 /**
  * The Proposal & Validation Spine entrypoint (ISOLATED SPIKE, off-path).
  *
- * classifyProposal: stale-gate (INV-1) -> candidate construction (V5-owned seam)
- *   -> EP2 parity (INV-3) -> verdict { would_apply | held | clarify_required | stale }.
+ * classifyProposal: readable-graph guard -> stale-gate (INV-1) -> candidate
+ *   construction (V5-owned seam) -> EP2 parity (INV-3) -> verdict
+ *   { would_apply | held | clarify_required | stale }.
  *
- * Pinned outcome: add_option is HELD-only (OPTION_NOT_REPRESENTABLE_IN_MODEL_STATE)
- * because a new option cannot enter canonical options[] over the current D1 seam;
- * rename_node reaches would_apply. The add_option candidate is still constructed
- * and EP2-assessed for transparency, but held on the model-state check so an
- * EP2-green node-level reading can never become a false would_apply (INV-4).
+ * Total over its declared `unknown` graph input: an unreadable graph returns a
+ * typed `held` rather than throwing.
+ *
+ * Outcome by kind:
+ *  - rename_node -> would_apply (EP2 parity), or held/stale.
+ *  - add_option -> ALWAYS held. A new option survives as a node and is analysable
+ *    by run-analysis, but applying it diverges the top-level options[] (preferred
+ *    by the context-pack assembler) from the node-derived set. The candidate is
+ *    still built and EP2-assessed for transparency; the verdict never escapes
+ *    `held` (id collisions held distinctly).
  */
-import { checkBaseHash } from './base-hash-gate.js';
+import { checkBaseHash, isGraphLike } from './base-hash-gate.js';
 import {
   buildRenameCandidate,
   buildAddOptionCandidate,
-  optionPresentInModelState,
+  graphHasNodeId,
 } from './candidate-graph.js';
 import { assessCandidate, ep2VerdictForRepresentable } from './readiness-parity.js';
 import {
-  OPTION_NOT_REPRESENTABLE_IN_MODEL_STATE,
+  OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
+  OPTION_ID_COLLISION,
+  CURRENT_GRAPH_UNREADABLE,
   type Proposal,
   type ClassificationResult,
 } from './proposal-types.js';
@@ -27,6 +35,19 @@ export function classifyProposal(
   proposal: Proposal,
   currentPersistedGraph: unknown,
 ): ClassificationResult {
+  // 0. Totality guard — never throw on the declared `unknown` input.
+  if (!isGraphLike(currentPersistedGraph)) {
+    return {
+      verdict: 'held',
+      kind: proposal.kind,
+      base_hash_check: { expected: proposal.base_graph_hash, actual: null, match: false },
+      blocker: {
+        code: CURRENT_GRAPH_UNREADABLE,
+        message: 'The current graph could not be read (expected an object with a nodes array).',
+      },
+    };
+  }
+
   // 1. INV-1 stale gate — a proposal validated against H is never applied to H2.
   const base_hash_check = checkBaseHash(currentPersistedGraph, proposal.base_graph_hash);
   if (!base_hash_check.match) {
@@ -50,41 +71,44 @@ export function classifyProposal(
     };
   }
 
-  // 3. add_option — HELD-only. Build the candidate to PROVE the model-state gap,
-  //    run EP2 for transparency, then hold on the canonical options[] check.
+  // 3. add_option — ALWAYS held in this spike.
+  //    (a) id collision: the structural validator does not dedupe node ids, so a
+  //        reused id would otherwise yield a duplicate node and could even fall
+  //        through to would_apply. Reject it up front.
+  if (graphHasNodeId(currentPersistedGraph, proposal.option.id)) {
+    return {
+      verdict: 'held',
+      kind: proposal.kind,
+      base_hash_check,
+      blocker: {
+        code: OPTION_ID_COLLISION,
+        message: `An entity with id "${proposal.option.id}" already exists in the graph; add_option cannot reuse it.`,
+      },
+    };
+  }
+  //    (b) genuine new option: build + EP2-assess for transparency, then hold on
+  //        the top-level options[] divergence. The verdict NEVER reaches
+  //        would_apply (an EP2-green node-level reading does not override the
+  //        divergence — that is the point).
   const built = buildAddOptionCandidate(currentPersistedGraph, proposal);
   if (!built.candidate) {
     return { verdict: 'held', kind: proposal.kind, base_hash_check, blocker: built.error };
   }
   const ep2 = assessCandidate(built.candidate);
-  if (!optionPresentInModelState(built.candidate, proposal.option.id)) {
-    return {
-      verdict: 'held',
-      kind: proposal.kind,
-      base_hash_check,
-      candidate: built.candidate,
-      ep2: ep2.result,
-      ep2_state: ep2.state,
-      blocker: {
-        code: OPTION_NOT_REPRESENTABLE_IN_MODEL_STATE,
-        message:
-          'The new option exists only as a graph node; it cannot enter the canonical top-level ' +
-          'options[] model-state over the current D1 seam (candidate construction and the ' +
-          'persist-base merge both preserve options[] from the base). Requires a future ' +
-          'persist-merge extension before add_option can be applied.',
-      },
-    };
-  }
-
-  // Defensive: unreachable over the current seam (a new option is never in
-  // options[]). Kept so a future persist-merge extension that DOES carry the
-  // new option flows through EP2 parity rather than silently holding.
   return {
-    verdict: ep2VerdictForRepresentable(ep2),
+    verdict: 'held',
     kind: proposal.kind,
     base_hash_check,
     candidate: built.candidate,
     ep2: ep2.result,
     ep2_state: ep2.state,
+    blocker: {
+      code: OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
+      message:
+        'Applying this option would diverge canonical state: it survives as a graph node ' +
+        '(analysable by run-analysis, which derives options from nodes), but the top-level ' +
+        'options[] — preferred by the context-pack assembler — is kept base-only by the ' +
+        'persist-base merge. Holding until the apply-wiring spike fixes the node <-> options[] contract.',
+    },
   };
 }

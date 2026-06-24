@@ -97,11 +97,12 @@ export function buildAddOptionCandidate(
 }
 
 /**
- * The canonical analysis source of truth is the top-level options[] (OptionV3)
- * array. Returns true only if `optionId` is already an options[] member of the
- * candidate. Over the current D1 seam a genuinely-new option is NEVER present
- * there, so this returns false for any new option — which is exactly why
- * add_option is HELD-only.
+ * Whether `optionId` is a member of the candidate's TOP-LEVEL options[] array.
+ * The persist-base merge keeps options[] base-only, so a genuinely-new option is
+ * absent here even though it survives as a node and is analysable by run-analysis
+ * (which reads option nodes). That absence — against a graph carrying top-level
+ * options[] preferred by the context-pack assembler — is the divergence
+ * add_option is held on.
  */
 export function optionPresentInModelState(
   candidate: Record<string, unknown>,
@@ -111,5 +112,19 @@ export function optionPresentInModelState(
   if (!Array.isArray(options)) return false;
   return options.some(
     (o) => o !== null && typeof o === 'object' && (o as { id?: unknown }).id === optionId,
+  );
+}
+
+/**
+ * Whether a node with `nodeId` already exists in the graph. Used to reject an
+ * add_option whose id collides with an existing node (the structural validator
+ * does NOT dedupe node ids, so a collision would otherwise produce a duplicate).
+ */
+export function graphHasNodeId(graph: unknown, nodeId: string): boolean {
+  if (graph === null || typeof graph !== 'object') return false;
+  const nodes = (graph as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodes)) return false;
+  return nodes.some(
+    (n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === nodeId,
   );
 }
