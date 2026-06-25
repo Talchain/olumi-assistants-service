@@ -58,6 +58,10 @@ export type ReadinessReasonCode =
   | 'OPTION_INTERVENTION_UNRESOLVABLE'
   | 'OPTIONS_NOT_CONFIGURED'
   | 'SCHEMA_INVALID'
+  // No persisted graph at all (null/undefined) — distinct from SCHEMA_INVALID,
+  // which is a present-but-malformed graph. NO_GRAPH means "create a model",
+  // SCHEMA_INVALID means "fix the model you have".
+  | 'NO_GRAPH'
   | StructuralViolationCode
   | 'INTERNAL_ERROR';
 
@@ -213,7 +217,10 @@ const UNRESOLVED_NEXT_STEP: Record<string, string> = {
 export function assessAnalysisReadiness(rawGraph: unknown): ReadinessResult {
   try {
     if (rawGraph === undefined || rawGraph === null) {
-      return unrecoverable(['SCHEMA_INVALID'], 'graph_structure', 'This scenario has no graph to analyse yet.');
+      // No persisted graph at all (e.g. a guest scenario that never drafted/saved a
+      // model). The honest next step is to CREATE a model, not to fix one — so this
+      // is NO_GRAPH, not SCHEMA_INVALID.
+      return unrecoverable(['NO_GRAPH'], 'graph_structure', 'Draft or save a model first, then run analysis.');
     }
 
     // 1. Canonicalise option interventions (value-preserving) + DEFER on unencodable (#278).

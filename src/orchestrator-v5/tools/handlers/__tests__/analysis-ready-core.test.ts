@@ -277,3 +277,20 @@ describe('EP2 readiness core — totality (never throws)', () => {
     }
   });
 });
+
+describe('EP2 readiness core — NO_GRAPH (no persisted model at all)', () => {
+  it.each([null, undefined])('a %s graph → unrecoverable NO_GRAPH with a draft-a-model next step', (input) => {
+    const r = assessAnalysisReadiness(input as unknown);
+    expect(r.status).toBe('unrecoverable');
+    expect(r.reasonCodes).toEqual(['NO_GRAPH']);
+    expect(r.reasonCategory).toBe('graph_structure');
+    expect(r.canonicalGraph).toBeNull();
+    expect(r.nextStep).toBe('Draft or save a model first, then run analysis.');
+  });
+
+  it('NO_GRAPH (absent) is distinct from SCHEMA_INVALID (present-but-malformed)', () => {
+    const malformed = assessAnalysisReadiness({ nodes: 'not-an-array' });
+    expect(malformed.status).toBe('unrecoverable');
+    expect(malformed.reasonCodes).not.toContain('NO_GRAPH'); // a broken graph is not an absent one
+  });
+});
