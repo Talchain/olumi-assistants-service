@@ -78,6 +78,16 @@ export interface TurnResponse {
     readonly options?: unknown;
     readonly goal_node_id?: unknown;
     readonly computed_at?: unknown;
+    /**
+     * Freshness of the analysis relative to the current persisted graph,
+     * serialised on the wire by `analysis-ready-emit.ts`. Derived from a
+     * graph-hash comparison (graph_hash_at_run vs the current
+     * analysis-affecting graph hash). The assurance journey reads this to
+     * prove staleness after a mutation and freshness after a rerun.
+     * Values: 'fresh' | 'stale' | 'unknown' | 'none' (typed as string for
+     * forward-compat — never assert on an unmodelled literal).
+     */
+    readonly freshness?: string;
   };
   // Note: `turn_class` and `handler_id` were probed during the DL-7
   // audit but are NOT on the wire response envelope — they are

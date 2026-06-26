@@ -524,6 +524,15 @@ export const STALENESS_STEPS: readonly JourneyStep[] = [
 // flag. The default is `canonical` so existing invocations stay
 // backwards-compatible. The harness skips `dl7-edit-graph` when
 // `DL7_PR_B_LANDED !== 'true'` (gating logic lives in index.ts).
+//
+// NOTE: the V5 staging-assurance journey (`pnpm assurance:v5:staging`) is a
+// SEPARATE orchestrator under `./assurance/` — it is NOT a static
+// `JourneyStep[]` entry here because it spans two scenarios (graphless +
+// draft-first) and interleaves Supabase fact/hash reads + exact-ID cleanup,
+// which the single-scenario, HTTP-only `buildPayload(ctx)` registry cannot
+// express. It REUSES this spine's primitives (client, redact,
+// forbidden-terms, classify-outcome, deploy-gate). See
+// `./assurance/index.ts` and `./README.md`.
 // ---------------------------------------------------------------------------
 
 export type JourneyId = 'canonical' | 'dl7-set-factor' | 'dl7-edit-graph' | 'dl7-staleness';
