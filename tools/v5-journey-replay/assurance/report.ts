@@ -78,6 +78,17 @@ function fmtBool(v: boolean | undefined): string {
 }
 
 /**
+ * Escape a string for safe inclusion in a Markdown table cell / list line.
+ * Backslashes MUST be escaped FIRST, then pipes — otherwise a `\` already in
+ * the input would not be escaped and could "escape the escape" of a following
+ * pipe (the `js/incomplete-sanitization` issue). This ordering is locked by a
+ * unit test; do not reorder.
+ */
+export function escapeMdCell(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+}
+
+/**
  * Render the full markdown report. `cleanupLines` / `residualLines` are
  * pre-formatted by the orchestrator (the report module does not depend on
  * the cleanup module's types, keeping it decoupled and easy to test).
@@ -138,7 +149,7 @@ export function renderReport(
   lines.push('| | Check | Detail |');
   lines.push('|---|---|---|');
   for (const c of checks) {
-    const detail = c.detail.replace(/\|/g, '\\|');
+    const detail = escapeMdCell(c.detail);
     lines.push(`| ${ICON[c.status]} | ${c.title} | ${detail} |`);
   }
   lines.push('');
@@ -154,7 +165,7 @@ export function renderReport(
       lines.push(`- **${c.title}** ${ICON[c.status]}`);
       if (c.scenario_id) lines.push(`  - scenario_id: \`${c.scenario_id}\``);
       if (c.request_id) lines.push(`  - request_id: \`${c.request_id}\``);
-      for (const e of c.evidence ?? []) lines.push(`  - ${e.replace(/\|/g, '\\|')}`);
+      for (const e of c.evidence ?? []) lines.push(`  - ${escapeMdCell(e)}`);
     }
     lines.push('');
   }

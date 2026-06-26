@@ -225,7 +225,8 @@ export function readFactorValue(
 export function chooseMutationValue(current: number | null, cap: number | null): number {
   const cur = current ?? 0;
   if (cap !== null && Number.isFinite(cap) && cap >= 2) {
-    const frac = cap > 0 ? cur / cap : 0;
+    // cap >= 2 is guaranteed by the guard above, so the division is safe.
+    const frac = cur / cap;
     let target = Math.round(cap * (frac < 0.5 ? 0.7 : 0.3));
     if (target < 1) target = Math.max(1, Math.round(cap * 0.5));
     if (target > cap) target = Math.round(cap * 0.5);

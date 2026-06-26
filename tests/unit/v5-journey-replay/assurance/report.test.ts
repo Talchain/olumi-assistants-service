@@ -4,6 +4,7 @@ import {
   countRag,
   renderReport,
   consoleSummary,
+  escapeMdCell,
   type CheckResult,
   type ReportHeader,
 } from '../../../../tools/v5-journey-replay/assurance/report.js';
@@ -57,5 +58,42 @@ describe('report', () => {
   it('renderReport: overall GREEN when no amber/red', () => {
     const md = renderReport(header, [{ id: 'x', title: 'x', status: 'green', detail: 'ok' }], [], []);
     expect(md).toContain('🟢 GREEN');
+  });
+});
+
+describe('escapeMdCell — backslash-before-pipe ordering (CodeQL js/incomplete-sanitization)', () => {
+  it('leaves ordinary prose untouched', () => {
+    expect(escapeMdCell('no special chars')).toBe('no special chars');
+  });
+
+  it('escapes a lone pipe', () => {
+    // 'a|b'  ->  'a\|b'
+    expect(escapeMdCell('a|b')).toBe('a\\|b');
+  });
+
+  it('escapes a lone backslash (doubles it)', () => {
+    // '\'  ->  '\\'
+    expect(escapeMdCell('\\')).toBe('\\\\');
+  });
+
+  it('escapes BACKSLASH FIRST, then pipe — input with both is fully escaped', () => {
+    const input = 'a\\|b'; // chars: a \ | b
+    const correctOrder = (s: string) => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+    const wrongOrder = (s: string) => s.replace(/\|/g, '\\|').replace(/\\/g, '\\\\');
+    // Locks the implementation to the correct (backslash-first) ordering...
+    expect(escapeMdCell(input)).toBe(correctOrder(input));
+    // ...and proves the ordering actually matters for this input (regression guard).
+    expect(escapeMdCell(input)).not.toBe(wrongOrder(input));
+  });
+
+  it('round-trips safely in a rendered table cell (no unescaped pipe leaks a column)', () => {
+    const md = renderReport(
+      header,
+      [{ id: 'x', title: 'x', status: 'red', detail: 'value a\\|b changed' }],
+      [],
+      [],
+    );
+    // The raw pipe from the detail must not appear unescaped (it would break the table).
+    expect(md).toContain('value a\\\\\\|b changed');
   });
 });
