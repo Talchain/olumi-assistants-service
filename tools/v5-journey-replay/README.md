@@ -194,3 +194,87 @@ Regression coverage: see [tests/unit/v5-journey-replay/redact.test.ts](../../tes
 | [forbidden-terms.ts](forbidden-terms.ts) | Internal-term leak patterns |
 | [evidence-writer.ts](evidence-writer.ts) | Markdown output + executive summary |
 | [types.ts](types.ts) | Shared types |
+
+---
+
+## V5 staging assurance (`pnpm assurance:v5:staging`)
+
+A separate, **manual** confidence command that extends this spine (it reuses
+`client`, `redact`, `forbidden-terms`, `classify-outcome`, and the
+`evaluateDeployGate`/healthz/preflight gates) and adds what the HTTP-only
+replay cannot do: **Supabase fact/hash reads + exact-ID cleanup + a
+red/amber/green report**. It replaces the repeated hand-run live checks for the
+current CEE/coaching spine. Code lives under [`assurance/`](assurance/).
+
+```bash
+# uses .env.staging.local for the Supabase service-role key (cleanup) + assist key (auth)
+pnpm assurance:v5:staging
+# options:
+pnpm assurance:v5:staging -- --base-url https://cee-staging.onrender.com \
+  --expected-build "$(git rev-parse --short HEAD)" \
+  --scenario-prefix demo --out test-diagnostics/v5-assurance/report.md
+```
+
+**What it does** (two disposable scenarios, cleaned up in a `finally`):
+1. graphless forced `run_analysis` → typed `analysis_not_ready` 200 + chip
+   `chip_prompt_fix_before_analysis` + **zero** handler facts;
+2. draft-first → persisted graph;
+3. forced `run_analysis` → real PLoT result + `run_analysis` fact +
+   `graph_hash_at_run`;
+4. deterministic `set_factor_value` via `selected_elements.node_ids` + edit verb
+   + quantity → the persisted factor value changes (no LLM routing);
+5. stale coaching question → **safe degrade** (post-check / caveat / rerun
+   offer), never confident current-result advice (the hardest case is
+   `confident_advice_under_unsafe_state`);
+6. forced rerun → `analysis_ready.freshness: 'fresh'`.
+
+Every turn is scanned for internal-term leaks **and** Tier-2/Tier-3 claim
+vocabulary ([`assurance/blocked-claim-fields.ts`](assurance/blocked-claim-fields.ts)).
+Serving SHA + flag state are captured (never set). The run exits non-zero on any
+🔴. The report defaults to a gitignored `test-diagnostics/` path.
+
+### Credentials (names only — values never printed)
+
+Read from `.env.staging.local`:
+
+| Name | Purpose |
+|---|---|
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | exact-ID cleanup + fact/hash reads. Service-role bypasses RLS (assurance scenarios are guest rows, `user_id IS NULL`). |
+| `OLUMI_REPLAY_API_KEY` (or `ASSIST_API_KEY`) | assist auth (`X-Olumi-Assist-Key`). |
+
+> **Security (locked decision):** the Supabase service-role key is for this
+> LOCAL/MANUAL command **only**. It MUST NOT be put into CI. When a gated
+> CI workflow is added later, cleanup transport is a **separate** approved
+> decision (authenticated admin endpoint / scoped cleanup credential /
+> CI-only controlled path) — never the service-role key by default.
+
+### Field-safety boundary (non-negotiable)
+
+PR #301 (Brief 4 claim-safety contract) is **doctrine, not enforcement**. The
+suite asserts Tier-2/Tier-3 fields (`factor_sensitivity`, `confidence_tier`,
+`robustness`, `edge_e_values`, `inference_warnings`, evidence quality,
+report-level confidence, bias / scientific-warning vocabulary) are **absent**
+from user-facing text — it must never assert them as present, displayed, or
+safe.
+
+### Files (`assurance/`)
+
+| File | Purpose |
+|---|---|
+| [assurance/index.ts](assurance/index.ts) | CLI entry (arg parse, report write, exit code) |
+| [assurance/run.ts](assurance/run.ts) | Orchestrator — two-scenario journey + cleanup in `finally` |
+| [assurance/journey.ts](assurance/journey.ts) | Pure extraction + R/A/G classifiers |
+| [assurance/facts.ts](assurance/facts.ts) | Supabase fact/hash/graph reads + factor resolution |
+| [assurance/cleanup.ts](assurance/cleanup.ts) | Exact-ID child-first cleanup + zero-residual verify |
+| [assurance/supabase.ts](assurance/supabase.ts) | Env load + service-role client + `TableAccess` |
+| [assurance/blocked-claim-fields.ts](assurance/blocked-claim-fields.ts) | Tier-2/3 negative guard |
+| [assurance/report.ts](assurance/report.ts) | Red/amber/green report renderer |
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | all checks green/amber (no red) |
+| 1 | at least one 🔴 (hard contract failure / unsafe state / residual left) |
+| 2 | fatal harness error |
+| 3 | blocked before running (missing creds / deploy halt / auth) — no scenarios created |

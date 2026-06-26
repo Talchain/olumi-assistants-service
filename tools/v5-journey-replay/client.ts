@@ -48,6 +48,20 @@ export interface TurnPayload {
       | 'what_would_flip';
     readonly parameters?: Record<string, unknown>;
   };
+  /**
+   * UI selection context. Parsed by `parseRequestExtensions`
+   * (src/orchestrator-v5/boundary/request-extensions.ts) as a second,
+   * best-effort pass over the raw body — it is NOT part of the strict B1
+   * `MessageTurnPayloadSchema`, so an invalid value is dropped silently
+   * (never a 422). The V5 deterministic value-update pre-route consumes
+   * `node_ids` as a strict factor-kind tie-breaker, which is how the
+   * assurance journey forces a `set_factor_value` mutation deterministically
+   * (selected factor node + edit verb + quantity → no LLM routing).
+   */
+  readonly selected_elements?: {
+    readonly node_ids?: readonly string[];
+    readonly edge_ids?: readonly string[];
+  };
   readonly retry_of?: string;
 }
 
