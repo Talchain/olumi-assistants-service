@@ -67,6 +67,7 @@ function makeRunAnalysisFact(
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
+    noop: false,
     result: {
       scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_a',
@@ -246,6 +247,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     return {
       fact_type: 'run_analysis',
       fact_version: 1,
+      noop: false,
       result: {
         scenario_id: SCENARIO_ID,
         leading_option_id: 'opt_a',
@@ -320,6 +322,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const fact = {
       fact_type: 'run_analysis',
       fact_version: 1,
+      noop: false,
       result: {
         scenario_id: SCENARIO_ID,
         leading_option_id: 'opt_a',
@@ -355,6 +358,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     return {
       fact_type: 'run_analysis',
       fact_version: 1,
+      noop: false,
       result: {
         scenario_id: SCENARIO_ID,
         leading_option_id: 'opt_a',
@@ -568,6 +572,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const fact = {
       fact_type: 'run_analysis',
       fact_version: 1,
+      noop: false,
       result: {
         scenario_id: SCENARIO_ID,
         leading_option_id: 'opt_a',
@@ -619,6 +624,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const fact = {
       fact_type: 'run_analysis',
       fact_version: 1,
+      noop: false,
       result: {
         scenario_id: SCENARIO_ID,
         leading_option_id: 'opt_a',
@@ -953,5 +959,96 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
         (payload as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
     );
     expect(lifecycleCalls).toHaveLength(0);
+  });
+
+  // ── Fix 1: routed-turn fact selection is index-robust ──────────────────
+  // The freshness verdict's `selected_fact_index` is relative to the array it
+  // was derived from. On a routed follow-up the post-handler derivation runs
+  // against the UNIFIED `[...handlerFacts, ...prior_facts]` array, so the index
+  // can be > the position of the same fact inside `prior_facts`. The composer
+  // must resolve the fact by CONTENT, not by blindly indexing.
+
+  it('FIX1 REGRESSION: resolves the prior fact by content even when selected_fact_index is shifted', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    const response = composeToolCallResponse({
+      orientation: '',
+      confirmation: 'Explained.',
+      coaching: null,
+      stage: 'decide',
+      handlerFacts: [],
+      lifecycle: {
+        // Only the run_analysis fact is in this array (position 0)...
+        priorFacts: [priorFact],
+        // ...but the verdict was derived against a prepended array, so the
+        // index points at position 1 (off by handlerFactsForCommit.length).
+        // Pre-fix: priorFacts[1] === undefined → rebuild_failed. Post-fix:
+        // content selection finds the fact at 0 → emitted_fresh.
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 1 }),
+        requestId: 'req-fix1',
+        scenarioId: SCENARIO_ID,
+      },
+    });
+    // Blocks rebuilt — NOT a rebuild_failed.
+    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeDefined();
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([p]) =>
+        typeof p === 'object' && p !== null &&
+        (p as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    expect((lifecycleCalls[0]![0] as Record<string, unknown>).lifecycle_state).toBe('emitted_fresh');
+    // And the index/content mismatch is observable (1 passed vs 0 by content).
+    const mismatch = infoSpy.mock.calls.filter(
+      ([p]) =>
+        typeof p === 'object' && p !== null &&
+        (p as Record<string, unknown>).event === 'v5.phase3.lifecycle_index_mismatch',
+    );
+    expect(mismatch).toHaveLength(1);
+    const mm = mismatch[0]![0] as Record<string, unknown>;
+    expect(mm.passed_index).toBe(1);
+    expect(mm.content_index).toBe(0);
+  });
+
+  it('FIX1: no index-mismatch event when the passed index already matches content position', () => {
+    const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
+    composeToolCallResponse({
+      orientation: '', confirmation: 'Explained.', coaching: null,
+      stage: 'decide', handlerFacts: [],
+      lifecycle: {
+        priorFacts: [priorFact],
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+        requestId: 'req-fix1-ok', scenarioId: SCENARIO_ID,
+      },
+    });
+    const mismatch = infoSpy.mock.calls.filter(
+      ([p]) =>
+        typeof p === 'object' && p !== null &&
+        (p as Record<string, unknown>).event === 'v5.phase3.lifecycle_index_mismatch',
+    );
+    expect(mismatch).toHaveLength(0);
+  });
+
+  it('FIX1: honest degradation — no run_analysis fact present → rebuild_failed (selected_fact_unavailable)', () => {
+    // The verdict claims a selected fact, but prior_facts genuinely has none.
+    // Content selection returns null → the honest rebuild_failed path fires.
+    const response = composeToolCallResponse({
+      orientation: '', confirmation: 'Explained.', coaching: null,
+      stage: 'decide', handlerFacts: [],
+      lifecycle: {
+        priorFacts: [], // genuinely no run_analysis fact
+        freshness: freshDerivation({ sourceHash: SOURCE_GRAPH_HASH, selectedIndex: 0 }),
+        requestId: 'req-fix1-none', scenarioId: SCENARIO_ID,
+      },
+    });
+    expect(response.blocks.find((b) => b.type === 'analysis_result')).toBeUndefined();
+    const lifecycleCalls = infoSpy.mock.calls.filter(
+      ([p]) =>
+        typeof p === 'object' && p !== null &&
+        (p as Record<string, unknown>).event === 'v5.phase3.block_lifecycle',
+    );
+    expect(lifecycleCalls).toHaveLength(1);
+    const payload = lifecycleCalls[0]![0] as Record<string, unknown>;
+    expect(payload.lifecycle_state).toBe('rebuild_failed');
+    expect(payload.reason).toBe('selected_fact_unavailable');
   });
 });

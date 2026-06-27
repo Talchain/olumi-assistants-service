@@ -175,6 +175,7 @@ import {
   computeAnalysisAffectingGraphHash,
   computeDeterministicGraphHash,
 } from './context/graph-hash.js';
+import { extractGraphOptionIds } from './context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
@@ -1002,9 +1003,19 @@ export async function runTurnExecutor(
       );
       return null;
     })();
+    // Option-identity guard inputs (CEE_OPTION_IDENTITY_FRESHNESS_GUARD). Read
+    // option IDs from the RAW current graph — persisted when present (even when
+    // it failed ingress parse above, so the recovered/unparseable-graph case is
+    // still covered), else the request graph on cold start. `undefined` when the
+    // flag is off → byte-identical pre-guard behaviour.
+    const currentGraphOptionIdsForTurn: readonly string[] | null | undefined =
+      config.cee.optionIdentityFreshnessGuard
+        ? extractGraphOptionIds(context.persistedGraph ?? graphStateForTurn ?? null)
+        : undefined;
     routingFreshness = deriveAnalysisFreshness(
       context.prior_facts,
       currentAnalysisGraphHashForTurn,
+      currentGraphOptionIdsForTurn,
     );
     // Until the post-dispatch re-derivation runs, the wire-bound
     // `freshness` defaults to the routing view — this covers exit paths
@@ -4987,9 +4998,19 @@ export async function runTurnExecutor(
           merged as GraphStateIngress | null | undefined,
         );
       })();
+      // Option-identity guard inputs (CEE_OPTION_IDENTITY_FRESHNESS_GUARD).
+      // Options are not altered by value mutations, and a structural option
+      // edit already diverges the hash (→ stale by hash), so reading from the
+      // raw current graph — persisted when present, else the request graph —
+      // is the correct, conservative source. `undefined` when the flag is off.
+      const currentGraphOptionIdsForPostHandler: readonly string[] | null | undefined =
+        config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(context.persistedGraph ?? graphStateForTurn ?? null)
+          : undefined;
       freshness = deriveAnalysisFreshness(
         [...handlerFactsForCommit, ...context.prior_facts],
         hashForPostHandlerFreshness,
+        currentGraphOptionIdsForPostHandler,
       );
       emitFreshnessTelemetry(
         freshness,
@@ -5038,6 +5059,7 @@ export async function runTurnExecutor(
         priorFacts: context.prior_facts,
         readiness: canonicalReadinessForRun,
         currentGraphHash: hashForPostHandlerFreshness,
+        currentGraphOptionIds: currentGraphOptionIdsForPostHandler,
       });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
@@ -5111,10 +5133,20 @@ export async function runTurnExecutor(
         // Phase 3 blocks from prior_facts when the current turn produced
         // no run_analysis fact, or emit the stale-safe rerun coaching
         // when the graph has diverged from the source fact.
+        //
+        // Fact-array basis: `freshness` above was derived against the UNIFIED
+        // array `[...handlerFactsForCommit, ...context.prior_facts]`, so
+        // `freshness.selected_fact_index` is a position in THAT array. Hand the
+        // composer the same unified array so the index basis is consistent
+        // end-to-end (the composer also re-resolves the fact by content as a
+        // safety net — see selectPriorRunAnalysisFact). Passing the unprepended
+        // `context.prior_facts` here is the historical routed-turn bug: a
+        // non-run_analysis current-turn fact shifts the index by
+        // handlerFactsForCommit.length → selected_fact_unavailable.
         ...(freshness !== null
           ? {
               lifecycle: {
-                priorFacts: context.prior_facts,
+                priorFacts: [...handlerFactsForCommit, ...context.prior_facts],
                 freshness,
                 requestId,
                 scenarioId: context.session_id,
@@ -5934,6 +5966,11 @@ export async function runTurnExecutor(
           analysisReadyForTurn,
         ),
         currentGraphHash: currentAnalysisGraphHashForTurn,
+        // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): same raw
+        // graph source as the routing-freshness hash above. undefined when off.
+        currentGraphOptionIds: config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(context.persistedGraph ?? graphStateForTurn ?? null)
+          : undefined,
       });
     }
     return {

@@ -577,6 +577,20 @@ const ConfigSchema = z.object({
     // (the always-on coaching policy engine) and CEE_COACHING_STATE_PACK_ENABLED
     // (the diagnostic-only `_context_summary` sub-block).
     coachingContextPromptEnabled: booleanString.default(false),
+    // V5 option-identity freshness guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD).
+    // When true, the freshness derivation additionally compares the analysed
+    // option identities carried on the selected run_analysis fact
+    // (enrichment.option_comparison[].option_id ∪ leading_option_id) against
+    // the current graph's option IDs. If they diverge while the hash path
+    // could not already prove staleness ('fresh' or the hash-impossible
+    // 'unknown' paths — legacy_fact_missing_hash / current_graph_hash_unavailable,
+    // i.e. recovered-session / unparseable-graph reloads), the verdict is
+    // forced to 'stale' with reason 'analysed_options_diverged' so the system
+    // fails closed instead of implying the analysis reflects the current model.
+    // Default OFF; flag-off is byte-identical (no option IDs threaded into
+    // deriveAnalysisFreshness, no override, no new telemetry). Proven ON in
+    // deterministic tests; staging enablement is a separate gated follow-up.
+    optionIdentityFreshnessGuard: booleanString.default(false),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
@@ -984,6 +998,7 @@ function parseConfig(): Config {
       contextSummaryEnabled: env.CEE_CONTEXT_SUMMARY_ENABLED,
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
       coachingContextPromptEnabled: env.CEE_COACHING_CONTEXT_PROMPT_ENABLED,
+      optionIdentityFreshnessGuard: env.CEE_OPTION_IDENTITY_FRESHNESS_GUARD,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
       promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
       fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,

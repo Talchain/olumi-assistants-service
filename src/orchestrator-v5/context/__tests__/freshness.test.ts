@@ -588,3 +588,133 @@ describe('emitFreshnessTelemetry — event family by derivation reason', () => {
     expect(captured[1]!.data.prior_fact_count).toBeUndefined();
   });
 });
+
+// ─── Option-identity freshness guard (3rd-arg currentGraphOptionIds) ──────
+
+describe('deriveAnalysisFreshness — option-identity guard', () => {
+  function mkFactWithOptions(opts: {
+    graphHash?: string | null;
+    leader?: string | null;
+    optionIds?: readonly string[];
+    computedAt?: string | null;
+  }): RunAnalysisHandlerFact {
+    const enrichment: Record<string, unknown> = {
+      option_comparison: (opts.optionIds ?? []).map((id) => ({
+        option_id: id,
+        win_probability: 0.5,
+      })),
+    };
+    const result: Record<string, unknown> = {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: opts.leader ?? null,
+      summary: 'Ran analysis.',
+      enrichment,
+    };
+    if (opts.graphHash != null) result.graph_hash_at_run = opts.graphHash;
+    if (opts.computedAt != null) result.computed_at = opts.computedAt;
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result,
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  it('byte-identical: 3rd-arg undefined === the two-argument form', () => {
+    const facts = [mkRunAnalysisFact({ graph_hash_at_run: 'h1' })];
+    const twoArg = deriveAnalysisFreshness(facts, 'h1');
+    const undef = deriveAnalysisFreshness(facts, 'h1', undefined);
+    expect(undef).toEqual(twoArg);
+    expect(undef.freshness).toBe('fresh');
+  });
+
+  it('fresh + analysed IDs all present in current graph → stays fresh', () => {
+    const fact = mkFactWithOptions({
+      graphHash: 'h1',
+      leader: 'A',
+      optionIds: ['A', 'B', 'C'],
+    });
+    const r = deriveAnalysisFreshness([fact], 'h1', ['A', 'B', 'C']);
+    expect(r.freshness).toBe('fresh');
+    expect(r.reason).toBe('graph_hash_match');
+  });
+
+  it('RECOVERED-SESSION REPRO: hashes match but analysed X/Y/C (leader X) vs current A/B/C → stale', () => {
+    // Isolate the option-identity signal: force the hash path to "fresh" by
+    // making the hashes equal, then prove option divergence overrides to stale.
+    const fact = mkFactWithOptions({
+      graphHash: 'same-hash',
+      leader: 'X',
+      optionIds: ['X', 'Y', 'C'],
+    });
+    const r = deriveAnalysisFreshness([fact], 'same-hash', ['A', 'B', 'C']);
+    expect(r.freshness).toBe('stale');
+    expect(r.reason).toBe('analysed_options_diverged');
+    // The verdict must NOT be classified fresh/current for current-model claims.
+    expect(r.freshness).not.toBe('fresh');
+  });
+
+  it('legacy fact (no graph_hash_at_run) + option divergence → stale (decisive, not lenient unknown)', () => {
+    const fact = mkFactWithOptions({ leader: 'X', optionIds: ['X', 'Y'] }); // no graph_hash_at_run
+    const r = deriveAnalysisFreshness([fact], 'current-hash', ['A', 'B', 'C']);
+    expect(r.freshness).toBe('stale');
+    expect(r.reason).toBe('analysed_options_diverged');
+  });
+
+  it('current graph hash unavailable + option divergence → stale (recovered/unparseable graph)', () => {
+    const fact = mkFactWithOptions({ graphHash: 'h1', leader: 'X', optionIds: ['X', 'Y'] });
+    const r = deriveAnalysisFreshness([fact], null, ['A', 'B', 'C']);
+    expect(r.freshness).toBe('stale');
+    expect(r.reason).toBe('analysed_options_diverged');
+  });
+
+  it('current option IDs null/empty → unchanged (no comparison possible)', () => {
+    const fact = mkFactWithOptions({ graphHash: 'h1', leader: 'X', optionIds: ['X'] });
+    expect(deriveAnalysisFreshness([fact], 'h1', null).freshness).toBe('fresh');
+    expect(deriveAnalysisFreshness([fact], 'h1', []).freshness).toBe('fresh');
+  });
+
+  it('no analysed option IDs (win_probabilities labels only) → unchanged, never label-blocked', () => {
+    // No option_comparison ⇒ analysed IDs indeterminate; leader also absent.
+    const fact = mkFactWithOptions({ graphHash: 'h1', leader: null, optionIds: [] });
+    const r = deriveAnalysisFreshness([fact], 'h1', ['A', 'B', 'C']);
+    expect(r.freshness).toBe('fresh');
+  });
+
+  it("'none' (no fact) + option IDs supplied → stays none", () => {
+    const r = deriveAnalysisFreshness([], 'h1', ['A', 'B', 'C']);
+    expect(r.freshness).toBe('none');
+    expect(r.reason).toBe('no_successful_run_analysis_fact');
+  });
+
+  it('telemetry: analysed_options_diverged on a hash-impossible path emits options_diverged AND preserves graph_hash_missing', () => {
+    const captured: string[] = [];
+    setTestSink((event) => {
+      if (event.startsWith('v5.analysis_freshness.')) captured.push(event);
+    });
+    try {
+      const fact = mkFactWithOptions({
+        graphHash: 'h1',
+        leader: 'X',
+        optionIds: ['X', 'Y'],
+        computedAt: '2026-05-01T00:00:00.000Z',
+      });
+      // current_graph_hash_unavailable path overridden to analysed_options_diverged.
+      const r = deriveAnalysisFreshness([fact], null, ['A', 'B', 'C']);
+      expect(r.reason).toBe('analysed_options_diverged');
+      emitFreshnessTelemetry(r, {
+        request_id: 'r',
+        scenario_id: 's',
+        dispatch_path: 'unit_test',
+      });
+      expect(captured).toEqual([
+        'v5.analysis_freshness.derived',
+        'v5.analysis_freshness.fact_selected',
+        'v5.analysis_freshness.graph_hash_missing', // NOT lost on the override
+        'v5.analysis_freshness.options_diverged',
+      ]);
+    } finally {
+      setTestSink(null);
+    }
+  });
+});

@@ -14,7 +14,7 @@
 import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import type { FreshnessDerivation } from './context/freshness.js';
+import { selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
 import { TelemetryEvents, emit } from '../utils/telemetry.js';
 import type { SuggestedAction } from './compose/types.js';
 import {
@@ -532,7 +532,10 @@ function buildLifecycleBlocksFromPrior(
     return [];
   }
 
-  const priorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index);
+  const priorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index, {
+    requestId: lifecycle.requestId,
+    scenarioId: lifecycle.scenarioId,
+  });
   if (priorFact === null) {
     emitLifecycle(lifecycle, {
       lifecycle_state: 'rebuild_failed',
@@ -609,27 +612,48 @@ function buildLifecycleBlocksFromPrior(
 }
 
 /**
- * Resolve the canonical prior run_analysis fact using the index already
- * picked by the upstream freshness derivation. Falls back to "most
- * recent run_analysis fact in prior_facts" only when the index is null
- * (e.g. legacy callers that did not pre-compute one).
+ * Resolve the canonical prior run_analysis fact for the Phase 3 lifecycle.
+ *
+ * Resolution is CONTENT-based: `selectRunAnalysisFact` picks the newest
+ * successful run_analysis fact in `priorFacts` — the exact selector the
+ * freshness derivation used. This is deliberately NOT a blind index lookup.
+ * `selectedFactIndex` is a position relative to whatever array the freshness
+ * derivation ran against; a caller that derives freshness on one fact-array
+ * basis (e.g. `[...handlerFacts, ...priorFacts]`) but hands the lifecycle a
+ * differently-ordered array would otherwise shift the index and fail to
+ * resolve the fact (`selected_fact_unavailable`). Selecting by content makes
+ * the resolution robust to that array-basis drift.
+ *
+ * `selectedFactIndex` is retained only as a cross-check: when it disagrees
+ * with the content-selected position we emit
+ * `v5.phase3.lifecycle_index_mismatch` (metadata only) so the drift is
+ * observable. The content-selected fact always wins — behaviour does not
+ * change because the cross-check differs.
  */
 function selectPriorRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
   selectedFactIndex: number | null,
+  telemetryContext?: { readonly requestId: string; readonly scenarioId: string },
 ): RunAnalysisHandlerFact | null {
-  if (selectedFactIndex !== null) {
-    const fact = priorFacts[selectedFactIndex];
-    if (fact !== undefined && fact.fact_type === 'run_analysis') {
-      return fact;
-    }
-    return null;
+  const selected = selectRunAnalysisFact(priorFacts);
+  if (selected === null) return null;
+
+  if (
+    telemetryContext !== undefined &&
+    selectedFactIndex !== null &&
+    selectedFactIndex !== selected.index
+  ) {
+    emit(TelemetryEvents.V5Phase3LifecycleIndexMismatch, {
+      request_id: telemetryContext.requestId,
+      scenario_id: telemetryContext.scenarioId,
+      passed_index: selectedFactIndex,
+      content_index: selected.index,
+    });
   }
-  // Defensive fallback — newest first per build-turn-context loader.
-  for (const fact of priorFacts) {
-    if (fact.fact_type === 'run_analysis') return fact;
-  }
-  return null;
+
+  // `selectRunAnalysisFact` only ever returns a run_analysis fact; narrow
+  // defensively so the return type stays honest.
+  return selected.fact.fact_type === 'run_analysis' ? selected.fact : null;
 }
 
 interface LifecycleTelemetryPayload {

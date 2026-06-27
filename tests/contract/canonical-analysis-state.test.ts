@@ -577,3 +577,103 @@ describe('non-execute assembly shape — handlerFacts:[] + priorFacts honesty', 
     expect(pack.usable_for_chips).toBe(false);
   });
 });
+
+// ─── Option-identity freshness guard (currentGraphOptionIds input) ────────
+
+describe('selectCanonicalAnalysisState — option-identity guard', () => {
+  function mkFactWithOptions(opts: {
+    graph_hash_at_run?: string;
+    leader?: string | null;
+    optionIds?: readonly string[];
+    computed_at?: string;
+  }): RunAnalysisHandlerFact {
+    const result: Record<string, unknown> = {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: opts.leader ?? null,
+      summary: 'Ran analysis.',
+      enrichment: {
+        analysis_status: 'computed',
+        option_comparison: (opts.optionIds ?? []).map((id) => ({
+          option_id: id,
+          win_probability: 0.5,
+        })),
+      },
+    };
+    if (opts.graph_hash_at_run !== undefined) result.graph_hash_at_run = opts.graph_hash_at_run;
+    if (opts.computed_at !== undefined) result.computed_at = opts.computed_at;
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result,
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  it('flag-off (no currentGraphOptionIds) → no option_identity, verdict unchanged', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [mkFactWithOptions({ graph_hash_at_run: 'same', leader: 'X', optionIds: ['X', 'Y'] })],
+      currentGraphHash: 'same',
+    });
+    expect(state.freshness).toBe('fresh');
+    expect(state.option_identity).toBeUndefined();
+    expect(summariseCanonicalAnalysisState(state).option_identity).toBeUndefined();
+  });
+
+  it('divergent option IDs → stale + requiresRerun + !usableForChips, prose still usable (caveated)', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [
+        mkFactWithOptions({ graph_hash_at_run: 'same', leader: 'X', optionIds: ['X', 'Y', 'C'] }),
+      ],
+      currentGraphHash: 'same', // hashes match → would be fresh without the guard
+      currentGraphOptionIds: ['A', 'B', 'C'],
+    });
+    expect(state.freshness).toBe('stale');
+    expect(state.freshness_reason).toBe('analysed_options_diverged');
+    expect(state.requiresRerun).toBe(true);
+    expect(state.usableForChips).toBe(false);
+    expect(state.usableForProse).toBe(true); // stale prose is allowed with a caveat
+    // Diagnostic surface records the decision (counts + closed enum, no IDs).
+    expect(state.option_identity).toEqual({
+      checked: true,
+      match: false,
+      reason: 'leader_absent',
+      analysed_option_count: 3,
+      current_option_count: 3,
+    });
+    const summary = summariseCanonicalAnalysisState(state);
+    expect(summary.option_identity?.match).toBe(false);
+    expect(summary.freshness_reason).toBe('analysed_options_diverged');
+  });
+
+  it('matching option IDs → fresh, option_identity records the match', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [
+        mkFactWithOptions({ graph_hash_at_run: 'same', leader: 'A', optionIds: ['A', 'B', 'C'] }),
+      ],
+      currentGraphHash: 'same',
+      currentGraphOptionIds: ['A', 'B', 'C'],
+    });
+    expect(state.freshness).toBe('fresh');
+    expect(state.option_identity).toEqual({
+      checked: true,
+      match: true,
+      reason: 'match',
+      analysed_option_count: 3,
+      current_option_count: 3,
+    });
+  });
+
+  it('flag on but no fact → no option_identity (nothing to compare)', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [],
+      currentGraphHash: 'same',
+      currentGraphOptionIds: ['A', 'B', 'C'],
+    });
+    expect(state.freshness).toBe('none');
+    expect(state.option_identity).toBeUndefined();
+  });
+});

@@ -38,6 +38,11 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  compareAnalysedOptionIdentity,
+  extractAnalysedLeaderId,
+  extractAnalysedOptionIds,
+} from './option-identity.js';
 
 /**
  * Four-valued freshness state. Reachable from new code paths only as
@@ -58,6 +63,12 @@ export type FreshnessReason =
   | 'current_graph_hash_unavailable'
   | 'no_successful_run_analysis_fact'
   | 'invariant_failed'
+  /** Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): the analysed
+   *  option identities on the selected fact no longer match the current graph's
+   *  option IDs, so a `fresh` or hash-impossible `unknown` verdict is forced to
+   *  `stale` (fail closed). Only reachable when the guard is enabled and the
+   *  caller threaded current graph option IDs. */
+  | 'analysed_options_diverged'
   /** Dispatcher attempted derivation and failed (session-store error,
    *  bad graph parse, etc.). Honours the "always emit freshness"
    *  contract instead of dropping the wire fields silently. */
@@ -72,12 +83,18 @@ export interface FreshnessDerivation {
   readonly freshness: AnalysisFreshness;
   readonly reason: FreshnessReason;
   /**
-   * Position of the selected fact within the prior-fact array (newest-
-   * first per build-turn-context loader convention). Null when no
-   * successful fact was selected. Used as a stable identifier in
-   * telemetry; the schemas package does not surface fact row UUIDs
-   * through `readFactsFor`, so position-in-array is the available
-   * deterministic key.
+   * Position of the selected fact within the EXACT array passed to
+   * `deriveAnalysisFreshness` — which is caller-defined, NOT a global
+   * ordering. Most callers pass `prior_facts` (newest-first per the
+   * build-turn-context loader), but the turn-executor post-handler path
+   * derives against the unified `[...handlerFactsForCommit, ...prior_facts]`
+   * array, so the index is relative to that. Consumers MUST resolve the fact
+   * against the same array they passed in, or — preferably — re-resolve by
+   * content via `selectRunAnalysisFact` and treat this index as a cross-check
+   * only (see compose.ts `selectPriorRunAnalysisFact`). Null when no
+   * successful fact was selected. Used as a stable identifier in telemetry;
+   * the schemas package does not surface fact row UUIDs through `readFactsFor`,
+   * so position-in-array is the available deterministic key.
    */
   readonly selected_fact_index: number | null;
   readonly graph_hash_at_run: string | null;
@@ -372,6 +389,16 @@ function checkHardInvariants(
  *   - Hashes match → fresh
  *   - Hashes differ → stale
  *
+ * Option-identity guard (optional `currentGraphOptionIds`, gated by
+ * `cee.optionIdentityFreshnessGuard` at the call sites): when provided, a
+ * `fresh` or hash-impossible `unknown` verdict is downgraded to `stale`
+ * (reason `analysed_options_diverged`) if the analysed option identities on the
+ * selected fact no longer match the current graph's option IDs. This fails
+ * closed on the recovered-session / unparseable-graph paths the hash cannot
+ * reach. Passing `undefined` (the default — flag off) skips the guard entirely,
+ * so behaviour is byte-identical to the two-argument form. `none` and already-
+ * `stale` verdicts, and indeterminate option data, are left untouched.
+ *
  * Caller is responsible for emitting the `analysis_freshness.derived`
  * telemetry event with the returned derivation. The function does not
  * import or call telemetry to keep the unit-test surface minimal and
@@ -380,6 +407,7 @@ function checkHardInvariants(
 export function deriveAnalysisFreshness(
   priorFacts: readonly HandlerFact[],
   currentGraphHash: string | null,
+  currentGraphOptionIds?: readonly string[] | null,
 ): FreshnessDerivation {
   const selected = selectRunAnalysisFact(priorFacts);
 
@@ -395,47 +423,65 @@ export function deriveAnalysisFreshness(
     return enforceInvariants(noFact);
   }
 
+  // Base verdict from the graph-hash comparison (unchanged logic).
+  let base: FreshnessDerivation;
   if (selected.graph_hash_at_run === null) {
-    return enforceInvariants({
+    base = {
       freshness: 'unknown',
       reason: 'legacy_fact_missing_hash',
       selected_fact_index: selected.index,
       graph_hash_at_run: null,
       current_graph_hash: currentGraphHash,
       computed_at: selected.computed_at,
-    });
-  }
-
-  if (currentGraphHash === null) {
-    return enforceInvariants({
+    };
+  } else if (currentGraphHash === null) {
+    base = {
       freshness: 'unknown',
       reason: 'current_graph_hash_unavailable',
       selected_fact_index: selected.index,
       graph_hash_at_run: selected.graph_hash_at_run,
       current_graph_hash: null,
       computed_at: selected.computed_at,
-    });
-  }
-
-  if (selected.graph_hash_at_run === currentGraphHash) {
-    return enforceInvariants({
+    };
+  } else if (selected.graph_hash_at_run === currentGraphHash) {
+    base = {
       freshness: 'fresh',
       reason: 'graph_hash_match',
       selected_fact_index: selected.index,
       graph_hash_at_run: selected.graph_hash_at_run,
       current_graph_hash: currentGraphHash,
       computed_at: selected.computed_at,
-    });
+    };
+  } else {
+    base = {
+      freshness: 'stale',
+      reason: 'graph_hash_diverged',
+      selected_fact_index: selected.index,
+      graph_hash_at_run: selected.graph_hash_at_run,
+      current_graph_hash: currentGraphHash,
+      computed_at: selected.computed_at,
+    };
   }
 
-  return enforceInvariants({
-    freshness: 'stale',
-    reason: 'graph_hash_diverged',
-    selected_fact_index: selected.index,
-    graph_hash_at_run: selected.graph_hash_at_run,
-    current_graph_hash: currentGraphHash,
-    computed_at: selected.computed_at,
-  });
+  // Option-identity guard. Only engaged when the caller threaded current graph
+  // option IDs (flag on) AND the hash path could not already prove staleness
+  // (`fresh`, or the hash-impossible `unknown` paths). A genuine divergence
+  // fails closed to `stale`. `undefined` (flag off) → skip → byte-identical.
+  if (
+    currentGraphOptionIds !== undefined &&
+    (base.freshness === 'fresh' || base.freshness === 'unknown')
+  ) {
+    const verdict = compareAnalysedOptionIdentity(
+      extractAnalysedOptionIds(selected.fact),
+      extractAnalysedLeaderId(selected.fact),
+      currentGraphOptionIds ?? null,
+    );
+    if (!verdict.match) {
+      base = { ...base, freshness: 'stale', reason: 'analysed_options_diverged' };
+    }
+  }
+
+  return enforceInvariants(base);
 }
 
 /**
@@ -526,11 +572,15 @@ export function emitFreshnessTelemetry(
   }
   // graph_hash_missing fires whenever a hash comparison was IMPOSSIBLE —
   // either current graph hash unavailable on this turn OR the selected
-  // fact predates 0.10.0 and has no graph_hash_at_run. Both are
-  // legitimately "comparison not possible because hash data missing".
+  // fact predates 0.10.0 and has no graph_hash_at_run. Keyed on the HASH
+  // FIELDS (not the reason) so the signal survives when the option-identity
+  // guard overrides the verdict to 'analysed_options_diverged' on a
+  // hash-impossible path — the hash was still missing, and ops must not lose
+  // that. Requires a selected fact (the 'none' case legitimately has both
+  // hashes null with no fact and must not fire).
   if (
-    derivation.reason === 'current_graph_hash_unavailable' ||
-    derivation.reason === 'legacy_fact_missing_hash'
+    derivation.selected_fact_index !== null &&
+    (derivation.graph_hash_at_run === null || derivation.current_graph_hash === null)
   ) {
     emit(TelemetryEvents.AnalysisFreshnessGraphHashMissing, {
       request_id: context.request_id,
@@ -538,9 +588,20 @@ export function emitFreshnessTelemetry(
       dispatch_path: context.dispatch_path,
       selected_fact_index: derivation.selected_fact_index,
       missing_side:
-        derivation.reason === 'current_graph_hash_unavailable'
-          ? 'current_graph_hash'
-          : 'graph_hash_at_run',
+        derivation.graph_hash_at_run === null ? 'graph_hash_at_run' : 'current_graph_hash',
+    });
+  }
+  // options_diverged: the option-identity guard forced 'stale'. Emitted in
+  // addition to graph_hash_missing above (which still fires on the recovery
+  // paths). Correlation + freshness fields only; no option IDs/labels.
+  if (derivation.reason === 'analysed_options_diverged') {
+    emit(TelemetryEvents.AnalysisFreshnessOptionsDiverged, {
+      request_id: context.request_id,
+      scenario_id: context.scenario_id,
+      dispatch_path: context.dispatch_path,
+      selected_fact_index: derivation.selected_fact_index,
+      graph_hash_at_run: derivation.graph_hash_at_run,
+      current_graph_hash: derivation.current_graph_hash,
     });
   }
 }

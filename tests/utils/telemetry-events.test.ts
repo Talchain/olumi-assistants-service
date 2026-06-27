@@ -429,6 +429,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         AnalysisFreshnessFirstTurnAssumed: "v5.analysis_freshness.first_turn_assumed",
         AnalysisFreshnessGraphHashMissing: "v5.analysis_freshness.graph_hash_missing",
         AnalysisFreshnessInvariantFailed: "v5.analysis_freshness.invariant_failed",
+        AnalysisFreshnessOptionsDiverged: "v5.analysis_freshness.options_diverged",
         BoundaryValidation: "boundary.validation",
         ContextPackAssembled: "v5.context_pack.assembled",
         CqeExtraction: "cqe.extraction",
@@ -541,6 +542,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
         V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
         V5Phase3BlockLifecycle: "v5.phase3.block_lifecycle",
+        V5Phase3LifecycleIndexMismatch: "v5.phase3.lifecycle_index_mismatch",
         V5PostAnalysisAdviceGate: "v5.post_analysis_advice_gate",
         V5PostAnalysisLabelIntercept: "v5.post_analysis_label_intercept",
         V5PostDraftCoachingSourceSelected: "v5.post_draft_coaching.source_selected",
@@ -1092,6 +1094,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.AnalysisFreshnessFirstTurnAssumed,
         TelemetryEvents.AnalysisFreshnessGraphHashMissing,
         TelemetryEvents.AnalysisFreshnessInvariantFailed,
+        // Option-identity freshness guard (debug-only; counts/closed-enum/hash
+        // flags only, no Datadog mapping yet).
+        TelemetryEvents.AnalysisFreshnessOptionsDiverged,
         // Answer-carrying explanation handlers (debug-only — no Datadog
         // mapping yet; observability is via structured logs).
         TelemetryEvents.V5ExplanationAnswerVerdict,
@@ -1219,6 +1224,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5FrameStageNoBriefGuard,
         TelemetryEvents.V5FreshAnalysisFollowupGuard,
         TelemetryEvents.V5Phase3BlockLifecycle,
+        TelemetryEvents.V5Phase3LifecycleIndexMismatch,
         TelemetryEvents.V5PostAnalysisAdviceGate,
         TelemetryEvents.V5PostAnalysisLabelIntercept,
         TelemetryEvents.V5PostDraftCoachingSourceSelected,
@@ -1674,6 +1680,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.analysis_freshness.first_turn_assumed",
         "v5.analysis_freshness.graph_hash_missing",
         "v5.analysis_freshness.invariant_failed",
+        "v5.analysis_freshness.options_diverged",
         "v5.context_pack.assembled",
         // V5 Phase 2 additions (2026-05-01).
         "v5.draft_narration.count_mismatch",
@@ -1758,6 +1765,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.frame_stage_no_brief_guard",
         "v5.fresh_analysis_followup_guard",
         "v5.phase3.block_lifecycle",
+        "v5.phase3.lifecycle_index_mismatch",
         "v5.post_analysis_advice_gate",
         "v5.post_analysis_label_intercept",
         "v5.post_draft_coaching.source_selected",

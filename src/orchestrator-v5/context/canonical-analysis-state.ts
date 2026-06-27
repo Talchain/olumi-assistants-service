@@ -71,6 +71,12 @@ import {
   type FreshnessDerivation,
   type FreshnessReason,
 } from './freshness.js';
+import {
+  compareAnalysedOptionIdentity,
+  extractAnalysedLeaderId,
+  extractAnalysedOptionIds,
+  type OptionIdentityReason,
+} from './option-identity.js';
 
 /**
  * Contract version for the canonical analysis-state object. Bump on any
@@ -268,6 +274,33 @@ export interface CanonicalAnalysisState {
   readonly requiresRerun: boolean;
   /** Analysis is unusable — blocked status or a hard contradiction. */
   readonly blockedUnusable: boolean;
+
+  // ── Option-identity guard observability (diagnostic only) ──
+  /**
+   * The option-identity comparison the freshness guard performed this turn, or
+   * undefined when the guard did not run (flag off, or no selected fact to
+   * compare). Counts + closed enums only — never option IDs or labels. Surfaced
+   * via {@link AnalysisStateSummary}/`_context_summary` so debug evidence can
+   * show whether option identity was checked, matched or diverged. Diagnostic
+   * only — the verdict's EFFECT on freshness is already in `freshness` /
+   * `freshness_reason`; this never drives behaviour.
+   */
+  readonly option_identity?: OptionIdentitySummary;
+}
+
+/**
+ * Redacted record of the option-identity comparison (see option-identity.ts).
+ * Counts + closed enums only — never the option IDs/labels themselves — so it
+ * is safe on the diagnostic boundary.
+ */
+export interface OptionIdentitySummary {
+  /** True when the guard ran (current graph option IDs supplied + a fact). */
+  readonly checked: boolean;
+  /** Verdict: true ⇒ analysed option identities consistent with the graph. */
+  readonly match: boolean;
+  readonly reason: OptionIdentityReason;
+  readonly analysed_option_count: number;
+  readonly current_option_count: number;
 }
 
 /**
@@ -284,6 +317,13 @@ export interface SelectCanonicalAnalysisStateInput {
   readonly readiness?: ReadinessLike;
   /** Hash of this turn's analysis-affecting graph fields, or null. */
   readonly currentGraphHash: string | null;
+  /**
+   * Current graph's option IDs for the option-identity freshness guard. Only
+   * threaded by callers when `cee.optionIdentityFreshnessGuard` is on; left
+   * `undefined` otherwise so the freshness derivation is byte-identical to the
+   * pre-guard behaviour. See {@link deriveAnalysisFreshness}.
+   */
+  readonly currentGraphOptionIds?: readonly string[] | null;
   /** True when persisted scenario state asserts an analysis exists. */
   readonly scenarioClaimsAnalysis?: boolean;
 }
@@ -314,8 +354,14 @@ export function selectCanonicalAnalysisState(
   ];
 
   // Freshness verdict (also yields selected_fact_index / hashes /
-  // computed_at — the single source for those fields here).
-  const derivation = deriveAnalysisFreshness(unifiedFacts, input.currentGraphHash);
+  // computed_at — the single source for those fields here). Threads the
+  // option-identity guard inputs verbatim: undefined (flag off) → byte-
+  // identical to the pre-guard derivation.
+  const derivation = deriveAnalysisFreshness(
+    unifiedFacts,
+    input.currentGraphHash,
+    input.currentGraphOptionIds,
+  );
   const selected = selectRunAnalysisFact(unifiedFacts);
   const degraded = selectDegradedRunAnalysisFact(unifiedFacts);
 
@@ -330,12 +376,34 @@ export function selectCanonicalAnalysisState(
     selected.computed_at !== null &&
     degradedComputedAt > selected.computed_at;
 
+  // Option-identity observability (diagnostic only). Recompute the verdict the
+  // guard saw — a trivial set comparison — when the caller supplied current
+  // graph option IDs (flag on) and a fact exists. Its EFFECT on freshness is
+  // already in `derivation`; this records the inputs/outcome for `_context_summary`.
+  let optionIdentity: OptionIdentitySummary | undefined;
+  if (input.currentGraphOptionIds !== undefined && selected !== null) {
+    const analysedIds = extractAnalysedOptionIds(selected.fact);
+    const verdict = compareAnalysedOptionIdentity(
+      analysedIds,
+      extractAnalysedLeaderId(selected.fact),
+      input.currentGraphOptionIds ?? null,
+    );
+    optionIdentity = {
+      checked: true,
+      match: verdict.match,
+      reason: verdict.reason,
+      analysed_option_count: analysedIds?.length ?? 0,
+      current_option_count: input.currentGraphOptionIds?.length ?? 0,
+    };
+  }
+
   return assembleCanonicalState({
     derivation,
     readiness: input.readiness,
     degradedStatus: degraded?.status ?? null,
     degradedNewerThanSelectedSuccess,
     scenarioClaimsAnalysis: input.scenarioClaimsAnalysis === true,
+    optionIdentity,
   });
 }
 
@@ -372,6 +440,7 @@ interface AssembleCanonicalStateParams {
   readonly degradedStatus: string | null;
   readonly degradedNewerThanSelectedSuccess: boolean;
   readonly scenarioClaimsAnalysis: boolean;
+  readonly optionIdentity?: OptionIdentitySummary;
 }
 
 /**
@@ -475,6 +544,11 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
     usableForFollowupContext,
     requiresRerun,
     blockedUnusable,
+    // Omitted entirely when the guard did not run — keeps the verdict
+    // byte-identical for callers that do not thread option IDs (flag off).
+    ...(params.optionIdentity !== undefined
+      ? { option_identity: params.optionIdentity }
+      : {}),
   };
 }
 
@@ -502,6 +576,9 @@ export interface AnalysisStateSummary {
   readonly current_graph_hash: string | null;
   readonly degraded_fact_status: string | null;
   readonly contradiction_codes: readonly CanonicalContradiction[];
+  /** Option-identity guard decision (counts + closed enums), or undefined when
+   *  the guard did not run this turn. See {@link OptionIdentitySummary}. */
+  readonly option_identity?: OptionIdentitySummary;
 }
 
 /**
@@ -532,6 +609,11 @@ export function summariseCanonicalAnalysisState(
     current_graph_hash: state.current_graph_hash,
     degraded_fact_status: state.degraded_fact_status,
     contradiction_codes: state.contradictions,
+    // Pass through verbatim (counts + enums only); omitted when the guard did
+    // not run so the summary stays byte-identical for flag-off callers.
+    ...(state.option_identity !== undefined
+      ? { option_identity: state.option_identity }
+      : {}),
   };
 }
 
