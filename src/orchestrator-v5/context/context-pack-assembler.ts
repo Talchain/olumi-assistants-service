@@ -51,10 +51,11 @@ import {
   runExtraction,
   type CqeExtractionSummary,
 } from './cqe/extract-quantities.js';
-import { isProduction, isTest } from '../../config/index.js';
+import { config, isProduction, isTest } from '../../config/index.js';
 import { ContextPackSchema } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
 import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
+import { extractGraphOptionIds } from './option-identity.js';
 import {
   selectCanonicalAnalysisState,
   summariseCanonicalAnalysisState,
@@ -434,6 +435,12 @@ function deriveContextPackAnalysisState(
   const canonical = selectCanonicalAnalysisState({
     priorFacts: input.priorFacts,
     currentGraphHash,
+    // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
+    // diagnostic / coaching-pack canonical state consistent with the wire
+    // verdict. Same raw graph the hash is derived from. undefined when off.
+    currentGraphOptionIds: config.cee.optionIdentityFreshnessGuard
+      ? extractGraphOptionIds(rawGraph)
+      : undefined,
     scenarioClaimsAnalysis: input.analysis != null,
   });
   return summariseCanonicalAnalysisState(canonical);

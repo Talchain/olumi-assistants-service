@@ -57,6 +57,7 @@ import {
 } from './coaching/coaching-lifecycle.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
+import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
@@ -394,7 +395,16 @@ export async function buildTurnContext(
   // persisted-graph hash the routing path uses — reused internally only, NOT emitted
   // as freshness telemetry (turn-executor owns that), so there is no second freshness
   // signal. Pure + total, internal-only — never reaches the wire or the LLM prompt.
-  const coachingFreshness = deriveAnalysisFreshness(priorFacts, persistedGraphHash);
+  const coachingFreshness = deriveAnalysisFreshness(
+    priorFacts,
+    persistedGraphHash,
+    // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
+    // internal coaching freshness consistent with the wire verdict so there is
+    // no second freshness authority. Same graph the hash is derived from.
+    config.cee.optionIdentityFreshnessGuard
+      ? extractGraphOptionIds(scenarioState.graph)
+      : undefined,
+  );
   const coachingState = deriveCoachingState({
     decisionContext,
     freshness: coachingFreshness,

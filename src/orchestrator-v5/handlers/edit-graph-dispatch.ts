@@ -63,6 +63,8 @@ import {
   loadPersistedGraphStrict,
 } from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { extractGraphOptionIds } from '../context/option-identity.js';
+import { config } from '../../config/index.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
@@ -1679,7 +1681,17 @@ export async function dispatchEditGraph(
       const concept = findProposedConceptAction(priorPending);
       pendingProposedConceptForRecovery = concept;
     }
-    freshness = deriveAnalysisFreshness(turnContext.prior_facts, currentGraphHash);
+    freshness = deriveAnalysisFreshness(
+      turnContext.prior_facts,
+      currentGraphHash,
+      // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): option IDs
+      // from the post-edit persisted graph (same source as the hash). When an
+      // option is added/removed the hash already diverges; the guard adds the
+      // hash-impossible coverage. undefined when off → byte-identical.
+      config.cee.optionIdentityFreshnessGuard
+        ? extractGraphOptionIds(persistedPostEditGraph)
+        : undefined,
+    );
     emitFreshnessTelemetry(
       freshness,
       {

@@ -62,6 +62,7 @@ import {
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
@@ -773,7 +774,16 @@ export async function dispatchChipClickRunAnalysis(
           currentGraphHash = computeAnalysisAffectingGraphHash(parsedForHash.data);
         }
       }
-      const freshness = deriveAnalysisFreshness(postDispatchFacts, currentGraphHash);
+      const freshness = deriveAnalysisFreshness(
+        postDispatchFacts,
+        currentGraphHash,
+        // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): read
+        // option IDs from the RAW persisted graph (covers the unparseable case
+        // the hash skips). undefined when off → byte-identical.
+        config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(cachedSnapshot?.rawPersistedGraph ?? null)
+          : undefined,
+      );
       emitFreshnessTelemetry(
         freshness,
         {
@@ -1280,7 +1290,15 @@ function buildProjectionInputs(
       currentGraphHash = computeAnalysisAffectingGraphHash(parsed.data);
     }
   }
-  const analysisFreshness = deriveAnalysisFreshness(context.prior_facts, currentGraphHash);
+  const analysisFreshness = deriveAnalysisFreshness(
+    context.prior_facts,
+    currentGraphHash,
+    // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): option IDs
+    // from the RAW persisted graph (covers the unparseable case). undefined off.
+    config.cee.optionIdentityFreshnessGuard
+      ? extractGraphOptionIds(context.persistedGraph ?? null)
+      : undefined,
+  );
 
   // Step 4: raw robustness signals from the SAME run_analysis fact the
   // freshness/projection layer selected. Reused by the what_would_flip

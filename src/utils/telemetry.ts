@@ -605,6 +605,17 @@ export const TelemetryEvents = {
    *  can investigate replay scenarios where a "first-turn" trigger
    *  shape lands on a session that already has a prior fact. */
   AnalysisFreshnessFirstTurnAssumed: "v5.analysis_freshness.first_turn_assumed",
+  /** Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD) fired: the
+   *  analysed option identities on the selected fact diverged from the current
+   *  graph's option IDs, so the verdict was forced to 'stale'. Carries the
+   *  standard correlation + freshness fields (request_id, scenario_id,
+   *  dispatch_path, selected_fact_index, graph_hash_at_run, current_graph_hash)
+   *  — never option IDs/labels or user content. Emitted IN ADDITION to the
+   *  graph_hash_missing event on recovery paths (that signal is keyed on the
+   *  hash fields, not the reason, so it is not lost when the verdict is
+   *  overridden to 'analysed_options_diverged'). The richer per-option detail
+   *  (counts, sub-reason) lives on the gated context-summary diagnostic. */
+  AnalysisFreshnessOptionsDiverged: "v5.analysis_freshness.options_diverged",
 
   // V5 Coaching State Spine — Stage 1. Emitted once per turn when the
   // internal DecisionContext projection is derived from canonical state.
@@ -912,6 +923,20 @@ export const TelemetryEvents = {
   // stale-vs-fresh outcome and trace which fact in prior_facts was selected
   // without seeing any user content.
   V5Phase3BlockLifecycle: "v5.phase3.block_lifecycle",
+
+  // V5Phase3LifecycleIndexMismatch — defence-in-depth cross-check for the
+  // Phase 3 lifecycle fact selection. The freshness derivation reports a
+  // `selected_fact_index` relative to the EXACT array it was derived from;
+  // the compose lifecycle resolves the prior run_analysis fact by CONTENT
+  // (selectRunAnalysisFact) rather than trusting that index. This event fires
+  // when the content-selected position differs from the passed index — a
+  // signal that an upstream call site derived freshness against one fact-array
+  // basis but handed compose a differently-ordered array (the historical
+  // routed-turn prepend bug). Metadata only: { request_id, scenario_id,
+  // passed_index, content_index } — both are array positions, never user
+  // content. Behaviour is unchanged when it fires (content selection wins);
+  // the event exists so the regression cannot silently reappear.
+  V5Phase3LifecycleIndexMismatch: "v5.phase3.lifecycle_index_mismatch",
 
   // CQE (Custom Quantity Extractor — V5 Layer 0) per CQE Design v1.1 §9 and
   // cqe-investigation-proposal.md §7.2. Emits once per turn after the
