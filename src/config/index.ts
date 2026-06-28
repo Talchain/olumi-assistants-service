@@ -587,10 +587,14 @@ const ConfigSchema = z.object({
     // i.e. recovered-session / unparseable-graph reloads), the verdict is
     // forced to 'stale' with reason 'analysed_options_diverged' so the system
     // fails closed instead of implying the analysis reflects the current model.
-    // Default OFF; flag-off is byte-identical (no option IDs threaded into
-    // deriveAnalysisFreshness, no override, no new telemetry). Proven ON in
-    // deterministic tests; staging enablement is a separate gated follow-up.
-    optionIdentityFreshnessGuard: booleanString.default(false),
+    // The guard is DOWNGRADE-ONLY: it can only move 'fresh'/'unknown' → 'stale',
+    // never the reverse, so enabling it can never make a stale/diverged analysis
+    // read as current. Default ON (proven in deterministic tests; routing already
+    // fails closed on 'stale' regardless of reason). Set
+    // CEE_OPTION_IDENTITY_FRESHNESS_GUARD=false for a code-free rollback to the
+    // byte-identical legacy behaviour (no option IDs threaded into
+    // deriveAnalysisFreshness, no override, no new telemetry).
+    optionIdentityFreshnessGuard: booleanString.default(true),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)

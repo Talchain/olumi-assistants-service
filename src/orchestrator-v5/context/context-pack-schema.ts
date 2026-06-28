@@ -211,6 +211,30 @@ const AnalysisStateSummarySchema = z
     current_graph_hash: z.string().nullable(),
     degraded_fact_status: z.string().nullable(),
     contradiction_codes: z.array(z.string()).readonly(),
+    // Redacted option-identity guard verdict (CEE_OPTION_IDENTITY_FRESHNESS_GUARD).
+    // Closed enums / booleans / counts only — no IDs, labels, hashes or values —
+    // so it stays prompt-safe under the same redaction discipline as the rest of
+    // this summary. Present only when the guard ran this turn (current option IDs
+    // supplied + a selected fact); omitted otherwise. Mirrors
+    // `OptionIdentitySummary` in `./canonical-analysis-state.ts`. Reviewed-safe
+    // addition (the projection has carried this field since #306; this teaches the
+    // strict validator about it so the default-ON guard does not trip the leak gate).
+    option_identity: z
+      .object({
+        checked: z.boolean(),
+        match: z.boolean(),
+        reason: z.enum([
+          'match',
+          'leader_absent',
+          'analysed_option_absent',
+          'current_option_added',
+          'indeterminate',
+        ]),
+        analysed_option_count: z.number().int().nonnegative(),
+        current_option_count: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
