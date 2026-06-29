@@ -76,10 +76,7 @@ you like to try?"* — it makes **no** mutation-success claim. So:
 | **A8** | pass (but only because it was role-gated to `mutate_intent`) | **pass** — text is honest; verified the success-claim tokens are absent | ✅ no false-positive; and now role-agnostic so a *genuine* phantom claim on a `direct_answer`/`explain` turn would be caught |
 | **A10** | **pass (missed it)** — 11347 ms < 12 s LLM budget | **fail (advisory)** — *wrongful LLM escalation*: a deterministic-eligible proposal turn made 1 LLM call | ✅ now caught |
 
-So the real lived defect this turn exemplifies is the **A10 wrongful-LLM-escalation /
-latency** one (an edit-failure + proposal that should be handled by the deterministic
-gate took an ~11 s LLM route), not an A8 false-success. The harness reports this
-faithfully. Two hardening fixes were driven by this validation:
+Two hardening fixes were driven by this validation:
 
 1. **A8 made role-agnostic + hash-authoritative.** It previously only ran on the
    synthetic `mutate_intent` step (would have missed a phantom claim on the real
@@ -91,31 +88,52 @@ faithfully. Two hardening fixes were driven by this validation:
 2. **A10 widened** to flag wrongful LLM escalation on deterministic-eligible roles even
    when the turn lands inside the generic LLM time budget.
 
-A **sanitized, committable** reproduction lives at
-`fixtures/golden-journey-v1-f4835349-regression.json` (generic decision content):
-A8 **pass** (honest proposal) + A10 **advisory** (escalation) + A9/A2 acceptance
-requirements. The real assistant text is never stored.
+### A10 covers only ONE facet of f4835349
 
-## Capability 2 acceptance target
+The harness asserts **only the escalation/latency facet** of this turn. The real turn
+had more than one thing wrong, and the report must not be read as covering all of it:
 
-`golden-journey-v1-f4835349-regression.json` is retained as a **permanent durable
-real-defect baseline** and the **Capability 2 acceptance target**. The target is
-encoded in the fixture's `capability_2_acceptance_target` block:
+| facet of the real f4835349 turn | scope | harness coverage today |
+|---|---|---|
+| wrongful LLM escalation on a deterministic-eligible turn (`llm_calls=1`, ~11 s) | **Capability 2A** (this harness) | **A10 advisory** ✅ |
+| confabulated failure-mechanism narration ("…created an inconsistency the system couldn't resolve…") | **Capability 2A** (narration correctness) | **not asserted by any invariant** — out of A10's scope |
+| held-science / scientific prose in the explanation | **Gate Zero / scientific-egress** (separate workstream) | not asserted here |
+
+A8 is **not** the f4835349 finding: the real answer was honest, so A8 correctly passes.
+A8's value is proven separately by the synthetic defects fixture (below).
+
+### The two fixtures are distinct — do not conflate them
+
+| fixture | purpose | A8 | A10 | exit |
+|---|---|---|---|---|
+| `golden-journey-v1-defects.json` | **synthetic RED capability proof** for A8 phantom-success detection (+ A10 over-budget, A11 overclaim) | **gating FAIL** (phantom-success on the mutate-intent and premortem turns) | advisory | **1** |
+| `golden-journey-v1-f4835349-regression.json` | **sanitised real-defect baseline** (build f4835349, row a9da06f2) | **PASS** (honest proposal, no phantom claim) | **advisory** (wrongful escalation) | **0** |
+
+The synthetic fixture is what proves the A8 gate; the real-defect fixture intentionally
+passes A8 (the real answer was honest) and fires only the A10 advisory.
+
+## Capability 2A acceptance target
+
+`golden-journey-v1-f4835349-regression.json` is retained as a **permanent sanitised
+real-defect baseline** and the **Capability 2A acceptance target** (escalation/latency
+facet). The target is encoded in the fixture's `capability_2a_acceptance_target` block:
 
 | | `llm_calls_used` | A8 | A10 |
 |---|---|---|---|
 | **today (baseline)** | 1 | pass (honest proposal) | **advisory fail** — wrongful LLM escalation |
-| **accepted when** | 0 | pass | pass — no escalation |
+| **accepted when** | 0 | pass | **clears or materially improves** |
 
-Capability 2 is accepted when the same deterministic-eligible mutation-intent/proposal
-turn is handled by the deterministic gate (`llm_calls_used=0`) and A10 no longer fires
-the escalation advisory. Until then:
+Capability 2A is accepted when the same deterministic-eligible mutation-intent/proposal
+turn is handled by the deterministic gate (`llm_calls_used=0`) and A10 clears or
+materially improves. Until then:
 
 - **A10 stays ADVISORY** — this fixture must **not** be a hard CI failure. It is tracked
   evidence in the deterministic harness/report set, not a gate (replay exit code = 0).
 - **A8 must remain a pass** — the real answer is honest (proposal, not a phantom-success
   claim); a regression to phantom-success would flip A8 to a gating fail.
 - It is **deterministic-only evidence** — never a live staging run.
+- The **confabulated-narration** and **held-science** facets are out of A10's scope
+  (Capability 2A narration-correctness and Gate Zero / scientific-egress respectively).
 
 ## Commands run
 

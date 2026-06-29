@@ -26,7 +26,7 @@ Produced by [tools/golden-journey-harness](../../tools/golden-journey-harness/).
 - **Mode:** replay
 - **Started at:** replay (deterministic fixture)
 - **Branch:** `eval/post-analysis-proof`
-- **Harness commit:** `ce6d48efe27d21547e54c0f723e27f787c96ca92`
+- **Harness commit:** `017c1cef6dd1f92a6591e7dca1800e89314fdd1c`
 
 ## Core-component matrix
 

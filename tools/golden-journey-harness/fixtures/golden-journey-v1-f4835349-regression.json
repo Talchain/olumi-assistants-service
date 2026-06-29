@@ -2,10 +2,11 @@
   "name": "golden-journey-v1-f4835349-regression",
   "description": "SANITIZED regression for the real lived turn (build f4835349, persisted turn row a9da06f2). Generic decision content — no real scenario data. Reproduces the SHAPE validated read-only against production: a non-committing edit-intent/proposal turn that (a) is HONEST about the failed change and proposes options (so A8 correctly PASSES — no phantom success), and (b) wrongly escalated to an LLM (1 call, ~11.3s, handler_id=null, proposal-only, graph hash unchanged) on a deterministic-eligible turn (so A10 fires the wrongful-LLM-escalation advisory). This fixture exists so the two behaviours stay regression-proofed without persisting any sensitive scenario text. The real assistant text was validated transiently and is NOT stored here.",
   "brief": "A team is choosing between two scaling options for next quarter and is exploring how to encode a delivery risk in the model.",
-  "capability_2_acceptance_target": {
-    "summary": "Durable real-defect baseline AND Capability 2 acceptance target. Today this turn handles a deterministic-eligible mutation-intent/proposal with llm_calls_used=1 (A10 advisory: wrongful LLM escalation). Capability 2 is accepted when the same turn is handled deterministically: llm_calls_used=0 and A10 no longer fires the escalation advisory.",
+  "capability_2a_acceptance_target": {
+    "summary": "Durable sanitised real-defect baseline AND Capability 2A acceptance target. This harness asserts ONLY the escalation/latency facet of the real defect: today a deterministic-eligible mutation-intent/proposal turn is handled with llm_calls_used=1 (A10 advisory: wrongful LLM escalation). Capability 2A is accepted when the same turn is handled deterministically: llm_calls_used=0 and A10 clears or materially improves.",
     "current_state": { "llm_calls_used": 1, "a8": "pass (honest proposal, no phantom success)", "a10": "advisory fail (wrongful LLM escalation)" },
-    "accepted_when": { "llm_calls_used": 0, "a8": "pass", "a10": "pass (no escalation)" },
+    "accepted_when": { "llm_calls_used": 0, "a8": "pass", "a10": "pass (escalation cleared) or materially improved" },
+    "a10_scope_note": "A10 covers ONLY the escalation/latency facet. The real turn also exhibited (1) a confabulated failure-mechanism narration — Capability 2A scope, NOT asserted by any harness invariant today; and (2) held-science prose — Gate Zero / scientific-egress scope, a separate workstream. Do not read A10 (or this fixture) as covering the whole f4835349 defect.",
     "gating": "A10 stays ADVISORY — this fixture must NOT be a hard CI failure; it is tracked evidence, not a gate.",
     "evidence_only": "Deterministic harness/report set only — never a live staging run."
   },
