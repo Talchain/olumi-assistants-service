@@ -46,12 +46,14 @@
 import {
   hasSufficientReadinessData,
   summariseReadiness,
+  type ReadinessOpenItem,
   type ReadinessSummary,
 } from './readiness-summary.js';
 import {
   hasIndependentMutationSignal,
   MUTATION_SIGNAL_PATTERNS,
 } from './analytical-intent.js';
+import { classifyStructuralClaim } from './mutation-language.js';
 import {
   formatPercentagePoints,
   formatProbability,
@@ -134,6 +136,30 @@ export interface AdviceGateAnalysis {
 export type AdviceGateFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
 
 /**
+ * Narrow read-only view of the canonical analysis state usability predicates
+ * (mirrors the relevant subset of `CanonicalAnalysisState` from
+ * `context/canonical-analysis-state.ts`). Kept structural so this module stays
+ * free of orchestrator-internal type imports (same discipline as
+ * `AdviceGateFreshness`). Only the fields the safe-now fallback needs.
+ */
+export interface AdviceGateCanonicalState {
+  readonly status?: string | null;
+  /** Fresh (or stale-with-caveat) usable analysis exists for grounding prose. */
+  readonly usableForProse: boolean;
+  /** Analysis is blocked / unusable — the fallback must NOT compose from it. */
+  readonly blockedUnusable: boolean;
+}
+
+/**
+ * Narrow read-only view of a projected recent change (mirrors the
+ * user-safe `summary` of `RecentMutation` from `context/recent-changes.ts`).
+ * The summary is decision-language with no identifiers (enforced upstream).
+ */
+export interface AdviceGateRecentChange {
+  readonly summary: string;
+}
+
+/**
  * Discriminated class of advice / coaching / readiness question matched
  * from the user message. `advice` is the original PR #173 surface; the
  * remaining classes are added by P0 deterministic post-analysis router.
@@ -191,6 +217,23 @@ export interface AdviceGateInput {
    * cannot silently swap fragile copy for confident copy.
    */
   readonly rawRobustness?: RawRobustnessSignals | null | undefined;
+  /**
+   * AI Harness capability 1 (CEE_POST_ANALYSIS_LOOP_ENABLED). Canonical
+   * analysis-state usability predicates, threaded by the turn-executor ONLY
+   * when the post-analysis-loop flag is on. When present AND `usableForProse`
+   * (and not blocked), the gate may compose a grounded safe-now answer instead
+   * of returning `data_unavailable_for_class` for the relaxation-eligible
+   * classes. Absent / undefined (the flag-OFF default) → the relaxation branch
+   * is dead and the existing fall-through is byte-identical.
+   */
+  readonly canonicalState?: AdviceGateCanonicalState | null | undefined;
+  /**
+   * AI Harness capability 1. Recent successful mutations (decision-language
+   * summaries, no IDs) from `context.recent_changes`, threaded only when the
+   * flag is on. Used as safe-now grounding ("since your recent changes …").
+   * Absent / undefined is safe.
+   */
+  readonly recentChanges?: readonly AdviceGateRecentChange[] | null | undefined;
 }
 
 export type AdviceGateUnmatchedReason =
@@ -230,7 +273,13 @@ export type AdviceGateCopySource =
   | 'analysis_projection'
   | 'fragile_edges'
   | 'top_drivers'
-  | 'readiness';
+  | 'readiness'
+  // AI Harness capability 1 (CEE_POST_ANALYSIS_LOOP_ENABLED): the grounded
+  // safe-now fallback composed from canonical analysis state + readiness gaps
+  // + recent changes, used when the thin projection is blank but fresh usable
+  // state exists. Tier-1 safe-now content only (status/freshness/readiness/
+  // recent-changes/next-step) — never held science prose.
+  | 'canonical_rich';
 
 export interface AdviceGateMatched {
   readonly matched: true;
@@ -1008,6 +1057,16 @@ export function tryPostAnalysisAdviceGate(
     input.analysisReady,
   );
   if (missing.length > 0) {
+    // AI Harness capability 1 (flag-gated by `input.canonicalState` presence —
+    // the turn-executor threads it ONLY when CEE_POST_ANALYSIS_LOOP_ENABLED is
+    // on). When the thin LLM-facing projection is missing a required label BUT
+    // fresh, usable canonical state + substantive safe-now content exist,
+    // compose a grounded deterministic answer instead of falling through
+    // `data_unavailable_for_class` → the slow generic LLM router. Returns null
+    // (→ unchanged fall-through) for the flag-off default and whenever there is
+    // no substantive safe-now content, so weak copy never leaves this surface.
+    const rich = tryComposeRichSafeNowFallback(matchedClass, input);
+    if (rich) return rich;
     return {
       matched: false,
       reason: 'data_unavailable_for_class',
@@ -1040,6 +1099,148 @@ export function tryPostAnalysisAdviceGate(
     copy_source,
     coaching_fields_used,
   };
+}
+
+/**
+ * AI Harness capability 1 — relaxation-eligible classes for the grounded
+ * safe-now fallback. Advice / coaching / interpretation classes where, when the
+ * thin projection is blank, a status + readiness + recent-changes answer is
+ * materially better than the slow generic LLM route. `readiness` is excluded
+ * (it already composes from blockers via `composeReadiness`); the free-text
+ * explain/flip twins are excluded (they fall through to the deterministic
+ * fresh-followup chip, which is already non-LLM).
+ */
+const RICH_FALLBACK_CLASSES: ReadonlySet<AdviceClass> = new Set<AdviceClass>([
+  'advice',
+  'next_step',
+  'update_advice',
+  'improvement',
+  'meaning',
+  'evidence_gap',
+]);
+
+/**
+ * AI Harness capability 1 — grounded safe-now fallback (composer + guard).
+ *
+ * Fires ONLY when (a) the post-analysis-loop flag is on — the turn-executor
+ * threads `canonicalState` only then; (b) the matched class is relaxation-
+ * eligible; (c) the canonical analysis state is usable for prose and not
+ * blocked; and (d) there is SUBSTANTIVE safe-now content to surface (open
+ * readiness items or recent changes). Returns null otherwise, so the caller
+ * falls through to `data_unavailable_for_class` and never emits weak copy.
+ *
+ * Surfaces Tier-1 safe-now content ONLY — analysis currency, readiness gaps
+ * (`summariseReadiness`: quoted labels, no percentages), and recent-change
+ * summaries (decision-language, no IDs). NEVER held science prose (sensitivity
+ * / drivers / fragility / robustness band / flip).
+ *
+ * Fail-closed honesty: the composed text is re-checked with the precision-first
+ * `classifyStructuralClaim`; if it would read as a (false) first-person
+ * mutation-success claim, the fallback is abandoned (null) rather than emitted —
+ * so this surface can never introduce false-success language, independent of
+ * the always-on finaliser guard.
+ */
+function tryComposeRichSafeNowFallback(
+  cls: AdviceClass,
+  input: AdviceGateInput,
+): AdviceGateMatched | null {
+  if (!RICH_FALLBACK_CLASSES.has(cls)) return null;
+  const canonical = input.canonicalState;
+  if (!canonical || !canonical.usableForProse || canonical.blockedUnusable) {
+    return null;
+  }
+  const readiness: ReadinessSummary | null = hasSufficientReadinessData(
+    input.analysisReady,
+  )
+    ? summariseReadiness(input.analysisReady)
+    : null;
+  const openItems = readiness?.open_items ?? [];
+  const recentChanges = (input.recentChanges ?? []).filter(
+    (c) => typeof c.summary === 'string' && c.summary.trim().length > 0,
+  );
+  // Require substantive safe-now content — never emit a bare "analysis is
+  // current" line. With neither readiness gaps nor recent changes there is
+  // nothing grounded to add, so fall through (the module forbids weak copy).
+  if (openItems.length === 0 && recentChanges.length === 0) return null;
+
+  const assistantText = composeRichSafeNowAnswer(cls, openItems, recentChanges);
+
+  // Fail-closed: never let a (false) structural-success claim leave this path.
+  // Reuses the precision-first classifier (no new detector, no class widening).
+  const claim = classifyStructuralClaim({
+    assistantText,
+    handlerEmittedMutatedGraph: false,
+    proposedHandlerId: null,
+  });
+  if (claim.verdict === 'swap') return null;
+
+  const fields: string[] = ['canonical_state'];
+  if (openItems.length > 0) fields.push('readiness');
+  if (recentChanges.length > 0) fields.push('recent_changes');
+
+  return {
+    matched: true,
+    advice_class: cls,
+    assistant_text: assistantText,
+    // The thin projection was blank by definition on this path — surface honest
+    // empties for the diagnostic fields rather than a fabricated label.
+    leading_option_label: '',
+    top_driver_label: null,
+    suggested_actions: suggestedActionsForClass(cls),
+    copy_source: 'canonical_rich',
+    coaching_fields_used: fields,
+  };
+}
+
+/**
+ * AI Harness capability 1 — PLACEHOLDER-SAFE COPY (pending final wording review).
+ *
+ * Neutral, structural, honest wording assembled from Tier-1 safe-now content
+ * only. Invariant-compliant by construction: no "recommend(ed)", no
+ * "winner/winning", no raw IDs, no raw decimals, no readiness percentage, and
+ * no first-person mutation-success phrasing. The gate only reaches this composer
+ * when freshness === 'fresh' and the canonical state is usable, so the
+ * "up to date" standing line is honest.
+ */
+function composeRichSafeNowAnswer(
+  cls: AdviceClass,
+  openItems: readonly ReadinessOpenItem[],
+  recentChanges: readonly AdviceGateRecentChange[],
+): string {
+  const sections: string[] = [openerForClass(cls)];
+  if (openItems.length > 0) sections.push(formatOpenItems(openItems));
+  if (recentChanges.length > 0) sections.push(formatRecentChanges(recentChanges));
+  // Safe next step. The accompanying chip (when present) is the primary
+  // affordance; this prose nudges without claiming or implying any change.
+  sections.push(
+    "When you're ready, you can re-run the analysis or look at what could change the outcome.",
+  );
+  return sections.join('\n\n');
+}
+
+/** Class-aware safe-now opener (placeholder copy). */
+function openerForClass(cls: AdviceClass): string {
+  switch (cls) {
+    case 'meaning':
+      return 'Your most recent analysis is up to date with the current model. Here is where things stand and what is still open.';
+    case 'evidence_gap':
+      return 'Your most recent analysis is up to date with the current model. Here is what would make it more complete.';
+    default:
+      return 'Your most recent analysis is up to date with the current model. Here is what you could firm up next.';
+  }
+}
+
+/** Render readiness open-items as safe-now prose (descriptions are user-safe). */
+function formatOpenItems(items: readonly ReadinessOpenItem[]): string {
+  if (items.length === 1) return `Still open: ${items[0].description}.`;
+  return ['A few things are still open:', ...items.map((it) => `• ${it.description}`)].join('\n');
+}
+
+/** Render recent-change summaries as safe-now context (decision-language, no IDs). */
+function formatRecentChanges(changes: readonly AdviceGateRecentChange[]): string {
+  const summaries = changes.map((c) => c.summary.trim());
+  if (summaries.length === 1) return `Recent change in view: ${summaries[0]}`;
+  return ['Recent changes in view:', ...summaries.map((s) => `• ${s}`)].join('\n');
 }
 
 /**
