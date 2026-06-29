@@ -3625,6 +3625,19 @@ export async function runTurnExecutor(
             : null,
           // The advice-gate path is always deterministic (llm_calls_used: 0).
           deterministic: adviceOutcome.matched ? true : null,
+          // AI Harness capability 1 latency/grounding diagnostics (additive).
+          // `loop_enabled` records the flag state per turn; `routing_path` marks
+          // whether the grounded safe-now fallback fired (`canonical_rich`) vs
+          // the existing projection-backed match vs an unmatched fall-through.
+          // Lets dashboards compare llm_calls_used / fall-through rate ON vs OFF.
+          loop_enabled: config.cee.postAnalysisLoopEnabled === true,
+          routing_path: adviceOutcome.matched
+            ? adviceOutcome.copy_source === 'canonical_rich'
+              ? 'canonical_rich'
+              : 'advice_gate_projection'
+            : adviceOutcome.reason === 'data_unavailable_for_class'
+              ? 'fallthrough_data_unavailable'
+              : 'fallthrough_other',
         });
         if (adviceOutcome.matched) {
           const adviceResponse = composeDirectAnswerResponse({
