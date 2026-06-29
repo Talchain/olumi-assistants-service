@@ -1,0 +1,107 @@
+{
+  "name": "golden-journey-v1-f4835349-regression",
+  "description": "SANITIZED regression for the real lived turn (build f4835349, persisted turn row a9da06f2). Generic decision content — no real scenario data. Reproduces the SHAPE validated read-only against production: a non-committing edit-intent/proposal turn that (a) is HONEST about the failed change and proposes options (so A8 correctly PASSES — no phantom success), and (b) wrongly escalated to an LLM (1 call, ~11.3s, handler_id=null, proposal-only, graph hash unchanged) on a deterministic-eligible turn (so A10 fires the wrongful-LLM-escalation advisory). This fixture exists so the two behaviours stay regression-proofed without persisting any sensitive scenario text. The real assistant text was validated transiently and is NOT stored here.",
+  "brief": "A team is choosing between two scaling options for next quarter and is exploring how to encode a delivery risk in the model.",
+  "expected_milestones": [
+    { "step": "1_draft", "role": "draft", "expect": "draft returned; labels parseable (setup)", "components": ["context_management", "observability_recovery"], "invariants": ["A2", "A6"] },
+    { "step": "2_run_analysis", "role": "analysis", "expect": "analysis_ready with hash trio (setup — establishes baseline graph hash)", "components": ["canonical_state", "observability_recovery"], "invariants": ["A1", "A6"] },
+    { "step": "9_mutate_intent", "role": "mutate_intent", "expect": "honest edit-failure + proposal (A8 PASS — no phantom success) BUT wrongful LLM escalation on a deterministic-eligible turn: 1 LLM call, ~11.3s, handler_id null, proposal-only, hash unchanged → A10 advisory fail.", "components": ["typed_action_mutation", "ai_orchestration"], "invariants": ["A8", "A10"] }
+  ],
+  "transcript": {
+    "note": "diagnostic_trace_enabled=true. No _context_summary → A9 inconclusive (acceptance requirement). The mutate_intent turn is honest (A8 pass) and the headline defect is the A10 wrongful-LLM-escalation advisory.",
+    "diagnostic_trace_enabled": true,
+    "timing_debug_enabled": true,
+    "observations": [
+      {
+        "step": "1_draft",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Your decision model is ready, with two options and a few delivery factors. Run the analysis whenever you're ready.",
+          "suggested_actions": [
+            { "id": "chip_run", "label": "Run analysis", "message": "Run analysis.", "action_type": "run_analysis" }
+          ],
+          "draft_graph": {
+            "nodes": [
+              { "id": "goal_delivery", "kind": "goal", "label": "Scale delivery" },
+              { "id": "opt_a", "kind": "option", "label": "Option A" },
+              { "id": "opt_b", "kind": "option", "label": "Option B" },
+              { "id": "fac_capacity", "kind": "factor", "label": "Delivery capacity" }
+            ],
+            "edges": [
+              { "from": "opt_a", "to": "fac_capacity" },
+              { "from": "fac_capacity", "to": "goal_delivery" }
+            ]
+          },
+          "_diagnostic_trace": {
+            "exit_path": "draft_graph",
+            "correlation_ids": { "request_id": "req-1", "scenario_id": "scn-r", "turn_id": "turn-1" }
+          },
+          "_timings": { "turn": { "total_ms": 50000 }, "draft_graph": { "total_ms": 49000, "parse_ms": 30000 } }
+        }
+      },
+      {
+        "step": "2_run_analysis",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Analysis complete. Option A leads with about 60% against the goal.",
+          "suggested_actions": [
+            { "id": "chip_explain", "label": "Explain the result", "message": "Why does the leading option win?", "action_type": "explain_result" }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-29T15:00:00.000Z",
+            "options": [
+              { "option_id": "opt_a", "label": "Option A", "win_probability": 0.60 },
+              { "option_id": "opt_b", "label": "Option B", "win_probability": 0.40 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "acfa3515acfa3515",
+            "current_graph_hash": "acfa3515acfa3515",
+            "model_adjustments": []
+          },
+          "_diagnostic_trace": {
+            "exit_path": "chip_click",
+            "correlation_ids": { "request_id": "req-2", "scenario_id": "scn-r", "turn_id": "turn-2" }
+          },
+          "_timings": { "turn": { "total_ms": 8000 }, "run_analysis": { "handler_total_ms": 7700, "plot_status": "computed" } }
+        }
+      },
+      {
+        "step": "9_mutate_intent",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Being transparent about what happened: the change was rejected by the structural rules because the new risk linked directly to an option, which the model's structure doesn't allow. The underlying concern is still encodable two clean ways: introduce a factor for it between the option and the delivery outcome, or loosen an existing link to encode the same scepticism. Which would you like to try?",
+          "suggested_actions": [
+            { "id": "chip_continue", "label": "Continue with the proposed update", "message": "Continue with the proposed factor.", "action_type": "edit_graph" }
+          ],
+          "pending_actions": [
+            { "action": { "kind": "proposed_concept", "preferred_kind": "factor", "public_label": "Continue with the proposed update" } }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-29T15:00:00.000Z",
+            "options": [
+              { "option_id": "opt_a", "label": "Option A", "win_probability": 0.60 },
+              { "option_id": "opt_b", "label": "Option B", "win_probability": 0.40 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "acfa3515acfa3515",
+            "current_graph_hash": "acfa3515acfa3515"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-9", "scenario_id": "scn-r", "turn_id": "turn-9" }
+          },
+          "_timings": { "turn": { "total_ms": 11347, "routing_llm_ms": 10500, "llm_calls_used": 1 } }
+        }
+      }
+    ]
+  }
+}
