@@ -264,6 +264,7 @@ export function buildFactorConfidenceLookup(
     const e = readRecord(raw);
     if (e === null) continue;
     const factorId = typeof e.factor_id === 'string' ? e.factor_id
+      : typeof e.node_id === 'string' ? e.node_id
       : typeof e.id === 'string' ? e.id
       : null;
     if (factorId === null) continue;

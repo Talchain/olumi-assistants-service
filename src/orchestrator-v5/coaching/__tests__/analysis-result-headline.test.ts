@@ -2030,3 +2030,129 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
     expect(describeAnalysisHeadline(input).case).toBe('E');
   });
 });
+
+describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppression', () => {
+  // `fac_capacity` is the LARGER-score driver and would lead the "strongest
+  // driver" clause; it is option-controlled. `fac_market` is external/tunable.
+  const ENRICH_CONTROLLED: Record<string, unknown> = {
+    results: [
+      { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.62 },
+      { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.38 },
+    ],
+    factor_sensitivity: [
+      { factor_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
+      { factor_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1 },
+    ],
+    robustness: { level: 'moderate' }, // no fragility → Case B driver clause
+  };
+
+  it('omits the driver clause when the raw strongest driver is option-controlled', () => {
+    // fac_capacity (0.9) is the raw strongest but option-controlled; naming the
+    // weaker external fac_market (0.4) as "the strongest driver" would be false,
+    // so the clause is omitted entirely (headline falls to a no-driver shape).
+    const out = buildAnalysisResultHeadline({
+      enrichment: ENRICH_CONTROLLED,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    expect(out).not.toBeNull();
+    expect(out!).not.toContain('Engineering Capacity');
+    expect(out!).not.toContain('Market Demand');
+    expect(out!).not.toContain('strongest driver');
+  });
+
+  it('matches the controlled set on node_id — a node_id-only controlled top entry is still recognised', () => {
+    // PLoT keys factor_sensitivity entries by `node_id` (compactAnalysis reads
+    // `node_id ?? factor_id`); a node_id-only entry must still be recognised as
+    // the raw strongest, so the clause is omitted.
+    const enrichment: Record<string, unknown> = {
+      results: ENRICH_CONTROLLED.results,
+      factor_sensitivity: [
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1 },
+      ],
+      robustness: { level: 'moderate' },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    expect(out!).not.toContain('Engineering Capacity');
+    expect(out!).not.toContain('Market Demand');
+  });
+
+  it('names the strongest driver when it is genuinely external (weaker controlled present — no over-omit)', () => {
+    const enrichment: Record<string, unknown> = {
+      results: ENRICH_CONTROLLED.results,
+      factor_sensitivity: [
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.9, confidence: 1 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.4, confidence: 1 },
+      ],
+      robustness: { level: 'moderate' },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    // The genuine strongest (fac_market) is external → it IS named.
+    expect(out!).toContain('Market Demand');
+    expect(out!).not.toContain('Engineering Capacity');
+  });
+
+  it('omits the driver clause on an equal-score tie with a controlled lever (order-independent)', () => {
+    // External listed FIRST, controlled SECOND, with identical score. Because a
+    // controlled lever ties for strongest, the clause is omitted rather than
+    // naming the external as "the strongest" — deterministic regardless of array
+    // order (the prior first-seen logic would have named the external here).
+    const enrichment: Record<string, unknown> = {
+      results: ENRICH_CONTROLLED.results,
+      factor_sensitivity: [
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.7, confidence: 1 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.7, confidence: 1 },
+      ],
+      robustness: { level: 'moderate' },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    expect(out!).not.toContain('Engineering Capacity');
+    expect(out!).not.toContain('Market Demand');
+    expect(out!).not.toContain('strongest driver');
+  });
+
+  it('without the controlled set, the controlled lever WOULD be named (guard is load-bearing)', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: ENRICH_CONTROLLED,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out!).toContain('Engineering Capacity');
+  });
+
+  it('omits the driver clause entirely when every driver is option-controlled', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: {
+        results: ENRICH_CONTROLLED.results,
+        factor_sensitivity: [
+          { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
+        ],
+        robustness: { level: 'moderate' },
+      },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    // Still a valid headline (winner clause), just without naming the lever.
+    expect(out).not.toBeNull();
+    expect(out!).not.toContain('Engineering Capacity');
+    expect(out!).not.toContain('strongest driver');
+  });
+});

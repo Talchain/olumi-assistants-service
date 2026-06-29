@@ -117,6 +117,14 @@ export interface AnalysisResultHeadlineInput {
   readonly enrichment: Record<string, unknown>;
   readonly leading_option_id: string;
   readonly status_kind: 'ok' | 'partial' | 'unknown';
+  /**
+   * Spine A backstop: factor_ids an option intervenes on. The top-driver
+   * resolver skips these so an option-controlled lever is never named as the
+   * strongest sensitivity driver in the run_analysis headline (the headline
+   * reads raw `factor_sensitivity`, bypassing `projectTopDrivers`). Keyed on
+   * structural `factor_id` only. Omitted / empty ⇒ no suppression.
+   */
+  readonly interventionControlledFactorIds?: ReadonlySet<string>;
 }
 
 /**
@@ -202,7 +210,7 @@ export function describeAnalysisHeadline(
 }
 
 function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
-  const { enrichment, leading_option_id, status_kind } = input;
+  const { enrichment, leading_option_id, status_kind, interventionControlledFactorIds } = input;
 
   // Same-source resolution: the winner label, winner probability, and
   // runner-up probability ALL come from the SAME source array (one of
@@ -233,7 +241,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
 
   const winnerLabel = winner.label;
   const winnerProbability = winner.winnerProb;
-  const driverLabel = resolveTopDriverLabel(enrichment);
+  const driverLabel = resolveTopDriverLabel(enrichment, interventionControlledFactorIds);
   const fragileLabel = resolveFragileLabel(enrichment);
   const suffix = statusSuffix(status_kind);
   const marginBucket = computeMarginBucket(winner);
@@ -657,11 +665,19 @@ interface DriverCandidate {
   readonly score: number;
 }
 
-function resolveTopDriverLabel(enrichment: Record<string, unknown>): string | null {
+function resolveTopDriverLabel(
+  enrichment: Record<string, unknown>,
+  controlledFactorIds?: ReadonlySet<string>,
+): string | null {
   const arr = enrichment.factor_sensitivity;
   if (!Array.isArray(arr)) return null;
 
-  let best: DriverCandidate | null = null;
+  let bestNamed: DriverCandidate | null = null;
+  // Track the RAW strongest driver (any control status) so we can omit the
+  // driver clause when the genuine strongest is one we suppress — naming a
+  // weaker tunable driver as "the strongest driver" would be inaccurate.
+  let topScore = -Infinity;
+  let topControlled = false;
   for (const raw of arr) {
     const entry = readRecord(raw);
     if (!entry) continue;
@@ -669,22 +685,49 @@ function resolveTopDriverLabel(enrichment: Record<string, unknown>): string | nu
       (typeof entry.factor_id === 'string' && entry.factor_id) ||
       (typeof entry.id === 'string' && entry.id) ||
       '';
+    // Spine A backstop: match on the SAME id the analysis keys factors by —
+    // `node_id` first (mirroring compactAnalysis's `node_id ?? factor_id`
+    // precedence), so a lever is recognised even when a PLoT entry carries only
+    // `node_id`. Structural id only; never the label.
+    const controlledMatchId =
+      (typeof entry.node_id === 'string' && entry.node_id) || idGuess;
+    const isControlled =
+      controlledFactorIds !== undefined &&
+      controlledMatchId.length > 0 &&
+      controlledFactorIds.has(controlledMatchId);
+
+    const score = computeDriverScore(entry);
+    if (score === null) continue;
+    if (score > topScore) {
+      topScore = score;
+      topControlled = isControlled;
+    } else if (score === topScore && isControlled) {
+      // Tie at the top: if ANY equally-strongest driver is option-controlled,
+      // treat the top as controlled — order-independent and conservative, so we
+      // omit rather than present an equally-strong tunable driver as "the
+      // strongest".
+      topControlled = true;
+    }
+    if (isControlled) continue; // never NAME an option-controlled lever
+
     const rawLabel =
       (typeof entry.factor_label === 'string' && entry.factor_label) ||
       (typeof entry.label === 'string' && entry.label) ||
       '';
     const label = sanitiseLabel(rawLabel, idGuess);
     if (label === null) continue;
-
-    const score = computeDriverScore(entry);
-    if (score === null) continue;
-    if (best === null || score > best.score) {
-      best = { label, score };
-    } else if (score === best.score && label.localeCompare(best.label) < 0) {
-      best = { label, score };
+    if (bestNamed === null || score > bestNamed.score) {
+      bestNamed = { label, score };
+    } else if (score === bestNamed.score && label.localeCompare(bestNamed.label) < 0) {
+      bestNamed = { label, score };
     }
   }
-  return best?.label ?? null;
+  // If the raw strongest driver is option-controlled, omit the driver clause
+  // entirely (the headline falls to a no-driver shape) rather than present a
+  // weaker tunable driver as "the strongest". Once the producer fix lands,
+  // controlled levers are zero-sensitivity and never top, so the clause returns.
+  if (topControlled) return null;
+  return bestNamed?.label ?? null;
 }
 
 function computeDriverScore(entry: Record<string, unknown>): number | null {

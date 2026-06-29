@@ -75,6 +75,7 @@ import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
 import { buildAnalysisProjectionSummary } from '../context/projection-summaries.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 import { projectTopDrivers } from '../context/context-pack-assembler.js';
+import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import {
   createRegistry,
   getDefaultPlotClient,
@@ -1235,6 +1236,15 @@ function buildProjectionInputs(
         .filter((n) => n.kind === 'option')
         .map((n) => ({ id: n.id, label: n.label ?? null }))
     : undefined;
+  // Spine A backstop: option-controlled levers must not be surfaced as tunable
+  // drivers on the chip-click what_would_flip path either. Collect from the RAW
+  // persisted graph, NOT the parsed `graph`: GraphV3.safeParse keeps only
+  // top-level `node.interventions` and strips `node.data.interventions` and the
+  // top-level `options[]` array, so parsing first would make the backstop blind
+  // to canonical intervention bundles stored in those locations. The detector
+  // is defensive against the raw/unparsed shape.
+  const interventionControlledFactorIds =
+    collectInterventionControlledFactorIds(context.persistedGraph);
   const analysisFromPrior: AnalysisResponseSummary | null = buildAnalysisFromPriorFacts(
     context.prior_facts,
     optionLabelSource,
@@ -1271,7 +1281,10 @@ function buildProjectionInputs(
         // Shared with projectAnalysis via projectTopDrivers: filter non-finite,
         // neutral → 0, sort by |signed value|, cap — so a no-effect driver is
         // never left leading a "would shift the most" claim on this path.
-        top_drivers: projectTopDrivers(analysisFromPrior.top_drivers),
+        top_drivers: projectTopDrivers(
+          analysisFromPrior.top_drivers,
+          interventionControlledFactorIds,
+        ),
         fragile_edges: (analysisFromPrior.top_fragile_edges ?? []).map((e) => ({
           from_label: e.from_label,
           to_label: e.to_label,
