@@ -252,6 +252,14 @@ describe('buildAnalysisFromPriorFacts', () => {
       expect(labels).toContain('Eng Capacity');
     });
 
+    it('P0b-1: populates FragileEdge.from_id from the PER-OPTION robustness.fragile_edges source', () => {
+      const fact = runAnalysisFactWithEnrichment(RICH_ENRICHMENT);
+      const summary = buildAnalysisFromPriorFacts([fact])!;
+      const edge = summary.top_fragile_edges?.find((e) => e.from_label === 'Marketing Spend');
+      expect(edge).toBeDefined();
+      expect(edge?.from_id).toBe('fac-marketing'); // structural id, ready for source-only lever suppression
+    });
+
     it('populates robustness_level (canonicalised) from enrichment robustness data', () => {
       const fact = runAnalysisFactWithEnrichment(RICH_ENRICHMENT);
       const summary = buildAnalysisFromPriorFacts([fact])!;
@@ -544,12 +552,48 @@ describe('buildAnalysisFromPriorFacts', () => {
         expect(summary.fragile_edge_count).toBe(5);
       });
 
+      it('P0b-1: populates FragileEdge.from_id from the TOP-LEVEL (fallback) robustness.fragile_edges source', () => {
+        const fact = runAnalysisFactWithEnrichment(GOLDEN_504_ENRICHMENT);
+        const summary = buildAnalysisFromPriorFacts([fact])!;
+        const edges = summary.top_fragile_edges!;
+        expect(edges.length).toBe(3);
+        // Every projected edge carries its structural source id on the fallback
+        // path too — so the assembler's source-only lever filter cannot silently
+        // miss the exact path P0b-1 protects.
+        for (const e of edges) expect(typeof e.from_id).toBe('string');
+        const leverEdge = edges.find((e) => e.from_label === 'Local Senior Hire');
+        expect(leverEdge?.from_id).toBe('fac_local_hire');
+      });
+
+      it('P0b-1: a top-level edge with only labels (no source id) yields from_id undefined — the consumer fails closed', () => {
+        const labelOnly: Record<string, unknown> = {
+          meta: { seed_used: 1, n_samples: 100, response_hash: 'h-labelonly' },
+          option_comparison: [
+            { option_id: 'a', option_label: 'A', win_probability: 0.7 },
+            { option_id: 'b', option_label: 'B', win_probability: 0.3 },
+          ],
+          robustness: {
+            level: 'moderate',
+            fragile_edges: [
+              // No from_node_id / from_id / from — labels only.
+              { from_label: 'Some Source', to_label: 'Some Target', switch_probability: 0.3 },
+            ],
+          },
+          analysis_status: 'complete',
+        };
+        const summary = buildAnalysisFromPriorFacts([runAnalysisFactWithEnrichment(labelOnly)])!;
+        const edge = summary.top_fragile_edges?.find((e) => e.from_label === 'Some Source');
+        expect(edge).toBeDefined();
+        expect(edge?.from_id).toBeUndefined(); // assembler fail-closes on this (see context-pack-assembler tests)
+      });
+
       it('GOLDEN: ranks by switch_probability so [0] names the MOST fragile link (parity with m1_coaching)', () => {
         const fact = runAnalysisFactWithEnrichment(GOLDEN_504_ENRICHMENT);
         const summary = buildAnalysisFromPriorFacts([fact])!;
         expect(summary.top_fragile_edges![0]).toEqual({
           from_label: 'Local Senior Hire',
           to_label: 'Q3 Roadmap Delivery Capacity',
+          from_id: 'fac_local_hire', // P0b-1: structural source id now carried
         });
       });
 
@@ -609,7 +653,7 @@ describe('buildAnalysisFromPriorFacts', () => {
         });
         const summary = buildAnalysisFromPriorFacts([fact])!;
         expect(summary.top_fragile_edges).toEqual([
-          { from_label: 'Speed', to_label: 'Premium plan' },
+          { from_label: 'Speed', to_label: 'Premium plan', from_id: 'fac_speed' },
         ]);
       });
 
@@ -638,7 +682,7 @@ describe('buildAnalysisFromPriorFacts', () => {
         });
         const summary = buildAnalysisFromPriorFacts([fact])!;
         expect(summary.top_fragile_edges).toEqual([
-          { from_label: 'Speed', to_label: 'Premium plan' },
+          { from_label: 'Speed', to_label: 'Premium plan', from_id: 'fac_speed' },
         ]);
       });
 
@@ -799,7 +843,8 @@ describe('buildAnalysisFromPriorFacts', () => {
         });
         const summary = buildAnalysisFromPriorFacts([fact])!;
         expect(summary.top_fragile_edges).toEqual([
-          { from_label: 'Marketing Spend', to_label: 'Revenue' },
+          // P0b-1: per-option deriver now carries the structural source id too.
+          { from_label: 'Marketing Spend', to_label: 'Revenue', from_id: 'fac-marketing' },
         ]);
       });
 

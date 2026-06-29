@@ -240,6 +240,13 @@ function deriveTopFragileEdgesFromTopLevel(
     const fromLabel = resolveEndpoint(e.from_label, [e.from_node_id, e.from_id, e.from]);
     const toLabel = resolveEndpoint(e.to_label, [e.to_node_id, e.to_id, e.to]);
     if (fromLabel === null || toLabel === null) continue;
+    // P0b-1: capture the structural source id (fresh, from the raw edge) so the
+    // assembler can suppress lever-sourced fragile edges on the fallback/cached
+    // path too. `undefined` only for a label-only raw edge (no id at all) — the
+    // assembler fails closed on that rather than letting a lever silently leak.
+    const fromId = [e.from_node_id, e.from_id, e.from].find(
+      (c): c is string => typeof c === 'string' && c.trim().length > 0,
+    );
     // Collision-proof key — a label could in principle contain the arrow
     // separator, so key on the structured pair rather than a joined string.
     const key = JSON.stringify([fromLabel, toLabel]);
@@ -249,7 +256,7 @@ function deriveTopFragileEdgesFromTopLevel(
         : -Infinity;
     const existing = byKey.get(key);
     if (existing === undefined || score > existing.score) {
-      byKey.set(key, { edge: { from_label: fromLabel, to_label: toLabel }, score });
+      byKey.set(key, { edge: { from_label: fromLabel, to_label: toLabel, from_id: fromId }, score });
     }
   }
 

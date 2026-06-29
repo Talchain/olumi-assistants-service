@@ -646,6 +646,40 @@ function isProbabilityValid(
 const TOP_DRIVER_CAP = 3;
 
 /**
+ * P0b-1 — source-only fragile-edge lever suppression, shared by `projectAnalysis`
+ * (routed path) and the chip-click dispatch so the two re-projection sites cannot
+ * drift (mirrors how `projectTopDrivers` is shared).
+ *
+ * An option-controlled lever as an edge SOURCE ("lever → X") would imply the user
+ * can validate / test / act on a tunable driver — the unsafe claim — so it is
+ * suppressed. A lever as edge TARGET ("X → lever") describes something acting ON
+ * the lever, not tuning it, so it is preserved (mirrors PLoT Lane A1c
+ * `isLeverSourcedEdge`).
+ *
+ * Authority is STRUCTURAL `from_id` membership ONLY — never the label (labels
+ * collide; #308). FAIL-CLOSED: an edge with no resolvable `from_id` cannot be
+ * proven non-lever, so when any lever exists it is dropped rather than risk a
+ * silent bypass on the fallback path this guard protects. `from_id` is populated
+ * fresh at derivation time on every path (per-option and top-level/fallback), so
+ * the fail-closed branch only fires for malformed/label-only raw input. Producer
+ * values are never mutated — a suppressed edge is simply not surfaced. Empty
+ * controlled set ⇒ no-op.
+ */
+export function filterLeverSourcedFragileEdges<E extends { from_id?: string }>(
+  edges: readonly E[],
+  controlledFactorIds?: ReadonlySet<string>,
+): E[] {
+  if (controlledFactorIds === undefined || controlledFactorIds.size === 0) {
+    return edges.slice();
+  }
+  return edges.filter((e) => {
+    const fromId = typeof e.from_id === 'string' ? e.from_id.trim() : '';
+    if (fromId.length === 0) return false; // fail-closed — see doc
+    return !controlledFactorIds.has(fromId);
+  });
+}
+
+/**
  * Project `DriverSummary[]` into the display-safe ContextPack driver shape —
  * the single rule shared by `projectAnalysis` (routed path) and the chip-click
  * dispatch so the two sign-reattachment sites cannot drift:
@@ -764,7 +798,14 @@ function projectAnalysis(
     margin_pp: marginPp,
     robustness_band: robustnessBand,
     top_drivers: topDrivers,
-    fragile_edges: (analysis.top_fragile_edges ?? []).map((e) => ({
+    // P0b-1: drop lever-SOURCED fragile edges before they reach the prose /
+    // validation surfaces (explain_results, explanation-fallback, advice gate —
+    // all read this same projection). Source-only; the output shape is unchanged
+    // ({from_label,to_label}), so the strict ContextPack schema is unaffected.
+    fragile_edges: filterLeverSourcedFragileEdges(
+      analysis.top_fragile_edges ?? [],
+      controlledFactorIds,
+    ).map((e) => ({
       from_label: e.from_label,
       to_label: e.to_label,
     })),

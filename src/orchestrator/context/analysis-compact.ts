@@ -52,6 +52,16 @@ export interface FlipThreshold {
 export interface FragileEdge {
   from_label: string;
   to_label: string;
+  /**
+   * Source node id of the edge (P0b-1). INTERNAL ONLY — never serialised onto
+   * the wire or the strict-validated ContextPack output (which keeps just the
+   * `{from_label, to_label}` shape). Carried so the V5 context-pack assembler
+   * can suppress option-controlled-lever-SOURCED fragile edges by structural
+   * `factor_id` (never by label — labels collide). Always populated fresh from
+   * the raw `robustness.fragile_edges` source at derivation time; may be absent
+   * only for a malformed/label-only raw edge, which the consumer fails closed on.
+   */
+  from_id?: string;
 }
 
 export interface AnalysisResponseSummary {
@@ -466,7 +476,9 @@ function deriveTopFragileEdges(
           ?? (typeof edgeObj.from_label === 'string' ? edgeObj.from_label : fromId);
         const toLabel = graphNodeLabels?.get(toId)
           ?? (typeof edgeObj.to_label === 'string' ? edgeObj.to_label : toId);
-        seen.set(edgeKey, { from_label: fromLabel as string, to_label: toLabel as string });
+        // P0b-1: carry the structural source id (already proven non-null by the
+        // `!fromId` guard above) so the assembler can suppress lever-sourced edges.
+        seen.set(edgeKey, { from_label: fromLabel as string, to_label: toLabel as string, from_id: fromId });
       }
     }
   }
