@@ -2067,4 +2067,45 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     });
     expect(out!).toContain('Engineering Capacity');
   });
+
+  it('suppresses a lever whose PLoT entry carries only node_id (not factor_id)', () => {
+    // PLoT keys factor_sensitivity entries by `node_id` (compactAnalysis reads
+    // `node_id ?? factor_id`). The headline must match on node_id too, else a
+    // node_id-only entry would escape suppression and leak.
+    const enrichment: Record<string, unknown> = {
+      results: ENRICH_CONTROLLED.results,
+      factor_sensitivity: [
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1 },
+      ],
+      robustness: { level: 'moderate' },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    expect(out!).not.toContain('Engineering Capacity');
+    expect(out!).toContain('Market Demand');
+  });
+
+  it('omits the driver clause entirely when every driver is option-controlled', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: {
+        results: ENRICH_CONTROLLED.results,
+        factor_sensitivity: [
+          { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
+        ],
+        robustness: { level: 'moderate' },
+      },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    // Still a valid headline (winner clause), just without naming the lever.
+    expect(out).not.toBeNull();
+    expect(out!).not.toContain('Engineering Capacity');
+    expect(out!).not.toContain('strongest driver');
+  });
 });

@@ -681,11 +681,16 @@ function resolveTopDriverLabel(
       (typeof entry.id === 'string' && entry.id) ||
       '';
     // Spine A backstop: never name an option-controlled lever as the strongest
-    // driver. Keyed on structural factor_id only (never the label).
+    // driver. Match on the SAME id the analysis keys factors by — `node_id`
+    // first (mirroring compactAnalysis's `node_id ?? factor_id` precedence), so
+    // a lever is suppressed even when a PLoT entry carries only `node_id`.
+    // Structural id only; never the label.
+    const controlledMatchId =
+      (typeof entry.node_id === 'string' && entry.node_id) || idGuess;
     if (
       controlledFactorIds !== undefined &&
-      idGuess.length > 0 &&
-      controlledFactorIds.has(idGuess)
+      controlledMatchId.length > 0 &&
+      controlledFactorIds.has(controlledMatchId)
     ) {
       continue;
     }
