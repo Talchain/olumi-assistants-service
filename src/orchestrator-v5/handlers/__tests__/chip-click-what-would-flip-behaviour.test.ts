@@ -436,8 +436,13 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
             win_probability: 0.55,
             outcome_mean: 1,
             factor_sensitivity: [
-              // Unsigned magnitude + neutral direction.
-              { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.6, direction: 'neutral' },
+              // Unsigned magnitude + neutral direction. `fac_runway` is a
+              // genuinely external/tunable factor (no option intervenes on it),
+              // so the Spine A backstop leaves it in place — the mechanic under
+              // test (neutral → "has little effect") is unaffected. (Using the
+              // option-controlled `fac_acquisition_cost` here would be correctly
+              // suppressed; that path is covered by its own test below.)
+              { node_id: 'fac_runway', label: 'Runway', elasticity: 0.6, direction: 'neutral' },
             ],
           },
           {
@@ -465,7 +470,7 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     expect(text.toLowerCase()).toContain('has little effect');
     expect(text.toLowerCase()).not.toMatch(/strengthens|weakens/);
     // The neutral driver is still named — no raw id leak.
-    expect(text).toContain('Acquisition cost');
+    expect(text).toContain('Runway');
   });
 
   it('multi-driver: a lower-magnitude DIRECTIONAL driver is selected ahead of a higher-magnitude NEUTRAL driver', async () => {
@@ -487,8 +492,11 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
             outcome_mean: 1,
             factor_sensitivity: [
               // Neutral has the LARGER raw magnitude; directional is smaller.
+              // Both factors are genuinely external/tunable (no option
+              // intervenes on them), so the Spine A backstop leaves them in
+              // place — the ordering mechanic under test is unaffected.
               { node_id: 'fac_brand', label: 'Brand sentiment', elasticity: 0.8, direction: 'neutral' },
-              { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.4, direction: 'negative' },
+              { node_id: 'fac_runway', label: 'Runway', elasticity: 0.4, direction: 'negative' },
             ],
           },
           {
@@ -513,13 +521,65 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
 
     const text = commitedAssistantText();
     // Both named, but the directional driver leads (appears first).
-    expect(text).toContain('Acquisition cost');
+    expect(text).toContain('Runway');
     expect(text).toContain('Brand sentiment');
-    expect(text.indexOf('Acquisition cost')).toBeLessThan(text.indexOf('Brand sentiment'));
+    expect(text.indexOf('Runway')).toBeLessThan(text.indexOf('Brand sentiment'));
     // Honest direction: the directional driver weakens; the neutral one has
     // little effect (and is never mis-signed as strengthen/weaken).
     expect(text.toLowerCase()).toMatch(/weakens/);
     expect(text.toLowerCase()).toContain('has little effect');
+  });
+
+  it('Spine A: an option-controlled lever is NOT named as a tunable driver (end-to-end)', async () => {
+    // READY_GRAPH wires both options to intervene on `fac_acquisition_cost`, so
+    // it is an option-controlled lever — not an independently tunable external
+    // driver. The Spine A backstop must keep it out of the deterministic "what
+    // would shift the result" prose even though it is the only/strongest
+    // sensitivity entry, closing the lever-as-sensitivity leak on the chip-click
+    // path while the producer fix (Lane A1) is pending. Values are preserved;
+    // the driver is simply not surfaced as tunable.
+    buildTurnContextMock.mockResolvedValueOnce(
+      await buildFreshFragileContext({
+        leading_prob: 0.55,
+        runner_prob: 0.45,
+        margin_pp: 10,
+        raw_robustness_level: null,
+        results: [
+          {
+            option_id: 'opt_freelance',
+            option_label: 'Freelance Consultant + Moderate Ad Spend',
+            win_probability: 0.55,
+            outcome_mean: 1,
+            factor_sensitivity: [
+              { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.7, direction: 'negative' },
+            ],
+          },
+          {
+            option_id: 'opt_hire',
+            option_label: 'Hire Marketing Manager',
+            win_probability: 0.45,
+            outcome_mean: 0.8,
+          },
+        ],
+      }),
+    );
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor(),
+      requestId: 'req-flip-controlled-lever-suppressed',
+      handlerRegistry: REAL_REGISTRY,
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+    expect(routeWithToolUseSpy).not.toHaveBeenCalled();
+
+    const text = commitedAssistantText();
+    // The option-controlled lever must not be named as a sensitivity driver,
+    // and the response must still be a valid, non-empty answer.
+    expect(text).not.toContain('Acquisition cost');
+    expect(text.length).toBeGreaterThan(0);
+    expect(text.toLowerCase()).not.toMatch(/would shift this result the most/);
   });
 
   // V5 P0-B — the live staging failure, reproduced end-to-end and fixed.

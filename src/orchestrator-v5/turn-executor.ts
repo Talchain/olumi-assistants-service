@@ -162,6 +162,7 @@ import {
   type ContextPack,
 } from './context/context-pack-assembler.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
+import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 import {
   applyTopLevelDriversOverride,
   applyTopLevelFragileEdgeOverride,
@@ -1183,6 +1184,12 @@ export async function runTurnExecutor(
         compactedConstraints,
         analysis: analysisSummary,
         analysisStalenessReason,
+        // Spine A backstop: option-controlled levers must not be surfaced as
+        // tunable sensitivity drivers. Computed from the RAW turn graph
+        // (`graphStateForTurn`) because the compacted projection strips
+        // intervention bundles. Empty set ⇒ no suppression (fail-safe).
+        interventionControlledFactorIds:
+          collectInterventionControlledFactorIds(graphStateForTurn),
         coaching: coachingCache,
         // Flag-gated, prompt-safe coaching pack (undefined ⇒ field omitted).
         coachingContext,

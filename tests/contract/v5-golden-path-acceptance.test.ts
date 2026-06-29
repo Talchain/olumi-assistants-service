@@ -46,6 +46,10 @@ import type { QuantityExtractionResult } from '../../src/orchestrator-v5/context
 import { findForbiddenMatches } from '../../tools/v5-journey-replay/forbidden-terms.js'
 import type { HandlerInvocation } from '../../src/orchestrator-v5/tools/registry.js'
 import type { AnalysisProjectionSummary } from '../../src/orchestrator-v5/context/projection-summaries.js'
+import { buildAnalysisProjectionSummary } from '../../src/orchestrator-v5/context/projection-summaries.js'
+import { projectTopDrivers, type ContextPackAnalysis } from '../../src/orchestrator-v5/context/context-pack-assembler.js'
+import { collectInterventionControlledFactorIds } from '../../src/orchestrator-v5/context/intervention-controlled-drivers.js'
+import type { DriverSummary } from '../../src/orchestrator/context/analysis-compact.js'
 import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator'
 import { OlumiResponseSchema } from '@talchain/schemas/boundary'
 import { ContextPackSchema } from '../../src/orchestrator-v5/context/context-pack-schema.js'
@@ -590,5 +594,82 @@ describe('Acceptance Gate — no internal-term leakage in user copy', () => {
     for (const term of expected) {
       expect(FORBIDDEN_STRINGS, `missing forbidden term: ${term}`).toContain(term)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Acceptance Gate — Spine A option-controlled-driver suppression
+//
+// An option-controlled lever (a factor an option intervenes on) must never be
+// surfaced in user-facing explain_results / what_would_flip prose as a tunable
+// sensitivity driver — that is the lever-as-sensitivity leak. The CEE backstop
+// suppresses it at the projection boundary (`projectTopDrivers`) from the RAW
+// graph's intervention bundles, keyed on structural factor_id. Genuinely
+// external/tunable drivers still surface. Producer values are preserved (this
+// is a presentation suppression, not the Lane A1 producer fix).
+// ---------------------------------------------------------------------------
+describe('Acceptance Gate — Spine A option-controlled-driver suppression', () => {
+  // Both options intervene on `fac_lever` → option-controlled. `fac_external`
+  // is a genuinely tunable factor no option touches.
+  const SPINE_A_GRAPH = {
+    nodes: [
+      { id: 'fac_lever', kind: 'factor', label: 'Factory Capacity' },
+      { id: 'fac_external', kind: 'factor', label: 'Market Demand' },
+      { id: 'opt_a', kind: 'option', label: 'Option A', interventions: { fac_lever: 1 } },
+      { id: 'opt_b', kind: 'option', label: 'Option B', interventions: { fac_lever: 0 } },
+    ],
+  }
+  const CONTROLLED = collectInterventionControlledFactorIds(SPINE_A_GRAPH)
+
+  // The controlled lever has the LARGER magnitude — without the backstop it
+  // would lead the "would shift this result the most" prose.
+  const DRIVERS: DriverSummary[] = [
+    { factor_id: 'fac_lever', factor_label: 'Factory Capacity', sensitivity: 0.9, direction: 'negative' },
+    { factor_id: 'fac_external', factor_label: 'Market Demand', sensitivity: 0.5, direction: 'negative' },
+  ]
+
+  function spineAProjection(): AnalysisProjectionSummary {
+    const analysis: ContextPackAnalysis = {
+      status: 'complete',
+      leading_option: { label: 'Hire Senior Engineer', probability: 0.62 },
+      runner_up: { label: 'Hire Two Mid-Level', probability: 0.27 },
+      margin_pp: 35,
+      robustness_band: 'stable',
+      top_drivers: projectTopDrivers(DRIVERS, CONTROLLED),
+      fragile_edges: [],
+    }
+    const projection = buildAnalysisProjectionSummary(analysis)
+    if (projection === null) throw new Error('projection should not be null')
+    return projection
+  }
+
+  it('projection drops the option-controlled lever and keeps the external driver', () => {
+    const labels = spineAProjection().top_drivers.map((d) => d.factor_label)
+    expect(labels).not.toContain('Factory Capacity')
+    expect(labels).toContain('Market Demand')
+  })
+
+  it('explain_results assistant_text never names the option-controlled lever', async () => {
+    const handler = createExplainResultsHandler()
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+        analysisProjection: spineAProjection(),
+        analysisFreshness: makeFreshness('fresh'),
+      }),
+    )
+    expect(outcome.assistant_text).not.toContain('Factory Capacity')
+  })
+
+  it('what_would_flip assistant_text never names the option-controlled lever', async () => {
+    const handler = createWhatWouldFlipHandler()
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+        analysisProjection: spineAProjection(),
+        analysisFreshness: makeFreshness('fresh'),
+      }),
+    )
+    expect(outcome.assistant_text).not.toContain('Factory Capacity')
   })
 })

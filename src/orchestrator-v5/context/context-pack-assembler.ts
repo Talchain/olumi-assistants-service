@@ -37,6 +37,7 @@ import type {
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
+import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import {
   formatAnalysisForContext,
@@ -332,6 +333,18 @@ export interface AssembleContextPackInput {
    * Absent/null means analysis is fresh (or absent).
    */
   readonly analysisStalenessReason?: string | null;
+  /**
+   * Spine A (V5-owned claim-safety BACKSTOP): the set of `factor_id`s that an
+   * option intervenes on, computed by the dispatch path from the RAW turn graph
+   * (the compacted projection strips intervention bundles, so this must be
+   * supplied here, NOT derived from `compactedGraph`). When present,
+   * `projectTopDrivers` suppresses any top driver whose factor is in the set so
+   * deterministic prose / LLM context never name an option-controlled lever as a
+   * tunable sensitivity driver. Producer values are untouched — this is a
+   * presentation suppression, NOT the Lane A1 producer fix. Omitted / empty ⇒ no
+   * suppression (fail-safe).
+   */
+  readonly interventionControlledFactorIds?: ReadonlySet<string>;
   readonly systemEvent?: unknown | null;
   readonly pendingConfirmation?: boolean;
   /** Pre-resolved coaching state. Caller reads sidecar / prior facts before
@@ -458,6 +471,7 @@ export function assembleContextPackWithSummary(
   const rawAnalysis = projectAnalysis(
     input.analysis ?? null,
     input.analysisStalenessReason ?? null,
+    input.interventionControlledFactorIds,
   );
   const projectedGraph: ContextPackGraph = input.compactedGraph
     ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
@@ -645,8 +659,37 @@ const TOP_DRIVER_CAP = 3;
  */
 export function projectTopDrivers(
   drivers: readonly DriverSummary[],
+  controlledFactorIds?: ReadonlySet<string>,
 ): ContextPackAnalysisDriver[] {
-  return drivers
+  // Spine A backstop: drop any driver whose factor is option-controlled BEFORE
+  // the projection strips `factor_id` (the structural match key). Authority is
+  // structural `factor_id` membership only — never the label. Producer values
+  // are not touched; the driver is simply not surfaced as tunable.
+  let source: readonly DriverSummary[] = drivers;
+  if (controlledFactorIds !== undefined && controlledFactorIds.size > 0) {
+    const { kept, suppressed } = partitionInterventionControlledDrivers(
+      drivers,
+      controlledFactorIds,
+    );
+    if (suppressed.length > 0) {
+      // The backstop fired: an option-controlled lever was about to be surfaced
+      // as a tunable driver. This is EVIDENCE THE PRODUCER FIX (Science/PLoT
+      // Lane A1) IS STILL REQUIRED — never a sign it is closed. `factor_id`s are
+      // internal identifiers (not user-facing prose), so they are safe to log.
+      log.warn(
+        {
+          event: 'v5.intervention_controlled_driver_suppressed',
+          source: 'projectTopDrivers',
+          suppressed_count: suppressed.length,
+          suppressed_factor_ids: suppressed.map((d) => d.factor_id),
+          producer_fix_required: true,
+        },
+        'V5 Spine A: suppressed option-controlled lever from tunable-driver projection (producer fix still required)',
+      );
+    }
+    source = kept;
+  }
+  return source
     .filter((d) => isFiniteSensitivity(d.sensitivity))
     .map((d) => ({
       factor_label: d.factor_label,
@@ -659,6 +702,7 @@ export function projectTopDrivers(
 function projectAnalysis(
   analysis: AnalysisResponseSummary | null,
   stalenessReason: string | null,
+  controlledFactorIds?: ReadonlySet<string>,
 ): ContextPackAnalysis | null {
   if (analysis === null) return null;
 
@@ -695,7 +739,10 @@ function projectAnalysis(
   // 2. Top drivers — shared with the chip-click dispatch via projectTopDrivers:
   //    filter non-finite, re-attach sign (neutral → 0), sort by |signed value|,
   //    cap. Keeping both reattachment sites on one helper prevents drift.
-  const topDrivers: ContextPackAnalysisDriver[] = projectTopDrivers(analysis.top_drivers);
+  const topDrivers: ContextPackAnalysisDriver[] = projectTopDrivers(
+    analysis.top_drivers,
+    controlledFactorIds,
+  );
 
   // 3. Robustness band: null when source is unknown / empty; do not fabricate.
   const rawBand = analysis.robustness_level;

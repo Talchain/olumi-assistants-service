@@ -180,11 +180,22 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
           },
         ],
         factor_sensitivity: [
+          // `fac_capacity` is fully option-controlled in READY_GRAPH (both
+          // options intervene on it), so the Spine A backstop suppresses it
+          // from the tunable-driver projection. `fac_market` is a genuinely
+          // external/tunable factor that no option intervenes on — it is the
+          // driver the advice gate grounds its `needs_top_driver` classes on.
           {
             factor_id: 'fac_capacity',
             factor_label: 'Capacity',
             sensitivity: 0.6,
             direction: 'positive',
+          },
+          {
+            factor_id: 'fac_market',
+            factor_label: 'Market demand',
+            sensitivity: 0.5,
+            direction: 'negative',
           },
         ],
         robustness_synthesis: { overall_assessment: 'moderate' },
