@@ -36,20 +36,39 @@ describe('collectInterventionControlledFactorIds', () => {
     expect(set.size).toBe(2);
   });
 
-  it('reads the data.interventions location with precedence over top-level', () => {
+  it('UNIONS data.interventions with top-level node.interventions (a backstop must miss neither)', () => {
     const graph = {
       nodes: [
         {
           id: 'opt_a',
           kind: 'option',
           data: { interventions: { fac_speed: { value: 3 } } },
-          interventions: { fac_ignored: {} },
+          interventions: { fac_top: {} },
         },
       ],
     };
     const set = collectInterventionControlledFactorIds(graph);
     expect(set.has('fac_speed')).toBe(true);
-    expect(set.has('fac_ignored')).toBe(false);
+    // Top-level-only factor must NOT be dropped just because data.interventions
+    // also exists (the normaliser preserves it; the backstop must too).
+    expect(set.has('fac_top')).toBe(true);
+    expect(set.size).toBe(2);
+  });
+
+  it('collects slash-keyed flat data/interventions/<fac> entries (normaliser Source 2)', () => {
+    const graph = {
+      nodes: [
+        {
+          id: 'opt_a',
+          kind: 'option',
+          'data/interventions/fac_runway': 0.4,
+          interventions: { fac_top: {} },
+        },
+      ],
+    };
+    const set = collectInterventionControlledFactorIds(graph);
+    expect(set.has('fac_runway')).toBe(true);
+    expect(set.has('fac_top')).toBe(true);
   });
 
   it('collects from the canonical options[] array', () => {

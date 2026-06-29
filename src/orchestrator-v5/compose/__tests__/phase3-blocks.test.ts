@@ -206,6 +206,13 @@ describe('buildFactorConfidenceLookup (Codex correction #1)', () => {
   it('returns an empty map when factor_sensitivity is absent', () => {
     expect(buildFactorConfidenceLookup(makeFact()).size).toBe(0);
   });
+
+  it('keys a node_id-only entry (PLoT keys by node_id) so its EvidenceBlock is not dropped', () => {
+    const lookup = buildFactorConfidenceLookup(makeFact({
+      factorSensitivity: [{ node_id: 'fac_node_only', confidence: 0.85 }],
+    }));
+    expect(lookup.get('fac_node_only')).toBe('high');
+  });
 });
 
 // ============================================================================

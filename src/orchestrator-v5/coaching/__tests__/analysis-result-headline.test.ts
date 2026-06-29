@@ -2046,7 +2046,10 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     robustness: { level: 'moderate' }, // no fragility → Case B driver clause
   };
 
-  it('does not name an option-controlled lever as the strongest driver', () => {
+  it('omits the driver clause when the raw strongest driver is option-controlled', () => {
+    // fac_capacity (0.9) is the raw strongest but option-controlled; naming the
+    // weaker external fac_market (0.4) as "the strongest driver" would be false,
+    // so the clause is omitted entirely (headline falls to a no-driver shape).
     const out = buildAnalysisResultHeadline({
       enrichment: ENRICH_CONTROLLED,
       leading_option_id: 'opt_a',
@@ -2055,23 +2058,14 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     });
     expect(out).not.toBeNull();
     expect(out!).not.toContain('Engineering Capacity');
-    // The external driver is named instead — prose is still grounded.
-    expect(out!).toContain('Market Demand');
+    expect(out!).not.toContain('Market Demand');
+    expect(out!).not.toContain('strongest driver');
   });
 
-  it('without the controlled set, the controlled lever WOULD be named (guard is load-bearing)', () => {
-    const out = buildAnalysisResultHeadline({
-      enrichment: ENRICH_CONTROLLED,
-      leading_option_id: 'opt_a',
-      status_kind: 'ok',
-    });
-    expect(out!).toContain('Engineering Capacity');
-  });
-
-  it('suppresses a lever whose PLoT entry carries only node_id (not factor_id)', () => {
+  it('matches the controlled set on node_id — a node_id-only controlled top entry is still recognised', () => {
     // PLoT keys factor_sensitivity entries by `node_id` (compactAnalysis reads
-    // `node_id ?? factor_id`). The headline must match on node_id too, else a
-    // node_id-only entry would escape suppression and leak.
+    // `node_id ?? factor_id`); a node_id-only entry must still be recognised as
+    // the raw strongest, so the clause is omitted.
     const enrichment: Record<string, unknown> = {
       results: ENRICH_CONTROLLED.results,
       factor_sensitivity: [
@@ -2087,7 +2081,36 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
       interventionControlledFactorIds: new Set(['fac_capacity']),
     });
     expect(out!).not.toContain('Engineering Capacity');
+    expect(out!).not.toContain('Market Demand');
+  });
+
+  it('names the strongest driver when it is genuinely external (weaker controlled present — no over-omit)', () => {
+    const enrichment: Record<string, unknown> = {
+      results: ENRICH_CONTROLLED.results,
+      factor_sensitivity: [
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.9, confidence: 1 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.4, confidence: 1 },
+      ],
+      robustness: { level: 'moderate' },
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    // The genuine strongest (fac_market) is external → it IS named.
     expect(out!).toContain('Market Demand');
+    expect(out!).not.toContain('Engineering Capacity');
+  });
+
+  it('without the controlled set, the controlled lever WOULD be named (guard is load-bearing)', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: ENRICH_CONTROLLED,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out!).toContain('Engineering Capacity');
   });
 
   it('omits the driver clause entirely when every driver is option-controlled', () => {

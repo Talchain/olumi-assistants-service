@@ -37,31 +37,41 @@ function isPlainObject(value: unknown): value is Dict {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Slash-keyed flat intervention entry, e.g. `data/interventions/fac_annual_cost`. */
+const SLASH_KEY_RE = /^data\/interventions\/(.+)$/;
+
 /**
- * Read an option node's intervention bundle, honouring the same location
- * precedence the readiness path uses (`tools/handlers/analysis-ready-core.ts`):
- * the canonical OptionV3 location is the node's top-level `interventions`, but a
- * just-edited node can still carry it under `data.interventions`. The bundle is
- * a record keyed by `factor_id`.
+ * Add every `factor_id` an option node intervenes on, UNIONED across all known
+ * locations. A safety backstop must not miss a factor that lives in one shape
+ * but not another, so — unlike the readiness path's precedence read — this takes
+ * the union. Mirrors the recovery sources in `normalise-option-interventions.ts`
+ * (`recoverFromDataSources`), which overlays these onto the canonical top-level
+ * `node.interventions` while preserving top-level-only factors:
+ *   1. canonical top-level `node.interventions`
+ *   2. `node.data.interventions` (pre-normalisation / just-edited shape)
+ *   3. slash-keyed flat entries `node["data/interventions/<fac>"]`
  */
-function readInterventionBundle(node: Dict): Dict {
+function addNodeInterventionFactorIds(node: Dict, add: (factorId: string) => void): void {
+  if (isPlainObject(node.interventions)) {
+    for (const fac of Object.keys(node.interventions)) add(fac);
+  }
   const data = node.data;
   if (isPlainObject(data) && isPlainObject(data.interventions)) {
-    return data.interventions;
+    for (const fac of Object.keys(data.interventions)) add(fac);
   }
-  if (isPlainObject(node.interventions)) {
-    return node.interventions;
+  for (const key of Object.keys(node)) {
+    const m = SLASH_KEY_RE.exec(key);
+    if (m !== null && typeof m[1] === 'string') add(m[1]);
   }
-  return {};
 }
 
 /**
  * Collect the set of `factor_id`s that any option in `graph` intervenes on.
  *
- * Sources are UNIONED so a no-op cannot arise from one shape being used over
- * the other:
- *   1. option-kind graph NODES — `node.interventions` / `node.data.interventions`
- *      (the canvas-display copy that survives on the persisted/turn graph);
+ * Sources are UNIONED so a controlled factor cannot slip through by living in
+ * one shape but not another:
+ *   1. option-kind graph NODES — top-level `node.interventions`,
+ *      `node.data.interventions`, and slash-keyed `data/interventions/<fac>`;
  *   2. the canonical `graph.options[]` array — `option.interventions`.
  *
  * Read from the RAW turn graph: the compacted ContextPack projection strips
@@ -75,17 +85,15 @@ export function collectInterventionControlledFactorIds(
   const controlled = new Set<string>();
   if (!isPlainObject(graph)) return controlled;
 
-  const addBundleKeys = (bundle: Dict): void => {
-    for (const factorId of Object.keys(bundle)) {
-      const id = factorId.trim();
-      if (id.length > 0) controlled.add(id);
-    }
+  const add = (factorId: string): void => {
+    const id = factorId.trim();
+    if (id.length > 0) controlled.add(id);
   };
 
   if (Array.isArray(graph.nodes)) {
     for (const node of graph.nodes) {
       if (!isPlainObject(node) || node.kind !== 'option') continue;
-      addBundleKeys(readInterventionBundle(node));
+      addNodeInterventionFactorIds(node, add);
     }
   }
 
@@ -93,7 +101,7 @@ export function collectInterventionControlledFactorIds(
     for (const option of graph.options) {
       if (!isPlainObject(option)) continue;
       if (isPlainObject(option.interventions)) {
-        addBundleKeys(option.interventions);
+        for (const fac of Object.keys(option.interventions)) add(fac);
       }
     }
   }
