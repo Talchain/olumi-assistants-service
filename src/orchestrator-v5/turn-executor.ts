@@ -5894,6 +5894,54 @@ export async function runTurnExecutor(
     };
   }
 
+  /**
+   * AI Harness capability 1 — ALWAYS-ON false-success neutralisation.
+   *
+   * Finaliser-level companion to `enforceEgressForbiddenPhraseGuard`: that guard
+   * catches lexical DENIAL ("I haven't applied any changes"); this one catches a
+   * (false) first-person mutation-SUCCESS claim when NO durable mutation
+   * committed this turn. STEP 6.6 already enforces this on the main LLM-routed
+   * COMPOSE path (pre-commit), but the deterministic short-circuits
+   * (advice-gate, stale-rerun, state-query, fresh-followup, no-analysis) and the
+   * new post-analysis composer commit and return via `finalizeRun` WITHOUT
+   * passing STEP 6.6. Running the SAME precision-first `classifyStructuralClaim`
+   * here backstops every emit path uniformly — not gated by
+   * CEE_POST_ANALYSIS_LOOP_ENABLED.
+   *
+   * Commit-anchored, NOT classifier-widening: the swap fires only on the
+   * existing high-confidence first-person-completion verdict AND only when
+   * `handlerEmittedMutatedGraph || isDraftOrEditGraph` is false (mirrors STEP 6.6
+   * and buildTurnOutcome). Monitor-only classes (broad / passive / ambiguous-edge)
+   * are NOT swapped — #288/#289 stay deferred. Idempotent: the neutral decline
+   * text carries no claim, so a second pass is a no-op.
+   */
+  function enforceStructuralSuccessClaimGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    const decision = classifyStructuralClaim({
+      assistantText,
+      handlerEmittedMutatedGraph,
+      proposedHandlerId: proposedHandlerIdForOutcome,
+      structuralEditIntent: mentionsStructuralEditRequest(payload.message),
+    });
+    if (decision.verdict !== 'swap') return;
+    emit(TelemetryEvents.V5StructuralSuccessClaimSwapped, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      handler_id: proposedHandlerIdForOutcome ?? null,
+      text_length: assistantText.length,
+      match_kind: decision.kind,
+      dispatch_path: dispatchPath,
+    });
+    response = {
+      ...response,
+      assistant_text: V5_STRUCTURAL_DECLINE_TEXT,
+    };
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // V5 finaliser contract: surface `analysisReadyForTurn` on the run
     // result so route-v2.ts can stamp it via `finaliseV5Response`. The
@@ -5914,6 +5962,13 @@ export async function runTurnExecutor(
     // a finaliser hook cannot. See FORBIDDEN_USER_FACING_PHRASES for
     // the contradiction list this enforces.
     enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
+    // AI Harness capability 1 — always-on false-success neutralisation. Runs
+    // alongside the forbidden-phrase guard so EVERY emit path (incl. the
+    // deterministic short-circuits and the new post-analysis composer, which
+    // bypass STEP 6.6) is backstopped against a first-person mutation-success
+    // claim with no committed mutation. Commit-anchored, precision-first, not
+    // flag-gated. See `enforceStructuralSuccessClaimGuard`.
+    enforceStructuralSuccessClaimGuard('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     // Fix 4 (observability): finalise turn timings only when V5_TIMING_DEBUG
     // is enabled. Default-OFF production paths skip the telemetry emit and
