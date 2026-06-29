@@ -67,7 +67,7 @@ function renderRejection(graph: GraphV3T, flagOn: boolean) {
     if (match) rejectionCtx.structural_guidance = ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER;
   }
   const env = buildPatchRejectionEnvelope(rejectionCtx, 'turn', ctx);
-  return { text: env.assistant_text, chips: env.suggested_actions };
+  return { text: env.assistant_text ?? '', chips: env.suggested_actions };
 }
 
 const RISK = n('risk_resent', 'risk', 'Team resents new tech lead');

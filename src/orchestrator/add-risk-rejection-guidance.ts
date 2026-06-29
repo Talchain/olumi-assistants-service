@@ -124,10 +124,23 @@ export function classifyAddRiskToOptionRejection(
   }
   if (riskMatches.length === 0) return null;
 
+  // Conservative operations gate: when patch operations are supplied, the edit
+  // must have ADDED or WIRED the matched risk THIS turn (an add_node of the
+  // risk, or an add_edge touching it). This excludes legitimate NON-add-risk
+  // rejections that merely leave a *pre-existing* risk unreachable — e.g. an
+  // edit that removes a factor and orphans a risk it used to host (there is no
+  // "new risk to add" in that case, so the add-risk copy would misfire). When
+  // operations are absent / not interpretable, the candidateGraph + new-violation
+  // evidence stands (the production caller always supplies canonical operations).
+  const gated = operations === undefined
+    ? riskMatches
+    : riskMatches.filter((r) => riskWasAddedOrWired(operations, r.id) !== 'no');
+  if (gated.length === 0) return null;
+
   return {
-    risk_labels: riskMatches.map((r) => r.label),
+    risk_labels: gated.map((r) => r.label),
     example_factor_labels: decisionReachableFactorLabels(candidateGraph),
-    added_new_risk: operationsAddARisk(operations),
+    added_new_risk: anyRiskAddNode(operations),
   };
 }
 
@@ -175,26 +188,46 @@ function decisionReachableFactorLabels(graph: GraphV3T): readonly string[] {
   return labels;
 }
 
+type OpVerdict = 'yes' | 'no' | 'unknown';
+
 /**
- * Best-effort, fully-defensive scan of the supplied patch operations for an
- * add of a risk node. Observability only — never gates the match (the
- * candidateGraph + new-violation evidence is authoritative, and the operations
- * shape is treated as `unknown`). Returns `null` when not supplied / not
- * interpretable.
+ * Did the supplied canonical patch operations ADD or WIRE the given risk node
+ * this turn? Reads the canonical `{ op, value }` shape (PatchOperationSchema):
+ * `add_node` → `value.id`; `add_edge` → `value.from` / `value.to`.
+ *   - `'yes'`  — an add_node of the risk, or an add_edge touching it.
+ *   - `'no'`   — operations were interpretable but none added/wired the risk
+ *               (e.g. a removal/update elsewhere that incidentally orphaned it).
+ *   - `'unknown'` — no operation was interpretable; the caller falls back to the
+ *               candidateGraph + new-violation evidence.
  */
-function operationsAddARisk(operations?: readonly unknown[]): boolean | null {
-  if (operations === undefined) return null;
-  if (!Array.isArray(operations)) return null;
+function riskWasAddedOrWired(operations: readonly unknown[], riskId: string): OpVerdict {
   let interpreted = false;
   for (const op of operations) {
     if (op === null || typeof op !== 'object') continue;
     const rec = op as Record<string, unknown>;
-    const opName = typeof rec.op === 'string' ? rec.op : typeof rec.type === 'string' ? rec.type : null;
-    if (opName === null) continue;
+    if (typeof rec.op !== 'string') continue;
     interpreted = true;
-    if (!/add[_-]?node/i.test(opName)) continue;
-    const node = rec.node && typeof rec.node === 'object' ? (rec.node as Record<string, unknown>) : rec;
-    if (typeof node.kind === 'string' && node.kind === 'risk') return true;
+    const value = rec.value && typeof rec.value === 'object' ? (rec.value as Record<string, unknown>) : null;
+    if (rec.op === 'add_node' && value && value.id === riskId) return 'yes';
+    if (rec.op === 'add_edge' && value && (value.from === riskId || value.to === riskId)) return 'yes';
+  }
+  return interpreted ? 'no' : 'unknown';
+}
+
+/**
+ * Observability only: whether the operations clearly add a new risk node.
+ * `null` when not supplied / not interpretable. Does NOT gate the match.
+ */
+function anyRiskAddNode(operations?: readonly unknown[]): boolean | null {
+  if (operations === undefined || !Array.isArray(operations)) return null;
+  let interpreted = false;
+  for (const op of operations) {
+    if (op === null || typeof op !== 'object') continue;
+    const rec = op as Record<string, unknown>;
+    if (typeof rec.op !== 'string') continue;
+    interpreted = true;
+    const value = rec.value && typeof rec.value === 'object' ? (rec.value as Record<string, unknown>) : null;
+    if (rec.op === 'add_node' && value && value.kind === 'risk') return true;
   }
   return interpreted ? false : null;
 }
