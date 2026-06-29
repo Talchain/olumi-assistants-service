@@ -3549,6 +3549,23 @@ export async function runTurnExecutor(
           // signal is available — composer falls back to margin_pp +
           // projected robustness_band.
           rawRobustness: pickLatestRawRobustness(context.prior_facts),
+          // AI Harness capability 1 (CEE_POST_ANALYSIS_LOOP_ENABLED, default
+          // OFF). Thread the already-derived canonical analysis state + the
+          // recent-changes projection so the gate can compose a grounded
+          // safe-now answer instead of falling through `data_unavailable_for_class`
+          // to the slow generic LLM router when the thin projection is blank but
+          // fresh, usable state exists. Flag OFF → both fields absent (undefined)
+          // → the gate's relaxation branch is dead → behaviour byte-identical.
+          // `canonicalStateFromFreshness` is the same pure pre-dispatch seam the
+          // coaching-context pack and the route fallback already use.
+          ...(config.cee.postAnalysisLoopEnabled && freshness !== null
+            ? {
+                canonicalState: canonicalStateFromFreshness(freshness, {
+                  readiness: analysisReadyForTurn,
+                }),
+                recentChanges: contextPack.recent_changes,
+              }
+            : {}),
         });
         emit(TelemetryEvents.V5PostAnalysisAdviceGate, {
           request_id: requestId,
