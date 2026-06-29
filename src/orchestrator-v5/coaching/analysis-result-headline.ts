@@ -701,6 +701,12 @@ function resolveTopDriverLabel(
     if (score > topScore) {
       topScore = score;
       topControlled = isControlled;
+    } else if (score === topScore && isControlled) {
+      // Tie at the top: if ANY equally-strongest driver is option-controlled,
+      // treat the top as controlled — order-independent and conservative, so we
+      // omit rather than present an equally-strong tunable driver as "the
+      // strongest".
+      topControlled = true;
     }
     if (isControlled) continue; // never NAME an option-controlled lever
 
