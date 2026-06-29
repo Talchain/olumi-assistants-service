@@ -195,3 +195,56 @@ describe('compareRuns', () => {
     expect(delta.comparable).toBe(false);
   });
 });
+
+describe('compareRuns — Spine A option-controlled-driver suppression', () => {
+  // `fac_lever` is option-controlled; the others are external/tunable.
+  const onshore = (win: number) => ({ id: 'b', label: 'Onshore', win });
+
+  it('excludes an option-controlled lever from driver_rank_changes', () => {
+    const prior = compactAnalysis(envelope({ options: [
+      { id: 'a', label: 'Offshore', win: 0.62, drivers: [
+        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9 },
+        { id: 'fac_ext', label: 'Market demand', sensitivity: 0.5 },
+      ] },
+      onshore(0.38),
+    ] }))!;
+    const current = compactAnalysis(envelope({ options: [
+      { id: 'a', label: 'Offshore', win: 0.62, drivers: [
+        { id: 'fac_ext', label: 'Market demand', sensitivity: 0.9 },
+        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.5 },
+      ] },
+      onshore(0.38),
+    ] }))!;
+    const guarded = compareRuns(prior, current, new Set(['fac_lever'])).driver_rank_changes.map(
+      (d) => d.factor_label,
+    );
+    expect(guarded).not.toContain('Capacity');
+    // Load-bearing: without the controlled set the comparator WOULD report it.
+    const unguarded = compareRuns(prior, current).driver_rank_changes.map((d) => d.factor_label);
+    expect(unguarded).toContain('Capacity');
+  });
+
+  it('still reports an external driver rank change (no over-suppression)', () => {
+    const prior = compactAnalysis(envelope({ options: [
+      { id: 'a', label: 'Offshore', win: 0.62, drivers: [
+        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9 },
+        { id: 'fac_b', label: 'Brand sentiment', sensitivity: 0.5 },
+        { id: 'fac_c', label: 'Conversion rate', sensitivity: 0.3 },
+      ] },
+      onshore(0.38),
+    ] }))!;
+    const current = compactAnalysis(envelope({ options: [
+      { id: 'a', label: 'Offshore', win: 0.62, drivers: [
+        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9 },
+        { id: 'fac_c', label: 'Conversion rate', sensitivity: 0.5 },
+        { id: 'fac_b', label: 'Brand sentiment', sensitivity: 0.3 },
+      ] },
+      onshore(0.38),
+    ] }))!;
+    const labels = compareRuns(prior, current, new Set(['fac_lever'])).driver_rank_changes.map(
+      (d) => d.factor_label,
+    );
+    expect(labels).not.toContain('Capacity');
+    expect(labels).toEqual(expect.arrayContaining(['Brand sentiment', 'Conversion rate']));
+  });
+});

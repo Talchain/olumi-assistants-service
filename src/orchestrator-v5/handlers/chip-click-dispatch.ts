@@ -1237,10 +1237,14 @@ function buildProjectionInputs(
         .map((n) => ({ id: n.id, label: n.label ?? null }))
     : undefined;
   // Spine A backstop: option-controlled levers must not be surfaced as tunable
-  // drivers on the chip-click what_would_flip path either. The parsed GraphV3
-  // retains option intervention bundles (the compacted projection does not).
+  // drivers on the chip-click what_would_flip path either. Collect from the RAW
+  // persisted graph, NOT the parsed `graph`: GraphV3.safeParse keeps only
+  // top-level `node.interventions` and strips `node.data.interventions` and the
+  // top-level `options[]` array, so parsing first would make the backstop blind
+  // to canonical intervention bundles stored in those locations. The detector
+  // is defensive against the raw/unparsed shape.
   const interventionControlledFactorIds =
-    collectInterventionControlledFactorIds(graph);
+    collectInterventionControlledFactorIds(context.persistedGraph);
   const analysisFromPrior: AnalysisResponseSummary | null = buildAnalysisFromPriorFacts(
     context.prior_facts,
     optionLabelSource,

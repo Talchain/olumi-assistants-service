@@ -20,6 +20,7 @@ import {
 } from '../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { partitionInterventionControlledDrivers } from '../context/intervention-controlled-drivers.js';
 
 export type MarginDirection =
   | 'widened'
@@ -152,9 +153,31 @@ function deriveDriverRankChanges(
  * Diff two projected run summaries. `prior` is the older run, `current`
  * the newer. Pure and content-safe (see module header).
  */
+/**
+ * Spine A backstop: drop option-controlled drivers from a summary's
+ * `top_drivers` before the rank diff, so an option-controlled lever is never
+ * reported as gaining/losing influence. Keyed on structural `factor_id`.
+ * Returns the input unchanged when nothing is controlled (cheap, allocation-free).
+ */
+function withoutControlledDrivers(
+  summary: AnalysisResponseSummary,
+  controlledFactorIds?: ReadonlySet<string>,
+): AnalysisResponseSummary {
+  if (controlledFactorIds === undefined || controlledFactorIds.size === 0) {
+    return summary;
+  }
+  const { kept } = partitionInterventionControlledDrivers(
+    summary.top_drivers,
+    controlledFactorIds,
+  );
+  if (kept.length === summary.top_drivers.length) return summary;
+  return { ...summary, top_drivers: kept };
+}
+
 export function compareRuns(
   prior: AnalysisResponseSummary,
   current: AnalysisResponseSummary,
+  controlledFactorIds?: ReadonlySet<string>,
 ): RunDelta {
   const priorLabel = prior.winner.option_label.trim();
   const currentLabel = current.winner.option_label.trim();
@@ -177,7 +200,10 @@ export function compareRuns(
     current_leading_label: currentLabel,
     margin_direction: direction,
     margin_shift_pp: shift,
-    driver_rank_changes: deriveDriverRankChanges(prior, current),
+    driver_rank_changes: deriveDriverRankChanges(
+      withoutControlledDrivers(prior, controlledFactorIds),
+      withoutControlledDrivers(current, controlledFactorIds),
+    ),
     robustness_changed: robustnessChanged,
     prior_band: priorBand,
     current_band: currentBand,

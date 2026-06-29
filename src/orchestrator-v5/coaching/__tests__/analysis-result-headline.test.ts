@@ -2030,3 +2030,41 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
     expect(describeAnalysisHeadline(input).case).toBe('E');
   });
 });
+
+describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppression', () => {
+  // `fac_capacity` is the LARGER-score driver and would lead the "strongest
+  // driver" clause; it is option-controlled. `fac_market` is external/tunable.
+  const ENRICH_CONTROLLED: Record<string, unknown> = {
+    results: [
+      { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.62 },
+      { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.38 },
+    ],
+    factor_sensitivity: [
+      { factor_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
+      { factor_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1 },
+    ],
+    robustness: { level: 'moderate' }, // no fragility → Case B driver clause
+  };
+
+  it('does not name an option-controlled lever as the strongest driver', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: ENRICH_CONTROLLED,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      interventionControlledFactorIds: new Set(['fac_capacity']),
+    });
+    expect(out).not.toBeNull();
+    expect(out!).not.toContain('Engineering Capacity');
+    // The external driver is named instead — prose is still grounded.
+    expect(out!).toContain('Market Demand');
+  });
+
+  it('without the controlled set, the controlled lever WOULD be named (guard is load-bearing)', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: ENRICH_CONTROLLED,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out!).toContain('Engineering Capacity');
+  });
+});

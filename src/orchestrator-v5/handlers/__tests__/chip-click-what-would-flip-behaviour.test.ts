@@ -582,6 +582,59 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     expect(text.toLowerCase()).not.toMatch(/would shift this result the most/);
   });
 
+  it('Spine A raw-graph: suppresses a lever whose interventions live in node.data.interventions (GraphV3-stripped)', async () => {
+    // Same controlled lever, but the persisted graph stores the option
+    // interventions under `node.data.interventions` instead of the canonical
+    // top-level `node.interventions`. GraphV3.safeParse strips `node.data`, so
+    // the backstop only catches this because the chip-click path reads the RAW
+    // persisted graph (the regression for review point #4).
+    const dataInterventionsGraph = {
+      nodes: [
+        { id: 'dec_root', kind: 'decision', label: 'Marketing capacity?' },
+        { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8 },
+        { id: 'fac_acquisition_cost', kind: 'factor', label: 'Acquisition cost' },
+        { id: 'opt_freelance', kind: 'option', label: 'Freelance Consultant + Moderate Ad Spend', data: { interventions: { fac_acquisition_cost: 0.55 } } },
+        { id: 'opt_hire', kind: 'option', label: 'Hire Marketing Manager', data: { interventions: { fac_acquisition_cost: 0.7 } } },
+      ],
+      edges: READY_GRAPH.edges,
+    };
+    const ctx = await buildFreshFragileContext({
+      leading_prob: 0.55,
+      runner_prob: 0.45,
+      margin_pp: 10,
+      raw_robustness_level: null,
+      results: [
+        {
+          option_id: 'opt_freelance',
+          option_label: 'Freelance Consultant + Moderate Ad Spend',
+          win_probability: 0.55,
+          outcome_mean: 1,
+          factor_sensitivity: [
+            { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.7, direction: 'negative' },
+          ],
+        },
+        {
+          option_id: 'opt_hire',
+          option_label: 'Hire Marketing Manager',
+          win_probability: 0.45,
+          outcome_mean: 0.8,
+        },
+      ],
+    });
+    buildTurnContextMock.mockResolvedValueOnce({ ...ctx, persistedGraph: dataInterventionsGraph });
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor(),
+      requestId: 'req-flip-data-interventions',
+      handlerRegistry: REAL_REGISTRY,
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+    const text = commitedAssistantText();
+    expect(text).not.toContain('Acquisition cost');
+  });
+
   // V5 P0-B — the live staging failure, reproduced end-to-end and fixed.
   // Build cef69b0, scenario e22aa97b: the served answer said the picture was
   // fragile and "small adjustments could shift which option leads" while the

@@ -1185,11 +1185,15 @@ export async function runTurnExecutor(
         analysis: analysisSummary,
         analysisStalenessReason,
         // Spine A backstop: option-controlled levers must not be surfaced as
-        // tunable sensitivity drivers. Computed from the RAW turn graph
-        // (`graphStateForTurn`) because the compacted projection strips
-        // intervention bundles. Empty set ⇒ no suppression (fail-safe).
-        interventionControlledFactorIds:
-          collectInterventionControlledFactorIds(graphStateForTurn),
+        // tunable sensitivity drivers. Computed from the RAW, unparsed turn
+        // graph (request graphState, else the raw persisted graph) — NOT the
+        // compacted projection (strips intervention bundles) and NOT a
+        // GraphV3-parsed graph (keeps only top-level `node.interventions`,
+        // dropping `node.data.interventions` / top-level `options[]`). Empty
+        // set ⇒ no suppression (fail-safe).
+        interventionControlledFactorIds: collectInterventionControlledFactorIds(
+          options.graphState ?? context.persistedGraph,
+        ),
         coaching: coachingCache,
         // Flag-gated, prompt-safe coaching pack (undefined ⇒ field omitted).
         coachingContext,
@@ -3245,6 +3249,12 @@ export async function runTurnExecutor(
           message: payload.message,
           priorFacts: context.prior_facts,
           freshness: freshness?.freshness,
+          // Spine A backstop: option-controlled levers must not be reported as
+          // gaining/losing influence in run-comparison prose. Raw, unparsed
+          // current graph (see the assembler call above).
+          interventionControlledFactorIds: collectInterventionControlledFactorIds(
+            options.graphState ?? context.persistedGraph,
+          ),
         });
         emit(TelemetryEvents.V5RunComparisonGate, {
           request_id: requestId,

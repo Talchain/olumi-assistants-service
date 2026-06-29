@@ -52,6 +52,7 @@ import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.j
 
 import { getHandlerBudgetMs } from '../../budgets.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { collectInterventionControlledFactorIds } from '../../context/intervention-controlled-drivers.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import type {
   HandlerFn,
@@ -654,6 +655,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       enrichment: response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
       status_kind: headlineStatusKind,
+      // Spine A backstop: the headline reads raw `factor_sensitivity` directly
+      // (bypassing projectTopDrivers), so it must skip option-controlled levers.
+      // Source the controlled-id set from the RAW persisted graph (covers all
+      // intervention locations), falling back to the canonical options array.
+      interventionControlledFactorIds: collectInterventionControlledFactorIds(
+        snapshot.rawPersistedGraph ?? { options: snapshot.options },
+      ),
     };
     const headline = buildAnalysisResultHeadline(headlineInput);
     const summary = headline ?? template;

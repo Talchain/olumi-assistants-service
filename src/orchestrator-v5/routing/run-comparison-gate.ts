@@ -78,6 +78,13 @@ export interface RunComparisonGuardInput {
   readonly message: string;
   readonly priorFacts: readonly HandlerFact[];
   readonly freshness: RunComparisonFreshness | null | undefined;
+  /**
+   * Spine A backstop: factor_ids an option intervenes on. Threaded into
+   * `compareRuns` so an option-controlled lever is never reported as having
+   * gained/lost influence between runs (the comparator diffs raw `top_drivers`,
+   * bypassing `projectTopDrivers`). Omitted / empty ⇒ no suppression.
+   */
+  readonly interventionControlledFactorIds?: ReadonlySet<string>;
 }
 
 const RERUN_ACTION: RunComparisonSuggestedAction = Object.freeze({
@@ -220,7 +227,7 @@ export function tryRunComparisonGate(
     };
   }
 
-  const delta = compareRuns(prior, current);
+  const delta = compareRuns(prior, current, input.interventionControlledFactorIds);
   if (!delta.comparable) {
     return {
       matched: true,

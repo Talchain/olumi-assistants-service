@@ -117,6 +117,14 @@ export interface AnalysisResultHeadlineInput {
   readonly enrichment: Record<string, unknown>;
   readonly leading_option_id: string;
   readonly status_kind: 'ok' | 'partial' | 'unknown';
+  /**
+   * Spine A backstop: factor_ids an option intervenes on. The top-driver
+   * resolver skips these so an option-controlled lever is never named as the
+   * strongest sensitivity driver in the run_analysis headline (the headline
+   * reads raw `factor_sensitivity`, bypassing `projectTopDrivers`). Keyed on
+   * structural `factor_id` only. Omitted / empty ⇒ no suppression.
+   */
+  readonly interventionControlledFactorIds?: ReadonlySet<string>;
 }
 
 /**
@@ -202,7 +210,7 @@ export function describeAnalysisHeadline(
 }
 
 function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
-  const { enrichment, leading_option_id, status_kind } = input;
+  const { enrichment, leading_option_id, status_kind, interventionControlledFactorIds } = input;
 
   // Same-source resolution: the winner label, winner probability, and
   // runner-up probability ALL come from the SAME source array (one of
@@ -233,7 +241,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
 
   const winnerLabel = winner.label;
   const winnerProbability = winner.winnerProb;
-  const driverLabel = resolveTopDriverLabel(enrichment);
+  const driverLabel = resolveTopDriverLabel(enrichment, interventionControlledFactorIds);
   const fragileLabel = resolveFragileLabel(enrichment);
   const suffix = statusSuffix(status_kind);
   const marginBucket = computeMarginBucket(winner);
@@ -657,7 +665,10 @@ interface DriverCandidate {
   readonly score: number;
 }
 
-function resolveTopDriverLabel(enrichment: Record<string, unknown>): string | null {
+function resolveTopDriverLabel(
+  enrichment: Record<string, unknown>,
+  controlledFactorIds?: ReadonlySet<string>,
+): string | null {
   const arr = enrichment.factor_sensitivity;
   if (!Array.isArray(arr)) return null;
 
@@ -669,6 +680,15 @@ function resolveTopDriverLabel(enrichment: Record<string, unknown>): string | nu
       (typeof entry.factor_id === 'string' && entry.factor_id) ||
       (typeof entry.id === 'string' && entry.id) ||
       '';
+    // Spine A backstop: never name an option-controlled lever as the strongest
+    // driver. Keyed on structural factor_id only (never the label).
+    if (
+      controlledFactorIds !== undefined &&
+      idGuess.length > 0 &&
+      controlledFactorIds.has(idGuess)
+    ) {
+      continue;
+    }
     const rawLabel =
       (typeof entry.factor_label === 'string' && entry.factor_label) ||
       (typeof entry.label === 'string' && entry.label) ||
