@@ -96,6 +96,27 @@ A **sanitized, committable** reproduction lives at
 A8 **pass** (honest proposal) + A10 **advisory** (escalation) + A9/A2 acceptance
 requirements. The real assistant text is never stored.
 
+## Capability 2 acceptance target
+
+`golden-journey-v1-f4835349-regression.json` is retained as a **permanent durable
+real-defect baseline** and the **Capability 2 acceptance target**. The target is
+encoded in the fixture's `capability_2_acceptance_target` block:
+
+| | `llm_calls_used` | A8 | A10 |
+|---|---|---|---|
+| **today (baseline)** | 1 | pass (honest proposal) | **advisory fail** — wrongful LLM escalation |
+| **accepted when** | 0 | pass | pass — no escalation |
+
+Capability 2 is accepted when the same deterministic-eligible mutation-intent/proposal
+turn is handled by the deterministic gate (`llm_calls_used=0`) and A10 no longer fires
+the escalation advisory. Until then:
+
+- **A10 stays ADVISORY** — this fixture must **not** be a hard CI failure. It is tracked
+  evidence in the deterministic harness/report set, not a gate (replay exit code = 0).
+- **A8 must remain a pass** — the real answer is honest (proposal, not a phantom-success
+  claim); a regression to phantom-success would flip A8 to a gating fail.
+- It is **deterministic-only evidence** — never a live staging run.
+
 ## Commands run
 
 ```bash

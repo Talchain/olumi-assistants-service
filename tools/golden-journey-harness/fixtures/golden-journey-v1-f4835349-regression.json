@@ -2,6 +2,13 @@
   "name": "golden-journey-v1-f4835349-regression",
   "description": "SANITIZED regression for the real lived turn (build f4835349, persisted turn row a9da06f2). Generic decision content — no real scenario data. Reproduces the SHAPE validated read-only against production: a non-committing edit-intent/proposal turn that (a) is HONEST about the failed change and proposes options (so A8 correctly PASSES — no phantom success), and (b) wrongly escalated to an LLM (1 call, ~11.3s, handler_id=null, proposal-only, graph hash unchanged) on a deterministic-eligible turn (so A10 fires the wrongful-LLM-escalation advisory). This fixture exists so the two behaviours stay regression-proofed without persisting any sensitive scenario text. The real assistant text was validated transiently and is NOT stored here.",
   "brief": "A team is choosing between two scaling options for next quarter and is exploring how to encode a delivery risk in the model.",
+  "capability_2_acceptance_target": {
+    "summary": "Durable real-defect baseline AND Capability 2 acceptance target. Today this turn handles a deterministic-eligible mutation-intent/proposal with llm_calls_used=1 (A10 advisory: wrongful LLM escalation). Capability 2 is accepted when the same turn is handled deterministically: llm_calls_used=0 and A10 no longer fires the escalation advisory.",
+    "current_state": { "llm_calls_used": 1, "a8": "pass (honest proposal, no phantom success)", "a10": "advisory fail (wrongful LLM escalation)" },
+    "accepted_when": { "llm_calls_used": 0, "a8": "pass", "a10": "pass (no escalation)" },
+    "gating": "A10 stays ADVISORY — this fixture must NOT be a hard CI failure; it is tracked evidence, not a gate.",
+    "evidence_only": "Deterministic harness/report set only — never a live staging run."
+  },
   "expected_milestones": [
     { "step": "1_draft", "role": "draft", "expect": "draft returned; labels parseable (setup)", "components": ["context_management", "observability_recovery"], "invariants": ["A2", "A6"] },
     { "step": "2_run_analysis", "role": "analysis", "expect": "analysis_ready with hash trio (setup — establishes baseline graph hash)", "components": ["canonical_state", "observability_recovery"], "invariants": ["A1", "A6"] },
