@@ -665,7 +665,7 @@ const TOP_DRIVER_CAP = 3;
  * values are never mutated — a suppressed edge is simply not surfaced. Empty
  * controlled set ⇒ no-op.
  */
-export function filterLeverSourcedFragileEdges<E extends { from_id?: string }>(
+export function filterLeverSourcedFragileEdges<E extends { from_id?: string; from_label: string }>(
   edges: readonly E[],
   controlledFactorIds?: ReadonlySet<string>,
 ): E[] {
