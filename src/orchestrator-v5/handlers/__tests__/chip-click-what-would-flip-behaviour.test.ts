@@ -377,6 +377,37 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     expect(text).toContain('Freelance Consultant + Moderate Ad Spend');
   });
 
+  it('P0b-1: what_would_flip never names an option-pinned lever as the "clearest to test"; a non-lever flip survives', async () => {
+    // READY_GRAPH: BOTH options intervene on `fac_acquisition_cost` → it is an
+    // option-pinned lever. A pre-P0b1 build named it (via flip_thresholds) as the
+    // single factor to test. The non-lever `fac_market_demand` must survive.
+    buildTurnContextMock.mockResolvedValueOnce(
+      await buildFreshFragileContext({
+        leading_prob: 0.62,
+        runner_prob: 0.38,
+        margin_pp: 24,
+        raw_robustness_level: 'stable', // non-fragile → the concrete "clearest to test" branch fires
+        flip_thresholds: [
+          { factor_id: 'fac_acquisition_cost', factor_label: 'Acquisition cost', flip_value: 0.6, direction: 'increase' },
+          { factor_id: 'fac_market_demand', factor_label: 'Market demand', flip_value: 0.45, direction: 'increase' },
+        ],
+      }),
+    );
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor(),
+      requestId: 'req-flip-p0b1-lever',
+      handlerRegistry: REAL_REGISTRY,
+    });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+
+    const text = commitedAssistantText();
+    // NEGATIVE: the pinned lever is never surfaced as a thing to test / flip.
+    expect(text).not.toContain('Acquisition cost');
+    // POSITIVE: the non-lever flip target still surfaces — no over-suppression, no blanking.
+    expect(text).toContain('Market demand');
+  });
+
   it('canonical fragile band derived from robustness_synthesis (raw enrichment.robustness omitted): deterministically triggers fragility-aware copy', async () => {
     // Round-2 review: the previous version of this test omitted both the
     // raw robustness block AND the synthesis, so the canonical band was

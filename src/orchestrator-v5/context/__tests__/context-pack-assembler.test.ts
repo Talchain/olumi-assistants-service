@@ -39,6 +39,7 @@ import type { AnalysisResponseSummary } from '../../../orchestrator/context/anal
 import { buildAnalysisFromPriorFacts } from '../analysis-fallback.js';
 import {
   assembleContextPack,
+  filterLeverSourcedFragileEdges,
   CONTEXT_PACK_RECENT_TURNS_CAP,
   CONTEXT_PACK_VERSION,
   type GraphWithOptions,
@@ -887,5 +888,74 @@ describe('projectAnalysis — enriched projection', () => {
     for (const banned of ['results', 'edge_sensitivity', 'review_cards', 'm1_coaching', 'enrichment']) {
       expect(json).not.toContain(banned);
     }
+  });
+});
+
+describe('filterLeverSourcedFragileEdges — P0b-1 source-only fragile-edge suppression', () => {
+  const lever = 'fac_lever';
+  const controlled: ReadonlySet<string> = new Set([lever]);
+
+  it('suppresses an edge whose SOURCE is a controlled lever', () => {
+    const out = filterLeverSourcedFragileEdges(
+      [{ from_id: lever, from_label: 'Lever', to_label: 'Goal' }],
+      controlled,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('PRESERVES an edge whose TARGET is a controlled lever (source-only rule, mirrors PLoT A1c)', () => {
+    const e = { from_id: 'fac_plain', from_label: 'Plain', to_id: lever, to_label: 'Lever' };
+    expect(filterLeverSourcedFragileEdges([e], controlled)).toEqual([e]);
+  });
+
+  it('PRESERVES a non-lever edge', () => {
+    const e = { from_id: 'fac_plain', from_label: 'Plain', to_label: 'Goal' };
+    expect(filterLeverSourcedFragileEdges([e], controlled)).toEqual([e]);
+  });
+
+  it('empty / undefined controlled set is a no-op', () => {
+    const edges = [
+      { from_id: lever, from_label: 'Lever', to_label: 'Goal' },
+      { from_id: 'fac_plain', from_label: 'Plain', to_label: 'Goal' },
+    ];
+    expect(filterLeverSourcedFragileEdges(edges, new Set())).toEqual(edges);
+    expect(filterLeverSourcedFragileEdges(edges, undefined)).toEqual(edges);
+  });
+
+  it('FAILS CLOSED on a missing from_id when a lever exists — no silent lever bypass on the fallback path', () => {
+    const e = { from_label: 'Unknown-source', to_label: 'Goal' }; // no from_id (legacy/label-only)
+    expect(filterLeverSourcedFragileEdges([e], controlled)).toEqual([]); // dropped (fail-closed)
+    expect(filterLeverSourcedFragileEdges([e], new Set())).toEqual([e]); // but no over-suppression when no levers
+  });
+});
+
+describe('projectAnalysis — P0b-1 fragile-edge lever suppression (via assembleContextPack)', () => {
+  const fragile = [
+    { from_id: 'fac_lever', from_label: 'Pinned Lever', to_label: 'Goal' }, // lever SOURCE → suppress
+    { from_id: 'fac_plain', from_label: 'Background', to_label: 'Goal' }, // non-lever → keep
+  ];
+
+  it('drops lever-SOURCED fragile edges and preserves non-lever edges; output keeps the {from_label,to_label} shape', () => {
+    const pack = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      analysis: makeAnalysis({ top_fragile_edges: fragile }),
+      interventionControlledFactorIds: new Set(['fac_lever']),
+    });
+    expect((pack.analysis?.fragile_edges ?? []).map((e) => e.from_label)).toEqual(['Background']);
+    // No from_id leaks onto the strict-validated ContextPack output.
+    expect(pack.analysis?.fragile_edges).toEqual([{ from_label: 'Background', to_label: 'Goal' }]);
+  });
+
+  it('no controlled ids → all fragile edges preserved (no over-suppression)', () => {
+    const pack = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      analysis: makeAnalysis({ top_fragile_edges: fragile }),
+    });
+    expect((pack.analysis?.fragile_edges ?? []).map((e) => e.from_label)).toEqual([
+      'Pinned Lever',
+      'Background',
+    ]);
   });
 });
