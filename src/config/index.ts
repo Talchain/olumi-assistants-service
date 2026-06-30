@@ -605,6 +605,20 @@ const ConfigSchema = z.object({
     // byte-identical legacy behaviour (no option IDs threaded into
     // deriveAnalysisFreshness, no override, no new telemetry).
     optionIdentityFreshnessGuard: booleanString.default(true),
+    // V5 post-analysis conversational loop (CEE_POST_ANALYSIS_LOOP_ENABLED —
+    // AI Harness capability 1). When true, the post-analysis advice gate may
+    // consume the already-assembled canonical analysis state + readiness
+    // blockers + recent-changes to compose a grounded, safe-now deterministic
+    // answer in the fresh-analysis case where the thin LLM-facing projection
+    // is blank — instead of falling through `data_unavailable_for_class` to the
+    // slow generic LLM router. Default OFF; flag-off is byte-identical (the gate
+    // receives no canonical/readiness/recent-change inputs, so the relaxation
+    // branch is dead and the existing fall-through is unchanged). The always-on
+    // false-success neutralisation (finaliser) is NOT gated by this flag.
+    // Surfacing is restricted to Tier-1 safe-now content (status/freshness/
+    // readiness/recent-changes/next-step) — no held science prose. Behavioural
+    // activation (flag ON) is reserved for an authorised live-acceptance step.
+    postAnalysisLoopEnabled: booleanString.default(false),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
@@ -1014,6 +1028,7 @@ function parseConfig(): Config {
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
       coachingContextPromptEnabled: env.CEE_COACHING_CONTEXT_PROMPT_ENABLED,
       optionIdentityFreshnessGuard: env.CEE_OPTION_IDENTITY_FRESHNESS_GUARD,
+      postAnalysisLoopEnabled: env.CEE_POST_ANALYSIS_LOOP_ENABLED,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
       promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
       fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,
