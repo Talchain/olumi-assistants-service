@@ -196,7 +196,7 @@ export type FrameUiTargets = Record<string, never>;
 
 /**
  * diagnostics projection — references the existing redacted summary. Diagnostic
- * only; never product logic (mirrors the `_context_summary` discipline).
+ * only; never product logic (mirrors the redacted diagnostic-summary discipline).
  */
 export interface FrameDiagnostics {
   readonly analysisStateSummary?: AnalysisStateSummary;
