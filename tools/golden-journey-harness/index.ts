@@ -56,7 +56,7 @@ import {
   threadHashMemory,
   type GoldenJourneyContext,
 } from './journey.js';
-import { evaluateJourney } from './invariants.js';
+import { evaluateJourney, latencyClassFor } from './invariants.js';
 import { isAdvisoryFinding } from './components.js';
 import { JourneyPreconditionError } from '../v5-journey-replay/steps.js';
 import {
@@ -66,10 +66,12 @@ import {
   getCurrentGraphHash,
   getDiagnosticTrace,
   getGraphHashAtRun,
+  getLlmCalls,
+  getTurnTotalMs,
   type TurnObservation,
   type WireBody,
 } from './observation.js';
-import { writeGoldenReport, type GoldenReportInput, type StepCapture } from './report.js';
+import { writeGoldenReport, type GoldenReportInput, type LatencyRow, type StepCapture } from './report.js';
 
 interface Cli {
   readonly baseUrl: string;
@@ -147,7 +149,24 @@ function summariseObservation(obs: TurnObservation): string {
   return parts.join(' ');
 }
 
-/** Append the two synthetic (non-HTTP) coverage steps so the report lists all 10. */
+/** Build the A10 latency summary rows (one per captured HTTP turn). */
+function buildLatencySummary(observations: readonly TurnObservation[]): LatencyRow[] {
+  return observations.map((obs) => {
+    const totalMs = getTurnTotalMs(obs);
+    const { cls, budgetMs } = latencyClassFor(obs);
+    return {
+      step: obs.step,
+      role: obs.role,
+      totalMs,
+      cls,
+      budgetMs,
+      llmCalls: getLlmCalls(obs.body),
+      overBudget: totalMs !== undefined && totalMs > budgetMs,
+    };
+  });
+}
+
+/** Append the two synthetic (non-HTTP) coverage steps so the report lists all 12. */
 function syntheticCaptures(): StepCapture[] {
   return GOLDEN_SYNTHETIC_STEPS.map((s) => ({
     step: s.name,
@@ -242,6 +261,7 @@ function runReplay(cli: Cli): never {
       captures,
       findings,
       caveats,
+      latencySummary: buildLatencySummary(threaded),
     },
     redact,
   );
@@ -419,6 +439,7 @@ async function runLive(cli: Cli): Promise<void> {
       captures,
       findings,
       caveats,
+      latencySummary: buildLatencySummary(threaded),
     },
     redact,
   );

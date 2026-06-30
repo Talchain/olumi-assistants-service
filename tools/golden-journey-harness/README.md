@@ -5,14 +5,18 @@ core components, so a reader can answer **"which component must fix this next?"*
 
 ```
 draft model → run analysis → explain result → follow-up → mutate/value-edit →
-rerun → explain what changed → reload → verify chips/actions → capture debug
+rerun → explain what changed → reload → non-committing edit-intent → premortem →
+verify chips/actions → capture debug
 ```
 
 It makes one thing visible and repeatable: whether the AI experience is reliably
 grounded in **canonical state, context, orchestration, typed actions, and
 science-backed coaching**.
 
-## The seven invariants → six components
+## The invariants → six components
+
+A1–A7 are the core journey invariants; **A8–A11 are the blind-spot-closure
+invariants for the four lived post-analysis defects**.
 
 | id | invariant | primary component |
 |----|-----------|-------------------|
@@ -23,21 +27,39 @@ science-backed coaching**.
 | A5 | coaching grounded in graph/analysis/science signals | 5. Science-grounded coaching |
 | A6 | debug output explains what happened | 6. Observability/recovery |
 | A7 | repairs/recoveries are visible, not silent | 6. Observability/recovery |
+| **A8** | **no phantom success** — a turn that did not durably mutate never claims it did (lived defect 1) · **gating** · role-agnostic; the graph hash is authoritative (a non-mutating handler is not proof); opening-anchored claim detection avoids descriptive false-positives | 4. Typed action/mutation |
+| **A9** | **AI-facing context is observable on the wire**, not only in-process (lived defect 2) · _inconclusive = acceptance requirement_ | 1. Context management |
+| **A10** | **simple deterministic turns stay within an advisory latency budget** AND **deterministic-eligible turns don't wrongfully escalate to an LLM** (lived defect 3) · _advisory_ | 3. AI orchestration |
+| **A11** | **premortem/challenge prompts handled safely** — no overclaiming/invented doctrine (lived defect 4) · _advisory_ | 3. AI orchestration |
 
 `pass` / `fail` / `inconclusive`. **Inconclusive ≠ pass:** when a required signal
-is missing (no diagnostic trace, no `current_graph_hash`), the invariant is
-`inconclusive` AND a high-severity Component-6 finding — a missing-observability
-gap blocks the harness from proving the system, so it is never silently green.
+is missing (no diagnostic trace, no `current_graph_hash`, no wire context summary),
+the invariant is `inconclusive` AND surfaced as a **CEE acceptance requirement** —
+a missing-observability gap blocks the harness from proving the system, so it is
+never silently green.
+
+**Gating:** only `status==='fail' && !advisory` sets a non-zero exit code. A8 gates
+(safety/honesty, like A4); A10/A11 are advisory; A9/A2 inconclusives are acceptance
+requirements (non-gating but RED in the matrix and listed under "CEE acceptance
+requirements" in the report).
 
 ## Run
 
-**Deterministic replay** (CI-safe; no network — runs the classifier over a
-recorded transcript):
+**Deterministic replay — all-green self-test** (CI-safe; no network; expected exit 0):
 
 ```bash
 pnpm tsx tools/golden-journey-harness/index.ts \
   --replay tools/golden-journey-harness/fixtures/golden-journey-v1.json \
   --out Docs/golden-journey/golden-journey-v1-report.md
+```
+
+**Deterministic replay — RED baseline of the four lived defects** (expected exit 1;
+A8 gating fail + A10/A11 advisory + A9/A2 acceptance requirements):
+
+```bash
+pnpm tsx tools/golden-journey-harness/index.ts \
+  --replay tools/golden-journey-harness/fixtures/golden-journey-v1-defects.json \
+  --out Docs/golden-journey/golden-journey-v1-defects-baseline.md
 ```
 
 **Live** (drives the real `POST /orchestrate/v2/turn`):
@@ -116,7 +138,9 @@ attributed to context vs pure LLM variance.
 | `journey.ts` | the 10-step journey + hash-memory threading |
 | `report.ts` | classified markdown report + 6-component matrix |
 | `index.ts` | CLI (live + `--replay`) |
-| `fixtures/golden-journey-v1.json` | brief + per-step milestones + reference transcript |
+| `fixtures/golden-journey-v1.json` | brief + per-step milestones + all-green reference transcript (self-test, exit 0) |
+| `fixtures/golden-journey-v1-defects.json` | RED-baseline transcript reproducing the four lived defects (A8/A9/A10/A11) |
+| `fixtures/golden-journey-v1-f4835349-regression.json` | sanitized reproduction of the real lived turn (row `a9da06f2`): honest proposal (A8 pass) + wrongful LLM escalation (A10 advisory). No real scenario data. |
 
 Reuses (does not fork) `../v5-journey-replay/` for the HTTP client, deploy gate,
 preflight, redaction, forbidden-term scan, timings formatter, and the mutation /

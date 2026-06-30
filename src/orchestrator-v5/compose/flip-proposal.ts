@@ -369,6 +369,30 @@ export function summariseFlipEntries(entries: readonly FlipEntry[]): FlipSummary
 }
 
 /**
+ * P0b-1 — drop option-controlled levers from a {@link FlipSummary} so the
+ * "what would flip / the clearest one to test" prose cannot name a lever as a
+ * thing to validate, test or act on. Authority is structural `factor_id`
+ * membership (the #308 union set, `collectInterventionControlledFactorIds`),
+ * never the label. Re-summarises the kept entries via {@link summariseFlipEntries}
+ * so `overall_status` / `margin_supports_flip` stay consistent — e.g. dropping
+ * the only concrete entry demotes `'concrete'`, and dropping all entries yields
+ * `'none'`, letting the composer fall back to its pre-flip behaviour. Pure; no
+ * entry values are mutated. Empty controlled set ⇒ returned unchanged.
+ */
+export function filterFlipSummaryEntries(
+  summary: FlipSummary,
+  controlledFactorIds: ReadonlySet<string>,
+): FlipSummary {
+  if (controlledFactorIds.size === 0) return summary;
+  const kept = summary.entries.filter((e) => {
+    const id = typeof e.factor_id === 'string' ? e.factor_id.trim() : '';
+    return !(id.length > 0 && controlledFactorIds.has(id));
+  });
+  if (kept.length === summary.entries.length) return summary;
+  return summariseFlipEntries(kept);
+}
+
+/**
  * Select the single best flip entry to propose: the first entry that
  * builds a safe proposal. (Entries arrive in the analysis's own
  * importance order; we do not re-rank.) Returns the proposal + the

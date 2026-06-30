@@ -415,6 +415,16 @@ const ConfigSchema = z.object({
     // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
     patchPreValidationEnabled: booleanString.default(true), // If true, apply structural validation to edit_graph patches before assembly
     patchBudgetEnabled: booleanString.default(true), // If true, enforce complexity budget (3 node ops, 4 edge ops) on edit_graph patches
+    // Capability 2A — add-risk rejection guidance (CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED).
+    // When true, an unsupported add-risk edit that fails structural validation with a
+    // reachability-class violation (the new risk node is not reachable from the decision —
+    // e.g. wired only to an option, or orphaned) renders a deterministic, structural-only
+    // next-step ("the risk needs to connect through to your goal…") instead of the generic
+    // "inconsistency in the model structure" suppression. Tightly scoped to that single
+    // rejection class; every other rejection reason/type is byte-identical. Default OFF;
+    // flag-off renders exactly as today. Final user-facing wording is authored separately
+    // before any live run / flag enablement.
+    addRiskRejectionGuidanceEnabled: booleanString.default(false),
     deterministicEnforcementEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ENFORCEMENT_ENABLED — budget rescale + bridge chain repair (Stage 4 substep 9b, after clarifier)
     editNormalisationEnabled: booleanString.default(true), // CEE_EDIT_NORMALISATION_ENABLED — normalise non-canonical LLM field names before Zod validation
     editInterventionRoutingEnabled: booleanString.default(true), // CEE_EDIT_INTERVENTION_ROUTING_ENABLED — read interventions from data.interventions + slash-keyed entries
@@ -908,6 +918,7 @@ function parseConfig(): Config {
       orchestratorValidationEnabled: env.CEE_ORCHESTRATOR_VALIDATION_ENABLED,
       // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
       patchPreValidationEnabled: env.CEE_PATCH_PRE_VALIDATION_ENABLED,
+      addRiskRejectionGuidanceEnabled: env.CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED,
       patchBudgetEnabled: env.CEE_PATCH_BUDGET_ENABLED,
       deterministicEnforcementEnabled: env.CEE_DETERMINISTIC_ENFORCEMENT_ENABLED,
       editNormalisationEnabled: env.CEE_EDIT_NORMALISATION_ENABLED,

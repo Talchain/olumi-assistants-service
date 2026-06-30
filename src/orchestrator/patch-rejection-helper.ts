@@ -28,6 +28,14 @@ export interface PatchRejectionContext {
   detail: string;
   /** Translated structural violation codes (for structural_violation reason). */
   violations?: string[];
+  /**
+   * Capability 2A (flag-gated): deterministic, structural-only next-step copy
+   * for the unsupported add-risk / reachability rejection class. When present
+   * (set ONLY by the flag-gated caller for that one class) it REPLACES the
+   * generic structural-violation assistant_text. Absent on every other
+   * rejection, so the default copy is byte-identical to before.
+   */
+  structural_guidance?: string;
   /** Node operation count (for budget_exceeded reason). */
   node_ops?: number;
   /** Edge operation count (for budget_exceeded reason). */
@@ -99,6 +107,14 @@ function buildAssistantText(ctx: PatchRejectionContext): string {
   // rejection.reason for debugging, but must not appear in assistant_text.
   if (ctx.violations?.length) {
     log.warn({ violations: ctx.violations }, 'edit_graph structural violations suppressed from user-facing text');
+  }
+
+  // Capability 2A (flag-gated caller): for the unsupported add-risk /
+  // reachability class ONLY, the caller supplies deterministic, structural-only
+  // next-step copy that replaces the generic line. Absent for every other
+  // rejection → the generic copy below is byte-identical to before.
+  if (typeof ctx.structural_guidance === 'string' && ctx.structural_guidance.length > 0) {
+    return ctx.structural_guidance;
   }
 
   return "I wasn't able to apply that change — it would create an inconsistency in the model structure. You could try describing the change differently, or I can rebuild the model from an updated brief.";

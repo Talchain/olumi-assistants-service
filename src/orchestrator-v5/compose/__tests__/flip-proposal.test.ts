@@ -7,6 +7,7 @@ import {
   readFlipEntries,
   selectFlipProposal,
   summariseFlipEntries,
+  filterFlipSummaryEntries,
   type FlipEntry,
   type FactorNodeInfo,
 } from '../flip-proposal.js';
@@ -584,5 +585,40 @@ describe('summariseFlipEntries — overall_status verdict', () => {
       entry({ flip_value: 0.5, margin_supports_flip: true }),
     ]);
     expect(s.margin_supports_flip).toBe(true);
+  });
+});
+
+describe('filterFlipSummaryEntries — P0b-1 lever suppression', () => {
+  it('drops a lever-id entry and re-summarises overall_status (concrete → no_practical_flip)', () => {
+    const summary = summariseFlipEntries([
+      entry({ factor_id: 'fac_lever', flip_value: 0.4 }), // the only CONCRETE flip
+      entry({ factor_id: 'fac_plain', flip_value: null, flip_reason: 'no_effect_within_bounds' }),
+    ]);
+    expect(summary.overall_status).toBe('concrete');
+    const filtered = filterFlipSummaryEntries(summary, new Set(['fac_lever']));
+    // Lever is gone; only the non-lever (no-effect) entry survives.
+    expect(filtered.entries.map((e) => e.factor_id)).toEqual(['fac_plain']);
+    expect(filtered.entries.some((e) => e.factor_id === 'fac_lever')).toBe(false);
+    // Re-summarised honestly: with the lever removed, nothing concrete flips.
+    expect(filtered.overall_status).toBe('no_practical_flip');
+  });
+
+  it('keeps non-lever entries — returns the SAME summary when nothing matches (positive: no over-suppression)', () => {
+    const summary = summariseFlipEntries([entry({ factor_id: 'fac_plain', flip_value: 0.4 })]);
+    const filtered = filterFlipSummaryEntries(summary, new Set(['fac_some_other_lever']));
+    expect(filtered).toBe(summary);
+    expect(filtered.overall_status).toBe('concrete');
+  });
+
+  it('empty controlled set is a no-op', () => {
+    const summary = summariseFlipEntries([entry({ factor_id: 'fac_lever', flip_value: 0.4 })]);
+    expect(filterFlipSummaryEntries(summary, new Set())).toBe(summary);
+  });
+
+  it('dropping every entry yields overall_status "none" so the composer falls back to pre-flip behaviour', () => {
+    const summary = summariseFlipEntries([entry({ factor_id: 'fac_lever', flip_value: 0.4 })]);
+    const filtered = filterFlipSummaryEntries(summary, new Set(['fac_lever']));
+    expect(filtered.entries).toEqual([]);
+    expect(filtered.overall_status).toBe('none');
   });
 });

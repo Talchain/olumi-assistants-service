@@ -208,11 +208,50 @@ export const GOLDEN_STEPS: readonly GoldenStep[] = [
       source: 'composer',
     }),
   },
+  {
+    name: '9_mutate_intent',
+    role: 'mutate_intent',
+    description:
+      'A NON-COMMITTING change request — vague/ambiguous edit intent ("make the budget side matter more") that ' +
+      'the product should clarify or propose, NOT silently apply. Proves the assistant never claims a mutation ' +
+      'it did not durably make (lived defect 1: phantom success on a no-op edit). A8 + A4.',
+    invariants: ['A4', 'A8'],
+    depends_on: '6_rerun_analysis',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'The budget side feels off — can you make it matter more?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '10_premortem',
+    role: 'premortem',
+    description:
+      'Premortem / challenge prompt → safe handling only: structural framing, a clear next step, no overclaiming ' +
+      'or invented science/coaching doctrine (lived defect 4, secondary). A11 (advisory).',
+    invariants: ['A11'],
+    depends_on: '6_rerun_analysis',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message:
+        'Give me a premortem: what would have to go wrong for the leading option to turn out to be the wrong call?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
 ];
 
 /**
- * Steps 9 + 10 are evaluations over the captured turns, not HTTP turns.
- * Surfaced here so the coverage matrix lists the full 10-step journey.
+ * Steps 11 + 12 are evaluations over the captured turns, not HTTP turns.
+ * Surfaced here so the coverage matrix lists the full journey (10 HTTP turns
+ * + 2 synthetic evaluations).
  */
 export const GOLDEN_SYNTHETIC_STEPS: ReadonlyArray<{
   readonly name: string;
@@ -220,14 +259,14 @@ export const GOLDEN_SYNTHETIC_STEPS: ReadonlyArray<{
   readonly invariants: readonly InvariantId[];
 }> = [
   {
-    name: '9_verify_chips',
+    name: '11_verify_chips',
     description: 'Verify chips/actions across the mutate + rerun turns (no false-success chips; rerun affordance after stale).',
     invariants: ['A4', 'A7'],
   },
   {
-    name: '10_capture_debug',
-    description: 'Capture the debug/context trace (_diagnostic_trace + _timings) from every turn into the report.',
-    invariants: ['A6'],
+    name: '12_capture_debug',
+    description: 'Capture the debug/context trace (_diagnostic_trace + _timings + latency) from every turn into the report.',
+    invariants: ['A6', 'A10'],
   },
 ];
 

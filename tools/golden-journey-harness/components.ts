@@ -50,9 +50,22 @@ export const COMPONENT_LABEL: Readonly<Record<CoreComponent, string>> = {
   observability_recovery: 'Observability/recovery',
 };
 
-export type InvariantId = 'A1' | 'A2' | 'A3' | 'A4' | 'A5' | 'A6' | 'A7';
+export type InvariantId =
+  | 'A1'
+  | 'A2'
+  | 'A3'
+  | 'A4'
+  | 'A5'
+  | 'A6'
+  | 'A7'
+  // Blind-spot-closure invariants for the four lived post-analysis defects.
+  | 'A8' // non-committing mutation intent → no phantom success (defect 1)
+  | 'A8b' // source rejection (unsupported add-risk) carries grounded structural guidance (Capability 2A acceptance target, ADVISORY)
+  | 'A9' // AI-facing context is surfaced/observable on the wire (defect 2)
+  | 'A10' // simple deterministic turns stay within an advisory latency budget (defect 3)
+  | 'A11'; // premortem / challenge prompts are handled safely (defect 4, secondary)
 
-/** The seven required assertions, in brief order. */
+/** The required assertions, in brief order (A1–A7 core; A8–A11 blind-spot closure). */
 export const INVARIANT_TITLE: Readonly<Record<InvariantId, string>> = {
   A1: 'Analysis state is not contradicted by prose, chips or reload',
   A2: 'AI-facing context contains graph, analysis, blockers, capabilities, recent-turn state',
@@ -61,6 +74,11 @@ export const INVARIANT_TITLE: Readonly<Record<InvariantId, string>> = {
   A5: 'Coaching is grounded in actual graph/analysis/science signals',
   A6: 'Debug output explains what happened',
   A7: 'Repairs/recoveries are visible, not silent',
+  A8: 'A non-committing change request never claims a mutation it did not durably make',
+  A8b: 'An unsupported add-risk rejection gives grounded structural guidance (no invented mechanism, no held-science)',
+  A9: 'AI-facing context is observable on the wire (not only in-process)',
+  A10: 'Simple deterministic turns stay within an advisory latency budget',
+  A11: 'Premortem / challenge prompts are handled safely (no overclaiming or invented doctrine)',
 };
 
 /** Primary component each invariant is attributed to (the one that must fix it). */
@@ -72,6 +90,11 @@ export const INVARIANT_PRIMARY: Readonly<Record<InvariantId, CoreComponent>> = {
   A5: 'science_grounded_coaching',
   A6: 'observability_recovery',
   A7: 'observability_recovery',
+  A8: 'typed_action_mutation',
+  A8b: 'typed_action_mutation',
+  A9: 'context_management',
+  A10: 'ai_orchestration',
+  A11: 'ai_orchestration',
 };
 
 /** Contributing (secondary) components for cross-cutting findings. */
@@ -83,6 +106,11 @@ export const INVARIANT_CONTRIBUTING: Readonly<Record<InvariantId, readonly CoreC
   A5: ['context_management'],
   A6: ['ai_orchestration'],
   A7: ['canonical_state', 'ai_orchestration'],
+  A8: ['science_grounded_coaching', 'observability_recovery'],
+  A8b: ['science_grounded_coaching', 'observability_recovery'],
+  A9: ['canonical_state', 'observability_recovery'],
+  A10: ['observability_recovery'],
+  A11: ['science_grounded_coaching'],
 };
 
 /**
@@ -155,7 +183,20 @@ export function makeFinding(
  * zero thin responses with stable analysis context — consistent with LLM
  * variance — so a lone A5 fail must not hard-gate a live run.
  */
-export const ADVISORY_INVARIANTS: ReadonlySet<InvariantId> = new Set<InvariantId>(['A5']);
+export const ADVISORY_INVARIANTS: ReadonlySet<InvariantId> = new Set<InvariantId>([
+  'A5',
+  // A10 (latency) and A11 (premortem safe-handling) are reported for tracking
+  // but never set a non-zero exit code: latency is environment-variance-prone
+  // and premortem reads generated prose. A8 (non-committing false-success) is
+  // deliberately NOT advisory — it is a safety/honesty gate like A4.
+  'A10',
+  'A11',
+  // A8b (Capability 2A add-risk rejection grounding) is an ACCEPTANCE TARGET for
+  // a capability that has not merged yet — advisory so it reports the gap /
+  // grounding state without hard-failing CI before Cap-2A lands. Promote to
+  // gating once Cap-2A is accepted and merged dark.
+  'A8b',
+]);
 
 /**
  * True when a finding should be treated as advisory (non-gating). A1 stays

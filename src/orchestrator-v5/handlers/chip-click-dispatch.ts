@@ -74,7 +74,7 @@ import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
 import { buildAnalysisProjectionSummary } from '../context/projection-summaries.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
-import { projectTopDrivers } from '../context/context-pack-assembler.js';
+import { projectTopDrivers, filterLeverSourcedFragileEdges } from '../context/context-pack-assembler.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import {
   createRegistry,
@@ -93,7 +93,7 @@ import {
   type RawRobustnessSignals,
 } from '../coaching/pick-raw-robustness.js';
 import { pickLatestFlipSummary } from '../coaching/pick-flip-summary.js';
-import type { FlipSummary } from '../compose/flip-proposal.js';
+import { filterFlipSummaryEntries, type FlipSummary } from '../compose/flip-proposal.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
   HandlerInvocationFailedError,
@@ -1285,7 +1285,13 @@ function buildProjectionInputs(
           analysisFromPrior.top_drivers,
           interventionControlledFactorIds,
         ),
-        fragile_edges: (analysisFromPrior.top_fragile_edges ?? []).map((e) => ({
+        // P0b-1: mirror projectAnalysis — drop lever-SOURCED fragile edges on the
+        // chip-click re-projection too (this path builds its own projection, so the
+        // assembler filter does not reach it). Source-only; output shape unchanged.
+        fragile_edges: filterLeverSourcedFragileEdges(
+          analysisFromPrior.top_fragile_edges ?? [],
+          interventionControlledFactorIds,
+        ).map((e) => ({
           from_label: e.from_label,
           to_label: e.to_label,
         })),
@@ -1322,7 +1328,13 @@ function buildProjectionInputs(
   // Step 5: honest flip-threshold summary from the SAME run_analysis fact, so
   // the what_would_flip composer answers from the flip evidence rather than a
   // robustness band that can contradict it. `null` when no flip thresholds.
-  const flipSummary = pickLatestFlipSummary(context.prior_facts);
+  // P0b-1: suppress option-controlled levers so the "clearest one to test"
+  // prose cannot name a lever; re-summarises so overall_status stays honest.
+  const rawFlipSummary = pickLatestFlipSummary(context.prior_facts);
+  const flipSummary =
+    rawFlipSummary !== null
+      ? filterFlipSummaryEntries(rawFlipSummary, interventionControlledFactorIds)
+      : null;
 
   return { analysisReady, analysisProjection, analysisFreshness, graph, rawRobustness, flipSummary };
 }
