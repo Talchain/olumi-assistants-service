@@ -136,7 +136,7 @@ Per-artefact availability at the turn-executor seam, verified on `origin/staging
 |---|---|---|---|
 | `freshness` | **Yes** — `deriveAnalysisFreshness` already produces `routingFreshness`/`freshness` in scope (`turn-executor.ts:1016`, `:5057`; used in the Cap-1 spread at `:3561`) | pass the existing `FreshnessDerivation`; type the frame field as that return type | n/a |
 | `canonicalState` (+ `source`) | **Yes** — `selectCanonicalAnalysisState` (full) runs pre/post-dispatch; `canonicalStateFromFreshness` (partial) at `:1166`/`:3563` | pass the existing verdict and **carry its `turn_executor` vs `route_fallback` source**; never re-pick | n/a |
-| `recentChanges` | **Yes** — `contextPack.recent_changes`, assembled once (`context-pack-assembler.ts:497` → `projectRecentChanges` `recent-changes.ts:126`); read at `turn-executor.ts:3566` | read `contextPack.recent_changes`; **MUST NOT** call `projectRecentChanges` a second time (would re-apply the 3-cap to a different slice → drift) | n/a |
+| `recentChanges` | **Yes** — `contextPack.recent_changes`, assembled once (`context-pack-assembler.ts:497` → `projectRecentChanges` `recent-changes.ts:126`); read at `turn-executor.ts:3566` | project once upstream into `FrameChanges` (via `ProjectRecentChangesToFrame`) and pass that; the builder receives the **already-projected** form, so it structurally cannot re-call `projectRecentChanges` | n/a |
 | `graphHash` | **Yes** — `computeAnalysisAffectingGraphHash` computed at the seam for freshness; also `current_graph_hash` on `CanonicalAnalysisState` | pass the already-computed hash | n/a |
 | `conversation.recent_turn_count` (M5) | **Yes** — `EnrichedTurnContext.prior_turns` from `buildTurnContext` | pass `prior_turns.length` / `recent_changes.length` | n/a |
 | `capabilities_present` (M6) | **No** — no capabilities source threaded today | **Resolve at the post-dispatch seam** from the dispatch outcome; **parity proof:** assert the projected value equals the dispatch's own capability signal, and until that source exists emit honest `null` (not `false`) — never fabricate |
@@ -144,12 +144,15 @@ Per-artefact availability at the turn-executor seam, verified on `origin/staging
 | `actions` (committed/proposed/rejected/pending) | **Yes at respective seams** — committed graph ref post-persist; proposed/pending from `confirmation-flow`; rejected from `patch-rejection-helper` | project at the post-dispatch seam (Increment 6 scaffold) | parity: each projected field === the originating authority's value |
 | `claim_permissions` | **n/a (static)** — a constant default-held table, not a turn derivation | constant lookup; no parity concern | n/a |
 
-**Structural prevention (enforce, don't trust):** (1) frame fields typed as the authorities' return types
-(`FreshnessDerivation`, `CanonicalAnalysisState`, the assembler's `RecentMutation[]`); (2) `buildFrame` takes
-assembled artefacts as parameters, so it *cannot* re-derive what it never receives; (3) a parity guard test
-mirroring the existing "no second freshness truth" tests (`build-turn-context.test.ts`, `coaching-context-pack.test.ts`)
-asserts `frame.freshness ===` the live `deriveAnalysisFreshness` verdict and that `projectRecentChanges` is
-called exactly once/turn.
+**Structural prevention (enforce, don't trust):** (1) frame fields are **bound to** the authorities —
+freshness as `FreshnessDerivation`, analysis via `Pick<CanonicalAnalysisState, …>` (no hand-restated
+predicates), and recent-changes as the **already-projected `FrameChanges`** (not raw `RecentMutation[]`);
+(2) `buildFrame` takes assembled artefacts as parameters, so it *cannot* re-derive what it never receives —
+and because `recentChanges` arrives pre-projected, "project once per turn" is **structural**, not comment-only
+(there is no `RecentMutation[]` in scope for the builder to re-project); (3) a parity guard test mirroring the
+existing "no second freshness truth" test (`build-turn-context.test.ts`) asserts `frame.freshness ===` the live
+`deriveAnalysisFreshness` verdict and that the single upstream `RecentMutation` → `FrameChanges` projection
+equals the authority's output.
 
 ---
 

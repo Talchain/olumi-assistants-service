@@ -13,9 +13,11 @@
  *   - WRAP, NEVER RE-DERIVE. The frame is composed from the *outputs* of the
  *     existing single authorities (freshness, canonical analysis state,
  *     recent-changes, graph-hash). The builder INPUT ({@link BuildFrameInput})
- *     is typed as those authorities' return types, so a builder can only pass
- *     already-resolved values through — it cannot introduce a second
- *     freshness / canonical-state / recent-change derivation.
+ *     is typed as those authorities' resolved outputs — freshness as
+ *     `FreshnessDerivation`, analysis bound to `CanonicalAnalysisState` via
+ *     `Pick<>`, and recent-changes as the ALREADY-projected {@link FrameChanges}
+ *     — so a builder can only pass already-resolved values through; it cannot
+ *     introduce a second freshness / canonical-state / recent-change derivation.
  *   - READ-ONLY PROJECTIONS. What consumers read ({@link CanonicalContextFrame})
  *     is a set of narrow, read-only per-domain projection interfaces — the
  *     formalised version of the existing `AdviceGateCanonicalState` /
@@ -86,16 +88,26 @@ export interface FrameFreshness {
  * analysis projection — narrow usability predicates (formalises the
  * `AdviceGateCanonicalState` mirror). Carries the provenance `source`; never
  * the full internal blocker/adjustment objects.
+ *
+ * The projected fields are **bound to the authority** via
+ * `Pick<CanonicalAnalysisState, …>` rather than hand-restated, so a rename or
+ * retype of any predicate on the canonical analysis state breaks this interface
+ * at compile time (no silent drift; `readonly` carries through `Pick`). The only
+ * member the frame adds is `source` (provenance), which the authority does not
+ * own. The public `FrameAnalysisStatus` alias is kept as a consumer convenience.
  */
-export interface FrameAnalysis {
-  readonly status: FrameAnalysisStatus;
+export interface FrameAnalysis
+  extends Pick<
+    CanonicalAnalysisState,
+    | 'status'
+    | 'usableForProse'
+    | 'usableForChips'
+    | 'usableForFollowupContext'
+    | 'requiresRerun'
+    | 'blockedUnusable'
+  > {
   /** Provenance: full turn-executor verdict vs partial route fallback. */
   readonly source: CanonicalStateSource;
-  readonly usableForProse: boolean;
-  readonly usableForChips: boolean;
-  readonly usableForFollowupContext: boolean;
-  readonly requiresRerun: boolean;
-  readonly blockedUnusable: boolean;
 }
 
 /** changes projection — decision-language summaries, no identifiers. */
@@ -105,6 +117,20 @@ export interface FrameChange {
   readonly targetLabel: string;
 }
 export type FrameChanges = readonly FrameChange[];
+
+/**
+ * The single, named `RecentMutation` → {@link FrameChanges} projection (TYPE
+ * ONLY). This is the *one* place the authority output is mapped into the frame's
+ * changes shape — it runs once per turn, at the seam that owns
+ * `contextPack.recent_changes`, and its output is what {@link BuildFrameInput}
+ * receives. Because the builder is handed the already-projected `FrameChanges`
+ * (not raw `RecentMutation[]`), "project once per turn" is structural rather than
+ * comment-only: there is no `RecentMutation[]` in scope for the builder to
+ * re-project. Implementation lands with the upstream seam in a later increment.
+ */
+export type ProjectRecentChangesToFrame = (
+  changes: readonly RecentMutation[],
+) => FrameChanges;
 
 /** conversation projection — counts + pending flag. No raw turn content. */
 export interface FrameConversation {
@@ -126,11 +152,14 @@ export interface FrameIntent {
 
 /**
  * evidence projection — annotation only (F.6). Booleans/refs that attest to
- * provenance and freshness; NEVER held-science values (no sensitivity /
- * fragility / driver / flip / robustness / EVPI prose or numbers).
+ * provenance; NEVER held-science values (no sensitivity / fragility / driver /
+ * flip / robustness / EVPI prose or numbers).
+ *
+ * Freshness is intentionally NOT duplicated here: the single freshness verdict
+ * lives on {@link FrameFreshness} (`frame.freshness.verdict`). There is exactly
+ * one freshness-verdict concept in the frame.
  */
 export interface FrameEvidence {
-  readonly freshnessVerdict: FrameFreshnessVerdict;
   /** Whether a decision-review enrichment was attached to the selected fact. */
   readonly hasDecisionReview?: boolean;
   /** Whether edge-level provenance metadata is present. Boolean only. */
@@ -198,9 +227,10 @@ export interface CanonicalContextFrame {
  * Every field is an already-resolved authority OUTPUT taken from the current
  * turn's call path. A builder constructed against this type cannot introduce a
  * second derivation: it is handed the freshness verdict, the canonical state,
- * the assembled recent-changes and the graph hash, and may only project them.
- * In particular, the builder MUST read `recentChanges` (already projected once
- * per turn) and MUST NOT call `projectRecentChanges` again. See state map §3.1.
+ * the already-projected recent-changes and the graph hash, and may only project
+ * them. Because `recentChanges` arrives as the frame-projected
+ * {@link FrameChanges} (not raw `RecentMutation[]`), the builder structurally
+ * cannot re-run `projectRecentChanges`. See state map §3.1.
  */
 export interface BuildFrameInput {
   /** The single freshness authority's output (`deriveAnalysisFreshness`). */
@@ -213,10 +243,14 @@ export interface BuildFrameInput {
   /** Provenance of `canonicalState`. */
   readonly canonicalStateSource: CanonicalStateSource;
   /**
-   * The assembled recent-changes (`contextPack.recent_changes`) — already
-   * projected once per turn. The builder MUST NOT re-project.
+   * The recent-changes for this turn, ALREADY projected into the frame's
+   * {@link FrameChanges} shape upstream (where `contextPack.recent_changes` is
+   * owned) via {@link ProjectRecentChangesToFrame}. Taking the projected form
+   * here — not raw `RecentMutation[]` — makes "project once per turn" STRUCTURAL:
+   * the builder is never handed `RecentMutation[]`, so it cannot call
+   * `projectRecentChanges` (or re-apply the cap) a second time.
    */
-  readonly recentChanges: readonly RecentMutation[];
+  readonly recentChanges: FrameChanges;
   /** The current turn's analysis-affecting graph hash. */
   readonly graphHash: string | null;
   /** Optional graph entity counts, when the caller has them. */

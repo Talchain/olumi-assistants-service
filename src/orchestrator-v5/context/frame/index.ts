@@ -27,6 +27,7 @@ export type {
   FrameChange,
   FrameChanges,
   FrameChangeAction,
+  ProjectRecentChangesToFrame,
   FrameConversation,
   FrameIntent,
   FrameEvidence,
