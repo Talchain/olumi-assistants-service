@@ -193,7 +193,11 @@ import {
   checkCoachingOutput,
   buildCoachingDegradeResponse,
 } from './coaching/coaching-output-postcheck.js';
-import { buildFlipProposalEmit, type FactorNodeInfo } from './compose/flip-proposal.js';
+import {
+  buildFlipProposalEmit,
+  filterFlipSummaryEntries,
+  type FactorNodeInfo,
+} from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { pickLatestFlipSummary } from './coaching/pick-flip-summary.js';
@@ -4454,6 +4458,31 @@ export async function runTurnExecutor(
             })
           : undefined;
 
+      // P0b-2 (chip-click parity): the routed `what_would_flip` deterministic
+      // fallback must not name an option-pinned lever as "the clearest one to
+      // test". The chip-click path already filters its flip evidence
+      // (chip-click-dispatch.ts → filterFlipSummaryEntries); the routed path
+      // threaded the RAW summary. Suppress option-controlled levers here with the
+      // SAME helper and the SAME raw-graph authority as the Spine A context-pack
+      // backstop above (request graphState else raw persisted graph — never the
+      // GraphV3-parsed graph, which strips `node.data.interventions` / top-level
+      // `options[]`). filterFlipSummaryEntries is a no-op when the controlled set
+      // is empty or no entry is pinned, and re-summarises kept entries so
+      // `overall_status` stays honest (a dropped sole-concrete entry demotes).
+      const routedFlipSummary =
+        isExplanationHandler && analysisStateSource !== 'request'
+          ? pickLatestFlipSummary(context.prior_facts)
+          : undefined;
+      const routedFlipSummaryFiltered =
+        routedFlipSummary != null
+          ? filterFlipSummaryEntries(
+              routedFlipSummary,
+              collectInterventionControlledFactorIds(
+                options.graphState ?? context.persistedGraph,
+              ),
+            )
+          : routedFlipSummary;
+
       try {
         const registry = options.handlerRegistry ?? getDefaultRegistry();
         const handlerFn = resolveHandler(registry, proposedHandlerId);
@@ -4492,9 +4521,7 @@ export async function runTurnExecutor(
           rawRobustness: isExplanationHandler && analysisStateSource !== 'request'
             ? pickLatestRawRobustness(context.prior_facts)
             : undefined,
-          flipSummary: isExplanationHandler && analysisStateSource !== 'request'
-            ? pickLatestFlipSummary(context.prior_facts)
-            : undefined,
+          flipSummary: routedFlipSummaryFiltered,
         });
         if (timingsEnabled) {
           turnTimings.handler_execute_ms = Date.now() - handlerStartedAt;
