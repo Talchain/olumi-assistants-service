@@ -11,8 +11,10 @@
     { "step": "6_rerun_analysis", "role": "rerun_analysis", "expect": "fresh analysis on the mutated graph; current_graph_hash differs from the step-2 baseline", "components": ["typed_action_mutation", "canonical_state"], "invariants": ["A3", "A7"] },
     { "step": "7_explain_what_changed", "role": "explain_changed", "expect": "references the edited factor + honestly describes whether the leader changed", "components": ["science_grounded_coaching", "canonical_state"], "invariants": ["A1", "A5", "A7"] },
     { "step": "8_reload", "role": "reload", "expect": "fresh read turn reloads canonical analysis; not contradicted by prose/chips", "components": ["canonical_state", "context_management"], "invariants": ["A1", "A2"] },
-    { "step": "9_verify_chips", "role": "evaluation", "expect": "no false-success chips; rerun/refresh affordance present when stale", "components": ["typed_action_mutation", "observability_recovery"], "invariants": ["A4", "A7"] },
-    { "step": "10_capture_debug", "role": "evaluation", "expect": "_diagnostic_trace + _timings captured for every turn", "components": ["observability_recovery"], "invariants": ["A6"] }
+    { "step": "9_mutate_intent", "role": "mutate_intent", "expect": "non-committing change request clarifies/proposes; no mutation-ack, graph hash unchanged → no phantom success", "components": ["typed_action_mutation", "science_grounded_coaching"], "invariants": ["A4", "A8"] },
+    { "step": "10_premortem", "role": "premortem", "expect": "premortem handled safely: structural framing, clear next step, no overclaiming/invented science", "components": ["ai_orchestration", "science_grounded_coaching"], "invariants": ["A11"] },
+    { "step": "11_verify_chips", "role": "evaluation", "expect": "no false-success chips; rerun/refresh affordance present when stale", "components": ["typed_action_mutation", "observability_recovery"], "invariants": ["A4", "A7"] },
+    { "step": "12_capture_debug", "role": "evaluation", "expect": "_diagnostic_trace + _timings + latency captured for every turn", "components": ["observability_recovery", "ai_orchestration"], "invariants": ["A6", "A10"] }
   ],
   "transcript": {
     "note": "SYNTHETIC reference capture — a plausible all-green wire journey. Hashes/timestamps are illustrative. Replay over this transcript is the deterministic self-test (expected exit 0; A2 inconclusive by design — not wire-observable).",
@@ -170,7 +172,7 @@
             "correlation_ids": { "request_id": "req-5", "scenario_id": "scn-1", "turn_id": "turn-5" },
             "coaching_delivery": { "handler": "set_factor_value", "composer": "value_update_ack", "copy_source": "deterministic", "coaching_fields_used": [] }
           },
-          "_timings": { "turn": { "total_ms": 6100 } }
+          "_timings": { "turn": { "total_ms": 930, "llm_calls_used": 0 } }
         }
       },
       {
@@ -226,7 +228,7 @@
             "correlation_ids": { "request_id": "req-7", "scenario_id": "scn-1", "turn_id": "turn-7" },
             "coaching_delivery": { "handler": "explain_result", "composer": "what_changed", "copy_source": "recent_changes", "coaching_fields_used": ["win_probability"] }
           },
-          "_timings": { "turn": { "total_ms": 5200 } }
+          "_timings": { "turn": { "total_ms": 1055, "llm_calls_used": 0 } }
         }
       },
       {
@@ -255,6 +257,66 @@
             "coaching_delivery": { "handler": "explain_result", "composer": "explain_leader", "copy_source": "analysis_projection", "coaching_fields_used": ["win_probability"] }
           },
           "_timings": { "turn": { "total_ms": 5000 } }
+        }
+      },
+      {
+        "step": "9_mutate_intent",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Did you mean increase how much weight the Budget factor carries, or change its underlying value? I can do either — which would you like before I touch the model?",
+          "suggested_actions": [
+            { "id": "chip_clarify_weight", "label": "Increase its weight", "message": "Increase the weight of the Budget factor.", "action_type": "edit_graph" }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:05:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.58 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.30 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "b2c3d4e5f6a1b2c3",
+            "current_graph_hash": "b2c3d4e5f6a1b2c3"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-9", "scenario_id": "scn-1", "turn_id": "turn-9" },
+            "coaching_delivery": { "handler": "clarify_intent", "composer": "edit_clarification", "copy_source": "deterministic", "coaching_fields_used": [] }
+          },
+          "_timings": { "turn": { "total_ms": 800, "handler_id": "clarify_intent", "llm_calls_used": 0 } }
+        }
+      },
+      {
+        "step": "10_premortem",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "A premortem for Hire two senior engineers: the main ways it could prove the wrong call are if Budget pressure forces a slower ramp than planned, or if the two hires take longer than expected to reach full productivity. To de-risk before committing, you could pressure-test the Budget assumption or add a hiring-timeline factor and re-run the analysis.",
+          "suggested_actions": [
+            { "id": "chip_add_timeline", "label": "Add a hiring-timeline factor", "message": "Add a hiring timeline factor.", "action_type": "edit_graph" }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-21T10:05:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.58 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.30 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "b2c3d4e5f6a1b2c3",
+            "current_graph_hash": "b2c3d4e5f6a1b2c3"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-10", "scenario_id": "scn-1", "turn_id": "turn-10" },
+            "coaching_delivery": { "handler": "explain_result", "composer": "premortem", "copy_source": "analysis_projection", "coaching_fields_used": ["win_probability"] }
+          },
+          "_timings": { "turn": { "total_ms": 5300, "llm_calls_used": 1 } }
         }
       }
     ]

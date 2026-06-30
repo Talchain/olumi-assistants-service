@@ -18,6 +18,12 @@ import {
   a5CoachingGrounded,
   a6DebugExplains,
   a7RecoveryVisible,
+  a8NonCommittingNoFalseSuccess,
+  a8bSourceRejectionGrounded,
+  a9ContextSurfaced,
+  a10Latency,
+  a11PremortemSafe,
+  latencyClassFor,
   evaluateJourney,
   evaluateObservation,
   type ContextSnapshot,
@@ -373,5 +379,291 @@ describe('advisory gating (A5 / provisional A1 do not hard-gate)', () => {
     ]);
     expect(next?.invariant).toBe('A5');
     expect(next?.advisory).toBe(true);
+  });
+});
+
+// ===========================================================================
+// Blind-spot-closure invariants for the four lived post-analysis defects.
+// ===========================================================================
+
+describe('A8 — non-committing intent never claims a mutation it did not make', () => {
+  it('fails (gating) on phantom success: mutation ack with an unchanged graph hash', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'aaaa1111',
+        body: {
+          assistant_text: 'Updated the Budget factor so it carries more weight now.',
+          analysis_ready: { status: 'ready', current_graph_hash: 'aaaa1111' },
+        },
+      }),
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0]!.status).toBe('fail');
+    expect(isAdvisoryFinding(f[0]!)).toBe(false); // A8 is a safety/honesty gate
+  });
+
+  it('passes when a non-committing request clarifies without claiming a change', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'aaaa1111',
+        body: {
+          assistant_text: 'Did you mean increase its weight, or change its value? Which would you like?',
+          analysis_ready: { status: 'ready', current_graph_hash: 'aaaa1111' },
+        },
+      }),
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('is inconclusive (acceptance requirement) when a success claim has no observable hash', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: null,
+        body: { assistant_text: 'Updated the Budget factor.' },
+      }),
+    );
+    expect(f[0]!.status).toBe('inconclusive');
+  });
+
+  it('is role-agnostic: fires on a non-intent turn (e.g. explain/direct-answer) that opens with a success claim', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'explain',
+        priorGraphHash: 'aaaa1111',
+        body: {
+          assistant_text: 'Added a new factor to the model.',
+          analysis_ready: { status: 'ready', current_graph_hash: 'aaaa1111' },
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('fail'); // previously missed — only ran on mutate_intent
+  });
+
+  it('hash is authoritative: a non-mutating handler does NOT make a claim durable', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'aaaa1111',
+        body: {
+          assistant_text: 'Updated the Budget factor.',
+          analysis_ready: { status: 'ready', current_graph_hash: 'aaaa1111' },
+          _diagnostic_trace: { coaching_delivery: { handler: 'explain_result' } },
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('fail');
+  });
+
+  it('passes honest proposal text (the real a9da06f2 shape): no opening claim, proposal-only', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'acfa3515',
+        body: {
+          assistant_text:
+            'The change was rejected by the structural rules. You could introduce a factor or loosen a link. Which would you like to try?',
+          analysis_ready: { status: 'ready', current_graph_hash: 'acfa3515' },
+          pending_actions: [{ action: { kind: 'proposed_concept' } }],
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('pass'); // honest acknowledgement + proposal is NOT a false success
+  });
+
+  it('returns no finding for a non-intent turn that makes no mutation claim', () => {
+    expect(
+      a8NonCommittingNoFalseSuccess(obs({ role: 'explain', body: { assistant_text: 'Option A leads at 60%.' } })),
+    ).toHaveLength(0);
+  });
+});
+
+describe('A9 — AI-facing context observable on the wire', () => {
+  it('is inconclusive (acceptance requirement) when no turn surfaces a context summary', () => {
+    const f = a9ContextSurfaced([obs({ role: 'explain', body: { assistant_text: 'x' } })]);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.status).toBe('inconclusive');
+    expect(f[0]!.evidence).toContain('ACCEPTANCE REQUIREMENT');
+  });
+
+  it('passes when a wire context summary carries all five required elements', () => {
+    const f = a9ContextSurfaced([
+      obs({
+        role: 'reload',
+        body: {
+          assistant_text: 'x',
+          _context_summary: {
+            graph: { nodes: 3 },
+            analysis_state: 'ready',
+            blockers: ['none'],
+            capabilities: ['edit'],
+            recent_turn_state: { last: 'reload' },
+          },
+        },
+      }),
+    ]);
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('fails when a present context summary is missing required elements', () => {
+    const f = a9ContextSurfaced([
+      obs({ role: 'reload', body: { assistant_text: 'x', _context_summary: { graph: { nodes: 3 } } } }),
+    ]);
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.evidence).toContain('analysis_state');
+  });
+});
+
+describe('A10 — simple deterministic turns within an advisory latency budget', () => {
+  it('classifies an llm_calls=0 turn as deterministic with the tight budget', () => {
+    const cls = latencyClassFor(obs({ role: 'mutate_intent', body: { _timings: { turn: { llm_calls_used: 0 } } } }));
+    expect(cls.cls).toBe('deterministic');
+    expect(cls.budgetMs).toBe(1500);
+  });
+
+  it('flags (advisory) a deterministic turn over budget; never gating', () => {
+    const f = a10Latency(
+      obs({ role: 'mutate_intent', body: { _timings: { turn: { total_ms: 2300, llm_calls_used: 0 } } } }),
+    );
+    expect(f[0]!.status).toBe('fail');
+    expect(isAdvisoryFinding(f[0]!)).toBe(true);
+  });
+
+  it('passes a fast deterministic turn', () => {
+    const f = a10Latency(
+      obs({ role: 'mutate', body: { _timings: { turn: { total_ms: 930, llm_calls_used: 0 } } } }),
+    );
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('is inconclusive when no latency is observable', () => {
+    const f = a10Latency(obs({ role: 'explain', body: { assistant_text: 'x' } }));
+    expect(f[0]!.status).toBe('inconclusive');
+  });
+
+  it('does not flag a slow draft (generous draft budget)', () => {
+    const f = a10Latency(obs({ role: 'draft', body: { _timings: { turn: { total_ms: 52000 } } } }));
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('flags wrongful LLM escalation on a deterministic-eligible turn even within the time budget (real a9da06f2 shape)', () => {
+    // 11347ms < 12000ms llm budget, but role is deterministic-eligible with 1 LLM call.
+    const f = a10Latency(
+      obs({ role: 'mutate_intent', body: { _timings: { turn: { total_ms: 11347, llm_calls_used: 1 } } } }),
+    );
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.evidence).toContain('wrongful LLM escalation');
+    expect(isAdvisoryFinding(f[0]!)).toBe(true);
+  });
+
+  it('does not flag a legitimate LLM turn (explain) for escalation', () => {
+    const f = a10Latency(
+      obs({ role: 'explain', body: { _timings: { turn: { total_ms: 11347, llm_calls_used: 1 } } } }),
+    );
+    expect(f[0]!.status).toBe('pass');
+  });
+});
+
+describe('A11 — premortem / challenge handled safely (advisory)', () => {
+  it('passes a safe premortem with framing + a next step', () => {
+    const f = a11PremortemSafe(
+      obs({
+        role: 'premortem',
+        body: {
+          assistant_text:
+            'A premortem: the main risks are budget pressure and ramp time. To de-risk, you could test the Budget assumption.',
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('fails (advisory) when a discuss-only premortem overclaims with a success verb', () => {
+    const f = a11PremortemSafe(
+      obs({ role: 'premortem', body: { assistant_text: 'Updated the model to be more robust. The leader is guaranteed.' } }),
+    );
+    expect(f[0]!.status).toBe('fail');
+    expect(isAdvisoryFinding(f[0]!)).toBe(true);
+  });
+
+  it('fails when no clear next step is offered', () => {
+    const f = a11PremortemSafe(
+      obs({ role: 'premortem', body: { assistant_text: 'The leading option could be wrong in several ways.' } }),
+    );
+    expect(f[0]!.status).toBe('fail');
+  });
+
+  it('does not run on non-premortem roles', () => {
+    expect(a11PremortemSafe(obs({ role: 'explain' }))).toHaveLength(0);
+  });
+});
+
+describe('evaluateJourney — A9 + blind-spot caveats', () => {
+  it('emits A9 inconclusive and the new acceptance-requirement caveats', () => {
+    const { findings, caveats } = evaluateJourney(
+      [obs({ role: 'analysis', body: { analysis_ready: { status: 'ready', current_graph_hash: 'h' }, _diagnostic_trace: COMPLETE_TRACE } })],
+      { diagnosticTraceExpected: true },
+    );
+    expect(findings.some((f) => f.invariant_id === 'A9' && f.status === 'inconclusive')).toBe(true);
+    expect(caveats.some((c) => c.title.includes('A9 — context observability'))).toBe(true);
+    expect(caveats.some((c) => c.title.includes('A10 — latency'))).toBe(true);
+    expect(caveats.some((c) => c.title.includes('A8 — non-committing'))).toBe(true);
+  });
+});
+
+describe('A8b — source-rejection grounding (Capability 2A acceptance target, advisory)', () => {
+  const GENERIC =
+    "I wasn't able to apply that change — it would create an inconsistency in the model structure. You could try describing the change differently, or I can rebuild the model from an updated brief.";
+  const ENRICHED =
+    "I wasn't able to add that as described, because the new risk isn't connected into the model yet, so it has no path through to your goal and can't affect the result. To add it, connect it through to your goal — for example by linking it to a factor that already feeds into your goal. Which factor should it relate to, or which outcome does it threaten?";
+  const INVENTED =
+    "I wasn't able to apply that change: adding a new risk connected directly to an option rather than flowing through an existing factor created an inconsistency the system couldn't resolve cleanly.";
+  const HELD_SCIENCE =
+    "I wasn't able to add that risk. Connect it through to your goal — it would shift the most vulnerable assumptions and the sensitivity of the result.";
+
+  it('CURRENT (generic suppression) → advisory fail (no structural next step), reports the gap', () => {
+    const f = a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body: { assistant_text: GENERIC } }));
+    expect(f).toHaveLength(1);
+    expect(f[0]!.invariant_id).toBe('A8b');
+    expect(f[0]!.status).toBe('fail');
+    expect(isAdvisoryFinding(f[0]!)).toBe(true); // advisory — never gates
+  });
+
+  it('ACCEPTED (enriched structural next step) → pass', () => {
+    const f = a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body: { assistant_text: ENRICHED } }));
+    expect(f).toHaveLength(1);
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('invented failure mechanism → advisory fail', () => {
+    const f = a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body: { assistant_text: INVENTED } }));
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.evidence).toMatch(/invented failure mechanism/i);
+    expect(isAdvisoryFinding(f[0]!)).toBe(true);
+  });
+
+  it('held-science prose → advisory fail', () => {
+    const f = a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body: { assistant_text: HELD_SCIENCE } }));
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.evidence).toMatch(/held-science/i);
+  });
+
+  it('does NOT fire on a non-rejection edit turn (self-gated)', () => {
+    expect(a8bSourceRejectionGrounded(obs({ role: 'mutate', body: { assistant_text: 'Set Budget to 0.5. Re-run analysis to see the effect.' } }))).toHaveLength(0);
+  });
+
+  it('does NOT fire on a non-edit role (e.g. explain)', () => {
+    expect(a8bSourceRejectionGrounded(obs({ role: 'explain', body: { assistant_text: GENERIC } }))).toHaveLength(0);
+  });
+
+  it('is never gating: every A8b finding is advisory', () => {
+    for (const body of [{ assistant_text: GENERIC }, { assistant_text: INVENTED }, { assistant_text: HELD_SCIENCE }]) {
+      for (const f of a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body }))) {
+        expect(isAdvisoryFinding(f)).toBe(true);
+      }
+    }
   });
 });

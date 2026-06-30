@@ -80,6 +80,18 @@ export type WireBody = Omit<TurnResponse, 'analysis_ready' | 'suggested_actions'
   readonly suggested_actions?: readonly WireChip[];
   readonly _diagnostic_trace?: DiagnosticTraceWire;
   readonly _timings?: Record<string, unknown>;
+  /**
+   * Optional AI-facing context summary surface (canonical-state M3
+   * `_context_summary`). Absent on every wire path today — its presence is
+   * exactly the CEE acceptance requirement that A9 tracks (see invariants.ts).
+   */
+  readonly _context_summary?: Record<string, unknown>;
+  /**
+   * Server-side pending proposals (e.g. `proposed_concept`). A turn that
+   * carries a `proposed_*` pending action emitted a PROPOSAL, not a durable
+   * commit — a strong "no mutation happened" signal for A8.
+   */
+  readonly pending_actions?: readonly { readonly action?: { readonly kind?: string } & Record<string, unknown> }[];
   readonly draft_graph?: { readonly nodes?: readonly unknown[]; readonly edges?: readonly unknown[]; readonly [k: string]: unknown };
   readonly [k: string]: unknown;
 };
@@ -91,9 +103,13 @@ export type TurnRole =
   | 'explain'
   | 'follow_up'
   | 'mutate'
+  /** A change *request* that should NOT durably commit (clarify/propose only). */
+  | 'mutate_intent'
   | 'rerun_analysis'
   | 'explain_changed'
-  | 'reload';
+  | 'reload'
+  /** A premortem / challenge prompt — safe-handling check only. */
+  | 'premortem';
 
 /**
  * One captured turn plus the cross-turn memory the classifiers need.
@@ -170,4 +186,70 @@ export function getFreshness(body: WireBody | undefined): WireFreshness | undefi
 /** True when the analysis_ready payload reports a runnable/complete analysis. */
 export function isAnalysisReadyComplete(body: WireBody | undefined): boolean {
   return getAnalysisReady(body)?.status === 'ready';
+}
+
+/** The `_timings.turn` block (server-side per-turn substage timings), if present. */
+function getTurnTimings(body: WireBody | undefined): Record<string, unknown> | undefined {
+  const t = body?._timings;
+  if (!t || typeof t !== 'object') return undefined;
+  const turn = (t as { turn?: unknown }).turn;
+  return turn && typeof turn === 'object' ? (turn as Record<string, unknown>) : undefined;
+}
+
+/**
+ * Wall-clock for the turn. Prefers the server `_timings.turn.total_ms`
+ * (deterministic, present in replay fixtures); falls back to the client-
+ * measured `elapsedMs` (live only). Returns undefined when neither exists —
+ * latency is then unprovable (A10 inconclusive), never silently "fast".
+ */
+export function getTurnTotalMs(obs: TurnObservation): number | undefined {
+  const v = getTurnTimings(obs.body)?.total_ms;
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
+  if (typeof obs.elapsedMs === 'number' && Number.isFinite(obs.elapsedMs)) return Math.round(obs.elapsedMs);
+  return undefined;
+}
+
+/**
+ * Number of LLM calls the turn made. `0` ⇒ a simple deterministic turn
+ * (the latency-tracking class the brief names). `undefined` ⇒ not observable.
+ */
+export function getLlmCalls(body: WireBody | undefined): number | undefined {
+  const v = getTurnTimings(body)?.llm_calls_used;
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * The AI-facing context summary surface, if the wire exposes one. Checks the
+ * canonical-state `_context_summary` field first, then a context block nested
+ * in the diagnostic trace. Absent everywhere today — A9 turns that absence
+ * into an explicit CEE acceptance requirement rather than a silent pass.
+ */
+export function getContextSummary(body: WireBody | undefined): Record<string, unknown> | undefined {
+  const top = body?._context_summary;
+  if (top && typeof top === 'object') return top as Record<string, unknown>;
+  const traceCtx = (body?._diagnostic_trace as { context_summary?: unknown } | undefined)?.context_summary;
+  return traceCtx && typeof traceCtx === 'object' ? (traceCtx as Record<string, unknown>) : undefined;
+}
+
+/**
+ * The committing handler id for the turn (`_timings.turn.handler_id`, or the
+ * trace `coaching_delivery.handler`). `undefined` ⇒ no handler executed — a
+ * turn that nonetheless claims a mutation made none (A8 durability signal).
+ */
+export function getHandlerId(body: WireBody | undefined): string | undefined {
+  const fromTimings = getTurnTimings(body)?.handler_id;
+  if (typeof fromTimings === 'string' && fromTimings.length > 0) return fromTimings;
+  const fromTrace = body?._diagnostic_trace?.coaching_delivery?.handler;
+  return typeof fromTrace === 'string' && fromTrace.length > 0 ? fromTrace : undefined;
+}
+
+/**
+ * True when the turn carries a `proposed_*` pending action — i.e. it emitted a
+ * PROPOSAL the user must still confirm, not a durable mutation. A8 treats this
+ * as "no commit happened": a turn that proposes must not also claim it applied.
+ */
+export function hasProposedPendingAction(body: WireBody | undefined): boolean {
+  const pa = body?.pending_actions;
+  if (!Array.isArray(pa)) return false;
+  return pa.some((p) => typeof p?.action?.kind === 'string' && /^proposed[_-]/.test(p.action.kind));
 }

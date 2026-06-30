@@ -32,7 +32,19 @@ import {
 type Redactor = (v: unknown) => string;
 const identityRedact: Redactor = createRedactor(undefined);
 
-const INVARIANT_ORDER: readonly InvariantId[] = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
+const INVARIANT_ORDER: readonly InvariantId[] = [
+  'A1',
+  'A2',
+  'A3',
+  'A4',
+  'A5',
+  'A6',
+  'A7',
+  'A8',
+  'A9',
+  'A10',
+  'A11',
+];
 
 /** Raw per-step capture produced by the runner (before classification). */
 export interface StepCapture {
@@ -46,6 +58,17 @@ export interface StepCapture {
   readonly chips?: readonly WireChip[];
 }
 
+/** One row of the latency summary (A10 — captured per turn for tracking). */
+export interface LatencyRow {
+  readonly step: string;
+  readonly role: string;
+  readonly totalMs: number | undefined;
+  readonly cls: string;
+  readonly budgetMs: number;
+  readonly llmCalls: number | undefined;
+  readonly overBudget: boolean;
+}
+
 export interface GoldenReportInput {
   readonly mode: 'live' | 'replay';
   readonly baseUrl?: string;
@@ -57,6 +80,7 @@ export interface GoldenReportInput {
   readonly captures: readonly StepCapture[];
   readonly findings: readonly Finding[];
   readonly caveats: readonly CoverageCaveat[];
+  readonly latencySummary?: readonly LatencyRow[];
 }
 
 function escapePipes(s: string): string {
@@ -314,6 +338,54 @@ export function renderGoldenReport(input: GoldenReportInput, redact: Redactor = 
     }
   }
   lines.push('');
+
+  // ---- CEE acceptance requirements (inconclusive = unobservable, NOT pass) ----
+  const inconclusive = input.findings.filter((f) => f.status === 'inconclusive');
+  lines.push('## CEE acceptance requirements (close these to turn the baseline green)');
+  lines.push('');
+  lines.push(
+    'Each row is something the harness **could not prove** because the signal is not observable today — ' +
+      'recorded as an acceptance requirement, **not** a pass. Closing these (mostly wire-surfacing on the CEE ' +
+      'side) is what lets the corresponding invariant graduate to a real pass/fail.',
+  );
+  lines.push('');
+  if (inconclusive.length === 0) {
+    lines.push('_None — every invariant was wire-observable this run._');
+  } else {
+    lines.push('| invariant | component | requirement (evidence) |');
+    lines.push('|---|---|---|');
+    for (const f of inconclusive) {
+      lines.push(
+        `| ${f.invariant_id} | ${COMPONENT_NUMBER[f.component_primary]}. ${COMPONENT_LABEL[f.component_primary]} | ${escapePipes(
+          redact(f.evidence),
+        )} |`,
+      );
+    }
+  }
+  lines.push('');
+
+  // ---- Latency summary (A10 — captured per turn for improvement tracking) ----
+  if (input.latencySummary && input.latencySummary.length > 0) {
+    lines.push('## Latency summary (A10 — advisory)');
+    lines.push('');
+    lines.push(
+      'Per-turn wall-clock from `_timings.turn.total_ms` (fallback: client elapsed). **Simple deterministic ' +
+        'turns** (`llm_calls=0`) are the class tracked for latency improvement; budgets are advisory and never ' +
+        'gate the exit code.',
+    );
+    lines.push('');
+    lines.push('| step | role | total_ms | class | budget_ms | llm_calls | verdict |');
+    lines.push('|---|---|---|---|---|---|---|');
+    for (const r of input.latencySummary) {
+      const verdict = r.totalMs === undefined ? 'not observable' : r.overBudget ? 'OVER (advisory)' : 'within';
+      lines.push(
+        `| \`${r.step}\` | ${r.role} | ${r.totalMs ?? '—'} | ${r.cls} | ${r.budgetMs} | ${
+          r.llmCalls ?? '—'
+        } | ${verdict} |`,
+      );
+    }
+    lines.push('');
+  }
 
   // ---- assistant_text per step (redacted) ----
   const withText = input.captures.filter((c) => typeof c.assistant_text === 'string' && c.assistant_text.length > 0);
