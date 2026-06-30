@@ -1,0 +1,112 @@
+{
+  "name": "golden-journey-v1-add-risk-rejection",
+  "description": "SANITIZED source-rejection fixture for Capability 2A (the cdd306e0-class ORIGINATING rejection, one turn before the f4835349 follow-up). Generic decision content — no real scenario data. A user asks to add a risk wired directly to an option; the structural validator rejects it (NO_PATH_TO_GOAL — the risk is not reachable from the decision). TODAY the rejection renders the GENERIC suppression ('…inconsistency in the model structure…') with no structural next step → A8b advisory fail (the grounding gap). Capability 2A is accepted when the SAME rejection renders a grounded, reachability-based next step with no invented mechanism and no held-science → A8b pass. A8b is ADVISORY (Cap-2A is not merged yet; it must not hard-fail CI).",
+  "brief": "A team is choosing between two scaling options and wants to add a risk that the current team resents a change.",
+  "capability_2a_acceptance_target": {
+    "summary": "Source-rejection grounding acceptance target. This harness (A8b, advisory) reports whether the unsupported add-risk rejection gives grounded structural guidance: a reachability-based next step, NO invented failure mechanism, NO held-science prose. Today the rejection is the generic suppression → A8b advisory fail.",
+    "current_state": { "a8b": "advisory fail (generic suppression — no structural next-step guidance)", "llm_calls_used": 1, "a10": "advisory fail (edit attempt used the LLM)" },
+    "accepted_when": { "a8b": "pass (reachability-based next step; no invented mechanism; no held-science)" },
+    "scope_note": "A8b asserts the rejection COPY grounding (deterministic render). It does NOT assert llm_calls=0 — the edit ATTEMPT may use the LLM (edit pipeline); that escalation facet is A10's, and the a9da06f2 follow-up is Capability 2B (see golden-journey-v1-f4835349-regression). 'Unrelated rejection types unchanged' under Cap-2A is enforced by Cap-2A's own byte-identical render tests, NOT by A8b.",
+    "gating": "A8b stays ADVISORY until Capability 2A is accepted and merged dark — then it may be promoted to gating.",
+    "evidence_only": "Deterministic harness/report set only — never a live staging run."
+  },
+  "expected_milestones": [
+    { "step": "1_draft", "role": "draft", "expect": "draft returned; labels parseable (setup)", "components": ["context_management", "observability_recovery"], "invariants": ["A2", "A6"] },
+    { "step": "2_run_analysis", "role": "analysis", "expect": "analysis_ready with hash trio (setup — establishes baseline graph hash)", "components": ["canonical_state", "observability_recovery"], "invariants": ["A1", "A6"] },
+    { "step": "9_add_risk_rejection", "role": "mutate_intent", "expect": "unsupported add-risk (risk wired to an option) → structural rejection. TODAY: generic suppression, no structural next step → A8b advisory fail. A8 PASSES (no phantom success — it is honest about the failure). A10 advisory fail (edit attempt used the LLM).", "components": ["typed_action_mutation"], "invariants": ["A8", "A8b", "A10"] }
+  ],
+  "transcript": {
+    "note": "diagnostic_trace_enabled=true. No _context_summary → A9 inconclusive (acceptance requirement). The add-risk source rejection is honest (A8 pass) but renders the GENERIC suppression (A8b advisory fail — the Capability 2A grounding gap).",
+    "diagnostic_trace_enabled": true,
+    "timing_debug_enabled": true,
+    "observations": [
+      {
+        "step": "1_draft",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Your decision model is ready, with two options and a delivery factor. Run the analysis whenever you're ready.",
+          "suggested_actions": [
+            { "id": "chip_run", "label": "Run analysis", "message": "Run analysis.", "action_type": "run_analysis" }
+          ],
+          "draft_graph": {
+            "nodes": [
+              { "id": "goal_delivery", "kind": "goal", "label": "Scale delivery" },
+              { "id": "opt_a", "kind": "option", "label": "Option A" },
+              { "id": "opt_b", "kind": "option", "label": "Option B" },
+              { "id": "fac_capacity", "kind": "factor", "label": "Delivery capacity" }
+            ],
+            "edges": [
+              { "from": "opt_a", "to": "fac_capacity" },
+              { "from": "fac_capacity", "to": "goal_delivery" }
+            ]
+          },
+          "_diagnostic_trace": {
+            "exit_path": "draft_graph",
+            "correlation_ids": { "request_id": "req-1", "scenario_id": "scn-ar", "turn_id": "turn-1" }
+          },
+          "_timings": { "turn": { "total_ms": 50000 }, "draft_graph": { "total_ms": 49000, "parse_ms": 30000 } }
+        }
+      },
+      {
+        "step": "2_run_analysis",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Analysis complete. Option A leads with about 60% against the goal.",
+          "suggested_actions": [
+            { "id": "chip_explain", "label": "Explain the result", "message": "Why does the leading option win?", "action_type": "explain_result" }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-30T15:00:00.000Z",
+            "options": [
+              { "option_id": "opt_a", "label": "Option A", "win_probability": 0.60 },
+              { "option_id": "opt_b", "label": "Option B", "win_probability": 0.40 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "acfa3515acfa3515",
+            "current_graph_hash": "acfa3515acfa3515",
+            "model_adjustments": []
+          },
+          "_diagnostic_trace": {
+            "exit_path": "chip_click",
+            "correlation_ids": { "request_id": "req-2", "scenario_id": "scn-ar", "turn_id": "turn-2" }
+          },
+          "_timings": { "turn": { "total_ms": 8000 }, "run_analysis": { "handler_total_ms": 7700, "plot_status": "computed" } }
+        }
+      },
+      {
+        "step": "9_add_risk_rejection",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "I wasn't able to apply that change — it would create an inconsistency in the model structure. You could try describing the change differently, or I can rebuild the model from an updated brief.",
+          "suggested_actions": [
+            { "id": "chip_rebuild", "label": "Rebuild from updated brief", "message": "Would you like to rebuild the model from an updated brief instead?", "action_type": "draft_graph" }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-06-30T15:00:00.000Z",
+            "options": [
+              { "option_id": "opt_a", "label": "Option A", "win_probability": 0.60 },
+              { "option_id": "opt_b", "label": "Option B", "win_probability": 0.40 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "acfa3515acfa3515",
+            "current_graph_hash": "acfa3515acfa3515"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "turn_executor",
+            "correlation_ids": { "request_id": "req-9", "scenario_id": "scn-ar", "turn_id": "turn-9" }
+          },
+          "_timings": { "turn": { "total_ms": 33048, "routing_llm_ms": 31000, "llm_calls_used": 1 } }
+        }
+      }
+    ]
+  }
+}

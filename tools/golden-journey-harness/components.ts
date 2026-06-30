@@ -60,6 +60,7 @@ export type InvariantId =
   | 'A7'
   // Blind-spot-closure invariants for the four lived post-analysis defects.
   | 'A8' // non-committing mutation intent → no phantom success (defect 1)
+  | 'A8b' // source rejection (unsupported add-risk) carries grounded structural guidance (Capability 2A acceptance target, ADVISORY)
   | 'A9' // AI-facing context is surfaced/observable on the wire (defect 2)
   | 'A10' // simple deterministic turns stay within an advisory latency budget (defect 3)
   | 'A11'; // premortem / challenge prompts are handled safely (defect 4, secondary)
@@ -74,6 +75,7 @@ export const INVARIANT_TITLE: Readonly<Record<InvariantId, string>> = {
   A6: 'Debug output explains what happened',
   A7: 'Repairs/recoveries are visible, not silent',
   A8: 'A non-committing change request never claims a mutation it did not durably make',
+  A8b: 'An unsupported add-risk rejection gives grounded structural guidance (no invented mechanism, no held-science)',
   A9: 'AI-facing context is observable on the wire (not only in-process)',
   A10: 'Simple deterministic turns stay within an advisory latency budget',
   A11: 'Premortem / challenge prompts are handled safely (no overclaiming or invented doctrine)',
@@ -89,6 +91,7 @@ export const INVARIANT_PRIMARY: Readonly<Record<InvariantId, CoreComponent>> = {
   A6: 'observability_recovery',
   A7: 'observability_recovery',
   A8: 'typed_action_mutation',
+  A8b: 'typed_action_mutation',
   A9: 'context_management',
   A10: 'ai_orchestration',
   A11: 'ai_orchestration',
@@ -104,6 +107,7 @@ export const INVARIANT_CONTRIBUTING: Readonly<Record<InvariantId, readonly CoreC
   A6: ['ai_orchestration'],
   A7: ['canonical_state', 'ai_orchestration'],
   A8: ['science_grounded_coaching', 'observability_recovery'],
+  A8b: ['science_grounded_coaching', 'observability_recovery'],
   A9: ['canonical_state', 'observability_recovery'],
   A10: ['observability_recovery'],
   A11: ['science_grounded_coaching'],
@@ -187,6 +191,11 @@ export const ADVISORY_INVARIANTS: ReadonlySet<InvariantId> = new Set<InvariantId
   // deliberately NOT advisory — it is a safety/honesty gate like A4.
   'A10',
   'A11',
+  // A8b (Capability 2A add-risk rejection grounding) is an ACCEPTANCE TARGET for
+  // a capability that has not merged yet — advisory so it reports the gap /
+  // grounding state without hard-failing CI before Cap-2A lands. Promote to
+  // gating once Cap-2A is accepted and merged dark.
+  'A8b',
 ]);
 
 /**

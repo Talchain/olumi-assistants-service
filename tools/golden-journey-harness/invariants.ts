@@ -625,6 +625,73 @@ export function a8NonCommittingNoFalseSuccess(obs: TurnObservation): Finding[] {
 }
 
 // ===========================================================================
+// A8b — an unsupported add-risk rejection gives grounded structural guidance
+// (Capability 2A acceptance target). ADVISORY — never gates (Cap-2A is not
+// merged yet, so it reports the grounding state without hard-failing CI).
+// ===========================================================================
+
+/** Edit-rejection opener shared by the generic suppression and the enriched copy. */
+const EDIT_REJECTION_PATTERN =
+  /\bI\s+was(?:n't| not)\s+able\s+to\s+(?:apply|add|make)\b|inconsistency in the model structure|could(?:n't| not)\s+apply that change/i;
+/** Signature phrase of today's generic suppression (no structural next step). */
+const GENERIC_SUPPRESSION_PATTERN = /inconsistency in the model structure/i;
+/** Reachability-grounded next-step language (the Cap-2A enriched copy). */
+const STRUCTURAL_NEXT_STEP_PATTERN =
+  /\b(?:connect(?:ed)?|link(?:ing|ed)?\s+it|path\s+(?:to|through)|through\s+to\s+your\s+goal|which\s+factor|which\s+outcome|hang\s+off|relate\s+to)\b/i;
+/** Invented failure-mechanism narration (the a9da06f2 confabulation class). */
+const INVENTED_MECHANISM_PATTERN =
+  /could(?:n't| not)\s+resolve\s+cleanly|flowing through an existing factor|sit downstream of|branch directly off|must\s+(?:flow|sit)\s+through/i;
+/** Held-science vocabulary that must never appear in the rejection copy. */
+const HELD_SCIENCE_PATTERN =
+  /\b(?:sensitiv\w*|fragile|fragility|flip|robustness|vulnerable|influence|elasticity|evpi|voi)\b/i;
+
+/**
+ * Acceptance target for Capability 2A (add-risk rejection guidance). On a
+ * structural-edit REJECTION turn (mutate / mutate_intent), report whether the
+ * rejection copy is GROUNDED: it gives a structural next step, invents no
+ * failure mechanism, and surfaces no held-science prose.
+ *
+ * Scope: targets the unsupported add-risk-to-option source rejection. The
+ * current generic suppression ("…inconsistency in the model structure…") is
+ * shared across structural rejections, so A8b reports the grounding gap for any
+ * edit rejection lacking a next step. "Unrelated rejection types unchanged"
+ * under Cap-2A is enforced by Cap-2A's own (byte-identical) render tests, NOT
+ * by A8b. A8b does NOT assert llm_calls=0 — the edit ATTEMPT may use the LLM
+ * (edit pipeline); the wrongful-LLM-escalation facet is A10's (and the
+ * a9da06f2 follow-up is 2B). All findings are ADVISORY.
+ */
+export function a8bSourceRejectionGrounded(obs: TurnObservation): Finding[] {
+  if (obs.role !== 'mutate' && obs.role !== 'mutate_intent') return [];
+  if (obs.httpStatus !== 200) return [];
+  const text = getAssistantText(obs.body);
+  if (!EDIT_REJECTION_PATTERN.test(text)) return []; // only structural-edit rejections
+  if (INVENTED_MECHANISM_PATTERN.test(text)) {
+    return [
+      makeFinding('A8b', 'fail', 'medium', `source rejection narrates an invented failure mechanism (no such deterministic rule exists)`, { step: obs.step }),
+    ];
+  }
+  if (HELD_SCIENCE_PATTERN.test(text)) {
+    return [
+      makeFinding('A8b', 'fail', 'medium', `source rejection surfaces held-science prose (sensitivity / fragility / robustness / influence)`, { step: obs.step }),
+    ];
+  }
+  if (GENERIC_SUPPRESSION_PATTERN.test(text) || !STRUCTURAL_NEXT_STEP_PATTERN.test(text)) {
+    return [
+      makeFinding(
+        'A8b',
+        'fail',
+        'low',
+        `source rejection uses the generic suppression — no structural next-step guidance. ACCEPTANCE (Capability 2A): enrich the unsupported add-risk-to-option rejection with a reachability-based next step.`,
+        { step: obs.step },
+      ),
+    ];
+  }
+  return [
+    makeFinding('A8b', 'pass', 'none', `source rejection is grounded: structural next step, no invented mechanism, no held-science`, { step: obs.step }),
+  ];
+}
+
+// ===========================================================================
 // A9 — AI-facing context is observable on the wire (lived defect 2)
 // ===========================================================================
 
@@ -860,6 +927,9 @@ export function evaluateObservation(obs: TurnObservation): Finding[] {
   // phantom success on a direct_answer/explain/proposal turn is caught, not just
   // on the synthetic mutate_intent step.
   findings.push(...a8NonCommittingNoFalseSuccess(obs));
+  // A8b (Capability 2A acceptance target, advisory): self-gates to structural-edit
+  // rejection turns; reports whether the rejection copy is grounded.
+  findings.push(...a8bSourceRejectionGrounded(obs));
 
   // Role-specific blind-spot-closure invariants.
   if (obs.role === 'premortem') findings.push(...a11PremortemSafe(obs));

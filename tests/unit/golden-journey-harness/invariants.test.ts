@@ -19,6 +19,7 @@ import {
   a6DebugExplains,
   a7RecoveryVisible,
   a8NonCommittingNoFalseSuccess,
+  a8bSourceRejectionGrounded,
   a9ContextSurfaced,
   a10Latency,
   a11PremortemSafe,
@@ -610,5 +611,59 @@ describe('evaluateJourney — A9 + blind-spot caveats', () => {
     expect(caveats.some((c) => c.title.includes('A9 — context observability'))).toBe(true);
     expect(caveats.some((c) => c.title.includes('A10 — latency'))).toBe(true);
     expect(caveats.some((c) => c.title.includes('A8 — non-committing'))).toBe(true);
+  });
+});
+
+describe('A8b — source-rejection grounding (Capability 2A acceptance target, advisory)', () => {
+  const GENERIC =
+    "I wasn't able to apply that change — it would create an inconsistency in the model structure. You could try describing the change differently, or I can rebuild the model from an updated brief.";
+  const ENRICHED =
+    "I wasn't able to add that as described, because the new risk isn't connected into the model yet, so it has no path through to your goal and can't affect the result. To add it, connect it through to your goal — for example by linking it to a factor that already feeds into your goal. Which factor should it relate to, or which outcome does it threaten?";
+  const INVENTED =
+    "I wasn't able to apply that change: adding a new risk connected directly to an option rather than flowing through an existing factor created an inconsistency the system couldn't resolve cleanly.";
+  const HELD_SCIENCE =
+    "I wasn't able to add that risk. Connect it through to your goal — it would shift the most vulnerable assumptions and the sensitivity of the result.";
+
+  it('CURRENT (generic suppression) → advisory fail (no structural next step), reports the gap', () => {
+    const f = a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body: { assistant_text: GENERIC } }));
+    expect(f).toHaveLength(1);
+    expect(f[0]!.invariant_id).toBe('A8b');
+    expect(f[0]!.status).toBe('fail');
+    expect(isAdvisoryFinding(f[0]!)).toBe(true); // advisory — never gates
+  });
+
+  it('ACCEPTED (enriched structural next step) → pass', () => {
+    const f = a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body: { assistant_text: ENRICHED } }));
+    expect(f).toHaveLength(1);
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('invented failure mechanism → advisory fail', () => {
+    const f = a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body: { assistant_text: INVENTED } }));
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.evidence).toMatch(/invented failure mechanism/i);
+    expect(isAdvisoryFinding(f[0]!)).toBe(true);
+  });
+
+  it('held-science prose → advisory fail', () => {
+    const f = a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body: { assistant_text: HELD_SCIENCE } }));
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.evidence).toMatch(/held-science/i);
+  });
+
+  it('does NOT fire on a non-rejection edit turn (self-gated)', () => {
+    expect(a8bSourceRejectionGrounded(obs({ role: 'mutate', body: { assistant_text: 'Set Budget to 0.5. Re-run analysis to see the effect.' } }))).toHaveLength(0);
+  });
+
+  it('does NOT fire on a non-edit role (e.g. explain)', () => {
+    expect(a8bSourceRejectionGrounded(obs({ role: 'explain', body: { assistant_text: GENERIC } }))).toHaveLength(0);
+  });
+
+  it('is never gating: every A8b finding is advisory', () => {
+    for (const body of [{ assistant_text: GENERIC }, { assistant_text: INVENTED }, { assistant_text: HELD_SCIENCE }]) {
+      for (const f of a8bSourceRejectionGrounded(obs({ role: 'mutate_intent', body }))) {
+        expect(isAdvisoryFinding(f)).toBe(true);
+      }
+    }
   });
 });
