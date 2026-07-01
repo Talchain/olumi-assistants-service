@@ -3264,10 +3264,24 @@ export async function runTurnExecutor(
           priorFacts: context.prior_facts,
           freshness: freshness?.freshness,
           // Spine A backstop: option-controlled levers must not be reported as
-          // gaining/losing influence in run-comparison prose. Raw, unparsed
-          // current graph (see the assembler call above).
+          // gaining/losing influence in run-comparison prose (the comparator
+          // diffs the raw `top_drivers`, bypassing projectTopDrivers). Computed
+          // from the RAW, unparsed graph — the compacted projection strips
+          // intervention bundles. Empty set ⇒ no suppression (fail-safe).
+          //
+          // Authority = `context.persistedGraph ?? options.graphState` (CANONICAL-
+          // first; the request graph is used only when there is no persisted graph
+          // — cold-start, or a degraded/failed persisted read) — the SAME
+          // authority as the sibling ContextPack top-driver projection and routed
+          // what_would_flip fallback after #314/#309. Freshness for this turn
+          // already anchors the current-graph hash to `context.persistedGraph`
+          // ("NOT the request-supplied graphStateForTurn"), so a request-FIRST
+          // authority would read an empty controlled set from a stale request
+          // graph (intervention not yet echoed) and leak an option-pinned lever
+          // ("<factor> now has more influence …") while the analysis stayed
+          // anchored to the canonical persisted graph.
           interventionControlledFactorIds: collectInterventionControlledFactorIds(
-            options.graphState ?? context.persistedGraph,
+            context.persistedGraph ?? options.graphState,
           ),
         });
         emit(TelemetryEvents.V5RunComparisonGate, {
@@ -4485,8 +4499,8 @@ export async function runTurnExecutor(
       // `context.persistedGraph`, "NOT the request-supplied graphStateForTurn").
       // A request-FIRST authority would read an empty controlled set from a stale
       // request graph while the analysis stays anchored to the canonical persisted
-      // graph, leaking the pinned lever (P0b-2). (The separate run-comparison gate
-      // expression remains request-first — a distinct surface, out of scope here.)
+      // graph, leaking the pinned lever (P0b-2). (The sibling run-comparison gate
+      // expression uses this same persisted-first authority — see its call site.)
       // filterFlipSummaryEntries is a no-op when the controlled
       // set is empty or no entry is pinned, and re-summarises kept entries so
       // `overall_status` stays honest (a dropped sole-concrete entry demotes).
