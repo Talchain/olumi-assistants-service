@@ -1,15 +1,19 @@
 /**
- * V6 Context Management — frame public surface (Increment 1, types only).
+ * V6 Context Management — frame public surface.
  *
- * Re-exports the typed `CanonicalContextFrame` contract and the default-held
- * claim-permission table. No runtime wiring; nothing exported here is imported
- * by an active call site yet. The frame BUILDER and any consumer migration are
- * later, separately-reviewed increments (state map §6).
+ * Re-exports the typed `CanonicalContextFrame` contract (Increment 1), the
+ * default-held claim-permission table, and the pure `buildFrame` projection
+ * (Increment 2). Still INERT: nothing exported here is imported by an active
+ * call site yet — `buildFrame` has zero callers (no wiring, no flag). Consumer
+ * migration (the redacted diagnostic-summary projection, then Cap-1) is a
+ * later, separately-reviewed increment (state map §6).
  */
 
 export {
   CANONICAL_CONTEXT_FRAME_VERSION,
 } from './types.js';
+
+export { buildFrame } from './build-frame.js';
 
 export type {
   CanonicalContextFrame,
