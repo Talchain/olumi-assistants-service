@@ -33,6 +33,7 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { createWhatWouldFlipHandler } from '../tools/handlers/what-would-flip.js';
 import type { HandlerFn, HandlerInvocation, HandlerRegistry } from '../tools/registry.js';
 import type { FlipSummary } from '../compose/flip-proposal.js';
 import type { V5ActionType } from '@talchain/schemas/orchestrator';
@@ -224,6 +225,61 @@ const SPY_REGISTRY: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
   ['what_would_flip', spyWhatWouldFlipHandler()],
 ]);
 
+// Real handler + composer, for the user-facing-prose regression.
+const REAL_REGISTRY: HandlerRegistry = new Map<V5ActionType, HandlerFn>([
+  ['what_would_flip', createWhatWouldFlipHandler()],
+]);
+
+/**
+ * Prior fact carrying BOTH per-option driver sensitivities and flip thresholds
+ * for the option-pinned lever (`fac_acquisition_cost`) and a genuine external
+ * factor (`fac_market_demand`). Analysed on the canonical READY_GRAPH so the
+ * hash matches the persisted graph → freshness fresh.
+ */
+function priorFactWithDriversAndFlip(): Record<string, unknown> {
+  const parsed = GraphStateIngressSchema.safeParse(READY_GRAPH);
+  if (!parsed.success) throw new Error('test setup: graph parse failed');
+  const hash = computeAnalysisAffectingGraphHash(parsed.data)!;
+  return {
+    fact_type: 'run_analysis' as const,
+    fact_version: 1 as const,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_freelance',
+      win_probabilities: { opt_freelance: 0.62, opt_hire: 0.38 },
+      summary: 'Ran analysis.',
+      graph_hash_at_run: hash,
+      computed_at: '2026-04-30T12:00:00.000Z',
+      enrichment: {
+        analysis_status: 'computed',
+        margin_pp: 24,
+        option_comparison: [
+          { option_id: 'opt_freelance', option_label: 'Freelance + Moderate Ad Spend', win_probability: 0.62 },
+          { option_id: 'opt_hire', option_label: 'Hire Marketing Manager', win_probability: 0.38 },
+        ],
+        results: [
+          {
+            option_id: 'opt_freelance',
+            option_label: 'Freelance + Moderate Ad Spend',
+            win_probability: 0.62,
+            outcome_mean: 1,
+            factor_sensitivity: [
+              { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.7, direction: 'negative' },
+              { node_id: 'fac_market_demand', label: 'Market demand', elasticity: 0.5, direction: 'positive' },
+            ],
+          },
+          { option_id: 'opt_hire', option_label: 'Hire Marketing Manager', win_probability: 0.38, outcome_mean: 0.8 },
+        ],
+        flip_thresholds: [
+          { factor_id: 'fac_acquisition_cost', factor_label: 'Acquisition cost', flip_value: 0.6, direction: 'increase' },
+          { factor_id: 'fac_market_demand', factor_label: 'Market demand', flip_value: 0.45, direction: 'increase' },
+        ],
+      },
+    },
+  };
+}
+
 describe('P0b-2 — routed what_would_flip suppresses option-pinned levers (chip-click parity)', () => {
   beforeEach(() => {
     capturedFlip = undefined;
@@ -288,6 +344,32 @@ describe('P0b-2 — routed what_would_flip suppresses option-pinned levers (chip
     // even though the lagging request graph shows it as unpinned.
     expect(factorIds).not.toContain('fac_acquisition_cost');
     expect(factorIds).toContain('fac_market_demand');
+  });
+
+  it('full composer, stale request vs canonical persisted: the routed fallback PROSE never names the pinned lever (top-driver sentence OR flip sentence)', async () => {
+    // End-to-end user-facing proof with the REAL what_would_flip handler +
+    // composer. The lever is named in TWO places in this response: the
+    // top-driver "would shift this result the most" sentence (fed by the
+    // ContextPack driver projection) and the flip "clearest one to test"
+    // sentence (fed by flipSummary). Both must be suppressed against the
+    // canonical persisted graph even when the request graph is stale.
+    mockState.priorFacts = [priorFactWithDriversAndFlip()];
+    mockState.persistedGraph = READY_GRAPH; // canonical: lever pinned
+    mockState.priorTurns = [PRIOR_RA_TURN];
+
+    const result = await runTurnExecutor(mkPayload('Let us keep going with this for now please.'), 'req-p0b2-prose', {
+      routingAdapter: { chatWithTools: vi.fn() } as never,
+      handlerRegistry: REAL_REGISTRY,
+      graphState: UNPINNED_GRAPH as never, // stale request graph: no interventions
+    });
+
+    const text = (result.response as { assistant_text?: string }).assistant_text ?? '';
+    expect(text.length).toBeGreaterThan(0);
+    // The option-pinned lever must not be named ANYWHERE in the routed fallback
+    // prose — neither the top-driver nor the flip sentence.
+    expect(text).not.toContain('Acquisition cost');
+    // The genuine external factor still surfaces.
+    expect(text).toContain('Market demand');
   });
 
   it('no option-pinned entries → threaded flip summary is unchanged (no behavioural change)', async () => {

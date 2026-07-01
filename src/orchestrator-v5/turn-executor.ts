@@ -1189,14 +1189,24 @@ export async function runTurnExecutor(
         analysis: analysisSummary,
         analysisStalenessReason,
         // Spine A backstop: option-controlled levers must not be surfaced as
-        // tunable sensitivity drivers. Computed from the RAW, unparsed turn
-        // graph (request graphState, else the raw persisted graph) — NOT the
-        // compacted projection (strips intervention bundles) and NOT a
+        // tunable sensitivity drivers. Computed from the RAW, unparsed graph —
+        // NOT the compacted projection (strips intervention bundles) and NOT a
         // GraphV3-parsed graph (keeps only top-level `node.interventions`,
         // dropping `node.data.interventions` / top-level `options[]`). Empty
         // set ⇒ no suppression (fail-safe).
+        //
+        // Authority = `context.persistedGraph ?? options.graphState` (CANONICAL-
+        // first; request graph only as a cold-start fallback). This projection's
+        // `top_drivers` feed the routed what_would_flip deterministic fallback
+        // prose ("Movement on X would shift this result the most"), so it must
+        // follow the same canonical graph freshness trusts under client lag —
+        // `currentAnalysisGraphHashForTurn` derives from `context.persistedGraph`,
+        // "NOT the request-supplied graphStateForTurn". A request-FIRST authority
+        // let a stale request graph (intervention not yet echoed) read an empty
+        // controlled set and leak an option-pinned lever into that sentence while
+        // the analysis stayed anchored to the canonical persisted graph (P0b-2).
         interventionControlledFactorIds: collectInterventionControlledFactorIds(
-          options.graphState ?? context.persistedGraph,
+          context.persistedGraph ?? options.graphState,
         ),
         coaching: coachingCache,
         // Flag-gated, prompt-safe coaching pack (undefined ⇒ field omitted).
@@ -4467,19 +4477,17 @@ export async function runTurnExecutor(
       // `node.data.interventions` / top-level `options[]`).
       //
       // Authority = `context.persistedGraph ?? options.graphState`
-      // (CANONICAL-first, request graph only as a cold-start fallback). This is
-      // the claim-safe choice and matches how freshness derives the current-graph
-      // hash from `context.persistedGraph` — "NOT the request-supplied
-      // graphStateForTurn" (see currentAnalysisGraphHashForTurn above) — and the
-      // option-identity guard's `context.persistedGraph ?? graphStateForTurn`.
-      // Under client lag the request graph can be stale (e.g. an intervention not
-      // yet echoed): a request-FIRST authority would read an empty controlled set
-      // from the stale request graph while the analysis (and freshness) stay
-      // anchored to the canonical persisted graph, leaking the pinned lever. We
-      // therefore deliberately DIVERGE from the co-located Spine A
-      // `options.graphState ?? context.persistedGraph` driver expression, which is
-      // a separate (pre-existing) surface with the same latent divergence and is
-      // out of scope here. filterFlipSummaryEntries is a no-op when the controlled
+      // (CANONICAL-first, request graph only as a cold-start fallback) — the SAME
+      // authority as the ContextPack driver suppression above (so the whole
+      // routed fallback response, top-driver sentence AND flip sentence, uses one
+      // canonical graph) and as the freshness / option-identity guards under
+      // client lag (`currentAnalysisGraphHashForTurn` derives from
+      // `context.persistedGraph`, "NOT the request-supplied graphStateForTurn").
+      // A request-FIRST authority would read an empty controlled set from a stale
+      // request graph while the analysis stays anchored to the canonical persisted
+      // graph, leaking the pinned lever (P0b-2). (The separate run-comparison gate
+      // expression remains request-first — a distinct surface, out of scope here.)
+      // filterFlipSummaryEntries is a no-op when the controlled
       // set is empty or no entry is pinned, and re-summarises kept entries so
       // `overall_status` stays honest (a dropped sole-concrete entry demotes).
       const routedFlipSummary =
