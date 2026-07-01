@@ -390,4 +390,62 @@ describe('P0b-2 — routed what_would_flip suppresses option-pinned levers (chip
     expect(factorIds).toEqual(['fac_acquisition_cost', 'fac_market_demand']);
     expect(capturedFlip?.overall_status).toBe('concrete');
   });
+
+  it('suppressing the sole concrete lever DEMOTES overall_status (concrete → no_practical_flip), not a silent over-claim', async () => {
+    // Honesty property (integration-level). When the option-pinned lever is the
+    // ONLY concrete flip entry (finite flip_value) and the genuine external
+    // factor has no practical flip (`no_effect_within_bounds`, no flip_value),
+    // dropping the lever must RE-SUMMARISE the kept entries so the threaded
+    // `overall_status` demotes from 'concrete' to 'no_practical_flip'. A stale
+    // 'concrete' after the only tipping point was removed would let the composer
+    // imply a real single-factor flip still exists — the dishonesty this guards.
+    const parsed = GraphStateIngressSchema.safeParse(READY_GRAPH);
+    if (!parsed.success) throw new Error('test setup: graph parse failed');
+    const hash = computeAnalysisAffectingGraphHash(parsed.data)!;
+    const soleConcreteLeverFact: Record<string, unknown> = {
+      fact_type: 'run_analysis' as const,
+      fact_version: 1 as const,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_freelance',
+        win_probabilities: { opt_freelance: 0.62, opt_hire: 0.38 },
+        summary: 'Ran analysis.',
+        graph_hash_at_run: hash,
+        computed_at: '2026-04-30T12:00:00.000Z',
+        enrichment: {
+          analysis_status: 'computed',
+          margin_pp: 24,
+          option_comparison: [
+            { option_id: 'opt_freelance', option_label: 'Freelance + Moderate Ad Spend', win_probability: 0.62 },
+            { option_id: 'opt_hire', option_label: 'Hire Marketing Manager', win_probability: 0.38 },
+          ],
+          flip_thresholds: [
+            // Option-pinned AND the only concrete (finite flip_value) entry.
+            { factor_id: 'fac_acquisition_cost', factor_label: 'Acquisition cost', flip_value: 0.6, direction: 'increase' },
+            // Genuine external factor with NO practical flip (no flip_value).
+            { factor_id: 'fac_market_demand', factor_label: 'Market demand', flip_reason: 'no_effect_within_bounds' },
+          ],
+        },
+      },
+    };
+    mockState.priorFacts = [soleConcreteLeverFact];
+    mockState.persistedGraph = READY_GRAPH;
+
+    await runTurnExecutor(mkPayload('Let us keep going with this for now please.'), 'req-p0b2-demote', {
+      routingAdapter: { chatWithTools: vi.fn() } as never,
+      handlerRegistry: SPY_REGISTRY,
+      graphState: READY_GRAPH as never,
+    });
+
+    expect(capturedFlip, 'routed path must thread a flip summary on this turn').toBeTruthy();
+    const factorIds = (capturedFlip?.entries ?? []).map((e) => e.factor_id);
+    // The pinned concrete lever is dropped; the non-concrete external factor stays.
+    expect(factorIds).not.toContain('fac_acquisition_cost');
+    expect(factorIds).toContain('fac_market_demand');
+    // HONESTY: dropping the sole concrete entry demotes the overall status —
+    // proving the routed path re-summarises kept entries rather than leaking a
+    // stale 'concrete' verdict.
+    expect(capturedFlip?.overall_status).toBe('no_practical_flip');
+  });
 });
