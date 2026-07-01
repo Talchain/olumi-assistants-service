@@ -262,6 +262,34 @@ describe('P0b-2 — routed what_would_flip suppresses option-pinned levers (chip
     expect(factorLabels).toContain('Market demand');
   });
 
+  it('stale request graph vs canonical persisted graph: suppresses the lever from the PERSISTED (canonical) graph, not the lagging request graph', async () => {
+    // Client-lag divergence: the canonical PERSISTED graph pins
+    // `fac_acquisition_cost` (both options intervene), but the request-supplied
+    // `graphState` is stale and carries NO interventions. Freshness derives the
+    // current-graph hash from the PERSISTED graph (turn-executor.ts:957-987 —
+    // "NOT the request-supplied graphStateForTurn"), so the prior analysis stays
+    // fresh and the routed fallback fires. The controlled-ID authority must
+    // therefore follow the same canonical (persisted-first) graph freshness
+    // trusts — a request-first authority would read the empty intervention set
+    // from the stale request graph and leak the pinned lever.
+    mockState.priorFacts = [priorRunAnalysisFact(READY_GRAPH)]; // analysed on the canonical graph
+    mockState.persistedGraph = READY_GRAPH; // canonical: lever pinned
+    mockState.priorTurns = [PRIOR_RA_TURN];
+
+    await runTurnExecutor(mkPayload('Let us keep going with this for now please.'), 'req-p0b2-divergence', {
+      routingAdapter: { chatWithTools: vi.fn() } as never,
+      handlerRegistry: SPY_REGISTRY,
+      graphState: UNPINNED_GRAPH as never, // stale request graph: no interventions
+    });
+
+    expect(capturedFlip, 'routed path must thread a flip summary on this turn').toBeTruthy();
+    const factorIds = (capturedFlip?.entries ?? []).map((e) => e.factor_id);
+    // The pinned lever (per the canonical persisted graph) must be suppressed
+    // even though the lagging request graph shows it as unpinned.
+    expect(factorIds).not.toContain('fac_acquisition_cost');
+    expect(factorIds).toContain('fac_market_demand');
+  });
+
   it('no option-pinned entries → threaded flip summary is unchanged (no behavioural change)', async () => {
     // UNPINNED_GRAPH has no interventions → controlled set empty →
     // filterFlipSummaryEntries is a no-op and the routed path threads the raw

@@ -4458,16 +4458,29 @@ export async function runTurnExecutor(
             })
           : undefined;
 
-      // P0b-2 (chip-click parity): the routed `what_would_flip` deterministic
-      // fallback must not name an option-pinned lever as "the clearest one to
-      // test". The chip-click path already filters its flip evidence
-      // (chip-click-dispatch.ts → filterFlipSummaryEntries); the routed path
-      // threaded the RAW summary. Suppress option-controlled levers here with the
-      // SAME helper and the SAME raw-graph authority as the Spine A context-pack
-      // backstop above (request graphState else raw persisted graph — never the
-      // GraphV3-parsed graph, which strips `node.data.interventions` / top-level
-      // `options[]`). filterFlipSummaryEntries is a no-op when the controlled set
-      // is empty or no entry is pinned, and re-summarises kept entries so
+      // P0b-2: the routed `what_would_flip` deterministic fallback must not name
+      // an option-pinned lever as "the clearest one to test". The chip-click path
+      // already filters its flip evidence (chip-click-dispatch.ts →
+      // filterFlipSummaryEntries); the routed path threaded the RAW summary.
+      // Suppress option-controlled levers here with the SAME helper, off the RAW
+      // graph (never the GraphV3-parsed graph, which strips
+      // `node.data.interventions` / top-level `options[]`).
+      //
+      // Authority = `context.persistedGraph ?? options.graphState`
+      // (CANONICAL-first, request graph only as a cold-start fallback). This is
+      // the claim-safe choice and matches how freshness derives the current-graph
+      // hash from `context.persistedGraph` — "NOT the request-supplied
+      // graphStateForTurn" (see currentAnalysisGraphHashForTurn above) — and the
+      // option-identity guard's `context.persistedGraph ?? graphStateForTurn`.
+      // Under client lag the request graph can be stale (e.g. an intervention not
+      // yet echoed): a request-FIRST authority would read an empty controlled set
+      // from the stale request graph while the analysis (and freshness) stay
+      // anchored to the canonical persisted graph, leaking the pinned lever. We
+      // therefore deliberately DIVERGE from the co-located Spine A
+      // `options.graphState ?? context.persistedGraph` driver expression, which is
+      // a separate (pre-existing) surface with the same latent divergence and is
+      // out of scope here. filterFlipSummaryEntries is a no-op when the controlled
+      // set is empty or no entry is pinned, and re-summarises kept entries so
       // `overall_status` stays honest (a dropped sole-concrete entry demotes).
       const routedFlipSummary =
         isExplanationHandler && analysisStateSource !== 'request'
@@ -4478,7 +4491,7 @@ export async function runTurnExecutor(
           ? filterFlipSummaryEntries(
               routedFlipSummary,
               collectInterventionControlledFactorIds(
-                options.graphState ?? context.persistedGraph,
+                context.persistedGraph ?? options.graphState,
               ),
             )
           : routedFlipSummary;
