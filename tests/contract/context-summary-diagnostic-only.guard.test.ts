@@ -105,6 +105,7 @@ describe('`_context_summary` is diagnostic-only (static guard)', () => {
 const COACHING_WIRE_KEY = 'coaching_state_pack';
 const COACHING_ALLOWLIST = new Set<string>([
   'orchestrator-v5/context/build-context-summary.ts', // defines + attaches the sub-block
+  'orchestrator-v5/context/context-summary-from-frame.ts', // T4 Slice 2: frame-first projection attaches the same sub-block
   'orchestrator/route-v2.ts', // the second (default-off) gate, in a comment
   'config/index.ts', // the CEE_COACHING_STATE_PACK_ENABLED flag doc
 ]);
@@ -146,6 +147,7 @@ describe('`coaching_state_pack` is diagnostic-only (static guard)', () => {
 const SOURCE_WIRE_KEY = 'canonical_state_source';
 const SOURCE_ALLOWLIST = new Set<string>([
   'orchestrator-v5/context/build-context-summary.ts', // defines + attaches the field
+  'orchestrator-v5/context/context-summary-from-frame.ts', // T4 Slice 2: frame-first projection emits the field (from frame.analysis.source)
   'orchestrator-v5/context/canonical-analysis-state.ts', // doc cross-reference only
   'config/index.ts', // the coachingStatePackEnabled flag doc cross-reference
 ]);

@@ -189,6 +189,14 @@ import {
   summariseCoachingStatePack,
   type CanonicalAnalysisState,
 } from './context/canonical-analysis-state.js';
+// T4 Slice 2 — canonical context frame, built ONCE per turn at the finalise
+// seam from the authority outputs already in scope (wrap, never re-derive).
+import {
+  buildFrame,
+  projectRecentChangesToFrame,
+  type CanonicalContextFrame,
+} from './context/frame/index.js';
+import { summariseGraphCounts } from './context/build-context-summary.js';
 import {
   checkCoachingOutput,
   buildCoachingDegradeResponse,
@@ -315,6 +323,17 @@ export interface TurnExecutorRunResult {
    * freshness-derived partial state for the diagnostic surface.
    */
   canonicalState?: CanonicalAnalysisState;
+  /**
+   * T4 Slice 2 — the canonical context frame for this turn, built ONCE at the
+   * finalise seam by wrapping the SAME authority outputs `canonicalState` /
+   * `freshness` carry (never a second derivation). Present exactly when both
+   * `canonicalState` and the assembled context pack are available; absent on
+   * early exits, so its absence is an honest "not observed" — consumers must
+   * not fabricate a fallback frame. First consumer: the route's flag-gated
+   * context-summary diagnostic (`context/context-summary-from-frame.ts`).
+   * INTERNAL ONLY — the frame itself never reaches the wire.
+   */
+  frame?: CanonicalContextFrame;
   /**
    * V5 Conversation Context Reliability: the authoritative graph this turn
    * reasoned over (request graphState parsed, or the persisted-graph fallback).
@@ -6137,6 +6156,34 @@ export async function runTurnExecutor(
           : undefined,
       });
     }
+    // T4 Slice 2 — build the canonical context frame ONCE, here at the single
+    // finalise seam every path funnels through. Pure wrap of the authority
+    // outputs already in scope: the SAME `freshness` derivation and
+    // `canonicalStateForRun` verdict returned below, the pack's already-capped
+    // recent-changes projection (shape-adapted once via
+    // projectRecentChangesToFrame), and integer counts of the SAME
+    // `effectiveTurnGraph` the route resolves labels against (identical input
+    // to the route's previous count call — parity by construction). Built only
+    // when the canonical state AND the assembled pack exist; on earlier exits
+    // the frame is honestly absent (never fabricated from partial state).
+    // `pendingConfirmation` / `intent` / claim permissions are deliberately
+    // NOT threaded yet — the builder's documented defaults mean "not
+    // supplied", and threading them is a later slice with its own owners.
+    const frameForRun: CanonicalContextFrame | undefined =
+      canonicalStateForRun !== undefined &&
+      freshness !== null &&
+      contextPackForLog !== null
+        ? buildFrame({
+            freshness,
+            canonicalState: canonicalStateForRun,
+            canonicalStateSource: 'turn_executor',
+            recentChanges: projectRecentChangesToFrame(
+              contextPackForLog.recent_changes,
+            ),
+            graphCounts: summariseGraphCounts(effectiveTurnGraph),
+            priorTurnCount: context.prior_turns.length,
+          })
+        : undefined;
     return {
       response,
       analysisReady: analysisReadyForTurn,
@@ -6149,6 +6196,9 @@ export async function runTurnExecutor(
       // only on early exits before routing freshness is derived (route-v2 then
       // falls back to its partial freshness-only state).
       ...(canonicalStateForRun ? { canonicalState: canonicalStateForRun } : {}),
+      // T4 Slice 2: the once-per-turn canonical frame (see above). Absent ⇒
+      // honest "not observed"; route consumers fall back to the partial path.
+      ...(frameForRun ? { frame: frameForRun } : {}),
       // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
       // so wire label resolution matches the durable-text scrub at commit.
       effectiveGraph: effectiveTurnGraph,

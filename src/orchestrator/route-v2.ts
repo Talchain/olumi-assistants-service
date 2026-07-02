@@ -101,6 +101,11 @@ import {
   summariseGraphCounts,
   type V5ContextSummary,
 } from '../orchestrator-v5/context/build-context-summary.js';
+// T4 Slice 2 — frame-first context-summary projection (the first live frame
+// consumer). When the turn-executor threads the canonical frame, the summary
+// is projected from the FRAME ALONE (no per-part re-assembly at this seam).
+import { contextSummaryFromFrame } from '../orchestrator-v5/context/context-summary-from-frame.js';
+import type { CanonicalContextFrame } from '../orchestrator-v5/context/frame/index.js';
 import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
@@ -294,6 +299,14 @@ function sendFinalised200(
      * body outside the gated `_context_summary` block.
      */
     readonly canonicalState?: CanonicalAnalysisState;
+    /**
+     * T4 Slice 2 — the turn-executor's once-per-turn canonical context frame.
+     * When present, the flag-gated context-summary diagnostic is projected
+     * from the frame ALONE (`contextSummaryFromFrame`) instead of being
+     * re-assembled from parts at this seam. Absent ⇒ the pre-frame paths
+     * below apply unchanged. Never reaches the wire itself.
+     */
+    readonly frame?: CanonicalContextFrame;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -512,30 +525,50 @@ function sendFinalised200(
   // above. Spreading breaks WeakSet membership (finaliser brand), so we
   // re-finalise the augmented body for the preSerialization hook.
   if (egress.ok && config.cee.contextSummaryEnabled) {
-    const canonical: CanonicalAnalysisState | null =
-      ctx.canonicalState ??
-      (ctx.freshness !== undefined
-        ? canonicalStateFromFreshness(
-            ctx.freshness,
-            ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
-          )
-        : null);
-    if (canonical !== null) {
-      const contextSummary: V5ContextSummary = buildV5ContextSummary({
-        canonicalState: canonical,
-        graphCounts: summariseGraphCounts(ctx.graph),
-        // Provenance: `ctx.canonicalState` present ⇒ the full graph-authority
-        // verdict from turn-executor (execute OR the non-execute fallback);
-        // otherwise we composed the partial `canonicalStateFromFreshness`
-        // fallback above for a non-turn-executor dispatch path. Lets a future
-        // consumer avoid misreading partial state as full graph authority.
-        canonicalStateSource: ctx.canonicalState ? 'turn_executor' : 'route_fallback',
-        // Second gate (default-off) for the redacted, hash-free
-        // `coaching_state_pack` sub-block — projected from the SAME canonical
-        // state as `analysis_state` (NOT non-execute-specific); diagnostic-only,
-        // never read by prompt/chip/product logic.
+    // T4 Slice 2 — frame-first. When the turn-executor threaded the canonical
+    // frame, project the summary from the FRAME ALONE: analysis state, graph
+    // counts, provenance and the (previously null / "not threaded" — M5)
+    // recent-turn / recent-change counts all read off the one per-turn frame,
+    // with no per-part re-assembly at this seam. The coaching sub-block still
+    // projects from the full canonical state the frame wrapped (the frame
+    // carries only the redacted summary); `ctx.canonicalState` is that same
+    // verdict. Frame absent ⇒ the pre-frame paths below apply UNCHANGED.
+    let contextSummary: V5ContextSummary | null = null;
+    if (ctx.frame !== undefined) {
+      contextSummary = contextSummaryFromFrame(ctx.frame, {
         includeCoachingState: config.cee.coachingStatePackEnabled,
+        ...(ctx.canonicalState
+          ? { coachingPackSource: ctx.canonicalState }
+          : {}),
       });
+    } else {
+      const canonical: CanonicalAnalysisState | null =
+        ctx.canonicalState ??
+        (ctx.freshness !== undefined
+          ? canonicalStateFromFreshness(
+              ctx.freshness,
+              ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
+            )
+          : null);
+      if (canonical !== null) {
+        contextSummary = buildV5ContextSummary({
+          canonicalState: canonical,
+          graphCounts: summariseGraphCounts(ctx.graph),
+          // Provenance: `ctx.canonicalState` present ⇒ the full graph-authority
+          // verdict from turn-executor (execute OR the non-execute fallback);
+          // otherwise we composed the partial `canonicalStateFromFreshness`
+          // fallback above for a non-turn-executor dispatch path. Lets a future
+          // consumer avoid misreading partial state as full graph authority.
+          canonicalStateSource: ctx.canonicalState ? 'turn_executor' : 'route_fallback',
+          // Second gate (default-off) for the redacted, hash-free
+          // `coaching_state_pack` sub-block — projected from the SAME canonical
+          // state as `analysis_state` (NOT non-execute-specific); diagnostic-only,
+          // never read by prompt/chip/product logic.
+          includeCoachingState: config.cee.coachingStatePackEnabled,
+        });
+      }
+    }
+    if (contextSummary !== null) {
       const augmented: OlumiResponseWithDebugFields = {
         ...wireBody,
         _context_summary: contextSummary,
@@ -2094,6 +2127,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // it supersedes the route's freshness-derived partial state (adds
       // degraded detection + contradictions over the unified fact chain).
       ...(run.canonicalState ? { canonicalState: run.canonicalState } : {}),
+      // T4 Slice 2: the once-per-turn canonical context frame. When present,
+      // the context-summary diagnostic is projected from the frame alone.
+      ...(run.frame ? { frame: run.frame } : {}),
     });
   });
 }
