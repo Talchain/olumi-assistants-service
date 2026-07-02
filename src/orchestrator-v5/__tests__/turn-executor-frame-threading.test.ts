@@ -24,6 +24,7 @@ import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { summariseCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
+import { summariseGraphCounts } from '../context/build-context-summary.js';
 
 const mockState = vi.hoisted(() => ({
   priorTurns: [] as Array<Record<string, unknown>>,
@@ -203,6 +204,13 @@ describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () =
     // Counts read the authoritative per-turn graph (3 nodes / 0 edges / 2
     // options / 1 goal) — same graph the route resolves labels against.
     expect(frame.model.counts).toEqual({ nodes: 3, edges: 0, options: 2, goals: 1 });
+    // Relationship pin (not just the literal): the frame's counts equal the
+    // counts of the EXACT graph object the route's legacy branch would count
+    // (ctx.graph = result.effectiveGraph, always set by finalizeRun) — so the
+    // frame path and the pre-frame path can never report divergent counts.
+    expect(result.effectiveGraph).not.toBeNull();
+    expect(result.effectiveGraph).toBeDefined();
+    expect(frame.model.counts).toEqual(summariseGraphCounts(result.effectiveGraph));
 
     // Conversation projection: empty mocked store → 0 prior turns; no prior
     // mutation facts → 0 recent changes; confirmation state not threaded yet.

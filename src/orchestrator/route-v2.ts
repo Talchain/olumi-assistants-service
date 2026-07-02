@@ -532,23 +532,28 @@ function sendFinalised200(
   // above. Spreading breaks WeakSet membership (finaliser brand), so we
   // re-finalise the augmented body for the preSerialization hook.
   if (egress.ok && config.cee.contextSummaryEnabled) {
-    // T4 Slice 2 — frame-first. When the turn-executor threaded the canonical
-    // frame, project the summary from the FRAME ALONE: analysis state, graph
-    // counts, provenance and the (previously null / "not threaded" — M5)
-    // recent-turn / recent-change counts all read off the one per-turn frame,
-    // with no per-part re-assembly at this seam. The coaching sub-block still
-    // projects from the full canonical state the frame wrapped (the frame
-    // carries only the redacted summary); `ctx.canonicalState` is that same
-    // verdict. Frame absent ⇒ the pre-frame paths below apply UNCHANGED.
-    let contextSummary: V5ContextSummary | null = null;
-    if (ctx.frame !== undefined) {
-      contextSummary = contextSummaryFromFrame(ctx.frame, {
-        includeCoachingState: config.cee.coachingStatePackEnabled,
-        ...(ctx.canonicalState
-          ? { coachingPackSource: ctx.canonicalState }
-          : {}),
-      });
-    } else {
+    // T4 Slice 2 — frame-first, legacy-fallback funnel. When the turn-executor
+    // threaded the canonical frame, project the summary from the FRAME ALONE:
+    // analysis state, graph counts, provenance and the (previously null /
+    // "not threaded" — M5) recent-turn / recent-change counts all read off the
+    // one per-turn frame, with no per-part re-assembly at this seam. The
+    // coaching sub-block still projects from the full canonical state the
+    // frame wrapped (the frame carries only the redacted summary);
+    // `ctx.canonicalState` is that same verdict.
+    //
+    // FALLBACK, not else: if the frame is absent OR its projection returns
+    // null (a hand-built frame missing the optional diagnostics summary —
+    // impossible from today's builder, but type-legal), the legacy
+    // parts-assembled path below still runs, so the diagnostic never silently
+    // disappears while the state to build it is in hand.
+    let contextSummary: V5ContextSummary | null =
+      ctx.frame !== undefined
+        ? contextSummaryFromFrame(
+            ctx.frame,
+            config.cee.coachingStatePackEnabled ? ctx.canonicalState : undefined,
+          )
+        : null;
+    if (contextSummary === null) {
       const canonical: CanonicalAnalysisState | null =
         ctx.canonicalState ??
         (ctx.freshness !== undefined

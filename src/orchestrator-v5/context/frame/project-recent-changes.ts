@@ -21,15 +21,20 @@ import type { FrameChanges, ProjectRecentChangesToFrame } from './types.js';
 
 /**
  * Map the already-projected recent changes into the frame's `changes` shape.
- * Pure, total, never throws; returns a frozen array.
+ * Pure, total, never throws; returns a frozen array of frozen elements — the
+ * one frame instance is shared across a turn's consumers, so the read-only
+ * contract is enforced at runtime (deep for this projection), not just via
+ * compile-time `readonly`.
  */
 export const projectRecentChangesToFrame: ProjectRecentChangesToFrame = (
   changes: readonly RecentMutation[],
 ): FrameChanges =>
   Object.freeze(
-    changes.map((change) => ({
-      action: change.action,
-      summary: change.summary,
-      targetLabel: change.target_label,
-    })),
+    changes.map((change) =>
+      Object.freeze({
+        action: change.action,
+        summary: change.summary,
+        targetLabel: change.target_label,
+      }),
+    ),
   );

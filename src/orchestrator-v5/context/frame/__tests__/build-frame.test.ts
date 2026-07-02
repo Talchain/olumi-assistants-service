@@ -82,9 +82,9 @@ describe('buildFrame — pure projection over authority outputs (Increment 2)', 
     expect(buildFrame(baseInput({ recentChanges: [] })).conversation.recentChangeCount).toBe(0);
   });
 
-  it('conversation.priorTurnCount passes through; defaults to 0 when absent', () => {
+  it('conversation.priorTurnCount passes through verbatim (REQUIRED input — no default; a fabricated 0 for "not supplied" is unconstructible)', () => {
     expect(buildFrame(baseInput({ priorTurnCount: 7 })).conversation.priorTurnCount).toBe(7);
-    expect(buildFrame(baseInput({ priorTurnCount: undefined })).conversation.priorTurnCount).toBe(0);
+    expect(buildFrame(baseInput({ priorTurnCount: 0 })).conversation.priorTurnCount).toBe(0);
   });
 
   it('pendingConfirmation defaults to false; the builder never invents it', () => {

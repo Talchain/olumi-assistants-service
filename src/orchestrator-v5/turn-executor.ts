@@ -6169,26 +6169,38 @@ export async function runTurnExecutor(
     // `pendingConfirmation` / `intent` / claim permissions are deliberately
     // NOT threaded yet — the builder's documented defaults mean "not
     // supplied", and threading them is a later slice with its own owners.
-    const frameForRun: CanonicalContextFrame | undefined =
+    let frameForRun: CanonicalContextFrame | undefined;
+    if (
       canonicalStateForRun !== undefined &&
       freshness !== null &&
       contextPackForLog !== null
-        ? buildFrame({
-            freshness,
-            canonicalState: canonicalStateForRun,
-            canonicalStateSource: 'turn_executor',
-            recentChanges: projectRecentChangesToFrame(
-              contextPackForLog.recent_changes,
-            ),
-            graphCounts: summariseGraphCounts(effectiveTurnGraph),
-            // Single-sourced from the pack's ASSEMBLED conversation projection
-            // (capped at CONTEXT_PACK_RECENT_TURNS_CAP), same rule as
-            // recentChanges: the frame reports what the turn actually reasoned
-            // over, never the uncapped store total — an uncapped count would
-            // over-report context completeness to the harness (A2).
-            priorTurnCount: contextPackForLog.conversation.recent_turns.length,
-          })
-        : undefined;
+    ) {
+      try {
+        frameForRun = buildFrame({
+          freshness,
+          canonicalState: canonicalStateForRun,
+          canonicalStateSource: 'turn_executor',
+          recentChanges: projectRecentChangesToFrame(
+            contextPackForLog.recent_changes,
+          ),
+          graphCounts: summariseGraphCounts(effectiveTurnGraph),
+          // Single-sourced from the pack's ASSEMBLED conversation projection
+          // (capped at CONTEXT_PACK_RECENT_TURNS_CAP), same rule as
+          // recentChanges: the frame reports what the turn actually reasoned
+          // over, never the uncapped store total — an uncapped count would
+          // over-report context completeness to the harness (A2).
+          priorTurnCount: contextPackForLog.conversation.recent_turns.length,
+        });
+      } catch {
+        // Never block the response on frame construction (mirrors the
+        // `_timings` decoration belt above). Every input expression is total
+        // today; if a future change breaks that, the frame is honestly absent
+        // and the route falls back to the pre-frame diagnostic path — a
+        // throw here would otherwise escape the executor on the error
+        // translators' own finalise path.
+        frameForRun = undefined;
+      }
+    }
     return {
       response,
       analysisReady: analysisReadyForTurn,

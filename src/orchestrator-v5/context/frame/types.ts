@@ -254,8 +254,14 @@ export interface BuildFrameInput {
   readonly recentChanges: FrameChanges;
   /** Optional graph entity counts, when the caller has them. */
   readonly graphCounts?: FrameGraphCounts | null;
-  /** Prior-turn count from the assembled context. */
-  readonly priorTurnCount?: number;
+  /**
+   * Prior-turn count from the ASSEMBLED context (the pack's capped
+   * conversation projection). REQUIRED: the frame is only built where the
+   * assembled pack exists, and the context-summary contract forbids a
+   * misleading defaulted 0 ("honest null" rule, build-context-summary.ts) —
+   * so "not supplied" is unconstructible rather than representable.
+   */
+  readonly priorTurnCount: number;
   /** Deterministic pre-route verdict, when a gate matched. */
   readonly intent?: FrameIntent;
   /**

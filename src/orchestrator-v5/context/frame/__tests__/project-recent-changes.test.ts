@@ -49,10 +49,14 @@ describe('projectRecentChangesToFrame (T4 Slice 2)', () => {
     expect(Object.isFrozen(projected)).toBe(true);
   });
 
-  it('output is frozen and input is not mutated (pure)', () => {
+  it('output is deeply frozen (array AND elements) and input is not mutated (pure)', () => {
     const before = JSON.stringify(MUTATIONS);
     const projected = projectRecentChangesToFrame(MUTATIONS);
     expect(Object.isFrozen(projected)).toBe(true);
+    // Element-level freeze: the one frame instance is shared across a turn's
+    // consumers, so runtime mutation of a change entry must throw (strict
+    // mode), not silently poison later consumers.
+    for (const entry of projected) expect(Object.isFrozen(entry)).toBe(true);
     expect(JSON.stringify(MUTATIONS)).toBe(before);
   });
 

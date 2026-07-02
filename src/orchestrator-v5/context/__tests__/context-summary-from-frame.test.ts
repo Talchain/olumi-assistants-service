@@ -16,7 +16,10 @@ import { describe, expect, it } from 'vitest';
 import { buildFrame } from '../frame/build-frame.js';
 import { projectRecentChangesToFrame } from '../frame/project-recent-changes.js';
 import { contextSummaryFromFrame } from '../context-summary-from-frame.js';
-import { buildV5ContextSummary } from '../build-context-summary.js';
+import {
+  buildV5ContextSummary,
+  type V5ContextSummary,
+} from '../build-context-summary.js';
 import { deriveAnalysisFreshness } from '../freshness.js';
 import {
   canonicalStateFromFreshness,
@@ -82,15 +85,10 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
     expect(fromFrame.recent_change_count).toBe(1);
   });
 
-  it('coaching_state_pack: omitted by default; opt-in projects from the same canonical state', () => {
+  it('coaching_state_pack: omitted by default; supplying the source IS the opt-in (single parameter — the include-without-source divergence is unrepresentable)', () => {
     expect(contextSummaryFromFrame(frame)).not.toHaveProperty('coaching_state_pack');
-    expect(
-      contextSummaryFromFrame(frame, { includeCoachingState: true }),
-    ).not.toHaveProperty('coaching_state_pack'); // no source supplied → still omitted
-    const withPack = contextSummaryFromFrame(frame, {
-      includeCoachingState: true,
-      coachingPackSource: canonicalState,
-    })!;
+    expect(contextSummaryFromFrame(frame, undefined)).not.toHaveProperty('coaching_state_pack');
+    const withPack = contextSummaryFromFrame(frame, canonicalState)!;
     expect(withPack.coaching_state_pack).toEqual(summariseCoachingStatePack(canonicalState));
   });
 
@@ -100,8 +98,41 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
       canonicalState,
       canonicalStateSource: 'turn_executor',
       recentChanges: projectRecentChangesToFrame([]),
+      priorTurnCount: 0,
     });
     expect(contextSummaryFromFrame(noCounts)!.graph_counts).toBeNull();
+  });
+
+  it('ANTI-DRIFT: frame-built and legacy-built summaries carry the identical key set for maximal equivalent inputs', () => {
+    // Both shapes maximal: coaching pack ON and provenance supplied on both
+    // sides. Any future field added to one assembly literal but not the other
+    // flips this key-set equality — the omission cannot ship silently.
+    const fromFrame = contextSummaryFromFrame(frame, canonicalState)!;
+    const legacy = buildV5ContextSummary({
+      canonicalState,
+      graphCounts: COUNTS,
+      canonicalStateSource: 'turn_executor',
+      includeCoachingState: true,
+    });
+    expect(Object.keys(fromFrame).sort()).toEqual(Object.keys(legacy).sort());
+  });
+
+  it('ANTI-DRIFT (compile-time): the wire type has no keys beyond the pinned set', () => {
+    // Exhaustive key pin: adding ANY key to V5ContextSummary makes this
+    // Record literal a tsc error in this file, forcing the author to extend
+    // the frame projection (or consciously exempt the key) rather than let
+    // the frame path silently omit it.
+    const PINNED: Record<keyof Required<V5ContextSummary>, true> = {
+      version: true,
+      analysis_state: true,
+      graph_counts: true,
+      recent_turn_count: true,
+      recent_change_count: true,
+      capabilities_present: true,
+      canonical_state_source: true,
+      coaching_state_pack: true,
+    };
+    expect(Object.keys(PINNED).length).toBe(8);
   });
 
   it('is pure: same frame → deeply-equal summaries; frame not mutated', () => {

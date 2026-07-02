@@ -411,6 +411,15 @@ describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailed
     expect(telemetry.failure_type).toBeNull();
     expect(telemetry.turn_class).toBe('direct_answer');
     expect(response.blocks.every((b) => b.type !== 'error')).toBe(true);
+    // Pin the BLOCKED-SPECIFIC recovery behaviour (Phase 2.3 UX, previously
+    // unpinned anywhere): the "engine cannot answer" verdict gets dedicated
+    // simplify-your-model coaching and a scenario-status text_prompt chip —
+    // NOT the generic retry action chip its sibling analysis_failed gets. A
+    // refactor that merges blocked into generic recovery copy must fail here.
+    expect(response.assistant_text).toContain("couldn't proceed");
+    expect(response.suggested_actions.map((a) => a.id)).toContain(
+      'chip_prompt_show_scenario_status',
+    );
   });
 });
 
