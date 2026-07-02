@@ -58,6 +58,11 @@ export const CeeTaskIdSchema = z.enum([
   'explain_result_narrate',
   'compare_options_narrate',
   'what_would_flip_narrate',
+  // V6 dual-draft M2 graph-review prompt slot. Additive; the registered
+  // default is a FAIL-CLOSED sentinel (src/cee/dual-draft/prompt-sentinel.ts)
+  // — the dual-draft stage refuses to call the LLM while it resolves. Paul is
+  // sole author of the real content (PMS lane).
+  'm2_graph_review',
 ]);
 export type CeeTaskId = z.infer<typeof CeeTaskIdSchema>;
 

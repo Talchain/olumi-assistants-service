@@ -59,6 +59,7 @@ const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
   'decision_review': 'decision_review',
   'orchestrator': 'orchestrator',
   'edit_graph': 'edit_graph',
+  'm2_graph_review': 'm2_review', // V6 dual-draft M2 review (CEE_MODEL_M2_REVIEW)
 };
 
 /**

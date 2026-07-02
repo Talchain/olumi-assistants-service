@@ -295,6 +295,7 @@ const ConfigSchema = z.object({
     artefactRenderingEnabled: booleanString.default(false), // CEE_ARTEFACT_RENDERING_ENABLED — when false, artefact blocks are suppressed with fallback commentary
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
+    v6DualDraftEnabled: booleanString.default(false), // CEE_V6_DUAL_DRAFT_ENABLED — V6 dual-model draft: M2 review + deterministic merge after M1 draft, before commit (default OFF; producer-agnostic enrichment stage in draft-graph-dispatch)
     // CEE_PIPELINE_V4_ENABLED — V1 route-registration flag only.
     //
     // Scope narrowed by the v5-handler-surface brief (Task 0b) for clarity:
@@ -466,6 +467,7 @@ const ConfigSchema = z.object({
       decision_review: z.string().optional(), // Model for decision review
       orchestrator: z.string().optional(), // Model for orchestrator Phase 3 + tool-calling
       edit_graph: z.string().optional(), // Model for edit_graph tool handler
+      m2_review: z.string().optional(), // Model for V6 dual-draft M2 graph review (CEE_MODEL_M2_REVIEW; recommended claude-opus-4-8 at activation)
     }).default({}),
     // Per-operation max tokens limits
     maxTokens: z.object({
@@ -479,6 +481,7 @@ const ConfigSchema = z.object({
       decision_review: z.coerce.number().int().positive().optional(), // Max tokens for decision review
       orchestrator: z.coerce.number().int().positive().optional(), // Max tokens for orchestrator Phase 3
       edit_graph: z.coerce.number().int().positive().optional(), // Max tokens for edit_graph tool
+      m2_review: z.coerce.number().int().positive().optional(), // Max tokens for V6 dual-draft M2 review (default 4096 in m2-review.ts)
     }).default({}),
     // Tiered model selection (Phase: Model Selection)
     modelSelection: z.object({
@@ -815,6 +818,7 @@ function parseConfig(): Config {
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
       orchestratorV5: env.ENABLE_V5_ORCHESTRATOR,
+      v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
@@ -971,6 +975,7 @@ function parseConfig(): Config {
         decision_review: env.CEE_MODEL_DECISION_REVIEW,
         orchestrator: env.CEE_MODEL_ORCHESTRATOR,
         edit_graph: env.CEE_MODEL_EDIT_GRAPH,
+        m2_review: env.CEE_MODEL_M2_REVIEW,
       },
       // Per-operation max tokens limits
       maxTokens: {
@@ -983,6 +988,7 @@ function parseConfig(): Config {
         decision_review: env.CEE_MAX_TOKENS_DECISION_REVIEW,
         orchestrator: env.CEE_MAX_TOKENS_ORCHESTRATOR,
         edit_graph: env.CEE_MAX_TOKENS_EDIT_GRAPH,
+        m2_review: env.CEE_MAX_TOKENS_M2_REVIEW,
       },
       // Tiered model selection
       modelSelection: {

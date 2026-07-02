@@ -52,6 +52,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
+import { config } from '../../config/index.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -370,6 +371,71 @@ export async function dispatchDraftGraph(
   }
 
   try {
+    // M2 LLM calls made by the dual-draft stage this turn (0 or 1). Counted
+    // whenever M2 actually reached the model — even if the merge applied
+    // nothing, timed out, or errored — NOT gated on whether a merge landed.
+    // Drives llm_calls_used accounting.
+    let m2LlmCallsUsed = 0;
+
+    // ── V6 dual-model draft enrichment (flag-gated, default OFF) ───────────
+    // When CEE_V6_DUAL_DRAFT_ENABLED is on, an M2 review pass proposes
+    // GraphV3-valid additions that deterministic code merges or rejects before
+    // this turn commits. The stage is producer-agnostic: it accepts any valid
+    // GraphV3 draft and returns either an enriched graph or the untouched M1
+    // graph — it never throws and never downgrades analysis-readiness. Lazy-
+    // imported so the flag-OFF path never loads the module (byte-identity
+    // contamination guard: cee/dual-draft/__tests__/dispatch-flag-off.test.ts).
+    // Swapping the merged graph into draftResult here — before commit (p_graph),
+    // the inline draft_graph field, the node/edge counts, and the analysis-
+    // affecting hash below — keeps the whole turn coherent under one atomic
+    // commit. Phase 0/1 ships a no-op enricher; the M2 path lands in later
+    // phases behind the same flag.
+    if (config.features.v6DualDraftEnabled && draftResult.graphOutput !== null) {
+      try {
+        const { enrichDraftGraph, m2LlmCallMade } = await import('../../cee/dual-draft/index.js');
+        const outcome = await enrichDraftGraph({
+          graph: draftResult.graphOutput,
+          brief: payload.message,
+          analysisReady: draftResult.analysisReady ?? null,
+          requestId,
+          scenarioId: payload.scenario_id,
+          turnId: payload.turn_id,
+          pipelineElapsedMs: draftResult.latencyMs,
+        });
+        // Accounting is call-based, not merge-based: a "called-but-merged-
+        // nothing" / timed-out / errored M2 still spent a call. The exhaustive
+        // helper (co-located with the reason taxonomy) classifies the outcome.
+        if (m2LlmCallMade(outcome.reason)) {
+          m2LlmCallsUsed = 1;
+        }
+        if (outcome.enriched) {
+          // assistantText is nulled alongside the graph swap: the M1 handler
+          // narration describes the PRE-merge graph, and the narration-count
+          // guard would otherwise compare it against merged counts — firing a
+          // spurious count-mismatch telemetry event on every enriched turn
+          // and polluting the standing Sonnet-drift ops signal. Nulling skips
+          // that guard (it is telemetry-only; the user-facing narrative is
+          // built deterministically from the final graph either way).
+          draftResult = { ...draftResult, graphOutput: outcome.graph, assistantText: null };
+        }
+      } catch (enrichErr) {
+        // Enrichment must never break the M1 draft. enrichDraftGraph is
+        // contracted not to throw; this catch is a belt-and-braces backstop
+        // that degrades to the M1 graph on any unexpected failure.
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            err:
+              enrichErr instanceof Error
+                ? { name: enrichErr.name, message: enrichErr.message }
+                : { message: String(enrichErr) },
+          },
+          'V6 dual-draft enrichment threw — degrading to M1 draft',
+        );
+      }
+    }
+
     // llm_calls_used: the unified pipeline's draft stage makes at least one
     // LLM call (see src/cee/unified-pipeline/stages/parse.ts). V4's
     // DraftGraphResult exposes this via `toolLLMTelemetry` but not as a
@@ -448,7 +514,12 @@ export async function dispatchDraftGraph(
         turn_class: 'direct_answer',
         handler_id: null,
         request_hash: computeRequestHash(payload),
-        llm_calls_used: 1,
+        // 1 = the unified pipeline's draft-stage call (honest minimum). +1
+        // whenever the V6 dual-draft M2 review actually reached the model this
+        // turn (call-based, not merge-based — a call that merged nothing /
+        // timed out / errored still counts). m2LlmCallsUsed is 0 for the
+        // no-call inert paths (sentinel, headroom, model-resolution gate).
+        llm_calls_used: 1 + m2LlmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
         graph: draftResult.graphOutput ?? undefined,

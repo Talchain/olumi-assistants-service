@@ -518,7 +518,13 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
     // as a code-level default fallback only. Manual seeding into PMS is
     // performed out-of-band; the brief explicitly forbids auto-seeding
     // routing into Supabase on startup. Skip it here.
-    const SEED_BLOCKLIST = new Set<CeeTaskId>(['routing']);
+    // 'm2_graph_review': its registered default is a FAIL-CLOSED sentinel
+    // (src/cee/dual-draft/prompt-sentinel.ts), not usable prompt copy —
+    // auto-seeding it would create a 'production' store row containing the
+    // sentinel and invert the provisioning model (Paul authors the real copy
+    // as a fresh store prompt, which clears the sentinel). Same discipline as
+    // the 'routing' file-based slot.
+    const SEED_BLOCKLIST = new Set<CeeTaskId>(['routing', 'm2_graph_review']);
 
     for (const taskId of taskIds) {
       if (SEED_BLOCKLIST.has(taskId)) {

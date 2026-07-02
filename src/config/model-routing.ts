@@ -64,6 +64,11 @@ export type CeeTask =
   | "repair_graph"
   | "critique_graph"
   | "decision_review"
+  // V6 dual-draft M2 graph review. Model must be EXPLICITLY set via
+  // CEE_MODEL_M2_REVIEW at activation (the dual-draft model-resolution gate
+  // stays inert otherwise); this union entry exists so startup/admin model
+  // listings and isValidCeeTask cover the task.
+  | "m2_graph_review"
   // Display-only entry for the v5 routing prompt. The v5 routing call site
   // (src/orchestrator-v5/routing/route-with-tool-use.ts) controls its own
   // model/temperature/tools selection independently. `getSystemPrompt('routing')`
@@ -108,6 +113,10 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   suggest_options: "gpt-5.2",  // Alias for options task
   critique_graph: "gpt-5.2",
   decision_review: "gpt-4.1-2025-04-14",  // Fast tier - narrative synthesis from ISL results
+  // V6 dual-draft M2 review — display default only (D3 recommendation).
+  // NEVER governs a live call: the dual-draft gate requires the explicit
+  // CEE_MODEL_M2_REVIEW env override to match the resolved model.
+  m2_graph_review: "claude-opus-4-8",
   // Display-only — see comment on the `routing` member of CeeTask above.
   // The v5 routing call site does NOT consume this value.
   routing: "claude-sonnet-4-20250514",
