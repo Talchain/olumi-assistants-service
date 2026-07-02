@@ -173,7 +173,7 @@ export async function reviewDraftGraph(input: EnrichmentInput): Promise<M2Review
         userMessage,
         temperature: 0,
         maxTokens: config.cee.maxTokens.m2_review ?? DEFAULT_M2_MAX_TOKENS,
-        outputSchema: PROPOSALS_JSON_SCHEMA as unknown as Record<string, unknown>,
+        outputSchema: PROPOSALS_JSON_SCHEMA,
       },
       {
         requestId: input.requestId,

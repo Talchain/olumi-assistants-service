@@ -56,7 +56,11 @@ const EDGE_DELTA_SCHEMA = {
   },
 } as const;
 
-export const PROPOSALS_JSON_SCHEMA = {
+// Typed as Record<string, unknown> (the ChatArgs.outputSchema shape) rather
+// than `as const` so consumers need no cast — the inner NODE/EDGE_DELTA_SCHEMA
+// keep `as const` for the compile-time lockstep guards below, which read those
+// consts, not this export.
+export const PROPOSALS_JSON_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
   required: ['proposals'],
@@ -85,7 +89,7 @@ export const PROPOSALS_JSON_SCHEMA = {
       },
     },
   },
-} as const;
+};
 
 // Compile-time drift guards: the schema property sets must stay in lockstep
 // with the guard allowlists (also asserted at runtime by the test suite).
