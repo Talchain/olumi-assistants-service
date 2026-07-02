@@ -1,0 +1,10 @@
+{
+  "description": "Single source of truth for golden-journey replay fixture expected exit codes. Consumed by BOTH the required unit test (tests/unit/golden-journey-harness/replay-fixtures.test.ts, in-process via evaluateReplayFixture) and the advisory replay-gate script (scripts/ci/golden-journey-replay-gate.sh, out-of-process via the CLI). Do not encode these expectations a third time; PR2B should reconcile the T2 advisory workflow (.github/workflows/golden-journey-replay.yml) to call the gate script instead of inlining its own copy. Exit codes (harness index.ts): 0 = no gating fail, 1 = >=1 gating fail, 2 = fatal (malformed fixture, fail-closed), 3 = auth/preflight/deploy halt (live only).",
+  "fixtures": [
+    { "file": "golden-journey-v1", "expected_exit": 0 },
+    { "file": "golden-journey-v1-defects", "expected_exit": 1 },
+    { "file": "golden-journey-v1-f4835349-regression", "expected_exit": 0 },
+    { "file": "golden-journey-v1-add-risk-rejection", "expected_exit": 0 },
+    { "file": "golden-journey-v1-context-drop", "expected_exit": 1, "gating_invariant": "A12" }
+  ]
+}
