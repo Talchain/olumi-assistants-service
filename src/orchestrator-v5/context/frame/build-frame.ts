@@ -9,11 +9,12 @@
  * (`deriveAnalysisFreshness` / `selectCanonicalAnalysisState` /
  * `projectRecentChanges` / `computeAnalysisAffectingGraphHash`).
  *
- * INERT. Nothing calls `buildFrame` yet — no call sites, no runtime wiring, no
- * flag — exactly like the Increment-1 types. Consumer migration (the redacted
- * diagnostic-summary projection, then Cap-1) is a later, separately-reviewed
- * increment. See
- * `Docs/v6/increment-2-frame-builder-brief.md`.
+ * LIVE as of T4 Slice 2: the turn-executor builds the frame once per turn at
+ * its finalise seam (`finalizeRun`), and the route's flag-gated
+ * context-summary diagnostic is the first consumer
+ * (`../context-summary-from-frame.ts`). Changes here alter the live per-turn
+ * frame — review accordingly. See
+ * `Docs/v6/increment-2-frame-builder-brief.md` for the original inert brief.
  *
  * SIDE-EFFECT-FREE / TOTAL. No I/O, no throw, deterministic (same input → same
  * output). `model.graphHash` is single-sourced from `freshness.current_graph_hash`
@@ -70,7 +71,9 @@ export function buildFrame(input: BuildFrameInput): CanonicalContextFrame {
     // Already the projected FrameChanges (projected once upstream) — pass through.
     changes: input.recentChanges,
     conversation: {
-      priorTurnCount: input.priorTurnCount ?? 0,
+      // Required input — no default. A misleading 0 for "not supplied" is
+      // unconstructible (honest-null rule; see BuildFrameInput.priorTurnCount).
+      priorTurnCount: input.priorTurnCount,
       // Single source: the projected changes array. Never a separate count.
       recentChangeCount: input.recentChanges.length,
       // Honest default: the builder NEVER invents confirmation state. When the
