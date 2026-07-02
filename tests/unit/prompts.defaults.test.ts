@@ -196,6 +196,11 @@ describe('Prompt Content Quality', () => {
       // routing, not JSON envelopes. Output is a structured tool call, not
       // a JSON document.
       'routing',
+      // V6 dual-draft M2 review — the registered default is a FAIL-CLOSED
+      // sentinel (__M2_PROMPT_NOT_PROVISIONED__), not a real prompt; it exists
+      // to keep the stage inert until Paul-authored copy lands via the PMS
+      // lane. No JSON instruction applies to a placeholder.
+      'm2_graph_review',
     ]);
 
     for (const [task, prompt] of Object.entries(defaults)) {

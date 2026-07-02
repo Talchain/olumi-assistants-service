@@ -26,6 +26,8 @@ const ALL_TASKS = [
   'clarification', 'preflight', 'draft_graph', 'edit_graph', 'bias_check',
   'evidence_helper', 'sensitivity_coach', 'options', 'suggest_options',
   'explainer', 'orchestrator', 'repair_graph', 'critique_graph', 'decision_review',
+  // V6 dual-draft M2 review (CEE_MODEL_M2_REVIEW). routing stays excluded (display-only).
+  'm2_graph_review',
 ] as const;
 
 describe('logResolvedTaskModels', () => {
@@ -43,7 +45,7 @@ describe('logResolvedTaskModels', () => {
   it('emits exactly one log line per CeeTask (Gate 6)', () => {
     logResolvedTaskModels();
     const taskLines = logInfoCalls.filter((c) => c.obj['event'] === 'model.task_resolved');
-    expect(taskLines).toHaveLength(14); // 14 CeeTasks
+    expect(taskLines).toHaveLength(15); // 14 original + V6 m2_graph_review (routing is display-only, excluded)
   });
 
   it('emits one caveat note line before task lines', () => {
@@ -59,7 +61,7 @@ describe('logResolvedTaskModels', () => {
     );
   });
 
-  it('covers all 14 CeeTask values', () => {
+  it('covers all 15 CeeTask values', () => {
     logResolvedTaskModels();
     const resolvedTasks = logInfoCalls
       .filter((c) => c.obj['event'] === 'model.task_resolved')
