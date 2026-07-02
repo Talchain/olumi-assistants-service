@@ -1,7 +1,8 @@
 # Security / data-floor status register
 
-**Date:** 2026-07-02 · **Verified against:** `origin/staging` @ `475922b300`, live GitHub PR
-state re-checked today. Read-only consolidation — no probing beyond repo + PR metadata.
+**Date:** 2026-07-02 · **Verified against:** `origin/staging` @ `2376914c8` (post-#318 tip;
+originally authored against `475922b300`), live GitHub PR state re-checked same day.
+Read-only consolidation — no probing beyond repo + PR metadata.
 
 | Item | Status | Owner / decision gap |
 |---|---|---|
@@ -89,6 +90,20 @@ Recommended merge order (safe → decision-needed):
      (dev; may surface new type errors — run full typecheck).
 - **Decision gap:** Paul to confirm the order and whether tier-1/2 merges can proceed as a batch;
   tier-4 items each need a dedicated check.
+
+## Recommended owners & target dates (mission S-floor recommendation, 2026-07-02)
+
+| Item | Owner | Recommended target | Rationale |
+|---|---|---|---|
+| S2 — #253 re-baseline + merge | Paul | by **2026-07-09** | required checks already green; only staleness risk grows with time (migrations drift) |
+| S3 — admin checklist (audit §9, Q1–Q6) | Paul + dashboard admin | by **2026-07-04** | ~30 min of dashboard reads; blocks turn-persisting traces and settles the staging/prod-isolation contradiction |
+| S4 tier 1 — CI-only dependabot (#56–#60) | Paul (batchable) | by **2026-07-09** | zero runtime surface; check workflow version consistency first |
+| S4 tier 2 — patch/minor prod deps | Paul (batchable after tier 1) | by **2026-07-16** | low risk; required CI is the gate |
+| S4 tier 3 — grouped updates (#126/#127) | Paul, per-manifest review | by **2026-07-23** | groups can hide a risky member |
+| S4 tier 4 — majors (excl. zod) | Paul, one-by-one | as capacity allows | each needs its own assessment |
+| **zod 3→4 (#64 + DGAI #108)** | cross-repo contract-layer project (CEE + DGAI + `olumi-schemas` together) | **schedule as a project; do NOT merge as a bump** | the vendored `@talchain/schemas` 0.13.0 and the egress pin test are built on zod-v3 introspection; a lone bump breaks the contract layer on both sides |
+
+Merge-order recommendation stands as §S4 tiers 1→4; nothing here blocks harness (T1/T2) work.
 
 ## Standing advisory-red context
 
