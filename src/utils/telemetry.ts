@@ -1480,6 +1480,17 @@ export const TelemetryEvents = {
   // (no Datadog metric); per-chip detail is a separate v5.chip.suppressed
   // structured log.
   V5ChipsFinalized: "v5.chips.finalized",
+
+  // V6 dual-model draft enrichment (CEE_V6_DUAL_DRAFT_ENABLED, default OFF).
+  // Fires from src/cee/dual-draft/. Content-free: counts, coded reasons,
+  // model ids and latencies only — proposal free text never leaves the stage.
+  // M2Outcome: one per enrichment attempt (outcome kind + latency + model).
+  // MergeReport: exact-one-bucket accounting (applied / artifacts / failure-
+  // code histogram / post_merge_valid). Degraded: the stage returned the M1
+  // graph with the coded reason (fail-open is recorded, never silent).
+  V6DualDraftM2Outcome: "v6.dual_draft.m2_outcome",
+  V6DualDraftMergeReport: "v6.dual_draft.merge_report",
+  V6DualDraftDegraded: "v6.dual_draft.degraded",
 } as const;
 
 /**

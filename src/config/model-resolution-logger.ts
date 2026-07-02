@@ -51,6 +51,7 @@ const TASK_TO_LEGACY_MODEL_KEY: Partial<Record<CeeTask, keyof typeof config.cee.
   decision_review: 'decision_review',
   orchestrator: 'orchestrator',
   edit_graph: 'edit_graph',
+  m2_graph_review: 'm2_review', // V6 dual-draft M2 review (CEE_MODEL_M2_REVIEW)
 };
 
 function resolveTaskModel(task: CeeTask): { model: string; source: ModelSource } {

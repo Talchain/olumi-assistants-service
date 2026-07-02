@@ -118,6 +118,18 @@ export const DECISION_REVIEW_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("DECISION_REVIEW_TIMEOUT_MS", 15_000),
 );
 
+/**
+ * V6 dual-draft M2 graph-review LLM call timeout (default: 25s, clamped 5s-5m).
+ * Same shape as DECISION_REVIEW_TIMEOUT_MS: a synchronous post-success LLM
+ * call whose timeout degrades to a thinner-but-valid turn (the M1 draft ships
+ * unenriched). The dual-draft stage additionally gates on remaining
+ * DRAFT_REQUEST_BUDGET_MS headroom before calling M2 at all — see
+ * src/cee/dual-draft/m2-review.ts.
+ */
+export const M2_REVIEW_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("CEE_M2_REVIEW_TIMEOUT_MS", 25_000),
+);
+
 /** Clarify-brief LLM call timeout (default: 10s, clamped 5s–5m) */
 export const CLARIFY_BRIEF_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("CLARIFY_BRIEF_TIMEOUT_MS", 10_000),
@@ -340,6 +352,19 @@ export function validateTimeoutRelationships(): string[] {
     );
   }
 
+  // V6 dual-draft M2 review: the headroom gate skips M2 when
+  // pipelineElapsed + M2_REVIEW_TIMEOUT_MS + ~10s post-review headroom would
+  // exceed DRAFT_REQUEST_BUDGET_MS (src/cee/dual-draft/m2-review.ts). A
+  // timeout at or above budget−headroom makes the gate always-true and M2
+  // permanently skipped as `insufficient_headroom` — warn at boot instead of
+  // failing silently per turn.
+  if (M2_REVIEW_TIMEOUT_MS + 10_000 >= DRAFT_REQUEST_BUDGET_MS) {
+    warnings.push(
+      `M2_REVIEW_TIMEOUT_MS (${M2_REVIEW_TIMEOUT_MS}ms) + 10s post-review headroom >= DRAFT_REQUEST_BUDGET_MS (${DRAFT_REQUEST_BUDGET_MS}ms) — ` +
+      `the dual-draft headroom gate will always skip M2 (insufficient_headroom); lower CEE_M2_REVIEW_TIMEOUT_MS`,
+    );
+  }
+
   return warnings;
 }
 
@@ -357,6 +382,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     CRITIQUE_TIMEOUT_MS,
     EXPLAIN_DIFF_TIMEOUT_MS,
     DECISION_REVIEW_TIMEOUT_MS,
+    M2_REVIEW_TIMEOUT_MS,
     CLARIFY_BRIEF_TIMEOUT_MS,
     ASK_TIMEOUT_MS,
     CLARIFIER_QUESTION_TIMEOUT_MS,

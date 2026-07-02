@@ -21,6 +21,7 @@ import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.
 import { getOrchestratorPromptV28, ORCHESTRATOR_PROMPT_CF_V28 } from './orchestrator-cf-v28.js';
 import { getDraftGraphPromptV187, DRAFT_GRAPH_PROMPT_V187 } from './defaults-v187.js';
 import { getEditGraphPromptV6, EDIT_GRAPH_PROMPT_V6 } from './edit-graph-v6.js';
+import { M2_PROMPT_NOT_PROVISIONED_SENTINEL } from '../cee/dual-draft/prompt-sentinel.js';
 import { log } from '../utils/telemetry.js';
 
 // ============================================================================
@@ -2333,6 +2334,14 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('explain_result_narrate', EXPLAIN_RESULT_NARRATE_PROMPT);
   registerDefaultPrompt('compare_options_narrate', COMPARE_OPTIONS_NARRATE_PROMPT);
   registerDefaultPrompt('what_would_flip_narrate', WHAT_WOULD_FLIP_NARRATE_PROMPT);
+  // V6 dual-draft M2 graph review — FAIL-CLOSED sentinel, not a placeholder
+  // prompt. Unlike the narrate placeholders above (which are minimal but
+  // usable), this default must never reach a live model call: the dual-draft
+  // stage checks for the sentinel and refuses to run while it resolves
+  // (degrade reason `prompt_not_provisioned`), even with the feature flag ON.
+  // Paul authors the real content via the PMS lane; the prompt store override
+  // clears the sentinel without code changes.
+  registerDefaultPrompt('m2_graph_review', M2_PROMPT_NOT_PROVISIONED_SENTINEL);
 
   // Log prompt versions at registration (read from actually-registered content)
   log.info({

@@ -140,6 +140,9 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   explain_result_narrate: 'explain_result_narrate',
   compare_options_narrate: 'compare_options_narrate',
   what_would_flip_narrate: 'what_would_flip_narrate',
+  // V6 dual-draft M2 graph review (fail-closed sentinel default; see
+  // src/cee/dual-draft/prompt-sentinel.ts and src/prompts/defaults.ts).
+  m2_graph_review: 'm2_graph_review',
   // Note: isl_synthesis is NOT here - it's deterministic (template-based, no LLM calls)
 };
 

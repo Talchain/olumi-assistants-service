@@ -575,4 +575,48 @@ describe("Configuration Module", () => {
       expect(config.cee.clarifierEnabled).toBe(false);
     });
   });
+
+  // V6 dual-draft flag + M2 model config: env -> parseConfig -> config round-trip.
+  // Regression guard for the class of bug where a flag is declared in the
+  // ConfigSchema but never mapped in parseConfig's env block (the Zod default
+  // then applies forever and the env var is silently dead). The dual-draft
+  // suites mock config, so only this unmocked round-trip can catch it.
+  describe("V6 dual-draft env wiring", () => {
+    it("CEE_V6_DUAL_DRAFT_ENABLED=true flows through to config.features.v6DualDraftEnabled", async () => {
+      process.env = {
+        NODE_ENV: "test",
+        LLM_PROVIDER: "fixtures",
+        CEE_V6_DUAL_DRAFT_ENABLED: "true",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.features.v6DualDraftEnabled).toBe(true);
+    });
+
+    it("defaults to false when the env var is unset", async () => {
+      process.env = {
+        NODE_ENV: "test",
+        LLM_PROVIDER: "fixtures",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.features.v6DualDraftEnabled).toBe(false);
+    });
+
+    it("CEE_MODEL_M2_REVIEW and CEE_MAX_TOKENS_M2_REVIEW flow through to config.cee", async () => {
+      process.env = {
+        NODE_ENV: "test",
+        LLM_PROVIDER: "fixtures",
+        CEE_MODEL_M2_REVIEW: "claude-opus-4-8",
+        CEE_MAX_TOKENS_M2_REVIEW: "4096",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.models.m2_review).toBe("claude-opus-4-8");
+      expect(config.cee.maxTokens.m2_review).toBe(4096);
+    });
+  });
 });
