@@ -32,7 +32,6 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { config } from '../../../src/config/index.js';
 import { setTestSink } from '../../../src/utils/telemetry.js';
-import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
@@ -42,7 +41,17 @@ import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
 } from '../../../src/adapters/llm/types.js';
-import type { GraphStateIngress } from '../../../src/orchestrator-v5/boundary/request-extensions.js';
+import {
+  ADD_RISK_SCENARIO_ID as EDIT_SCENARIO_ID,
+  CAP1_SCENARIO_ID as SCENARIO_ID,
+  PARTIAL_GRAPH,
+  PRICING_GRAPH,
+  PRIOR_RA_TURN,
+  TARGETED_ADD_RISK_OPS,
+  makeBlankProjectionFreshFact,
+  makeEditProposalResponse,
+} from '../../../src/orchestrator-v5/__tests__/coaching-fixtures.js';
+import { makeMessagePayload } from '../../../src/orchestrator-v5/__tests__/fixtures.js';
 
 // ────────────────────────────────────────────────────────────────────
 // Mocks
@@ -101,76 +110,17 @@ const { runTurnExecutor } = await import('../../../src/orchestrator-v5/turn-exec
 const { dispatchEditGraph } = await import('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js');
 
 // ────────────────────────────────────────────────────────────────────
-// Cap-1 fixtures (mirroring turn-executor-post-analysis-loop.integration.test.ts)
+// Cap-1 fixtures (shared with turn-executor-post-analysis-loop.integration.test.ts
+// via src/orchestrator-v5/__tests__/coaching-fixtures.ts)
 // ────────────────────────────────────────────────────────────────────
 
-const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-
-const PARTIAL_GRAPH = {
-  nodes: [
-    { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
-    { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
-    { id: 'opt_hire', kind: 'option', label: 'Hire', interventions: { fac_capacity: 1 } },
-    { id: 'opt_status_quo', kind: 'option', label: 'Hold', is_baseline: true, interventions: { fac_capacity: 0 } },
-  ],
-  edges: [
-    { from: 'opt_hire', to: 'fac_capacity', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
-    { from: 'opt_status_quo', to: 'fac_capacity', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
-    { from: 'fac_capacity', to: 'goal_q3', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
-  ],
-  goal_node_id: 'goal_q3',
-};
-
-const PARTIAL_GRAPH_HASH = computeAnalysisAffectingGraphHash(PARTIAL_GRAPH as never)!;
-
-function makeBlankProjectionFreshFact(): Record<string, unknown> {
-  return {
-    fact_type: 'run_analysis' as const,
-    fact_version: 1 as const,
-    noop: false,
-    result: {
-      scenario_id: SCENARIO_ID,
-      leading_option_id: 'opt_hire',
-      summary: 'Prior analysis result',
-      graph_hash_at_run: PARTIAL_GRAPH_HASH,
-      computed_at: new Date(Date.now() - 60_000).toISOString(),
-      enrichment: {
-        analysis_status: 'completed',
-        option_comparison: [
-          { option_id: 'opt_hire', option_label: 'Hire', win_probability: 0.72, outcome_mean: 0.5 },
-          { option_id: 'opt_status_quo', option_label: 'Hold', win_probability: 0.28, outcome_mean: 0.3 },
-        ],
-        robustness_synthesis: { overall_assessment: 'moderate' },
-      },
-      win_probabilities: { opt_hire: 0.72, opt_status_quo: 0.28 },
-    },
-  };
-}
-
-const PRIOR_RA_TURN = {
-  id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
-  scenario_id: SCENARIO_ID,
-  user_id: null,
-  turn_id: 'prior-turn-run-analysis',
-  turn_class: 'handler',
-  handler_id: 'run_analysis',
-  request_hash: 'sha256:prior-ra',
-  response_emitted: true,
-  llm_calls_used: 1,
-  duration_ms: 200,
-  created_at: new Date(Date.now() - 60_000).toISOString(),
-};
-
 function mkCap1Payload(): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'composer',
+  return makeMessagePayload({
     turn_id: `t-${randomUUID()}`,
     scenario_id: SCENARIO_ID,
     message: 'How can we improve this?',
-    turn_class: 'frame',
     stage: 'analyse',
-  };
+  });
 }
 
 function throwingRoutingAdapter() {
@@ -184,57 +134,21 @@ function throwingRoutingAdapter() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Cap-2A fixtures (mirroring edit-graph-add-risk-flag-seam.test.ts)
+// Cap-2A fixtures (shared with edit-graph-add-risk-flag-seam.test.ts via
+// src/orchestrator-v5/__tests__/coaching-fixtures.ts)
 // ────────────────────────────────────────────────────────────────────
 
-const EDIT_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const STUB_REQUEST = {} as FastifyRequest;
 
-const PRICING_GRAPH: GraphStateIngress = {
-  nodes: [
-    { id: 'goal_growth', kind: 'goal', label: 'Reach 1000 customers' },
-    { id: 'dec_pricing', kind: 'decision', label: 'Pricing model' },
-    { id: 'opt_subscription', kind: 'option', label: 'Subscription' },
-    { id: 'opt_oneoff', kind: 'option', label: 'One-off' },
-    { id: 'fac_price', kind: 'factor', label: 'Price' },
-  ],
-  edges: [
-    { from: 'dec_pricing', to: 'opt_subscription', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
-    { from: 'dec_pricing', to: 'opt_oneoff', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
-    { from: 'opt_subscription', to: 'fac_price', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-    { from: 'opt_oneoff', to: 'fac_price', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-    { from: 'fac_price', to: 'goal_growth', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-  ],
-} as unknown as GraphStateIngress;
-
-const TARGETED_ADD_RISK_OPS = [
-  { op: 'add_node', path: 'risk_team_dynamics', value: { id: 'risk_team_dynamics', kind: 'risk', label: 'Team dynamics' } },
-  {
-    op: 'add_edge',
-    path: 'risk_team_dynamics->opt_subscription',
-    value: { from: 'risk_team_dynamics', to: 'opt_subscription', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' },
-  },
-];
-
 async function runCap2aRejectionTurn(turnId: string) {
-  llmChatMock.mockResolvedValue({
-    content: JSON.stringify({
-      operations: TARGETED_ADD_RISK_OPS,
-      removed_edges: [],
-      warnings: [],
-      coaching: { summary: 'Proposed change.' },
-    }),
-  });
+  llmChatMock.mockResolvedValue(makeEditProposalResponse(TARGETED_ADD_RISK_OPS));
   return dispatchEditGraph({
-    payload: {
-      kind: 'message' as const,
+    payload: makeMessagePayload({
       scenario_id: EDIT_SCENARIO_ID,
       turn_id: turnId,
-      stage: 'analyse' as const,
+      stage: 'analyse',
       message: 'Add team dynamics as a risk and connect it to churn',
-      turn_class: 'frame' as const,
-      source: 'composer' as const,
-    },
+    }),
     requestId: `req-${turnId}`,
     request: STUB_REQUEST,
     graphState: PRICING_GRAPH,
