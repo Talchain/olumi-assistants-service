@@ -14,7 +14,7 @@
  * inconclusives and exits 0.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -24,35 +24,48 @@ import {
   ReplayFixtureError,
 } from '../../../tools/golden-journey-harness/index.js';
 
-const FIXTURE_DIR = fileURLToPath(
-  new URL('../../../tools/golden-journey-harness/fixtures/', import.meta.url),
-);
+const HARNESS_DIR = fileURLToPath(new URL('../../../tools/golden-journey-harness/', import.meta.url));
+const FIXTURE_DIR = `${HARNESS_DIR}fixtures/`;
 
 function loadFixture(name: string): unknown {
   return JSON.parse(readFileSync(`${FIXTURE_DIR}${name}`, 'utf-8'));
 }
 
 /**
- * The expected replay outcome for each committed fixture. `gatingInvariant`,
- * when set, asserts the discriminating gating fail is that invariant (so a
- * fixture cannot exit 1 for an unrelated reason and read as success).
+ * SINGLE SOURCE OF TRUTH for the pinned fixture exit codes — the same
+ * `replay-manifest.json` the advisory replay-gate script
+ * (scripts/ci/golden-journey-replay-gate.sh) reads. This required unit test
+ * (in-process, via `evaluateReplayFixture`) and the out-of-process CLI gate
+ * therefore agree on the expected exits by construction; neither re-encodes
+ * them. (The `file` field omits the `.json` extension so the shell script can
+ * pass it straight to `--replay …/<file>.json`.)
  */
-const MANIFEST: ReadonlyArray<{
+interface ManifestEntry {
   readonly file: string;
-  readonly expectedExit: 0 | 1;
-  readonly gatingInvariant?: string;
-}> = [
-  { file: 'golden-journey-v1.json', expectedExit: 0 },
-  { file: 'golden-journey-v1-defects.json', expectedExit: 1 },
-  { file: 'golden-journey-v1-f4835349-regression.json', expectedExit: 0 },
-  { file: 'golden-journey-v1-add-risk-rejection.json', expectedExit: 0 },
-  { file: 'golden-journey-v1-context-drop.json', expectedExit: 1, gatingInvariant: 'A12' },
-];
+  readonly expected_exit: 0 | 1;
+  readonly gating_invariant?: string;
+}
+const MANIFEST: ReadonlyArray<ManifestEntry> = (
+  JSON.parse(readFileSync(`${HARNESS_DIR}replay-manifest.json`, 'utf-8')) as { fixtures: ManifestEntry[] }
+).fixtures;
 
 describe('replay-fixture manifest — expected exit codes are enforced, not just documented', () => {
-  for (const { file, expectedExit, gatingInvariant } of MANIFEST) {
+  it('the shared manifest covers every committed replay fixture (no drift)', () => {
+    // Guards against a fixture being added without a pinned expectation.
+    const manifestFiles = new Set(MANIFEST.map((m) => m.file));
+    const committed = new Set(
+      readdirSync(FIXTURE_DIR)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => f.replace(/\.json$/, '')),
+    );
+    expect([...committed].sort(), 'every committed fixture must be pinned in replay-manifest.json').toEqual(
+      [...manifestFiles].sort(),
+    );
+  });
+
+  for (const { file, expected_exit: expectedExit, gating_invariant: gatingInvariant } of MANIFEST) {
     it(`${file} → replay exit ${expectedExit}${gatingInvariant ? ` (gating ${gatingInvariant})` : ''}`, () => {
-      const result = evaluateReplayFixture(loadFixture(file) as never);
+      const result = evaluateReplayFixture(loadFixture(`${file}.json`) as never);
       expect(result.exitCode, `${file} expected replay exit ${expectedExit}`).toBe(expectedExit);
       if (expectedExit === 1) {
         expect(result.gatingFails, `${file} must have at least one gating fail`).toBeGreaterThan(0);
