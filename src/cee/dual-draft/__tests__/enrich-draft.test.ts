@@ -74,7 +74,7 @@ describe('enrichDraftGraph — M2 degrade paths (all return the untouched M1 gra
     // reason (accepted additive contract extension #2) — distinct from
     // m2_llm_error so config/failover conditions do not read as adapter
     // instability. The M2ReviewResult kind also rides on the degraded `detail`.
-    ['model gate', { kind: 'model_not_resolved', detail: 'CEE_MODEL_M2_REVIEW unset' }, 'm2_model_not_resolved'],
+    ['model gate', { kind: 'model_not_resolved', cause: 'model_unset', detail: 'CEE_MODEL_M2_REVIEW unset' }, 'm2_model_not_resolved'],
   ];
 
   for (const [label, m2Outcome, reason] of CASES) {
@@ -107,20 +107,25 @@ describe('enrichDraftGraph — M2 degrade paths (all return the untouched M1 gra
     expect((calls[0][1] as Record<string, unknown>).reason).toBe('m2_timeout');
   });
 
-  it('model gate degrades with the first-class reason AND a detail sub-cause on the degraded event', async () => {
-    mockM2({ kind: 'model_not_resolved', detail: 'CEE_MODEL_M2_REVIEW unset' });
-    const res = await enrichDraftGraph(makeInput());
-    // First-class reason, NOT hidden under m2_llm_error.
-    expect(res.reason).toBe('m2_model_not_resolved');
-    const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls.filter(
-      (c) => c[0] === TelemetryEvents.V6DualDraftDegraded,
-    );
-    expect(calls).toHaveLength(1);
-    const payload = calls[0][1] as Record<string, unknown>;
-    expect(payload.reason).toBe('m2_model_not_resolved');
-    // The M2ReviewResult kind rides along so the degraded event alone
-    // distinguishes static-config conditions from real LLM instability.
-    expect(payload.detail).toBe('model_not_resolved');
+  it('model gate degrades with the first-class reason AND the coded resolution sub-cause on the degraded event (P2)', async () => {
+    // Each of the three model-resolution sub-causes must surface distinctly so
+    // activation dashboards can tell "unset" from "provider_unsupported" from
+    // "model_mismatch" (they need different operator responses).
+    for (const cause of ['model_unset', 'provider_unsupported', 'model_mismatch'] as const) {
+      (emit as unknown as MockedFunction<typeof emit>).mockClear();
+      mockM2({ kind: 'model_not_resolved', cause, detail: `human detail for ${cause}` });
+      const res = await enrichDraftGraph(makeInput());
+      // First-class reason, NOT hidden under m2_llm_error.
+      expect(res.reason).toBe('m2_model_not_resolved');
+      const calls = (emit as unknown as MockedFunction<typeof emit>).mock.calls.filter(
+        (c) => c[0] === TelemetryEvents.V6DualDraftDegraded,
+      );
+      expect(calls).toHaveLength(1);
+      const payload = calls[0][1] as Record<string, unknown>;
+      expect(payload.reason).toBe('m2_model_not_resolved');
+      // Coded sub-cause forwarded (NOT the collapsed kind 'model_not_resolved').
+      expect(payload.detail).toBe(cause);
+    }
   });
 });
 

@@ -28,6 +28,10 @@ export function emitM2Outcome(input: EnrichmentInput, result: M2ReviewResult): v
       model: result.model,
       proposals_count: result.proposals.length,
     }),
+    // Coded model-resolution sub-cause (safe enum — config values only) so
+    // activation dashboards distinguish unset / provider-unsupported /
+    // model-mismatch, the three operator-actionable inert conditions.
+    ...(result.kind === 'model_not_resolved' && { cause: result.cause }),
   });
 }
 

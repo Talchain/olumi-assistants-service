@@ -43,9 +43,12 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();
   return { ...actual, emit: vi.fn() };
 });
-vi.mock('../index.js', () => ({
-  enrichDraftGraph: vi.fn(),
-}));
+vi.mock('../index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../index.js')>();
+  // Keep the REAL m2LlmCallMade (the exhaustive reason->call classifier the
+  // dispatch uses for llm_calls_used); stub only enrichDraftGraph.
+  return { ...actual, enrichDraftGraph: vi.fn() };
+});
 
 import { dispatchDraftGraph } from '../../../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
@@ -184,18 +187,40 @@ describe('Phase 4 — merged-graph dispatch compatibility (flag ON, enricher ret
     expect(mismatchEvents).toHaveLength(0);
   });
 
-  it('accounting: llm_calls_used stays 1 on degraded (M1-only) turns', async () => {
-    (enrichDraftGraph as MockedFunction<typeof enrichDraftGraph>).mockResolvedValue({
-      enriched: false,
-      reason: 'm2_timeout',
-      graph: M1_GRAPH,
-    } as Awaited<ReturnType<typeof enrichDraftGraph>>);
+  // P3 (external Codex review): accounting is CALL-based, not merge-based —
+  // an M2 that reached the model but merged nothing / timed out / errored
+  // still spent a call and must count 2, not 1.
+  it.each(['no_proposals_applied', 'm2_timeout', 'm2_parse_failed', 'post_merge_invalid'] as const)(
+    'accounting (P3): llm_calls_used=2 when M2 was called but degraded with reason %s',
+    async (reason) => {
+      (enrichDraftGraph as MockedFunction<typeof enrichDraftGraph>).mockResolvedValue({
+        enriched: false,
+        reason,
+        graph: M1_GRAPH,
+      } as Awaited<ReturnType<typeof enrichDraftGraph>>);
 
-    await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-p4-acct-deg', request: STUB_REQUEST });
+      await dispatchDraftGraph({ payload: makePayload(), requestId: `req-p4-${reason}`, request: STUB_REQUEST });
 
-    const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-    expect(metadata.llm_calls_used).toBe(1);
-  });
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.llm_calls_used).toBe(2);
+    },
+  );
+
+  it.each(['prompt_not_provisioned', 'insufficient_headroom', 'm2_model_not_resolved', 'invalid_ingress_graph'] as const)(
+    'accounting: llm_calls_used stays 1 when M2 never reached the model (reason %s)',
+    async (reason) => {
+      (enrichDraftGraph as MockedFunction<typeof enrichDraftGraph>).mockResolvedValue({
+        enriched: false,
+        reason,
+        graph: M1_GRAPH,
+      } as Awaited<ReturnType<typeof enrichDraftGraph>>);
+
+      await dispatchDraftGraph({ payload: makePayload(), requestId: `req-p4-nocall-${reason}`, request: STUB_REQUEST });
+
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.llm_calls_used).toBe(1);
+    },
+  );
 
   it('freshness current_graph_hash is computed from the MERGED graph, not the M1 graph', async () => {
     const result = await dispatchDraftGraph({

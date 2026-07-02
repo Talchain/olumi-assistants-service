@@ -37,6 +37,17 @@ const POST_REVIEW_HEADROOM_MS = 10_000;
 
 const DEFAULT_M2_MAX_TOKENS = 4096;
 
+/**
+ * Coded sub-cause for `model_not_resolved` — safe to emit on telemetry
+ * (bounded enum, config values only, no user content) so activation
+ * dashboards can distinguish the three operator-actionable conditions:
+ *   model_unset          — CEE_MODEL_M2_REVIEW not set (ops forgot);
+ *   provider_unsupported — resolved to a non-Anthropic model (wrong family);
+ *   model_mismatch       — router resolved a different model (blocked /
+ *                          failover / override intercepted the config value).
+ */
+export type M2ModelResolutionCause = 'model_unset' | 'provider_unsupported' | 'model_mismatch';
+
 export type M2ReviewResult =
   | {
       readonly kind: 'ok';
@@ -45,7 +56,7 @@ export type M2ReviewResult =
       readonly model: string;
     }
   | { readonly kind: 'prompt_not_provisioned' }
-  | { readonly kind: 'model_not_resolved'; readonly detail: string }
+  | { readonly kind: 'model_not_resolved'; readonly cause: M2ModelResolutionCause; readonly detail: string }
   | { readonly kind: 'insufficient_headroom' }
   | { readonly kind: 'timeout' }
   | { readonly kind: 'llm_error'; readonly message: string }
@@ -102,7 +113,7 @@ export async function reviewDraftGraph(input: EnrichmentInput): Promise<M2Review
       { request_id: input.requestId, scenario_id: input.scenarioId },
       'V6 dual-draft M2 model not configured — set CEE_MODEL_M2_REVIEW explicitly; stage inert',
     );
-    return { kind: 'model_not_resolved', detail: 'CEE_MODEL_M2_REVIEW unset' };
+    return { kind: 'model_not_resolved', cause: 'model_unset', detail: 'CEE_MODEL_M2_REVIEW unset' };
   }
 
   const { adapter, resolution } = getAdapterWithResolution('m2_graph_review');
@@ -122,6 +133,7 @@ export async function reviewDraftGraph(input: EnrichmentInput): Promise<M2Review
     );
     return {
       kind: 'model_not_resolved',
+      cause: 'provider_unsupported',
       detail: `provider "${resolution.provider}" does not support structured outputs`,
     };
   }
@@ -138,6 +150,7 @@ export async function reviewDraftGraph(input: EnrichmentInput): Promise<M2Review
     );
     return {
       kind: 'model_not_resolved',
+      cause: 'model_mismatch',
       detail: `resolved "${resolution.resolved_model}" != configured "${configuredModel}"`,
     };
   }

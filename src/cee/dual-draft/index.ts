@@ -35,6 +35,50 @@ import { emitM2Outcome, emitMergeReport, emitDegraded } from './telemetry.js';
 
 export type { EnrichmentInput, EnrichmentOutcome, EnrichmentReason } from './types.js';
 
+/**
+ * Whether the M2 review actually made an LLM call for a given outcome reason.
+ *
+ * Drives `llm_calls_used` accounting in the dispatch: an M2 call (and its
+ * token cost) happens whenever the review reached `adapter.chat` — which is
+ * true even when the call timed out, errored, returned unparseable output, or
+ * merged nothing. It is FALSE only for the reasons that short-circuit before
+ * the call (prompt sentinel, headroom gate, model-resolution gate, invalid
+ * ingress) and the never-fire backstop. Exhaustive over EnrichmentReason so a
+ * new reason forces an explicit classification here rather than silently
+ * mis-counting. Co-located with the reason taxonomy (not gated on whether a
+ * merge landed) so the two cannot drift.
+ */
+export function m2LlmCallMade(reason: EnrichmentReason): boolean {
+  switch (reason) {
+    // Short-circuited before adapter.chat — no M2 call, no cost. `internal_error`
+    // is the never-fire backstop: conservatively "no call" (a throw is plausible
+    // only on the pre-call paths such as safeParse, and the honest-minimum
+    // convention prefers under- to over-counting on a should-never-fire path).
+    case 'not_implemented':
+    case 'invalid_ingress_graph':
+    case 'prompt_not_provisioned':
+    case 'insufficient_headroom':
+    case 'm2_model_not_resolved':
+    case 'internal_error':
+      return false;
+    // adapter.chat was invoked — a call (and tokens) were spent regardless of
+    // whether the response merged, timed out, errored, or failed to parse.
+    case 'applied':
+    case 'no_proposals_applied':
+    case 'm2_timeout':
+    case 'm2_llm_error':
+    case 'm2_parse_failed':
+    case 'post_merge_invalid':
+    case 'option_surface_changed':
+    case 'readiness_downgrade':
+      return true;
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}
+
 const M2_DEGRADE_REASON = {
   prompt_not_provisioned: 'prompt_not_provisioned',
   insufficient_headroom: 'insufficient_headroom',
@@ -73,10 +117,13 @@ export async function enrichDraftGraph(input: EnrichmentInput): Promise<Enrichme
     const m2 = await reviewDraftGraph(input);
     emitM2Outcome(input, m2);
     if (m2.kind !== 'ok') {
-      // The M2ReviewResult kind rides along as `detail` — it is more precise
-      // than the frozen EnrichmentReason union (notably 'model_not_resolved',
-      // which maps onto 'm2_llm_error').
-      return degrade(M2_DEGRADE_REASON[m2.kind], m2.kind);
+      // Carry the most specific coded sub-cause as the degraded event `detail`.
+      // For model_not_resolved this is the coded resolution cause (model_unset
+      // / provider_unsupported / model_mismatch) so activation dashboards can
+      // group by operator-actionable condition rather than collapsing all
+      // three to one value; for other non-ok kinds it is the kind itself.
+      const detail = m2.kind === 'model_not_resolved' ? m2.cause : m2.kind;
+      return degrade(M2_DEGRADE_REASON[m2.kind], detail);
     }
 
     // 3. Deterministic merge — every proposal in exactly one bucket. Operates

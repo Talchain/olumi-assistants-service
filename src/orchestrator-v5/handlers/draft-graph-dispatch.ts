@@ -371,9 +371,11 @@ export async function dispatchDraftGraph(
   }
 
   try {
-    // Whether the dual-draft stage APPLIED a merge this turn (an M2 LLM call
-    // happened and ≥1 proposal landed). Drives llm_calls_used accounting.
-    let enrichmentApplied = false;
+    // M2 LLM calls made by the dual-draft stage this turn (0 or 1). Counted
+    // whenever M2 actually reached the model — even if the merge applied
+    // nothing, timed out, or errored — NOT gated on whether a merge landed.
+    // Drives llm_calls_used accounting.
+    let m2LlmCallsUsed = 0;
 
     // ── V6 dual-model draft enrichment (flag-gated, default OFF) ───────────
     // When CEE_V6_DUAL_DRAFT_ENABLED is on, an M2 review pass proposes
@@ -390,7 +392,7 @@ export async function dispatchDraftGraph(
     // phases behind the same flag.
     if (config.features.v6DualDraftEnabled && draftResult.graphOutput !== null) {
       try {
-        const { enrichDraftGraph } = await import('../../cee/dual-draft/index.js');
+        const { enrichDraftGraph, m2LlmCallMade } = await import('../../cee/dual-draft/index.js');
         const outcome = await enrichDraftGraph({
           graph: draftResult.graphOutput,
           brief: payload.message,
@@ -400,8 +402,13 @@ export async function dispatchDraftGraph(
           turnId: payload.turn_id,
           pipelineElapsedMs: draftResult.latencyMs,
         });
+        // Accounting is call-based, not merge-based: a "called-but-merged-
+        // nothing" / timed-out / errored M2 still spent a call. The exhaustive
+        // helper (co-located with the reason taxonomy) classifies the outcome.
+        if (m2LlmCallMade(outcome.reason)) {
+          m2LlmCallsUsed = 1;
+        }
         if (outcome.enriched) {
-          enrichmentApplied = true;
           // assistantText is nulled alongside the graph swap: the M1 handler
           // narration describes the PRE-merge graph, and the narration-count
           // guard would otherwise compare it against merged counts — firing a
@@ -507,14 +514,12 @@ export async function dispatchDraftGraph(
         turn_class: 'direct_answer',
         handler_id: null,
         request_hash: computeRequestHash(payload),
-        // 1 = the unified pipeline's draft-stage call (honest minimum, see
-        // above). +1 when the V6 dual-draft M2 review APPLIED a merge this
-        // turn. Residual known undercount: M2 calls that completed but merged
-        // nothing (all-rejected/deferred/empty) still commit as 1 — the
-        // EnrichmentOutcome contract carries no call count (frozen; a
-        // dedicated field is a reported follow-up). Precise M2 accounting
-        // lives in v6.dual_draft.m2_outcome telemetry.
-        llm_calls_used: enrichmentApplied ? 2 : 1,
+        // 1 = the unified pipeline's draft-stage call (honest minimum). +1
+        // whenever the V6 dual-draft M2 review actually reached the model this
+        // turn (call-based, not merge-based — a call that merged nothing /
+        // timed out / errored still counts). m2LlmCallsUsed is 0 for the
+        // no-call inert paths (sentinel, headroom, model-resolution gate).
+        llm_calls_used: 1 + m2LlmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
         graph: draftResult.graphOutput ?? undefined,

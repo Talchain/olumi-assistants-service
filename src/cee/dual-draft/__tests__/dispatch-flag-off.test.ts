@@ -51,9 +51,12 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 // Spy on the dual-draft entry point. The dispatch dynamic-imports
 // '../../cee/dual-draft/index.js', which resolves to the same module id this
 // mock keys on, so the dispatch's call lands on this vi.fn().
-vi.mock('../index.js', () => ({
-  enrichDraftGraph: vi.fn(),
-}));
+vi.mock('../index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../index.js')>();
+  // Real m2LlmCallMade (dispatch destructures it for llm_calls_used); stub
+  // only enrichDraftGraph so call-count can be asserted.
+  return { ...actual, enrichDraftGraph: vi.fn() };
+});
 
 import { dispatchDraftGraph } from '../../../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';

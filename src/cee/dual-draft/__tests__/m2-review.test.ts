@@ -104,24 +104,27 @@ describe('reviewDraftGraph — model-resolution gate (activation ruling: inert +
     (getSystemPrompt as MockedFunction<typeof getSystemPrompt>).mockResolvedValue('You are M2.');
   });
 
-  it('CEE_MODEL_M2_REVIEW unset → model_not_resolved, adapter NEVER called', async () => {
+  it('CEE_MODEL_M2_REVIEW unset → model_not_resolved (cause model_unset), adapter NEVER called', async () => {
     modelCfg.value = undefined;
     const res = await reviewDraftGraph(makeInput());
     expect(res.kind).toBe('model_not_resolved');
+    if (res.kind === 'model_not_resolved') expect(res.cause).toBe('model_unset');
     expect(chatMock).not.toHaveBeenCalled();
   });
 
-  it('router resolves a DIFFERENT model than configured (e.g. blocked/failover) → model_not_resolved, adapter never called', async () => {
+  it('router resolves a DIFFERENT model than configured (blocked/failover) → model_not_resolved (cause model_mismatch), adapter never called', async () => {
     wireAdapter('some-other-model');
     const res = await reviewDraftGraph(makeInput());
     expect(res.kind).toBe('model_not_resolved');
+    if (res.kind === 'model_not_resolved') expect(res.cause).toBe('model_mismatch');
     expect(chatMock).not.toHaveBeenCalled();
   });
 
-  it('model resolving to a non-Anthropic provider (structured outputs unsupported) → model_not_resolved, adapter never called', async () => {
+  it('model resolving to a non-Anthropic provider → model_not_resolved (cause provider_unsupported), adapter never called', async () => {
     wireAdapter('test-model', 'openai');
     const res = await reviewDraftGraph(makeInput());
     expect(res.kind).toBe('model_not_resolved');
+    if (res.kind === 'model_not_resolved') expect(res.cause).toBe('provider_unsupported');
     expect(chatMock).not.toHaveBeenCalled();
   });
 
