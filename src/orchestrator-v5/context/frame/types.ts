@@ -226,9 +226,10 @@ export interface CanonicalContextFrame {
  *
  * Every field is an already-resolved authority OUTPUT taken from the current
  * turn's call path. A builder constructed against this type cannot introduce a
- * second derivation: it is handed the freshness verdict, the canonical state,
- * the already-projected recent-changes and the graph hash, and may only project
- * them. Because `recentChanges` arrives as the frame-projected
+ * second derivation: it is handed the freshness verdict (which carries the
+ * current graph hash), the canonical state, and the already-projected
+ * recent-changes, and may only project them. Because `recentChanges` arrives as
+ * the frame-projected
  * {@link FrameChanges} (not raw `RecentMutation[]`), the builder structurally
  * cannot re-run `projectRecentChanges`. See state map §3.1.
  */
@@ -251,14 +252,22 @@ export interface BuildFrameInput {
    * `projectRecentChanges` (or re-apply the cap) a second time.
    */
   readonly recentChanges: FrameChanges;
-  /** The current turn's analysis-affecting graph hash. */
-  readonly graphHash: string | null;
   /** Optional graph entity counts, when the caller has them. */
   readonly graphCounts?: FrameGraphCounts | null;
   /** Prior-turn count from the assembled context. */
   readonly priorTurnCount?: number;
   /** Deterministic pre-route verdict, when a gate matched. */
   readonly intent?: FrameIntent;
+  /**
+   * Whether a user-facing confirmation is outstanding this turn. This is a
+   * conversation/confirmation-flow fact owned upstream (`confirmation-flow.ts` /
+   * `most_recent_pending_actions`), NOT derivable from the four analysis
+   * authorities — so the caller supplies it. Optional; the builder defaults to
+   * `false` when it is not threaded (the inert/off default). The builder never
+   * computes confirmation state; a `false` default is "not supplied", and must
+   * not be read as a positive "no pending action" claim.
+   */
+  readonly pendingConfirmation?: boolean;
   /**
    * Claim-permission table. When omitted, the builder is expected to default to
    * the held table (`DEFAULT_CLAIM_PERMISSIONS`). No relaxation here.
