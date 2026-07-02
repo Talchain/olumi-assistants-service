@@ -1,6 +1,6 @@
 # UI ⇄ CEE wire-contract skew — evidence pack (0.8.1 vs 0.13.0)
 
-**Date:** 2026-07-02 · **CEE ref:** `origin/staging` @ `475922b300` · **Status:** live output-loss
+**Date:** 2026-07-02 · **CEE ref:** `origin/staging` @ `2376914c8` (post-#318) · **Status:** live output-loss
 defect, not future polish.
 
 ## 1. The skew
@@ -63,9 +63,12 @@ all. Any earlier statement implying these are droppable top-level wire fields is
    `src/orchestrator-v5/coaching/decision-review-enricher.ts` (plus the PLoT enrichment keep-list
    seam, PR #297). The UI probes some of these only as evidence-promotion *gate keys*
    (DGAI `src/lib/v5EvidenceKeys.ts`) — the values themselves are not extracted or displayed.
-4. **UI-side adapted-but-unrendered fields** (not a schema-version issue, but part of the same
-   output-loss picture): `strengthen_items[].actionType` and `strengthen_items[].biasCategory`
-   are mapped by DGAI `src/adapters/cee/client.ts` `mapDraftCoachingFromResponse()` and then never
+4. **UI-side adapted-but-partially-rendered fields** (not a schema-version issue, but part of the
+   same output-loss picture): `strengthen_items[].actionType` and `strengthen_items[].biasCategory`
+   are mapped by DGAI `src/adapters/cee/client.ts` `mapDraftCoachingFromResponse()`. As of the
+   Brief 5.8B D2b overlay, `actionType` IS now rendered
+   (`src/canvas/components/pre-analysis/utils/applyStrengthenOverlay.ts` →
+   `TriageActionCardsBody.tsx` / `PreAnalysisPanel.tsx`); `biasCategory` remains mapped but never
    consumed by any component.
 
 ## 4. Why the loss is silent
