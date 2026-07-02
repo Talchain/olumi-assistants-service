@@ -194,7 +194,7 @@ describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () =
       turn_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       scenario_id: SCENARIO_ID,
       message: 'tell me about this decision',
-      turn_class: 'explore',
+      turn_class: 'frame',
       stage: 'analyse',
     });
     const result = await runTurnExecutor(payload, 'req-frame-converse', {
