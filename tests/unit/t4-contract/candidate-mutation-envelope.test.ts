@@ -73,23 +73,34 @@ const PayloadByKind = {
   clarification: z.object({ target_ref: z.string().min(1), question: z.string().min(1) }).strict(),
 } satisfies Record<(typeof CANDIDATE_KINDS)[number], z.ZodTypeAny>;
 
-const CandidateMutationEnvelopeV1 = z
-  .discriminatedUnion(
-    'kind',
-    CANDIDATE_KINDS.map((kind) =>
-      z
-        .object({
-          envelope_version: z.literal(1),
-          candidate_id: z.string().uuid(),
-          kind: z.literal(kind),
-          base_graph_hash: z.string().min(1), // null/absent FORBIDDEN — stale gate needs it
-          payload: PayloadByKind[kind],
-          provenance: ProvenanceSchema,
-          identity: IdentitySchema,
-        })
-        .strict(),
-    ) as never,
-  );
+function envelopeBranch<K extends (typeof CANDIDATE_KINDS)[number]>(kind: K) {
+  return z
+    .object({
+      envelope_version: z.literal(1),
+      candidate_id: z.string().uuid(),
+      kind: z.literal(kind),
+      base_graph_hash: z.string().min(1), // null/absent FORBIDDEN — stale gate needs it
+      payload: PayloadByKind[kind],
+      provenance: ProvenanceSchema,
+      identity: IdentitySchema,
+    })
+    .strict();
+}
+
+// Explicit tuple (no cast): zod's discriminatedUnion type-checks every branch.
+// Totality vs CANDIDATE_KINDS is enforced by the valid-example loop below.
+const CandidateMutationEnvelopeV1 = z.discriminatedUnion('kind', [
+  envelopeBranch('add_node'),
+  envelopeBranch('add_edge'),
+  envelopeBranch('update_node_field'),
+  envelopeBranch('update_edge_field'),
+  envelopeBranch('rename_node'),
+  envelopeBranch('add_option'),
+  envelopeBranch('remove_node'),
+  envelopeBranch('remove_edge'),
+  envelopeBranch('flag_uncertainty'),
+  envelopeBranch('clarification'),
+]);
 
 // ---------------------------------------------------------------------------
 // Fixtures — one VALID example per kind (contract §6.1)
@@ -165,11 +176,15 @@ describe('T4.0 candidate mutation envelope v1 — executable spec', () => {
       expect(CandidateMutationEnvelopeV1.safeParse(bad).success).toBe(false);
     });
 
-    it('rejects extra payload fields (strict per-kind payloads)', () => {
-      const valid = VALID_BY_KIND.rename_node as { payload: object };
-      const bad = { ...valid, payload: { ...valid.payload, elasticity: 0.4 } };
-      expect(CandidateMutationEnvelopeV1.safeParse(bad).success).toBe(false);
-    });
+    // EVERY kind is exercised: a single sampled kind would let `.strict()`
+    // silently drop from another kind's payload schema (review finding).
+    for (const kind of CANDIDATE_KINDS) {
+      it(`rejects extra payload fields on ${kind} (strict per-kind payloads)`, () => {
+        const valid = VALID_BY_KIND[kind] as { payload: object };
+        const bad = { ...valid, payload: { ...valid.payload, elasticity: 0.4 } };
+        expect(CandidateMutationEnvelopeV1.safeParse(bad).success).toBe(false);
+      });
+    }
 
     it('rejects a missing provenance block', () => {
       const { provenance: _drop, ...bad } = VALID_BY_KIND.add_node as { provenance: unknown };
@@ -194,12 +209,23 @@ describe('T4.0 candidate mutation envelope v1 — executable spec', () => {
   });
 
   describe('isolation guard (contract §0 — off-path until T4 opens)', () => {
-    it('this spec imports nothing from src/ (fail-closed against premature wiring)', async () => {
-      const { readFileSync } = await import('node:fs');
-      const source = readFileSync(new URL(import.meta.url), 'utf-8');
-      const importLines = source.split('\n').filter((l) => /^\s*import\s/.test(l));
-      for (const line of importLines) {
-        expect(line).not.toMatch(/from\s+['"][^'"]*(src\/|\.\.\/\.\.\/src)/);
+    it('no file in tests/unit/t4-contract/ imports from src/ (fail-closed against premature wiring)', async () => {
+      const { readFileSync, readdirSync } = await import('node:fs');
+      const { dirname, join } = await import('node:path');
+      const { fileURLToPath } = await import('node:url');
+      const dir = dirname(fileURLToPath(import.meta.url));
+      const files = readdirSync(dir).filter((f) => f.endsWith('.ts'));
+      // Non-vacuous by construction: the directory must contain at least this
+      // spec, and every spec must import at least vitest (review finding: a
+      // zero-match scan previously passed without asserting anything).
+      expect(files.length).toBeGreaterThan(0);
+      for (const file of files) {
+        const source = readFileSync(join(dir, file), 'utf-8');
+        const importLines = source.split('\n').filter((l) => /^\s*import\s/.test(l));
+        expect(importLines.length).toBeGreaterThanOrEqual(1);
+        for (const line of importLines) {
+          expect(line).not.toMatch(/from\s+['"][^'"]*(src\/|\.\.\/\.\.\/src)/);
+        }
       }
     });
   });

@@ -47,7 +47,10 @@ Verified live:
   what is on disk and on GitHub.
 - Changed files: 5 (2 new: builder + test; edits to frame `index.ts`/`types.ts`; 1 doc).
 - **Inertness proven:** zero callers/importers of `buildFrame` outside the module + its
-  test, on both staging and the branch. Claim permissions default HELD; graph-hash
+  test, on both staging and the branch — claim type: no-live-import; scope:
+  `git grep -l "build-frame\|buildCanonicalContextFrame\|CanonicalContextFrame" <ref> -- src/`
+  on `origin/staging` and `ee5bc38c85`, 2026-07-02; all hits are the frame module files
+  (`index.ts`, `types.ts`, `build-frame.ts`) and its `__tests__/` file. Claim permissions default HELD; graph-hash
   single-sourced from `freshness.current_graph_hash`; source-scan guard test enforces the
   no-re-derivation allowlist. 16/16 tests pass per PR evidence.
 - Rebase risk: the 3 staging commits ahead (`3e4b86115`, `475922b30`, `2376914c8`) touch
@@ -68,14 +71,11 @@ change. No action needed before then — the draft is not rotting (clean rebase,
 | T4.0 hand-off contract | delivered by this mission (see contract doc) | typed-mutation slice |
 | Signature-loop lane | **cleared (abandon)** | — |
 
-## 4. T4 opening sequence (unchanged, now unblocked through step 2)
+## 4. T4 opening sequence
 
-1. **Canonical state** — land #315 (rebased), builder stays pure.
-2. **Context continuity** — thread the frame through the executor call path (consumers
-   read, never re-derive).
-3. **Freshness fail-closed** — unknown/unconfirmed freshness downgrades mutation verdicts
-   to `held`; no fresh-looking stale data.
-4. **Typed mutation / graph management** — implement the T4.0 hand-off contract
-   (envelope + referee + dual-draft adapter) at the dispatch seam.
-5. **Orchestration proof** — golden-journey propose→hold→confirm→apply→rerun journey with
-   A3/A4/A8/A12 gating green in required CI.
+**Authoritative definition:**
+[dual-model-typed-mutation-handoff-contract.md §7](./dual-model-typed-mutation-handoff-contract.md)
+— maintained there only, to avoid two drifting copies. In one line each: 1 canonical state
+(#315) · 2 context continuity (frame threading) · 3 freshness fail-closed · 4 typed
+mutation (this contract) · 5 orchestration proof (golden-journey). Steps 1–2 are unblocked
+by this packet; steps 3–5 gate on the §3 blocker register.
