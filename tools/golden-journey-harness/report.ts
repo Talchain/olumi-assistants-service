@@ -2,7 +2,7 @@
  * Golden-Journey Harness v1 — classified report writer.
  *
  * Renders the run as markdown: an executive verdict + the single "which
- * core component must fix this next", a 6-component matrix, the A1..A7
+ * core component must fix this next", a 6-component matrix, the A1..A12
  * invariant table, a per-step table for the full 10-step journey, the
  * findings detail, and the dispatch coverage caveats.
  *
@@ -44,6 +44,7 @@ const INVARIANT_ORDER: readonly InvariantId[] = [
   'A9',
   'A10',
   'A11',
+  'A12',
 ];
 
 /** Raw per-step capture produced by the runner (before classification). */
@@ -120,7 +121,7 @@ export function statusByInvariant(findings: readonly Finding[]): Record<Invarian
  * "Which core component must fix this next?" — the primary component of the
  * highest-priority finding. Priority: a GATING fail beats an ADVISORY fail
  * (A5 / provisional A1 are semantic & LLM-variance-prone) beats an
- * inconclusive; ties broken by invariant order (A1..A7), then component number.
+ * inconclusive; ties broken by invariant order (A1..A12), then component number.
  */
 export function nextComponentToFix(
   findings: readonly Finding[],
@@ -256,7 +257,7 @@ export function renderGoldenReport(input: GoldenReportInput, redact: Redactor = 
   lines.push('');
 
   // ---- Invariant table ----
-  lines.push('## Invariant results (A1..A7)');
+  lines.push('## Invariant results (A1..A12)');
   lines.push('');
   lines.push('| id | invariant | primary component | status | note |');
   lines.push('|---|---|---|---|---|');

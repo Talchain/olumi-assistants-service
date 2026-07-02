@@ -110,7 +110,7 @@ export const GOLDEN_STEPS: readonly GoldenStep[] = [
     name: '3_explain_leader',
     role: 'explain',
     description: '"Why does the leading option win?" → grounded explanation, no denial of available analysis.',
-    invariants: ['A1', 'A5', 'A6'],
+    invariants: ['A1', 'A5', 'A6', 'A12'],
     depends_on: '2_run_analysis',
     buildPayload: (ctx) => ({
       kind: 'message',
@@ -126,7 +126,7 @@ export const GOLDEN_STEPS: readonly GoldenStep[] = [
     name: '4_follow_up',
     role: 'follow_up',
     description: 'Follow-up that depends on recent-turn context ("…and how does the runner-up compare?").',
-    invariants: ['A1', 'A2', 'A5'],
+    invariants: ['A1', 'A2', 'A5', 'A12'],
     depends_on: '2_run_analysis',
     buildPayload: (ctx) => ({
       kind: 'message',
@@ -178,7 +178,7 @@ export const GOLDEN_STEPS: readonly GoldenStep[] = [
     name: '7_explain_what_changed',
     role: 'explain_changed',
     description: '"What changed?" → references the edited factor + honest change description.',
-    invariants: ['A1', 'A5', 'A7'],
+    invariants: ['A1', 'A5', 'A7', 'A12'],
     depends_on: '5_mutate',
     buildPayload: (ctx) => ({
       kind: 'message',
@@ -196,7 +196,7 @@ export const GOLDEN_STEPS: readonly GoldenStep[] = [
     description:
       'Fresh read turn (no graph_state in body) → server reloads canonical graph + re-derives analysis_ready. ' +
       'Proves analysis state survives reload and is not contradicted.',
-    invariants: ['A1', 'A2'],
+    invariants: ['A1', 'A2', 'A12'],
     depends_on: '6_rerun_analysis',
     buildPayload: (ctx) => ({
       kind: 'message',
@@ -270,10 +270,28 @@ export const GOLDEN_SYNTHETIC_STEPS: ReadonlyArray<{
   },
 ];
 
-/** Map a step name back to its role (used when re-hydrating a replay transcript). */
+/**
+ * Fixture step names that are not golden steps but have a known, deliberate
+ * role. `9_add_risk_rejection` is the Cap-2A acceptance fixture's rejection
+ * turn — a non-committing change request (`mutate_intent`), which is exactly
+ * the role A8b targets. (Under the old `follow_up` fallback it was mis-roled:
+ * A8b never fired on the very fixture authored for it, and A5 judged a
+ * rejection as coaching.)
+ */
+const STEP_ROLE_ALIASES: Readonly<Record<string, TurnRole>> = {
+  '9_add_risk_rejection': 'mutate_intent',
+};
+
+/**
+ * Map a step name back to its role (used when re-hydrating a replay
+ * transcript). Unknown step names get the neutral `unknown` role so only the
+ * universal invariants apply — a guessed role must never drive role-specific
+ * semantic checks (the pre-existing `follow_up` fallback did exactly that).
+ */
 export function roleForStep(name: string): TurnRole {
   const step = GOLDEN_STEPS.find((s) => s.name === name);
-  return step?.role ?? 'follow_up';
+  if (step) return step.role;
+  return STEP_ROLE_ALIASES[name] ?? 'unknown';
 }
 
 /**

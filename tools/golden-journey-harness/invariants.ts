@@ -315,6 +315,9 @@ export function a4NoFalseSuccess(obs: TurnObservation): Finding[] {
   }
 
   // A non-mutating turn that opens with a graph-mutation success claim.
+  // 'unknown' is included (review fix): an unrecognised step name must keep
+  // the universal safety floor — the old follow_up fallback applied this
+  // check to unknown steps and the neutral role must not silently drop it.
   const NON_MUTATING: ReadonlyArray<TurnObservation['role']> = [
     'analysis',
     'explain',
@@ -322,6 +325,7 @@ export function a4NoFalseSuccess(obs: TurnObservation): Finding[] {
     'rerun_analysis',
     'explain_changed',
     'reload',
+    'unknown',
   ];
   if (NON_MUTATING.includes(obs.role) && openingSuccess) {
     const m = text.match(OPENING_SUCCESS_CLAIM);
@@ -548,21 +552,54 @@ const A8_EXCLUDED_ROLES: ReadonlyArray<TurnRole> = ['draft', 'analysis', 'rerun_
  * pre-turn hash; OR no committing `handler_id` ran; OR the turn only emitted a
  * `proposed_*` pending action. A success claim under any of these is phantom.
  */
+/**
+ * STRONG mutation-acknowledgement detector for `mutate_intent` turns. Requires
+ * a strong claim SHAPE anywhere in the (apostrophe-normalised) text: a
+ * sentence-opening mutation verb, a first-person claim ("I've updated …"), a
+ * passive claim ("… has been updated"), or a state-assertion ("now
+ * shows/reflects").
+ *
+ * These shapes are precise enough that bare attributive verb forms ("… from an
+ * updated brief") do NOT match — which is the adjectival false positive the
+ * review drills first caught. An EARLIER fix excluded any sentence containing a
+ * rejection phrase, but that was itself fail-open: a mixed reject-plus-ack in
+ * ONE sentence ("I wasn't able to apply X, but the Budget factor has been
+ * updated.") hid the genuine ack behind the rejection clause and passed
+ * (review blocker). The exclusion is removed: a strong ack is a phantom-success
+ * signal wherever it appears, because it is a completed-mutation claim.
+ *
+ * Direction-of-error note: A8 is a GATING safety invariant, so a false RED is
+ * the safe direction (a real mutation moves the graph hash, and the caller
+ * passes A8 via `hashMoved` even when this returns true). The one residual
+ * over-match — rejection copy that literally asserts a completed change with
+ * "now shows/reflects" descriptively — is both rare and safe-side; no current
+ * rejection copy (generic suppression or the Cap-2A placeholder) trips it.
+ */
+function hasStrongMutationAck(rawText: string): boolean {
+  const FIRST_PERSON_ACK =
+    /\bI(?:'ve| have| just)?\s+(?:updated|changed|adjusted|set|added|removed|applied|modified|created)\b/i;
+  const PASSIVE_OR_STATE_ACK =
+    /\bhas been (?:updated|changed|adjusted|set|added|removed|applied)\b|\bnow (?:has|shows|reflects)\b/i;
+  const text = normaliseApostrophes(rawText);
+  return OPENING_SUCCESS_CLAIM.test(text) || FIRST_PERSON_ACK.test(text) || PASSIVE_OR_STATE_ACK.test(text);
+}
+
 export function a8NonCommittingNoFalseSuccess(obs: TurnObservation): Finding[] {
   if (A8_EXCLUDED_ROLES.includes(obs.role)) return [];
   if (obs.httpStatus !== 200) return []; // failure is A7's concern, not A8's
   const text = getAssistantText(obs.body);
-  const mutationAck = MUTATION_ACK_PATTERN.test(text);
   const openingClaim = OPENING_SUCCESS_CLAIM.test(text);
   const clarify = CLARIFICATION_BACK_PATTERN.test(text);
   // A "success claim" mirrors the product's opening-anchored SUCCESS_CLAIM_PATTERNS
   // (a line that OPENS with a mutation verb). A bare mid-sentence mutation verb
   // (e.g. "…reflects the updated Budget importance" on a reload) is DESCRIPTIVE,
-  // not a claim — so the broad mutation-ack only counts on an explicit
-  // `mutate_intent` turn, where any mutation acknowledgement is suspicious.
-  // Known limitation: a buried first-person claim ("I've added X") on a non-intent
-  // turn is not caught — same precision boundary as the product's own detector.
-  const claimsMutation = openingClaim || (obs.role === 'mutate_intent' && mutationAck);
+  // not a claim — so on `mutate_intent` turns the broader ack check uses the
+  // SENTENCE-scoped strong forms in {@link hasStrongMutationAck}. Known
+  // limitations, stated: a claim in the SAME sentence as rejection copy, or a
+  // buried first-person claim on a non-intent turn, are not caught — the same
+  // precision boundary as the product's own detector.
+  const claimsMutation =
+    openingClaim || (obs.role === 'mutate_intent' && hasStrongMutationAck(text));
 
   // A8 only has something to assert when the turn either claims a mutation, or
   // is an explicit non-committing edit intent (which we always score for coverage).
@@ -593,7 +630,7 @@ export function a8NonCommittingNoFalseSuccess(obs: TurnObservation): Finding[] {
           'A8',
           'fail',
           'high',
-          `turn (role=${obs.role}) claims a mutation (ack=${mutationAck} opening_claim=${openingClaim}) but made ` +
+          `turn (role=${obs.role}) claims a mutation (strong_ack=${hasStrongMutationAck(text)} opening_claim=${openingClaim}) but made ` +
             `no durable change — ${evid}. Phantom success: a claimed mutation with no commit.`,
           { step: obs.step },
         ),
@@ -912,6 +949,175 @@ export function a11PremortemSafe(obs: TurnObservation): Finding[] {
 }
 
 // ===========================================================================
+// A12 — prior-turn context continuity (the single most user-felt defect)
+// ===========================================================================
+
+/**
+ * Roles that BY DEFINITION need prior-turn context to answer correctly.
+ * `explain` and `reload` are included (review fix): a conversation-denial on
+ * "why does the leader win?" or "show me the current analysis" is the same
+ * lived defect landing one step earlier or later than the follow-up.
+ */
+const A12_ROLES: ReadonlyArray<TurnRole> = ['follow_up', 'explain_changed', 'explain', 'reload'];
+
+/**
+ * LLM prose routinely uses the typographic apostrophe (U+2019); the denial
+ * patterns are written with the ASCII form, so normalise before matching
+ * (review fix: a curly-apostrophe denial evaded every pattern).
+ */
+export function normaliseApostrophes(text: string): string {
+  return text.replace(/[‘’ʼ]/g, "'");
+}
+
+/**
+ * Explicit continuity-denial signatures — the assistant answering as if the
+ * conversation never happened. Distinct from `STEP5_DENIAL_PHRASES` (analysis
+ * availability): these deny the CONVERSATION (earlier results, prior turns,
+ * shared context), which is a continuity drop even when the analysis itself
+ * is attached to the very same response.
+ */
+const A12_CONTINUITY_DENIAL_PATTERNS: readonly RegExp[] = [
+  /\b(?:don'?t|do\s+not|can'?t|cannot|no\s+longer)\s+(?:have|see|find|access|recall|remember)\b[^.?!]{0,80}\b(?:earlier|previous|prior|last|past)\s+(?:results?|analysis|conversation|context|turns?|messages?|discussion)\b/i,
+  /\b(?:no|lost|missing)\s+(?:record|memory|context)\s+of\b/i,
+  // Tightened (review fix): the object must directly precede "again", so
+  // forward-looking coaching ("If you share updated numbers …, I can run the
+  // comparison again.") no longer false-positives; re-request shapes
+  // ("if you share the details again") still match.
+  /\bif you (?:share|send|provide|paste)\s+(?:the |that |those |these |your )?(?:details?|results?|numbers?|context|information|analysis|it|that|them)\s+again\b/i,
+  /\bwhich (?:decision|analysis|results?|options?) (?:are|were|do|did) you (?:referring|talking)\b/i,
+  /\bwithout (?:the|any|more)\s+(?:earlier|previous|prior)\s+(?:context|results?|details)\b/i,
+];
+
+/**
+ * Word-boundary anchor matching (review fix): bare substring containment let
+ * morphological variants ground an answer ('budgeting' contained 'budget').
+ * An anchor counts only when it appears as a whole token sequence.
+ */
+export function referencesAnchor(text: string, anchor: string): boolean {
+  const normalisedText = text.toLowerCase().replace(/\s+/g, ' ');
+  const escaped = anchor.toLowerCase().replace(/\s+/g, ' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`).test(normalisedText);
+}
+
+/**
+ * Journey-level: every prior-context-dependent turn (follow-up, explain,
+ * explain-what-changed, reload) must stay grounded in the conversation that
+ * produced it. FAIL on an explicit continuity denial, or on an answer that
+ * references NO anchor established by a strictly-prior turn. INCONCLUSIVE
+ * (acceptance-requirement style, never a silent pass) when no prior-turn
+ * anchors are computable at all.
+ *
+ * Anchors accumulate in ONE forward walk (single source for the
+ * strictly-prior semantics): draft option/factor labels count once a draft
+ * turn has been seen; every option label named by an earlier analysis turn
+ * counts, read from BOTH `analysis_ready.option_comparison[].option_label`
+ * and `analysis_ready.options[].label` (review fix: real wire bodies often
+ * carry only the latter).
+ *
+ * Gating posture: GATES in deterministic replay (fixed transcript, plain
+ * text matching). On live runs, pass `provisional: true` so findings are
+ * advisory (`isAdvisoryFinding`) — live prose is LLM-variance-prone and the
+ * replayed fixture is the stable regression gate (the A5/A1 split).
+ *
+ * RED baseline: `fixtures/golden-journey-v1-context-drop.json` — before A12
+ * existed that transcript exited 0 (its only fail was advisory A5), proving
+ * A1-A11 alone could not catch a dropped conversation. Transcripts:
+ * `Docs/golden-journey/a12-continuity-invariant-evidence.md`.
+ */
+export function a12PriorTurnContinuity(
+  observations: readonly TurnObservation[],
+  opts?: { readonly provisional?: boolean },
+): Finding[] {
+  const findings: Finding[] = [];
+  const provisional = opts?.provisional === true;
+  let draftSeen = false;
+  const analysisAnchors = new Set<string>();
+
+  for (const obs of observations) {
+    // Judge THIS turn against what was established strictly before it…
+    if (A12_ROLES.includes(obs.role) && obs.httpStatus === 200) {
+      const rawText = getAssistantText(obs.body);
+      if (rawText.trim().length > 0) {
+        const text = normaliseApostrophes(rawText);
+        const denial = A12_CONTINUITY_DENIAL_PATTERNS.find((re) => re.test(text));
+        if (denial) {
+          findings.push(
+            makeFinding(
+              'A12',
+              'fail',
+              'high',
+              `prior-context turn (role=${obs.role}) denies the prior conversation (matched ${String(denial)}) — ` +
+                `prior-turn context was dropped`,
+              { step: obs.step, provisional },
+            ),
+          );
+        } else {
+          const anchors = new Set<string>(analysisAnchors);
+          if (draftSeen) {
+            for (const l of obs.optionLabels ?? []) if (l.trim().length > 0) anchors.add(l.trim());
+            for (const l of obs.factorLabels ?? []) if (l.trim().length > 0) anchors.add(l.trim());
+          }
+          if (anchors.size === 0) {
+            findings.push(
+              makeFinding(
+                'A12',
+                'inconclusive',
+                'medium',
+                `no prior-turn anchors computable (no draft labels or prior analysis option names precede this ` +
+                  `turn) — continuity not provable. ACCEPTANCE REQUIREMENT: journeys exercising ${obs.role} must ` +
+                  `establish named options/factors in earlier turns so continuity is checkable.`,
+                { step: obs.step, provisional },
+              ),
+            );
+          } else {
+            const referenced = [...anchors].filter((a) => referencesAnchor(text, a));
+            if (referenced.length === 0) {
+              findings.push(
+                makeFinding(
+                  'A12',
+                  'fail',
+                  'high',
+                  `prior-context turn (role=${obs.role}) references NONE of the ${anchors.size} ` +
+                    `prior-turn anchors (options/factors the conversation established) — answered as if the ` +
+                    `conversation did not happen`,
+                  { step: obs.step, provisional },
+                ),
+              );
+            } else {
+              findings.push(
+                makeFinding(
+                  'A12',
+                  'pass',
+                  'none',
+                  `grounded in prior-turn context: references ${referenced.length}/${anchors.size} established anchor(s)`,
+                  { step: obs.step, provisional },
+                ),
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // …then accumulate what THIS turn establishes (strictly-prior semantics).
+    if (obs.role === 'draft') draftSeen = true;
+    if (obs.role === 'analysis' || obs.role === 'rerun_analysis') {
+      const ar = getAnalysisReady(obs.body);
+      for (const entry of ar?.option_comparison ?? []) {
+        const label = (entry as { option_label?: unknown })?.option_label;
+        if (typeof label === 'string' && label.trim().length > 0) analysisAnchors.add(label.trim());
+      }
+      for (const entry of ar?.options ?? []) {
+        const label = (entry as { label?: unknown })?.label;
+        if (typeof label === 'string' && label.trim().length > 0) analysisAnchors.add(label.trim());
+      }
+    }
+  }
+
+  return findings;
+}
+
+// ===========================================================================
 // Per-turn dispatch + whole-journey evaluation
 // ===========================================================================
 
@@ -946,6 +1152,11 @@ export function evaluateObservation(obs: TurnObservation): Finding[] {
     // acknowledged (not presented as fresh). A vague no-op mutate carries no
     // analysis_ready, so a1AnalysisCoherence returns [] for it.
     'mutate',
+    // 'unknown' keeps the GATING stale-as-fresh check on unrecognised step
+    // names (review fix: the neutral role must not drop the safety floor the
+    // old follow_up fallback provided; a1 self-guards when no analysis_ready
+    // is present, so this is fail-closed and noise-free).
+    'unknown',
   ];
   if (ANALYSIS_BEARING.includes(obs.role)) findings.push(...a1AnalysisCoherence(obs));
   if (obs.role === 'rerun_analysis') findings.push(...a3DurableStateChanged(obs));
@@ -963,6 +1174,15 @@ export interface JourneyEvaluation {
 export interface EvaluateJourneyOptions {
   /** Whether the diagnostic-trace flag was confirmed ON for the run (guardrail #5). */
   readonly diagnosticTraceExpected: boolean;
+  /**
+   * Which path produced the observations. REQUIRED (review fix: an optional
+   * param defaulting to the GATING posture would let a future live caller
+   * silently gate on LLM variance). `replay`: deterministic fixed transcript —
+   * semantic continuity findings (A12) GATE. `live`: prose is
+   * LLM-variance-prone — A12 findings are emitted `provisional` (advisory),
+   * mirroring the A5/A1 split.
+   */
+  readonly mode: 'replay' | 'live';
   /**
    * In-process A2 snapshot, when available (the committed test wires it).
    * Absent on the live/replay path → A2 emits the not-wire-observable stub.
@@ -990,6 +1210,9 @@ export function evaluateJourney(
   // A9 is journey-level (like A2): one verdict over whether ANY turn surfaced
   // AI-facing context on the wire.
   findings.push(...a9ContextSurfaced(observations));
+  // A12 is journey-level (needs strictly-prior turns to accumulate anchors).
+  // Gates in replay; provisional (advisory) on live runs.
+  findings.push(...a12PriorTurnContinuity(observations, { provisional: opts.mode === 'live' }));
 
   const caveats: CoverageCaveat[] = [
     {
@@ -1042,6 +1265,19 @@ export function evaluateJourney(
         'table reports every turn so deterministic-turn improvement is trackable across runs.',
     },
     {
+      component: 'context_management',
+      title: 'A12 — replay proves the classifier; live continuity needs re-capture',
+      detail:
+        'Two separate claims. (1) Provable by deterministic replay: the CLASSIFIER catches continuity drops — ' +
+        'the committed context-drop fixture fails A12 (exit 1) whenever replayed. The multi-turn classifier unit ' +
+        'tests run in the required CI gate today; the fixture replay itself becomes a standing CI check only when ' +
+        'the PR2 gate manifest lands — until then, run the replay by hand. (2) NOT provable in CI at all: that the ' +
+        'LIVE service maintains continuity. Replaying a synthetic fixture proves nothing about the product, and a ' +
+        'staging-captured fixture proves behaviour only at capture time. Catching a live continuity regression ' +
+        'requires re-capturing the fixture from staging after changes (an authorised live run + `--capture`). ' +
+        'On live runs A12 findings are provisional (advisory) — LLM prose varies; the replay is the gate.',
+    },
+    {
       component: 'typed_action_mutation',
       title: 'A8 — non-committing-intent coverage needs the hash trio',
       detail:
@@ -1051,6 +1287,24 @@ export function evaluateJourney(
         'never a pass.',
     },
   ];
+  // Unknown step names are a LOUD coverage caveat, never a silent skip
+  // (review fix): the universal safety invariants (A1 stale-as-fresh, A4,
+  // A6/A7/A8/A10) still apply to 'unknown' turns, but the role-specific
+  // semantic checks (A3/A5/A11/A12) cannot run on a guessed role — so the
+  // report must say so, per the harness's own "inconclusive is never silently
+  // green" doctrine.
+  const unknownSteps = observations.filter((o) => o.role === 'unknown').map((o) => o.step);
+  if (unknownSteps.length > 0) {
+    caveats.push({
+      component: 'observability_recovery',
+      title: 'Unknown step name(s) — role-specific invariants skipped',
+      detail:
+        `Step(s) ${unknownSteps.join(', ')} map to no known golden step, alias, or fixture-declared role. ` +
+        `Universal safety invariants still ran, but A3/A5/A11/A12 were NOT evaluated for these turns — this run ` +
+        `does not prove them there. Fix the step name, declare a role on the fixture observation, or extend ` +
+        `the alias table.`,
+    });
+  }
   if (opts.setFactorValueFragile) {
     caveats.push({
       component: 'typed_action_mutation',

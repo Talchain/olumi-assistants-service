@@ -63,7 +63,8 @@ export type InvariantId =
   | 'A8b' // source rejection (unsupported add-risk) carries grounded structural guidance (Capability 2A acceptance target, ADVISORY)
   | 'A9' // AI-facing context is surfaced/observable on the wire (defect 2)
   | 'A10' // simple deterministic turns stay within an advisory latency budget (defect 3)
-  | 'A11'; // premortem / challenge prompts are handled safely (defect 4, secondary)
+  | 'A11' // premortem / challenge prompts are handled safely (defect 4, secondary)
+  | 'A12'; // prior-turn context continuity — a follow-up never answers as if the conversation did not happen
 
 /** The required assertions, in brief order (A1–A7 core; A8–A11 blind-spot closure). */
 export const INVARIANT_TITLE: Readonly<Record<InvariantId, string>> = {
@@ -79,6 +80,7 @@ export const INVARIANT_TITLE: Readonly<Record<InvariantId, string>> = {
   A9: 'AI-facing context is observable on the wire (not only in-process)',
   A10: 'Simple deterministic turns stay within an advisory latency budget',
   A11: 'Premortem / challenge prompts are handled safely (no overclaiming or invented doctrine)',
+  A12: 'Follow-up turns stay grounded in prior-turn context (no dropped conversation)',
 };
 
 /** Primary component each invariant is attributed to (the one that must fix it). */
@@ -95,6 +97,7 @@ export const INVARIANT_PRIMARY: Readonly<Record<InvariantId, CoreComponent>> = {
   A9: 'context_management',
   A10: 'ai_orchestration',
   A11: 'ai_orchestration',
+  A12: 'context_management',
 };
 
 /** Contributing (secondary) components for cross-cutting findings. */
@@ -111,6 +114,7 @@ export const INVARIANT_CONTRIBUTING: Readonly<Record<InvariantId, readonly CoreC
   A9: ['canonical_state', 'observability_recovery'],
   A10: ['observability_recovery'],
   A11: ['science_grounded_coaching'],
+  A12: ['ai_orchestration', 'science_grounded_coaching'],
 };
 
 /**
@@ -196,6 +200,11 @@ export const ADVISORY_INVARIANTS: ReadonlySet<InvariantId> = new Set<InvariantId
   // grounding state without hard-failing CI before Cap-2A lands. Promote to
   // gating once Cap-2A is accepted and merged dark.
   'A8b',
+  // A12 (prior-turn continuity) is deliberately NOT in this set: it GATES in
+  // deterministic replay (fixed transcript, string containment — no LLM
+  // variance). On LIVE runs the classifier emits its findings with
+  // `provisional: true` (the A1 mechanism), so a lone live continuity flap is
+  // advisory while the replayed fixture remains the hard regression gate.
 ]);
 
 /**

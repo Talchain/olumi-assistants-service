@@ -109,7 +109,34 @@ export type TurnRole =
   | 'explain_changed'
   | 'reload'
   /** A premortem / challenge prompt — safe-handling check only. */
-  | 'premortem';
+  | 'premortem'
+  /**
+   * A step whose name maps to no known golden step, alias, or
+   * fixture-declared role. The universal invariants apply — including the
+   * gating A1 stale-as-fresh and A4 false-success checks, which treat
+   * 'unknown' as analysis-bearing/non-mutating so the safety floor never
+   * silently drops — but role-specific semantic checks (A3/A5/A11/A12) are
+   * never applied on a guessed role, and `evaluateJourney` emits a LOUD
+   * coverage caveat naming every unknown step. Before this member existed,
+   * unknown steps fell back to `follow_up`, which mis-applied A5 (and would
+   * have mis-gated A12) on turns that are not follow-ups at all.
+   */
+  | 'unknown';
+
+/** Runtime validation set for fixture-declared roles (kept in sync with TurnRole). */
+export const TURN_ROLES: ReadonlySet<string> = new Set([
+  'draft',
+  'analysis',
+  'explain',
+  'follow_up',
+  'mutate',
+  'mutate_intent',
+  'rerun_analysis',
+  'explain_changed',
+  'reload',
+  'premortem',
+  'unknown',
+]);
 
 /**
  * One captured turn plus the cross-turn memory the classifiers need.

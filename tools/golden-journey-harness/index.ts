@@ -48,6 +48,7 @@ import {
 import type { HarnessConfig } from '../v5-journey-replay/types.js';
 
 import {
+  GOLDEN_BRIEF,
   GOLDEN_STEPS,
   GOLDEN_SYNTHETIC_STEPS,
   captureLabelsFromDraft,
@@ -56,8 +57,13 @@ import {
   threadHashMemory,
   type GoldenJourneyContext,
 } from './journey.js';
+import {
+  buildCaptureFixture,
+  writeCaptureFixture,
+  type ReplayFixture,
+} from './capture.js';
 import { evaluateJourney, latencyClassFor } from './invariants.js';
-import { isAdvisoryFinding } from './components.js';
+import { isAdvisoryFinding, type CoverageCaveat, type Finding } from './components.js';
 import { JourneyPreconditionError } from '../v5-journey-replay/steps.js';
 import {
   getAnalysisReady,
@@ -68,7 +74,9 @@ import {
   getGraphHashAtRun,
   getLlmCalls,
   getTurnTotalMs,
+  TURN_ROLES,
   type TurnObservation,
+  type TurnRole,
   type WireBody,
 } from './observation.js';
 import { writeGoldenReport, type GoldenReportInput, type LatencyRow, type StepCapture } from './report.js';
@@ -82,6 +90,8 @@ interface Cli {
   readonly replayPath?: string;
   /** Force A6 to treat the diagnostic trace as expected-ON (guardrail #5). */
   readonly traceConfirmed: boolean;
+  /** Live mode only: also emit the run as a replayable fixture (redacted). */
+  readonly capturePath?: string;
 }
 
 function parseArgs(): Cli {
@@ -92,6 +102,7 @@ function parseArgs(): Cli {
   let expectedBuild: string | undefined;
   let replayPath: string | undefined;
   let traceConfirmed = false;
+  let capturePath: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -101,20 +112,23 @@ function parseArgs(): Cli {
     else if (arg === '--expected-build' && i + 1 < args.length) expectedBuild = args[++i]!.trim() || undefined;
     else if (arg === '--replay' && i + 1 < args.length) replayPath = args[++i]!;
     else if (arg === '--trace-confirmed') traceConfirmed = true;
+    else if (arg === '--capture' && i + 1 < args.length) capturePath = args[++i]!;
     else if (arg === '--help' || arg === '-h') {
       console.log(
         'Usage: pnpm tsx tools/golden-journey-harness/index.ts \\\n' +
           '         [--base-url URL] [--out PATH] [--scenario-prefix TAG] [--expected-build SHA]\n' +
-          '         [--trace-confirmed]\n' +
+          '         [--trace-confirmed] [--capture FIXTURE_OUT.json]\n' +
           '       pnpm tsx tools/golden-journey-harness/index.ts --replay FIXTURE.json [--out PATH]\n\n' +
           'Auth (live, remote): set OLUMI_REPLAY_API_KEY.\n' +
           '--trace-confirmed: assert CEE_DIAGNOSTIC_TRACE_ENABLED is ON, so a missing trace fails A6\n' +
-          '                   instead of being inconclusive (guardrail #5).',
+          '                   instead of being inconclusive (guardrail #5).\n' +
+          '--capture: live mode only — also write the run as a redacted replayable fixture\n' +
+          '           (review + redaction-check before committing; see README capture flow).',
       );
       process.exit(0);
     }
   }
-  return { baseUrl, out, scenarioPrefix, apiKey: readApiKey(), expectedBuild, replayPath, traceConfirmed };
+  return { baseUrl, out, scenarioPrefix, apiKey: readApiKey(), expectedBuild, replayPath, traceConfirmed, capturePath };
 }
 
 function safeGit(cmd: string): string {
@@ -179,12 +193,21 @@ function syntheticCaptures(): StepCapture[] {
 // GoldenReportInput + the out path travel together internally.
 type RunReportInput = GoldenReportInput & { readonly out_path: string };
 
+/**
+ * Number of GATING fails (status==='fail' and not advisory). Single source for
+ * the exit-code rule, shared by the CLI and the committed fixture-manifest test
+ * so both agree on what "the replay would exit 1" means.
+ */
+export function gatingFailCount(findings: readonly Finding[]): number {
+  return findings.filter((f) => f.status === 'fail' && !isAdvisoryFinding(f)).length;
+}
+
 function finishAndExit(input: RunReportInput, redact: (v: unknown) => string): never {
   writeGoldenReport(input.out_path, input, redact);
   console.log('');
   console.log(`Report written to ${input.out_path}`);
   const fails = input.findings.filter((f) => f.status === 'fail').length;
-  const gatingFails = input.findings.filter((f) => f.status === 'fail' && !isAdvisoryFinding(f)).length;
+  const gatingFails = gatingFailCount(input.findings);
   const advisoryFails = fails - gatingFails;
   const inconclusive = input.findings.filter((f) => f.status === 'inconclusive').length;
   console.log(
@@ -203,42 +226,85 @@ function finishAndExit(input: RunReportInput, redact: (v: unknown) => string): n
 // Replay mode — deterministic, no network.
 // --------------------------------------------------------------------------
 
-interface ReplayFixture {
-  readonly name?: string;
-  readonly brief?: string;
-  readonly transcript?: {
-    readonly diagnostic_trace_enabled?: boolean;
-    readonly timing_debug_enabled?: boolean;
-    readonly observations?: ReadonlyArray<{
-      readonly step: string;
-      readonly http_status: number;
-      readonly body: WireBody;
-    }>;
-  };
+/**
+ * Fixture-declared role, when valid — the deeper mechanism for capture and
+ * hand-authored fixtures (the step-name lookup stays as the fallback, so
+ * existing fixtures keep working; an invalid declared role degrades to the
+ * name lookup rather than crashing the replay).
+ */
+function roleForObservation(o: { readonly step: string; readonly role?: TurnRole }): TurnRole {
+  if (typeof o.role === 'string' && TURN_ROLES.has(o.role)) return o.role;
+  return roleForStep(o.step);
 }
 
-function runReplay(cli: Cli): never {
-  const redact = createRedactor(undefined);
-  const raw = readFileSync(cli.replayPath!, 'utf-8');
-  const fixture = JSON.parse(raw) as ReplayFixture;
-  const obsIn = fixture.transcript?.observations ?? [];
-  const traceExpected = Boolean(fixture.transcript?.diagnostic_trace_enabled) || cli.traceConfirmed;
+/** Thrown on a structurally invalid replay fixture — mapped to exit 2 (fatal). */
+export class ReplayFixtureError extends Error {}
+
+export interface ReplayEvaluation {
+  readonly observations: readonly TurnObservation[];
+  readonly findings: readonly Finding[];
+  readonly caveats: readonly CoverageCaveat[];
+  readonly gatingFails: number;
+  readonly exitCode: 0 | 1;
+  readonly traceExpected: boolean;
+}
+
+/**
+ * Pure fixture → evaluation seam, shared by the CLI and the committed
+ * fixture-manifest test. FAIL-CLOSED on shape (review blocker): a fixture whose
+ * `transcript.observations` is missing, renamed, non-array, or empty is a fatal
+ * error (`ReplayFixtureError` → exit 2), NOT a zero-turn run that reports only
+ * inconclusives and exits 0. No I/O, no `process.exit`.
+ */
+export function evaluateReplayFixture(
+  fixture: ReplayFixture,
+  opts: { readonly traceConfirmed?: boolean } = {},
+): ReplayEvaluation {
+  const obsIn = fixture.transcript?.observations;
+  if (!Array.isArray(obsIn)) {
+    throw new ReplayFixtureError(
+      'replay fixture is malformed: `transcript.observations` is missing or not an array — cannot evaluate ' +
+        '(a shape-broken fixture must fail closed, not replay zero turns and exit 0).',
+    );
+  }
+  if (obsIn.length === 0) {
+    throw new ReplayFixtureError('replay fixture has an empty `transcript.observations` array — nothing to evaluate.');
+  }
+  const traceExpected = Boolean(fixture.transcript?.diagnostic_trace_enabled) || Boolean(opts.traceConfirmed);
 
   // Parse labels from the draft observation, thread to all.
-  const draft = obsIn.find((o) => roleForStep(o.step) === 'draft');
-  const { optionLabels, factorLabels } = captureLabelsFromDraft(draft?.body);
+  const draft = obsIn.find((o) => roleForObservation(o) === 'draft');
+  const { optionLabels, factorLabels } = captureLabelsFromDraft(draft?.body as WireBody | undefined);
 
   const built: TurnObservation[] = obsIn.map((o) => ({
     step: o.step,
-    role: roleForStep(o.step),
+    role: roleForObservation(o),
     httpStatus: o.http_status,
-    body: o.body,
+    body: o.body as WireBody,
+    elapsedMs: o.elapsed_ms,
     diagnosticTraceExpected: traceExpected,
     optionLabels,
     factorLabels,
   }));
-  const threaded = threadHashMemory(built);
-  const { findings, caveats } = evaluateJourney(threaded, { diagnosticTraceExpected: traceExpected });
+  const observations = threadHashMemory(built);
+  const { findings, caveats } = evaluateJourney(observations, {
+    diagnosticTraceExpected: traceExpected,
+    mode: 'replay',
+  });
+  const gatingFails = gatingFailCount(findings);
+  return { observations, findings, caveats, gatingFails, exitCode: gatingFails > 0 ? 1 : 0, traceExpected };
+}
+
+function runReplay(cli: Cli): never {
+  const redact = createRedactor(undefined);
+  if (cli.capturePath) {
+    console.warn('--capture is a live-mode flag and is ignored in --replay mode (no capture will be written).');
+  }
+  const raw = readFileSync(cli.replayPath!, 'utf-8');
+  const fixture = JSON.parse(raw) as ReplayFixture;
+  const { observations: threaded, findings, caveats, traceExpected } = evaluateReplayFixture(fixture, {
+    traceConfirmed: cli.traceConfirmed,
+  });
 
   const captures: StepCapture[] = threaded.map((obs) => ({
     step: obs.step,
@@ -408,7 +474,30 @@ async function runLive(cli: Cli): Promise<void> {
     factorLabels: ctx.factorLabels,
   }));
   const threaded = threadHashMemory(stamped);
-  const { findings, caveats } = evaluateJourney(threaded, { diagnosticTraceExpected: traceExpected });
+  const { findings, caveats } = evaluateJourney(threaded, { diagnosticTraceExpected: traceExpected, mode: 'live' });
+
+  // Optional: emit the run as a redacted replayable fixture (capture flow).
+  // A capture failure must NEVER destroy the run's report — the authorised
+  // live journey is the expensive artefact; the report still gets written.
+  if (cli.capturePath) {
+    try {
+      const fixture = buildCaptureFixture({
+        name: `golden-journey-live-capture`,
+        brief: GOLDEN_BRIEF,
+        baseUrl: cli.baseUrl,
+        capturedAt: startedAt,
+        diagnosticTraceEnabled: traceExpected,
+        observations: stamped,
+      });
+      writeCaptureFixture(cli.capturePath, fixture, redact);
+      console.log(`Capture written to ${cli.capturePath} (review + redaction-check before committing)`);
+    } catch (err) {
+      console.error(
+        `Capture write FAILED (${redact(err instanceof Error ? err.message : String(err))}) — ` +
+          `continuing so the report is still written.`,
+      );
+    }
+  }
 
   // Build per-step captures with full evidence from the threaded observations.
   for (const obs of threaded) {

@@ -153,6 +153,7 @@ describe('A1 — stale-as-fresh is GATING + wire-grounded (Coaching Context Pack
   it('a stale-as-fresh turn yields a GATING fail in the whole-journey evaluation', () => {
     const { findings } = evaluateJourney([obs({ role: 'explain', body: staleAsFreshBody })], {
       diagnosticTraceExpected: true,
+      mode: 'replay',
     });
     const gatingFails = findings.filter((f) => f.status === 'fail' && !isAdvisoryFinding(f));
     expect(gatingFails.some((f) => f.invariant_id === 'A1')).toBe(true);
@@ -339,19 +340,19 @@ describe('evaluateJourney — aggregation + caveats', () => {
     const observations: TurnObservation[] = [
       obs({ step: '2_run_analysis', role: 'analysis', body: { analysis_ready: { status: 'ready', freshness: 'fresh' }, _diagnostic_trace: COMPLETE_TRACE } }),
     ];
-    const { findings, caveats } = evaluateJourney(observations, { diagnosticTraceExpected: true });
+    const { findings, caveats } = evaluateJourney(observations, { diagnosticTraceExpected: true, mode: 'replay' });
     expect(findings.some((f) => f.invariant_id === 'A2' && f.status === 'inconclusive')).toBe(true);
     expect(caveats.some((c) => c.title.includes('A2 asserted in-process only'))).toBe(true);
     expect(caveats.some((c) => c.title.includes('scalar value-edit path only'))).toBe(true);
   });
 
   it('adds a trace-flag caveat when the diagnostic flag is not confirmed', () => {
-    const { caveats } = evaluateJourney([], { diagnosticTraceExpected: false });
+    const { caveats } = evaluateJourney([], { diagnosticTraceExpected: false, mode: 'replay' });
     expect(caveats.some((c) => c.title.includes('Diagnostic-trace flag not confirmed ON'))).toBe(true);
   });
 
   it('always emits the "live A5 advisory" caveat', () => {
-    const { caveats } = evaluateJourney([], { diagnosticTraceExpected: true });
+    const { caveats } = evaluateJourney([], { diagnosticTraceExpected: true, mode: 'replay' });
     expect(caveats.some((c) => c.title.includes('Live A5 is advisory'))).toBe(true);
   });
 });
@@ -605,7 +606,7 @@ describe('evaluateJourney — A9 + blind-spot caveats', () => {
   it('emits A9 inconclusive and the new acceptance-requirement caveats', () => {
     const { findings, caveats } = evaluateJourney(
       [obs({ role: 'analysis', body: { analysis_ready: { status: 'ready', current_graph_hash: 'h' }, _diagnostic_trace: COMPLETE_TRACE } })],
-      { diagnosticTraceExpected: true },
+      { diagnosticTraceExpected: true, mode: 'replay' },
     );
     expect(findings.some((f) => f.invariant_id === 'A9' && f.status === 'inconclusive')).toBe(true);
     expect(caveats.some((c) => c.title.includes('A9 — context observability'))).toBe(true);
