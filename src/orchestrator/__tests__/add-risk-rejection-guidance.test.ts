@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { HELD_SCIENCE_VOCABULARY_PATTERN } from '../../orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import {
   validateGraphStructure,
@@ -184,7 +185,7 @@ describe('classifyAddRiskToOptionRejection — conservative', () => {
 
   it('placeholder copy is structural-only: no held-science / no invented-rule / no internal vocab', () => {
     const text = ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER;
-    expect(text).not.toMatch(/\b(sensitiv\w*|fragile|fragility|flip|robustness|vulnerable|influence|elasticity)\b/i);
+    expect(text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
     // No invented "risks must flow through factors" rule.
     expect(text.toLowerCase()).not.toContain('must flow through');
     expect(text.toLowerCase()).not.toContain('risks must');

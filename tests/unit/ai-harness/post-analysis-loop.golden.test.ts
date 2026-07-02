@@ -41,6 +41,7 @@ import {
   type AdviceGateResult,
 } from '../../../src/orchestrator-v5/routing/post-analysis-advice-gate.js';
 import {
+  HELD_SCIENCE_VOCABULARY_PATTERN,
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
@@ -102,9 +103,9 @@ const RECENT: readonly AdviceGateRecentChange[] = [
   { summary: 'Delivery risk from high to medium' },
 ];
 
-// Held-science vocabulary that must NEVER appear in the safe-now fallback copy.
-const HELD_SCIENCE_RE =
-  /\b(sensitiv\w*|fragile|fragility|flip|driver|drivers|robustness|elasticity|evpi|voi|influence)\b/i;
+// Held-science vocabulary that must NEVER appear in the safe-now fallback copy
+// (canonical superset pattern — see forbidden-user-facing-phrases.ts).
+const HELD_SCIENCE_RE = HELD_SCIENCE_VOCABULARY_PATTERN;
 
 interface GateOptions {
   readonly withLoop: boolean;

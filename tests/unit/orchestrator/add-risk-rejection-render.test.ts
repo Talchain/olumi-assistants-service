@@ -16,6 +16,7 @@ import { buildPatchRejectionEnvelope, type PatchRejectionContext } from '../../.
 import type { ConversationContext } from '../../../src/orchestrator/types.js';
 import type { GraphV3T } from '../../../src/schemas/cee-v3.js';
 import { validateGraphStructure, VIOLATION_MESSAGES } from '../../../src/orchestrator/graph-structure-validator.js';
+import { HELD_SCIENCE_VOCABULARY_PATTERN } from '../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 import {
   classifyAddRiskToOptionRejection,
   ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER,
@@ -113,7 +114,7 @@ describe('2A rejection render — flag parity + targeted enrichment', () => {
 
   it('enriched copy: no held-science, no invented mechanism, no internal vocab', () => {
     const out = renderRejection(TARGETED, true);
-    expect(out.text).not.toMatch(/\b(sensitiv\w*|fragile|fragility|flip|robustness|vulnerable|influence|elasticity)\b/i);
+    expect(out.text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
     expect(out.text.toLowerCase()).not.toContain('must flow through');
     expect(out.text).not.toMatch(/\b(validator|schema|patch|node|edge|graph|recommend)\b/i);
   });

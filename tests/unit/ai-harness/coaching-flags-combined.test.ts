@@ -33,6 +33,7 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import { config } from '../../../src/config/index.js';
 import { setTestSink } from '../../../src/utils/telemetry.js';
 import {
+  HELD_SCIENCE_VOCABULARY_PATTERN,
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
@@ -287,12 +288,9 @@ describe('coaching flags combined — non-interference proven, not asserted', ()
     for (const text of [...proseTexts, ...chipTexts]) {
       expect(findSuccessClaimHit(text)).toBeNull();
       expect(findForbiddenPhraseHit(text)).toBeNull();
-      // Superset of the sibling held-science lists (review fix: the first
-      // copy dropped 'vulnerable', which the render test and the harness A8b
-      // pattern both include — the copies had already diverged).
-      expect(text).not.toMatch(
-        /\b(sensitiv\w*|fragile|fragility|flip|robustness|vulnerable|elasticity|evpi|voi|driver|drivers|influence|causal)\b/i,
-      );
+      // Canonical superset pattern (the per-suite copies had diverged; one
+      // dropped 'vulnerable', others lacked driver/causal/evpi/voi).
+      expect(text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
       expect(text.toLowerCase()).not.toContain('must flow through');
     }
   });

@@ -23,6 +23,7 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import { config } from '../../config/index.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import {
+  HELD_SCIENCE_VOCABULARY_PATTERN,
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../compose/forbidden-user-facing-phrases.js';
@@ -147,7 +148,7 @@ describe('AI Harness cap-1 — full flag-ON turn-flow integration', () => {
     expect(text).toMatch(/still open|threshold|connected|options/i);
     expect(findSuccessClaimHit(text)).toBeNull();
     expect(findForbiddenPhraseHit(text)).toBeNull();
-    expect(text).not.toMatch(/\b(sensitiv\w*|fragile|fragility|flip|driver|drivers|robustness|influence)\b/i);
+    expect(text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
   });
 
   it('flag OFF, same turn → falls through data_unavailable_for_class (lived defect)', async () => {
