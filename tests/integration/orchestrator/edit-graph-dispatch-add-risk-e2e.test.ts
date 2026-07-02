@@ -60,45 +60,31 @@ import { dispatchEditGraph } from '../../../src/orchestrator-v5/handlers/edit-gr
 import { commitDirectAnswer } from '../../../src/orchestrator-v5/commit.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import type { GraphStateIngress } from '../../../src/orchestrator-v5/boundary/request-extensions.js';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import { setTestSink, TelemetryEvents } from '../../../src/utils/telemetry.js';
+import {
+  ADD_RISK_SCENARIO_ID as SCENARIO_ID,
+  PRICING_GRAPH,
+  makeEditProposalResponse,
+} from '../../../src/orchestrator-v5/__tests__/coaching-fixtures.js';
+import { makeMessagePayload } from '../../../src/orchestrator-v5/__tests__/fixtures.js';
 
 // ────────────────────────────────────────────────────────────────────
-// Fixtures
+// Fixtures (PRICING_GRAPH shared via coaching-fixtures.ts)
 // ────────────────────────────────────────────────────────────────────
 
-const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const TURN_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const STUB_REQUEST = {} as FastifyRequest;
 
-const PRICING_GRAPH: GraphStateIngress = {
-  nodes: [
-    { id: 'goal_growth', kind: 'goal', label: 'Reach 1000 customers' },
-    { id: 'dec_pricing', kind: 'decision', label: 'Pricing model' },
-    { id: 'opt_subscription', kind: 'option', label: 'Subscription' },
-    { id: 'opt_oneoff', kind: 'option', label: 'One-off' },
-    { id: 'fac_price', kind: 'factor', label: 'Price' },
-  ],
-  edges: [
-    { from: 'dec_pricing', to: 'opt_subscription', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
-    { from: 'dec_pricing', to: 'opt_oneoff', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
-    { from: 'opt_subscription', to: 'fac_price', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-    { from: 'opt_oneoff', to: 'fac_price', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-    { from: 'fac_price', to: 'goal_growth', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-  ],
-} as unknown as GraphStateIngress;
-
-function makePayload(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    kind: 'message' as const,
+function makePayload(overrides: Partial<MessageTurnPayload> = {}) {
+  return makeMessagePayload({
     scenario_id: SCENARIO_ID,
     turn_id: TURN_ID,
-    stage: 'analyse' as const,
+    stage: 'analyse',
     message: 'Add team dynamics as a risk',
-    turn_class: 'frame' as const,
-    source: 'composer' as const,
     ...overrides,
-  };
+  });
 }
 
 function makeCommitResult() {
@@ -218,9 +204,7 @@ describe('dispatchEditGraph e2e — bare add_risk clarification path', () => {
   });
 
   it('non-canonical ingress edges → deterministic add-risk path does NOT fire', async () => {
-    llmChatMock.mockResolvedValue({
-      content: JSON.stringify({ operations: [], removed_edges: [], warnings: [], coaching: { summary: 'No-op.' } }),
-    });
+    llmChatMock.mockResolvedValue(makeEditProposalResponse([], 'No-op.'));
 
     const nonCanonical: GraphStateIngress = {
       nodes: [
@@ -247,9 +231,7 @@ describe('dispatchEditGraph e2e — bare add_risk clarification path', () => {
   });
 
   it('compound request "Add team dynamics as a risk and connect it to churn" → falls through to LLM', async () => {
-    llmChatMock.mockResolvedValue({
-      content: JSON.stringify({ operations: [], removed_edges: [], warnings: [], coaching: { summary: 'No-op.' } }),
-    });
+    llmChatMock.mockResolvedValue(makeEditProposalResponse([], 'No-op.'));
 
     await dispatchEditGraph({
       payload: makePayload({ message: 'Add team dynamics as a risk and connect it to churn' }),

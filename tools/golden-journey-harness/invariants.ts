@@ -33,6 +33,7 @@ import {
   CLARIFICATION_BACK_PATTERN,
   STEP5_DENIAL_PHRASES,
 } from '../v5-journey-replay/assertions.js';
+import { HELD_SCIENCE_VOCABULARY_PATTERN } from '../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 
 import {
   makeFinding,
@@ -594,9 +595,11 @@ export function a8NonCommittingNoFalseSuccess(obs: TurnObservation): Finding[] {
   // (a line that OPENS with a mutation verb). A bare mid-sentence mutation verb
   // (e.g. "…reflects the updated Budget importance" on a reload) is DESCRIPTIVE,
   // not a claim — so on `mutate_intent` turns the broader ack check uses the
-  // SENTENCE-scoped strong forms in {@link hasStrongMutationAck}. Known
-  // limitations, stated: a claim in the SAME sentence as rejection copy, or a
-  // buried first-person claim on a non-intent turn, are not caught — the same
+  // strong claim SHAPES in {@link hasStrongMutationAck}, which match anywhere
+  // in the text — including a strong ack in the SAME sentence as rejection
+  // copy (the old per-sentence rejection exclusion was removed as fail-open;
+  // see hasStrongMutationAck's doc). Known limitation, stated: a buried
+  // first-person claim on a NON-intent turn is not caught — the same
   // precision boundary as the product's own detector.
   const claimsMutation =
     openingClaim || (obs.role === 'mutate_intent' && hasStrongMutationAck(text));
@@ -678,9 +681,13 @@ const STRUCTURAL_NEXT_STEP_PATTERN =
 /** Invented failure-mechanism narration (the a9da06f2 confabulation class). */
 const INVENTED_MECHANISM_PATTERN =
   /could(?:n't| not)\s+resolve\s+cleanly|flowing through an existing factor|sit downstream of|branch directly off|must\s+(?:flow|sit)\s+through/i;
-/** Held-science vocabulary that must never appear in the rejection copy. */
-const HELD_SCIENCE_PATTERN =
-  /\b(?:sensitiv\w*|fragile|fragility|flip|robustness|vulnerable|influence|elasticity|evpi|voi)\b/i;
+/**
+ * Held-science vocabulary that must never appear in the rejection copy.
+ * Canonical pattern imported from the product (single source of truth, same
+ * cross-import as `tools/v5-journey-replay/forbidden-terms.ts`) so the
+ * harness and the coaching suites cannot drift.
+ */
+const HELD_SCIENCE_PATTERN = HELD_SCIENCE_VOCABULARY_PATTERN;
 
 /**
  * Acceptance target for Capability 2A (add-risk rejection guidance). On a

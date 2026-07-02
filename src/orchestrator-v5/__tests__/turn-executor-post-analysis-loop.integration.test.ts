@@ -22,8 +22,8 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { config } from '../../config/index.js';
 import { setTestSink } from '../../utils/telemetry.js';
-import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
+  HELD_SCIENCE_VOCABULARY_PATTERN,
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../compose/forbidden-user-facing-phrases.js';
@@ -31,6 +31,13 @@ import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
 } from '../../adapters/llm/types.js';
+import {
+  CAP1_SCENARIO_ID as SCENARIO_ID,
+  PARTIAL_GRAPH,
+  PRIOR_RA_TURN,
+  makeBlankProjectionFreshFact,
+} from './coaching-fixtures.js';
+import { makeMessagePayload } from './fixtures.js';
 
 const mockState: {
   priorTurns: Array<Record<string, unknown>>;
@@ -56,87 +63,13 @@ vi.mock('../session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 
-const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-
-// A graph that is structurally analysable (fresh hash) but NOT fully ready:
-// the goal carries no measurable threshold and an option is unmapped, so
-// `summariseReadiness` surfaces open items → substantive safe-now content.
-const PARTIAL_GRAPH = {
-  nodes: [
-    { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
-    { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
-    { id: 'opt_hire', kind: 'option', label: 'Hire', interventions: { fac_capacity: 1 } },
-    { id: 'opt_status_quo', kind: 'option', label: 'Hold', is_baseline: true, interventions: { fac_capacity: 0 } },
-  ],
-  edges: [
-    { from: 'opt_hire', to: 'fac_capacity', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
-    { from: 'opt_status_quo', to: 'fac_capacity', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
-    { from: 'fac_capacity', to: 'goal_q3', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
-  ],
-  goal_node_id: 'goal_q3',
-};
-
-const PARTIAL_GRAPH_HASH = computeAnalysisAffectingGraphHash(PARTIAL_GRAPH as never)!;
-
-/**
- * Fresh run_analysis fact with a usable leading option BUT no renderable
- * tunable driver: `fac_capacity` is fully option-controlled (both options
- * intervene on it) so Spine A suppresses it from the driver projection, and no
- * external factor is supplied. The ContextPack projection therefore has a
- * populated `leading_option` but an EMPTY `top_drivers[]` — so an `improvement`
- * question (needs leading_option AND top_driver) falls through
- * `data_unavailable_for_class: ['top_driver']`. Still a successful,
- * hash-matching fact → freshness 'fresh', canonical state usable.
- */
-function makeBlankProjectionFreshFact(): Record<string, unknown> {
-  return {
-    fact_type: 'run_analysis' as const,
-    fact_version: 1 as const,
-    noop: false,
-    result: {
-      scenario_id: SCENARIO_ID,
-      leading_option_id: 'opt_hire',
-      summary: 'Prior analysis result',
-      graph_hash_at_run: PARTIAL_GRAPH_HASH,
-      computed_at: new Date(Date.now() - 60_000).toISOString(),
-      enrichment: {
-        analysis_status: 'completed',
-        option_comparison: [
-          { option_id: 'opt_hire', option_label: 'Hire', win_probability: 0.72, outcome_mean: 0.5 },
-          { option_id: 'opt_status_quo', option_label: 'Hold', win_probability: 0.28, outcome_mean: 0.3 },
-        ],
-        // No external/tunable factor_sensitivity → top_drivers projects empty.
-        robustness_synthesis: { overall_assessment: 'moderate' },
-      },
-      win_probabilities: { opt_hire: 0.72, opt_status_quo: 0.28 },
-    },
-  };
-}
-
-const PRIOR_RA_TURN = {
-  id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
-  scenario_id: SCENARIO_ID,
-  user_id: null,
-  turn_id: 'prior-turn-run-analysis',
-  turn_class: 'handler',
-  handler_id: 'run_analysis',
-  request_hash: 'sha256:prior-ra',
-  response_emitted: true,
-  llm_calls_used: 1,
-  duration_ms: 200,
-  created_at: new Date(Date.now() - 60_000).toISOString(),
-};
-
 function mkPayload(message: string): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'composer',
+  return makeMessagePayload({
     turn_id: `t-${randomUUID()}`,
     scenario_id: SCENARIO_ID,
     message,
-    turn_class: 'frame',
     stage: 'analyse',
-  };
+  });
 }
 
 function throwingRoutingAdapter() {
@@ -215,7 +148,7 @@ describe('AI Harness cap-1 — full flag-ON turn-flow integration', () => {
     expect(text).toMatch(/still open|threshold|connected|options/i);
     expect(findSuccessClaimHit(text)).toBeNull();
     expect(findForbiddenPhraseHit(text)).toBeNull();
-    expect(text).not.toMatch(/\b(sensitiv\w*|fragile|fragility|flip|driver|drivers|robustness|influence)\b/i);
+    expect(text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
   });
 
   it('flag OFF, same turn → falls through data_unavailable_for_class (lived defect)', async () => {

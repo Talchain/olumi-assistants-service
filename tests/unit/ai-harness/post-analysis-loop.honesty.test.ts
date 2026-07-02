@@ -26,6 +26,7 @@ import {
   V5_STRUCTURAL_DECLINE_TEXT,
 } from '../../../src/orchestrator-v5/routing/mutation-language.js';
 import {
+  HELD_SCIENCE_VOCABULARY_PATTERN,
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
@@ -196,7 +197,7 @@ describe('AI Harness cap-1 — targeted honesty / safety proofs', () => {
       // The held-science driver label and any sensitivity/fragility/flip prose
       // must NOT have leaked into the safe-now answer.
       expect(text).not.toContain(UNIQUE_DRIVER);
-      expect(text).not.toMatch(/\b(sensitiv\w*|fragile|fragility|flip|driver|drivers|robustness|elasticity|influence)\b/i);
+      expect(text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
       // It SHOULD carry safe-now content instead.
       expect(text).toMatch(/still open|threshold|connected|Budget/i);
     });

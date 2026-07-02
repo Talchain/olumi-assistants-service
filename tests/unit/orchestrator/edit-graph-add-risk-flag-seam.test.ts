@@ -85,37 +85,24 @@ import { dispatchEditGraph } from '../../../src/orchestrator-v5/handlers/edit-gr
 import { commitDirectAnswer } from '../../../src/orchestrator-v5/commit.js';
 import { config } from '../../../src/config/index.js';
 import { ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER } from '../../../src/orchestrator/add-risk-rejection-guidance.js';
-import type { GraphStateIngress } from '../../../src/orchestrator-v5/boundary/request-extensions.js';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import {
+  ADD_RISK_SCENARIO_ID as SCENARIO_ID,
+  PRICING_GRAPH,
+  TARGETED_ADD_RISK_OPS,
+  makeEditProposalResponse,
+} from '../../../src/orchestrator-v5/__tests__/coaching-fixtures.js';
+import { makeMessagePayload } from '../../../src/orchestrator-v5/__tests__/fixtures.js';
 
 // ────────────────────────────────────────────────────────────────────
-// Fixtures
+// Fixtures (PRICING_GRAPH / TARGETED_ADD_RISK_OPS shared via coaching-fixtures.ts)
 // ────────────────────────────────────────────────────────────────────
 
-const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const STUB_REQUEST = {} as FastifyRequest;
 
 /** The exact pre-change generic structural-violation copy (patch-rejection-helper.ts). */
 const GENERIC =
   "I wasn't able to apply that change — it would create an inconsistency in the model structure. You could try describing the change differently, or I can rebuild the model from an updated brief.";
-
-/** Structurally clean baseline: decision → options → factor → goal. */
-const PRICING_GRAPH: GraphStateIngress = {
-  nodes: [
-    { id: 'goal_growth', kind: 'goal', label: 'Reach 1000 customers' },
-    { id: 'dec_pricing', kind: 'decision', label: 'Pricing model' },
-    { id: 'opt_subscription', kind: 'option', label: 'Subscription' },
-    { id: 'opt_oneoff', kind: 'option', label: 'One-off' },
-    { id: 'fac_price', kind: 'factor', label: 'Price' },
-  ],
-  edges: [
-    { from: 'dec_pricing', to: 'opt_subscription', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
-    { from: 'dec_pricing', to: 'opt_oneoff', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
-    { from: 'opt_subscription', to: 'fac_price', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-    { from: 'opt_oneoff', to: 'fac_price', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-    { from: 'fac_price', to: 'goal_growth', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
-  ],
-} as unknown as GraphStateIngress;
 
 /**
  * Compound add-risk message: bypasses the deterministic bare-add-risk
@@ -124,41 +111,13 @@ const PRICING_GRAPH: GraphStateIngress = {
  * immediately instead of entering the narrow-intent repair loop.
  */
 function makePayload(turnId: string) {
-  return {
-    kind: 'message' as const,
+  return makeMessagePayload({
     scenario_id: SCENARIO_ID,
     turn_id: turnId,
-    stage: 'analyse' as const,
+    stage: 'analyse',
     message: 'Add team dynamics as a risk and connect it to churn',
-    turn_class: 'frame' as const,
-    source: 'composer' as const,
-  };
+  });
 }
-
-/**
- * LLM proposal that adds a risk wired ONLY to an option — the candidate graph
- * fails structural validation with the reachability class (the risk has no
- * path through the model), which is exactly the Cap-2A target shape.
- */
-const TARGETED_ADD_RISK_OPS = [
-  {
-    // patch-applier semantics: `path` is the authoritative node id.
-    op: 'add_node',
-    path: 'risk_team_dynamics',
-    value: { id: 'risk_team_dynamics', kind: 'risk', label: 'Team dynamics' },
-  },
-  {
-    op: 'add_edge',
-    path: 'risk_team_dynamics->opt_subscription',
-    value: {
-      from: 'risk_team_dynamics',
-      to: 'opt_subscription',
-      strength: { mean: 0.4, std: 0.1 },
-      exists_probability: 0.8,
-      effect_direction: 'negative',
-    },
-  },
-];
 
 /**
  * LLM proposal creating a cycle (factor → goal already exists; goal → factor
@@ -181,14 +140,7 @@ const CYCLE_OPS = [
 ];
 
 function mockLlmProposal(operations: readonly unknown[]): void {
-  llmChatMock.mockResolvedValue({
-    content: JSON.stringify({
-      operations,
-      removed_edges: [],
-      warnings: [],
-      coaching: { summary: 'Proposed change.' },
-    }),
-  });
+  llmChatMock.mockResolvedValue(makeEditProposalResponse(operations));
 }
 
 function makeCommitResult() {

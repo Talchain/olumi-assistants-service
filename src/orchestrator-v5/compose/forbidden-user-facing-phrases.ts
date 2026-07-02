@@ -288,6 +288,33 @@ export function findSuccessClaimHit(text: string): string | null {
 }
 
 /**
+ * Held-science vocabulary — the single canonical pattern for scientific-claim
+ * wording (sensitivity / fragility / flip / driver / robustness / causal /
+ * elasticity / EVPI / VoI …) that must NOT surface on prose paths where the
+ * science is HELD: the Cap-1 safe-now composer, the Cap-2A add-risk rejection
+ * copy, and the golden-journey harness A8b invariant.
+ *
+ * Deliberately NOT part of {@link FORBIDDEN_USER_FACING_PHRASES}: these words
+ * are legitimate — and deliberate — on surfaces that DO carry the science
+ * (driver prose from projectTopDrivers, what_would_flip copy, robustness
+ * summaries). Wiring this into the runtime egress guard would erase those
+ * responses. It is a contextual checker for held-science surfaces only,
+ * consumed by:
+ *   - tools/golden-journey-harness/invariants.ts (A8b source-rejection
+ *     grounding)
+ *   - the AI-harness coaching suites (post-analysis-loop golden/honesty/
+ *     integration, coaching-flags-combined) and the Cap-2A rejection tests
+ *     (add-risk-rejection-render / -guidance)
+ *
+ * Superset union of the previously-diverged per-suite copies — five-plus
+ * variants had drifted (one dropped `vulnerable`, others lacked
+ * driver/drivers, causal, elasticity, evpi, voi). Add vocabulary here, not
+ * in downstream consumers.
+ */
+export const HELD_SCIENCE_VOCABULARY_PATTERN =
+  /\b(?:sensitiv\w*|fragile|fragility|flip|driver|drivers|robustness|vulnerable|influence|elasticity|evpi|voi|causal)\b/i;
+
+/**
  * R10 — internal-vocabulary / raw-identifier patterns used ONLY by the
  * edit_graph no-op clarification-preservation gate.
  *
