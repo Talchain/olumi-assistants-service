@@ -66,10 +66,13 @@ all. Any earlier statement implying these are droppable top-level wire fields is
 4. **UI-side adapted-but-partially-rendered fields** (not a schema-version issue, but part of the
    same output-loss picture): `strengthen_items[].actionType` and `strengthen_items[].biasCategory`
    are mapped by DGAI `src/adapters/cee/client.ts` `mapDraftCoachingFromResponse()`. As of the
-   Brief 5.8B D2b overlay, `actionType` IS now rendered
-   (`src/canvas/components/pre-analysis/utils/applyStrengthenOverlay.ts` →
-   `TriageActionCardsBody.tsx` / `PreAnalysisPanel.tsx`); `biasCategory` remains mapped but never
-   consumed by any component.
+   Brief 5.8B D2b overlay, `actionType` IS now rendered as passive labels: the overlay util
+   `src/canvas/components/pre-analysis/utils/applyStrengthenOverlay.ts` feeds both
+   `src/canvas/components/pre-analysis/PreAnalysisPanel.tsx` and
+   `src/components/results/TriageActionCardsBody.tsx` (via `AnalysisHeroV17`).
+   `biasCategory` remains mapped but never consumed by any component (scope:
+   `git grep -n biasCategory origin/staging -- src/`, 2026-07-02 — hits only in the
+   adapter/type layer, no component reads it).
 
 ## 4. Why the loss is silent
 
