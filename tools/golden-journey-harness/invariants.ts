@@ -595,9 +595,11 @@ export function a8NonCommittingNoFalseSuccess(obs: TurnObservation): Finding[] {
   // (a line that OPENS with a mutation verb). A bare mid-sentence mutation verb
   // (e.g. "…reflects the updated Budget importance" on a reload) is DESCRIPTIVE,
   // not a claim — so on `mutate_intent` turns the broader ack check uses the
-  // SENTENCE-scoped strong forms in {@link hasStrongMutationAck}. Known
-  // limitations, stated: a claim in the SAME sentence as rejection copy, or a
-  // buried first-person claim on a non-intent turn, are not caught — the same
+  // strong claim SHAPES in {@link hasStrongMutationAck}, which match anywhere
+  // in the text — including a strong ack in the SAME sentence as rejection
+  // copy (the old per-sentence rejection exclusion was removed as fail-open;
+  // see hasStrongMutationAck's doc). Known limitation, stated: a buried
+  // first-person claim on a NON-intent turn is not caught — the same
   // precision boundary as the product's own detector.
   const claimsMutation =
     openingClaim || (obs.role === 'mutate_intent' && hasStrongMutationAck(text));
