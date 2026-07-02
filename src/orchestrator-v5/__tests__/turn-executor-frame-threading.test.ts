@@ -25,10 +25,14 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { summariseCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 
+const mockState = vi.hoisted(() => ({
+  priorTurns: [] as Array<Record<string, unknown>>,
+}));
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: 'mock-row-id' }),
-    readRecent: async () => [],
+    readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
@@ -141,8 +145,29 @@ function mockRoutingAdapter(
   };
 }
 
+function mkPriorTurn(n: number): Record<string, unknown> {
+  return {
+    id: `row-${n}`,
+    scenario_id: SCENARIO_ID,
+    user_id: null,
+    turn_id: `prior-turn-${n}`,
+    turn_class: 'direct_answer',
+    handler_id: null,
+    request_hash: `sha256:prior-${n}`,
+    response_emitted: true,
+    llm_calls_used: 1,
+    duration_ms: 8,
+    created_at: `2026-04-30T0${Math.min(n, 9)}:00:00.000Z`,
+    user_message: `prior message ${n}`,
+    assistant_message: `prior answer ${n}`,
+  };
+}
+
 describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () => {
-  beforeEach(() => setTestSink(() => {}));
+  beforeEach(() => {
+    setTestSink(() => {});
+    mockState.priorTurns = [];
+  });
   afterEach(() => {
     setTestSink(null);
     vi.restoreAllMocks();
@@ -215,6 +240,22 @@ describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () =
     expect(result.freshness).toBeDefined();
     expect(frame.freshness.verdict).toBe(result.freshness!.freshness);
     expect(frame.model.graphHash).toBe(result.freshness!.current_graph_hash);
+  });
+
+  it('priorTurnCount reports the ASSEMBLED (capped) context, never the uncapped store total', async () => {
+    // 7 prior turns in the store; the ContextPack conversation projection caps
+    // at CONTEXT_PACK_RECENT_TURNS_CAP (5). The frame must report what the
+    // turn actually reasoned over — an uncapped 7 would over-report context
+    // completeness to the harness (A2 fabricated-completeness hazard flagged
+    // in the slice-2 fail-open review).
+    mockState.priorTurns = [1, 2, 3, 4, 5, 6, 7].map(mkPriorTurn);
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-frame-cap', {
+      routingAdapter: mockRoutingAdapter(async () => mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…')),
+      handlerRegistry: makeSuccessRegistry(GRAPH_HASH),
+      graphState: GRAPH_WITH_OPTIONS,
+    });
+    expect(result.frame).toBeDefined();
+    expect(result.frame!.conversation.priorTurnCount).toBe(5);
   });
 
   it('read-only posture: the frame never alters the user-facing response', async () => {

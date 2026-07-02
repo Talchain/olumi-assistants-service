@@ -6181,7 +6181,12 @@ export async function runTurnExecutor(
               contextPackForLog.recent_changes,
             ),
             graphCounts: summariseGraphCounts(effectiveTurnGraph),
-            priorTurnCount: context.prior_turns.length,
+            // Single-sourced from the pack's ASSEMBLED conversation projection
+            // (capped at CONTEXT_PACK_RECENT_TURNS_CAP), same rule as
+            // recentChanges: the frame reports what the turn actually reasoned
+            // over, never the uncapped store total — an uncapped count would
+            // over-report context completeness to the harness (A2).
+            priorTurnCount: contextPackForLog.conversation.recent_turns.length,
           })
         : undefined;
     return {

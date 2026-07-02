@@ -305,6 +305,13 @@ function sendFinalised200(
      * from the frame ALONE (`contextSummaryFromFrame`) instead of being
      * re-assembled from parts at this seam. Absent ⇒ the pre-frame paths
      * below apply unchanged. Never reaches the wire itself.
+     *
+     * INVARIANT: a caller that threads `frame` MUST also thread the
+     * `canonicalState` the frame wrapped (the executor's finalise seam
+     * guarantees this pairing). Frame-without-canonicalState would silently
+     * omit the `coaching_state_pack` sub-block on the frame path — a
+     * fail-closed diagnostic drop, but a divergence from the pre-frame
+     * behaviour; do not introduce such a caller.
      */
     readonly frame?: CanonicalContextFrame;
   },
