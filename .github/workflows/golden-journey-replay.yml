@@ -1,0 +1,61 @@
+name: Golden Journey Replay
+
+# Advisory CI wiring for the golden-journey replay gate (C5 PR2B).
+#
+# This workflow does NOT re-encode the fixture list or expected exits. It calls
+# the single-source gate script `scripts/ci/golden-journey-replay-gate.sh`
+# (merged in #324), which drives every fixture from
+# `tools/golden-journey-harness/replay-manifest.json` — the SAME manifest the
+# required unit test (tests/unit/golden-journey-harness/replay-fixtures.test.ts)
+# consumes. One source of truth, three consumers (unit test, script, this job);
+# no inline fixture matrix here (that duplication is exactly what PR2B removes).
+#
+# ADVISORY by convention (ci.yml pattern): this check MUST NOT be added to the
+# branch-protection required-checks list yet. Promote to required only after a
+# soak period, as a separate branch-protection change.
+# A red run means a committed fixture no longer classifies as its pinned exit,
+# or the fail-closed self-test regressed.
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: golden-journey-replay-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    name: Golden Journey Replay (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          # Needed by .npmrc token substitution, not by the harness itself.
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+
+      # No openapi:generate / build step: the harness imports only tool-local
+      # modules and node builtins; tsx executes the TypeScript directly. The
+      # gate script owns the fixture list (via the manifest) and the
+      # fail-closed self-test.
+      - name: Run golden-journey replay gate (single-source manifest)
+        run: bash scripts/ci/golden-journey-replay-gate.sh
