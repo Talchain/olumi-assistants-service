@@ -277,19 +277,33 @@ export const PENDING_ACTIONS_PER_TURN_CAP = 3;
  * The kinds whose live presence means "the next user turn is expected to
  * confirm or dismiss a pending change" — the semantic the ContextPack's
  * `conversation.pending_confirmation` boolean carries (see the assembler's
- * field doc and spec §10:444's original patch framing). Mutation-proposing
- * kinds only: chip suggestion offers (`run_analysis`, `what_would_flip`)
- * are deliberately excluded — chips derive pending actions after most
- * analysis turns, so counting them would leave the flag near-constant-true
- * for `PENDING_ACTION_DEFAULT_TURN_TTL` turns after every run and dilute
- * the routing signal. All kinds remain visible in the frame's pending
- * diagnostics counts regardless of this set.
+ * field doc and spec §10:444's original patch framing).
+ *
+ * PROPOSE-THEN-DECIDE kinds only — a system-surfaced proposal whose immediate
+ * next turn is the user's accept/decline:
+ *   - `apply_proposed_change` — the G7/G8 propose-then-confirm patch.
+ *   - `proposed_concept` — a system-initiated "would you like me to add X?"
+ *     concept memory; the next turn agrees (→ a follow-up clarifier fires) or
+ *     declines. Agreement leading to a refinement does not change that the
+ *     immediate expectation is accept/decline.
+ *
+ * Deliberately EXCLUDED:
+ *   - `set_factor_value` / `edit_graph_add_risk` — CLARIFICATION-CONTINUATION
+ *     pendings. The change is already DECIDED (value parsed / risk named); the
+ *     pending only carries it across a TARGET-disambiguation turn ("which
+ *     factor?" / "what does it affect?"). The next turn supplies a parameter,
+ *     not a confirm/dismiss — counting them would mislabel clarification state
+ *     as proposal-confirmation to the router.
+ *   - `run_analysis` / `what_would_flip` — chip suggestion offers; chips derive
+ *     pending actions after most analysis turns, so counting them would leave
+ *     the flag near-constant-true for `PENDING_ACTION_DEFAULT_TURN_TTL` turns.
+ *
+ * All kinds (including the excluded ones) remain visible in the frame's
+ * pending diagnostics COUNTS regardless of this set.
  */
 export const CONFIRMATION_EXPECTING_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   'apply_proposed_change',
   'proposed_concept',
-  'set_factor_value',
-  'edit_graph_add_risk',
 ]);
 
 /**
@@ -339,8 +353,12 @@ export function filterLivePendingActions(
  * expired lifecycle is DIAGNOSABLE without a second state authority. Each
  * prior pending is attributed to the FIRST matching drop reason (mirrors the
  * carry-forward short-circuit order: consumed → superseded → wall → hash →
- * turns), so `consumed + superseded + expired_wall + hash_invalidated +
- * expired_turns + survived === prior`.
+ * turns), then a final `cap_dropped` bucket accounts for eligible survivors
+ * evicted by the per-turn `PENDING_ACTIONS_PER_TURN_CAP` when this turn's own
+ * pendings fill it. The seven fates partition the prior set exactly:
+ * `consumed + superseded + expired_wall + expired_turns + hash_invalidated +
+ * cap_dropped + survived === prior`. `survivedCount` therefore reflects what
+ * ACTUALLY persisted (post-cap), NOT pre-cap eligibility.
  */
 export interface PendingLifecycleSummary {
   /** Prior turn's pending actions entering carry-forward. */
@@ -355,7 +373,14 @@ export interface PendingLifecycleSummary {
   readonly expiredTurnsCount: number;
   /** Dropped because the emit-time graph hash no longer matches. */
   readonly hashInvalidatedCount: number;
-  /** Carried forward into this turn's persisted pending set. */
+  /**
+   * Eligible to carry forward but evicted by the per-turn cap because this
+   * turn's own pendings (offered FIRST) filled `PENDING_ACTIONS_PER_TURN_CAP`.
+   * Zero at the pre-cap carry-forward pass; finalised at commit against
+   * `finalPendings`.
+   */
+  readonly capDroppedCount: number;
+  /** Carried forward into this turn's PERSISTED pending set (post-cap). */
   readonly survivedCount: number;
 }
 

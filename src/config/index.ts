@@ -569,7 +569,7 @@ const ConfigSchema = z.object({
     contextSummaryEnabled: booleanString.default(false),
     // Track 2 pending-confirmation truth (CEE_PENDING_CONFIRMATION_TRUTH_ENABLED
     // — kill-switch, default ON). When true, the turn-executor threads the REAL
-    // pending-confirmation state (a live, non-expired mutation-proposing pending
+    // pending-confirmation state (a live, non-expired propose-then-decide pending
     // action from the most recent prior turn — CONFIRMATION_EXPECTING_ACTION_TYPES
     // in session/pending-action.ts) into the ContextPack's
     // `conversation.pending_confirmation` AND the canonical frame's

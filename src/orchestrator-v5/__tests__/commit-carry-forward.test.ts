@@ -12,8 +12,9 @@ import { describe, it, expect } from 'vitest';
 import {
   computeSurvivingPriorPendings,
   computeSurvivingPriorPendingsDetailed,
+  finaliseLifecycleAgainstCap,
 } from '../commit.js';
-import type { PendingAction } from '../session/pending-action.js';
+import type { PendingAction, PendingLifecycleSummary } from '../session/pending-action.js';
 
 const NOW = Date.parse('2026-06-10T12:00:00.000Z');
 const SCENARIO = 'sc-carry-forward';
@@ -190,12 +191,12 @@ describe('computeSurvivingPriorPendingsDetailed — lifecycle drop-reason tally 
     );
     const {
       priorCount, consumedCount, supersededCount, expiredWallCount,
-      expiredTurnsCount, hashInvalidatedCount, survivedCount,
+      expiredTurnsCount, hashInvalidatedCount, capDroppedCount, survivedCount,
     } = summary;
     expect(priorCount).toBe(6);
     expect(
       consumedCount + supersededCount + expiredWallCount +
-      expiredTurnsCount + hashInvalidatedCount + survivedCount,
+      expiredTurnsCount + hashInvalidatedCount + capDroppedCount + survivedCount,
     ).toBe(priorCount);
     expect(summary).toEqual({
       priorCount: 6,
@@ -204,7 +205,53 @@ describe('computeSurvivingPriorPendingsDetailed — lifecycle drop-reason tally 
       expiredWallCount: 1,
       expiredTurnsCount: 1,
       hashInvalidatedCount: 1,
+      // Pre-cap pass applies no per-turn cap → capDroppedCount is 0 here.
+      capDroppedCount: 0,
       survivedCount: 1,
     });
+  });
+});
+
+describe('finaliseLifecycleAgainstCap — post-cap survivor/cap-drop split (Track 2)', () => {
+  const preCap: PendingLifecycleSummary = {
+    priorCount: 2,
+    consumedCount: 0,
+    supersededCount: 0,
+    expiredWallCount: 0,
+    expiredTurnsCount: 0,
+    hashInvalidatedCount: 0,
+    capDroppedCount: 0,
+    survivedCount: 2, // two eligible survivors before the cap
+  };
+
+  it('no cap pressure: all eligible survivors persist, capDroppedCount stays 0', () => {
+    expect(finaliseLifecycleAgainstCap(preCap, 2)).toMatchObject({
+      survivedCount: 2,
+      capDroppedCount: 0,
+    });
+  });
+
+  it('cap fully binds: this-turn pendings fill the cap, every eligible survivor is cap-dropped', () => {
+    // finalPendings.length - chipDerivedPending.length == 0 → persisted 0.
+    const out = finaliseLifecycleAgainstCap(preCap, 0);
+    expect(out.survivedCount).toBe(0);
+    expect(out.capDroppedCount).toBe(2);
+    // Partition still exact: prior == sum of the seven fates.
+    expect(
+      out.consumedCount + out.supersededCount + out.expiredWallCount +
+      out.expiredTurnsCount + out.hashInvalidatedCount + out.capDroppedCount +
+      out.survivedCount,
+    ).toBe(out.priorCount);
+  });
+
+  it('cap partially binds: one of two eligible survivors persists', () => {
+    const out = finaliseLifecycleAgainstCap(preCap, 1);
+    expect(out).toMatchObject({ survivedCount: 1, capDroppedCount: 1 });
+  });
+
+  it('clamps defensively: a persisted count above eligibility cannot make capDroppedCount negative', () => {
+    const out = finaliseLifecycleAgainstCap(preCap, 5);
+    expect(out.survivedCount).toBe(2);
+    expect(out.capDroppedCount).toBe(0);
   });
 });

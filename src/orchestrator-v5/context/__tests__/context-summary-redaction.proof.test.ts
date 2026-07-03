@@ -181,6 +181,7 @@ describe('redaction — no sentinel reaches a wire-bound projection', () => {
           expiredWallCount: 0,
           expiredTurnsCount: 0,
           hashInvalidatedCount: 0,
+          capDroppedCount: 0,
           survivedCount: 1,
         },
       },

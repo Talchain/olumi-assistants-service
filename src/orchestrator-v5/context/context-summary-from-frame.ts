@@ -111,6 +111,7 @@ export function contextSummaryFromFrame(
                     expired_turns_count: frame.pending.lifecycle.expiredTurnsCount,
                     hash_invalidated_count:
                       frame.pending.lifecycle.hashInvalidatedCount,
+                    cap_dropped_count: frame.pending.lifecycle.capDroppedCount,
                     survived_count: frame.pending.lifecycle.survivedCount,
                   },
                 }

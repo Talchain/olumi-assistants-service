@@ -358,6 +358,11 @@ export function computeSurvivingPriorPendingsDetailed(
       expiredWallCount,
       expiredTurnsCount,
       hashInvalidatedCount,
+      // Pre-cap: this function applies no per-turn cap (it has no view of this
+      // turn's own pendings). `capDroppedCount` is finalised at the commit seam
+      // against `finalPendings`; `survivedCount` here is the ELIGIBLE survivor
+      // count, corrected to the actually-persisted count by `finaliseLifecycle`.
+      capDroppedCount: 0,
       survivedCount: survivors.length,
     },
   };
@@ -383,6 +388,28 @@ export function computeSurvivingPriorPendings(
     currentGraphHash,
     nowMs,
   ).survivors;
+}
+
+/**
+ * Finalise the pre-cap carry-forward tally against the per-turn cap. The
+ * detailed pass counts every ELIGIBLE survivor; the commit then caps
+ * `[...thisTurnPendings, ...eligibleSurvivors]` at
+ * `PENDING_ACTIONS_PER_TURN_CAP` with this turn's own pendings FIRST, so some
+ * eligible survivors may not persist. This splits the pre-cap `survivedCount`
+ * into the actually-persisted `survivedCount` and the `capDroppedCount`,
+ * keeping the seven-fate partition exact. Pure; total (clamps defensively).
+ */
+export function finaliseLifecycleAgainstCap(
+  preCap: PendingLifecycleSummary,
+  persistedSurvivorCount: number,
+): PendingLifecycleSummary {
+  const eligible = preCap.survivedCount;
+  const persisted = Math.max(0, Math.min(persistedSurvivorCount, eligible));
+  return {
+    ...preCap,
+    survivedCount: persisted,
+    capDroppedCount: eligible - persisted,
+  };
 }
 
 /**
@@ -460,6 +487,21 @@ export async function commitDirectAnswer(
     ...chipDerivedPending,
     ...survivingPrior,
   ].slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+
+  // Track 2 — finalise the lifecycle tally against the cap. This turn's own
+  // pendings occupy the head of `finalPendings`, so the eligible survivors that
+  // actually persisted = whatever tail remains after them. `survivedCount` is
+  // corrected to that persisted count and the evicted remainder is attributed
+  // to `capDroppedCount`, so the diagnostic reflects what was WRITTEN, not
+  // pre-cap eligibility (Track 3 may read this as persisted survivor truth).
+  const persistedSurvivorCount = Math.max(
+    0,
+    finalPendings.length - chipDerivedPending.length,
+  );
+  const pendingLifecycle = finaliseLifecycleAgainstCap(
+    carryForward.summary,
+    persistedSurvivorCount,
+  );
 
   // V5 Conversation Context Reliability: capture this turn's conversation
   // content for the next turn's ContextPack. user_message comes from the call
@@ -609,7 +651,7 @@ export async function commitDirectAnswer(
     performed: true,
     persisted_row_id: persistedRowId,
     graphPersisted,
-    pendingLifecycle: carryForward.summary,
+    pendingLifecycle,
   };
 }
 

@@ -132,6 +132,7 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
           expiredWallCount: 1,
           expiredTurnsCount: 0,
           hashInvalidatedCount: 0,
+          capDroppedCount: 0,
           survivedCount: 1,
         },
       },
@@ -151,6 +152,7 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
         expired_wall_count: 1,
         expired_turns_count: 0,
         hash_invalidated_count: 0,
+        cap_dropped_count: 0,
         survived_count: 1,
       },
     });
@@ -195,6 +197,7 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
       expired_wall_count: true,
       expired_turns_count: true,
       hash_invalidated_count: true,
+      cap_dropped_count: true,
       survived_count: true,
     };
     const fullyPopulated = buildFrame({
@@ -212,7 +215,7 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
         threaded: true,
         lifecycle: {
           priorCount: 1, consumedCount: 0, supersededCount: 0, expiredWallCount: 0,
-          expiredTurnsCount: 0, hashInvalidatedCount: 0, survivedCount: 1,
+          expiredTurnsCount: 0, hashInvalidatedCount: 0, capDroppedCount: 0, survivedCount: 1,
         },
       },
     });
@@ -245,16 +248,16 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
     expect(summary.pending!.threaded).toBe(false);
   });
 
-  it('ANTI-DRIFT: the frame-built summary carries every legacy key (no silent drop), plus exactly the frame-only `pending` block', () => {
+  it('ANTI-DRIFT: the frame-built summary carries every legacy key (no silent drop), plus exactly the frame-only `pending` and `rerun` blocks', () => {
     // Both shapes maximal: coaching pack ON and provenance supplied on both
-    // sides, and the frame ALSO carries a pending block (frame-only — the
-    // legacy parts path has no frame to source it from). The frame path must
-    // be a strict SUPERSET of the legacy key set, differing by exactly the
-    // one documented frame-only key `pending`. Any future field added to the
-    // legacy literal but not the frame projection makes `fromFrame` MISSING a
-    // legacy key → the superset check fails; any frame-only field beyond
-    // `pending` → the difference check fails. Neither omission can ship
-    // silently.
+    // sides, and the frame ALSO carries pending + rerun blocks (frame-only —
+    // the legacy parts path has no frame to source them from). The frame path
+    // must be a strict SUPERSET of the legacy key set, differing by exactly the
+    // two documented frame-only keys `pending` and `rerun`. Any future field
+    // added to the legacy literal but not the frame projection makes `fromFrame`
+    // MISSING a legacy key → the superset check fails; any frame-only field
+    // beyond `pending`/`rerun` → the difference check fails. Neither omission
+    // can ship silently.
     const maximalFrame = buildFrame({
       freshness,
       canonicalState,

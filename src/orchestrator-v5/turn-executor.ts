@@ -584,10 +584,10 @@ export async function runTurnExecutor(
   // coaching_state snapshot on EVERY turn-executor commit. Injected centrally
   // here so no individual commit site can omit it; `context` is the single turn
   // context built above. Forwards the optional sessionStore arg unchanged. The
-  // 19 `commitDirectAnswer` call sites in this function were renamed to
+  // 20 `commitDirectAnswer` call sites in this function were renamed to
   // `commitTurn` so the snapshot threads uniformly.
   // V5 Conversation Context Reliability: also inject userMessage centrally so
-  // EVERY turn-executor commit (all 19 sites: happy path, recoveries,
+  // EVERY turn-executor commit (all 20 sites: happy path, recoveries,
   // clarifications, guards) persists the user's turn text uniformly. The
   // assistant side is derived inside commitDirectAnswer from the composed
   // response. Message-kind turns carry payload.message; system-event-kind

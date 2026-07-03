@@ -150,6 +150,7 @@ describe('buildFrame — pure projection over authority outputs (Increment 2)', 
         expiredWallCount: 1,
         expiredTurnsCount: 0,
         hashInvalidatedCount: 0,
+        capDroppedCount: 0,
         survivedCount: 1,
       },
     };

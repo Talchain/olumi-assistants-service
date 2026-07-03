@@ -83,14 +83,17 @@ describe('filterLivePendingActions', () => {
   });
 });
 
-describe('CONFIRMATION_EXPECTING_ACTION_TYPES — mutation-proposing kinds only', () => {
-  it('contains exactly the mutation-proposing kinds', () => {
+describe('CONFIRMATION_EXPECTING_ACTION_TYPES — propose-then-decide kinds only', () => {
+  it('contains exactly the two propose-then-decide kinds', () => {
     expect([...CONFIRMATION_EXPECTING_ACTION_TYPES].sort()).toEqual([
       'apply_proposed_change',
-      'edit_graph_add_risk',
       'proposed_concept',
-      'set_factor_value',
     ]);
+  });
+
+  it('excludes the clarification-continuation kinds (change already decided; target-disambiguation pending)', () => {
+    expect(CONFIRMATION_EXPECTING_ACTION_TYPES.has('set_factor_value')).toBe(false);
+    expect(CONFIRMATION_EXPECTING_ACTION_TYPES.has('edit_graph_add_risk')).toBe(false);
   });
 
   it('excludes the chip suggestion offers', () => {

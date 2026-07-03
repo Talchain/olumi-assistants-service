@@ -73,6 +73,54 @@ function liveChipOffer(): PendingAction {
   };
 }
 
+/** A live `proposed_concept` — a system-initiated propose-then-decide pending. */
+function liveProposedConcept(): PendingAction {
+  return {
+    id: `pa-${randomUUID()}`,
+    scenario_id: SCENARIO_ID,
+    chip_id: `chip_concept_${randomUUID()}`,
+    action: {
+      kind: 'proposed_concept',
+      concept: 'team morale',
+      preferred_kind: 'factor',
+      public_label: 'Add team morale',
+      public_message: 'Would you like me to add team morale as a factor?',
+    },
+    preconditions: {},
+    expires_at_turn_count: 2,
+    expires_at_iso: '2099-12-31T23:59:59.000Z',
+    emitted_at_iso: '2026-07-03T00:00:00.000Z',
+  };
+}
+
+/** A live `set_factor_value` — a CLARIFICATION-CONTINUATION (target disambiguation). */
+function liveSetFactorValue(): PendingAction {
+  return {
+    id: `pa-${randomUUID()}`,
+    scenario_id: SCENARIO_ID,
+    chip_id: `chip_setval_${randomUUID()}`,
+    action: { kind: 'set_factor_value', factor_id: 'fac_ambiguous', value: 10, operator: 'set' },
+    preconditions: { graph_hash: 'hash-at-emit' },
+    expires_at_turn_count: 2,
+    expires_at_iso: '2099-12-31T23:59:59.000Z',
+    emitted_at_iso: '2026-07-03T00:00:00.000Z',
+  };
+}
+
+/** A live `edit_graph_add_risk` — a CLARIFICATION-CONTINUATION (affect-target pending). */
+function liveAddRisk(): PendingAction {
+  return {
+    id: `pa-${randomUUID()}`,
+    scenario_id: SCENARIO_ID,
+    chip_id: `chip_addrisk_${randomUUID()}`,
+    action: { kind: 'edit_graph_add_risk', label: 'Supply delay' },
+    preconditions: { graph_hash: 'hash-at-emit' },
+    expires_at_turn_count: 2,
+    expires_at_iso: '2099-12-31T23:59:59.000Z',
+    emitted_at_iso: '2026-07-03T00:00:00.000Z',
+  };
+}
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
@@ -193,6 +241,51 @@ describe('pending-confirmation truth — ContextPack and frame from one authorit
     expect(result.frame!.pending).toBeDefined();
     expect(result.frame!.pending!.liveCount).toBe(1);
     expect(result.frame!.pending!.kinds.what_would_flip).toBe(1);
+    expect(result.frame!.pending!.confirmationExpectingLiveCount).toBe(0);
+  });
+
+  it('live proposed_concept → TRUE at both seams (system-initiated propose-then-decide)', async () => {
+    seededPendings = [liveProposedConcept()];
+    const adapter = textRoutingAdapter();
+    const result = await runTurnExecutor(payload(NEUTRAL_MESSAGE), 'req-proposed-concept', {
+      routingAdapter: adapter,
+    });
+    expect(packUserContent(adapter)).toContain('"pending_confirmation": true');
+    expect(result.frame!.conversation.pendingConfirmation).toBe(true);
+    expect(result.frame!.pending!.confirmationExpectingLiveCount).toBe(1);
+    expect(result.frame!.pending!.kinds.proposed_concept).toBe(1);
+  });
+
+  // NB: a live set_factor_value / edit_graph_add_risk pending triggers its OWN
+  // deterministic clarification pre-route, which can short-circuit before the LLM
+  // routing call — so the pack is not always observable via the adapter here. We
+  // assert the FRAME seam (which always receives the same derived const the pack
+  // does — agreement is proven by construction in the apply/agreement cases that
+  // DO reach the LLM). The point of these cases is the KIND SCOPING: a live
+  // clarification-continuation pending must read as pending_confirmation:false
+  // while remaining visible in the diagnostics counts.
+  it('live set_factor_value ONLY → frame pendingConfirmation FALSE (clarification-continuation) but visible in diagnostics counts', async () => {
+    seededPendings = [liveSetFactorValue()];
+    const result = await runTurnExecutor(payload(NEUTRAL_MESSAGE), 'req-setval-clarify', {
+      routingAdapter: textRoutingAdapter(),
+    });
+    expect(result.frame).toBeDefined();
+    expect(result.frame!.conversation.pendingConfirmation).toBe(false);
+    // Diagnostics honesty: the pending is live and counted, just not confirm-expecting.
+    expect(result.frame!.pending!.liveCount).toBe(1);
+    expect(result.frame!.pending!.kinds.set_factor_value).toBe(1);
+    expect(result.frame!.pending!.confirmationExpectingLiveCount).toBe(0);
+  });
+
+  it('live edit_graph_add_risk ONLY → frame pendingConfirmation FALSE (clarification-continuation) but visible in diagnostics counts', async () => {
+    seededPendings = [liveAddRisk()];
+    const result = await runTurnExecutor(payload(NEUTRAL_MESSAGE), 'req-addrisk-clarify', {
+      routingAdapter: textRoutingAdapter(),
+    });
+    expect(result.frame).toBeDefined();
+    expect(result.frame!.conversation.pendingConfirmation).toBe(false);
+    expect(result.frame!.pending!.liveCount).toBe(1);
+    expect(result.frame!.pending!.kinds.edit_graph_add_risk).toBe(1);
     expect(result.frame!.pending!.confirmationExpectingLiveCount).toBe(0);
   });
 

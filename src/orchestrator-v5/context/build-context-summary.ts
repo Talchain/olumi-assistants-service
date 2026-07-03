@@ -92,6 +92,7 @@ export interface ContextSummaryPendingLifecycle {
   readonly expired_wall_count: number;
   readonly expired_turns_count: number;
   readonly hash_invalidated_count: number;
+  readonly cap_dropped_count: number;
   readonly survived_count: number;
 }
 

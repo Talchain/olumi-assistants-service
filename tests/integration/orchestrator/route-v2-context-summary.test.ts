@@ -18,6 +18,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
+// Assert the version against the shared constant, not a hard-coded literal, so
+// an additive `_context_summary` version bump never leaves this advisory
+// integration test stale (Track 2 bumped it 1.0.0 → 1.1.0).
+import { V5_CONTEXT_SUMMARY_VERSION } from '../../../src/orchestrator-v5/context/build-context-summary.js';
+
 const configHolder = {
   cee: {
     timingDebugEnabled: false,
@@ -165,7 +170,7 @@ describe('route-v2 — flag-gated `_context_summary`', () => {
     expect(status).toBe(200);
     expect(body).toHaveProperty('_context_summary');
     const cs = body._context_summary as Record<string, any>;
-    expect(cs.version).toBe('1.0.0');
+    expect(cs.version).toBe(V5_CONTEXT_SUMMARY_VERSION);
     expect(cs.analysis_state.freshness).toBe('fresh');
     expect(cs.analysis_state.usable_for_chips).toBe(true);
     expect(cs.analysis_state.requires_rerun).toBe(false);

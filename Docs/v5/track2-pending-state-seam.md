@@ -36,7 +36,10 @@ isPendingActionExpired(pa, nowMs): boolean         // malformed ISO → expired;
                                                    // expires_at_turn_count <= 0 → expired
 filterLivePendingActions(pendings, nowMs): PendingAction[]   // order-preserving
 CONFIRMATION_EXPECTING_ACTION_TYPES: ReadonlySet<PendingActionKind>
-    // { apply_proposed_change, proposed_concept, set_factor_value, edit_graph_add_risk }
+    // { apply_proposed_change, proposed_concept }  — propose-then-decide only.
+    // set_factor_value / edit_graph_add_risk are clarification-continuations
+    // (change decided; target-disambiguation pending) → NOT confirm-expecting,
+    // but still visible in the pending diagnostics counts.
 ```
 
 Track 3 MUST use `filterLivePendingActions` (or `isPendingActionExpired`) to
@@ -74,8 +77,15 @@ The commit-time carry-forward pass emits a redacted tally
 (`PendingLifecycleSummary` in `session/pending-action.ts`, surfaced on
 `CommitResult.pendingLifecycle` and in the frame's `pending.lifecycle`
 diagnostics): `{ priorCount, consumedCount, supersededCount, expiredWallCount,
-expiredTurnsCount, hashInvalidatedCount, survivedCount }`. The six outcomes
-partition `priorCount` exactly.
+expiredTurnsCount, hashInvalidatedCount, capDroppedCount, survivedCount }`. The
+seven outcomes partition `priorCount` exactly.
+
+**`survivedCount` is POST-CAP** — it counts what ACTUALLY persisted into this
+turn's pending set, after the `PENDING_ACTIONS_PER_TURN_CAP` slice. When this
+turn's own pendings fill the cap, an eligible prior survivor is evicted and
+attributed to `capDroppedCount` (not `survivedCount`). Track 3 may therefore
+treat `survivedCount` as persisted survivor truth; the authoritative persisted
+set remains `finalPendings` at commit.
 
 ## The apply/refuse contract Track 3 must honour
 
@@ -99,13 +109,36 @@ a zombie. Invariants to preserve:
   mismatch as superseded (see `decideProposedChangeSynthesis`). Track 3's CAS
   apply should reuse this, not invent a parallel hash check.
 
-## Persisted-first graph authority (unchanged; do not fork)
+## Graph authority — TWO distinct rules, do not conflate (unchanged; do not fork)
 
-The graph read source is `graphStateForTurn ?? context.persistedGraph`
-(request-second). Writes go through `commit.ts` → `append_turn_atomic(p_graph)`
-atomically with the turn row. Track 3's apply logic must write through this same
-chokepoint — do **not** add a second graph-write path or a second source of
-truth.
+The turn-executor resolves TWO different graphs with DIFFERENT precedence. Track
+3's CAS/referee must copy the RIGHT one — conflating them is a correctness bug.
+
+1. **Response / label / wire-egress graph** (`effectiveTurnGraph`, from
+   `graphStateForTurn`) — **REQUEST-FIRST with persisted fallback.**
+   `graphStateForTurn = options.graphState ?? null`; when the request omits a
+   graph, it falls back to `context.persistedGraph`. This graph drives the wire
+   response, entity-label resolution and the durable-text scrub. (turn-executor:
+   `graphStateForTurn` init + the `if (!graphStateForTurn) { … persistedGraph }`
+   fallback.)
+
+2. **Freshness / analysis-affecting-hash authority**
+   (`currentAnalysisGraphHashForTurn`, `canonicalReadinessGraphForRun`, the
+   `interventionControlledFactorIds` source) — **PERSISTED-FIRST, no cross-fallback
+   on parse failure.** When a persisted graph exists it is ALWAYS hashed; if it
+   fails to parse the hash is `null` (freshness = unknown) — it does **not** fall
+   back to the request graph (a lagging client could otherwise match the prior
+   `graph_hash_at_run` and produce a false-fresh verdict). The request graph is
+   used only on cold-start (no persisted graph). Source expressions read
+   `context.persistedGraph ?? options.graphState`.
+
+**For Track 3's CAS / referee:** the emit-time `preconditions.graph_hash` on a
+pending proposal was computed against the FRESHNESS authority (rule 2 —
+persisted-first). Compare the live hash the same way (persisted-first); do NOT
+hash the request graph for the CAS check, or a client-lag turn will spuriously
+pass/fail. Writes go through `commit.ts` → `append_turn_atomic(p_graph)`
+atomically with the turn row — write through this same chokepoint; do **not**
+add a second graph-write path or a second source of truth.
 
 ## What Track 2 does NOT own (Track 3's to build)
 
