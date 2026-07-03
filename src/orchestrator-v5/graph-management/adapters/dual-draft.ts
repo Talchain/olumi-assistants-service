@@ -81,6 +81,16 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
+/**
+ * Default node kind by producer type. Only `added_risk` has a canonical node kind;
+ * `added_assumption`/`added_evidence_gap` have no NodeKindV3 equivalent, so the producer
+ * MUST supply `delta.node.kind` — otherwise the projection leaves `kind` undefined and R1
+ * REJECTS it (fail-closed), never silently mislabelling it as `'risk'`.
+ */
+function defaultNodeKind(type: DualDraftProposalType): string | undefined {
+  return type === 'added_risk' ? 'risk' : undefined;
+}
+
 /** Best-effort payload projection per kind (R1 is the fail-closed validator). */
 function projectPayload(proposal: DualDraftProposal, kind: CandidateKind): Record<string, unknown> {
   const node = asObject(proposal.delta.node);
@@ -97,7 +107,7 @@ function projectPayload(proposal: DualDraftProposal, kind: CandidateKind): Recor
         },
       };
     case 'add_node':
-      return { node: { id: str(node.id) ?? '', kind: node.kind ?? 'risk', label: str(node.label) ?? '' } };
+      return { node: { id: str(node.id) ?? '', kind: str(node.kind) ?? defaultNodeKind(proposal.type), label: str(node.label) ?? '' } };
     case 'add_edge':
       return { edge: { from: str(edge.from) ?? '', to: str(edge.to) ?? '' } };
     case 'flag_uncertainty':

@@ -71,6 +71,21 @@ describe('dual-draft adapter — fail-closed + end-to-end', () => {
     expect(r.ok).toBe(false); // empty from/to fail the strict edge payload
   });
 
+  it('added_assumption WITHOUT delta.node.kind is REJECTED by R1 (never silently mislabelled as risk)', () => {
+    const p: DualDraftProposal = { type: 'added_assumption', delta: { node: { id: 'a-1', label: 'Assumption' } }, evidence_pointer: 'brief:1' };
+    const env = dualDraftToCandidateEnvelope(p, CTX);
+    // kind is left undefined (no blanket 'risk' default) → R1 rejects.
+    expect(((env as { payload: { node: { kind?: unknown } } }).payload.node.kind)).toBeUndefined();
+    expect(parseEnvelope(env).ok).toBe(false);
+  });
+
+  it('added_risk WITHOUT delta.node.kind defaults to a valid `risk` node (its canonical kind)', () => {
+    const p: DualDraftProposal = { type: 'added_risk', delta: { node: { id: 'r-1', label: 'Risk' } }, evidence_pointer: 'brief:1' };
+    const env = dualDraftToCandidateEnvelope(p, CTX);
+    expect(((env as { payload: { node: { kind?: unknown } } }).payload.node.kind)).toBe('risk');
+    expect(parseEnvelope(env).ok).toBe(true);
+  });
+
   it('end-to-end: added_option → referee → held ADD_OPTION_APPLY_UNWIRED (nodes-only graph)', () => {
     const graph = buildReadyGraph();
     const proposal: DualDraftProposal = {

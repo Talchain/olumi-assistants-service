@@ -28,6 +28,7 @@ export const BASE_HASH_MISSING = 'BASE_HASH_MISSING' as const;
 // --- R2 frame / stale gate (frame-provided authority; never re-derived) -------
 export const FRAME_UNAVAILABLE = 'FRAME_UNAVAILABLE' as const;
 export const BASE_HASH_DIVERGED = 'BASE_HASH_DIVERGED' as const;
+export const ANALYSIS_NOT_FRESH = 'ANALYSIS_NOT_FRESH' as const;
 export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
 
 // --- R3 referential integrity -------------------------------------------------
@@ -78,6 +79,7 @@ export const MUTATION_REASON_CODES = Object.freeze([
   BASE_HASH_MISSING,
   FRAME_UNAVAILABLE,
   BASE_HASH_DIVERGED,
+  ANALYSIS_NOT_FRESH,
   CURRENT_GRAPH_UNREADABLE,
   ENTITY_NOT_FOUND,
   OPTION_ID_COLLISION,

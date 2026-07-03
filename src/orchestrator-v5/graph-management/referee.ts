@@ -25,6 +25,7 @@ import { checkFieldSafety } from './field-safety.js';
 import {
   buildRenameCandidate,
   buildAddOptionCandidate,
+  currentGraphIsParseable,
   graphHasNodeId,
   graphHasTopLevelOptions,
   graphOptionsAreMalformed,
@@ -34,18 +35,24 @@ import {
   SCHEMA_INVALID,
   FRAME_UNAVAILABLE,
   BASE_HASH_DIVERGED,
+  ANALYSIS_NOT_FRESH,
   CURRENT_GRAPH_UNREADABLE,
   OPTION_ID_COLLISION,
   OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
   ADD_OPTION_APPLY_UNWIRED,
   GRAPH_OPTIONS_MALFORMED,
   GRAPH_INVARIANT_VIOLATED,
+  FIELD_NOT_ALLOWED,
+  PIPELINE_OWNED_FIELD,
+  ENGINE_CLAIM_IN_TEXT,
   READINESS_DOWNGRADE,
   STRUCTURAL_APPLY_HELD,
   TUNABLE_APPLY_HELD,
   REMOVE_UNCONFIRMED,
   CLASSIFY_FAILED,
+  type MutationReasonCode,
 } from './reason-codes.js';
+import { CANDIDATE_KINDS } from './types.js';
 import type {
   CandidateKind,
   CandidateMutationEnvelope,
@@ -58,25 +65,25 @@ import type {
 function bestEffortKind(raw: unknown): CandidateKind | null {
   try {
     const k = (raw as { kind?: unknown } | null)?.kind;
-    return typeof k === 'string' &&
-      (
-        [
-          'add_node',
-          'add_edge',
-          'update_node_field',
-          'update_edge_field',
-          'rename_node',
-          'add_option',
-          'remove_node',
-          'remove_edge',
-          'flag_uncertainty',
-          'clarification',
-        ] as const
-      ).includes(k as CandidateKind)
+    return typeof k === 'string' && (CANDIDATE_KINDS as readonly string[]).includes(k)
       ? (k as CandidateKind)
       : null;
   } catch {
     return null;
+  }
+}
+
+/** Fixed, REDACTED readable per field-safety code — never echoes the raw field/value. */
+function fieldSafetyReadable(code: MutationReasonCode): string {
+  switch (code) {
+    case FIELD_NOT_ALLOWED:
+      return 'The candidate targets a field it may not set.';
+    case PIPELINE_OWNED_FIELD:
+      return 'The candidate targets an analysis-derived, pipeline-owned field.';
+    case ENGINE_CLAIM_IN_TEXT:
+      return 'The candidate carries engine-claim prose (EVPI / flip-point / quantified probability).';
+    default:
+      return 'Field-safety check failed.';
   }
 }
 
@@ -153,39 +160,52 @@ export function refereeMutation(
           blocker: { code: CURRENT_GRAPH_UNREADABLE, readable: 'The frame could not read or hash the current graph.' },
         };
       case 'stale':
+        // Both stale reasons carry a machine-readable code (no-silent-outcome contract).
         return {
           ...meta,
           verdict: 'stale',
-          ...(gate.outcome.reason === 'base_hash_diverged'
-            ? { blocker: { code: BASE_HASH_DIVERGED, readable: 'The graph has moved since this candidate was generated.' } as MutationBlocker }
-            : {}),
+          blocker:
+            gate.outcome.reason === 'base_hash_diverged'
+              ? { code: BASE_HASH_DIVERGED, readable: 'The graph has moved since this candidate was generated.' }
+              : { code: ANALYSIS_NOT_FRESH, readable: 'The analysis is not current (freshness is not fresh); re-run before applying.' },
         };
       case 'proceed':
         break;
     }
 
-    // Non-mutating kinds never touch the graph.
+    // R4 — field-safety (allowlist + engine-claim scan on prose AND field values).
+    // Runs BEFORE the non-mutating short-circuit so an engine claim smuggled into a
+    // flag_uncertainty/clarification `question` (or a producer rationale) is rejected.
+    const fs = checkFieldSafety(env);
+    if (!fs.ok && fs.code) {
+      // Redacted: fixed per-code message, never the raw field/value.
+      return { ...meta, verdict: 'rejected', blocker: { code: fs.code, readable: fieldSafetyReadable(fs.code) } };
+    }
+
+    // Non-mutating kinds never touch the graph — no current-graph guards apply.
     if (kind === 'flag_uncertainty' || kind === 'clarification') {
       return { ...meta, verdict: 'clarify_required' };
     }
 
-    // R4 — field-safety (allowlist + engine-claim scan).
-    const fs = checkFieldSafety(env);
-    if (!fs.ok && fs.code) {
-      return {
-        ...meta,
-        verdict: 'rejected',
-        blocker: { code: fs.code, readable: `Field-safety rejected at \`${fs.path ?? 'payload'}\` (${fs.code}).` },
-      };
-    }
-
-    // General graph-corruption guard: a present-but-non-array top-level `options`
-    // corrupts the context view for EVERY mutating kind (PR #300, verified live).
+    // Current-graph guards (mutating kinds only):
+    //  - a present-but-non-array top-level `options` corrupts the context view
+    //    (GraphV3 strips `options`, so a parse check alone won't catch it);
+    //  - a base graph that does NOT parse as GraphV3 is an ENVIRONMENTAL hold
+    //    (CURRENT_GRAPH_UNREADABLE), not a candidate reject — this distinguishes a
+    //    malformed BASE from a genuinely invalid CANDIDATE (both otherwise surface as
+    //    GRAPH_INVARIANT_VIOLATED from the apply seam's ingress vs post-mutation parse).
     if (graphOptionsAreMalformed(currentGraph)) {
       return {
         ...meta,
         verdict: 'held',
         blocker: { code: GRAPH_OPTIONS_MALFORMED, readable: 'The current graph top-level `options` is present but not an array (malformed).' },
+      };
+    }
+    if (!currentGraphIsParseable(currentGraph)) {
+      return {
+        ...meta,
+        verdict: 'held',
+        blocker: { code: CURRENT_GRAPH_UNREADABLE, readable: 'The current graph is not structurally readable (failed schema validation).' },
       };
     }
 
@@ -236,8 +256,9 @@ export function refereeMutation(
           }
           return { ...meta, verdict: 'held', blocker: built.error };
         }
-        // NEVER would_apply: candidate built + EP2-assessed for transparency, held on the divergence split.
-        assessCandidate(built.candidate);
+        // NEVER would_apply: the built candidate is surfaced for transparency, and the
+        // verdict is held on the divergence split. (No EP2 assessment here — add_option
+        // holds regardless of readiness, so assessing it would be discarded work.)
         return {
           ...meta,
           verdict: 'held',

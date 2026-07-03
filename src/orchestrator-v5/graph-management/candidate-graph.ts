@@ -12,7 +12,7 @@
  */
 import { applyAndValidateMutation } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
-import type { GraphV3T, NodeV3T, EdgeV3T } from '../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T, type NodeV3T, type EdgeV3T } from '../../schemas/cee-v3.js';
 import {
   CANDIDATE_BUILD_FAILED,
   ENTITY_NOT_FOUND,
@@ -152,6 +152,23 @@ export function graphOptionsAreMalformed(graph: unknown): boolean {
   if (graph === null || typeof graph !== 'object') return false;
   const options = (graph as { options?: unknown }).options;
   return options !== null && options !== undefined && !Array.isArray(options);
+}
+
+/**
+ * Whether the CURRENT graph parses as GraphV3 (structural validity). Used to
+ * distinguish a malformed BASE graph (an environmental hold → CURRENT_GRAPH_UNREADABLE)
+ * from a genuinely invalid CANDIDATE (a producer fault → rejected): both otherwise
+ * surface as `GRAPH_INVARIANT_VIOLATED` from `applyAndValidateMutation`'s two parse
+ * steps (ingress vs post-mutation), which the redacted blocker cannot tell apart.
+ * Total (never throws). Note: GraphV3 strips top-level `options`, so a malformed
+ * `options` is caught separately by `graphOptionsAreMalformed`.
+ */
+export function currentGraphIsParseable(graph: unknown): boolean {
+  try {
+    return GraphV3.safeParse(graph).success;
+  } catch {
+    return false;
+  }
 }
 
 /** A node with `nodeId` already exists. → OPTION_ID_COLLISION for add_option. */

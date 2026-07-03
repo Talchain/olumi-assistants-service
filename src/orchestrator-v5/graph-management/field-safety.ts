@@ -68,10 +68,15 @@ const ENGINE_CLAIM_PATTERNS: readonly RegExp[] = [
   /\b\d{1,3}(?:\.\d+)?\s?%\s+(?:likely|chance|probability|confiden)/i,
 ];
 
+/**
+ * Result carries a CODE only — never the offending field name or value. The raw
+ * `field`/`to` strings are model-controlled payload values, so surfacing them (even
+ * as a diagnostic `path`) would violate the §5 redaction contract; callers render a
+ * fixed per-code message.
+ */
 export interface FieldSafetyResult {
   readonly ok: boolean;
   readonly code?: MutationReasonCode;
-  readonly path?: string;
 }
 
 function isPipelineOwned(field: string): boolean {
@@ -92,21 +97,25 @@ export function checkFieldSafety(envelope: CandidateMutationEnvelope): FieldSafe
   // (a) field allowlist / pipeline-owned guard for the two field-edit kinds.
   if (envelope.kind === 'update_node_field') {
     const field = envelope.payload.field;
-    if (isPipelineOwned(field)) return { ok: false, code: PIPELINE_OWNED_FIELD, path: field };
-    if (!ALLOWED_NODE_FIELDS.has(field)) return { ok: false, code: FIELD_NOT_ALLOWED, path: field };
+    if (isPipelineOwned(field)) return { ok: false, code: PIPELINE_OWNED_FIELD };
+    if (!ALLOWED_NODE_FIELDS.has(field)) return { ok: false, code: FIELD_NOT_ALLOWED };
   } else if (envelope.kind === 'update_edge_field') {
     const field = envelope.payload.field;
-    if (isPipelineOwned(field)) return { ok: false, code: PIPELINE_OWNED_FIELD, path: field };
-    if (!ALLOWED_EDGE_FIELDS.has(field)) return { ok: false, code: FIELD_NOT_ALLOWED, path: field };
+    if (isPipelineOwned(field)) return { ok: false, code: PIPELINE_OWNED_FIELD };
+    if (!ALLOWED_EDGE_FIELDS.has(field)) return { ok: false, code: FIELD_NOT_ALLOWED };
   }
 
-  // (b) engine-claim scan on narrative free text (rationale / question / reason).
+  // (b) engine-claim scan on narrative free text (rationale / question / reason)
+  //     AND on string field VALUES a producer may set (update_* `from`/`to`) — an
+  //     engine claim must not ride in as a value, not just as prose (G14).
   const texts: (string | undefined)[] = [envelope.provenance.rationale];
   const p = envelope.payload as Record<string, unknown>;
   if (typeof p.question === 'string') texts.push(p.question);
   if (typeof p.reason === 'string') texts.push(p.reason);
+  if (typeof p.to === 'string') texts.push(p.to);
+  if (typeof p.from === 'string') texts.push(p.from);
   for (const t of texts) {
-    if (scanText(t)) return { ok: false, code: ENGINE_CLAIM_IN_TEXT, path: 'free_text' };
+    if (scanText(t)) return { ok: false, code: ENGINE_CLAIM_IN_TEXT };
   }
 
   return { ok: true };

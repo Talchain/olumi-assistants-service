@@ -10,6 +10,7 @@ import {
   FRAME_UNAVAILABLE,
   CURRENT_GRAPH_UNREADABLE,
   BASE_HASH_DIVERGED,
+  ANALYSIS_NOT_FRESH,
   ENTITY_NOT_FOUND,
   OPTION_ID_COLLISION,
   OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
@@ -71,6 +72,8 @@ describe('R2 — frame / stale gate', () => {
   it('freshness STALE → stale (fail-CLOSED — regression: previously fell through to would_apply)', () => {
     const v = refereeMutation(envFor('rename_node'), G, frameFor(G, 'stale'));
     expect(v.verdict).toBe('stale');
+    // No-silent-outcome: the freshness-driven stale carries a machine-readable code.
+    expect(v.blocker?.code).toBe(ANALYSIS_NOT_FRESH);
   });
 
   it('freshness NONE (pre-analysis) → would_apply for a hash-matching rename (legitimate pre-analysis edit)', () => {
@@ -220,5 +223,39 @@ describe('provenance-independence + totality', () => {
     expect(() => { vs = refereeMutationBatch(arr, G, frameFor(G)); }).not.toThrow();
     expect(vs).toHaveLength(1);
     expect(vs![0].verdict).toBe('rejected');
+  });
+});
+
+describe('code-review regressions', () => {
+  it('redaction: R4 field-safety rejection does NOT echo the raw field name into blocker.readable', () => {
+    const raw = makeEnvelope('update_node_field', { node_id: 'f-spend', field: 'secret_titan_layoff_field', from: 1, to: 2 }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(FIELD_NOT_ALLOWED);
+    expect(v.blocker?.readable).not.toContain('secret_titan_layoff_field');
+  });
+
+  it('base graph invalid (not a candidate fault) → held CURRENT_GRAPH_UNREADABLE, not rejected', () => {
+    // A structurally-invalid GraphV3 (node missing kind/label); frame reports readable + matching hash.
+    const badGraph = { nodes: [{ id: 'x' }], edges: [] };
+    const frame = { currentGraphHash: 'h1', graphReadable: true, freshness: 'fresh' as const };
+    const raw = makeEnvelope('rename_node', { node_id: 'x', to_label: 'Y' }, { base_graph_hash: 'h1' });
+    const v = refereeMutation(raw, badGraph, frame);
+    expect(v.verdict).toBe('held');
+    expect(v.blocker?.code).toBe(CURRENT_GRAPH_UNREADABLE);
+  });
+
+  it('engine-claim in a flag_uncertainty question is REJECTED (field-safety now runs before the clarify short-circuit)', () => {
+    const raw = makeEnvelope('flag_uncertainty', { target_ref: 'f-spend', question: 'What is the EVPI of this factor?' }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENGINE_CLAIM_IN_TEXT);
+  });
+
+  it('engine-claim smuggled as an update_node_field VALUE is rejected', () => {
+    const raw = makeEnvelope('update_node_field', { node_id: 'f-spend', field: 'label', from: 'Marketing spend', to: 'flip-point at 42%' }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENGINE_CLAIM_IN_TEXT);
   });
 });
