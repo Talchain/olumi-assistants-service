@@ -6,10 +6,11 @@
  *     may touch only tunable node/edge fields. Pipeline-OWNED value fields
  *     (sensitivity_score, elasticity, e-values, robustness, flip thresholds, …)
  *     are analysis-derived — a producer must never set them (dual-draft G10).
- *  2. Engine-claim scan on narrative free text (rationale / question / reason):
- *     no EVPI / flip-point / quantified-probability prose may ride in on a
- *     candidate (dual-draft G14). Node LABELS are deliberately out of scope — a
- *     label like "50% uptake" is legitimate identifier text, not an engine claim.
+ *  2. Engine-claim scan on ALL free text — EVERY string leaf in the payload (labels,
+ *     descriptions, questions, reasons, update `from`/`to` values) PLUS the provenance
+ *     rationale: no EVPI / flip-point / quantified-probability prose may ride in on a
+ *     candidate, whether as narrative prose OR as a label/value (dual-draft G14, "any
+ *     free text"). Ids are scanned too but never match the patterns, so it's harmless.
  *
  * All checks are pure and total.
  */
@@ -58,7 +59,7 @@ const PIPELINE_OWNED_MARKERS: readonly string[] = [
   'inference_warnings',
 ];
 
-/** Conservative engine-claim patterns for narrative free text (G14). */
+/** Conservative engine-claim patterns applied to every candidate string leaf (G14). */
 const ENGINE_CLAIM_PATTERNS: readonly RegExp[] = [
   /\bEVPI\b/i,
   /\bVOI\b/i,

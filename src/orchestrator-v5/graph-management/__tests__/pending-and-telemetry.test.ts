@@ -89,4 +89,20 @@ describe('no-silent-outcome telemetry', () => {
     expect(ev.turn_id).toBeNull();
     expect(ev.latency_ms).toBeNull();
   });
+
+  it('normalizes a dirty context: unknown source → null; non-finite/negative latency → null', () => {
+    const bad = mutationTelemetryEvent(heldVerdict, {
+      source: 'not-a-real-source',
+      latency_ms: -5,
+    });
+    expect(bad.source).toBeNull();
+    expect(bad.latency_ms).toBeNull();
+    for (const l of [NaN, Infinity, -Infinity, -1]) {
+      expect(mutationTelemetryEvent(heldVerdict, { latency_ms: l }).latency_ms).toBeNull();
+    }
+    // a known source + finite non-negative latency survive.
+    const good = mutationTelemetryEvent(heldVerdict, { source: 'user_direct', latency_ms: 0 });
+    expect(good.source).toBe('user_direct');
+    expect(good.latency_ms).toBe(0);
+  });
 });

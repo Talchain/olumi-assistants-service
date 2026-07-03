@@ -345,4 +345,25 @@ describe('codex-review regressions', () => {
     expect(v.verdict).toBe('rejected');
     expect(v.blocker?.code).toBe(ENGINE_CLAIM_IN_TEXT);
   });
+
+  // Round 2 [P1] — add_option linkage integrity (dangling parent decision / target factor).
+  it('add_option with a MISSING parent_decision_id → rejected ENTITY_NOT_FOUND (no dangling edge)', () => {
+    const raw = makeEnvelope('add_option', { option: { id: 'o-c', label: 'Plan C', parent_decision_id: 'no-such-decision', edges: [{ to_factor_id: 'f-spend' }] } }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENTITY_NOT_FOUND);
+  });
+
+  it('add_option with a MISSING target factor → rejected ENTITY_NOT_FOUND (no dangling edge)', () => {
+    const raw = makeEnvelope('add_option', { option: { id: 'o-c', label: 'Plan C', parent_decision_id: 'd-choice', edges: [{ to_factor_id: 'no-such-factor' }] } }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENTITY_NOT_FOUND);
+  });
+
+  it('add_option with VALID linkage still reaches the held divergence outcome (R3 passes)', () => {
+    // parent d-choice + factor f-spend both exist in G → R3 null → held (unwired, nodes-only graph).
+    const v = refereeMutation(envFor('add_option'), G, frameFor(G));
+    expect(v.verdict).toBe('held');
+  });
 });

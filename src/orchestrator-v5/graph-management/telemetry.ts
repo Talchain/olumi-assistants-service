@@ -43,6 +43,24 @@ export interface MutationTelemetryContext {
   readonly latency_ms?: number | null;
 }
 
+/** The known provenance sources (mirrors the envelope's `provenance.source` enum). */
+const KNOWN_SOURCES: ReadonlySet<string> = new Set([
+  'dual_model_m2',
+  'edit_graph_llm',
+  'flip_proposal',
+  'user_direct',
+]);
+
+/** Constrain `source` to the known set — an unrecognised value → null (clean signal). */
+function normaliseSource(s: string | null | undefined): string | null {
+  return typeof s === 'string' && KNOWN_SOURCES.has(s) ? s : null;
+}
+
+/** Normalise latency — only a finite, non-negative number is kept; else null. */
+function normaliseLatency(ms: number | null | undefined): number | null {
+  return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? ms : null;
+}
+
 /** Build the single redacted telemetry event for a verdict. Pure; never throws. */
 export function mutationTelemetryEvent(
   v: RefereeVerdict,
@@ -55,9 +73,9 @@ export function mutationTelemetryEvent(
     mutation_class: v.mutation_class,
     blocker_code: v.blocker?.code ?? null,
     base_hash_match: v.base_hash_match,
-    source: ctx.source ?? null,
-    scenario_id: ctx.scenario_id ?? null,
-    turn_id: ctx.turn_id ?? null,
-    latency_ms: ctx.latency_ms ?? null,
+    source: normaliseSource(ctx.source),
+    scenario_id: typeof ctx.scenario_id === 'string' ? ctx.scenario_id : null,
+    turn_id: typeof ctx.turn_id === 'string' ? ctx.turn_id : null,
+    latency_ms: normaliseLatency(ctx.latency_ms),
   };
 }

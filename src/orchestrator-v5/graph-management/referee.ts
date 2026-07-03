@@ -131,8 +131,9 @@ function addOptionHoldBlocker(hasTopLevelOptions: boolean): MutationBlocker {
  * per the T4.0 §3 "integrity failure" verdict) when the candidate references a missing
  * entity or collides with an existing id; null when integrity holds. Runs BEFORE R4/R5/R7
  * (first-failure-wins) so an IMPOSSIBLE candidate surfaces as an integrity failure, not a
- * legitimate doctrine posture-hold. `add_option` is EXCLUDED — its id-collision is a
- * held-by-design divergence outcome (the option survives as a node), handled in its case.
+ * legitimate doctrine posture-hold. For `add_option`, only its LINKAGE targets (parent
+ * decision + each target factor) are checked here (→ rejected on a dangling edge); its
+ * id-collision stays a held-by-design divergence outcome, handled in the add_option case.
  * `flag_uncertainty`/`clarification` never mutate.
  */
 function referentialIntegrityBlocker(
@@ -169,8 +170,24 @@ function referentialIntegrityBlocker(
       return graphHasEdge(currentGraph, env.payload.from_node, env.payload.to_node)
         ? null
         : { code: ENTITY_NOT_FOUND, readable: 'The edge to remove does not exist in the graph.' };
+    case 'add_option': {
+      // Linkage integrity: the option's parent decision (if given) and EVERY target factor
+      // must exist — otherwise the built candidate would carry dangling edges (GraphV3
+      // validates edge shape, not connectivity). The id-collision case stays held-by-design
+      // in the add_option handler.
+      const opt = env.payload.option;
+      if (opt.parent_decision_id !== undefined && !graphHasNodeId(currentGraph, opt.parent_decision_id)) {
+        return { code: ENTITY_NOT_FOUND, readable: 'The option parent decision does not exist in the graph.' };
+      }
+      for (const e of opt.edges) {
+        if (!graphHasNodeId(currentGraph, e.to_factor_id)) {
+          return { code: ENTITY_NOT_FOUND, readable: 'An option target factor does not exist in the graph.' };
+        }
+      }
+      return null;
+    }
     default:
-      return null; // add_option (held-by-design) / flag_uncertainty / clarification
+      return null; // flag_uncertainty / clarification (never mutate)
   }
 }
 

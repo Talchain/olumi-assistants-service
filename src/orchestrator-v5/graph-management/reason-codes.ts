@@ -36,7 +36,9 @@ export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
 export const ENTITY_NOT_FOUND = 'ENTITY_NOT_FOUND' as const;
 export const ENTITY_ID_COLLISION = 'ENTITY_ID_COLLISION' as const;
 export const OPTION_ID_COLLISION = 'OPTION_ID_COLLISION' as const;
-export const GRAPH_CAP_EXCEEDED = 'GRAPH_CAP_EXCEEDED' as const;
+// NOTE: graph-cap enforcement (max node/edge counts, dual-draft G11) is a DEFERRED slice —
+// no code is emitted for it yet, so no `GRAPH_CAP_EXCEEDED` is minted here (the implemented
+// contract stays honest). Re-add when candidate-cap enforcement lands.
 
 // --- R4 field-safety ----------------------------------------------------------
 export const FIELD_NOT_ALLOWED = 'FIELD_NOT_ALLOWED' as const;
@@ -87,7 +89,6 @@ export const MUTATION_REASON_CODES = Object.freeze([
   ENTITY_NOT_FOUND,
   ENTITY_ID_COLLISION,
   OPTION_ID_COLLISION,
-  GRAPH_CAP_EXCEEDED,
   FIELD_NOT_ALLOWED,
   PIPELINE_OWNED_FIELD,
   ENGINE_CLAIM_IN_TEXT,

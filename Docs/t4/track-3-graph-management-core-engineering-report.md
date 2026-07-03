@@ -22,7 +22,8 @@ ordered rules R1–R7 (first-failure-wins), with:
 - **Structural/tunable classifier** (`classify-mutation.ts`) — mechanical taxonomy; §6 PENDING
   → tunables stay held; `rename_node` is the only `would_apply` case.
 - **R4 field-safety** (`field-safety.ts`) — tunable field allowlist + pipeline-owned-field
-  denylist + engine-claim scan on narrative free text.
+  denylist + engine-claim scan on ALL payload string leaves (labels/descriptions/questions/
+  reasons/values) plus rationale.
 - **Candidate construction** (`candidate-graph.ts`) via the V5-owned seam
   `applyAndValidateMutation` **only**; **R6 EP2 non-downgrade** parity (`readiness-parity.ts`).
 - **add_option** held-split (`OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE` / `ADD_OPTION_APPLY_UNWIRED`
@@ -82,9 +83,9 @@ emission · the §3b/§6-gated un-holding of tunables/add_option.
 
 ## Test evidence
 
-- **111 tests green** across 8 files (envelope matrix, R-ladder, add_option divergence ×8+stale,
+- **126 tests green** across 8 files (envelope matrix, R-ladder, add_option divergence ×8+stale,
   merge-parity identity pin, classifier, EP2 parity, pending/idempotency/telemetry, adapter,
-  isolation guard, + 11 regressions for the two review passes below). Run via main-repo vitest
+  isolation guard, + regressions across the review passes below). Run via main-repo vitest
   `--root <worktree>`, `LOG_LEVEL=fatal`. eslint clean.
 - **tsc-clean:** 0 errors in `graph-management/` (total 544 = pre-existing test-file baseline,
   unchanged; zero existing files edited). Type-level compat assertions for `PendingActionAction`
@@ -152,6 +153,24 @@ All 4 blocking + 2 non-blocking findings analysed on the merits (none false posi
    (`candidate`); `candidate` is NOT part of the public payload (see the handoff section above).
 
 +11 regression tests (122 total green); graph-management tsc-clean (build + full) + eslint clean.
+
+### Fourth pass — Codex review (round 2) — 1 blocking + 4 non-blocking resolved
+
+1. **[P1] BLOCKING — add_option linkage integrity.** `add_option` was excluded from R3, so
+   `buildAddOptionCandidate` could create edges to a nonexistent `parent_decision_id` /
+   `to_factor_id` (GraphV3 validates edge *shape*, not connectivity → a held candidate with
+   dangling edges). Fixed: `referentialIntegrityBlocker` now checks the option's parent decision
+   and every target factor exist → `rejected ENTITY_NOT_FOUND` on a dangling target. The
+   id-collision case stays held-by-design. (+3 tests: missing parent, missing factor, valid-linkage-still-held.)
+2. **`GRAPH_CAP_EXCEEDED` removed** — graph-cap enforcement is a deferred slice with no code path,
+   so the unused code is not minted (implemented contract stays honest; re-add when caps land).
+3. **field-safety comments refreshed** — the header/patterns comments now match the "scan all
+   string leaves" behaviour (previously said labels were out of scope).
+4. **Telemetry normalized** — `source` constrained to the known set (unknown → null); `latency_ms`
+   kept only if finite and ≥ 0 (non-finite/negative → null) — a cleaner safety signal.
+5. **Report drift fixed** — test count (→ 126) and the field-safety prose corrected.
+
+126 tests green; graph-management tsc-clean (build + full) + eslint clean.
 
 ## CI ratchet reconciliation (2026-07-03)
 
