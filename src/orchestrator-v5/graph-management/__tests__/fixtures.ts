@@ -59,7 +59,9 @@ export function buildReadyGraphWithTopLevelOptions(): GraphV3T & { options: Opti
 
 /** Analysis-affecting hash of a graph the test TRUSTS (frame stamp). */
 export function hashOf(graph: unknown): string {
-  return computeAnalysisAffectingGraphHash(graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+  const h = computeAnalysisAffectingGraphHash(graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+  if (h === null) throw new Error('fixture graph is not hashable');
+  return h;
 }
 
 /** A frame whose currentGraphHash matches `graph` (readable, fresh by default). */

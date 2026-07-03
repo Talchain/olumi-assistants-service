@@ -36,3 +36,19 @@ export {
   type Ep2Assessment,
 } from './readiness-parity.js';
 export { refereeMutation, refereeMutationBatch } from './referee.js';
+export {
+  projectHeldToPendingAction,
+  appliedLedgerOf,
+  idempotencyBlocker,
+  type HeldMutationPendingAction,
+  type AppliedLedger,
+} from './pending-projection.js';
+export { mutationTelemetryEvent, type MutationTelemetryEvent } from './telemetry.js';
+export {
+  mapProposalType,
+  dualDraftToCandidateEnvelope,
+  DUAL_DRAFT_PROPOSAL_TYPES,
+  type DualDraftProposal,
+  type DualDraftProposalType,
+  type AdapterContext,
+} from './adapters/dual-draft.js';
