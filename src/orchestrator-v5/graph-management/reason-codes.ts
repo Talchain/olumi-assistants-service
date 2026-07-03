@@ -24,6 +24,7 @@ export const UNKNOWN_ENVELOPE_VERSION = 'UNKNOWN_ENVELOPE_VERSION' as const;
 export const MISSING_PROVENANCE = 'MISSING_PROVENANCE' as const;
 export const EVIDENCE_POINTER_MISSING = 'EVIDENCE_POINTER_MISSING' as const;
 export const BASE_HASH_MISSING = 'BASE_HASH_MISSING' as const;
+export const BATCH_CAP_EXCEEDED = 'BATCH_CAP_EXCEEDED' as const;
 
 // --- R2 frame / stale gate (frame-provided authority; never re-derived) -------
 export const FRAME_UNAVAILABLE = 'FRAME_UNAVAILABLE' as const;
@@ -33,6 +34,7 @@ export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
 
 // --- R3 referential integrity -------------------------------------------------
 export const ENTITY_NOT_FOUND = 'ENTITY_NOT_FOUND' as const;
+export const ENTITY_ID_COLLISION = 'ENTITY_ID_COLLISION' as const;
 export const OPTION_ID_COLLISION = 'OPTION_ID_COLLISION' as const;
 export const GRAPH_CAP_EXCEEDED = 'GRAPH_CAP_EXCEEDED' as const;
 
@@ -77,11 +79,13 @@ export const MUTATION_REASON_CODES = Object.freeze([
   MISSING_PROVENANCE,
   EVIDENCE_POINTER_MISSING,
   BASE_HASH_MISSING,
+  BATCH_CAP_EXCEEDED,
   FRAME_UNAVAILABLE,
   BASE_HASH_DIVERGED,
   ANALYSIS_NOT_FRESH,
   CURRENT_GRAPH_UNREADABLE,
   ENTITY_NOT_FOUND,
+  ENTITY_ID_COLLISION,
   OPTION_ID_COLLISION,
   GRAPH_CAP_EXCEEDED,
   FIELD_NOT_ALLOWED,

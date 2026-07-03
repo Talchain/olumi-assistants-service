@@ -180,3 +180,17 @@ export function graphHasNodeId(graph: unknown, nodeId: string): boolean {
     (n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === nodeId,
   );
 }
+
+/** An edge `from → to` exists. Used by R3 referential integrity (update/remove edge). */
+export function graphHasEdge(graph: unknown, from: string, to: string): boolean {
+  if (graph === null || typeof graph !== 'object') return false;
+  const edges = (graph as { edges?: unknown }).edges;
+  if (!Array.isArray(edges)) return false;
+  return edges.some(
+    (e) =>
+      e !== null &&
+      typeof e === 'object' &&
+      (e as { from?: unknown }).from === from &&
+      (e as { to?: unknown }).to === to,
+  );
+}

@@ -129,6 +129,30 @@ A broader review (correctness + reuse/simplification/efficiency/altitude/convent
 7. **Dead work** — removed a discarded `assessCandidate` on the add_option path.
 8. **Reuse** — `bestEffortKind` reuses `CANDIDATE_KINDS`.
 
+### Third pass — Codex review (round 1) — 6 findings resolved
+
+All 4 blocking + 2 non-blocking findings analysed on the merits (none false positives) and fixed:
+
+1. **Batch cap (blocking).** `refereeMutationBatch` now enforces the T4.0 `PROPOSAL_CAP` (8):
+   a batch with `length > 8` is rejected in O(1) (`BATCH_CAP_EXCEEDED`), so a sparse hostile
+   array with a huge length cannot force unbounded parsing/allocation.
+2. **R3 for held kinds (blocking).** A centralized `referentialIntegrityBlocker` runs R3 BEFORE
+   R4/R5/R7 (first-failure-wins) for `add_node`/`add_edge`/`update_*`/`remove_*`/`rename_node`:
+   a missing endpoint/target → `rejected` `ENTITY_NOT_FOUND`; an id collision → `rejected`
+   `ENTITY_ID_COLLISION`. Impossible candidates no longer surface as legitimate doctrine holds.
+   (`add_option` keeps its held-by-design divergence collision.)
+3. **candidate_id leak (blocking).** `bestEffortId` now returns the value only if it is a valid
+   UUID, so an R1 failure never exposes arbitrary model/user text as `candidate_id`.
+4. **Claim scan coverage (blocking).** R4 now scans EVERY string leaf in the payload (labels,
+   descriptions, questions, reasons, `from`/`to`) plus rationale — an engine claim can no longer
+   ride in via an `add_option`/`add_node` label.
+5. **Telemetry fields (non-blocking).** `MutationTelemetryEvent` now carries `scenario_id`,
+   `turn_id`, `latency_ms` (via a `MutationTelemetryContext`) — the T4.0 §5 event is complete.
+6. **Track 4 doc (non-blocking).** Split UI-visible/public (redacted) from internal apply-state
+   (`candidate`); `candidate` is NOT part of the public payload (see the handoff section above).
+
++11 regression tests (122 total green); graph-management tsc-clean (build + full) + eslint clean.
+
 ## CI ratchet reconciliation (2026-07-03)
 
 `Typecheck Drift (ratchet)` is RED on head `b3b1167f9` — reconciled as **zero-delta vs current
@@ -205,11 +229,16 @@ staging**, NOT a Track 3 regression.
 
 ## Track 4 handoff — UI-visible mutation state
 
-The UI-visible payload per verdict:
-`{ verdict, mutation_class ('structural'|'tunable'|'non_mutating'), blocker { code, readable },
-candidate_id, base_hash_match, candidate? }` — redacted (code+hash+enum only, never payload
-values). Maps to the task's proposed/held/refused/applied lifecycle. `projectHeldToPendingAction`
-gives the pending-confirmation shape for held verdicts.
+Two DISTINCT surfaces (do not conflate):
+- **UI-visible / public (redacted):** `{ verdict, mutation_class
+  ('structural'|'tunable'|'non_mutating'), blocker { code, readable }, candidate_id,
+  base_hash_match }` — code+hash+enum only, never payload values. Maps to the task's
+  proposed/held/refused/applied lifecycle.
+- **Internal apply-state (NOT UI-visible):** `RefereeVerdict.candidate` is the in-memory
+  candidate graph, present only for the deferred apply path — it carries graph content and MUST
+  NOT be surfaced in the public payload. Track 4 renders only the redacted fields above.
+  `projectHeldToPendingAction` gives the pending-confirmation shape for held verdicts (also
+  redacted; the real executable patch is filled by the deferred wiring, not the referee).
 
 ## Track 6 handoff — safety / hygiene
 

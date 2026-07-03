@@ -63,20 +63,30 @@ describe('idempotency (PROPOSAL_ALREADY_APPLIED)', () => {
 });
 
 describe('no-silent-outcome telemetry', () => {
-  it('every verdict maps to exactly one redacted event with the right name', () => {
+  it('every verdict maps to exactly one redacted event with the right name + full T4 fields', () => {
     for (const verdict of ['would_apply', 'held', 'stale', 'rejected', 'clarify_required'] as MutationVerdict[]) {
-      const ev = mutationTelemetryEvent({ ...heldVerdict, verdict }, 'dual_model_m2');
+      const ev = mutationTelemetryEvent(
+        { ...heldVerdict, verdict },
+        { source: 'dual_model_m2', scenario_id: 'scn-9', turn_id: 'turn-3', latency_ms: 12 },
+      );
       expect(ev.event).toBe(`v5.candidate_mutation.${verdict}`);
       expect(ev.verdict).toBe(verdict);
       expect(ev.source).toBe('dual_model_m2');
       expect(ev.base_hash_match).toBe(true);
+      // T4.0 §5 event fields now complete:
+      expect(ev.scenario_id).toBe('scn-9');
+      expect(ev.turn_id).toBe('turn-3');
+      expect(ev.latency_ms).toBe(12);
     }
   });
 
-  it('event carries codes/enums/booleans only — never a raw payload value', () => {
+  it('event carries codes/enums/booleans only — never a raw payload value; unset context → null', () => {
     const ev = mutationTelemetryEvent(heldVerdict);
     expect(JSON.stringify(ev)).not.toMatch(/observed_state|"label"|Marketing/);
     expect(ev.blocker_code).toBe(STRUCTURAL_APPLY_HELD);
     expect(ev.source).toBeNull();
+    expect(ev.scenario_id).toBeNull();
+    expect(ev.turn_id).toBeNull();
+    expect(ev.latency_ms).toBeNull();
   });
 });

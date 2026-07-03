@@ -23,6 +23,9 @@ import type { MutationReasonCode } from './reason-codes.js';
 // Kinds (v1 closed set — T4.0 §1)
 // ============================================================================
 
+/** T4.0 §1 batch cap: a producer emits ≤ 8 envelopes (matches dual-draft PROPOSAL_CAP). */
+export const PROPOSAL_CAP = 8;
+
 export const CANDIDATE_KINDS = [
   'add_node',
   'add_edge',

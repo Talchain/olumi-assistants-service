@@ -23,14 +23,30 @@ export interface MutationTelemetryEvent {
   readonly mutation_class: MutationClass | null;
   readonly blocker_code: MutationReasonCode | null;
   readonly base_hash_match: boolean;
-  /** provenance.source, supplied by the caller (not carried on the verdict). */
+  /** provenance.source (envelope), supplied by the caller (not carried on the verdict). */
   readonly source: string | null;
+  /** identity.scenario_id / identity.turn_id (envelope), supplied by the caller. */
+  readonly scenario_id: string | null;
+  readonly turn_id: string | null;
+  /** Referee wall-clock latency in ms, supplied by the caller at emit time. */
+  readonly latency_ms: number | null;
+}
+
+/**
+ * Context the verdict does not carry but the contract's event requires (T4.0 §5):
+ * source + scenario_id + turn_id (from the envelope) and latency (measured at emit).
+ */
+export interface MutationTelemetryContext {
+  readonly source?: string | null;
+  readonly scenario_id?: string | null;
+  readonly turn_id?: string | null;
+  readonly latency_ms?: number | null;
 }
 
 /** Build the single redacted telemetry event for a verdict. Pure; never throws. */
 export function mutationTelemetryEvent(
   v: RefereeVerdict,
-  source: string | null = null,
+  ctx: MutationTelemetryContext = {},
 ): MutationTelemetryEvent {
   return {
     event: `v5.candidate_mutation.${v.verdict}`,
@@ -39,6 +55,9 @@ export function mutationTelemetryEvent(
     mutation_class: v.mutation_class,
     blocker_code: v.blocker?.code ?? null,
     base_hash_match: v.base_hash_match,
-    source,
+    source: ctx.source ?? null,
+    scenario_id: ctx.scenario_id ?? null,
+    turn_id: ctx.turn_id ?? null,
+    latency_ms: ctx.latency_ms ?? null,
   };
 }

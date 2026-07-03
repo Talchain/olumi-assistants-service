@@ -84,9 +84,24 @@ function isPipelineOwned(field: string): boolean {
   return PIPELINE_OWNED_MARKERS.some((m) => f.includes(m));
 }
 
-function scanText(text: string | undefined): boolean {
+function scanText(text: unknown): boolean {
   if (typeof text !== 'string' || text.length === 0) return false;
   return ENGINE_CLAIM_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Collect every string leaf in an arbitrary value (payload). Total; bounded by the
+ * envelope schema (already parsed + capped). Ids are collected too but never match
+ * the engine-claim patterns, so scanning them is harmless.
+ */
+function collectStrings(value: unknown, out: string[]): void {
+  if (typeof value === 'string') {
+    out.push(value);
+  } else if (Array.isArray(value)) {
+    for (const el of value) collectStrings(el, out);
+  } else if (value !== null && typeof value === 'object') {
+    for (const el of Object.values(value)) collectStrings(el, out);
+  }
 }
 
 /**
@@ -105,15 +120,13 @@ export function checkFieldSafety(envelope: CandidateMutationEnvelope): FieldSafe
     if (!ALLOWED_EDGE_FIELDS.has(field)) return { ok: false, code: FIELD_NOT_ALLOWED };
   }
 
-  // (b) engine-claim scan on narrative free text (rationale / question / reason)
-  //     AND on string field VALUES a producer may set (update_* `from`/`to`) — an
-  //     engine claim must not ride in as a value, not just as prose (G14).
-  const texts: (string | undefined)[] = [envelope.provenance.rationale];
-  const p = envelope.payload as Record<string, unknown>;
-  if (typeof p.question === 'string') texts.push(p.question);
-  if (typeof p.reason === 'string') texts.push(p.reason);
-  if (typeof p.to === 'string') texts.push(p.to);
-  if (typeof p.from === 'string') texts.push(p.from);
+  // (b) engine-claim scan on ALL free text (G14 "any free text"): every string leaf in
+  //     the payload — labels, descriptions, questions, reasons, update `from`/`to`
+  //     values — PLUS the provenance rationale. A claim must not ride in as a label or
+  //     any other string field, not just as narrative prose.
+  const texts: string[] = [];
+  collectStrings(envelope.payload, texts);
+  if (typeof envelope.provenance.rationale === 'string') texts.push(envelope.provenance.rationale);
   for (const t of texts) {
     if (scanText(t)) return { ok: false, code: ENGINE_CLAIM_IN_TEXT };
   }

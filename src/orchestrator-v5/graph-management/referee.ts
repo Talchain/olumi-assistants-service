@@ -27,16 +27,20 @@ import {
   buildAddOptionCandidate,
   currentGraphIsParseable,
   graphHasNodeId,
+  graphHasEdge,
   graphHasTopLevelOptions,
   graphOptionsAreMalformed,
 } from './candidate-graph.js';
 import { assessCandidate, representableVerdict } from './readiness-parity.js';
 import {
   SCHEMA_INVALID,
+  BATCH_CAP_EXCEEDED,
   FRAME_UNAVAILABLE,
   BASE_HASH_DIVERGED,
   ANALYSIS_NOT_FRESH,
   CURRENT_GRAPH_UNREADABLE,
+  ENTITY_NOT_FOUND,
+  ENTITY_ID_COLLISION,
   OPTION_ID_COLLISION,
   OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
   ADD_OPTION_APPLY_UNWIRED,
@@ -52,7 +56,7 @@ import {
   CLASSIFY_FAILED,
   type MutationReasonCode,
 } from './reason-codes.js';
-import { CANDIDATE_KINDS } from './types.js';
+import { CANDIDATE_KINDS, PROPOSAL_CAP } from './types.js';
 import type {
   CandidateKind,
   CandidateMutationEnvelope,
@@ -87,10 +91,18 @@ function fieldSafetyReadable(code: MutationReasonCode): string {
   }
 }
 
+/** RFC-4122 v1–5 UUID. Matches the envelope's `z.string().uuid()` constraint. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Best-effort read of `candidate_id` from a raw (possibly invalid) candidate —
+ * diagnostics only. Returns the value ONLY if it is a well-formed UUID, so an R1
+ * failure never leaks arbitrary model/user text as `candidate_id` (redaction).
+ */
 function bestEffortId(raw: unknown): string | null {
   try {
     const id = (raw as { candidate_id?: unknown } | null)?.candidate_id;
-    return typeof id === 'string' ? id : null;
+    return typeof id === 'string' && UUID_RE.test(id) ? id : null;
   } catch {
     return null;
   }
@@ -112,6 +124,54 @@ function addOptionHoldBlocker(hasTopLevelOptions: boolean): MutationBlocker {
           'No top-level options[] array is present; the canonical node↔options[] persist contract is unbuilt. ' +
           'Held pending the node↔options[] consistency workstream (out of scope for this core).',
       };
+}
+
+/**
+ * R3 — referential integrity for the mutating kinds. Returns a blocker (→ `rejected`,
+ * per the T4.0 §3 "integrity failure" verdict) when the candidate references a missing
+ * entity or collides with an existing id; null when integrity holds. Runs BEFORE R4/R5/R7
+ * (first-failure-wins) so an IMPOSSIBLE candidate surfaces as an integrity failure, not a
+ * legitimate doctrine posture-hold. `add_option` is EXCLUDED — its id-collision is a
+ * held-by-design divergence outcome (the option survives as a node), handled in its case.
+ * `flag_uncertainty`/`clarification` never mutate.
+ */
+function referentialIntegrityBlocker(
+  env: CandidateMutationEnvelope,
+  currentGraph: unknown,
+): MutationBlocker | null {
+  switch (env.kind) {
+    case 'add_node':
+      return graphHasNodeId(currentGraph, env.payload.node.id)
+        ? { code: ENTITY_ID_COLLISION, readable: 'The proposed node id already exists in the graph.' }
+        : null;
+    case 'rename_node':
+      return graphHasNodeId(currentGraph, env.payload.node_id)
+        ? null
+        : { code: ENTITY_NOT_FOUND, readable: 'The node to rename does not exist in the graph.' };
+    case 'add_edge':
+      return graphHasNodeId(currentGraph, env.payload.edge.from) &&
+        graphHasNodeId(currentGraph, env.payload.edge.to)
+        ? null
+        : { code: ENTITY_NOT_FOUND, readable: 'The edge references a node that does not exist in the graph.' };
+    case 'update_node_field':
+      return graphHasNodeId(currentGraph, env.payload.node_id)
+        ? null
+        : { code: ENTITY_NOT_FOUND, readable: 'The target node does not exist in the graph.' };
+    case 'update_edge_field':
+      return graphHasEdge(currentGraph, env.payload.from_node, env.payload.to_node)
+        ? null
+        : { code: ENTITY_NOT_FOUND, readable: 'The target edge does not exist in the graph.' };
+    case 'remove_node':
+      return graphHasNodeId(currentGraph, env.payload.node_id)
+        ? null
+        : { code: ENTITY_NOT_FOUND, readable: 'The node to remove does not exist in the graph.' };
+    case 'remove_edge':
+      return graphHasEdge(currentGraph, env.payload.from_node, env.payload.to_node)
+        ? null
+        : { code: ENTITY_NOT_FOUND, readable: 'The edge to remove does not exist in the graph.' };
+    default:
+      return null; // add_option (held-by-design) / flag_uncertainty / clarification
+  }
 }
 
 /**
@@ -173,27 +233,23 @@ export function refereeMutation(
         break;
     }
 
-    // R4 — field-safety (allowlist + engine-claim scan on prose AND field values).
-    // Runs BEFORE the non-mutating short-circuit so an engine claim smuggled into a
-    // flag_uncertainty/clarification `question` (or a producer rationale) is rejected.
-    const fs = checkFieldSafety(env);
-    if (!fs.ok && fs.code) {
-      // Redacted: fixed per-code message, never the raw field/value.
-      return { ...meta, verdict: 'rejected', blocker: { code: fs.code, readable: fieldSafetyReadable(fs.code) } };
-    }
-
-    // Non-mutating kinds never touch the graph — no current-graph guards apply.
+    // Non-mutating kinds: R4 engine-claim scan on their free text (question / rationale),
+    // then clarify. They never touch the graph, so no R3 / current-graph guards apply.
     if (kind === 'flag_uncertainty' || kind === 'clarification') {
+      const fsNm = checkFieldSafety(env);
+      if (!fsNm.ok && fsNm.code) {
+        return { ...meta, verdict: 'rejected', blocker: { code: fsNm.code, readable: fieldSafetyReadable(fsNm.code) } };
+      }
       return { ...meta, verdict: 'clarify_required' };
     }
 
-    // Current-graph guards (mutating kinds only):
+    // --- Mutating kinds -------------------------------------------------------
+    // Current-graph readability guards (prerequisite for R3/R5):
     //  - a present-but-non-array top-level `options` corrupts the context view
     //    (GraphV3 strips `options`, so a parse check alone won't catch it);
     //  - a base graph that does NOT parse as GraphV3 is an ENVIRONMENTAL hold
     //    (CURRENT_GRAPH_UNREADABLE), not a candidate reject — this distinguishes a
-    //    malformed BASE from a genuinely invalid CANDIDATE (both otherwise surface as
-    //    GRAPH_INVARIANT_VIOLATED from the apply seam's ingress vs post-mutation parse).
+    //    malformed BASE from a genuinely invalid CANDIDATE.
     if (graphOptionsAreMalformed(currentGraph)) {
       return {
         ...meta,
@@ -209,7 +265,22 @@ export function refereeMutation(
       };
     }
 
-    // Per-kind posture (R3 / R5 / R6 / R7).
+    // R3 — referential integrity (endpoint/target existence, id collision). Runs BEFORE
+    // R4/R5/R7 (first-failure-wins) so an impossible candidate is an integrity failure,
+    // not a legitimate posture-hold. (add_option keeps its held-by-design collision.)
+    const integrity = referentialIntegrityBlocker(env, currentGraph);
+    if (integrity) {
+      return { ...meta, verdict: 'rejected', blocker: integrity };
+    }
+
+    // R4 — field-safety (allowlist + engine-claim scan on ALL free text incl. labels).
+    const fs = checkFieldSafety(env);
+    if (!fs.ok && fs.code) {
+      // Redacted: fixed per-code message, never the raw field/value.
+      return { ...meta, verdict: 'rejected', blocker: { code: fs.code, readable: fieldSafetyReadable(fs.code) } };
+    }
+
+    // Per-kind R5 / R6 / R7.
     switch (kind) {
       case 'rename_node': {
         const built = buildRenameCandidate(currentGraph, {
@@ -309,23 +380,25 @@ export function refereeMutation(
   }
 }
 
-/** Fail-closed verdict for a batch slot whose raw value could not even be READ. */
-function unreadableElementVerdict(): RefereeVerdict {
+/** A fail-closed, kind-less rejected verdict (batch-level failures / unreadable slots). */
+function batchRejected(code: MutationReasonCode, readable: string): RefereeVerdict {
   return {
     verdict: 'rejected',
     kind: null,
     candidate_id: null,
     mutation_class: null,
     base_hash_match: false,
-    blocker: { code: SCHEMA_INVALID, readable: 'Batch element could not be read.' },
+    blocker: { code, readable },
   };
 }
 
 /**
- * Referee a batch of raw candidates. Per-envelope verdicts (independent). TOTAL:
- * a non-array batch, a hostile array whose `length` or element reads throw (Proxy /
- * throwing index getter), and every element resolve to a CLASSIFIED verdict — the
- * function never throws (the guarantee `refereeMutation` already honours per-element).
+ * Referee a batch of raw candidates. Per-envelope verdicts (independent). TOTAL and
+ * BOUNDED: a non-array batch, a hostile array whose `length` or element reads throw
+ * (Proxy / throwing index getter), and every element resolve to a CLASSIFIED verdict —
+ * the function never throws. A batch exceeding the T4.0 `PROPOSAL_CAP` (8) is REJECTED
+ * as a whole in O(1), so a sparse hostile array with a huge `length` cannot force
+ * unbounded parsing/allocation.
  */
 export function refereeMutationBatch(
   rawBatch: unknown,
@@ -339,7 +412,11 @@ export function refereeMutationBatch(
   try {
     len = rawBatch.length;
   } catch {
-    return [unreadableElementVerdict()];
+    return [batchRejected(SCHEMA_INVALID, 'Batch could not be read.')];
+  }
+  if (len > PROPOSAL_CAP) {
+    // Fail closed, bounded: never iterate an over-cap (possibly huge/sparse) array.
+    return [batchRejected(BATCH_CAP_EXCEEDED, `Batch exceeds the ${PROPOSAL_CAP}-envelope cap.`)];
   }
   const out: RefereeVerdict[] = [];
   for (let i = 0; i < len; i += 1) {
@@ -347,7 +424,7 @@ export function refereeMutationBatch(
     try {
       raw = rawBatch[i];
     } catch {
-      out.push(unreadableElementVerdict());
+      out.push(batchRejected(SCHEMA_INVALID, 'Batch element could not be read.'));
       continue;
     }
     out.push(refereeMutation(raw, currentGraph, frame));

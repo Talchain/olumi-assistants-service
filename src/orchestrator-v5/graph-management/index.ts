@@ -5,6 +5,7 @@
 export * from './reason-codes.js';
 export {
   CANDIDATE_KINDS,
+  PROPOSAL_CAP,
   MUTATION_VERDICTS,
   CandidateMutationEnvelopeV1,
   type CandidateKind,
@@ -43,7 +44,12 @@ export {
   type HeldMutationPendingAction,
   type AppliedLedger,
 } from './pending-projection.js';
-export { mutationTelemetryEvent, type MutationTelemetryEvent } from './telemetry.js';
+export {
+  mutationTelemetryEvent,
+  type MutationTelemetryEvent,
+  type MutationTelemetryContext,
+} from './telemetry.js';
+export { graphHasEdge } from './candidate-graph.js';
 export {
   mapProposalType,
   dualDraftToCandidateEnvelope,

@@ -11,7 +11,9 @@ import {
   CURRENT_GRAPH_UNREADABLE,
   BASE_HASH_DIVERGED,
   ANALYSIS_NOT_FRESH,
+  BATCH_CAP_EXCEEDED,
   ENTITY_NOT_FOUND,
+  ENTITY_ID_COLLISION,
   OPTION_ID_COLLISION,
   OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
   ADD_OPTION_APPLY_UNWIRED,
@@ -176,10 +178,10 @@ describe('general graph-corruption + R3 guards', () => {
     expect(v.blocker?.code).toBe(GRAPH_OPTIONS_MALFORMED);
   });
 
-  it('rename of a missing node → held ENTITY_NOT_FOUND', () => {
+  it('rename of a missing node → rejected ENTITY_NOT_FOUND (R3 integrity, first-failure-wins)', () => {
     const raw = makeEnvelope('rename_node', { node_id: 'does-not-exist', to_label: 'X' }, { base_graph_hash: hashOf(G) });
     const v = refereeMutation(raw, G, frameFor(G));
-    expect(v.verdict).toBe('held');
+    expect(v.verdict).toBe('rejected');
     expect(v.blocker?.code).toBe(ENTITY_NOT_FOUND);
   });
 
@@ -254,6 +256,91 @@ describe('code-review regressions', () => {
 
   it('engine-claim smuggled as an update_node_field VALUE is rejected', () => {
     const raw = makeEnvelope('update_node_field', { node_id: 'f-spend', field: 'label', from: 'Marketing spend', to: 'flip-point at 42%' }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENGINE_CLAIM_IN_TEXT);
+  });
+});
+
+describe('codex-review regressions', () => {
+  // Finding 1 — batch cap enforcement (T4.0 PROPOSAL_CAP = 8).
+  it('a batch of 9 → single rejected BATCH_CAP_EXCEEDED (never partially processed)', () => {
+    const batch = Array.from({ length: 9 }, () => envFor('rename_node'));
+    const vs = refereeMutationBatch(batch, G, frameFor(G));
+    expect(vs).toHaveLength(1);
+    expect(vs[0].verdict).toBe('rejected');
+    expect(vs[0].blocker?.code).toBe(BATCH_CAP_EXCEEDED);
+  });
+
+  it('a sparse array with a huge length is rejected in O(1), never iterated', () => {
+    const sparse: unknown[] = [];
+    sparse.length = 1_000_000; // hostile: huge length, no real elements
+    let vs: ReturnType<typeof refereeMutationBatch> | undefined;
+    expect(() => { vs = refereeMutationBatch(sparse, G, frameFor(G)); }).not.toThrow();
+    expect(vs).toHaveLength(1);
+    expect(vs![0].blocker?.code).toBe(BATCH_CAP_EXCEEDED);
+  });
+
+  // Finding 2 — R3 referential integrity for the posture-held kinds (first-failure-wins).
+  it('add_edge with a missing endpoint → rejected ENTITY_NOT_FOUND (not a doctrine hold)', () => {
+    const raw = makeEnvelope('add_edge', { edge: { from: 'f-spend', to: 'no-such-node' } }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENTITY_NOT_FOUND);
+  });
+
+  it('update_node_field on a missing node → rejected ENTITY_NOT_FOUND', () => {
+    const raw = makeEnvelope('update_node_field', { node_id: 'no-such-node', field: 'label', from: 'a', to: 'b' }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENTITY_NOT_FOUND);
+  });
+
+  it('remove_edge on a missing edge → rejected ENTITY_NOT_FOUND', () => {
+    const raw = makeEnvelope('remove_edge', { from_node: 'f-spend', to_node: 'f-reach', reason: 'x' }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENTITY_NOT_FOUND);
+  });
+
+  it('add_node with a colliding id → rejected ENTITY_ID_COLLISION', () => {
+    const raw = makeEnvelope('add_node', { node: { id: 'g-profit', kind: 'factor', label: 'Dup' } }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENTITY_ID_COLLISION);
+  });
+
+  it('valid refs still reach the posture hold (R3 passes) — add_edge existing endpoints → STRUCTURAL_APPLY_HELD', () => {
+    const v = refereeMutation(envFor('add_edge'), G, frameFor(G)); // from f-spend to g-profit (both exist)
+    expect(v.verdict).toBe('held');
+    expect(v.blocker?.code).toBe(STRUCTURAL_APPLY_HELD);
+  });
+
+  // Finding 3 — R1 failure must not leak an unvalidated candidate_id.
+  it('R1-rejected envelope with a NON-uuid candidate_id → verdict.candidate_id is null (no leak)', () => {
+    const raw = makeEnvelope('rename_node', SAMPLE_PAYLOADS.rename_node, { candidate_id: 'arbitrary secret text', envelope_version: 2 });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.candidate_id).toBeNull();
+  });
+
+  it('R1-rejected envelope with a VALID uuid candidate_id → the uuid survives (diagnostic)', () => {
+    const raw = makeEnvelope('rename_node', SAMPLE_PAYLOADS.rename_node, { candidate_id: '11111111-1111-4111-8111-111111111111', envelope_version: 2 });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.candidate_id).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  // Finding 4 — engine-claim scan covers labels / all string payload fields.
+  it('add_option whose LABEL carries an engine claim → rejected ENGINE_CLAIM_IN_TEXT', () => {
+    const raw = makeEnvelope('add_option', { option: { id: 'o-c', label: 'EVPI of switching plans', edges: [{ to_factor_id: 'f-spend' }] } }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(ENGINE_CLAIM_IN_TEXT);
+  });
+
+  it('add_node whose LABEL carries a flip-point claim → rejected ENGINE_CLAIM_IN_TEXT', () => {
+    const raw = makeEnvelope('add_node', { node: { id: 'n-fp', kind: 'factor', label: 'flip point sensitivity' } }, { base_graph_hash: hashOf(G) });
     const v = refereeMutation(raw, G, frameFor(G));
     expect(v.verdict).toBe('rejected');
     expect(v.blocker?.code).toBe(ENGINE_CLAIM_IN_TEXT);
