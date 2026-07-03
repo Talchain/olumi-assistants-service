@@ -42,6 +42,11 @@ vi.mock('../../../tools/golden-journey-harness/invariants.js', async (importOrig
 const { evaluateReplayFixture, failingInvariantSet } = await import(
   '../../../tools/golden-journey-harness/index.js'
 );
+// The classification source of truth — not mocked, so this asserts the REAL
+// advisory/gating split rather than a comment's claim about it.
+const { ADVISORY_INVARIANTS } = await import(
+  '../../../tools/golden-journey-harness/components.js'
+);
 
 const HARNESS_DIR = fileURLToPath(new URL('../../../tools/golden-journey-harness/', import.meta.url));
 const DEFECTS = JSON.parse(
@@ -62,10 +67,16 @@ const PINNED_DEFECTS_SET: readonly string[] = (() => {
 
 describe('masking negative-control: exit-code pinning is blind to a silent advisory regression', () => {
   it('the pinned defects set genuinely mixes a gating and an advisory invariant (else the masking scenario is moot)', () => {
-    // A8 is gating (drives exit=1); A11 is advisory (does not). The masking
-    // hole only exists because both fail on one fixture.
+    // The masking hole exists only because one fixture fails BOTH a gating and
+    // an advisory invariant. Assert the CLASSIFICATION against the real
+    // ADVISORY_INVARIANTS set — so this precondition is self-invalidating: if
+    // A11 ever became gating, or A8 advisory, this goes red and the whole
+    // negative-control (and the promotion-readiness claim it backs) is flagged
+    // for re-derivation rather than silently asserting a stale premise.
     expect(PINNED_DEFECTS_SET).toContain('A8');
     expect(PINNED_DEFECTS_SET).toContain('A11');
+    expect(ADVISORY_INVARIANTS.has('A8'), 'A8 must stay GATING (drives exit=1)').toBe(false);
+    expect(ADVISORY_INVARIANTS.has('A11'), 'A11 must stay ADVISORY (does not drive exit)').toBe(true);
   });
 
   it('with A11 silently regressed: exit code STAYS 1 (exit-code-only pinning does not catch it)', () => {
