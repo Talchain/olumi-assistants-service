@@ -20,6 +20,10 @@ pnpm test  # Should pass
 pnpm dev   # Starts on :3101
 ```
 
+Working in a **git worktree** (or a checkout where typecheck/lint/tests fail with
+MODULE_NOT_FOUND)? Run `bash scripts/bootstrap-worktree.sh` and see
+[worktree-setup.md](worktree-setup.md).
+
 ## First Request
 
 ```bash

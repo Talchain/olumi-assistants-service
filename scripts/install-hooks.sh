@@ -29,8 +29,16 @@ chmod +x "$REPO_ROOT/scripts/validate-prepush.sh"
 
 # ---------------------------------------------------------------------------
 # Install pre-push hook (idempotent)
+#
+# Resolve the hooks dir via git itself: in a linked worktree, `.git` is a
+# gitdir-pointer FILE, so "$REPO_ROOT/.git/hooks" does not exist and the
+# hardcoded path fails. `--git-path hooks` resolves to the shared common-dir
+# hooks for linked worktrees and to .git/hooks in a normal clone (the hook
+# is shared: installing from any worktree covers them all).
 # ---------------------------------------------------------------------------
-HOOK_PATH="$REPO_ROOT/.git/hooks/pre-push"
+HOOKS_DIR="$(git rev-parse --git-path hooks)"
+mkdir -p "$HOOKS_DIR"
+HOOK_PATH="$HOOKS_DIR/pre-push"
 
 if [ -f "$HOOK_PATH" ] && grep -q "validate-prepush" "$HOOK_PATH"; then
   echo "[install-hooks] pre-push hook already installed."
@@ -42,5 +50,5 @@ else
 exec "$(git rev-parse --show-toplevel)/scripts/validate-prepush.sh" "$@"
 HOOK
   chmod +x "$HOOK_PATH"
-  echo "[install-hooks] pre-push hook installed at .git/hooks/pre-push"
+  echo "[install-hooks] pre-push hook installed at $HOOK_PATH"
 fi
