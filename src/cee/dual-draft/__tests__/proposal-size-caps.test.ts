@@ -156,6 +156,71 @@ describe('G-size — boundary: exactly at cap applies, one over rejects', () => 
   });
 });
 
+describe('G-size — ordering: unbounded arrays rejected BEFORE the G14 spread, no batch collapse', () => {
+  it('a 1,000,000-element uncertainty_drivers array is rejected per-proposal WITHOUT throwing; a valid sibling still applies', () => {
+    // The count cap must short-circuit in O(1) before G14 filters/spreads the
+    // array (a huge `...spread` can throw RangeError, which would collapse the
+    // whole batch to M1 via enrichDraftGraph's internal_error backstop).
+    const huge = Array.from({ length: 1_000_000 }, () => 'd');
+    let out!: ReturnType<typeof mergeProposals>;
+    expect(() => {
+      out = mergeProposals(baseGraph(), [
+        {
+          type: 'added_risk',
+          delta: { node: { id: 'risk_flood', kind: 'risk', label: 'R', uncertainty_drivers: huge } },
+          evidence_pointer: 'e',
+        },
+        VALID_RISK,
+      ]);
+    }).not.toThrow();
+    expect(out.report.applied).toBe(1);
+    expect(out.merged.nodes.some((n) => n.id === 'risk_regulatory')).toBe(true);
+    expect(out.merged.nodes.some((n) => n.id === 'risk_flood')).toBe(false);
+    expect(codes(out)).toEqual(['proposal_field_too_large']);
+    expect(out.report.failures[0].reason).toContain('delta.node.uncertainty_drivers');
+    assertTallyInvariant(out, 2);
+  });
+
+  it('the huge-array rejection reports the item count against the item cap (no per-element scan)', () => {
+    const huge = Array.from({ length: 500_000 }, () => 'd');
+    const out = mergeProposals(baseGraph(), [
+      {
+        type: 'added_risk',
+        delta: { node: { id: 'risk_flood2', kind: 'risk', label: 'R', uncertainty_drivers: huge } },
+        evidence_pointer: 'e',
+      },
+    ]);
+    expect(out.report.failures[0].reason).toContain('size 500000');
+    expect(out.report.failures[0].reason).toContain(`cap ${C.uncertainty_drivers_items}`);
+  });
+});
+
+describe('G-size — MergeFailure metadata is length-bounded (no unbounded value leaks in)', () => {
+  it('a huge non-matching edge endpoint (not size-capped) yields a bounded reason', () => {
+    const hugeId = `fac_${'z'.repeat(100_000)}`;
+    const out = mergeProposals(baseGraph(), [
+      {
+        type: 'added_causal_link',
+        delta: {
+          edge: { from: hugeId, to: 'goal_revenue', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.7, effect_direction: 'positive' },
+        },
+        evidence_pointer: 'e',
+      },
+    ]);
+    expect(codes(out)).toEqual(['edge_endpoint_missing']);
+    expect(out.report.failures[0].reason.length).toBeLessThanOrEqual(300);
+  });
+
+  it('a huge invalid proposal type yields a bounded reason AND a bounded proposal_type', () => {
+    const out = mergeProposals(baseGraph(), [
+      { type: 'z'.repeat(100_000), delta: {}, evidence_pointer: 'e' },
+    ]);
+    expect(codes(out)).toEqual(['malformed_proposal']);
+    expect(out.report.failures[0].reason.length).toBeLessThanOrEqual(300);
+    expect((out.report.failures[0].proposal_type ?? '').length).toBeLessThanOrEqual(300);
+  });
+});
+
 describe('G-size — a whole batch is NOT collapsed by oversized members', () => {
   it('mixed batch: valid applies, oversized rejects, artifact records; tally holds', () => {
     const out = mergeProposals(baseGraph(), [

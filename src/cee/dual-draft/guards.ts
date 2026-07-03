@@ -145,6 +145,15 @@ export interface OversizedField {
  * Envelope text (evidence_pointer, rationale, delta.question) is checked for
  * every proposal type; node text (id, label, description, uncertainty_drivers)
  * only when a delta.node object is present.
+ *
+ * Length is JS `String.length` = UTF-16 code units, not bytes/code points/
+ * graphemes. That is a deliberate, conventional proxy: it blocks visual-length
+ * tricks (combining/zero-width chars still count) and bounds UTF-8 byte size to
+ * within a small constant factor (<= ~3 bytes/code unit, or 2 code units for an
+ * astral char = 4 bytes), which — with PROPOSAL_CAP and the graph node/edge caps
+ * — bounds aggregate merged growth. It is NOT a total-serialised-graph byte cap;
+ * a graph-level byte ceiling, if ever wanted, is a separate PLoT-boundary
+ * concern, not this per-field guard.
  */
 export function findOversizedProposalField(
   proposal: {
