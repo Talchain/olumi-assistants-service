@@ -17,6 +17,16 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# The pnpm MAJOR that CI installs with (pnpm/action-setup `version:` in
+# .github/workflows/*.yml). Keep in sync if the workflows change. A local pnpm
+# on a different major can behave differently against this lockfile — newer
+# majors have false-reded `--frozen-lockfile` here — so we surface the
+# divergence loudly rather than let it read as a mysterious install failure.
+CI_PNPM_MAJOR=9
+
+# Non-interactive: never let Corepack block setup on a download prompt.
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 fail() {
   echo "[bootstrap-worktree] FAIL: $1" >&2
   exit 1
@@ -28,13 +38,20 @@ step() {
 }
 
 # ---------------------------------------------------------------------------
-# 0. pnpm present
+# 0. pnpm present + version awareness
 # ---------------------------------------------------------------------------
 step "checking pnpm"
 if ! command -v pnpm > /dev/null 2>&1; then
   fail "pnpm not found on PATH. Install via 'corepack enable' or https://pnpm.io/installation, then re-run."
 fi
-echo "  pnpm $(pnpm --version)"
+PNPM_VERSION="$(pnpm --version)"
+echo "  pnpm ${PNPM_VERSION}"
+if [ "${PNPM_VERSION%%.*}" != "${CI_PNPM_MAJOR}" ]; then
+  echo "  NOTE: CI installs with pnpm ${CI_PNPM_MAJOR}.x; you are on ${PNPM_VERSION} (not fatal)."
+  echo "        If install or the replay gate behaves unexpectedly, reproduce CI with:"
+  echo "          corepack pnpm@${CI_PNPM_MAJOR} install --frozen-lockfile"
+  echo "        See Docs/t4/pnpm-toolchain-alignment.md."
+fi
 
 # ---------------------------------------------------------------------------
 # 1. Dependencies — frozen lockfile, no drift
