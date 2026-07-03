@@ -21,8 +21,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   evaluateReplayFixture,
+  failingInvariantSet,
   ReplayFixtureError,
 } from '../../../tools/golden-journey-harness/index.js';
+import {
+  ADVISORY_INVARIANTS,
+  INVARIANT_TITLE,
+  type InvariantId,
+} from '../../../tools/golden-journey-harness/components.js';
 
 const HARNESS_DIR = fileURLToPath(new URL('../../../tools/golden-journey-harness/', import.meta.url));
 const FIXTURE_DIR = `${HARNESS_DIR}fixtures/`;
@@ -44,6 +50,15 @@ interface ManifestEntry {
   readonly file: string;
   readonly expected_exit: 0 | 1;
   readonly gating_invariant?: string;
+  /**
+   * The exact sorted set of invariant IDs with status 'fail' (gating AND
+   * advisory). Optional per entry (absent = exit-code-only pinning, byte-for-
+   * byte legacy behaviour). Closes the mixed-invariant masking hole: on a RED
+   * fixture that fails A8+A10+A11, an A10/A11 classifier that silently stops
+   * failing keeps exit=1 (via A8) and is invisible to the exit code alone.
+   * Values are CAPTURED via --json-summary, never hand-authored.
+   */
+  readonly expected_failing_invariants?: readonly string[];
 }
 const MANIFEST: ReadonlyArray<ManifestEntry> = (
   JSON.parse(readFileSync(`${HARNESS_DIR}replay-manifest.json`, 'utf-8')) as { fixtures: ManifestEntry[] }
@@ -63,7 +78,12 @@ describe('replay-fixture manifest — expected exit codes are enforced, not just
     );
   });
 
-  for (const { file, expected_exit: expectedExit, gating_invariant: gatingInvariant } of MANIFEST) {
+  for (const {
+    file,
+    expected_exit: expectedExit,
+    gating_invariant: gatingInvariant,
+    expected_failing_invariants: expectedFailing,
+  } of MANIFEST) {
     it(`${file} → replay exit ${expectedExit}${gatingInvariant ? ` (gating ${gatingInvariant})` : ''}`, () => {
       const result = evaluateReplayFixture(loadFixture(`${file}.json`) as never);
       expect(result.exitCode, `${file} expected replay exit ${expectedExit}`).toBe(expectedExit);
@@ -76,8 +96,59 @@ describe('replay-fixture manifest — expected exit codes are enforced, not just
         const gating = result.findings.filter((f) => f.status === 'fail' && f.invariant_id === gatingInvariant);
         expect(gating.length, `${file} must gate specifically on ${gatingInvariant}`).toBeGreaterThan(0);
       }
+      if (expectedFailing !== undefined) {
+        expect(
+          failingInvariantSet(result.findings),
+          `${file}: pinned failing-invariant set diverged. A pinned invariant that STOPPED failing means a ` +
+            `classifier silently regressed (exit-code-only pinning would have stayed green); a NEW failing ` +
+            `invariant means the fixture surfaced a new defect. Re-capture with --json-summary and update ` +
+            `replay-manifest.json deliberately (same PR, diff explained).`,
+        ).toEqual([...expectedFailing].sort());
+      }
     });
   }
+});
+
+describe('replay-manifest integrity — the gate must be provably able to fail', () => {
+  it('the pinned fixture population does not shrink below the known floor', () => {
+    // 5 = today's committed population. Shrinking the manifest (deleting
+    // fixtures + their pins together) would otherwise pass every per-fixture
+    // assertion while measuring less and less.
+    expect(MANIFEST.length, 'manifest lost fixtures — shrinking the pinned population needs review').toBeGreaterThanOrEqual(5);
+  });
+
+  it('at least one fixture is pinned RED (expected_exit=1)', () => {
+    // A gate whose fixtures are all-green proves nothing about its ability
+    // to detect a defect.
+    expect(
+      MANIFEST.some((m) => m.expected_exit === 1),
+      'no pinned-RED fixture left — an all-green manifest measures nothing',
+    ).toBe(true);
+  });
+
+  it('every pinned invariant ID is a real invariant (typo guard)', () => {
+    const known = new Set(Object.keys(INVARIANT_TITLE));
+    for (const m of MANIFEST) {
+      for (const id of m.expected_failing_invariants ?? []) {
+        expect(known.has(id), `${m.file}: unknown invariant id '${id}' in expected_failing_invariants`).toBe(true);
+      }
+      if (m.gating_invariant) {
+        expect(known.has(m.gating_invariant), `${m.file}: unknown gating_invariant '${m.gating_invariant}'`).toBe(true);
+      }
+    }
+  });
+
+  it('every pinned-RED entry with a pinned set contains at least one GATING (non-advisory) invariant', () => {
+    // Internal consistency: exit=1 requires a gating fail, so a pinned set
+    // of only advisory IDs contradicts the pinned exit.
+    for (const m of MANIFEST) {
+      if (m.expected_exit !== 1 || m.expected_failing_invariants === undefined) continue;
+      const hasGating = m.expected_failing_invariants.some(
+        (id) => !ADVISORY_INVARIANTS.has(id as InvariantId),
+      );
+      expect(hasGating, `${m.file}: expected_exit=1 but pinned set has no gating invariant`).toBe(true);
+    }
+  });
 });
 
 describe('replay fixture shape — fail closed (review blocker)', () => {

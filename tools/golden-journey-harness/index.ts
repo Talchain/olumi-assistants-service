@@ -32,7 +32,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import { postTurn, type FetchResult, type TurnPayload } from '../v5-journey-replay/client.js';
@@ -79,7 +79,7 @@ import {
   type TurnRole,
   type WireBody,
 } from './observation.js';
-import { writeGoldenReport, type GoldenReportInput, type LatencyRow, type StepCapture } from './report.js';
+import { statusByInvariant, writeGoldenReport, type GoldenReportInput, type LatencyRow, type StepCapture } from './report.js';
 
 interface Cli {
   readonly baseUrl: string;
@@ -92,6 +92,12 @@ interface Cli {
   readonly traceConfirmed: boolean;
   /** Live mode only: also emit the run as a replayable fixture (redacted). */
   readonly capturePath?: string;
+  /**
+   * Optional machine-readable per-invariant summary (IDs/statuses/counts only,
+   * NO evidence strings) so out-of-process consumers — the advisory replay
+   * gate — can assert the failing-invariant SET, not just the exit code.
+   */
+  readonly jsonSummaryPath?: string;
 }
 
 function parseArgs(): Cli {
@@ -103,6 +109,7 @@ function parseArgs(): Cli {
   let replayPath: string | undefined;
   let traceConfirmed = false;
   let capturePath: string | undefined;
+  let jsonSummaryPath: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -113,22 +120,35 @@ function parseArgs(): Cli {
     else if (arg === '--replay' && i + 1 < args.length) replayPath = args[++i]!;
     else if (arg === '--trace-confirmed') traceConfirmed = true;
     else if (arg === '--capture' && i + 1 < args.length) capturePath = args[++i]!;
+    else if (arg === '--json-summary' && i + 1 < args.length) jsonSummaryPath = args[++i]!;
     else if (arg === '--help' || arg === '-h') {
       console.log(
         'Usage: pnpm tsx tools/golden-journey-harness/index.ts \\\n' +
           '         [--base-url URL] [--out PATH] [--scenario-prefix TAG] [--expected-build SHA]\n' +
-          '         [--trace-confirmed] [--capture FIXTURE_OUT.json]\n' +
+          '         [--trace-confirmed] [--capture FIXTURE_OUT.json] [--json-summary SUMMARY_OUT.json]\n' +
           '       pnpm tsx tools/golden-journey-harness/index.ts --replay FIXTURE.json [--out PATH]\n\n' +
           'Auth (live, remote): set OLUMI_REPLAY_API_KEY.\n' +
           '--trace-confirmed: assert CEE_DIAGNOSTIC_TRACE_ENABLED is ON, so a missing trace fails A6\n' +
           '                   instead of being inconclusive (guardrail #5).\n' +
           '--capture: live mode only — also write the run as a redacted replayable fixture\n' +
-          '           (review + redaction-check before committing; see README capture flow).',
+          '           (review + redaction-check before committing; see README capture flow).\n' +
+          '--json-summary: also write a machine-readable per-invariant summary (IDs/statuses/\n' +
+          '                counts only, no evidence text) for out-of-process gate consumers.',
       );
       process.exit(0);
     }
   }
-  return { baseUrl, out, scenarioPrefix, apiKey: readApiKey(), expectedBuild, replayPath, traceConfirmed, capturePath };
+  return {
+    baseUrl,
+    out,
+    scenarioPrefix,
+    apiKey: readApiKey(),
+    expectedBuild,
+    replayPath,
+    traceConfirmed,
+    capturePath,
+    jsonSummaryPath,
+  };
 }
 
 function safeGit(cmd: string): string {
@@ -191,7 +211,22 @@ function syntheticCaptures(): StepCapture[] {
 }
 
 // GoldenReportInput + the out path travel together internally.
-type RunReportInput = GoldenReportInput & { readonly out_path: string };
+type RunReportInput = GoldenReportInput & {
+  readonly out_path: string;
+  /** When set, finishAndExit also writes the machine-readable summary here. */
+  readonly json_summary_path?: string;
+};
+
+/**
+ * The sorted, de-duplicated set of invariant IDs whose status is 'fail'
+ * (gating AND advisory alike). This is what the manifest's
+ * `expected_failing_invariants` pins: an invariant that silently STOPS
+ * failing on a RED fixture is a classifier regression the exit code alone
+ * cannot see (the fixture still exits 1 via another gating invariant).
+ */
+export function failingInvariantSet(findings: readonly Finding[]): string[] {
+  return [...new Set(findings.filter((f) => f.status === 'fail').map((f) => f.invariant_id))].sort();
+}
 
 /**
  * Number of GATING fails (status==='fail' and not advisory). Single source for
@@ -213,6 +248,42 @@ function finishAndExit(input: RunReportInput, redact: (v: unknown) => string): n
   console.log(
     `findings: ${input.findings.length} (fail=${fails} [gating=${gatingFails} advisory=${advisoryFails}] inconclusive=${inconclusive})`,
   );
+  // Machine-readable summary for out-of-process consumers (the advisory
+  // replay gate). IDs / statuses / counts ONLY — deliberately no evidence
+  // strings, so this adds no new redaction surface. A summary-write failure
+  // must never destroy the run: report is already written above; fall
+  // through to the normal exit with a loud stderr note.
+  if (input.json_summary_path) {
+    try {
+      writeFileSync(
+        input.json_summary_path,
+        JSON.stringify(
+          {
+            schema: 'golden-journey-summary/v1',
+            mode: input.mode,
+            exit_code: gatingFails > 0 ? 1 : 0,
+            counts: {
+              findings: input.findings.length,
+              fails,
+              gating_fails: gatingFails,
+              advisory_fails: advisoryFails,
+              inconclusive,
+            },
+            failing_invariants: failingInvariantSet(input.findings),
+            invariant_status: statusByInvariant(input.findings),
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      console.log(`Summary written to ${input.json_summary_path}`);
+    } catch (err) {
+      console.error(
+        `Summary write FAILED (${redact(err instanceof Error ? err.message : String(err))}) — ` +
+          `report already written; exiting with the run's own status.`,
+      );
+    }
+  }
   // Only GATING fails set a non-zero exit code. Advisory fails (A5 / provisional
   // A1 except the wire-grounded stale-as-fresh finding — semantic, LLM-variance-
   // prone) are reported but do not hard-gate a single live run; the deterministic
@@ -319,6 +390,7 @@ function runReplay(cli: Cli): never {
   finishAndExit(
     {
       out_path: cli.out,
+      json_summary_path: cli.jsonSummaryPath,
       mode: 'replay',
       startedAt: 'replay (deterministic fixture)',
       branch: safeGit('git rev-parse --abbrev-ref HEAD'),
@@ -518,6 +590,7 @@ async function runLive(cli: Cli): Promise<void> {
   finishAndExit(
     {
       out_path: cli.out,
+      json_summary_path: cli.jsonSummaryPath,
       mode: 'live',
       baseUrl: cli.baseUrl,
       startedAt,
