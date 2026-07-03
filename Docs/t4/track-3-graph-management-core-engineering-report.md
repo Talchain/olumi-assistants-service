@@ -129,6 +129,37 @@ A broader review (correctness + reuse/simplification/efficiency/altitude/convent
 7. **Dead work** — removed a discarded `assessCandidate` on the add_option path.
 8. **Reuse** — `bestEffortKind` reuses `CANDIDATE_KINDS`.
 
+## CI ratchet reconciliation (2026-07-03)
+
+`Typecheck Drift (ratchet)` is RED on head `b3b1167f9` — reconciled as **zero-delta vs current
+staging**, NOT a Track 3 regression.
+
+- **SHAs:** staging `cc5dd47174d5fc203bd02254031409d5e64f35bd` (unmoved since Track 3 base) · PR head
+  `b3b1167f942e10f38a0a32cd704e9765b391df93`.
+- **Mechanism:** the ratchet (`scripts/ci/typecheck-ratchet.sh`, full `tsc -p tsconfig.json`) compares
+  against the **frozen** `scripts/ci/typecheck-baseline.txt` (`count=462`, 137 files, recorded
+  **2026-06-01** in PR #225) — NOT a fresh staging measurement.
+- **The +1:** the single new-file error is `src/cee/dual-draft/__tests__/guards.test.ts`
+  (`TS2322: Type '3' is not assignable to type '300'`, line 284) — introduced by the **staging tip
+  `cc5dd4717` itself (PR #337)**, which modified that file without updating the baseline.
+- **Delta proof:** this PR's diff vs staging touches only `src/orchestrator-v5/graph-management/**` +
+  a doc — **zero** changes to `src/cee/`, `src/generated/`, `tsconfig*.json`, `.d.ts`, or the baseline
+  (git diff empty), and no ambient/global declarations. `guards.test.ts` and its entire type closure are
+  byte-identical on both SHAs, so it errors identically. Ratchet count: **staging 463 vs baseline 462
+  (+1); PR head 463 vs baseline 462 (+1); delta (PR vs staging) = 0.**
+- **Classification:** *zero-delta / CI baseline stale* (staging drifted via #337 after the 2026-06-01
+  baseline). The required `Lint, TypeCheck, Unit Tests` (src-only `tsc -p tsconfig.build.json`) **passes**;
+  the ratchet is a **non-required** job.
+- **Pre-push coverage:** the bypassed pre-push hook (`scripts/validate-prepush.sh`) does **not** run the
+  ratchet — its `check_typecheck` is `tsc -p tsconfig.build.json` (src-only), which would never check a
+  test file like `guards.test.ts`. The equivalent worktree gate (tsc/vitest/eslint via main binaries)
+  therefore never covered the ratchet, and *couldn't* have flagged this as a Track 3 issue because the
+  drift is pre-existing on staging. Future worktree pushes should read a red ratchet as **delta-vs-staging**
+  (reconcile the offending file's provenance), not as a PR regression — and, when a clean install is
+  available, run `scripts/ci/typecheck-ratchet.sh` after `pnpm openapi:generate`.
+- **Resolution (out of scope for Track 3, needs reviewer sign-off):** fix the `guards.test.ts` literal
+  or refresh `typecheck-baseline.txt` in a staging-hygiene PR (owner of #337).
+
 ## Risk register
 
 | Risk | Mitigation |
