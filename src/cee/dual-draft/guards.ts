@@ -108,6 +108,99 @@ export function checkEdgeNumericSanity(edge: {
   return null;
 }
 
+/**
+ * G-size — per-proposal text-size caps. SINGLE SOURCE OF TRUTH for the merge
+ * guard (the authoritative enforcement point) AND the structured-output JSON
+ * schema mirror (proposal-json-schema.ts, a model-facing first fence only).
+ * Lengths are character counts, except `uncertainty_drivers_items` which caps
+ * the array element count.
+ *
+ * Policy: oversized fields are REJECTED per proposal (never truncated in the
+ * merge). A truncated label would silently alter M2's committed content, and
+ * proposals are advisory — same reject-not-clamp stance as G10/G14. Values are
+ * generous defaults (real node labels are ~15–40 chars); tune here only.
+ */
+export const PROPOSAL_FIELD_CAPS = {
+  node_id: 128,
+  label: 200,
+  description: 1000,
+  uncertainty_drivers_items: 12,
+  uncertainty_driver_length: 120,
+  evidence_pointer: 300,
+  rationale: 500,
+  question: 500,
+} as const;
+
+export interface OversizedField {
+  readonly field: string;
+  /** Character count for text fields; element count for the drivers-array cap. */
+  readonly length: number;
+  readonly cap: number;
+}
+
+/**
+ * Returns the first proposal text field exceeding {@link PROPOSAL_FIELD_CAPS},
+ * or null. Reads raw fields defensively (delta.node stays `unknown` until the
+ * merge's NodeV3 parse) so oversized input is rejected before schema parsing.
+ * Envelope text (evidence_pointer, rationale, delta.question) is checked for
+ * every proposal type; node text (id, label, description, uncertainty_drivers)
+ * only when a delta.node object is present.
+ */
+export function findOversizedProposalField(
+  proposal: {
+    readonly evidence_pointer?: unknown;
+    readonly rationale?: unknown;
+    readonly delta?: unknown;
+  },
+  caps: typeof PROPOSAL_FIELD_CAPS = PROPOSAL_FIELD_CAPS,
+): OversizedField | null {
+  const check = (field: string, value: unknown, cap: number): OversizedField | null =>
+    typeof value === 'string' && value.length > cap ? { field, length: value.length, cap } : null;
+
+  let hit = check('evidence_pointer', proposal.evidence_pointer, caps.evidence_pointer);
+  if (hit) return hit;
+  hit = check('rationale', proposal.rationale, caps.rationale);
+  if (hit) return hit;
+
+  const delta =
+    proposal.delta !== null && typeof proposal.delta === 'object'
+      ? (proposal.delta as { node?: unknown; question?: unknown })
+      : null;
+  if (delta === null) return null;
+
+  hit = check('delta.question', delta.question, caps.question);
+  if (hit) return hit;
+
+  const node =
+    delta.node !== null && typeof delta.node === 'object' && !Array.isArray(delta.node)
+      ? (delta.node as Record<string, unknown>)
+      : null;
+  if (node === null) return null;
+
+  hit = check('delta.node.id', node.id, caps.node_id);
+  if (hit) return hit;
+  hit = check('delta.node.label', node.label, caps.label);
+  if (hit) return hit;
+  hit = check('delta.node.description', node.description, caps.description);
+  if (hit) return hit;
+
+  const drivers = node.uncertainty_drivers;
+  if (Array.isArray(drivers)) {
+    if (drivers.length > caps.uncertainty_drivers_items) {
+      return {
+        field: 'delta.node.uncertainty_drivers',
+        length: drivers.length,
+        cap: caps.uncertainty_drivers_items,
+      };
+    }
+    for (let i = 0; i < drivers.length; i++) {
+      hit = check(`delta.node.uncertainty_drivers[${i}]`, drivers[i], caps.uncertainty_driver_length);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 function optionSurface(graph: GraphV3T): string {
   const optionNodes = graph.nodes.filter((n) => n.kind === 'option');
   const optionIds = new Set(optionNodes.map((n) => n.id));

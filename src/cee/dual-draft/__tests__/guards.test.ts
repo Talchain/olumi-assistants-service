@@ -18,6 +18,8 @@ import {
   ALLOWED_EDGE_DELTA_FIELDS,
   optionSurfaceUnchanged,
   checkReadinessNoDowngrade,
+  findOversizedProposalField,
+  PROPOSAL_FIELD_CAPS,
 } from '../guards.js';
 
 // A structurally READY graph: goal + two options with numeric interventions.
@@ -198,5 +200,88 @@ describe('G12 — option-surface invariance + readiness no-downgrade', () => {
     after.nodes = after.nodes.filter((n) => n.kind !== 'goal');
     const res = checkReadinessNoDowngrade(before, after);
     expect(res.ok).toBe(false);
+  });
+});
+
+describe('G-size — findOversizedProposalField (per-proposal text caps)', () => {
+  const C = PROPOSAL_FIELD_CAPS;
+
+  it('returns null for a well-formed proposal with all fields at or under cap', () => {
+    expect(
+      findOversizedProposalField({
+        evidence_pointer: 'x'.repeat(C.evidence_pointer),
+        rationale: 'y'.repeat(C.rationale),
+        delta: {
+          question: null,
+          node: {
+            id: 'a'.repeat(C.node_id),
+            label: 'b'.repeat(C.label),
+            description: 'c'.repeat(C.description),
+            uncertainty_drivers: Array.from({ length: C.uncertainty_drivers_items }, () =>
+              'd'.repeat(C.uncertainty_driver_length),
+            ),
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it('flags an oversized evidence_pointer (envelope field, checked for every type)', () => {
+    const hit = findOversizedProposalField({ evidence_pointer: 'x'.repeat(C.evidence_pointer + 1) });
+    expect(hit).toEqual({ field: 'evidence_pointer', length: C.evidence_pointer + 1, cap: C.evidence_pointer });
+  });
+
+  it('flags an oversized rationale', () => {
+    const hit = findOversizedProposalField({ evidence_pointer: 'e', rationale: 'r'.repeat(C.rationale + 1) });
+    expect(hit?.field).toBe('rationale');
+  });
+
+  it('flags an oversized artifact question', () => {
+    const hit = findOversizedProposalField({ evidence_pointer: 'e', delta: { question: 'q'.repeat(C.question + 1) } });
+    expect(hit?.field).toBe('delta.question');
+  });
+
+  it('flags oversized node id / label / description', () => {
+    expect(
+      findOversizedProposalField({ evidence_pointer: 'e', delta: { node: { id: 'a'.repeat(C.node_id + 1) } } })?.field,
+    ).toBe('delta.node.id');
+    expect(
+      findOversizedProposalField({ evidence_pointer: 'e', delta: { node: { label: 'b'.repeat(C.label + 1) } } })?.field,
+    ).toBe('delta.node.label');
+    expect(
+      findOversizedProposalField({ evidence_pointer: 'e', delta: { node: { description: 'c'.repeat(C.description + 1) } } })
+        ?.field,
+    ).toBe('delta.node.description');
+  });
+
+  it('flags too many uncertainty_drivers (element count) with the item cap', () => {
+    const hit = findOversizedProposalField({
+      evidence_pointer: 'e',
+      delta: { node: { uncertainty_drivers: Array.from({ length: C.uncertainty_drivers_items + 1 }, () => 'x') } },
+    });
+    expect(hit).toEqual({
+      field: 'delta.node.uncertainty_drivers',
+      length: C.uncertainty_drivers_items + 1,
+      cap: C.uncertainty_drivers_items,
+    });
+  });
+
+  it('flags an over-long individual uncertainty_driver with its index', () => {
+    const hit = findOversizedProposalField({
+      evidence_pointer: 'e',
+      delta: { node: { uncertainty_drivers: ['ok', 'z'.repeat(C.uncertainty_driver_length + 1)] } },
+    });
+    expect(hit?.field).toBe('delta.node.uncertainty_drivers[1]');
+  });
+
+  it('reads raw fields defensively — non-object delta / node and non-string values are ignored', () => {
+    expect(findOversizedProposalField({ evidence_pointer: 'e', delta: 'not-an-object' })).toBeNull();
+    expect(findOversizedProposalField({ evidence_pointer: 'e', delta: { node: 42 } })).toBeNull();
+    expect(findOversizedProposalField({ evidence_pointer: 123 })).toBeNull();
+  });
+
+  it('accepts an injectable cap object (tuning stays in one place)', () => {
+    const hit = findOversizedProposalField({ evidence_pointer: 'abcd' }, { ...C, evidence_pointer: 3 });
+    expect(hit).toEqual({ field: 'evidence_pointer', length: 4, cap: 3 });
   });
 });
