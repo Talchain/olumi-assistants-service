@@ -41,12 +41,23 @@ fi
 OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gj-replay-gate.XXXXXX")"
 trap 'rm -rf "${OUT_DIR}"' EXIT
 
-# Run one fixture and compare its actual CLI exit to the expected exit.
+# Run one fixture and compare its actual CLI exit to the expected exit, and —
+# when the manifest pins a failing-invariant set (third field != "-") — compare
+# the actual failing set from the machine-readable --json-summary. The set
+# comparison closes the mixed-invariant masking hole: on a RED fixture failing
+# A8+A10+A11, an A10/A11 classifier that silently stops failing keeps exit=1
+# (via A8) and is invisible to the exit code alone.
+# Third field encoding from the manifest emitter:
+#   "-"            no pinned set (legacy exit-code-only entry)
+#   "="            pinned EMPTY set (fixture must have zero failing invariants)
+#   "=A,B,C"       pinned set (sorted, comma-joined)
 run_fixture() {
-  local file="$1" expected="$2" actual
-  echo "::group::${file} (expect exit ${expected})"
+  local file="$1" expected="$2" expected_set="$3" actual csv
+  echo "::group::${file} (expect exit ${expected}${expected_set:+, set ${expected_set}})"
   set +e
-  pnpm tsx "${CLI}" --replay "${FIXTURES}/${file}.json" --out "${OUT_DIR}/${file}-report.md"
+  pnpm tsx "${CLI}" --replay "${FIXTURES}/${file}.json" \
+    --out "${OUT_DIR}/${file}-report.md" \
+    --json-summary "${OUT_DIR}/${file}-summary.json"
   actual=$?
   set -e
   echo "  ${file}: exit=${actual} expected=${expected}"
@@ -54,6 +65,39 @@ run_fixture() {
   if [ "${actual}" -ne "${expected}" ]; then
     echo "::error::${file}: replay exit ${actual}, expected ${expected} (a pinned RED fixture may have flipped, or the harness crashed)"
     return 1
+  fi
+  if [ "${expected_set}" != "-" ]; then
+    csv="${expected_set#=}"
+    if ! node -e '
+      const fs = require("node:fs");
+      const [summaryPath, expectedCsv, file] = process.argv.slice(1);
+      let actual;
+      try {
+        actual = JSON.parse(fs.readFileSync(summaryPath, "utf8")).failing_invariants;
+      } catch (err) {
+        console.error(`${file}: could not read --json-summary output (${err.message}) — treating as gate failure (fail closed)`);
+        process.exit(1);
+      }
+      if (!Array.isArray(actual)) {
+        console.error(`${file}: summary failing_invariants is not an array — fail closed`);
+        process.exit(1);
+      }
+      const exp = expectedCsv === "" ? [] : expectedCsv.split(",");
+      const a = [...actual].sort().join(",");
+      const e = [...exp].sort().join(",");
+      if (a !== e) {
+        console.error(
+          `${file}: failing invariants [${a}] != pinned [${e}] — a pinned invariant that STOPPED failing ` +
+          `means a classifier silently regressed while the exit code stayed the same; a NEW one means the ` +
+          `fixture surfaced a new defect. Re-capture with --json-summary and update replay-manifest.json deliberately.`
+        );
+        process.exit(1);
+      }
+    ' "${OUT_DIR}/${file}-summary.json" "${csv}" "${file}"; then
+      echo "::error::${file}: failing-invariant set mismatch (see line above)"
+      return 1
+    fi
+    echo "  ${file}: failing-invariant set matched [${csv}]"
   fi
   return 0
 }
@@ -63,23 +107,44 @@ status=0
 echo "== golden-journey replay gate (advisory) =="
 echo "manifest: ${MANIFEST}"
 
-# Emit "<file> <expected_exit>" lines from the shared manifest with node (no jq
-# dependency), then drive the gate from them. `while read` runs in this shell
-# (process substitution) so `status` mutations survive the loop.
-while read -r file expected; do
+# Emit "<file> <expected_exit> <set>" lines from the shared manifest with node
+# (no jq dependency), then drive the gate from them. `while read` runs in this
+# shell (process substitution) so `status` mutations survive the loop.
+# Set encoding: "-" = no pinned set; "=" = pinned empty; "=A,B,C" = pinned set.
+# The emitter also enforces the manifest-integrity guards out-of-process
+# (mirroring the required unit test) so the advisory workflow is self-sufficient:
+#   - fixture population must not shrink below the known floor (5);
+#   - at least one fixture must be pinned RED (a gate with an all-green
+#     manifest measures nothing).
+while read -r file expected expected_set; do
   [ -z "${file}" ] && continue
-  run_fixture "${file}" "${expected}" || status=1
+  run_fixture "${file}" "${expected}" "${expected_set}" || status=1
 done < <(node -e '
   const fs = require("node:fs");
   const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   if (!Array.isArray(m.fixtures) || m.fixtures.length === 0) {
     console.error("manifest has no fixtures[]"); process.exit(1);
   }
+  if (m.fixtures.length < 5) {
+    console.error("manifest-integrity: fixture population shrank below the known floor (5) — shrinking the pinned population needs review");
+    process.exit(1);
+  }
+  if (!m.fixtures.some((f) => f.expected_exit === 1)) {
+    console.error("manifest-integrity: no pinned-RED fixture left — an all-green manifest measures nothing");
+    process.exit(1);
+  }
   for (const f of m.fixtures) {
     if (typeof f.file !== "string" || (f.expected_exit !== 0 && f.expected_exit !== 1)) {
       console.error("malformed manifest entry: " + JSON.stringify(f)); process.exit(1);
     }
-    console.log(f.file + " " + f.expected_exit);
+    let set = "-";
+    if (f.expected_failing_invariants !== undefined) {
+      if (!Array.isArray(f.expected_failing_invariants) || !f.expected_failing_invariants.every((x) => typeof x === "string" && /^[A-Za-z0-9]+$/.test(x))) {
+        console.error("malformed expected_failing_invariants: " + JSON.stringify(f)); process.exit(1);
+      }
+      set = "=" + [...f.expected_failing_invariants].sort().join(",");
+    }
+    console.log(f.file + " " + f.expected_exit + " " + set);
   }
 ' "${MANIFEST}")
 
