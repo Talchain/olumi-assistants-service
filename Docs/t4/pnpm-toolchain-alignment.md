@@ -28,14 +28,26 @@ actual pnpm-11 run**, which is why this doc recommends rather than patches.
 ## Landed in this PR (safe, additive)
 
 `scripts/bootstrap-worktree.sh`:
-- warns (non-fatal) when the local pnpm major differs from CI's pinned `9`,
-  with the exact `corepack pnpm@9 install --frozen-lockfile` reproduction line;
-- exports `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` so Corepack can never block setup
-  on an interactive download prompt (the "make bootstrap non-interactive-safe"
-  point).
+- runs the install as `CI=1 pnpm install --frozen-lockfile`. The real
+  fresh-worktree blocker is pnpm's *"The modules directory … will be removed and
+  reinstalled from scratch. Proceed?"* purge prompt, triggered by the partially
+  tracked `node_modules`. It hangs even with stdin closed (reproduced on pnpm 9),
+  so the install never completes and binaries stay missing — bootstrap then fails
+  later at `openapi-typescript: command not found`. `CI=1` makes that step
+  non-interactive. **Verified:** pnpm 9 without it hangs on the prompt; with it,
+  install completes and tsc/eslint/vitest/openapi-typescript are all present.
+- exports `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` (no Corepack download prompt) and
+  `COREPACK_ENABLE_AUTO_PIN=0` (if `pnpm` is a Corepack shim, it must not silently
+  write a `packageManager` field into `package.json` — that pin is the separate
+  decision below);
+- warns (non-fatal) when the local pnpm major differs from CI's pinned `9`, and
+  prints a **non-mutating** reproduction line:
+  `COREPACK_ENABLE_AUTO_PIN=0 CI=1 corepack pnpm@9 install --frozen-lockfile`.
+  Both guards matter: bare `corepack pnpm@9 …` can auto-add a `packageManager`
+  field, and without `CI=1` it hits the same purge prompt.
 
 This turns a mysterious false-red into a signposted version mismatch. It does
-NOT change what pnpm anyone runs.
+NOT change what pnpm anyone runs, and does NOT mutate `package.json`.
 
 ## Recommended decision (Paul to choose ONE)
 
@@ -47,9 +59,13 @@ NOT change what pnpm anyone runs.
 ```
 - Corepack-enabled environments auto-use 9 → dev == CI. Non-Corepack users are
   unaffected (the field is advisory unless Corepack is active).
-- Update `CI_PNPM_MAJOR` in `bootstrap-worktree.sh` only if the pinned major
-  changes (currently already 9).
-- **Validation required before merge:** `corepack pnpm@9 install --frozen-lockfile`
+- Pin the EXACT version everywhere, not just the major: set `packageManager` to
+  `pnpm@9.15.9` (the version Corepack currently resolves for `pnpm@9`) AND change
+  the workflows' `pnpm/action-setup` from `version: 9` to `version: 9.15.9`,
+  otherwise patch-level drift between dev and CI remains. Update
+  `CI_PNPM_MAJOR` in `bootstrap-worktree.sh` only if the pinned major changes.
+- **Validation required before merge:**
+  `COREPACK_ENABLE_AUTO_PIN=0 CI=1 corepack pnpm@9.15.9 install --frozen-lockfile`
   green on a fresh worktree; CI green (it already runs 9).
 
 **Option B — support pnpm 9–11 (more work, more resilient):**
