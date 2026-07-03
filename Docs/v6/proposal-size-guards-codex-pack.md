@@ -38,7 +38,7 @@ canvas-rendered graph (100KB rationale/evidence_pointer into DeferArtifacts; 10k
 | File | Change |
 |---|---|
 | `src/cee/dual-draft/guards.ts` | NEW `PROPOSAL_FIELD_CAPS` (single source of truth) + `findOversizedProposalField` (pure; reads raw fields defensively). |
-| `src/cee/dual-draft/merge.ts` | NEW `MergeFailureCode` member `proposal_field_too_large`; call the guard right after the G14 claim scan, reject per-proposal. |
+| `src/cee/dual-draft/merge.ts` | NEW `MergeFailureCode` member `proposal_field_too_large`; call the guard **before** the G14 claim scan (so an unbounded `uncertainty_drivers` array is rejected in O(1) before G14 spreads it), reject per-proposal. |
 | `src/cee/dual-draft/proposal-json-schema.ts` | Mirror the caps as `maxLength`/`maxItems` **from the const** (model-facing first fence only). |
 | tests (3) | guard unit block; size-caps proof suite; schema↔const lockstep. |
 
@@ -52,7 +52,7 @@ no free text (from/to are ids already bound by the endpoint-existence guard).
    is a *first fence* the model may ignore; `findOversizedProposalField` in the
    deterministic merge is authoritative. Both read `PROPOSAL_FIELD_CAPS`; the
    lockstep test fails if they drift. (Verify: could any path reach node
-   commitment without passing the guard? The guard runs after G14 and before the
+   commitment without passing the guard? The guard runs before G14 and before the
    artifact/option/node branches, covering every text channel; edges have no text.)
 2. **Reject, never truncate** — consistent with G10/G14 ("proposals are advisory,
    rejected not clamped"). A truncated label would silently alter M2's committed
@@ -91,14 +91,33 @@ no free text (from/to are ids already bound by the endpoint-existence guard).
   raw-field reads and an injectable cap object.
 - `serialise-and-schema.test.ts` (+1): schema `maxLength`/`maxItems` == `PROPOSAL_FIELD_CAPS`.
 - Gates at tip: `typecheck` + `typecheck:src` clean; zero new full-tsc drift in
-  changed files; `pnpm test:required` 885 files / 17,971 green; flag-OFF proof
+  changed files; `pnpm test:required` 885 files / 17,975 green; flag-OFF proof
   (`dispatch-flag-off` + `phase4-dispatch-compat`) 20/20 identical to baseline;
   full advisory suite failing-set identical to base (see
   `proposal-size-guards-proof.md`).
 
+## Known residuals — tracked follow-up: aggregate / serialized payload bounds
+Out of scope for this per-field fix (Codex round 2 rated all as non-blocking); a
+single future lane per the reviewer's framing. None affects normal M2 output,
+which is `maxTokens`-bounded (~4k tokens):
+1. **No total serialized-graph byte cap.** Per-field caps + `PROPOSAL_CAP` + graph
+   node/edge caps bound aggregate growth within a constant factor, but there is no
+   single graph-level byte ceiling. That belongs at the PLoT boundary, not here.
+2. **Edge `from`/`to` are intentionally not length-capped.** They must match an
+   existing node id to have effect, so a huge non-matching endpoint is rejected
+   `edge_endpoint_missing` (with a now-bounded reason). Residual: if M1 ever
+   emitted an oversized node id, M2 could add an edge duplicating that id. Low
+   likelihood (our own M1 pipeline does not emit oversized ids); a node-id byte
+   bound at graph production would close it.
+3. **Pre-truncation allocation in `ProposalEnvelope.safeParse`.** A malformed
+   huge `type` makes zod's enum error embed the value before `fail()` truncates
+   it — one transient, bounded-by-input, freed-per-turn allocation (≤ `PROPOSAL_CAP`
+   of them). Mitigated on the live path by `maxTokens`; a cheap pre-parse
+   type-length reject would eliminate it if this lane is taken.
+
 ## Rollback
-Revert the two feat commits (`5e222a5fa`, `7484c38bb`). No env/flag/migration to
-undo — the change is code-only and flag-ON-path.
+Revert the feat/fix commits on the branch (`5e222a5fa`, `7484c38bb`, `2960fb106`).
+No env/flag/migration to undo — the change is code-only and flag-ON-path.
 
 ## Downstream coupling (must sequence after merge)
 Once this lands on staging and PR #330 (the quarantined dual-model branch)
