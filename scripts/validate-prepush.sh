@@ -40,6 +40,41 @@ print_check() {
 }
 
 # ---------------------------------------------------------------------------
+# 0. Toolchain preflight — fail fast with the actual cause.
+#    Fresh worktrees check out sources but no usable toolchain: checks 2–4
+#    would otherwise die in MODULE_NOT_FOUND walls that mask the real problem.
+#    IMPORTANT: existence checks are NOT sufficient — node_modules is
+#    partially tracked, so .bin/tsc exists AND RUNS in a fresh worktree while
+#    eslint/vitest crash on load and openapi-typescript is absent entirely.
+#    So we probe by EXECUTION (--version) plus the one known-absent binary.
+#    Exits immediately (rather than accumulating FAILURES): every later
+#    check is noise without a toolchain.
+# ---------------------------------------------------------------------------
+check_toolchain_preflight() {
+  local broken=""
+  local bin
+  for bin in tsc eslint vitest; do
+    if ! "${REPO_ROOT}/node_modules/.bin/${bin}" --version > /dev/null 2>&1; then
+      broken="${broken} ${bin}"
+    fi
+  done
+  if [ ! -x "${REPO_ROOT}/node_modules/.bin/openapi-typescript" ]; then
+    broken="${broken} openapi-typescript"
+  fi
+  if [ -n "$broken" ]; then
+    print_check "toolchain-preflight" "FAIL"
+    echo "    Broken or missing toolchain binaries:${broken}"
+    echo "    This worktree's toolchain is not installed (fresh worktree?)."
+    echo "    node_modules is partially tracked, so some binaries exist but crash."
+    echo "    Fix:   bash scripts/bootstrap-worktree.sh"
+    echo ""
+    echo "pre-push: toolchain missing. Push blocked."
+    exit 1
+  fi
+  print_check "toolchain-preflight" "OK"
+}
+
+# ---------------------------------------------------------------------------
 # 1. Branch guard — block push to main
 # ---------------------------------------------------------------------------
 check_branch_guard() {
@@ -414,6 +449,7 @@ echo ""
 echo "pre-push validation"
 echo "-------------------"
 
+check_toolchain_preflight
 check_branch_guard
 check_typecheck
 check_lint_changed
