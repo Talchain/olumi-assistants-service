@@ -621,9 +621,15 @@ export async function commitDirectAnswer(
           scenario_id: metadata.scenario_id,
           turn_row_id: persistedRowId,
           // newly-created this turn vs carried forward from prior turns.
+          // Track 2: carried_forward_count / cap_dropped_count are the POST-CAP
+          // lifecycle values (what actually persisted), so they agree with
+          // `pending_action_count`: new_pending + carried_forward ≤ cap, and the
+          // cap-evicted survivors are attributed to cap_dropped (NOT counted as
+          // carried forward). Previously this logged pre-cap `survivingPrior.length`.
           pending_action_count: finalPendings.length,
           new_pending_count: chipDerivedPending.length,
-          carried_forward_count: survivingPrior.length,
+          carried_forward_count: pendingLifecycle.survivedCount,
+          cap_dropped_count: pendingLifecycle.capDroppedCount,
           consumed_ref_count: (metadata.consumedPendingRefs ?? []).length,
           kinds: finalPendings.map((pa) => pa.action.kind),
         },

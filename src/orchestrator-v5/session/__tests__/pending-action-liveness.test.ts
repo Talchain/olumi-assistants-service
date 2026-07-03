@@ -12,10 +12,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CONFIRMATION_EXPECTING_ACTION_TYPES,
+  derivePendingActivity,
   filterLivePendingActions,
   isPendingActionExpired,
   RESUMABLE_ACTION_TYPES,
   type PendingAction,
+  type PendingActionKind,
 } from '../pending-action.js';
 
 const NOW_MS = Date.parse('2026-07-03T12:00:00.000Z');
@@ -106,5 +108,98 @@ describe('CONFIRMATION_EXPECTING_ACTION_TYPES — propose-then-decide kinds only
       expect(RESUMABLE_ACTION_TYPES.has(kind)).toBe(true);
     }
     expect(CONFIRMATION_EXPECTING_ACTION_TYPES.size).toBeLessThan(RESUMABLE_ACTION_TYPES.size);
+  });
+});
+
+/** A minimal valid live PendingAction for any kind (each kind's required fields). */
+function pendingOfKind(kind: PendingActionKind): PendingAction {
+  const base = {
+    id: `pa_${kind}`,
+    scenario_id: 'scn_test',
+    chip_id: `chip_${kind}`,
+    preconditions: {},
+    expires_at_turn_count: 2,
+    expires_at_iso: '2026-07-03T12:10:00.000Z',
+    emitted_at_iso: '2026-07-03T11:59:00.000Z',
+  };
+  switch (kind) {
+    case 'run_analysis':
+    case 'what_would_flip':
+      return { ...base, action: { kind } };
+    case 'set_factor_value':
+      return { ...base, action: { kind, factor_id: 'fac_x', value: 1, operator: 'set' } };
+    case 'edit_graph_add_risk':
+      return { ...base, action: { kind, label: 'Risk' } };
+    case 'proposed_concept':
+      return {
+        ...base,
+        action: { kind, concept: 'morale', preferred_kind: 'factor', public_label: 'Add', public_message: 'Add?' },
+      };
+    case 'apply_proposed_change':
+      return {
+        ...base,
+        chip_id: 'prop_ref_abcdef',
+        preconditions: { graph_hash: 'gh' },
+        action: {
+          kind,
+          proposal_ref: 'prop_ref_abcdef',
+          inline_patch: { handler_id: 'set_factor_value', params: {}, target_entity_ids: ['fac_x'] },
+          public_label: 'Apply',
+          public_message: 'Apply?',
+        },
+      };
+  }
+}
+
+describe('derivePendingActivity — single ORIENT-time pending tally, per kind', () => {
+  it('empty input → all-zero tally', () => {
+    expect(derivePendingActivity([], NOW_MS)).toEqual({
+      liveCount: 0,
+      expiredCount: 0,
+      kinds: {},
+      confirmationExpectingLiveCount: 0,
+    });
+  });
+
+  // Table-test EVERY kind's confirmation-expecting contribution in isolation —
+  // the kind-scope decision (propose-then-decide only) is proven here directly,
+  // independent of routing / the ContextPack serialisation.
+  it.each<[PendingActionKind, number]>([
+    ['apply_proposed_change', 1],
+    ['proposed_concept', 1],
+    ['set_factor_value', 0],
+    ['edit_graph_add_risk', 0],
+    ['run_analysis', 0],
+    ['what_would_flip', 0],
+  ])('a single live %s → confirmationExpectingLiveCount %d, but always counted live', (kind, expected) => {
+    const tally = derivePendingActivity([pendingOfKind(kind)], NOW_MS);
+    expect(tally.liveCount).toBe(1);
+    expect(tally.kinds[kind]).toBe(1);
+    expect(tally.confirmationExpectingLiveCount).toBe(expected);
+  });
+
+  it('expired entries are counted as expired, never live or confirmation-expecting', () => {
+    const expiredProposal: PendingAction = {
+      ...pendingOfKind('apply_proposed_change'),
+      expires_at_iso: '2020-01-01T00:00:00.000Z',
+    };
+    const tally = derivePendingActivity([expiredProposal], NOW_MS);
+    expect(tally).toMatchObject({ liveCount: 0, expiredCount: 1, confirmationExpectingLiveCount: 0 });
+    expect(tally.kinds).toEqual({});
+  });
+
+  it('mixed set: live confirm-expecting + live clarification + expired → correct partition', () => {
+    const tally = derivePendingActivity(
+      [
+        pendingOfKind('proposed_concept'), // live, confirm-expecting
+        pendingOfKind('set_factor_value'), // live, NOT confirm-expecting
+        { ...pendingOfKind('apply_proposed_change'), expires_at_turn_count: 0 }, // turn-expired
+      ],
+      NOW_MS,
+    );
+    expect(tally.liveCount).toBe(2);
+    expect(tally.expiredCount).toBe(1);
+    expect(tally.confirmationExpectingLiveCount).toBe(1);
+    expect(tally.kinds).toEqual({ proposed_concept: 1, set_factor_value: 1 });
   });
 });

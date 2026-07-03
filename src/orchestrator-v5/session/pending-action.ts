@@ -347,6 +347,56 @@ export function filterLivePendingActions(
 }
 
 /**
+ * Redacted read-time tally of prior-turn pending actions. Counts + closed-enum
+ * kind counts only. `confirmationExpectingLiveCount` counts live pendings whose
+ * kind is in {@link CONFIRMATION_EXPECTING_ACTION_TYPES} — the value the caller
+ * gates behind the kill-switch to derive `pending_confirmation`.
+ */
+export interface PendingActivityTally {
+  /** Live (non-expired) pending actions. */
+  readonly liveCount: number;
+  /** Present in the read but expired (wall or turn TTL). */
+  readonly expiredCount: number;
+  /** Live counts by kind (closed-enum keys; absent kind ⇒ zero). */
+  readonly kinds: Partial<Record<PendingActionKind, number>>;
+  /** Live entries whose kind is confirmation-expecting. */
+  readonly confirmationExpectingLiveCount: number;
+}
+
+/**
+ * The SINGLE ORIENT-time derivation of pending truth: one pass over the (≤
+ * `PENDING_ACTIONS_PER_TURN_CAP`) prior-turn pendings that classifies liveness
+ * (via the shared predicate) and tallies live count, per-kind counts, and the
+ * confirmation-expecting live count together. Pure; the caller applies the
+ * kill-switch (`pending_confirmation = flagOn && confirmationExpectingLiveCount
+ * > 0`) and adds the `threaded` flag / commit-time `lifecycle` for the frame
+ * diagnostics. Extracted so every kind's confirmation-expecting contribution is
+ * unit-testable in isolation, independent of routing.
+ */
+export function derivePendingActivity(
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): PendingActivityTally {
+  const kinds: Partial<Record<PendingActionKind, number>> = {};
+  let liveCount = 0;
+  let confirmationExpectingLiveCount = 0;
+  for (const pa of pendings) {
+    if (isPendingActionExpired(pa, nowMs)) continue;
+    liveCount += 1;
+    kinds[pa.action.kind] = (kinds[pa.action.kind] ?? 0) + 1;
+    if (CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind)) {
+      confirmationExpectingLiveCount += 1;
+    }
+  }
+  return {
+    liveCount,
+    expiredCount: pendings.length - liveCount,
+    kinds,
+    confirmationExpectingLiveCount,
+  };
+}
+
+/**
  * Redacted per-turn pending-action lifecycle tally (Track 2). Integer counts
  * only — never ids, labels, messages or patch content. Produced by the
  * commit-time carry-forward pass so the proposed → held → refused → applied →

@@ -206,6 +206,15 @@ export interface TryShortConfirmResumeInput {
  * multi-candidate clarify). That pre-route is the bounded follow-up
  * for full clarification continuity; until it lands those kinds are
  * deliberately excluded from the bare-confirm resumer.
+ *
+ * `proposed_concept` is ALSO excluded here. It IS confirmation-expecting
+ * (it flips `pending_confirmation` — Track 2's
+ * `CONFIRMATION_EXPECTING_ACTION_TYPES`), but it resumes through the
+ * dedicated proposal-continuation path (`decideNoOpRecovery` /
+ * `resolveProposalResume` in `edit-graph-dispatch`, which emits a Stage-1/2
+ * clarifier on agreement), NOT this generic bare-confirm set. So
+ * "confirmation-expecting" and "bare-confirm-resumable" are distinct: this
+ * set is the latter only.
  */
 const RESUMABLE_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
   'run_analysis',

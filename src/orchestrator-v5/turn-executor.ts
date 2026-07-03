@@ -127,8 +127,7 @@ import {
   resolveProposalRenderCopy,
 } from './compose/proposed-change.js';
 import {
-  CONFIRMATION_EXPECTING_ACTION_TYPES,
-  isPendingActionExpired,
+  derivePendingActivity,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
@@ -544,39 +543,28 @@ export async function runTurnExecutor(
   // typed invalidation outcomes. Start-of-turn semantics: a proposal consumed
   // later THIS turn still counts (it was live when the user replied); the
   // next turn's derivation reflects the consumption.
-  const pendingActionsAtOrient = context.most_recent_pending_actions ?? [];
-  const pendingNowMs = Date.now();
-  // Single pass over the (≤ PENDING_ACTIONS_PER_TURN_CAP) prior-turn pendings:
-  // classify liveness via the shared predicate and tally live count, per-kind
-  // counts, and the confirmation-expecting count together. Reuses the read-time
-  // liveness authority so this seam agrees with the short-confirm / route
-  // resolvers on what "live" means.
-  const pendingKindCounts: Partial<Record<PendingAction['action']['kind'], number>> = {};
-  let liveCount = 0;
-  let confirmationExpectingLiveCount = 0;
-  for (const pa of pendingActionsAtOrient) {
-    if (isPendingActionExpired(pa, pendingNowMs)) continue;
-    liveCount += 1;
-    pendingKindCounts[pa.action.kind] = (pendingKindCounts[pa.action.kind] ?? 0) + 1;
-    if (CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind)) {
-      confirmationExpectingLiveCount += 1;
-    }
-  }
+  // Single, pure, unit-tested derivation (`derivePendingActivity`): one pass
+  // classifying liveness via the shared predicate + tallying live/kind/
+  // confirmation-expecting counts. Reuses the read-time liveness authority so
+  // this seam agrees with the short-confirm / route resolvers on what "live"
+  // means.
+  const pendingActivity = derivePendingActivity(
+    context.most_recent_pending_actions ?? [],
+    Date.now(),
+  );
   // The ONE value both state seams receive — the ContextPack (LLM-routing-
   // visible) and the canonical frame (diagnostics) agree by construction.
   // Kill-switch: CEE_PENDING_CONFIRMATION_TRUTH_ENABLED=false restores the
   // pre-fix constant-false at BOTH seams (agreement preserved either way).
   const pendingConfirmationForTurn =
-    config.cee.pendingConfirmationTruthEnabled && confirmationExpectingLiveCount > 0;
+    config.cee.pendingConfirmationTruthEnabled &&
+    pendingActivity.confirmationExpectingLiveCount > 0;
   // Redacted pending observability for the frame (counts + closed-enum kind
   // keys only). Deliberately NOT gated by the kill-switch: manual testers see
   // the derived truth in diagnostics even when threading is disabled, with
   // `threaded` recording the flag state that governed the two seams above.
   const pendingDiagnosticsForTurn: FramePendingDiagnostics = {
-    liveCount,
-    expiredCount: pendingActionsAtOrient.length - liveCount,
-    kinds: pendingKindCounts,
-    confirmationExpectingLiveCount,
+    ...pendingActivity,
     threaded: config.cee.pendingConfirmationTruthEnabled,
   };
 
