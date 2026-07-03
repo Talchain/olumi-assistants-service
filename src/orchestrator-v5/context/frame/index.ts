@@ -47,6 +47,9 @@ export type {
   FramePendingRef,
   FrameUiTargets,
   FrameDiagnostics,
+  FramePendingDiagnostics,
+  FramePendingLifecycle,
+  FrameRerunReadiness,
 } from './types.js';
 
 export { DEFAULT_CLAIM_PERMISSIONS } from './claim-permissions.js';

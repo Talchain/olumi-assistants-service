@@ -151,4 +151,72 @@ describe('redaction — no sentinel reaches a wire-bound projection', () => {
     const summary = contextSummaryFromFrame(frame, HOSTILE_STATE)!;
     expect(summary.capabilities_present).toBeNull();
   });
+
+  it('Track 2 — the pending block is a pure counts/enum/boolean re-map (structural: no prose leaf types)', () => {
+    // The pending block is derived from PendingActions (which DO carry prose:
+    // public_label, public_message, inline_patch) at the ORIENT seam, reduced
+    // to counts there — that redaction is proven discriminatingly in the
+    // executor test. Here we prove the frame→summary PROJECTION adds no prose:
+    // every leaf is a number, boolean, or a closed-enum kind KEY, never a
+    // free-text string. A future field that smuggles a label/message through
+    // fails this structural scan.
+    const framedWithPending = buildFrame({
+      freshness,
+      canonicalState: HOSTILE_STATE,
+      canonicalStateSource: 'turn_executor',
+      recentChanges: projectRecentChangesToFrame(HOSTILE_CHANGES),
+      graphCounts: { nodes: 4, edges: 2, options: 2, goals: 1 },
+      priorTurnCount: 3,
+      pendingConfirmation: true,
+      pending: {
+        liveCount: 1,
+        expiredCount: 0,
+        kinds: { apply_proposed_change: 1 },
+        confirmationExpectingLiveCount: 1,
+        threaded: true,
+        lifecycle: {
+          priorCount: 1,
+          consumedCount: 0,
+          supersededCount: 0,
+          expiredWallCount: 0,
+          expiredTurnsCount: 0,
+          hashInvalidatedCount: 0,
+          capDroppedCount: 0,
+          survivedCount: 1,
+        },
+      },
+    });
+    const pending = contextSummaryFromFrame(framedWithPending, HOSTILE_STATE)!.pending!;
+    const KNOWN_ENUM_KEYS = new Set([
+      'set_factor_value',
+      'run_analysis',
+      'what_would_flip',
+      'apply_proposed_change',
+      'edit_graph_add_risk',
+      'proposed_concept',
+    ]);
+    const scan = (v: unknown, path: string): void => {
+      if (v === null) return;
+      if (typeof v === 'number' || typeof v === 'boolean') return;
+      if (typeof v === 'string') {
+        throw new Error(`unexpected string leaf at ${path}: ${v}`);
+      }
+      if (Array.isArray(v)) {
+        v.forEach((el, i) => scan(el, `${path}[${i}]`));
+        return;
+      }
+      if (typeof v === 'object') {
+        for (const [k, val] of Object.entries(v)) {
+          // Under `kinds`, the KEYS are closed-enum kind literals (safe).
+          if (path.endsWith('.kinds')) {
+            expect(KNOWN_ENUM_KEYS.has(k), `unknown kind key: ${k}`).toBe(true);
+          }
+          scan(val, `${path}.${k}`);
+        }
+        return;
+      }
+      throw new Error(`unexpected leaf type at ${path}`);
+    };
+    expect(() => scan(pending, 'pending')).not.toThrow();
+  });
 });

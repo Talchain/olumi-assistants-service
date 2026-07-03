@@ -274,6 +274,167 @@ export const PENDING_ACTION_DEFAULT_WALL_TTL_MS = 10 * 60 * 1000;
 export const PENDING_ACTIONS_PER_TURN_CAP = 3;
 
 /**
+ * The kinds whose live presence means "the next user turn is expected to
+ * confirm or dismiss a pending change" — the semantic the ContextPack's
+ * `conversation.pending_confirmation` boolean carries (see the assembler's
+ * field doc and spec §10:444's original patch framing).
+ *
+ * PROPOSE-THEN-DECIDE kinds only — a system-surfaced proposal whose immediate
+ * next turn is the user's accept/decline:
+ *   - `apply_proposed_change` — the G7/G8 propose-then-confirm patch.
+ *   - `proposed_concept` — a system-initiated "would you like me to add X?"
+ *     concept memory; the next turn agrees (→ a follow-up clarifier fires) or
+ *     declines. Agreement leading to a refinement does not change that the
+ *     immediate expectation is accept/decline.
+ *
+ * Deliberately EXCLUDED:
+ *   - `set_factor_value` / `edit_graph_add_risk` — CLARIFICATION-CONTINUATION
+ *     pendings. The change is already DECIDED (value parsed / risk named); the
+ *     pending only carries it across a TARGET-disambiguation turn ("which
+ *     factor?" / "what does it affect?"). The next turn supplies a parameter,
+ *     not a confirm/dismiss — counting them would mislabel clarification state
+ *     as proposal-confirmation to the router.
+ *   - `run_analysis` / `what_would_flip` — chip suggestion offers; chips derive
+ *     pending actions after most analysis turns, so counting them would leave
+ *     the flag near-constant-true for `PENDING_ACTION_DEFAULT_TURN_TTL` turns.
+ *
+ * All kinds (including the excluded ones) remain visible in the frame's
+ * pending diagnostics COUNTS regardless of this set.
+ */
+export const CONFIRMATION_EXPECTING_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
+  'apply_proposed_change',
+  'proposed_concept',
+]);
+
+/**
+ * Single liveness authority for a persisted pending action at READ time.
+ *
+ * IMPORTANT: `SessionStore.readMostRecentPendingActions` does NOT filter
+ * expiry (parse + scenario checks only), so wall-expired entries DO reach
+ * `EnrichedTurnContext.most_recent_pending_actions`. Every consumer that
+ * needs "live" truth must apply this predicate; `length > 0` on the raw
+ * list is NOT a liveness claim.
+ *
+ * Semantics (extracted verbatim from the short-confirm resumer's
+ * `isExpired`, which the route-level proposal-confirm suppressor mirrors):
+ *   - malformed `expires_at_iso` → expired (fail-closed: never treat an
+ *     action whose freshness we can't verify as live);
+ *   - `nowMs > expires_at_iso` → expired (wall-clock TTL);
+ *   - `expires_at_turn_count <= 0` → expired (turn-count TTL;
+ *     carry-forward decrements and drops at persistence, so a non-positive
+ *     count reaching a read is defence-in-depth).
+ *
+ * Deliberately DIFFERENT predicates that must NOT delegate here:
+ *   - carry-forward survival in `commit.ts` (decrement-then-drop +
+ *     consume/supersede/graph-hash rules);
+ *   - `isProposedConceptExpired` in `coaching/proposal-continuation.ts`
+ *     (wall-clock only, documented there).
+ */
+export function isPendingActionExpired(pa: PendingAction, nowMs: number): boolean {
+  const expiresMs = Date.parse(pa.expires_at_iso);
+  if (!Number.isFinite(expiresMs)) return true;
+  if (nowMs > expiresMs) return true;
+  if (pa.expires_at_turn_count <= 0) return true;
+  return false;
+}
+
+/** Live = not expired per {@link isPendingActionExpired}. Order-preserving. */
+export function filterLivePendingActions(
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): readonly PendingAction[] {
+  return pendings.filter((pa) => !isPendingActionExpired(pa, nowMs));
+}
+
+/**
+ * Redacted read-time tally of prior-turn pending actions. Counts + closed-enum
+ * kind counts only. `confirmationExpectingLiveCount` counts live pendings whose
+ * kind is in {@link CONFIRMATION_EXPECTING_ACTION_TYPES} — the value the caller
+ * gates behind the kill-switch to derive `pending_confirmation`.
+ */
+export interface PendingActivityTally {
+  /** Live (non-expired) pending actions. */
+  readonly liveCount: number;
+  /** Present in the read but expired (wall or turn TTL). */
+  readonly expiredCount: number;
+  /** Live counts by kind (closed-enum keys; absent kind ⇒ zero). */
+  readonly kinds: Partial<Record<PendingActionKind, number>>;
+  /** Live entries whose kind is confirmation-expecting. */
+  readonly confirmationExpectingLiveCount: number;
+}
+
+/**
+ * The SINGLE ORIENT-time derivation of pending truth: one pass over the (≤
+ * `PENDING_ACTIONS_PER_TURN_CAP`) prior-turn pendings that classifies liveness
+ * (via the shared predicate) and tallies live count, per-kind counts, and the
+ * confirmation-expecting live count together. Pure; the caller applies the
+ * kill-switch (`pending_confirmation = flagOn && confirmationExpectingLiveCount
+ * > 0`) and adds the `threaded` flag / commit-time `lifecycle` for the frame
+ * diagnostics. Extracted so every kind's confirmation-expecting contribution is
+ * unit-testable in isolation, independent of routing.
+ */
+export function derivePendingActivity(
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): PendingActivityTally {
+  const kinds: Partial<Record<PendingActionKind, number>> = {};
+  let liveCount = 0;
+  let confirmationExpectingLiveCount = 0;
+  for (const pa of pendings) {
+    if (isPendingActionExpired(pa, nowMs)) continue;
+    liveCount += 1;
+    kinds[pa.action.kind] = (kinds[pa.action.kind] ?? 0) + 1;
+    if (CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind)) {
+      confirmationExpectingLiveCount += 1;
+    }
+  }
+  return {
+    liveCount,
+    expiredCount: pendings.length - liveCount,
+    kinds,
+    confirmationExpectingLiveCount,
+  };
+}
+
+/**
+ * Redacted per-turn pending-action lifecycle tally (Track 2). Integer counts
+ * only — never ids, labels, messages or patch content. Produced by the
+ * commit-time carry-forward pass so the proposed → held → refused → applied →
+ * expired lifecycle is DIAGNOSABLE without a second state authority. Each
+ * prior pending is attributed to the FIRST matching drop reason (mirrors the
+ * carry-forward short-circuit order: consumed → superseded → wall → hash →
+ * turns), then a final `cap_dropped` bucket accounts for eligible survivors
+ * evicted by the per-turn `PENDING_ACTIONS_PER_TURN_CAP` when this turn's own
+ * pendings fill it. The seven fates partition the prior set exactly:
+ * `consumed + superseded + expired_wall + expired_turns + hash_invalidated +
+ * cap_dropped + survived === prior`. `survivedCount` therefore reflects what
+ * ACTUALLY persisted (post-cap), NOT pre-cap eligibility.
+ */
+export interface PendingLifecycleSummary {
+  /** Prior turn's pending actions entering carry-forward. */
+  readonly priorCount: number;
+  /** Consumed this turn (applied or dismissed via consumedPendingRefs). */
+  readonly consumedCount: number;
+  /** Superseded by a same-key offer emitted this turn (newer wins). */
+  readonly supersededCount: number;
+  /** Dropped by wall-clock TTL (or malformed expiry) at commit time. */
+  readonly expiredWallCount: number;
+  /** Dropped by turn-count TTL decrement reaching zero at commit time. */
+  readonly expiredTurnsCount: number;
+  /** Dropped because the emit-time graph hash no longer matches. */
+  readonly hashInvalidatedCount: number;
+  /**
+   * Eligible to carry forward but evicted by the per-turn cap because this
+   * turn's own pendings (offered FIRST) filled `PENDING_ACTIONS_PER_TURN_CAP`.
+   * Zero at the pre-cap carry-forward pass; finalised at commit against
+   * `finalPendings`.
+   */
+  readonly capDroppedCount: number;
+  /** Carried forward into this turn's PERSISTED pending set (post-cap). */
+  readonly survivedCount: number;
+}
+
+/**
  * Hand-rolled validator for a single pending action read from the JSONB
  * column. We keep this in-house (not Zod) because the shape is small and
  * `pending-action.ts` is a leaf module that should not pull additional

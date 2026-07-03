@@ -38,7 +38,10 @@ import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import type { PendingAction } from './session/pending-action.js';
+import type {
+  PendingAction,
+  PendingLifecycleSummary,
+} from './session/pending-action.js';
 import { PENDING_ACTIONS_PER_TURN_CAP } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
@@ -255,6 +258,14 @@ export interface CommitResult {
    * here — the caller's catch block handles that path.
    */
   readonly graphPersisted: boolean;
+  /**
+   * Track 2 — redacted per-turn pending-action lifecycle tally from the
+   * carry-forward pass (counts only). Diagnostic-only; the turn-executor
+   * threads it into the frame's `pending.lifecycle` diagnostics block. Always
+   * present on a successful commit (the carry-forward runs unconditionally,
+   * with `priorCount: 0` on legacy callers that thread no prior pendings).
+   */
+  readonly pendingLifecycle: PendingLifecycleSummary;
 }
 
 /**
@@ -286,22 +297,41 @@ function pendingMatchKey(pa: PendingAction): string {
  * TurnExecutor `commitTurn` wrapper threads `priorPendingActions`, never the
  * route-level dispatchers.
  */
-export function computeSurvivingPriorPendings(
+export interface SurvivingPriorPendingsResult {
+  readonly survivors: readonly PendingAction[];
+  readonly summary: PendingLifecycleSummary;
+}
+
+/**
+ * Detailed variant of {@link computeSurvivingPriorPendings}: identical survivor
+ * computation (same rules, same short-circuit order, same TTL decrement) PLUS a
+ * redacted drop-reason tally for the Track 2 lifecycle diagnostics. Each prior
+ * pending is attributed to the FIRST matching drop reason (the order the
+ * `continue`s already impose), so the counts partition `prior` exactly:
+ * consumed + superseded + expiredWall + hashInvalidated + expiredTurns +
+ * survived === prior.length. Pure; clock injected.
+ */
+export function computeSurvivingPriorPendingsDetailed(
   prior: readonly PendingAction[],
   thisTurn: readonly PendingAction[],
   consumedRefs: readonly string[],
   currentGraphHash: string | undefined,
   nowMs: number,
-): readonly PendingAction[] {
+): SurvivingPriorPendingsResult {
   const consumed = new Set(consumedRefs);
   const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
   const survivors: PendingAction[] = [];
+  let consumedCount = 0;
+  let supersededCount = 0;
+  let expiredWallCount = 0;
+  let hashInvalidatedCount = 0;
+  let expiredTurnsCount = 0;
   for (const pa of prior) {
     const key = pendingMatchKey(pa);
-    if (consumed.has(key)) continue; // 1. applied / dismissed this turn
-    if (thisTurnKeys.has(key)) continue; // 2. superseded by a newer offer
+    if (consumed.has(key)) { consumedCount += 1; continue; } // 1. applied / dismissed
+    if (thisTurnKeys.has(key)) { supersededCount += 1; continue; } // 2. superseded
     const expiresMs = Date.parse(pa.expires_at_iso);
-    if (!Number.isFinite(expiresMs) || nowMs > expiresMs) continue; // 3. wall TTL
+    if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
     // 4. graph-hash invalidation — only when both hashes are known.
     const preconditionHash = pa.preconditions.graph_hash;
     if (
@@ -311,14 +341,75 @@ export function computeSurvivingPriorPendings(
       currentGraphHash.length > 0 &&
       preconditionHash !== currentGraphHash
     ) {
+      hashInvalidatedCount += 1;
       continue;
     }
     // 5. turn-count TTL — decrement once per carried turn; drop when exhausted.
     const nextTurnCount = pa.expires_at_turn_count - 1;
-    if (nextTurnCount <= 0) continue;
+    if (nextTurnCount <= 0) { expiredTurnsCount += 1; continue; }
     survivors.push({ ...pa, expires_at_turn_count: nextTurnCount });
   }
-  return survivors;
+  return {
+    survivors,
+    summary: {
+      priorCount: prior.length,
+      consumedCount,
+      supersededCount,
+      expiredWallCount,
+      expiredTurnsCount,
+      hashInvalidatedCount,
+      // Pre-cap: this function applies no per-turn cap (it has no view of this
+      // turn's own pendings). `capDroppedCount` is finalised at the commit seam
+      // against `finalPendings`; `survivedCount` here is the ELIGIBLE survivor
+      // count, corrected to the actually-persisted count by `finaliseLifecycle`.
+      capDroppedCount: 0,
+      survivedCount: survivors.length,
+    },
+  };
+}
+
+/**
+ * V5 Signature Loop — pure carry-forward survival filter (survivors only).
+ * A thin wrapper over {@link computeSurvivingPriorPendingsDetailed}: the
+ * detailed variant is the single implementation, so the survivor semantics
+ * pinned by `commit-carry-forward.test.ts` cannot diverge from the tally.
+ */
+export function computeSurvivingPriorPendings(
+  prior: readonly PendingAction[],
+  thisTurn: readonly PendingAction[],
+  consumedRefs: readonly string[],
+  currentGraphHash: string | undefined,
+  nowMs: number,
+): readonly PendingAction[] {
+  return computeSurvivingPriorPendingsDetailed(
+    prior,
+    thisTurn,
+    consumedRefs,
+    currentGraphHash,
+    nowMs,
+  ).survivors;
+}
+
+/**
+ * Finalise the pre-cap carry-forward tally against the per-turn cap. The
+ * detailed pass counts every ELIGIBLE survivor; the commit then caps
+ * `[...thisTurnPendings, ...eligibleSurvivors]` at
+ * `PENDING_ACTIONS_PER_TURN_CAP` with this turn's own pendings FIRST, so some
+ * eligible survivors may not persist. This splits the pre-cap `survivedCount`
+ * into the actually-persisted `survivedCount` and the `capDroppedCount`,
+ * keeping the seven-fate partition exact. Pure; total (clamps defensively).
+ */
+export function finaliseLifecycleAgainstCap(
+  preCap: PendingLifecycleSummary,
+  persistedSurvivorCount: number,
+): PendingLifecycleSummary {
+  const eligible = preCap.survivedCount;
+  const persisted = Math.max(0, Math.min(persistedSurvivorCount, eligible));
+  return {
+    ...preCap,
+    survivedCount: persisted,
+    capDroppedCount: eligible - persisted,
+  };
 }
 
 /**
@@ -384,17 +475,33 @@ export async function commitDirectAnswer(
   // does NOT wipe a still-valid proposal. This turn's own pendings come FIRST so
   // a fresh offer is never evicted by a carried one when the per-turn cap binds.
   // Dropping `priorPendingActions` (legacy callers) makes this a no-op.
-  const survivingPrior = computeSurvivingPriorPendings(
+  const carryForward = computeSurvivingPriorPendingsDetailed(
     metadata.priorPendingActions ?? [],
     chipDerivedPending,
     metadata.consumedPendingRefs ?? [],
     metadata.graph_hash,
     Date.now(),
   );
+  const survivingPrior = carryForward.survivors;
   const finalPendings: readonly PendingAction[] = [
     ...chipDerivedPending,
     ...survivingPrior,
   ].slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+
+  // Track 2 — finalise the lifecycle tally against the cap. This turn's own
+  // pendings occupy the head of `finalPendings`, so the eligible survivors that
+  // actually persisted = whatever tail remains after them. `survivedCount` is
+  // corrected to that persisted count and the evicted remainder is attributed
+  // to `capDroppedCount`, so the diagnostic reflects what was WRITTEN, not
+  // pre-cap eligibility (Track 3 may read this as persisted survivor truth).
+  const persistedSurvivorCount = Math.max(
+    0,
+    finalPendings.length - chipDerivedPending.length,
+  );
+  const pendingLifecycle = finaliseLifecycleAgainstCap(
+    carryForward.summary,
+    persistedSurvivorCount,
+  );
 
   // V5 Conversation Context Reliability: capture this turn's conversation
   // content for the next turn's ContextPack. user_message comes from the call
@@ -514,9 +621,15 @@ export async function commitDirectAnswer(
           scenario_id: metadata.scenario_id,
           turn_row_id: persistedRowId,
           // newly-created this turn vs carried forward from prior turns.
+          // Track 2: carried_forward_count / cap_dropped_count are the POST-CAP
+          // lifecycle values (what actually persisted), so they agree with
+          // `pending_action_count`: new_pending + carried_forward ≤ cap, and the
+          // cap-evicted survivors are attributed to cap_dropped (NOT counted as
+          // carried forward). Previously this logged pre-cap `survivingPrior.length`.
           pending_action_count: finalPendings.length,
           new_pending_count: chipDerivedPending.length,
-          carried_forward_count: survivingPrior.length,
+          carried_forward_count: pendingLifecycle.survivedCount,
+          cap_dropped_count: pendingLifecycle.capDroppedCount,
           consumed_ref_count: (metadata.consumedPendingRefs ?? []).length,
           kinds: finalPendings.map((pa) => pa.action.kind),
         },
@@ -539,7 +652,13 @@ export async function commitDirectAnswer(
   }
 
   const graphPersisted = metadata.graph !== undefined;
-  return { response, performed: true, persisted_row_id: persistedRowId, graphPersisted };
+  return {
+    response,
+    performed: true,
+    persisted_row_id: persistedRowId,
+    graphPersisted,
+    pendingLifecycle,
+  };
 }
 
 /**

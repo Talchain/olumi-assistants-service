@@ -81,5 +81,55 @@ export function contextSummaryFromFrame(
     ...(coachingPackSource
       ? { coaching_state_pack: summariseCoachingStatePack(coachingPackSource) }
       : {}),
+    // Track 2 — pending observability, projected from the frame alone (the
+    // pending block was tallied ONCE at the ORIENT derivation site;
+    // re-mapping frame camelCase → wire snake_case is a pure rename, not a
+    // re-derivation). `pending_confirmation` mirrors the gated seam value
+    // (`frame.conversation.pendingConfirmation`); the counts / `threaded`
+    // come from `frame.pending`. Omitted when the frame carries no pending
+    // block (honest absence — a hand-built frame or a future non-executor
+    // frame source). `kinds` flows through structurally (same
+    // `Partial<Record<PendingActionKind, number>>` shape), so this seam does
+    // not import the session leaf (source-scan allowlist stays intact).
+    ...(frame.pending
+      ? {
+          pending: {
+            pending_confirmation: frame.conversation.pendingConfirmation,
+            live_count: frame.pending.liveCount,
+            expired_count: frame.pending.expiredCount,
+            kinds: frame.pending.kinds,
+            confirmation_expecting_live_count:
+              frame.pending.confirmationExpectingLiveCount,
+            threaded: frame.pending.threaded,
+            ...(frame.pending.lifecycle
+              ? {
+                  lifecycle: {
+                    prior_count: frame.pending.lifecycle.priorCount,
+                    consumed_count: frame.pending.lifecycle.consumedCount,
+                    superseded_count: frame.pending.lifecycle.supersededCount,
+                    expired_wall_count: frame.pending.lifecycle.expiredWallCount,
+                    expired_turns_count: frame.pending.lifecycle.expiredTurnsCount,
+                    hash_invalidated_count:
+                      frame.pending.lifecycle.hashInvalidatedCount,
+                    cap_dropped_count: frame.pending.lifecycle.capDroppedCount,
+                    survived_count: frame.pending.lifecycle.survivedCount,
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
+    // Track 2 — rerun / what-changed readiness (frame.diagnostics.rerun →
+    // snake_case wire). Omitted when the frame carries no rerun diagnostics.
+    ...(frame.diagnostics.rerun
+      ? {
+          rerun: {
+            prior_successful_run_count:
+              frame.diagnostics.rerun.priorSuccessfulRunCount,
+            comparison_candidates_ready:
+              frame.diagnostics.rerun.comparisonCandidatesReady,
+          },
+        }
+      : {}),
   };
 }

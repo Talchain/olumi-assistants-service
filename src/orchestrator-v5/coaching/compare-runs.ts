@@ -19,7 +19,10 @@ import {
   type AnalysisResponseSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
-import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import {
+  isSuccessfulRunAnalysisFact,
+  type FreshnessDerivation,
+} from '../context/freshness.js';
 import { partitionInterventionControlledDrivers } from '../context/intervention-controlled-drivers.js';
 
 export type MarginDirection =
@@ -74,6 +77,37 @@ export function selectTwoNewestRunAnalysisFacts(
   const successful = priorFacts.filter(isSuccessfulRunAnalysisFact);
   if (successful.length < 2) return null;
   return { current: successful[0]!, prior: successful[1]! };
+}
+
+/**
+ * Redacted rerun / what-changed readiness (Track 2). Counts + a readiness
+ * boolean — no run content. Structurally identical to the frame's
+ * `FrameRerunReadiness` so the executor can assign it directly.
+ */
+export interface RerunReadiness {
+  readonly priorSuccessfulRunCount: number;
+  readonly comparisonCandidatesReady: boolean;
+}
+
+/**
+ * Compose the rerun-readiness diagnostic from the SAME authorities the
+ * run-comparison gate consults. `comparisonCandidatesReady` MIRRORS the gate's
+ * own precondition (`run-comparison-gate.ts`: a CONFIRMED-fresh verdict AND a
+ * `selectTwoNewestRunAnalysisFacts` pair) — fresh analysis AND ≥2 successful
+ * prior runs. It means the PRECONDITIONS hold; the projection/diff can still
+ * decline downstream, hence "candidates". Single-pass: the `≥2` check reuses
+ * `priorSuccessfulRunCount` (identical to `selectTwoNewestRunAnalysisFacts(...)
+ * !== null`, which is itself `filter(isSuccessfulRunAnalysisFact).length >= 2`)
+ * rather than walking the fact chain a second time. Pure; total.
+ */
+export function deriveRerunReadiness(
+  priorFacts: readonly HandlerFact[],
+  freshnessVerdict: FreshnessDerivation['freshness'],
+): RerunReadiness {
+  const priorSuccessfulRunCount = priorFacts.filter(isSuccessfulRunAnalysisFact).length;
+  const comparisonCandidatesReady =
+    freshnessVerdict === 'fresh' && priorSuccessfulRunCount >= 2;
+  return { priorSuccessfulRunCount, comparisonCandidatesReady };
 }
 
 /**

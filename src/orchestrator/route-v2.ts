@@ -136,6 +136,7 @@ import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
 import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
 import {
   PROPOSAL_CONFIRM_PATTERN,
@@ -1012,23 +1013,19 @@ async function resolveProposalConfirmAtRoute(
     return { kind: 'clarify', outcome: 'clarify_none' };
   }
   const nowMs = Date.now();
-  const notExpired = proposals.filter((pa) => {
-    const expiresMs = Date.parse(pa.expires_at_iso);
-    const wallValid = Number.isFinite(expiresMs) && nowMs <= expiresMs;
-    // Mirror TurnExecutor's `isExpired` (wall AND turn-count) for the
-    // route-visible expiry check. `suppressed_live` does NOT guarantee a
-    // mutation: it means route-visible expiry passed and edit handling is safely
-    // bypassed so TurnExecutor can make the AUTHORITATIVE apply / supersede /
-    // idempotency decision (graph-hash validity is still deferred downstream
-    // when the request carried no graphState; already-applied, validator
-    // failure, and handler failure can also prevent the mutation). Carry-forward
-    // already drops `expires_at_turn_count <= 0` before persistence, so this
-    // turn-count check is defence-in-depth + telemetry accuracy: a turn-count-
-    // exhausted proposal that ever reached the read is treated as expired
-    // (→ `clarify_expired`) rather than a misleading `suppressed_live`.
-    const turnValid = pa.expires_at_turn_count > 0;
-    return wallValid && turnValid;
-  });
+  // Track 2: shared read-time liveness authority (wall AND turn-count),
+  // previously an inline mirror of TurnExecutor's `isExpired`.
+  // `suppressed_live` does NOT guarantee a mutation: it means route-visible
+  // expiry passed and edit handling is safely bypassed so TurnExecutor can
+  // make the AUTHORITATIVE apply / supersede / idempotency decision
+  // (graph-hash validity is still deferred downstream when the request
+  // carried no graphState; already-applied, validator failure, and handler
+  // failure can also prevent the mutation). Carry-forward already drops
+  // `expires_at_turn_count <= 0` before persistence, so the turn-count leg
+  // is defence-in-depth + telemetry accuracy: a turn-count-exhausted
+  // proposal that ever reached the read is treated as expired
+  // (→ `clarify_expired`) rather than a misleading `suppressed_live`.
+  const notExpired = proposals.filter((pa) => !isPendingActionExpired(pa, nowMs));
   if (notExpired.length === 0) {
     return { kind: 'clarify', outcome: 'clarify_expired' };
   }

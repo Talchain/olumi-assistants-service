@@ -4,6 +4,7 @@ import { composeDirectAnswerResponse } from '../compose.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import type { SessionStore, SessionTurnWrite } from '../session/store.js';
 import type { SuggestedAction } from '../compose/types.js';
+import type { PendingAction } from '../session/pending-action.js';
 import { setTestSink } from '../../utils/telemetry.js';
 
 const META = {
@@ -152,6 +153,80 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       const chipIds = (appendCalls[0].pending_actions ?? []).map((p) => p.chip_id);
       expect(chipIds).toContain('chip_action_run_analysis');
       expect(chipIds).not.toContain('chip_action_run_analysis_blank');
+    });
+  });
+
+  // Track 2 (HV2): the lifecycle `survivedCount` must reflect what ACTUALLY
+  // persisted after the per-turn cap, not pre-cap eligibility. When this turn's
+  // own pendings fill PENDING_ACTIONS_PER_TURN_CAP (3), an eligible prior
+  // survivor is evicted — and must be attributed to capDroppedCount, not
+  // survivedCount, so Track 3 / harness checks cannot mistake it for persisted.
+  describe('pendingLifecycle — cap-ordering correctness', () => {
+    function makeSpyStore(): { store: SessionStore; appendCalls: Array<SessionTurnWrite> } {
+      const appendCalls: Array<SessionTurnWrite> = [];
+      const store = createNoopSessionStore({ appendId: 'row-cap' });
+      vi.spyOn(store, 'append').mockImplementation(async (write) => {
+        appendCalls.push(write);
+        return { id: 'row-cap' };
+      });
+      return { store, appendCalls };
+    }
+    function makePreSupplied(ref: string): PendingAction {
+      return {
+        id: `pa-${ref}`,
+        scenario_id: META.scenario_id,
+        chip_id: ref,
+        action: {
+          kind: 'apply_proposed_change',
+          proposal_ref: ref,
+          inline_patch: { handler_id: 'set_factor_value', params: {}, target_entity_ids: ['fac-1'] },
+          public_label: 'Apply',
+          public_message: 'Apply the change.',
+        },
+        preconditions: { graph_hash: 'gh-1' },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: '2026-06-10T11:59:00.000Z',
+      } as PendingAction;
+    }
+
+    it('this-turn pendings fill the cap → the live prior survivor is cap-dropped, not counted as survived', async () => {
+      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      // Three pre-supplied pendings occupy the whole cap; one live prior proposal
+      // is eligible to carry forward but cannot fit.
+      const thisTurn = [makePreSupplied('t1'), makePreSupplied('t2'), makePreSupplied('t3')];
+      const prior = [makePreSupplied('prior-live')];
+      const { store, appendCalls } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, graph_hash: 'gh-1', pending_actions: thisTurn, priorPendingActions: prior },
+        store,
+      );
+      // Persisted set is exactly the three this-turn pendings (cap = 3).
+      expect((appendCalls[0].pending_actions ?? []).map((p) => p.chip_id)).toEqual(['t1', 't2', 't3']);
+      // Lifecycle reflects post-cap reality: the eligible prior survivor was cap-dropped.
+      expect(result.pendingLifecycle).toMatchObject({
+        priorCount: 1,
+        survivedCount: 0,
+        capDroppedCount: 1,
+      });
+    });
+
+    it('no cap pressure → the live prior survivor persists and is counted as survived', async () => {
+      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const prior = [makePreSupplied('prior-live')];
+      const { store, appendCalls } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, graph_hash: 'gh-1', pending_actions: [], priorPendingActions: prior },
+        store,
+      );
+      expect((appendCalls[0].pending_actions ?? []).map((p) => p.chip_id)).toEqual(['prior-live']);
+      expect(result.pendingLifecycle).toMatchObject({
+        priorCount: 1,
+        survivedCount: 1,
+        capDroppedCount: 0,
+      });
     });
   });
 });

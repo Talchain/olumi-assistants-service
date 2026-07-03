@@ -5,6 +5,7 @@ import {
   selectTwoNewestRunAnalysisFacts,
   projectRunFact,
   compareRuns,
+  deriveRerunReadiness,
 } from '../compare-runs.js';
 import { compactAnalysis } from '../../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
@@ -246,5 +247,62 @@ describe('compareRuns — Spine A option-controlled-driver suppression', () => {
     );
     expect(labels).not.toContain('Capacity');
     expect(labels).toEqual(expect.arrayContaining(['Brand sentiment', 'Conversion rate']));
+  });
+});
+
+describe('deriveRerunReadiness — Track 2 rerun/what-changed readiness composition', () => {
+  const run = () => makeRunFact(envelope({ options: [{ id: 'a', label: 'A', win: 0.6 }] }));
+  const failedRun = () =>
+    makeRunFact(envelope({ options: [{ id: 'a', label: 'A', win: 0.6 }], status: 'failed' }));
+
+  it('no facts → 0 successful runs, comparison NOT ready', () => {
+    expect(deriveRerunReadiness([], 'fresh')).toEqual({
+      priorSuccessfulRunCount: 0,
+      comparisonCandidatesReady: false,
+    });
+  });
+
+  it('one successful run + fresh → count 1 but NOT ready (needs ≥2)', () => {
+    expect(deriveRerunReadiness([run()], 'fresh')).toEqual({
+      priorSuccessfulRunCount: 1,
+      comparisonCandidatesReady: false,
+    });
+  });
+
+  it('two successful runs + fresh → count 2 AND ready (the positive path)', () => {
+    expect(deriveRerunReadiness([run(), run()], 'fresh')).toEqual({
+      priorSuccessfulRunCount: 2,
+      comparisonCandidatesReady: true,
+    });
+  });
+
+  it('two successful runs but STALE → ready is false (the freshness conjunct)', () => {
+    expect(deriveRerunReadiness([run(), run()], 'stale')).toEqual({
+      priorSuccessfulRunCount: 2,
+      comparisonCandidatesReady: false,
+    });
+  });
+
+  it('two successful runs but UNKNOWN freshness → ready is false', () => {
+    expect(deriveRerunReadiness([run(), run()], 'unknown').comparisonCandidatesReady).toBe(false);
+  });
+
+  it('two successful runs but NONE freshness → ready is false', () => {
+    expect(deriveRerunReadiness([run(), run()], 'none').comparisonCandidatesReady).toBe(false);
+  });
+
+  it('only successful runs are counted (failed + non-run facts excluded from the count)', () => {
+    const facts = [run(), failedRun(), otherFact('edit_graph'), run()];
+    expect(deriveRerunReadiness(facts, 'fresh')).toEqual({
+      priorSuccessfulRunCount: 2,
+      comparisonCandidatesReady: true,
+    });
+  });
+
+  it('one successful + one failed + fresh → NOT ready (only one countable run)', () => {
+    expect(deriveRerunReadiness([run(), failedRun()], 'fresh')).toEqual({
+      priorSuccessfulRunCount: 1,
+      comparisonCandidatesReady: false,
+    });
   });
 });
