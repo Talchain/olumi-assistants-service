@@ -1,0 +1,84 @@
+# Codex review pack — proposal size-guard fix (F1, MVP-path)
+
+**Review required before merge.** This diff changes live MVP-activation-path
+validation (the flag-ON dual-draft merge). Do not merge without Codex clearance.
+
+## Exact diff under review
+- Branch: `claude/v6-dual-draft-proposal-size-guards`
+- Base: `origin/staging` @ `f2998df02` (#329)
+- Tip: `7484c38bb`
+- Range: `git diff f2998df02..7484c38bb`
+- Live-source-only diff attached: `Docs/v6/proposal-size-guards.diff`
+- Scope: 6 files, +407 / −8. **3 live source files** + 3 test files. No schema,
+  config, env, flag, migration, or cross-service change.
+
+## What changed and why
+F1: the dual-draft merge applied **unbounded** proposal text — proven against the
+live path, a 100KB `added_risk` node label merged into the committed, persisted,
+canvas-rendered graph (100KB rationale/evidence_pointer into DeferArtifacts; 10k
+`uncertainty_drivers` accepted). Now an MVP activation blocker.
+
+| File | Change |
+|---|---|
+| `src/cee/dual-draft/guards.ts` | NEW `PROPOSAL_FIELD_CAPS` (single source of truth) + `findOversizedProposalField` (pure; reads raw fields defensively). |
+| `src/cee/dual-draft/merge.ts` | NEW `MergeFailureCode` member `proposal_field_too_large`; call the guard right after the G14 claim scan, reject per-proposal. |
+| `src/cee/dual-draft/proposal-json-schema.ts` | Mirror the caps as `maxLength`/`maxItems` **from the const** (model-facing first fence only). |
+| tests (3) | guard unit block; size-caps proof suite; schema↔const lockstep. |
+
+## Caps (Paul-approved starting defaults, one SSOT — `PROPOSAL_FIELD_CAPS`)
+node id 128 · label 200 · description 1000 · uncertainty_drivers 12 items × 120
+chars · evidence_pointer 300 · rationale 500 · artifact question 500. Edges carry
+no free text (from/to are ids already bound by the endpoint-existence guard).
+
+## Design decisions to scrutinise
+1. **Enforcement point = the merge, not the schema.** The JSON schema `maxLength`
+   is a *first fence* the model may ignore; `findOversizedProposalField` in the
+   deterministic merge is authoritative. Both read `PROPOSAL_FIELD_CAPS`; the
+   lockstep test fails if they drift. (Verify: could any path reach node
+   commitment without passing the guard? The guard runs after G14 and before the
+   artifact/option/node branches, covering every text channel; edges have no text.)
+2. **Reject, never truncate** — consistent with G10/G14 ("proposals are advisory,
+   rejected not clamped"). A truncated label would silently alter M2's committed
+   content.
+3. **Per-proposal reject via a new additive `MergeFailureCode`**, NOT whole-M2→M1
+   degrade. One oversized proposal cannot collapse valid siblings; whole-batch
+   degrade stays reserved for post-merge safety trips
+   (`post_merge_invalid`/`option_surface_changed`/`readiness_downgrade`). (Verify:
+   the exact-one-bucket tally invariant still holds — pinned by the suite.)
+4. **NOT touching `src/schemas/cee-v3.ts` `NodeV3`.** Capping shared `NodeV3.label`
+   would hit M1 draft / edit_graph / the PLoT boundary (large blast radius). The
+   cap is proposal-specific and lives in the dual-draft layer, like the existing
+   allowlist/numeric guards that are already stricter than NodeV3. (Confirm this is
+   the right layering call.)
+5. **NOT adding `.max()` to the zod `ProposalEnvelope`** — keeps the envelope
+   shape-only so every oversized field funnels through ONE guard and ONE code
+   rather than splitting evidence_pointer/rationale into `malformed_proposal`.
+6. **Ordering vs G14**: G14 (claim scan) runs first, so a field that is both
+   claim-bearing and oversized rejects as `engine_boundary_violation`. Acceptable
+   (both are correct rejections) — flag if you disagree.
+
+## Test evidence
+- `proposal-size-caps.test.ts` (16): 100KB label rejected + absent from committed
+  graph + valid sibling still applies + post-merge scan finds no over-cap label;
+  every channel rejects; boundary at-cap applies / +1 rejects; oversized artifact
+  never becomes a DeferArtifact; mixed batch not collapsed (tally invariant).
+- `guards.test.ts` (+9): `findOversizedProposalField` unit matrix incl. defensive
+  raw-field reads and an injectable cap object.
+- `serialise-and-schema.test.ts` (+1): schema `maxLength`/`maxItems` == `PROPOSAL_FIELD_CAPS`.
+- Gates at tip: `typecheck` + `typecheck:src` clean; zero new full-tsc drift in
+  changed files; `pnpm test:required` 885 files / 17,971 green; flag-OFF proof
+  (`dispatch-flag-off` + `phase4-dispatch-compat`) 20/20 identical to baseline;
+  full advisory suite failing-set identical to base (see
+  `proposal-size-guards-proof.md`).
+
+## Rollback
+Revert the two feat commits (`5e222a5fa`, `7484c38bb`). No env/flag/migration to
+undo — the change is code-only and flag-ON-path.
+
+## Downstream coupling (must sequence after merge)
+Once this lands on staging and PR #330 (the quarantined dual-model branch)
+rebases, #330's F1 "FINDING: 100KB node label … APPLIED" pins
+(`adversarial-proposals.test.ts`) will fail — they assert the now-fixed buggy
+behaviour. #330's rebase must invert those pins to assert
+`proposal_field_too_large` and update the F1 entry in
+`dual-model-adversarial-findings.md`.
