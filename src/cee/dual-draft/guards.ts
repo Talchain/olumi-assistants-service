@@ -131,6 +131,17 @@ export const PROPOSAL_FIELD_CAPS = {
   question: 500,
 } as const;
 
+/**
+ * Injectable cap shape: every {@link PROPOSAL_FIELD_CAPS} key, widened from its
+ * `as const` literal to `number`. `findOversizedProposalField`'s `caps` parameter
+ * uses this so a caller/test can inject a DIFFERENT tuning (e.g. a smaller cap) —
+ * the whole point of the injectable parameter. Typing the parameter as
+ * `typeof PROPOSAL_FIELD_CAPS` (literal `300`, etc.) instead made every injected
+ * override a type error (e.g. `evidence_pointer: 3` → "Type '3' is not assignable
+ * to type '300'"). `PROPOSAL_FIELD_CAPS` (literal-typed) remains assignable here.
+ */
+export type ProposalFieldCaps = { readonly [K in keyof typeof PROPOSAL_FIELD_CAPS]: number };
+
 export interface OversizedField {
   readonly field: string;
   /** Character count for text fields; element count for the drivers-array cap. */
@@ -161,7 +172,7 @@ export function findOversizedProposalField(
     readonly rationale?: unknown;
     readonly delta?: unknown;
   },
-  caps: typeof PROPOSAL_FIELD_CAPS = PROPOSAL_FIELD_CAPS,
+  caps: ProposalFieldCaps = PROPOSAL_FIELD_CAPS,
 ): OversizedField | null {
   const check = (field: string, value: unknown, cap: number): OversizedField | null =>
     typeof value === 'string' && value.length > cap ? { field, length: value.length, cap } : null;
