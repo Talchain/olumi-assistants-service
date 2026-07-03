@@ -65,6 +65,54 @@ describe('tryRunComparisonGate', () => {
     expect(out.assistant_text).not.toMatch(FORBIDDEN);
   });
 
+  // T4 Slice 3 — freshness fail-closed. Before this slice, an `unknown`
+  // verdict (legacy fact missing its run-time hash, or an unhashable current
+  // graph) fell through to the same comparison path as `fresh`, returning a
+  // confident two-run comparison on unverified currency. Merged policy
+  // §1b/§1-parity/§5 require holding instead.
+  it('FAIL-CLOSED: does NOT compare on unknown freshness — offers an unconfirmed re-run without claiming the model changed', () => {
+    const out = tryRunComparisonGate({ message: 'What changed?', priorFacts: TWO_RUNS, freshness: 'unknown' });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    // Never a comparison on unverified currency.
+    expect(out.mode).toBe('unconfirmed');
+    expect(out.mode).not.toBe('compared');
+    // Offers a re-run…
+    expect(out.assistant_text.toLowerCase()).toContain('re-run');
+    expect(out.suggested_actions).toHaveLength(1);
+    expect(out.suggested_actions[0].action_type).toBe('run_analysis');
+    // …but must NOT assert the model changed (that is the stale-only claim;
+    // on unknown we cannot know it — §1 authority parity).
+    expect(out.assistant_text.toLowerCase()).not.toContain('has changed');
+    expect(out.assistant_text.toLowerCase()).toContain("can't confirm");
+    // No comparison content leaked.
+    expect(out.assistant_text).not.toContain('leading option has changed');
+    expect(out.leading_option_changed).toBeNull();
+    // Copy safety.
+    expect(out.assistant_text).not.toMatch(FORBIDDEN);
+    expect(out.assistant_text).not.toMatch(RAW_DECIMAL);
+  });
+
+  it('FAIL-CLOSED: an absent/unavailable freshness authority (null / undefined) holds like unknown', () => {
+    for (const freshness of [null, undefined] as const) {
+      const out = tryRunComparisonGate({ message: 'What changed?', priorFacts: TWO_RUNS, freshness });
+      expect(out.matched).toBe(true);
+      if (!out.matched) continue;
+      expect(out.mode).toBe('unconfirmed');
+      expect(out.assistant_text.toLowerCase()).not.toContain('has changed');
+      expect(out.suggested_actions[0].action_type).toBe('run_analysis');
+    }
+  });
+
+  it('unknown freshness holds even when only one run exists (no accidental insufficient_runs downgrade)', () => {
+    // The fail-closed branch precedes the run-count check, so unknown never
+    // reaches the fresh-only insufficient_runs path.
+    const out = tryRunComparisonGate({ message: 'What changed?', priorFacts: [CURRENT], freshness: 'unknown' });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.mode).toBe('unconfirmed');
+  });
+
   it('does not hijack a concrete edit / value-update message', () => {
     for (const message of ['Set pricing to 0.7', 'Change marketing channel to TikTok', 'Add a new constraint']) {
       const out = tryRunComparisonGate({ message, priorFacts: TWO_RUNS, freshness: 'fresh' });
