@@ -19,6 +19,17 @@
  *
  * Runs in the required CI unit gate (vitest.required.config.ts includes
  * tests/unit/**).
+ *
+ * SCAN SOURCE — the LIVE working tree, deliberately (not `git ls-files`).
+ * The guard's job is to catch a NEW ad-hoc caller the moment it appears; a
+ * brand-new *untracked* `.ts` under src/ referencing one of these authorities
+ * is exactly that case, and a `git ls-files` scan would be blind to it until
+ * the file was staged. The trade-off: a developer with UNRELATED uncommitted
+ * `.ts` under src/ that happens to reference one of these three symbols can
+ * see a local red before committing. That is a true signal about their tree,
+ * not a false one; CI runs on a clean checkout so it never fires spuriously
+ * there. If it ever surprises you locally, the failure diff names the exact
+ * file — commit or remove it, or update EXPECTED if the caller is intended.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
