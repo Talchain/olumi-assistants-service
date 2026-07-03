@@ -223,8 +223,12 @@ export type CandidateMutationEnvelope = z.infer<typeof CandidateMutationEnvelope
 // ============================================================================
 
 /** Freshness verdict vocabulary mirrored locally so the referee stays decoupled
- *  from the live freshness module. Values match `deriveAnalysisFreshness`. */
-export type FrameFreshness = 'fresh' | 'stale' | 'unknown' | 'unconfirmed' | 'none';
+ *  from the live freshness module. Values match `deriveAnalysisFreshness` EXACTLY
+ *  (`'fresh' | 'stale' | 'unknown' | 'none'` — it never emits `'unconfirmed'`,
+ *  which is a downstream Tier-0 wire remap). The frame gate trusts only `'fresh'`
+ *  and `'none'`; every other value fails closed to `stale`, so an unexpected value
+ *  is still handled safely. */
+export type FrameFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
 
 /**
  * The frame carries the analysis-affecting graph hash, freshness verdict, and

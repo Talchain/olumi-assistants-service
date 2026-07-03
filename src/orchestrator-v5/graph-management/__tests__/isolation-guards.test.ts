@@ -81,6 +81,13 @@ function scanImports(file: string): ScanResult {
           named.push({ module: mod, name: el.propertyName?.text ?? el.name.text });
         }
       }
+      // Also cover `export { X } from '...'` RE-EXPORTS — a re-export of a banned
+      // name would otherwise bypass the named-import ban (found by the boundary review).
+      if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+        for (const el of node.exportClause.elements) {
+          named.push({ module: mod, name: el.propertyName?.text ?? el.name.text });
+        }
+      }
     }
     if (ts.isCallExpression(node)) {
       const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
@@ -126,12 +133,31 @@ describe('isolation guards (AST import enforcement / off-path / no persistence-m
     }
   });
 
-  it('no production file imports mergeMutatedGraphForPersistence (candidate-build vs persistence-merge never co-mingle)', () => {
+  it('no production file imports OR re-exports mergeMutatedGraphForPersistence (candidate-build vs persistence-merge never co-mingle)', () => {
     for (const file of moduleFiles) {
       for (const n of scanImports(file).named) {
-        expect(BANNED_NAMED_IMPORTS.has(n.name), `${file} must not import ${n.name}`).toBe(false);
+        expect(BANNED_NAMED_IMPORTS.has(n.name), `${file} must not import/re-export ${n.name}`).toBe(false);
       }
     }
+  });
+
+  it('meta-check: the scanner catches a banned name in an `export { X } from` RE-EXPORT (not just imports)', () => {
+    // Mirrors the boundary-review finding: a re-export must not bypass the named ban.
+    const sf = ts.createSourceFile(
+      'tmp.ts',
+      "export { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';",
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const found: string[] = [];
+    const walk = (node: ts.Node): void => {
+      if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+        for (const el of node.exportClause.elements) found.push(el.propertyName?.text ?? el.name.text);
+      }
+      ts.forEachChild(node, walk);
+    };
+    walk(sf);
+    expect(found).toContain('mergeMutatedGraphForPersistence');
   });
 
   it('no production file imports commit / turn-executor / persistence / store / pending-action', () => {

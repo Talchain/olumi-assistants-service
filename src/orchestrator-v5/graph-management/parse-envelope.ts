@@ -45,7 +45,11 @@ function codeForIssue(issue: IssueLike): MutationReasonCode {
   if (p0 === 'envelope_version') return UNKNOWN_ENVELOPE_VERSION;
   if (p0 === 'base_graph_hash') return BASE_HASH_MISSING;
   if (p0 === 'provenance') {
-    return issue.path[1] === 'evidence_pointer' ? EVIDENCE_POINTER_MISSING : MISSING_PROVENANCE;
+    if (issue.path[1] === 'evidence_pointer') return EVIDENCE_POINTER_MISSING;
+    // Only a missing/invalid provenance OBJECT is MISSING_PROVENANCE; a present block
+    // with an otherwise-invalid sub-field (e.g. a bad `source` enum) is SCHEMA_INVALID.
+    if (issue.path.length === 1) return MISSING_PROVENANCE;
+    return SCHEMA_INVALID;
   }
   return SCHEMA_INVALID;
 }

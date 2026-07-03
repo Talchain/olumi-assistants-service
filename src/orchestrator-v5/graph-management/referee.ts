@@ -31,6 +31,7 @@ import {
 } from './candidate-graph.js';
 import { assessCandidate, representableVerdict } from './readiness-parity.js';
 import {
+  SCHEMA_INVALID,
   FRAME_UNAVAILABLE,
   BASE_HASH_DIVERGED,
   CURRENT_GRAPH_UNREADABLE,
@@ -287,9 +288,23 @@ export function refereeMutation(
   }
 }
 
+/** Fail-closed verdict for a batch slot whose raw value could not even be READ. */
+function unreadableElementVerdict(): RefereeVerdict {
+  return {
+    verdict: 'rejected',
+    kind: null,
+    candidate_id: null,
+    mutation_class: null,
+    base_hash_match: false,
+    blocker: { code: SCHEMA_INVALID, readable: 'Batch element could not be read.' },
+  };
+}
+
 /**
- * Referee a batch of raw candidates. Per-envelope verdicts (independent). A batch
- * that is not an array resolves to a single-element rejected verdict, never throws.
+ * Referee a batch of raw candidates. Per-envelope verdicts (independent). TOTAL:
+ * a non-array batch, a hostile array whose `length` or element reads throw (Proxy /
+ * throwing index getter), and every element resolve to a CLASSIFIED verdict — the
+ * function never throws (the guarantee `refereeMutation` already honours per-element).
  */
 export function refereeMutationBatch(
   rawBatch: unknown,
@@ -299,5 +314,22 @@ export function refereeMutationBatch(
   if (!Array.isArray(rawBatch)) {
     return [refereeMutation(rawBatch, currentGraph, frame)];
   }
-  return rawBatch.map((raw) => refereeMutation(raw, currentGraph, frame));
+  let len = 0;
+  try {
+    len = rawBatch.length;
+  } catch {
+    return [unreadableElementVerdict()];
+  }
+  const out: RefereeVerdict[] = [];
+  for (let i = 0; i < len; i += 1) {
+    let raw: unknown;
+    try {
+      raw = rawBatch[i];
+    } catch {
+      out.push(unreadableElementVerdict());
+      continue;
+    }
+    out.push(refereeMutation(raw, currentGraph, frame));
+  }
+  return out;
 }

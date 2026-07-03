@@ -67,6 +67,16 @@ describe('R2 — frame / stale gate', () => {
     const v = refereeMutation(envFor('rename_node'), G, frameFor(G, 'unknown'));
     expect(v.verdict).toBe('stale');
   });
+
+  it('freshness STALE → stale (fail-CLOSED — regression: previously fell through to would_apply)', () => {
+    const v = refereeMutation(envFor('rename_node'), G, frameFor(G, 'stale'));
+    expect(v.verdict).toBe('stale');
+  });
+
+  it('freshness NONE (pre-analysis) → would_apply for a hash-matching rename (legitimate pre-analysis edit)', () => {
+    const v = refereeMutation(envFor('rename_node'), G, frameFor(G, 'none'));
+    expect(v.verdict).toBe('would_apply');
+  });
 });
 
 describe('R7 — kind posture (fail-closed; §3b/§6 pending → held)', () => {
@@ -169,6 +179,13 @@ describe('general graph-corruption + R3 guards', () => {
     expect(v.verdict).toBe('held');
     expect(v.blocker?.code).toBe(ENTITY_NOT_FOUND);
   });
+
+  it('redaction: a candidate-build error does NOT leak the raw node_id into blocker.readable', () => {
+    const raw = makeEnvelope('rename_node', { node_id: 'secret-project-x-node', to_label: 'X' }, { base_graph_hash: hashOf(G) });
+    const v = refereeMutation(raw, G, frameFor(G));
+    expect(v.blocker?.code).toBe(ENTITY_NOT_FOUND);
+    expect(v.blocker?.readable).not.toContain('secret-project-x-node');
+  });
 });
 
 describe('provenance-independence + totality', () => {
@@ -193,5 +210,15 @@ describe('provenance-independence + totality', () => {
     const batch = [envFor('rename_node'), envFor('add_option'), envFor('flag_uncertainty')];
     const vs = refereeMutationBatch(batch, G, frameFor(G));
     expect(vs.map((v) => v.verdict)).toEqual(['would_apply', 'held', 'clarify_required']);
+  });
+
+  it('TOTALITY: a batch array whose element READ throws resolves that slot to a classified verdict (never throws)', () => {
+    const arr: unknown[] = [];
+    // Defining an array-index property auto-updates length to 1; the getter throws on read.
+    Object.defineProperty(arr, '0', { get() { throw new Error('boom'); }, enumerable: true, configurable: true });
+    let vs: ReturnType<typeof refereeMutationBatch> | undefined;
+    expect(() => { vs = refereeMutationBatch(arr, G, frameFor(G)); }).not.toThrow();
+    expect(vs).toHaveLength(1);
+    expect(vs![0].verdict).toBe('rejected');
   });
 });

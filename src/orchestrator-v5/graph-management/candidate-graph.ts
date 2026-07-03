@@ -13,7 +13,11 @@
 import { applyAndValidateMutation } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
 import type { GraphV3T, NodeV3T, EdgeV3T } from '../../schemas/cee-v3.js';
-import { CANDIDATE_BUILD_FAILED, type MutationReasonCode } from './reason-codes.js';
+import {
+  CANDIDATE_BUILD_FAILED,
+  ENTITY_NOT_FOUND,
+  GRAPH_INVARIANT_VIOLATED,
+} from './reason-codes.js';
 import type { MutationBlocker } from './types.js';
 
 export interface CandidateBuildResult {
@@ -40,17 +44,26 @@ export interface AddOptionPayload {
   };
 }
 
+/**
+ * Map a candidate-build error to a REDACTED blocker. Crucial: `err.message` from
+ * `applyAndValidateMutation` / D1 embeds raw ids (e.g. `Node <node_id> not found`),
+ * so it MUST NOT reach `blocker.readable` — the readable is a fixed per-code string
+ * (path/code only, never a payload value; T4.0 §5 redaction). Only the two D1 codes
+ * that belong to the mutation vocabulary map through; every other D1 code collapses
+ * to CANDIDATE_BUILD_FAILED (keeping `code` inside MUTATION_REASON_CODES).
+ */
 function toBlocker(err: unknown): MutationBlocker {
   if (err instanceof D1HandlerError) {
-    // D1 error codes overlap the reason vocabulary where it matters
-    // (GRAPH_INVARIANT_VIOLATED, ENTITY_NOT_FOUND); others map to a generic build failure.
-    const code = (err.code as MutationReasonCode) ?? CANDIDATE_BUILD_FAILED;
-    return { code, readable: err.message };
+    switch (err.code) {
+      case 'GRAPH_INVARIANT_VIOLATED':
+        return { code: GRAPH_INVARIANT_VIOLATED, readable: 'The candidate graph failed schema validation.' };
+      case 'ENTITY_NOT_FOUND':
+        return { code: ENTITY_NOT_FOUND, readable: 'A referenced entity was not found in the graph.' };
+      default:
+        return { code: CANDIDATE_BUILD_FAILED, readable: 'Candidate construction failed.' };
+    }
   }
-  return {
-    code: CANDIDATE_BUILD_FAILED,
-    readable: err instanceof Error ? err.message : 'candidate construction failed',
-  };
+  return { code: CANDIDATE_BUILD_FAILED, readable: 'Candidate construction failed.' };
 }
 
 const DEFAULT_STRENGTH = { mean: 0.5, std: 0.1 } as const;
