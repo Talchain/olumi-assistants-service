@@ -15,7 +15,11 @@ import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import { serialiseGraphForReview } from '../serialise-graph-for-review.js';
 import { PROPOSALS_JSON_SCHEMA } from '../proposal-json-schema.js';
 import { ProposalEnvelope, PROPOSAL_TYPES, PROPOSAL_CAP } from '../proposals.js';
-import { ALLOWED_NODE_DELTA_FIELDS, ALLOWED_EDGE_DELTA_FIELDS } from '../guards.js';
+import {
+  ALLOWED_NODE_DELTA_FIELDS,
+  ALLOWED_EDGE_DELTA_FIELDS,
+  PROPOSAL_FIELD_CAPS,
+} from '../guards.js';
 
 const GRAPH: GraphV3T = {
   nodes: [
@@ -77,6 +81,8 @@ type JsonSchema = {
   required?: string[];
   enum?: string[];
   maxItems?: number;
+  maxLength?: number;
+  minLength?: number;
 };
 
 function collectObjectSchemas(schema: JsonSchema, acc: JsonSchema[] = []): JsonSchema[] {
@@ -124,6 +130,19 @@ describe('PROPOSALS_JSON_SCHEMA — structural agreement with the contract', () 
   it('delta.edge properties are exactly the guard edge allowlist', () => {
     const edgeProps = Object.keys(delta.properties!.edge.properties!);
     expect(edgeProps.sort()).toEqual([...ALLOWED_EDGE_DELTA_FIELDS].sort());
+  });
+
+  it('size caps mirror PROPOSAL_FIELD_CAPS exactly (first fence == merge enforcement)', () => {
+    const node = delta.properties!.node.properties!;
+    expect(node.id.maxLength).toBe(PROPOSAL_FIELD_CAPS.node_id);
+    expect(node.label.maxLength).toBe(PROPOSAL_FIELD_CAPS.label);
+    expect(node.description.maxLength).toBe(PROPOSAL_FIELD_CAPS.description);
+    expect(node.uncertainty_drivers.maxItems).toBe(PROPOSAL_FIELD_CAPS.uncertainty_drivers_items);
+    expect(node.uncertainty_drivers.items!.maxLength).toBe(PROPOSAL_FIELD_CAPS.uncertainty_driver_length);
+    expect(delta.properties!.question.maxLength).toBe(PROPOSAL_FIELD_CAPS.question);
+    expect(envelope.properties!.evidence_pointer.minLength).toBe(1);
+    expect(envelope.properties!.evidence_pointer.maxLength).toBe(PROPOSAL_FIELD_CAPS.evidence_pointer);
+    expect(envelope.properties!.rationale.maxLength).toBe(PROPOSAL_FIELD_CAPS.rationale);
   });
 
   it('schema-shaped proposals parse through the zod envelope (agreement fixtures)', () => {

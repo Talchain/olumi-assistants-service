@@ -31,6 +31,7 @@ import {
   findAnalysisClaim,
   checkEdgeNumericSanity,
   findForbiddenProposalField,
+  findOversizedProposalField,
   ALLOWED_NODE_DELTA_FIELDS,
   ALLOWED_EDGE_DELTA_FIELDS,
 } from './guards.js';
@@ -39,6 +40,7 @@ export type MergeFailureCode =
   | 'proposal_cap_exceeded'
   | 'malformed_proposal'
   | 'engine_boundary_violation'
+  | 'proposal_field_too_large'
   | 'artifact_carries_delta'
   | 'artifact_missing_question'
   | 'option_missing_label'
@@ -88,6 +90,11 @@ export interface MergeOutcome {
   readonly report: MergeReport;
   readonly artifacts: readonly DeferArtifact[];
 }
+
+// Upper bound on a recorded MergeFailure.reason (diagnostic text only). Bounds
+// interpolated proposal-derived values (invalid `type`, edge endpoints, …) that
+// are not otherwise size-capped, so no unbounded string enters failure metadata.
+const MERGE_REASON_MAX_CHARS = 300;
 
 // Mutating node kinds per proposal type. `added_option` is deliberately
 // absent — D1 policy converts it to a defer artifact before this map is
@@ -148,8 +155,23 @@ export function mergeProposals(m1Graph: GraphV3T, proposals: readonly unknown[])
   const edgePairs = new Set(base.edges.map((e) => `${e.from}→${e.to}`));
   const kindById = new Map(base.nodes.map((n) => [n.id, n.kind as string]));
 
+  // MergeFailure metadata interpolates proposal-derived values that are not all
+  // size-capped: the recorded `reason` (a zod message for an invalid `type`, a
+  // missing edge endpoint `from→to`, …) AND `proposal_type` (the raw type string
+  // for malformed proposals). Bound both here — the single failure chokepoint —
+  // so no unbounded external string can enter failure metadata. This is
+  // diagnostic-only text (never emitted to telemetry, which carries counts +
+  // codes) and the salient content is at the start, so truncation loses nothing
+  // material.
+  const boundText = (s: string): string =>
+    s.length > MERGE_REASON_MAX_CHARS ? `${s.slice(0, MERGE_REASON_MAX_CHARS - 1)}…` : s;
   const fail = (index: number, type: string | null, code: MergeFailureCode, reason: string) => {
-    failures.push({ proposal_index: index, proposal_type: type, reason_code: code, reason });
+    failures.push({
+      proposal_index: index,
+      proposal_type: type === null ? null : boundText(type),
+      reason_code: code,
+      reason: boundText(reason),
+    });
   };
 
   proposals.forEach((raw, index) => {
@@ -177,9 +199,36 @@ export function mergeProposals(m1Graph: GraphV3T, proposals: readonly unknown[])
     }
     const proposal = envelope.data;
 
+    // G-size — per-proposal text-size caps. THE authoritative enforcement point
+    // (the JSON schema only fences the model, which may ignore maxLength).
+    // Rejected INDIVIDUALLY (never truncated: a clipped label would silently
+    // alter M2's committed content) so one oversized proposal cannot collapse a
+    // batch of otherwise-valid ones.
+    //
+    // MUST run BEFORE the G14 claim scan: G14 filters and SPREADS
+    // uncertainty_drivers as call arguments (`...rawDrivers`), which on an
+    // unbounded array does O(n) work and can throw RangeError — and a throw
+    // here degrades the WHOLE batch to M1 (internal_error) rather than
+    // rejecting one proposal. The item-count cap below short-circuits in O(1)
+    // (drivers.length > cap returns before any iteration), so after this gate
+    // G14 only ever scans bounded text. Covers every text channel (envelope +
+    // node) uniformly, before the artifact/option/node branches.
+    const oversized = findOversizedProposalField(proposal);
+    if (oversized !== null) {
+      fail(
+        index,
+        proposal.type,
+        'proposal_field_too_large',
+        `proposal field "${oversized.field}" size ${oversized.length} exceeds cap ${oversized.cap}`,
+      );
+      return;
+    }
+
     // G14 — engine-boundary claim scan across every free-text channel,
     // including proposed labels/descriptions and the allowlisted
-    // uncertainty_drivers string array (all canvas-visible if applied).
+    // uncertainty_drivers string array (all canvas-visible if applied). The
+    // drivers array is provably <= the G-size item cap here, so the spread is
+    // bounded.
     const rawNode = (proposal.delta.node ?? null) as Record<string, unknown> | null;
     const rawDrivers = Array.isArray(rawNode?.uncertainty_drivers)
       ? (rawNode.uncertainty_drivers as unknown[]).filter((d): d is string => typeof d === 'string')

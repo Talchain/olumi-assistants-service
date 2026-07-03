@@ -16,8 +16,13 @@
  * by __tests__/serialise-and-schema.test.ts.
  */
 import { PROPOSAL_TYPES, PROPOSAL_CAP } from './proposals.js';
-import { ALLOWED_NODE_DELTA_FIELDS, ALLOWED_EDGE_DELTA_FIELDS } from './guards.js';
+import { ALLOWED_NODE_DELTA_FIELDS, ALLOWED_EDGE_DELTA_FIELDS, PROPOSAL_FIELD_CAPS } from './guards.js';
 
+// Size caps mirrored from the single source of truth (guards.PROPOSAL_FIELD_CAPS)
+// so the model-facing fence and the merge enforcement cannot drift. This schema
+// is a FIRST FENCE only — the deterministic merge re-checks the same caps via
+// findOversizedProposalField and is the authoritative gate (a model may ignore
+// maxLength). Lockstep asserted by __tests__/serialise-and-schema.test.ts.
 const NODE_DELTA_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -25,13 +30,18 @@ const NODE_DELTA_SCHEMA = {
   properties: {
     id: {
       type: 'string',
+      maxLength: PROPOSAL_FIELD_CAPS.node_id,
       description: 'Canonical node id: lowercase alphanumeric, underscores, colons, hyphens.',
     },
     kind: { type: 'string', enum: ['option', 'risk', 'factor'] },
-    label: { type: 'string' },
-    description: { type: 'string' },
+    label: { type: 'string', maxLength: PROPOSAL_FIELD_CAPS.label },
+    description: { type: 'string', maxLength: PROPOSAL_FIELD_CAPS.description },
     category: { type: 'string', enum: ['controllable', 'observable', 'external'] },
-    uncertainty_drivers: { type: 'array', items: { type: 'string' } },
+    uncertainty_drivers: {
+      type: 'array',
+      maxItems: PROPOSAL_FIELD_CAPS.uncertainty_drivers_items,
+      items: { type: 'string', maxLength: PROPOSAL_FIELD_CAPS.uncertainty_driver_length },
+    },
   },
 } as const;
 
@@ -80,11 +90,11 @@ export const PROPOSALS_JSON_SCHEMA: Record<string, unknown> = {
             properties: {
               node: NODE_DELTA_SCHEMA,
               edge: EDGE_DELTA_SCHEMA,
-              question: { type: 'string' },
+              question: { type: 'string', maxLength: PROPOSAL_FIELD_CAPS.question },
             },
           },
-          evidence_pointer: { type: 'string', minLength: 1 },
-          rationale: { type: 'string' },
+          evidence_pointer: { type: 'string', minLength: 1, maxLength: PROPOSAL_FIELD_CAPS.evidence_pointer },
+          rationale: { type: 'string', maxLength: PROPOSAL_FIELD_CAPS.rationale },
         },
       },
     },
