@@ -74,7 +74,7 @@ describe('resolveModelStrict — coded outcomes (m2 gate parity)', () => {
       source: 'env_var',
     });
     expect((res as { adapter: unknown }).adapter).toBe(FAKE_ADAPTER);
-    expect((FAKE_ADAPTER as { chat: ReturnType<typeof vi.fn> }).chat).not.toHaveBeenCalled();
+    expect((FAKE_ADAPTER as unknown as { chat: ReturnType<typeof vi.fn> }).chat).not.toHaveBeenCalled();
   });
 
   it('fixtures provider passes the default allowlist → ok', () => {
