@@ -1,9 +1,11 @@
 # Proposal size-guard fix — verification & flag-OFF proof
 
 - Branch: `claude/v6-dual-draft-proposal-size-guards`
-- Base: `origin/staging` @ `f2998df02` (#329); Tip: `7484c38bb`
+- Base: `origin/staging` @ `f2998df02` (#329)
+- Code tip: `2960fb106` (the Codex-round-1 fix; subsequent commit is docs-only)
 - Fresh worktree, full `pnpm install`, `pnpm openapi:generate`; all commands run
-  from the worktree cwd.
+  from the worktree cwd. All figures below re-run at the code tip after the
+  Codex-round-1 changes (size guard moved before G14; failure metadata bounded).
 
 ## Flag-OFF behavioural-identity proof (required)
 The changed modules (`merge.ts` / `guards.ts` / `proposal-json-schema.ts`) are
@@ -15,7 +17,7 @@ holds by construction. Proven by test at both ends:
 ✓ dispatch-flag-off.test.ts (7)   ✓ phase4-dispatch-compat.test.ts (13)
 Test Files 2 passed · Tests 20 passed
 ```
-**Re-run at tip `7484c38bb`:**
+**Re-run at code tip `2960fb106`:**
 ```
 ✓ dispatch-flag-off.test.ts (7)   ✓ phase4-dispatch-compat.test.ts (13)
 Test Files 2 passed · Tests 20 passed
@@ -29,10 +31,11 @@ oversized input; valid-proposal merge behaviour (exercised by these suites and b
 |---|---|
 | `pnpm typecheck:src` (build scope) | clean |
 | Full `tsc --noEmit` (advisory drift) | **0 new errors** in changed files |
-| `pnpm test:required` | **885 files / 17,971 tests passed**, 0 failed |
+| `pnpm test:required` | **885 files / 17,975 tests passed**, 0 failed |
 | eslint over changed files | clean |
 | `merge.test.ts` (existing valid-proposal behaviour) | 33/33 green |
-| `proposal-size-caps.test.ts` (new F1 proof) | 16/16 green |
+| `proposal-size-caps.test.ts` (F1 proof + ordering + bounded-metadata) | 20/20 green |
+| ordering guarantee | 1,000,000-element `uncertainty_drivers` rejected per-proposal without throwing (~40ms) while a valid sibling applies |
 | Full `pnpm test` advisory (creds-dependent integration + baseline reds) | failing-set identical to base — below |
 
 ## Advisory full-suite delta vs base
@@ -45,6 +48,6 @@ worktree at the base SHA during the #330 verification). Tip set compared with
 - Failing-set **identical to base**; no test regressed on the size-guard branch.
 
 ## Change surface
-6 files, +407 / −8. Live source: `guards.ts`, `merge.ts`,
-`proposal-json-schema.ts`. No schema/config/env/flag/migration/cross-service
-change. Code-only, flag-ON-path; rollback = revert the two feat commits.
+Live source: `guards.ts`, `merge.ts`, `proposal-json-schema.ts` (+ 3 test files,
++ these docs). No schema (`cee-v3.ts`)/config/env/flag/migration/cross-service
+change. Code-only, flag-ON-path; rollback = revert the feat/fix commits.

@@ -6,11 +6,28 @@ validation (the flag-ON dual-draft merge). Do not merge without Codex clearance.
 ## Exact diff under review
 - Branch: `claude/v6-dual-draft-proposal-size-guards`
 - Base: `origin/staging` @ `f2998df02` (#329)
-- Tip: `7484c38bb`
-- Range: `git diff f2998df02..7484c38bb`
-- Live-source-only diff attached: `Docs/v6/proposal-size-guards.diff`
-- Scope: 6 files, +407 / −8. **3 live source files** + 3 test files. No schema,
+- Range: `git diff f2998df02..HEAD` (branch head SHA in
+  `proposal-size-guards-proof.md`)
+- Scope: **3 live source files** (`guards.ts`, `merge.ts`,
+  `proposal-json-schema.ts`) + 3 test files + these docs. No schema (`cee-v3.ts`),
   config, env, flag, migration, or cross-service change.
+
+## Changes since the first review (v2 — Codex round 1 addressed)
+- **BLOCKER fixed**: `findOversizedProposalField` now runs **before** the G14
+  claim scan (`merge.ts`). G14 spreads `uncertainty_drivers` as call args
+  (`...rawDrivers`); on an unbounded array that is O(n) / can throw RangeError on
+  the spread, and a throw collapses the whole batch to M1 (`internal_error`). The
+  size guard's item-count cap short-circuits in O(1) before any iteration, so a
+  huge array is now rejected per-proposal — pinned by a 1,000,000-element test
+  (no throw, ~40ms, valid sibling still applies).
+- **Point 5**: `MergeFailure.reason` AND `.proposal_type` are bounded at the
+  single `fail()` chokepoint (`MERGE_REASON_MAX_CHARS=300`) so an unbounded
+  invalid `type` / edge `from→to` cannot enter failure metadata. Pinned.
+- **Point 4**: guard docstring documents the UTF-16 `String.length` semantics and
+  states this is not a total-serialised-graph byte cap (a separate PLoT-boundary
+  concern — explicit non-goal).
+- **Point 3**: the committed `.diff` artifact (which tripped `git diff --check` on
+  trailing whitespace) was removed; obtain the diff from the range above.
 
 ## What changed and why
 F1: the dual-draft merge applied **unbounded** proposal text — proven against the
@@ -53,15 +70,23 @@ no free text (from/to are ids already bound by the endpoint-existence guard).
 5. **NOT adding `.max()` to the zod `ProposalEnvelope`** — keeps the envelope
    shape-only so every oversized field funnels through ONE guard and ONE code
    rather than splitting evidence_pointer/rationale into `malformed_proposal`.
-6. **Ordering vs G14**: G14 (claim scan) runs first, so a field that is both
-   claim-bearing and oversized rejects as `engine_boundary_violation`. Acceptable
-   (both are correct rejections) — flag if you disagree.
+6. **Ordering vs G14**: the size guard now runs **before** G14 (safety: bound
+   before scan/spread — see "Changes since first review"). Consequence: a field
+   that is both oversized and claim-bearing rejects as `proposal_field_too_large`
+   rather than `engine_boundary_violation`. Acceptable (both correct; the cheap
+   bounded check first also avoids regex over oversized text) — flag if you
+   disagree. Note edge `from`/`to` are intentionally NOT length-capped (they must
+   match an existing node id to have any effect; a huge non-matching endpoint is
+   rejected `edge_endpoint_missing` with a now-bounded reason).
 
 ## Test evidence
-- `proposal-size-caps.test.ts` (16): 100KB label rejected + absent from committed
+- `proposal-size-caps.test.ts` (20): 100KB label rejected + absent from committed
   graph + valid sibling still applies + post-merge scan finds no over-cap label;
   every channel rejects; boundary at-cap applies / +1 rejects; oversized artifact
-  never becomes a DeferArtifact; mixed batch not collapsed (tally invariant).
+  never becomes a DeferArtifact; mixed batch not collapsed (tally invariant);
+  **1,000,000-element uncertainty_drivers rejected without throwing while a valid
+  sibling applies (ordering fix)**; bounded reason for a huge edge endpoint;
+  bounded reason + proposal_type for a huge invalid type.
 - `guards.test.ts` (+9): `findOversizedProposalField` unit matrix incl. defensive
   raw-field reads and an injectable cap object.
 - `serialise-and-schema.test.ts` (+1): schema `maxLength`/`maxItems` == `PROPOSAL_FIELD_CAPS`.
