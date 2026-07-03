@@ -31,6 +31,7 @@ import {
   findAnalysisClaim,
   checkEdgeNumericSanity,
   findForbiddenProposalField,
+  findOversizedProposalField,
   ALLOWED_NODE_DELTA_FIELDS,
   ALLOWED_EDGE_DELTA_FIELDS,
 } from './guards.js';
@@ -39,6 +40,7 @@ export type MergeFailureCode =
   | 'proposal_cap_exceeded'
   | 'malformed_proposal'
   | 'engine_boundary_violation'
+  | 'proposal_field_too_large'
   | 'artifact_carries_delta'
   | 'artifact_missing_question'
   | 'option_missing_label'
@@ -194,6 +196,24 @@ export function mergeProposals(m1Graph: GraphV3T, proposals: readonly unknown[])
     );
     if (claim !== null) {
       fail(index, proposal.type, 'engine_boundary_violation', `engine-owned analysis claim (${claim}) in proposal text`);
+      return;
+    }
+
+    // G-size — per-proposal text-size caps. THE authoritative enforcement point
+    // (the JSON schema only fences the model, which may ignore maxLength).
+    // Rejected INDIVIDUALLY (never truncated: a clipped label would silently
+    // alter M2's committed content) so one oversized proposal cannot collapse a
+    // batch of otherwise-valid ones — symmetric with the G14 scan above and
+    // applied before the artifact/option/node branches so every text channel
+    // (envelope + node) is covered uniformly.
+    const oversized = findOversizedProposalField(proposal);
+    if (oversized !== null) {
+      fail(
+        index,
+        proposal.type,
+        'proposal_field_too_large',
+        `proposal field "${oversized.field}" size ${oversized.length} exceeds cap ${oversized.cap}`,
+      );
       return;
     }
 
