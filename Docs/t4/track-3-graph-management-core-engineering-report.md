@@ -82,14 +82,34 @@ emission · the §3b/§6-gated un-holding of tunables/add_option.
 
 ## Test evidence
 
-- **100 tests green** across 8 files (envelope matrix, R-ladder, add_option divergence ×8+stale,
+- **105 tests green** across 8 files (envelope matrix, R-ladder, add_option divergence ×8+stale,
   merge-parity identity pin, classifier, EP2 parity, pending/idempotency/telemetry, adapter,
-  isolation guard). Run via main-repo vitest `--root <worktree>`, `LOG_LEVEL=fatal`.
+  isolation guard, + 5 regressions for the review findings below). Run via main-repo vitest
+  `--root <worktree>`, `LOG_LEVEL=fatal`.
 - **tsc-clean:** 0 errors in `graph-management/` (total 544 = pre-existing test-file baseline,
   unchanged; zero existing files edited). Type-level compat assertions for `PendingActionAction`
   and `ProposalEnvelopeT` are enforced by tsc.
 - **Isolation proof:** `git grep "orchestrator-v5/graph-management" -- src/ ':!.../graph-management/**'`
   returns 0 — nothing outside the module imports it.
+
+## Adversarial review outcome (multi-agent, verified)
+
+A 7-dimension adversarial review (each finding independently verified) ran against the core
+BEFORE this report was finalised. **5 confirmed findings fixed** (commit `fix(t3): resolve
+adversarial-review findings`):
+
+1. **HIGH — stale-gate fail-open:** freshness `'stale'`/`'none'` fell through to `would_apply`
+   (the gate keyed on the never-emitted `'unconfirmed'`). Now only `'fresh'`/`'none'` proceed;
+   everything else fails closed to `stale`.
+2. **Redaction leak:** `toBlocker` echoed the raw `node_id` into `blocker.readable` → fixed per-code
+   messages, no raw values.
+3. **Totality gap:** a throwing array-element read in `refereeMutationBatch` escaped → guarded.
+4. **Isolation-guard gap:** the banned-named-import ban missed `export … from` re-exports → AST
+   scan extended.
+5. **Minor:** provenance sub-field reason-code mislabel → `SCHEMA_INVALID`.
+
+**Refuted (no change):** two add_option predicate fail-opens masked by the GraphV3 parse; the
+unreachable `clarify_required` branch (harmless defensive code for future representable kinds).
 
 ## Risk register
 
