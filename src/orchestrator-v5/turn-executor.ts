@@ -127,6 +127,8 @@ import {
   resolveProposalRenderCopy,
 } from './compose/proposed-change.js';
 import {
+  CONFIRMATION_EXPECTING_ACTION_TYPES,
+  isPendingActionExpired,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
@@ -183,6 +185,7 @@ import {
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
   canonicalStateFromFreshness,
@@ -195,6 +198,9 @@ import {
   buildFrame,
   projectRecentChangesToFrame,
   type CanonicalContextFrame,
+  type FramePendingDiagnostics,
+  type FramePendingLifecycle,
+  type FrameRerunReadiness,
 } from './context/frame/index.js';
 import { summariseGraphCounts } from './context/build-context-summary.js';
 import {
@@ -528,6 +534,52 @@ export async function runTurnExecutor(
   }
   stagesCompleted.push('build_turn_context');
 
+  // Track 2 — pending-confirmation truth, derived ONCE at ORIENT time from the
+  // single persisted authority (`most_recent_pending_actions`, the last prior
+  // turn's offers) via the shared read-time liveness predicate. The store read
+  // does NOT filter expiry, so wall-/turn-expired entries are present in the
+  // raw list and MUST NOT read as pending here. The raw context list is left
+  // untouched — the dismissal / label / ordinal pre-routes and
+  // edit-graph-dispatch deliberately see expired entries to emit their own
+  // typed invalidation outcomes. Start-of-turn semantics: a proposal consumed
+  // later THIS turn still counts (it was live when the user replied); the
+  // next turn's derivation reflects the consumption.
+  const pendingActionsAtOrient = context.most_recent_pending_actions ?? [];
+  const pendingNowMs = Date.now();
+  // Single pass over the (≤ PENDING_ACTIONS_PER_TURN_CAP) prior-turn pendings:
+  // classify liveness via the shared predicate and tally live count, per-kind
+  // counts, and the confirmation-expecting count together. Reuses the read-time
+  // liveness authority so this seam agrees with the short-confirm / route
+  // resolvers on what "live" means.
+  const pendingKindCounts: Partial<Record<PendingAction['action']['kind'], number>> = {};
+  let liveCount = 0;
+  let confirmationExpectingLiveCount = 0;
+  for (const pa of pendingActionsAtOrient) {
+    if (isPendingActionExpired(pa, pendingNowMs)) continue;
+    liveCount += 1;
+    pendingKindCounts[pa.action.kind] = (pendingKindCounts[pa.action.kind] ?? 0) + 1;
+    if (CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind)) {
+      confirmationExpectingLiveCount += 1;
+    }
+  }
+  // The ONE value both state seams receive — the ContextPack (LLM-routing-
+  // visible) and the canonical frame (diagnostics) agree by construction.
+  // Kill-switch: CEE_PENDING_CONFIRMATION_TRUTH_ENABLED=false restores the
+  // pre-fix constant-false at BOTH seams (agreement preserved either way).
+  const pendingConfirmationForTurn =
+    config.cee.pendingConfirmationTruthEnabled && confirmationExpectingLiveCount > 0;
+  // Redacted pending observability for the frame (counts + closed-enum kind
+  // keys only). Deliberately NOT gated by the kill-switch: manual testers see
+  // the derived truth in diagnostics even when threading is disabled, with
+  // `threaded` recording the flag state that governed the two seams above.
+  const pendingDiagnosticsForTurn: FramePendingDiagnostics = {
+    liveCount,
+    expiredCount: pendingActionsAtOrient.length - liveCount,
+    kinds: pendingKindCounts,
+    confirmationExpectingLiveCount,
+    threaded: config.cee.pendingConfirmationTruthEnabled,
+  };
+
   // V5 Coaching State Spine — Stage 2B-1b: persist the turn-start (pre-dispatch)
   // coaching_state snapshot on EVERY turn-executor commit. Injected centrally
   // here so no individual commit site can omit it; `context` is the single turn
@@ -541,12 +593,18 @@ export async function runTurnExecutor(
   // response. Message-kind turns carry payload.message; system-event-kind
   // turns carry no user text and persist NULL.
   const userMessageForTurn = payload.kind === 'message' ? payload.message : undefined;
-  const commitTurn = (
+  // Track 2 — the last commit's carry-forward lifecycle tally, hoisted here so
+  // `finalizeRun` can thread it into the frame's `pending.lifecycle` diagnostics
+  // (the tally is only known post-commit; the ORIENT-time pending block carries
+  // counts). Undefined on paths that never commit (e.g. early error exits) —
+  // honest absence, the frame's pending block then carries no lifecycle.
+  let pendingLifecycleForRun: FramePendingLifecycle | undefined;
+  const commitTurn = async (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
     store?: Parameters<typeof commitDirectAnswer>[2],
-  ): ReturnType<typeof commitDirectAnswer> =>
-    commitDirectAnswer(
+  ): Promise<Awaited<ReturnType<typeof commitDirectAnswer>>> => {
+    const result = await commitDirectAnswer(
       resp,
       {
         // V5 Signature Loop — carry forward the prior turn's pendings by default
@@ -572,6 +630,9 @@ export async function runTurnExecutor(
       },
       store,
     );
+    pendingLifecycleForRun = result.pendingLifecycle;
+    return result;
+  };
 
   // V5 alpha hardening Phase 2.5: one-query observability. v5_journey_id
   // aliases scenario_id (= context.session_id) per Paul's locked-in
@@ -1230,6 +1291,12 @@ export async function runTurnExecutor(
         coaching: coachingCache,
         // Flag-gated, prompt-safe coaching pack (undefined ⇒ field omitted).
         coachingContext,
+        // Track 2 — real pending-confirmation truth (was never threaded, so the
+        // assembler's `?? false` default made the field constant-false). Same
+        // shared const the canonical frame receives at the finalise seam —
+        // pack/frame agreement by construction. LLM-routing-visible via the
+        // serialised pack; kill-switch documented at the derivation site.
+        pendingConfirmation: pendingConfirmationForTurn,
       });
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
@@ -6166,15 +6233,32 @@ export async function runTurnExecutor(
     // to the route's previous count call — parity by construction). Built only
     // when the canonical state AND the assembled pack exist; on earlier exits
     // the frame is honestly absent (never fabricated from partial state).
-    // `pendingConfirmation` / `intent` / claim permissions are deliberately
-    // NOT threaded yet — the builder's documented defaults mean "not
-    // supplied", and threading them is a later slice with its own owners.
+    // Track 2: `pendingConfirmation` + the redacted `pending` diagnostics are
+    // now threaded from the ORIENT-time derivation (the SAME shared const the
+    // ContextPack received — pack/frame agreement by construction). `intent` /
+    // claim permissions remain deliberately NOT threaded — the builder's
+    // documented defaults mean "not supplied"; those are later slices with
+    // their own owners.
     let frameForRun: CanonicalContextFrame | undefined;
     if (
       canonicalStateForRun !== undefined &&
       freshness !== null &&
       contextPackForLog !== null
     ) {
+      // Track 2 — rerun / what-changed readiness, computed HERE (outside the
+      // builder, which the source-scan allowlist forbids from importing the
+      // fact selectors) via the pure `deriveRerunReadiness` helper, from the
+      // SAME authorities the run-comparison gate consults: successful
+      // run_analysis facts in the prior-fact chain and the freshness verdict.
+      // Prior-facts (not the current turn's fresh fact) is the honest source —
+      // a "what changed?" comparison is answered on a SUBSEQUENT turn, when
+      // this turn's run has become a prior fact, exactly matching the gate's
+      // own `input.priorFacts` at routing time. Diagnostic only; the gate
+      // remains the sole authority for the comparison itself.
+      const rerunReadiness: FrameRerunReadiness = deriveRerunReadiness(
+        context.prior_facts,
+        freshness.freshness,
+      );
       try {
         frameForRun = buildFrame({
           freshness,
@@ -6190,6 +6274,16 @@ export async function runTurnExecutor(
           // over, never the uncapped store total — an uncapped count would
           // over-report context completeness to the harness (A2).
           priorTurnCount: contextPackForLog.conversation.recent_turns.length,
+          // Track 2 — the SAME shared const the ContextPack received at ORIENT
+          // (agreement by construction), plus the redacted counts-only pending
+          // observability block (never gated by the kill-switch; `threaded`
+          // records the flag state). The commit-time lifecycle tally is merged
+          // in here (post-commit) when this path committed; absent otherwise.
+          pendingConfirmation: pendingConfirmationForTurn,
+          pending: pendingLifecycleForRun
+            ? { ...pendingDiagnosticsForTurn, lifecycle: pendingLifecycleForRun }
+            : pendingDiagnosticsForTurn,
+          rerunReadiness,
         });
       } catch {
         // Never block the response on frame construction (mirrors the

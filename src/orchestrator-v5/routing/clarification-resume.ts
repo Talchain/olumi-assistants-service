@@ -40,6 +40,7 @@
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { filterLivePendingActions } from '../session/pending-action.js';
 
 /**
  * Same negative-gate regex `tryShortConfirmResume` and
@@ -134,17 +135,6 @@ export interface TryClarificationResumeInput {
 }
 
 const FUZZY_DICE_FLOOR = 0.5;
-
-function isExpired(pa: PendingAction, nowMs: number): boolean {
-  // Mirrors the wall-clock and turn-count checks in
-  // `tryShortConfirmResume.isExpired`. Keep the rules in sync — both
-  // resumers must agree on what "expired" means.
-  const expiresMs = Date.parse(pa.expires_at_iso);
-  if (!Number.isFinite(expiresMs)) return true;
-  if (nowMs > expiresMs) return true;
-  if (pa.expires_at_turn_count <= 0) return true;
-  return false;
-}
 
 /**
  * Per-kind safety classification. Resuming a "mutating" kind against
@@ -270,7 +260,10 @@ export function tryClarificationResume(
   // clarification context — the LLM can only guess, and the brief's
   // "every promise has an executable path" rule says the system should
   // surface the lapse and offer a real next step instead.
-  const live = setFactorPendings.filter((pa) => !isExpired(pa, input.nowMs));
+  // Track 2 — the shared read-time liveness authority (same wall + turn-count
+  // rule the short-confirm resumer and the route-level suppressor use); this
+  // was previously a third private `isExpired` copy of the identical predicate.
+  const live = filterLivePendingActions(setFactorPendings, input.nowMs);
   if (live.length === 0) {
     return {
       matched: true,

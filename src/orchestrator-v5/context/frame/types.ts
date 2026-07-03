@@ -36,12 +36,20 @@ import type {
 } from '../canonical-analysis-state.js';
 import type { RecentMutation } from '../recent-changes.js';
 import type { CanonicalStateSource } from '../build-context-summary.js';
+import type {
+  PendingActionKind,
+  PendingLifecycleSummary,
+} from '../../session/pending-action.js';
 import type { ClaimPermissionTable } from './claim-permissions.js';
 
 export type { CanonicalStateSource } from '../build-context-summary.js';
 
-/** Frame schema version. Bumped when the frame contract changes shape. */
-export const CANONICAL_CONTEXT_FRAME_VERSION = '0.1.0';
+/**
+ * Frame schema version. Bumped when the frame contract changes shape.
+ * 0.2.0 — Track 2: additive optional `pending` diagnostics block +
+ * threaded `conversation.pendingConfirmation` truth.
+ */
+export const CANONICAL_CONTEXT_FRAME_VERSION = '0.2.0';
 export type CanonicalContextFrameVersion =
   typeof CANONICAL_CONTEXT_FRAME_VERSION;
 
@@ -195,12 +203,72 @@ export interface FrameActions {
 export type FrameUiTargets = Record<string, never>;
 
 /**
+ * rerun / what-changed readiness (Track 2) — counts + a boolean readiness
+ * predicate for the harness to see WHY a before/after comparison would or
+ * would not be available. NOT the comparison itself (that stays the
+ * run-comparison gate's job); this is a read-only diagnostic derived from the
+ * SAME authorities the gate consults (`isSuccessfulRunAnalysisFact` over the
+ * prior facts + the freshness verdict). `comparisonCandidatesReady` means the
+ * PRECONDITIONS the gate checks hold (fresh analysis + ≥2 successful prior
+ * runs) — the projection / diff can still decline downstream, so the name says
+ * "candidates", not "will compare".
+ */
+export interface FrameRerunReadiness {
+  /** Successful run_analysis facts observed in the prior-fact chain. */
+  readonly priorSuccessfulRunCount: number;
+  /** Freshness is `fresh` AND ≥2 successful prior runs exist. */
+  readonly comparisonCandidatesReady: boolean;
+}
+
+/**
  * diagnostics projection — references the existing redacted summary. Diagnostic
  * only; never product logic (mirrors the redacted diagnostic-summary discipline).
  */
 export interface FrameDiagnostics {
   readonly analysisStateSummary?: AnalysisStateSummary;
   readonly canonicalStateSource?: CanonicalStateSource;
+  /**
+   * Track 2 — rerun / what-changed readiness (optional, additive). Present
+   * only when the caller threads it (already computed outside the builder —
+   * the wrap-never-re-derive contract forbids the builder importing the
+   * fact-selection authorities).
+   */
+  readonly rerun?: FrameRerunReadiness;
+}
+
+// ── pending projection (Track 2) — redacted pending-action observability ──
+
+/**
+ * Per-turn pending-action lifecycle outcome, tallied by the commit-time
+ * carry-forward pass (`computeSurvivingPriorPendingsDetailed` in commit.ts).
+ * Single source of truth is the session leaf's {@link PendingLifecycleSummary}
+ * so the commit producer and this frame consumer cannot drift. Integer counts
+ * only; present only when this turn committed (honest absence otherwise).
+ */
+export type FramePendingLifecycle = PendingLifecycleSummary;
+
+/**
+ * pending projection — read-time pending-action truth as derived ONCE at
+ * ORIENT from `most_recent_pending_actions` via the shared liveness
+ * predicate (`session/pending-action.ts`). Counts and closed-enum kind keys
+ * only; never labels, messages, ids or patch payloads. Populated
+ * REGARDLESS of the pending-confirmation kill-switch so manual testers can
+ * see the derived truth even when threading is disabled — `threaded`
+ * records the flag state that governed `conversation.pendingConfirmation`.
+ */
+export interface FramePendingDiagnostics {
+  /** Live (non-expired) pending actions from the most recent prior turn. */
+  readonly liveCount: number;
+  /** Entries present in the persisted read but expired (wall or turn TTL). */
+  readonly expiredCount: number;
+  /** Live counts by kind (closed enum keys; absent kind ⇒ zero). */
+  readonly kinds: Partial<Record<PendingActionKind, number>>;
+  /** Live entries whose kind is in CONFIRMATION_EXPECTING_ACTION_TYPES. */
+  readonly confirmationExpectingLiveCount: number;
+  /** Whether CEE_PENDING_CONFIRMATION_TRUTH_ENABLED threaded the truth. */
+  readonly threaded: boolean;
+  /** Commit-time lifecycle tallies, when this turn committed. */
+  readonly lifecycle?: FramePendingLifecycle;
 }
 
 /** The single composed, read-only V6 context frame. */
@@ -217,6 +285,12 @@ export interface CanonicalContextFrame {
   readonly actions: FrameActions;
   readonly uiTargets: FrameUiTargets;
   readonly diagnostics: FrameDiagnostics;
+  /**
+   * Track 2 — pending-action observability (optional, additive). Distinct
+   * from the inert `actions` affordance scaffold above (Increment 6 owns
+   * that); this block is counts-only diagnostics.
+   */
+  readonly pending?: FramePendingDiagnostics;
 }
 
 // ── Builder contract (TYPE ONLY — implementation is a later increment) ──
@@ -279,6 +353,21 @@ export interface BuildFrameInput {
    * the held table (`DEFAULT_CLAIM_PERMISSIONS`). No relaxation here.
    */
   readonly claimPermissions?: ClaimPermissionTable;
+  /**
+   * Track 2 — pending-action diagnostics, ALREADY tallied at the ORIENT
+   * derivation site (wrap-never-re-derive: the builder receives counts, not
+   * `PendingAction[]`, so it structurally cannot re-run the liveness
+   * predicate). Optional; omitted ⇒ the frame carries no `pending` block
+   * (honest absence, e.g. a hand-built frame in tests).
+   */
+  readonly pending?: FramePendingDiagnostics;
+  /**
+   * Track 2 — rerun / what-changed readiness, ALREADY computed outside the
+   * builder (the builder must not import the fact-selection authorities per
+   * the source-scan allowlist). Placed into `diagnostics.rerun` verbatim.
+   * Optional; omitted ⇒ no rerun diagnostics on this frame.
+   */
+  readonly rerunReadiness?: FrameRerunReadiness;
 }
 
 /**

@@ -9,7 +9,10 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { computeSurvivingPriorPendings } from '../commit.js';
+import {
+  computeSurvivingPriorPendings,
+  computeSurvivingPriorPendingsDetailed,
+} from '../commit.js';
 import type { PendingAction } from '../session/pending-action.js';
 
 const NOW = Date.parse('2026-06-10T12:00:00.000Z');
@@ -107,5 +110,101 @@ describe('computeSurvivingPriorPendings — carry-forward survival', () => {
 
   it('is a no-op when there are no prior pendings', () => {
     expect(computeSurvivingPriorPendings([], [], [], GRAPH_HASH, NOW)).toHaveLength(0);
+  });
+});
+
+describe('computeSurvivingPriorPendingsDetailed — lifecycle drop-reason tally (Track 2)', () => {
+  it('the survivors are byte-identical to the wrapper (single implementation, no drift)', () => {
+    const prior = [proposal({ ref: 'a', turnCount: 2 }), proposal({ ref: 'b', turnCount: 2 })];
+    const detailed = computeSurvivingPriorPendingsDetailed(prior, [], ['a'], GRAPH_HASH, NOW);
+    const wrapped = computeSurvivingPriorPendings(prior, [], ['a'], GRAPH_HASH, NOW);
+    expect(detailed.survivors).toEqual(wrapped);
+  });
+
+  it('attributes a consumed pending to consumedCount', () => {
+    const { summary } = computeSurvivingPriorPendingsDetailed(
+      [proposal({ ref: 'a' })], [], ['a'], GRAPH_HASH, NOW,
+    );
+    expect(summary).toMatchObject({ priorCount: 1, consumedCount: 1, survivedCount: 0 });
+  });
+
+  it('attributes a superseded pending to supersededCount', () => {
+    const { summary } = computeSurvivingPriorPendingsDetailed(
+      [proposal({ ref: 'a' })], [proposal({ ref: 'a' })], [], GRAPH_HASH, NOW,
+    );
+    expect(summary).toMatchObject({ supersededCount: 1, survivedCount: 0 });
+  });
+
+  it('attributes wall-clock and malformed expiry to expiredWallCount', () => {
+    const { summary } = computeSurvivingPriorPendingsDetailed(
+      [
+        proposal({ ref: 'a', expiresAtIso: '2026-06-10T11:00:00.000Z' }),
+        proposal({ ref: 'b', expiresAtIso: 'not-a-date' }),
+      ],
+      [], [], GRAPH_HASH, NOW,
+    );
+    expect(summary).toMatchObject({ priorCount: 2, expiredWallCount: 2, survivedCount: 0 });
+  });
+
+  it('attributes a graph-hash mismatch to hashInvalidatedCount', () => {
+    const { summary } = computeSurvivingPriorPendingsDetailed(
+      [proposal({ ref: 'a', graphHash: 'stale' })], [], [], GRAPH_HASH, NOW,
+    );
+    expect(summary).toMatchObject({ hashInvalidatedCount: 1, survivedCount: 0 });
+  });
+
+  it('attributes an exhausted turn-count TTL to expiredTurnsCount', () => {
+    const { summary } = computeSurvivingPriorPendingsDetailed(
+      [proposal({ ref: 'a', turnCount: 1 })], [], [], GRAPH_HASH, NOW,
+    );
+    expect(summary).toMatchObject({ expiredTurnsCount: 1, survivedCount: 0 });
+  });
+
+  it('counts a survivor in survivedCount', () => {
+    const { summary } = computeSurvivingPriorPendingsDetailed(
+      [proposal({ ref: 'a', turnCount: 2 })], [], [], GRAPH_HASH, NOW,
+    );
+    expect(summary).toMatchObject({ priorCount: 1, survivedCount: 1 });
+  });
+
+  it('first-match attribution: a pending that is BOTH consumed and expired counts once, as consumed', () => {
+    const { summary } = computeSurvivingPriorPendingsDetailed(
+      [proposal({ ref: 'a', expiresAtIso: '2026-06-10T11:00:00.000Z' })],
+      [], ['a'], GRAPH_HASH, NOW,
+    );
+    expect(summary.consumedCount).toBe(1);
+    expect(summary.expiredWallCount).toBe(0);
+  });
+
+  it('PARTITION invariant: the six outcome counts sum to priorCount for a mixed set', () => {
+    const prior = [
+      proposal({ ref: 'consumed' }),
+      proposal({ ref: 'superseded' }),
+      proposal({ ref: 'wall', expiresAtIso: '2026-06-10T11:00:00.000Z' }),
+      proposal({ ref: 'hash', graphHash: 'stale' }),
+      proposal({ ref: 'turns', turnCount: 1 }),
+      proposal({ ref: 'survivor', turnCount: 2 }),
+    ];
+    const { summary } = computeSurvivingPriorPendingsDetailed(
+      prior, [proposal({ ref: 'superseded' })], ['consumed'], GRAPH_HASH, NOW,
+    );
+    const {
+      priorCount, consumedCount, supersededCount, expiredWallCount,
+      expiredTurnsCount, hashInvalidatedCount, survivedCount,
+    } = summary;
+    expect(priorCount).toBe(6);
+    expect(
+      consumedCount + supersededCount + expiredWallCount +
+      expiredTurnsCount + hashInvalidatedCount + survivedCount,
+    ).toBe(priorCount);
+    expect(summary).toEqual({
+      priorCount: 6,
+      consumedCount: 1,
+      supersededCount: 1,
+      expiredWallCount: 1,
+      expiredTurnsCount: 1,
+      hashInvalidatedCount: 1,
+      survivedCount: 1,
+    });
   });
 });

@@ -19,6 +19,8 @@ import { contextSummaryFromFrame } from '../context-summary-from-frame.js';
 import {
   buildV5ContextSummary,
   type V5ContextSummary,
+  type ContextSummaryPending,
+  type ContextSummaryPendingLifecycle,
 } from '../build-context-summary.js';
 import { deriveAnalysisFreshness } from '../freshness.js';
 import {
@@ -48,7 +50,7 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
   it('projects every base field from the frame alone', () => {
     const summary = contextSummaryFromFrame(frame);
     expect(summary).not.toBeNull();
-    expect(summary!.version).toBe('1.0.0');
+    expect(summary!.version).toBe('1.1.0');
     expect(summary!.analysis_state).toEqual(frame.diagnostics.analysisStateSummary);
     expect(summary!.graph_counts).toEqual(COUNTS);
     expect(summary!.canonical_state_source).toBe('turn_executor');
@@ -103,18 +105,186 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
     expect(contextSummaryFromFrame(noCounts)!.graph_counts).toBeNull();
   });
 
-  it('ANTI-DRIFT: frame-built and legacy-built summaries carry the identical key set for maximal equivalent inputs', () => {
+  it('Track 2 — pending block: omitted when the frame carries none (honest absence)', () => {
+    // The module-level `frame` was built without a pending input.
+    expect(contextSummaryFromFrame(frame)).not.toHaveProperty('pending');
+  });
+
+  it('Track 2 — pending block: projected from the frame (camelCase → wire snake_case), pending_confirmation mirrors the gated seam', () => {
+    const withPending = buildFrame({
+      freshness,
+      canonicalState,
+      canonicalStateSource: 'turn_executor',
+      recentChanges: projectRecentChangesToFrame([]),
+      graphCounts: COUNTS,
+      priorTurnCount: 2,
+      pendingConfirmation: true,
+      pending: {
+        liveCount: 2,
+        expiredCount: 1,
+        kinds: { apply_proposed_change: 1, run_analysis: 1 },
+        confirmationExpectingLiveCount: 1,
+        threaded: true,
+        lifecycle: {
+          priorCount: 3,
+          consumedCount: 1,
+          supersededCount: 0,
+          expiredWallCount: 1,
+          expiredTurnsCount: 0,
+          hashInvalidatedCount: 0,
+          survivedCount: 1,
+        },
+      },
+    });
+    const summary = contextSummaryFromFrame(withPending)!;
+    expect(summary.pending).toEqual({
+      pending_confirmation: true,
+      live_count: 2,
+      expired_count: 1,
+      kinds: { apply_proposed_change: 1, run_analysis: 1 },
+      confirmation_expecting_live_count: 1,
+      threaded: true,
+      lifecycle: {
+        prior_count: 3,
+        consumed_count: 1,
+        superseded_count: 0,
+        expired_wall_count: 1,
+        expired_turns_count: 0,
+        hash_invalidated_count: 0,
+        survived_count: 1,
+      },
+    });
+  });
+
+  it('Track 2 — rerun readiness: omitted when the frame carries none; projected (camelCase → snake_case) when present', () => {
+    expect(contextSummaryFromFrame(frame)).not.toHaveProperty('rerun');
+    const withRerun = buildFrame({
+      freshness,
+      canonicalState,
+      canonicalStateSource: 'turn_executor',
+      recentChanges: projectRecentChangesToFrame([]),
+      priorTurnCount: 0,
+      rerunReadiness: { priorSuccessfulRunCount: 3, comparisonCandidatesReady: false },
+    });
+    expect(contextSummaryFromFrame(withRerun)!.rerun).toEqual({
+      prior_successful_run_count: 3,
+      comparison_candidates_ready: false,
+    });
+  });
+
+  it('ANTI-DRIFT (pending): the hand-written camelCase→snake_case re-map projects EVERY ContextSummaryPending key', () => {
+    // The pending projection re-maps fields one at a time (frame camelCase →
+    // wire snake_case). A field added to ContextSummaryPending / …Lifecycle but
+    // forgotten in the projection would silently drop from the wire. This
+    // compile-time pin makes any new wire key a tsc error here, and the runtime
+    // key-set check fails if the projection omits one for a fully-populated
+    // frame — mirroring the top-level PINNED discipline.
+    const PENDING_PINNED: Record<keyof Required<ContextSummaryPending>, true> = {
+      pending_confirmation: true,
+      live_count: true,
+      expired_count: true,
+      kinds: true,
+      confirmation_expecting_live_count: true,
+      threaded: true,
+      lifecycle: true,
+    };
+    const LIFECYCLE_PINNED: Record<keyof Required<ContextSummaryPendingLifecycle>, true> = {
+      prior_count: true,
+      consumed_count: true,
+      superseded_count: true,
+      expired_wall_count: true,
+      expired_turns_count: true,
+      hash_invalidated_count: true,
+      survived_count: true,
+    };
+    const fullyPopulated = buildFrame({
+      freshness,
+      canonicalState,
+      canonicalStateSource: 'turn_executor',
+      recentChanges: projectRecentChangesToFrame([]),
+      priorTurnCount: 0,
+      pendingConfirmation: true,
+      pending: {
+        liveCount: 1,
+        expiredCount: 0,
+        kinds: { apply_proposed_change: 1 },
+        confirmationExpectingLiveCount: 1,
+        threaded: true,
+        lifecycle: {
+          priorCount: 1, consumedCount: 0, supersededCount: 0, expiredWallCount: 0,
+          expiredTurnsCount: 0, hashInvalidatedCount: 0, survivedCount: 1,
+        },
+      },
+    });
+    const pending = contextSummaryFromFrame(fullyPopulated)!.pending!;
+    expect(Object.keys(pending).sort()).toEqual(Object.keys(PENDING_PINNED).sort());
+    expect(Object.keys(pending.lifecycle!).sort()).toEqual(Object.keys(LIFECYCLE_PINNED).sort());
+  });
+
+  it('Track 2 — pending_confirmation follows the GATED seam, not the raw count (kill-switch off ⇒ false despite a live confirmation-expecting pending)', () => {
+    const flagOff = buildFrame({
+      freshness,
+      canonicalState,
+      canonicalStateSource: 'turn_executor',
+      recentChanges: projectRecentChangesToFrame([]),
+      priorTurnCount: 1,
+      // Gated seam false (kill-switch off) …
+      pendingConfirmation: false,
+      pending: {
+        liveCount: 1,
+        expiredCount: 0,
+        kinds: { apply_proposed_change: 1 },
+        // … while the ungated derived count still records the live proposal.
+        confirmationExpectingLiveCount: 1,
+        threaded: false,
+      },
+    });
+    const summary = contextSummaryFromFrame(flagOff)!;
+    expect(summary.pending!.pending_confirmation).toBe(false);
+    expect(summary.pending!.confirmation_expecting_live_count).toBe(1);
+    expect(summary.pending!.threaded).toBe(false);
+  });
+
+  it('ANTI-DRIFT: the frame-built summary carries every legacy key (no silent drop), plus exactly the frame-only `pending` block', () => {
     // Both shapes maximal: coaching pack ON and provenance supplied on both
-    // sides. Any future field added to one assembly literal but not the other
-    // flips this key-set equality — the omission cannot ship silently.
-    const fromFrame = contextSummaryFromFrame(frame, canonicalState)!;
+    // sides, and the frame ALSO carries a pending block (frame-only — the
+    // legacy parts path has no frame to source it from). The frame path must
+    // be a strict SUPERSET of the legacy key set, differing by exactly the
+    // one documented frame-only key `pending`. Any future field added to the
+    // legacy literal but not the frame projection makes `fromFrame` MISSING a
+    // legacy key → the superset check fails; any frame-only field beyond
+    // `pending` → the difference check fails. Neither omission can ship
+    // silently.
+    const maximalFrame = buildFrame({
+      freshness,
+      canonicalState,
+      canonicalStateSource: 'turn_executor',
+      recentChanges: projectRecentChangesToFrame(CHANGES),
+      graphCounts: COUNTS,
+      priorTurnCount: 5,
+      pendingConfirmation: true,
+      pending: {
+        liveCount: 1,
+        expiredCount: 0,
+        kinds: { apply_proposed_change: 1 },
+        confirmationExpectingLiveCount: 1,
+        threaded: true,
+      },
+      rerunReadiness: { priorSuccessfulRunCount: 2, comparisonCandidatesReady: true },
+    });
+    const fromFrame = contextSummaryFromFrame(maximalFrame, canonicalState)!;
     const legacy = buildV5ContextSummary({
       canonicalState,
       graphCounts: COUNTS,
       canonicalStateSource: 'turn_executor',
       includeCoachingState: true,
     });
-    expect(Object.keys(fromFrame).sort()).toEqual(Object.keys(legacy).sort());
+    const frameKeys = new Set(Object.keys(fromFrame));
+    for (const k of Object.keys(legacy)) {
+      expect(frameKeys.has(k), `frame path silently dropped legacy key '${k}'`).toBe(true);
+    }
+    const frameOnly = Object.keys(fromFrame).filter((k) => !(k in legacy)).sort();
+    expect(frameOnly).toEqual(['pending', 'rerun']);
   });
 
   it('ANTI-DRIFT (compile-time): the wire type has no keys beyond the pinned set', () => {
@@ -131,8 +301,10 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
       capabilities_present: true,
       canonical_state_source: true,
       coaching_state_pack: true,
+      pending: true,
+      rerun: true,
     };
-    expect(Object.keys(PINNED).length).toBe(8);
+    expect(Object.keys(PINNED).length).toBe(10);
   });
 
   it('is pure: same frame → deeply-equal summaries; frame not mutated', () => {

@@ -36,6 +36,7 @@
 
 import type { PendingAction } from '../session/pending-action.js';
 import {
+  isPendingActionExpired,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
 } from '../session/pending-action.js';
@@ -213,25 +214,15 @@ const RESUMABLE_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
 ]);
 
 function isExpired(pa: PendingAction, nowMs: number, _currentTurnIndex: number): boolean {
-  // Wall-clock TTL: emitted_at_iso + expires_at_iso are both written
-  // at emit time. We trust expires_at_iso as the canonical expiry.
-  const expiresMs = Date.parse(pa.expires_at_iso);
-  if (!Number.isFinite(expiresMs)) {
-    // Defence-in-depth: malformed expiry → treat as expired so we never
-    // silently resume an action whose freshness we can't verify.
-    return true;
-  }
-  if (nowMs > expiresMs) return true;
-  // Turn-count TTL: emitted_in_turn N, expires after expires_at_turn_count.
-  // currentTurnIndex is the count of prior turns; if more than
-  // expires_at_turn_count have elapsed since the offer, expire.
-  // We don't store the emit-time turn index — instead we rely on the
-  // fact that `pendingActions` is read from the MOST RECENT prior turn
-  // only, so the offer is at most one turn old. The turn-count TTL
-  // becomes a wall TTL for Wave 2; it will tighten in Wave 3 when
-  // multi-turn pending actions are persisted (e.g. add-risk clarify).
-  if (pa.expires_at_turn_count <= 0) return true;
-  return false;
+  // Track 2: delegates to the shared read-time liveness authority in
+  // session/pending-action.ts (extracted verbatim from this function).
+  // Semantics unchanged: malformed expires_at_iso → expired; wall-clock
+  // nowMs > expires_at_iso → expired; expires_at_turn_count <= 0 → expired.
+  // currentTurnIndex remains unused — `pendingActions` is read from the
+  // MOST RECENT prior turn only, so the offer is at most one turn old;
+  // the persisted turn counter (decremented by carry-forward) is the
+  // turn-TTL authority.
+  return isPendingActionExpired(pa, nowMs);
 }
 
 /** Emit timestamp in ms for most-recent-wins ordering; malformed → oldest. */

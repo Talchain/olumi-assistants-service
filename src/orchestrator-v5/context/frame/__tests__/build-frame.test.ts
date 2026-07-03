@@ -45,7 +45,9 @@ function baseInput(overrides: Partial<BuildFrameInput> = {}): BuildFrameInput {
 
 describe('buildFrame — pure projection over authority outputs (Increment 2)', () => {
   it('version is the frame contract version', () => {
-    expect(buildFrame(baseInput()).version).toBe('0.1.0');
+    // 0.2.0 — Track 2: additive optional `pending` diagnostics block +
+    // threaded conversation.pendingConfirmation truth.
+    expect(buildFrame(baseInput()).version).toBe('0.2.0');
   });
 
   it('freshness projection equals the freshness authority output, verbatim', () => {
@@ -119,10 +121,51 @@ describe('buildFrame — pure projection over authority outputs (Increment 2)', 
     expect(frame.uiTargets).toEqual({});
   });
 
+  it('pending block is omitted when not supplied (honest absence) and passed through verbatim when supplied', () => {
+    // Track 2 — the builder receives ALREADY-tallied counts (never
+    // PendingAction[]), so it structurally cannot re-derive liveness.
+    expect(buildFrame(baseInput()).pending).toBeUndefined();
+    expect('pending' in buildFrame(baseInput())).toBe(false);
+    const pending = {
+      liveCount: 2,
+      expiredCount: 1,
+      kinds: { apply_proposed_change: 1, run_analysis: 1 },
+      confirmationExpectingLiveCount: 1,
+      threaded: true,
+    };
+    expect(buildFrame(baseInput({ pending })).pending).toBe(pending);
+  });
+
+  it('pending.lifecycle passes through when the caller supplies commit-time tallies', () => {
+    const pending = {
+      liveCount: 0,
+      expiredCount: 0,
+      kinds: {},
+      confirmationExpectingLiveCount: 0,
+      threaded: false,
+      lifecycle: {
+        priorCount: 3,
+        consumedCount: 1,
+        supersededCount: 0,
+        expiredWallCount: 1,
+        expiredTurnsCount: 0,
+        hashInvalidatedCount: 0,
+        survivedCount: 1,
+      },
+    };
+    expect(buildFrame(baseInput({ pending })).pending?.lifecycle).toEqual(pending.lifecycle);
+  });
+
   it('diagnostics.analysisStateSummary is the pure redacted projection of the held canonical state', () => {
     const d = buildFrame(baseInput()).diagnostics;
     expect(d.analysisStateSummary).toEqual(summariseCanonicalAnalysisState(canonicalState));
     expect(d.canonicalStateSource).toBe('turn_executor');
+  });
+
+  it('diagnostics.rerun is omitted when not supplied and passed through verbatim when supplied', () => {
+    expect(buildFrame(baseInput()).diagnostics.rerun).toBeUndefined();
+    const rerunReadiness = { priorSuccessfulRunCount: 2, comparisonCandidatesReady: true };
+    expect(buildFrame(baseInput({ rerunReadiness })).diagnostics.rerun).toBe(rerunReadiness);
   });
 
   it('internal graph-hash consistency: model and the diagnostic summary agree for a single-derivation input', () => {

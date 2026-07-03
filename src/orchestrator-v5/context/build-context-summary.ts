@@ -45,8 +45,15 @@ import {
   summariseCanonicalAnalysisState,
   summariseCoachingStatePack,
 } from './canonical-analysis-state.js';
+import type { PendingActionKind } from '../session/pending-action.js';
 
-export const V5_CONTEXT_SUMMARY_VERSION = '1.0.0';
+/**
+ * 1.1.0 — Track 2: additive optional `pending` block (pending-confirmation
+ * truth + redacted pending-action observability). Frame-projection only
+ * (`contextSummaryFromFrame`); the legacy parts-assembled builder never
+ * emits it (no frame ⇒ no pending source).
+ */
+export const V5_CONTEXT_SUMMARY_VERSION = '1.1.0';
 
 /**
  * Provenance of the canonical state this summary projects. Determined by the
@@ -71,6 +78,51 @@ export interface ContextSummaryGraphCounts {
   readonly edges: number;
   readonly options: number;
   readonly goals: number;
+}
+
+/**
+ * Redacted per-turn pending-action lifecycle tallies (Track 2). Integer
+ * counts only — no ids, labels, messages, or patch content. Present only
+ * when the turn committed and the commit threaded the carry-forward summary.
+ */
+export interface ContextSummaryPendingLifecycle {
+  readonly prior_count: number;
+  readonly consumed_count: number;
+  readonly superseded_count: number;
+  readonly expired_wall_count: number;
+  readonly expired_turns_count: number;
+  readonly hash_invalidated_count: number;
+  readonly survived_count: number;
+}
+
+/**
+ * Redacted pending-action observability (Track 2). Counts + closed-enum
+ * kind keys + booleans only; never labels, messages, ids or patch payloads.
+ * `pending_confirmation` mirrors the gated seam value threaded to the
+ * ContextPack / frame; `threaded` records whether
+ * `CEE_PENDING_CONFIRMATION_TRUTH_ENABLED` governed it, so a `false`
+ * pending_confirmation alongside a non-zero
+ * `confirmation_expecting_live_count` is legible as "kill-switch off", not
+ * "no live proposal".
+ */
+export interface ContextSummaryPending {
+  readonly pending_confirmation: boolean;
+  readonly live_count: number;
+  readonly expired_count: number;
+  readonly kinds: Partial<Record<PendingActionKind, number>>;
+  readonly confirmation_expecting_live_count: number;
+  readonly threaded: boolean;
+  readonly lifecycle?: ContextSummaryPendingLifecycle;
+}
+
+/**
+ * Redacted rerun / what-changed readiness (Track 2). Count + a readiness
+ * boolean; the harness reads WHY a before/after comparison would or would not
+ * be available without any run content reaching the wire.
+ */
+export interface ContextSummaryRerun {
+  readonly prior_successful_run_count: number;
+  readonly comparison_candidates_ready: boolean;
 }
 
 /**
@@ -106,6 +158,20 @@ export interface V5ContextSummary {
    * unrelated coaching-lifecycle `coaching_state` feature.
    */
   readonly coaching_state_pack?: CoachingStatePack;
+  /**
+   * Track 2 — redacted pending-action observability. FRAME-PROJECTION ONLY:
+   * present when the turn-executor built a frame carrying the pending block
+   * (`contextSummaryFromFrame`); ABSENT on the legacy parts-assembled
+   * fallback (chip-click / system-event / draft paths have no frame, so no
+   * pending source). Absence here is honest "not observed at this seam",
+   * never a "no pending action" claim.
+   */
+  readonly pending?: ContextSummaryPending;
+  /**
+   * Track 2 — redacted rerun / what-changed readiness. FRAME-PROJECTION ONLY
+   * (same absence rule as `pending`).
+   */
+  readonly rerun?: ContextSummaryRerun;
 }
 
 /** Minimal structural graph view for counting — content is never read. */

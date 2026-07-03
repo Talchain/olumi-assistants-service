@@ -567,6 +567,21 @@ const ConfigSchema = z.object({
     // Default OFF; never read by UI/prose/chip logic (enforced by a static
     // guard test). Additive + backward-compatible.
     contextSummaryEnabled: booleanString.default(false),
+    // Track 2 pending-confirmation truth (CEE_PENDING_CONFIRMATION_TRUTH_ENABLED
+    // — kill-switch, default ON). When true, the turn-executor threads the REAL
+    // pending-confirmation state (a live, non-expired mutation-proposing pending
+    // action from the most recent prior turn — CONFIRMATION_EXPECTING_ACTION_TYPES
+    // in session/pending-action.ts) into the ContextPack's
+    // `conversation.pending_confirmation` AND the canonical frame's
+    // `conversation.pendingConfirmation`, from one shared derivation. Before this
+    // fix both were constant-false (the field existed but was never threaded).
+    // The pack is serialised into the LLM routing prompt, so this is
+    // prompt-visible by design (routing prompt v40 Example 8 already documents
+    // the signal). Set to `false` for a code-free rollback to constant-false at
+    // BOTH seams (pack/frame agreement holds in either state). Diagnostics
+    // (frame pending counts) are NOT gated by this flag — they always report
+    // derived truth, with `threaded` recording the flag state.
+    pendingConfirmationTruthEnabled: booleanString.default(true),
     // V5 coaching-state pack (CEE_COACHING_STATE_PACK_ENABLED — diagnostics
     // only). When true (AND contextSummaryEnabled is also true), the route adds
     // a redacted, hash-free `coaching_state_pack` sub-block to `_context_summary`
@@ -1031,6 +1046,7 @@ function parseConfig(): Config {
       analysisReadyGuardEnabled: env.CEE_RUN_ANALYSIS_READY_GUARD,
       runAnalysisNullGraphRecoverable: env.CEE_RUN_ANALYSIS_NULL_GRAPH_RECOVERABLE,
       contextSummaryEnabled: env.CEE_CONTEXT_SUMMARY_ENABLED,
+      pendingConfirmationTruthEnabled: env.CEE_PENDING_CONFIRMATION_TRUTH_ENABLED,
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
       coachingContextPromptEnabled: env.CEE_COACHING_CONTEXT_PROMPT_ENABLED,
       optionIdentityFreshnessGuard: env.CEE_OPTION_IDENTITY_FRESHNESS_GUARD,

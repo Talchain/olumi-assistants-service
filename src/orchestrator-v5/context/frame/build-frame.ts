@@ -97,6 +97,14 @@ export function buildFrame(input: BuildFrameInput): CanonicalContextFrame {
       // second derivation.
       analysisStateSummary: summariseCanonicalAnalysisState(input.canonicalState),
       canonicalStateSource: input.canonicalStateSource,
+      // Track 2 — rerun/what-changed readiness, computed OUTSIDE the builder
+      // (the source-scan allowlist forbids importing the fact selectors here);
+      // passed through verbatim. Omitted when the caller does not thread it.
+      ...(input.rerunReadiness !== undefined ? { rerun: input.rerunReadiness } : {}),
     },
+    // Track 2 — pending diagnostics: already-tallied counts passed through
+    // verbatim (the builder never sees PendingAction[] and cannot re-derive
+    // liveness). Omitted when not supplied — honest absence, no fabrication.
+    ...(input.pending !== undefined ? { pending: input.pending } : {}),
   };
 }
