@@ -96,10 +96,17 @@ describe('prototype-pollution-shaped keys are inert', () => {
   });
 });
 
-describe('FINDING: no size caps anywhere on proposal text', () => {
+// F1 CLOSED by #337 (proposal size caps enforced at the merge). These pins
+// were `FINDING:`-titled when they asserted the pre-fix unbounded behaviour;
+// inverted here to assert the fix — oversized text is now rejected per proposal
+// with `proposal_field_too_large`, never applied or deferred. Authoritative
+// enforcement + full boundary coverage live in
+// src/cee/dual-draft/__tests__/proposal-size-caps.test.ts; these are the
+// dual-model-side regression pins that F1 stays closed.
+describe('F1 CLOSED (#337): proposal text size caps enforced at the merge', () => {
   const HUNDRED_KB = 'x'.repeat(100_000);
 
-  it('FINDING: 100KB rationale on an artifact is accepted in full (lands in the DeferArtifact)', () => {
+  it('100KB rationale on an artifact is rejected (proposal_field_too_large), never a DeferArtifact', () => {
     const out = mergeProposals(baseGraph(), [
       {
         type: 'added_evidence_gap',
@@ -108,19 +115,18 @@ describe('FINDING: no size caps anywhere on proposal text', () => {
         rationale: HUNDRED_KB,
       },
     ]);
-    expect(out.report.artifacts).toBe(1);
-    expect(out.artifacts[0].rationale).toHaveLength(100_000);
+    expect(out.report.artifacts).toBe(0);
+    expect(codes(out)).toEqual(['proposal_field_too_large']);
   });
 
-  it('FINDING: 100KB node label on added_risk is APPLIED into the committed merged graph', () => {
+  it('100KB node label on added_risk is rejected, never applied to the committed graph', () => {
     const out = mergeProposals(baseGraph(), [riskProposal('risk_huge', HUNDRED_KB)]);
-    expect(out.report.applied).toBe(1);
-    const merged = out.merged.nodes.find((n) => n.id === 'risk_huge');
-    expect(merged?.label).toHaveLength(100_000);
-    expect(out.report.post_merge_valid).toBe(true);
+    expect(out.report.applied).toBe(0);
+    expect(out.merged.nodes.some((n) => n.id === 'risk_huge')).toBe(false);
+    expect(codes(out)).toEqual(['proposal_field_too_large']);
   });
 
-  it('FINDING: 100KB evidence_pointer is accepted (min length 1, no max)', () => {
+  it('100KB evidence_pointer is rejected (cap enforced above the min-length-1 floor)', () => {
     const out = mergeProposals(baseGraph(), [
       {
         type: 'added_evidence_gap',
@@ -128,11 +134,11 @@ describe('FINDING: no size caps anywhere on proposal text', () => {
         evidence_pointer: HUNDRED_KB,
       },
     ]);
-    expect(out.report.artifacts).toBe(1);
-    expect(out.artifacts[0].evidence_pointer).toHaveLength(100_000);
+    expect(out.report.artifacts).toBe(0);
+    expect(codes(out)).toEqual(['proposal_field_too_large']);
   });
 
-  it('FINDING: 1000-entry uncertainty_drivers array is accepted and applied (each string G14-scanned)', () => {
+  it('an oversized uncertainty_drivers array is rejected by the count cap (before the G14 scan/spread)', () => {
     const drivers = Array.from({ length: 1000 }, (_, i) => `driver ${i} with some plain text`);
     const out = mergeProposals(baseGraph(), [
       {
@@ -141,9 +147,9 @@ describe('FINDING: no size caps anywhere on proposal text', () => {
         evidence_pointer: 'e',
       },
     ]);
-    expect(out.report.applied).toBe(1);
-    const merged = out.merged.nodes.find((n) => n.id === 'risk_drv');
-    expect(merged?.uncertainty_drivers).toHaveLength(1000);
+    expect(out.report.applied).toBe(0);
+    expect(out.merged.nodes.some((n) => n.id === 'risk_drv')).toBe(false);
+    expect(codes(out)).toEqual(['proposal_field_too_large']);
   });
 });
 

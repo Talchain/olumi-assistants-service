@@ -2,22 +2,37 @@
 
 Findings from the quarantined production-system branch's adversarial pin suites
 (`src/cee/dual-model/__tests__/adversarial-*.test.ts`,
-`evidence-pointer.test.ts`). Every finding is **pinned by a `FINDING:`-titled
-test asserting today's behaviour** — a silent change trips CI. **No live code
-was changed**; each fix is a separate, explicitly-approved lane. Severity is
-relative to the flag-ON path only (the MVP is inert on staging/prod).
+`evidence-pointer.test.ts`). Each open finding is **pinned by a `FINDING:`-titled
+test asserting today's behaviour** — a silent change trips CI. **F1 is now CLOSED**
+(fixed on the live dual-draft path by #337, merged to staging); its pins were
+inverted to assert the fix. The remaining findings are still open, each a separate
+explicitly-approved lane. Severity is relative to the flag-ON path only (the MVP is
+inert on staging/prod).
 
-## F1 — No size caps anywhere on proposal text  ·  fix before activation
+## F1 — Unbounded proposal text  ·  ✅ CLOSED by #337 (merged to staging)
 
-`ProposalEnvelope` bounds nothing but `evidence_pointer >= 1` char; `NodeV3`
-label/description are bare `z.string()`. Pinned: a **100KB node label merges
-into the committed graph** (persisted, canvas-rendered, re-serialised); 100KB
-rationale/evidence_pointer accepted into DeferArtifacts; 10k-entry
-`uncertainty_drivers` accepted (each string G14-scanned — CPU note at scale).
-*Pin: adversarial-proposals.test.ts.*
-**Suggested fix shape**: length caps in the M2 structured-output JSON schema
-(`proposal-json-schema.ts`) + mirrored `.max()` in `ProposalEnvelope` (maps to
-existing `malformed_proposal`; no new failure code).
+WAS: `ProposalEnvelope` bounded nothing but `evidence_pointer >= 1` char and
+`NodeV3` label/description were bare `z.string()`, so a **100KB node label
+merged into the committed graph** and 100KB rationale/evidence_pointer /
+10k-entry `uncertainty_drivers` were accepted.
+
+FIX (#337, live dual-draft): `PROPOSAL_FIELD_CAPS` single source of truth in
+`guards.ts` (node id 128, label 200, description 1000, uncertainty_drivers
+12×120, evidence_pointer 300, rationale 500, question 500) enforced by
+`findOversizedProposalField` in `mergeProposals` — run **before** the G14 scan
+(so an unbounded `uncertainty_drivers` array is rejected in O(1) before the
+`...spread`), new additive `proposal_field_too_large` code, **reject per
+proposal, never truncate**, no whole-batch degrade; `MergeFailure`
+reason/proposal_type length-bounded; JSON schema mirrors the caps as a first
+fence. *Pin (this branch): the four inverted cases in `adversarial-proposals.test.ts`
+now assert `proposal_field_too_large`. Authoritative coverage:
+`src/cee/dual-draft/__tests__/proposal-size-caps.test.ts`.*
+
+Residual follow-ups tracked as one "aggregate/serialized payload bounds" lane
+(Codex-noted, non-blocking): no total serialized-graph byte cap; edge `from`/`to`
+not length-capped (only matters if M1 emits an oversized node id); pre-truncation
+allocation of a huge invalid `type` inside `safeParse` (live-path-mitigated by
+M2 `maxTokens`).
 
 ## F2 — Envelope-level extra keys silently stripped (asymmetry)  ·  fix-with-F1
 
