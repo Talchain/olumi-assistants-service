@@ -59,7 +59,7 @@ export class SupabaseArtifactStore implements ArtifactStore {
       const { data, error } = await withTimeout(
         this.client
           .from(M2_ARTIFACTS_TABLE)
-          .upsert(rows as unknown as Record<string, unknown>[], {
+          .upsert([...rows], {
             onConflict: 'scenario_id,turn_id,artifact_index',
             ignoreDuplicates: true,
           })
