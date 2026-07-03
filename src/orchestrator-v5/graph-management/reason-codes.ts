@@ -1,0 +1,108 @@
+/**
+ * Track 3 — Graph Management Core: machine-readable reason-code vocabulary.
+ *
+ * ISOLATED CORE (off-path): nothing in live V5 imports this module. These codes
+ * are the stable, redacted vocabulary the mutation referee attaches to every
+ * non-`would_apply` verdict. They are diagnostic identifiers only — never raw
+ * payload values (redaction contract, T4.0 §5) — so they are safe to log and to
+ * surface to Track 4 (UI-visible mutation state) and Track 6 (safety register).
+ *
+ * Provenance of the vocabulary:
+ *  - Envelope/schema, frame/stale, referential, field-safety, readiness, and
+ *    add_option codes restate the T4.0 hand-off contract
+ *    (Docs/t4/dual-model-typed-mutation-handoff-contract.md) + PR #300's proven
+ *    add_option blocker split.
+ *  - `STRUCTURAL_APPLY_HELD` / `TUNABLE_APPLY_HELD` encode the fail-closed posture
+ *    for structural/tunable mutations while spine-policy §3b/§6 remain PENDING
+ *    (Paul, 2026-07-03: pending policy → held; no broad tunable auto-apply).
+ */
+
+// --- R1 envelope / schema (fail-closed parse) --------------------------------
+export const SCHEMA_INVALID = 'SCHEMA_INVALID' as const;
+export const UNKNOWN_KIND = 'UNKNOWN_KIND' as const;
+export const UNKNOWN_ENVELOPE_VERSION = 'UNKNOWN_ENVELOPE_VERSION' as const;
+export const MISSING_PROVENANCE = 'MISSING_PROVENANCE' as const;
+export const EVIDENCE_POINTER_MISSING = 'EVIDENCE_POINTER_MISSING' as const;
+export const BASE_HASH_MISSING = 'BASE_HASH_MISSING' as const;
+
+// --- R2 frame / stale gate (frame-provided authority; never re-derived) -------
+export const FRAME_UNAVAILABLE = 'FRAME_UNAVAILABLE' as const;
+export const BASE_HASH_DIVERGED = 'BASE_HASH_DIVERGED' as const;
+export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
+
+// --- R3 referential integrity -------------------------------------------------
+export const ENTITY_NOT_FOUND = 'ENTITY_NOT_FOUND' as const;
+export const OPTION_ID_COLLISION = 'OPTION_ID_COLLISION' as const;
+export const GRAPH_CAP_EXCEEDED = 'GRAPH_CAP_EXCEEDED' as const;
+
+// --- R4 field-safety ----------------------------------------------------------
+export const FIELD_NOT_ALLOWED = 'FIELD_NOT_ALLOWED' as const;
+export const PIPELINE_OWNED_FIELD = 'PIPELINE_OWNED_FIELD' as const;
+export const ENGINE_CLAIM_IN_TEXT = 'ENGINE_CLAIM_IN_TEXT' as const;
+
+// --- R5 candidate build (via the V5-owned apply seam) -------------------------
+export const GRAPH_INVARIANT_VIOLATED = 'GRAPH_INVARIANT_VIOLATED' as const;
+export const CANDIDATE_BUILD_FAILED = 'CANDIDATE_BUILD_FAILED' as const;
+
+// --- R6 readiness parity (EP2) ------------------------------------------------
+export const READINESS_DOWNGRADE = 'READINESS_DOWNGRADE' as const;
+export const OPTION_SURFACE_CHANGED = 'OPTION_SURFACE_CHANGED' as const;
+
+// --- R7 kind posture ----------------------------------------------------------
+// add_option held-split (PR #300 proven; verified live in Agent 2 authority table)
+export const ADD_OPTION_APPLY_UNWIRED = 'ADD_OPTION_APPLY_UNWIRED' as const;
+export const OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE =
+  'OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE' as const;
+export const GRAPH_OPTIONS_MALFORMED = 'GRAPH_OPTIONS_MALFORMED' as const;
+// structural / tunable held-pending-doctrine (§3b/§6 PENDING → held)
+export const STRUCTURAL_APPLY_HELD = 'STRUCTURAL_APPLY_HELD' as const;
+export const TUNABLE_APPLY_HELD = 'TUNABLE_APPLY_HELD' as const;
+export const REMOVE_UNCONFIRMED = 'REMOVE_UNCONFIRMED' as const;
+
+// --- Slice 4 idempotency ------------------------------------------------------
+export const PROPOSAL_ALREADY_APPLIED = 'PROPOSAL_ALREADY_APPLIED' as const;
+
+// --- Totality (fail-closed fallback; never escapes unclassified) --------------
+export const CLASSIFY_FAILED = 'CLASSIFY_FAILED' as const;
+
+/**
+ * The complete closed set — frozen so a stray code is caught by
+ * `isMutationReasonCode` and the vocabulary test, never invented ad hoc.
+ */
+export const MUTATION_REASON_CODES = Object.freeze([
+  SCHEMA_INVALID,
+  UNKNOWN_KIND,
+  UNKNOWN_ENVELOPE_VERSION,
+  MISSING_PROVENANCE,
+  EVIDENCE_POINTER_MISSING,
+  BASE_HASH_MISSING,
+  FRAME_UNAVAILABLE,
+  BASE_HASH_DIVERGED,
+  CURRENT_GRAPH_UNREADABLE,
+  ENTITY_NOT_FOUND,
+  OPTION_ID_COLLISION,
+  GRAPH_CAP_EXCEEDED,
+  FIELD_NOT_ALLOWED,
+  PIPELINE_OWNED_FIELD,
+  ENGINE_CLAIM_IN_TEXT,
+  GRAPH_INVARIANT_VIOLATED,
+  CANDIDATE_BUILD_FAILED,
+  READINESS_DOWNGRADE,
+  OPTION_SURFACE_CHANGED,
+  ADD_OPTION_APPLY_UNWIRED,
+  OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE,
+  GRAPH_OPTIONS_MALFORMED,
+  STRUCTURAL_APPLY_HELD,
+  TUNABLE_APPLY_HELD,
+  REMOVE_UNCONFIRMED,
+  PROPOSAL_ALREADY_APPLIED,
+  CLASSIFY_FAILED,
+] as const);
+
+export type MutationReasonCode = (typeof MUTATION_REASON_CODES)[number];
+
+const REASON_CODE_SET: ReadonlySet<string> = new Set(MUTATION_REASON_CODES);
+
+export function isMutationReasonCode(value: unknown): value is MutationReasonCode {
+  return typeof value === 'string' && REASON_CODE_SET.has(value);
+}
