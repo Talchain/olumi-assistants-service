@@ -82,10 +82,10 @@ emission · the §3b/§6-gated un-holding of tunables/add_option.
 
 ## Test evidence
 
-- **105 tests green** across 8 files (envelope matrix, R-ladder, add_option divergence ×8+stale,
+- **111 tests green** across 8 files (envelope matrix, R-ladder, add_option divergence ×8+stale,
   merge-parity identity pin, classifier, EP2 parity, pending/idempotency/telemetry, adapter,
-  isolation guard, + 5 regressions for the review findings below). Run via main-repo vitest
-  `--root <worktree>`, `LOG_LEVEL=fatal`.
+  isolation guard, + 11 regressions for the two review passes below). Run via main-repo vitest
+  `--root <worktree>`, `LOG_LEVEL=fatal`. eslint clean.
 - **tsc-clean:** 0 errors in `graph-management/` (total 544 = pre-existing test-file baseline,
   unchanged; zero existing files edited). Type-level compat assertions for `PendingActionAction`
   and `ProposalEnvelopeT` are enforced by tsc.
@@ -110,6 +110,24 @@ adversarial-review findings`):
 
 **Refuted (no change):** two add_option predicate fail-opens masked by the GraphV3 parse; the
 unreachable `clarify_required` branch (harmless defensive code for future representable kinds).
+
+### Second pass — xhigh code review (10 finder angles → verify → sweep) — 8 findings FIXED
+
+A broader review (correctness + reuse/simplification/efficiency/altitude/conventions) confirmed
+8 more issues, all fixed (commit `fix(t3): resolve code-review findings`):
+
+1. **HIGH redaction leak** — R4 field-safety embedded the raw model-supplied `field` name in
+   `blocker.readable`; now a fixed per-code message (`FieldSafetyResult` no longer returns the raw field).
+2. **HIGH base-graph misattribution** — a schema-invalid *current* graph surfaced as candidate
+   `rejected` (via the apply seam's ingress-parse `GRAPH_INVARIANT_VIOLATED`) rather than an
+   environmental hold. A `currentGraphIsParseable` guard now returns held `CURRENT_GRAPH_UNREADABLE`,
+   reserving `rejected` for genuinely invalid candidates.
+3. **Silent stale** — a freshness-driven `stale` carried no reason code; added `ANALYSIS_NOT_FRESH`.
+4. **Claim-scan unreachable** for flag/clarify `question` — R4 now runs before the non-mutating short-circuit.
+5. **Claim-scan gap** — engine claims can no longer ride in as `update_*` field values.
+6. **Adapter mislabel** — `add_node` no longer blanket-defaults `kind` to `'risk'`.
+7. **Dead work** — removed a discarded `assessCandidate` on the add_option path.
+8. **Reuse** — `bestEffortKind` reuses `CANDIDATE_KINDS`.
 
 ## Risk register
 
