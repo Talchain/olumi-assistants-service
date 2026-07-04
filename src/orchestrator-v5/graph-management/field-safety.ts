@@ -10,7 +10,9 @@
  *     descriptions, questions, reasons, update `from`/`to` values) PLUS the provenance
  *     rationale: no EVPI / flip-point / quantified-probability prose may ride in on a
  *     candidate, whether as narrative prose OR as a label/value (dual-draft G14, "any
- *     free text"). Ids are scanned too but never match the patterns, so it's harmless.
+ *     free text"). Ids are scanned too — in the rare case an id literally contains an
+ *     engine-claim term (e.g. "flip-point"), the conservative false-positive rejection is
+ *     acceptable: a producer should not name entities with engine-claim terms.
  *
  * All checks are pure and total.
  */
