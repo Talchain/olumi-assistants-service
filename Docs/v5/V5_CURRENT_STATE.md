@@ -24,6 +24,7 @@ Rationale: the programme has been treating `V5_CURRENT_STATE.md` as canonical be
 
 - **Handler-coverage map merged and accepted** — PR #220, squash `638ecbe9` (2026-05-29). Now the authoritative static audit for V5 handler coverage and coaching-field delivery.
 - **Diagnostics trace merged** — #213 (`72bf16f0`): `_diagnostic_trace` on `draft_graph` plus a minimal trace on the other V5 paths.
+- **Group A canonical-state foundation (branch `claude/group-a-canonical-state-foundation`, unmerged)** — CEE-local `graphIdentityHash` + identity normalisation (`src/orchestrator-v5/context/graph-identity.ts`), `analysisAffectingHash` preserved, dark/observe CAS evaluator (unwired). A3/A4 (live-writer CAS, `store_draft_graph`) are approval-gated plans; see [`group-a-canonical-state-foundation.md`](./group-a-canonical-state-foundation.md). **Security:** `store_draft_graph` (+ legacy `append_turn_atomic`) carry live `authenticated` EXECUTE with ownership-blind graph UPDATE — fix is `REVOKE authenticated`, queued, not applied.
 
 ---
 
