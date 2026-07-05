@@ -1,23 +1,25 @@
 # Layer-1 architecture decisions memo — v0
 
-**Date:** 2026-07-05 · **Status:** Decisions 1 and 2 accepted; Decision 3 direction set
-(auth-owned v1, lightest safe interim guest posture) — final D1+D3 sign-off together; no
-migration until both are reflected here · **Scope:** the three architectural forks named in
-the layered-acceleration directive. Supporting analysis lives in the three companion docs
-in this folder; each decision below is self-contained enough to decide from.
+**Date:** 2026-07-05 · **Status:** Decisions 1 and 2 accepted; Decision 3 is a
+**conditional decision — not fully resolved**: the branch taken depends on whether Model
+Management must work before the required-login gate lands. D1+D3 final sign-off together;
+no migration until D3 is explicit · **Scope:** the three architectural forks named in the
+layered-acceleration directive. Supporting analysis lives in the three companion docs in
+this folder; each decision below is self-contained enough to decide from.
 
 *v0.1 (2026-07-05): per Paul's review — ownership fork made explicit (no silent `NOT NULL`
 default), Decision 2 marked accepted with the tolerance-retirement caveat, tracked backlog
 items A/B added.*
-*v0.2 (2026-07-05): Decision 1 accepted; Decision 3 direction recorded (required login
-expected soon → auth-owned durable ownership v1, no overbuilt guest model; stop-and-report
-clause for demo blockers).*
+*v0.2 (2026-07-05): Decision 1 accepted; Decision 3 direction recorded.*
+*v0.3 (2026-07-05): per Paul's correction — Decision 3 downgraded from "direction set" to
+**conditional decision** with an explicit login-gate dependency and a two-branch
+implementation rule; Layer-2 parallel plan recorded (opens only after D3 resolves).*
 
 | Decision | State (one line) | Supporting doc |
 |---|---|---|
 | 1. Model Management substrate | **ACCEPTED 2026-07-05**: new `model_versions` table + `scenarios.current_model_version_id` pointer; `scenario_snapshots` NOT extended | [model-management-substrate-decision-brief-v0.md](model-management-substrate-decision-brief-v0.md) |
 | 2. Re-vendor timing | **ACCEPTED 2026-07-05**: keep primitives CEE-local; UI+PLoT → 0.13.1 as Layer 2; promote nothing this layer. Caveat: tolerance retirement = separate follow-up PR | [contract-drift-and-revendor-plan-v0.md](contract-drift-and-revendor-plan-v0.md) |
-| 3. Ownership of version rows | **DIRECTION SET 2026-07-05** (final sign-off with D1): auth-owned `owner_user_id NOT NULL` durable versions; lightest safe interim guest posture; stop-and-report on concrete demo blocker | §4 of the substrate brief + direction below |
+| 3. Ownership of version rows | **CONDITIONAL 2026-07-05 — not fully resolved.** Auth-owned `NOT NULL` v1 *only if* required login lands before Model Management is used in the demo path; otherwise stop and present one concrete session-scoped guest-compatible model first. Open input: does MM need to work pre-login-gate? | §4 of the substrate brief + conditional rule below |
 
 The Apply/Reject service contract ([graph-management-apply-reject-contract-v0.md](graph-management-apply-reject-contract-v0.md))
 is not itself a decision — it is the Layer-3 contract that consumes whatever is decided
@@ -65,9 +67,9 @@ substrate-independent, so this decision does not block Layer-3 contract work).
 
 **Status: ACCEPTED (Paul, 2026-07-05)** — new `model_versions` table +
 `scenarios.current_model_version_id` pointer; `scenario_snapshots` is not extended.
-Ownership semantics come from Decision 3 (direction set the same day, below); D1+D3 receive
-final sign-off together, and **the migration is not written until both are clearly
-reflected in this memo — and migration work itself is Layer 2, which has not been opened.**
+Ownership semantics come from Decision 3 (a **conditional decision**, below); D1+D3 receive
+final sign-off together, and **the migration is not written until D3 is explicit — and
+migration work itself is Layer 2, which has not been opened.**
 
 ---
 
@@ -114,32 +116,43 @@ after runtime behaviour on 0.13.1 is proven.
 
 ---
 
-## Decision 3 — Ownership of model/version rows (DIRECTION SET 2026-07-05)
+## Decision 3 — Ownership of model/version rows (CONDITIONAL DECISION 2026-07-05 — not fully resolved)
 
-**Paul's direction (recorded verbatim in substance, 2026-07-05).** Required login is
-expected soon, so a complex durable guest-version model is not built now. Model Management
-v1 assumes **authenticated durable ownership**; guest durable version history is deferred
-unless a concrete demo blocker appears before the login gate lands.
+**The decision as recorded (Paul, 2026-07-05):**
+- Durable Model Management v1 should use **authenticated ownership where possible**.
+- Required login is expected soon, so we do not want to overbuild a permanent
+  guest-version ownership system unnecessarily.
+- **However, current scenarios are mostly guest/null-owner, so auth-only versioning would
+  not support the current demo path.**
+- **Before writing any migration or Layer-2 implementation, confirm whether Model
+  Management needs to work before the login gate lands.** ← this confirmation is the single
+  open input; D3 is not treated as resolved until it is answered.
 
-**Preferred v1 shape:**
-- `owner_user_id NOT NULL` for durable `model_versions`;
-- authenticated ownership for durable version history;
-- **no** global guest sentinel; **no** unguarded nullable durable owner; **no**
-  service-role-written unowned rows; **no** recreation of the A4 authenticated-write
-  anti-pattern.
+**Implementation rule (two branches, binding):**
 
-**Interim guest posture — lightest safe option**, chosen at implementation time from:
-no durable version history for guest scenarios; or non-durable preview-only behaviour; or
-clear "version history requires sign-in" behaviour. (These correspond to Options 1 and 3
-below; Option 2 — the durable guest-ownership model — is explicitly *not* built now and is
-retained below only as the pre-designed fallback if the login gate slips.)
+*Branch A — required login lands before Model Management v1 is demoed:*
+- `owner_user_id NOT NULL`;
+- authenticated durable model versions only;
+- no global guest sentinel;
+- no nullable unguarded owner;
+- no unowned service-role-written durable rows.
 
-**Stop-and-report clause (binding):** if this posture creates a concrete blocker for the
-current POC/demo path, stop and report the exact blocker **before** writing any migration
-or implementation.
+*Branch B — Model Management must work before required login lands:*
+- **stop and present one concrete guest-compatible model before implementation** (a
+  proposal for approval, not a build);
+- preferred temporary direction: **session-scoped and tenant-safe**;
+- no global guest owner;
+- no unguarded nullable owner;
+- no A4-style unowned service-role-write exposure;
+- must include cleanup/expiry and query-safety rules.
 
-Final sign-off happens together with Decision 1. The analysis that produced the fork is
-kept below for the record.
+**D1 and D3 sign together. No migration is written until D3 is explicit** (i.e. the
+login-gate question is answered and, if Branch B, the concrete guest-compatible model is
+approved).
+
+The analysis that produced the original fork is kept below for the record; Branch B's
+starting material is Option 2 (session claim + expiry + promotion) and Option 3
+(non-durable preview) below.
 
 ### The fork as analysed (for the record)
 
@@ -241,13 +254,35 @@ authorised.
 - **2 is independent:** nothing in 0.13.1 relates to Group A; the UI/PLoT re-vendor can
   start any time (it is Layer-2 execution work, separately approved).
 
-## Current decision state (v0.2)
+## Current decision state (v0.3)
 
 - **Decision 1: ACCEPTED** — `model_versions` + pointer; `scenario_snapshots` untouched.
 - **Decision 2: ACCEPTED** — keep-local; UI+PLoT → 0.13.1 in Layer 2; tolerance retirement
   is a separate follow-up PR.
-- **Decision 3: DIRECTION SET** — auth-owned `NOT NULL` v1, lightest safe interim guest
-  posture, stop-and-report on any concrete demo blocker. Final D1+D3 sign-off together.
-- **No migration is written until D1+D3 final sign-off, and migration work is Layer 2 —
-  not yet opened.** Layer 2 begins only after the decisions are resolved and #346's
-  post-rebase interface is understood.
+- **Decision 3: CONDITIONAL — not fully resolved.** Branch A (auth-only `NOT NULL`) only if
+  required login lands before Model Management is demoed; otherwise Branch B (stop, present
+  one concrete session-scoped tenant-safe guest model for approval). Open input: **does
+  Model Management need to work before the login gate lands?** D1+D3 sign together; no
+  migration until D3 is explicit.
+
+## Layer-2 parallel plan (opens ONLY after D3 resolves)
+
+Once D3 is resolved, Layer 2 runs in parallel:
+
+1. Model Management v1 implementation (per D1 + the resolved D3 branch; migration
+   Paul-approved).
+2. UI re-vendor to `@talchain/schemas` 0.13.1 (full review — consumer-facing; tolerance
+   layer untouched per the D2 caveat).
+3. PLoT re-vendor to `@talchain/schemas` 0.13.1 (full review).
+4. Assurance extension from #345 (harness remains the sole fixture/test owner).
+5. Small hardening follow-up: `__proto__` canonicaliser fix for CEE `response-hash.ts` and
+   the UI canonical hash (backlog item B).
+6. Server-authoritative freshness follow-up, scoped separately (backlog item A).
+
+**Apply/Reject stays Layer 3:** no durable Apply/Reject work until CAS observe-mode and the
+Model Management/version hooks are stable.
+
+**Standing gates:** #346 review/merge is separate; staging `CEE_V5_GRAPH_CAS_MODE=observe`
+flip requires Paul approval; any Model Management migration requires Paul approval; no
+deploy, live SQL, migration execution, schema promotion, prompt upload, CAS enforcement, or
+production flag flip without Paul approval.
