@@ -1,8 +1,24 @@
 # Server-authoritative freshness — scoping v0 (backlog item A)
 
-**Date:** 2026-07-05 · **Status:** scoping only — no implementation in this lane; each phase
-below requires separate authorisation · **Origin:** tracked backlog item A from the Layer-1
-contract-drift analysis (`contract-drift-and-revendor-plan-v0.md` §5, memo v0.4).
+**Date:** 2026-07-05 · **Status:** scoping + recorded product decision — no implementation
+in this lane; each phase below requires separate authorisation · **Origin:** tracked backlog
+item A from the Layer-1 contract-drift analysis (`contract-drift-and-revendor-plan-v0.md`
+§5, memo v0.4).
+
+## Recorded product decision (Paul, 2026-07-05) — binding on the future implementation
+
+1. **Label-only edits should NOT make analysis stale.** The current UI behaviour (stale on
+   label edit) is the defect, not the feature.
+2. **Analysis freshness is owned by the analysis-affecting hash** —
+   `computeAnalysisAffectingGraphHash` / `deriveAnalysisFreshness` semantics are the
+   authority.
+3. **Graph/proposal *application* safety may still use `graphIdentityHash`** — proposal
+   staleness (S2) legitimately reacts to identity-level changes, keyed to the identity
+   hash, not the analysis hash.
+4. **UI-local freshness is eventually retired or subordinated to server-authoritative
+   freshness** — the direction of this document stands.
+5. **The migration is NOT implemented until explicitly approved** — this document guides
+   the future implementation; each phase is separately authorised.
 
 **One-line problem:** the UI computes its own freshness hashes with different semantics from
 CEE's, so the same edit can read *stale* in one part of the screen and *fresh* in another.
@@ -155,12 +171,11 @@ S1–S5 never consult the server verdict; S6 already defers to it.
   Phase 1 UI-only parsing, 0.14.x typing rides the promotion wave.
 - `unconfirmed` execution mode, coaching freshness threading, option-identity guard:
   untouched.
-- **Product question for Paul (with recommendation):** *should a label-only edit make
-  analysis results read stale?* Recommendation: **No** for analysis freshness — labels do
-  not change computation; the analysis-affecting whitelist is the correct semantics, and
-  the current UI behaviour (stale on label edit) is the bug, not the feature. **But** for
-  *proposal application* (S2), label changes legitimately warrant a nudge — that surface
-  should move to identity-hash staleness (Apply/Reject contract), not lose the signal.
+- **Product question — RESOLVED (Paul, 2026-07-05; recorded at the top of this doc):**
+  label-only edits do not make analysis stale; analysis freshness is owned by the
+  analysis-affecting hash; proposal-application safety may still use `graphIdentityHash`;
+  UI-local freshness is retired/subordinated over time; no implementation until explicitly
+  approved.
 
 ---
 
