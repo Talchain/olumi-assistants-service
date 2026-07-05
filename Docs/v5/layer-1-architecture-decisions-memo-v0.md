@@ -1,19 +1,23 @@
 # Layer-1 architecture decisions memo — v0
 
-**Date:** 2026-07-05 · **Status:** Decision 2 accepted; Decision 1 directionally accepted
-pending ownership; Decision 3 open as an explicit fork · **Scope:** the three architectural
-forks named in the layered-acceleration directive. Supporting analysis lives in the three
-companion docs in this folder; each decision below is self-contained enough to decide from.
+**Date:** 2026-07-05 · **Status:** Decisions 1 and 2 accepted; Decision 3 direction set
+(auth-owned v1, lightest safe interim guest posture) — final D1+D3 sign-off together; no
+migration until both are reflected here · **Scope:** the three architectural forks named in
+the layered-acceleration directive. Supporting analysis lives in the three companion docs
+in this folder; each decision below is self-contained enough to decide from.
 
 *v0.1 (2026-07-05): per Paul's review — ownership fork made explicit (no silent `NOT NULL`
 default), Decision 2 marked accepted with the tolerance-retirement caveat, tracked backlog
 items A/B added.*
+*v0.2 (2026-07-05): Decision 1 accepted; Decision 3 direction recorded (required login
+expected soon → auth-owned durable ownership v1, no overbuilt guest model; stop-and-report
+clause for demo blockers).*
 
 | Decision | State (one line) | Supporting doc |
 |---|---|---|
-| 1. Model Management substrate | Option B (new `model_versions` + pointer) **directionally accepted 2026-07-05** — sign-off blocked on the Decision-3 ownership fork | [model-management-substrate-decision-brief-v0.md](model-management-substrate-decision-brief-v0.md) |
+| 1. Model Management substrate | **ACCEPTED 2026-07-05**: new `model_versions` table + `scenarios.current_model_version_id` pointer; `scenario_snapshots` NOT extended | [model-management-substrate-decision-brief-v0.md](model-management-substrate-decision-brief-v0.md) |
 | 2. Re-vendor timing | **ACCEPTED 2026-07-05**: keep primitives CEE-local; UI+PLoT → 0.13.1 as Layer 2; promote nothing this layer. Caveat: tolerance retirement = separate follow-up PR | [contract-drift-and-revendor-plan-v0.md](contract-drift-and-revendor-plan-v0.md) |
-| 3. Ownership of version rows | **OPEN — explicit 3-way fork** (auth-only v1 · guest-compatible now · hybrid preview); Paul chooses, no default | §4 of the substrate brief + fork table below |
+| 3. Ownership of version rows | **DIRECTION SET 2026-07-05** (final sign-off with D1): auth-owned `owner_user_id NOT NULL` durable versions; lightest safe interim guest posture; stop-and-report on concrete demo blocker | §4 of the substrate brief + direction below |
 
 The Apply/Reject service contract ([graph-management-apply-reject-contract-v0.md](graph-management-apply-reject-contract-v0.md))
 is not itself a decision — it is the Layer-3 contract that consumes whatever is decided
@@ -59,12 +63,11 @@ tenant-safe write-time-CAS precedent for the deferred Track-1/Track-3 apply-wiri
 `VersionEventSink` hook the Apply/Reject contract needs (its interface is
 substrate-independent, so this decision does not block Layer-3 contract work).
 
-**Ownership hold (Paul, 2026-07-05).** Substrate direction accepted, but this decision is
-not signable in isolation: current guest/null-owner scenario volume is **high**, and a v1
-`owner_user_id NOT NULL` constraint means version history does not function on the current
-guest-mode demo paths. That trade-off must be chosen explicitly, not defaulted — see the
-Decision-3 fork below; Decisions 1 and 3 are signed together so the migration is written
-once with final ownership semantics.
+**Status: ACCEPTED (Paul, 2026-07-05)** — new `model_versions` table +
+`scenarios.current_model_version_id` pointer; `scenario_snapshots` is not extended.
+Ownership semantics come from Decision 3 (direction set the same day, below); D1+D3 receive
+final sign-off together, and **the migration is not written until both are clearly
+reflected in this memo — and migration work itself is Layer 2, which has not been opened.**
 
 ---
 
@@ -111,7 +114,34 @@ after runtime behaviour on 0.13.1 is proven.
 
 ---
 
-## Decision 3 — Ownership of model/version rows (OPEN — Paul's fork, no default)
+## Decision 3 — Ownership of model/version rows (DIRECTION SET 2026-07-05)
+
+**Paul's direction (recorded verbatim in substance, 2026-07-05).** Required login is
+expected soon, so a complex durable guest-version model is not built now. Model Management
+v1 assumes **authenticated durable ownership**; guest durable version history is deferred
+unless a concrete demo blocker appears before the login gate lands.
+
+**Preferred v1 shape:**
+- `owner_user_id NOT NULL` for durable `model_versions`;
+- authenticated ownership for durable version history;
+- **no** global guest sentinel; **no** unguarded nullable durable owner; **no**
+  service-role-written unowned rows; **no** recreation of the A4 authenticated-write
+  anti-pattern.
+
+**Interim guest posture — lightest safe option**, chosen at implementation time from:
+no durable version history for guest scenarios; or non-durable preview-only behaviour; or
+clear "version history requires sign-in" behaviour. (These correspond to Options 1 and 3
+below; Option 2 — the durable guest-ownership model — is explicitly *not* built now and is
+retained below only as the pre-designed fallback if the login gate slips.)
+
+**Stop-and-report clause (binding):** if this posture creates a concrete blocker for the
+current POC/demo path, stop and report the exact blocker **before** writing any migration
+or implementation.
+
+Final sign-off happens together with Decision 1. The analysis that produced the fork is
+kept below for the record.
+
+### The fork as analysed (for the record)
 
 **One principle is fixed across all options: no unowned durable rows.** Rows with
 `owner_user_id NULL` can never be scoped by RLS (`auth.uid() = NULL` never matches), are
@@ -211,9 +241,13 @@ authorised.
 - **2 is independent:** nothing in 0.13.1 relates to Group A; the UI/PLoT re-vendor can
   start any time (it is Layer-2 execution work, separately approved).
 
-## What a decision looks like
+## Current decision state (v0.2)
 
-Decision 2 is already accepted (2026-07-05, caveat logged). Two lines from Paul close the
-rest, e.g.: "1: B approved with ownership Option 2. 3: Option 2." — Decisions 1 and 3 sign
-together so the migration is written once. Any modification names the section it changes;
-the companion docs absorb the edit and Layer-2 planning starts from the amended memo.
+- **Decision 1: ACCEPTED** — `model_versions` + pointer; `scenario_snapshots` untouched.
+- **Decision 2: ACCEPTED** — keep-local; UI+PLoT → 0.13.1 in Layer 2; tolerance retirement
+  is a separate follow-up PR.
+- **Decision 3: DIRECTION SET** — auth-owned `NOT NULL` v1, lightest safe interim guest
+  posture, stop-and-report on any concrete demo blocker. Final D1+D3 sign-off together.
+- **No migration is written until D1+D3 final sign-off, and migration work is Layer 2 —
+  not yet opened.** Layer 2 begins only after the decisions are resolved and #346's
+  post-rebase interface is understood.
