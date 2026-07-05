@@ -1,15 +1,19 @@
 # Layer-1 architecture decisions memo — v0
 
-**Date:** 2026-07-05 · **Status:** awaiting Paul's decisions · **Scope:** the three
-architectural forks named in the layered-acceleration directive. One sitting, three
-decisions. Supporting analysis lives in the three companion docs in this folder; each
-decision below is self-contained enough to decide from.
+**Date:** 2026-07-05 · **Status:** Decision 2 accepted; Decision 1 directionally accepted
+pending ownership; Decision 3 open as an explicit fork · **Scope:** the three architectural
+forks named in the layered-acceleration directive. Supporting analysis lives in the three
+companion docs in this folder; each decision below is self-contained enough to decide from.
 
-| Decision | Recommendation (one line) | Supporting doc |
+*v0.1 (2026-07-05): per Paul's review — ownership fork made explicit (no silent `NOT NULL`
+default), Decision 2 marked accepted with the tolerance-retirement caveat, tracked backlog
+items A/B added.*
+
+| Decision | State (one line) | Supporting doc |
 |---|---|---|
-| 1. Model Management substrate | New `model_versions` table + `scenarios.current_model_version_id` pointer (Option B) | [model-management-substrate-decision-brief-v0.md](model-management-substrate-decision-brief-v0.md) |
-| 2. Re-vendor timing | Keep primitives CEE-local until Group A + A3 freeze; **decouple**: re-vendor UI+PLoT to 0.13.1 now | [contract-drift-and-revendor-plan-v0.md](contract-drift-and-revendor-plan-v0.md) |
-| 3. Ownership of version rows | `owner_user_id NOT NULL` in v1 (no unowned durable rows); guest support = pre-designed later decision | §4 of the substrate brief |
+| 1. Model Management substrate | Option B (new `model_versions` + pointer) **directionally accepted 2026-07-05** — sign-off blocked on the Decision-3 ownership fork | [model-management-substrate-decision-brief-v0.md](model-management-substrate-decision-brief-v0.md) |
+| 2. Re-vendor timing | **ACCEPTED 2026-07-05**: keep primitives CEE-local; UI+PLoT → 0.13.1 as Layer 2; promote nothing this layer. Caveat: tolerance retirement = separate follow-up PR | [contract-drift-and-revendor-plan-v0.md](contract-drift-and-revendor-plan-v0.md) |
+| 3. Ownership of version rows | **OPEN — explicit 3-way fork** (auth-only v1 · guest-compatible now · hybrid preview); Paul chooses, no default | §4 of the substrate brief + fork table below |
 
 The Apply/Reject service contract ([graph-management-apply-reject-contract-v0.md](graph-management-apply-reject-contract-v0.md))
 is not itself a decision — it is the Layer-3 contract that consumes whatever is decided
@@ -55,6 +59,13 @@ tenant-safe write-time-CAS precedent for the deferred Track-1/Track-3 apply-wiri
 `VersionEventSink` hook the Apply/Reject contract needs (its interface is
 substrate-independent, so this decision does not block Layer-3 contract work).
 
+**Ownership hold (Paul, 2026-07-05).** Substrate direction accepted, but this decision is
+not signable in isolation: current guest/null-owner scenario volume is **high**, and a v1
+`owner_user_id NOT NULL` constraint means version history does not function on the current
+guest-mode demo paths. That trade-off must be chosen explicitly, not defaulted — see the
+Decision-3 fork below; Decisions 1 and 3 are signed together so the migration is written
+once with final ownership semantics.
+
 ---
 
 ## Decision 2 — Re-vendor timing
@@ -91,27 +102,62 @@ for a typed enrichment contract closing the `z.record` seam. Platform: a clean 0
 promotion wave with no silent-drop hazard; A3/A4 freeze the CAS interface without a
 published-contract deadline.
 
+**Status: ACCEPTED (Paul, 2026-07-05).** Keep new graph/data primitives CEE-local for now;
+UI and PLoT re-vendor to 0.13.1 executes as **Layer 2** under full ceremony; promote nothing
+in this layer. **Hard caveat, binding on the Layer-2 re-vendor brief:** the re-vendor PRs
+stay package/lockfile/adoption-test focused — the UI Phase-3 tolerance layer is **not**
+retired in the same PR as the re-vendor. Tolerance retirement is a separate follow-up, only
+after runtime behaviour on 0.13.1 is proven.
+
 ---
 
-## Decision 3 — Ownership of model/version rows
+## Decision 3 — Ownership of model/version rows (OPEN — Paul's fork, no default)
 
-**Recommendation: no unowned durable rows by default. v1 ships `owner_user_id NOT NULL`;
-the RPC refuses version creation for guest scenarios with a typed, recoverable
-"sign in to save versions" boundary error. Guests keep exactly today's behaviour (single
-live graph, no history — they have no snapshots today either, so nothing regresses).**
+**One principle is fixed across all options: no unowned durable rows.** Rows with
+`owner_user_id NULL` can never be scoped by RLS (`auth.uid() = NULL` never matches), are
+touchable only by service-role, and accumulate with no claimant — that is the A4 shape
+(service-role-written data whose only protection is "nothing else is granted") installed as
+a table default rather than a one-off RPC bug. Every option below preserves this principle;
+they differ in what guests get.
 
-**Rationale.** Rows with `owner_user_id NULL` can never be scoped by RLS
-(`auth.uid() = NULL` never matches), are touchable only by service-role, and accumulate
-with no claimant — that is the A4 shape (service-role-written data whose only protection is
-"nothing else is granted") installed as a table default rather than a one-off RPC bug.
+**Why this cannot be defaulted: current guest/null-owner scenario volume is high.** A
+silent `owner_user_id NOT NULL` v1 means version history does not work on the current
+guest-mode demo paths. That is a product trade-off, so the sign-off picks one of three
+explicit postures — each stated with its guest outcome, demo-path expectation, tenant
+safety, and A4 avoidance:
 
-**If guest versions become a product requirement**, the brief pre-designs the explicit
-model to approve then, not now: session-scoped claim (`guest_session_id` + CHECK constraint
-so every row has exactly one owner kind), mandatory `expires_at` with scheduled cleanup,
-one-shot promotion-on-signup RPC (transacted together with the matching `scenarios.user_id`
-promotion, which also lacks a path today), and CEE-mediated access only — the trust
-boundary is CEE binding the session id from its own validated state, never a
-client-supplied id.
+**Option 1 — authenticated-only v1, guest versions deferred.**
+- *Guest/null-owner scenarios:* keep exactly today's behaviour — single live graph, no
+  history; version-creation RPC returns a typed, recoverable "sign in to save versions"
+  error.
+- *Demo path:* version history does **not** work for guest demos until a later guest model
+  ships. This is the cost being accepted, explicitly.
+- *Tenant safety:* maximal — `NOT NULL` + owner-scoped RLS; nothing new to protect.
+- *A4 avoidance:* no unowned rows can exist; no JWT-role write grants.
+
+**Option 2 — guest-compatible ownership model now.**
+- *Guest/null-owner scenarios:* durable version history from day one via the pre-designed
+  protected mechanism (§4 of the brief): `guest_session_id` claim + CHECK constraint
+  (exactly one owner kind, never both null), mandatory `expires_at` + scheduled cleanup,
+  one-shot promotion-on-signup RPC (transacted with the matching `scenarios.user_id`
+  promotion, which also lacks a path today).
+- *Demo path:* version history works everywhere, including guest demos.
+- *Tenant safety:* guest rows are never directly readable by `anon`/`authenticated` (no
+  policy can scope them); all guest access is CEE-mediated, with CEE binding the session id
+  from its own validated state — never a client-supplied id.
+- *A4 avoidance:* rows can never be unowned-forever by constraint (expiry + exactly-one-
+  owner-kind); the cost is carrying the session-claim machinery from v1.
+
+**Option 3 — hybrid: durable authenticated versions + non-durable guest preview.**
+- *Guest/null-owner scenarios:* guests get session-scoped, non-durable preview versions
+  (ephemeral, never written to `model_versions`) — the version UX exists, persistence does
+  not; sign-in prompt to keep history.
+- *Demo path:* version history *appears* to work in guest demos within a session; it does
+  not survive the session.
+- *Tenant safety / A4 avoidance:* identical to Option 1 for durable rows (no durable guest
+  rows exist at all); preview state needs no DB protection.
+- *Cost:* two version code paths (durable + preview) and honest-copy care so preview is
+  never narrated as saved.
 
 **Protection checklist (A4 applied, binding for the whole feature):** ENABLE + FORCE RLS;
 owner-only SELECT policy; no JWT-role write policies; every RPC `SECURITY DEFINER` +
@@ -120,12 +166,35 @@ default privileges auto-grant on new public functions, so the revokes are load-b
 grant-layer verification against the **live database** (`pg_proc`/`proacl`), not migration
 filenames — the method that caught A4.
 
-**Risk if wrong.** Too strict → a sign-in prompt guests see when trying to save a version
-(recoverable copy, no data loss). Too loose → unscopeable durable rows and a repeat of the
-A4 remediation on a bigger surface. Strict is the reversible error.
+**Risk if wrong.** Too strict (Option 1 chosen when guest demos matter) → the demo path
+visibly lacks version history — recoverable, but a product regression against expectations,
+which is exactly why this is not defaulted. Too loose → unscopeable durable rows and a
+repeat of the A4 remediation on a bigger surface. Option 2 carries machinery cost; Option 3
+carries dual-path cost. All three are reversible at different prices; unowned-forever rows
+are the only unrecoverable shape, and no option permits them.
 
 **Unblocks.** Lets the Decision-1 migration be written with final ownership semantics (no
 retrofit), and gives Apply/Reject's version-event hook a tenant-safe target.
+
+---
+
+## Tracked backlog items (from the drift analysis — NOT for #343/#344/#345/#346)
+
+Follow-ups logged here so they are owned, not implemented in any current lane without
+separate authorisation.
+
+**A. Server-authoritative freshness (correctness issue).** The UI and CEE disagree on
+freshness semantics today: UI-local `generateGraphHash` **includes** labels; CEE
+`computeAnalysisAffectingGraphHash` **excludes** them — a label-only edit can read stale in
+the UI and fresh in CEE. Direction: server-authoritative freshness; retire or replace the
+UI-local freshness hash. Until that lands, the compatibility-plan canary test pinning the
+current divergence stays in place.
+
+**B. Complete `__proto__` canonicaliser hardening.** Group A hardened CEE
+`stableStringify` with null-prototype accumulators; the same hardening should later be
+applied to CEE `src/utils/response-hash.ts` and the UI canonical hash implementation. Small
+follow-up hardening task; not bundled into #343/#344/#345/#346 unless explicitly
+authorised.
 
 ---
 
@@ -144,6 +213,7 @@ retrofit), and gives Apply/Reject's version-event hook a tenant-safe target.
 
 ## What a decision looks like
 
-Three lines from Paul suffice, e.g.: "1: B approved. 2: keep-local + re-vendor now
-approved. 3: NOT NULL v1 approved." Any modification names the section it changes; the
-companion docs absorb the edit and Layer-2 planning starts from the amended memo.
+Decision 2 is already accepted (2026-07-05, caveat logged). Two lines from Paul close the
+rest, e.g.: "1: B approved with ownership Option 2. 3: Option 2." — Decisions 1 and 3 sign
+together so the migration is written once. Any modification names the section it changes;
+the companion docs absorb the edit and Layer-2 planning starts from the amended memo.
