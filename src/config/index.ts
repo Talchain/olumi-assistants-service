@@ -662,6 +662,18 @@ const ConfigSchema = z.object({
     chipEngineEnabled: booleanString.default(true), // CEE_CHIP_ENGINE_ENABLED — typed chip engine (WS5)
     postFlightValidatorEnabled: booleanString.default(false), // CEE_POST_FLIGHT_VALIDATOR_ENABLED — post-flight response validation (WS7) — not wired
     guidedIntakeEnabled: booleanString.default(false), // CEE_GUIDED_INTAKE_ENABLED — BIL wire-up for thin briefs (WS3) — not wired
+    // Model Management v1 (CEE_MODEL_VERSIONS_ENABLED — Layer 2, DARK).
+    // Gates every entry point of src/orchestrator-v5/model-management/
+    // (save/list/get/restore/compare versions). Default OFF; flag-off is a
+    // fail-closed typed 'disabled' no-op at every entry point — no Supabase
+    // call, no hashing, no behaviour change anywhere (the module has zero
+    // production call sites this slice; nothing is wired into routes or the
+    // turn-executor). Env-enforced: locked false in prod; staging requires an
+    // explicit opt-in (audit-logged). The backing migration
+    // (20260705120000_v5_model_versions.sql) is AUTHORED-NOT-EXECUTED and
+    // separately Paul-gated — do not enable this flag anywhere before that
+    // migration is live, or every call degrades to a typed store error.
+    modelVersionsEnabled: createEnvEnforcedBoolean(false, "CEE_MODEL_VERSIONS_ENABLED"),
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -1066,6 +1078,7 @@ function parseConfig(): Config {
       chipEngineEnabled: env.CEE_CHIP_ENGINE_ENABLED,
       postFlightValidatorEnabled: env.CEE_POST_FLIGHT_VALIDATOR_ENABLED,
       guidedIntakeEnabled: env.CEE_GUIDED_INTAKE_ENABLED,
+      modelVersionsEnabled: env.CEE_MODEL_VERSIONS_ENABLED,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,
