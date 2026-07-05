@@ -124,6 +124,32 @@ export interface SessionTurnWrite {
    * length-capped there. `undefined`/omitted writes NULL.
    */
   readonly assistantMessage?: string;
+  /**
+   * A3 graph CAS observe-mode: full identity hash (64-hex,
+   * `computeGraphIdentityHash`) of the SERVER-SIDE persisted graph read at
+   * turn start — the trusted expected base the pre-RPC CAS evaluation
+   * compares against the current `scenarios.graph`.
+   *
+   * TRUSTED BASE RULE: this must derive ONLY from a server-side persisted
+   * read (`buildTurnContext`'s scenarios read, or edit-graph-dispatch's
+   * `loadPersistedGraphStrict`). NEVER from request-supplied `graph_state` —
+   * that may be the very graph being written, and a CAS that validates the
+   * write against itself always "matches".
+   *
+   * Convention: `undefined` = this write path is not instrumented (no server
+   * base read; categorised `no_expected`, never a conflict). `null` = a
+   * server base read happened but the graph was absent / identity-empty /
+   * unparseable. Mirrors `CommitMetadata.expectedGraphIdentityHash`.
+   */
+  readonly expectedGraphIdentityHash?: string | null;
+  /**
+   * A3 graph CAS observe-mode: analysis-affecting hash (16-hex,
+   * `computeAnalysisAffectingGraphHash`) of the same server-read base as
+   * `expectedGraphIdentityHash`. Used to downgrade an identity mismatch to
+   * `cosmetic_concurrent_edit` when the analysis projection did not move.
+   * Same undefined/null convention as `expectedGraphIdentityHash`.
+   */
+  readonly expectedGraphAnalysisHash?: string | null;
 }
 
 export interface SessionStore {
@@ -307,6 +333,33 @@ export class StateCommitFailedError extends Error {
     if (opts?.cause !== undefined) {
       (this as unknown as { cause?: unknown }).cause = opts.cause;
     }
+  }
+}
+
+/**
+ * A3 graph CAS — enforce mode ONLY. Thrown by `SupabaseSessionStore.append()`
+ * BEFORE the append_turn_atomic_v2 RPC when the pre-write evaluation
+ * categorises the write as `analysis_affecting_conflict` and
+ * CEE_V5_GRAPH_CAS_MODE='enforce' (non-prod only — prod auto-downgrades to
+ * observe). No other category is ever enforced; observe mode never throws.
+ *
+ * Extends StateCommitFailedError so every existing TurnExecutor
+ * `instanceof StateCommitFailedError` catch maps it onto the existing typed
+ * failure envelope (STATE_COMMIT_FAILED → INTERNAL_ERROR) — no route or wire
+ * shape change. This is app-side, best-effort blocking with a
+ * SELECT-then-write TOCTOU window, NOT an atomicity guarantee.
+ */
+export class GraphStaleWriteError extends StateCommitFailedError {
+  /** Closed-enum conflict category from graph-cas-conflict.ts. */
+  readonly conflict_category: string;
+
+  constructor(
+    message: string,
+    opts: { conflict_category: string; cause?: unknown },
+  ) {
+    super(message, { cause: opts.cause });
+    this.name = 'GraphStaleWriteError';
+    this.conflict_category = opts.conflict_category;
   }
 }
 

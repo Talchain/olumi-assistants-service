@@ -177,6 +177,7 @@ import {
   computeAnalysisAffectingGraphHash,
   computeDeterministicGraphHash,
 } from './context/graph-hash.js';
+import { computeExpectedGraphCasHashes } from './context/graph-cas-conflict.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import {
   deriveAnalysisFreshness,
@@ -591,9 +592,26 @@ export async function runTurnExecutor(
     meta: Parameters<typeof commitDirectAnswer>[1],
     store?: Parameters<typeof commitDirectAnswer>[2],
   ): Promise<Awaited<ReturnType<typeof commitDirectAnswer>>> => {
+    // A3 graph CAS observe-mode: derive the expected-base hashes ONLY from
+    // the server-side persisted read buildTurnContext performed at turn start
+    // (`context.persistedGraph`) — NEVER from request-supplied graph_state,
+    // which may be the very graph being written (trusted base rule; see
+    // graph-cas-conflict.ts). Computed only for graph-bearing commits with
+    // the mode on, so flag-off / graph-free commits pay zero hashing.
+    // buildTurnContext degrades a failed scenarios read to null, which maps
+    // to expected=null → `no_expected`/`first_write` — categories that are
+    // never enforced, so a degraded read can never block a write.
+    const expectedGraphCasHashes =
+      meta.graph !== undefined && config.features.graphCasMode !== 'off'
+        ? computeExpectedGraphCasHashes(context.persistedGraph)
+        : undefined;
     const result = await commitDirectAnswer(
       resp,
       {
+        // Injected BEFORE ...meta so a call site could still override; no
+        // current call site does (the wrapper's server-read derivation is
+        // the single trusted source on this path).
+        ...(expectedGraphCasHashes ?? {}),
         // V5 Signature Loop — carry forward the prior turn's pendings by default
         // so a non-consuming turn does not wipe a live proposal (behaviour #2).
         // Placed BEFORE `...meta` so a call site can still override it; the

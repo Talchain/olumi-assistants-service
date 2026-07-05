@@ -20,8 +20,10 @@ import { getRuntimeEnv } from "./env-resolver.js";
  */
 interface ConfigOverrideEvent {
   settingName: string;
-  requestedValue: boolean;
-  actualValue: boolean;
+  // boolean for the enforced-boolean flags; string for enforced-mode flags
+  // (e.g. CEE_V5_GRAPH_CAS_MODE 'enforce' → 'observe').
+  requestedValue: boolean | string;
+  actualValue: boolean | string;
   env: string;
   reason: string;
 }
@@ -152,6 +154,70 @@ function createEnvEnforcedBoolean(
 
       // Local/test: allow requested value
       return requestedValue;
+    });
+}
+
+/**
+ * Environment-enforced three-state mode for the A3 graph CAS hook
+ * (CEE_V5_GRAPH_CAS_MODE). Values: 'off' | 'observe' | 'enforce'
+ * (lowercased + trimmed).
+ *
+ * Policy (mirrors createEnvEnforcedBoolean's production_lockdown pattern):
+ * - Invalid or empty values fall back to the code default with a console
+ *   warning — NEVER a boot failure (a typo in an env var must not take the
+ *   service down).
+ * - In prod, 'enforce' is DOWNGRADED to 'observe' with an [AUDIT] warning and
+ *   a configOverrideEvents entry. A3 enforcement is provisional and app-side
+ *   (SELECT-then-write, not atomic); it must not block production writes
+ *   until the RPC-v3 in-transaction CAS exists and is separately approved.
+ * - staging/local/test: the requested mode is honoured (staging is where
+ *   observe → enforce evidence is gathered).
+ *
+ * @param defaultValue - Code default ('off' for graphCasMode).
+ * @param settingName  - Env var name for logging/audit events.
+ */
+function createEnvEnforcedMode(
+  defaultValue: "off" | "observe" | "enforce",
+  settingName: string,
+) {
+  return z
+    .union([z.string(), z.undefined()])
+    .transform((val): "off" | "observe" | "enforce" => {
+      const env = getRuntimeEnv();
+
+      let requested: "off" | "observe" | "enforce" = defaultValue;
+      if (val !== undefined) {
+        const lower = val.toLowerCase().trim();
+        if (lower === "off" || lower === "observe" || lower === "enforce") {
+          requested = lower;
+        } else if (lower === "") {
+          requested = defaultValue;
+        } else {
+          console.warn(
+            `[CONFIG] ${settingName}: invalid value "${val}" — falling back to "${defaultValue}" ` +
+              `(valid values: off | observe | enforce)`,
+          );
+          requested = defaultValue;
+        }
+      }
+
+      // Prod: enforce downgrades to observe (never boot-fails, never blocks
+      // production writes on a non-atomic app-side check).
+      if (env === "prod" && requested === "enforce") {
+        console.warn(
+          `[AUDIT] ${settingName}=enforce is not permitted in production — downgraded to "observe"`,
+        );
+        configOverrideEvents.push({
+          settingName,
+          requestedValue: "enforce",
+          actualValue: "observe",
+          env,
+          reason: "production_lockdown",
+        });
+        return "observe";
+      }
+
+      return requested;
     });
 }
 
@@ -317,6 +383,17 @@ const ConfigSchema = z.object({
     // This is a known naming issue. Rename to CEE_V1_ROUTE_DISABLED planned post-pilot.
     pipelineV4Enabled: booleanString.default(true),
     orchestratorV5: booleanString.default(false), // ENABLE_V5_ORCHESTRATOR — V5 slice A0 scaffold (contracts + ingress/egress B1 validation only, no TurnExecutor). Route returns 404 when false.
+    // CEE_V5_GRAPH_CAS_MODE — A3 graph CAS observe-mode ('off' | 'observe' | 'enforce').
+    // App-side stale-write OBSERVATION at the single live scenarios.graph write
+    // chokepoint (SupabaseSessionStore.append → append_turn_atomic_v2). NOT atomic
+    // CAS — a SELECT-then-write TOCTOU window remains; true atomicity is the
+    // RPC-v3 proposal (Docs/v5/proposals/append-turn-atomic-v3-graph-cas.md).
+    // 'off' (default): zero SELECTs, byte-identical write path. 'observe': evaluate
+    // + telemetry, commit always proceeds. 'enforce' (provisional, non-prod only —
+    // auto-downgraded to 'observe' in prod): block analysis_affecting_conflict
+    // writes pre-RPC via GraphStaleWriteError (rides the existing
+    // StateCommitFailedError handling; no wire-shape change).
+    graphCasMode: createEnvEnforcedMode("off", "CEE_V5_GRAPH_CAS_MODE"),
   }),
 
   // Prompt Cache Configuration
@@ -847,6 +924,7 @@ function parseConfig(): Config {
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
       orchestratorV5: env.ENABLE_V5_ORCHESTRATOR,
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
+      graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

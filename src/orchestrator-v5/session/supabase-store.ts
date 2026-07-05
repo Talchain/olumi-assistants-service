@@ -36,11 +36,18 @@ import {
 import type { SessionLRUCache } from './cache.js';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import {
+  GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
+import {
+  categoriseGraphCasWrite,
+  unavailableGraphCasEvaluation,
+  type GraphCasEvaluation,
+  type GraphCasMode,
+} from '../context/graph-cas-conflict.js';
 import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
 import {
@@ -80,6 +87,21 @@ function errCode(e: unknown): string | undefined {
 
 export interface SupabaseSessionStoreOptions {
   readonly defaultReadLimit: number;
+  /**
+   * A3 graph CAS observe-mode (`CEE_V5_GRAPH_CAS_MODE`). Absent → 'off'
+   * (zero SELECTs, byte-identical write path). See `evaluateGraphCas` and
+   * graph-cas-conflict.ts for semantics and the coverage caveat.
+   */
+  readonly graphCasMode?: GraphCasMode;
+}
+
+/** Telemetry hash-prefix length for the 64-hex identity hashes. */
+const GRAPH_CAS_HASH_PREFIX_LENGTH = 16;
+
+function identityHashPrefix(hash: string | null | undefined): string | null {
+  return typeof hash === 'string' && hash.length > 0
+    ? hash.slice(0, GRAPH_CAS_HASH_PREFIX_LENGTH)
+    : null;
 }
 
 export class SupabaseSessionStore implements SessionStore {
@@ -90,6 +112,20 @@ export class SupabaseSessionStore implements SessionStore {
   ) {}
 
   async append(write: SessionTurnWrite): Promise<{ id: string }> {
+    // A3 graph CAS observe-mode — pre-RPC stale-write evaluation. Runs ONLY
+    // for graph-bearing writes when the mode is not 'off'; flag-off pays zero
+    // SELECTs and the RPC call below is byte-identical to today. In observe
+    // mode there is NO code path from this hook to a thrown error, a changed
+    // response, or a skipped RPC — the commit always proceeds. In enforce mode
+    // (non-prod only; prod config auto-downgrades to observe) ONLY
+    // `analysis_affecting_conflict` blocks, pre-RPC, via GraphStaleWriteError
+    // (extends StateCommitFailedError → existing typed failure envelope).
+    //
+    // NOT atomic: the SELECT inside evaluateGraphCas and the RPC below are
+    // separate round-trips (TOCTOU window). This is observation, not write
+    // safety — see graph-cas-conflict.ts and the RPC-v3 proposal doc.
+    await this.runGraphCasHook(write);
+
     // PostgREST overload disambiguation: always pass all 11 named args,
     // including p_graph and p_brief_text as `null` when absent. Omitting
     // either would make PostgREST consider lower-arity overloads as
@@ -175,6 +211,126 @@ export class SupabaseSessionStore implements SessionStore {
     this.cache.invalidateAll(write.scenario_id);
 
     return { id: data };
+  }
+
+  /**
+   * A3 graph CAS hook — evaluate, emit telemetry, and (enforce mode only)
+   * block `analysis_affecting_conflict` writes pre-RPC.
+   *
+   * Guarantees:
+   *  - mode 'off' or graph-absent write → returns immediately: no SELECT, no
+   *    hashing, no telemetry, no behavioural change of any kind.
+   *  - observe mode → NEVER throws, never changes the response, never skips
+   *    the RPC. Any internal fault (including telemetry) degrades to an
+   *    `unavailable` evaluation or a swallowed emit — the commit proceeds.
+   *  - enforce mode → throws GraphStaleWriteError ONLY for
+   *    `analysis_affecting_conflict`. Every other category — including
+   *    `self_noop` (idempotent replays / duplicate submissions),
+   *    `cosmetic_concurrent_edit`, `no_expected`, `first_write`, `match` and
+   *    every `unavailable` reason (SELECT failure, parse failure, hook fault)
+   *    — always proceeds. Infrastructure faults must never fail a live write.
+   */
+  private async runGraphCasHook(write: SessionTurnWrite): Promise<void> {
+    const mode = this.options.graphCasMode ?? 'off';
+    if (mode === 'off' || write.graph == null) return;
+
+    const { evaluation, select_ms, select_failed } = await this.evaluateGraphCas(write);
+
+    // Guarded telemetry: a telemetry fault must never fail (or block) the
+    // write, in either mode.
+    try {
+      const payload = {
+        scenario_id: write.scenario_id,
+        turn_id: write.turn_id,
+        mode,
+        category: evaluation.category,
+        reason: evaluation.reason,
+        expected_identity_hash: identityHashPrefix(write.expectedGraphIdentityHash),
+        current_identity_hash: identityHashPrefix(evaluation.current_identity_hash),
+        incoming_identity_hash: identityHashPrefix(evaluation.incoming_identity_hash),
+        // Analysis hashes are already 16-hex (graph-hash.ts HASH_HEX_LENGTH).
+        expected_analysis_hash: write.expectedGraphAnalysisHash ?? null,
+        current_analysis_hash: evaluation.current_analysis_hash,
+        select_ms,
+        select_failed,
+      };
+      emit(TelemetryEvents.V5GraphCasEvaluated, payload);
+      if (mode === 'enforce' && evaluation.category === 'analysis_affecting_conflict') {
+        emit(TelemetryEvents.V5GraphCasWriteBlocked, payload);
+      }
+    } catch (telemetryErr) {
+      try {
+        log.warn(
+          {
+            scenario_id: write.scenario_id,
+            turn_id: write.turn_id,
+            err: (telemetryErr as Error)?.message ?? String(telemetryErr),
+          },
+          'A3 graph CAS — telemetry emit failed; continuing (write is never failed by telemetry)',
+        );
+      } catch {
+        // Nothing in this hook may fail the write via logging either.
+      }
+    }
+
+    if (mode === 'enforce' && evaluation.category === 'analysis_affecting_conflict') {
+      throw new GraphStaleWriteError(
+        `graph CAS enforce: stale write blocked pre-RPC for scenario ${write.scenario_id} ` +
+          `(category=${evaluation.category}, reason=${evaluation.reason}). ` +
+          'App-side best-effort check (SELECT-then-write), not an atomicity guarantee.',
+        { conflict_category: evaluation.category },
+      );
+    }
+  }
+
+  /**
+   * A3 graph CAS — pre-RPC evaluation: timed PK SELECT of the current
+   * `scenarios.graph`, then the pure categoriser. The whole body is
+   * fault-isolated: any throw degrades to `unavailable`/observe_hook_failed
+   * and the commit ALWAYS proceeds (a SELECT failure is
+   * `unavailable`/select_failed — also always proceeds, even under enforce).
+   */
+  private async evaluateGraphCas(write: SessionTurnWrite): Promise<{
+    readonly evaluation: GraphCasEvaluation;
+    readonly select_ms: number | null;
+    readonly select_failed: boolean;
+  }> {
+    try {
+      const selectStartedAt = Date.now();
+      const { data, error } = await this.client
+        .from('scenarios')
+        .select('graph')
+        .eq('id', write.scenario_id)
+        .maybeSingle();
+      const select_ms = Date.now() - selectStartedAt;
+
+      if (error) {
+        return {
+          evaluation: unavailableGraphCasEvaluation('select_failed'),
+          select_ms,
+          select_failed: true,
+        };
+      }
+
+      const currentGraphRaw =
+        data == null ? null : ((data as { graph?: unknown }).graph ?? null);
+      return {
+        evaluation: categoriseGraphCasWrite({
+          expectedIdentityHash: write.expectedGraphIdentityHash,
+          expectedAnalysisHash: write.expectedGraphAnalysisHash,
+          currentGraphRaw,
+          incomingGraphRaw: write.graph,
+        }),
+        select_ms,
+        select_failed: false,
+      };
+    } catch {
+      return {
+        evaluation: unavailableGraphCasEvaluation('observe_hook_failed'),
+        select_ms: null,
+        select_failed: false,
+      };
+    }
   }
 
   async readRecent(
