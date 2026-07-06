@@ -120,11 +120,37 @@ function repoRel(absPath: string): string {
 }
 
 /**
+ * Strip line (`//…`) and block (`/* … *\/`, incl. JSDoc) comments so the
+ * substrate scan matches SHIPPING CODE references only.
+ *
+ * A substrate is "landed" when it exists in shipping code, not when a
+ * comment merely NAMES it — e.g. build-context-summary.ts documents that
+ * "the CEE-local 64-hex graphIdentityHash is on NO wire or diagnostic
+ * surface", asserting the OPPOSITE of a landing, yet a raw string scan
+ * matched that documentation and fired the ISSUE-9024 tripwire falsely.
+ *
+ * This never HIDES a real landing: code after `//` or inside `/* *\/` is by
+ * definition itself commented out, and a genuine substrate reference is an
+ * identifier / property / string KEY (e.g. `env.CEE_V5_GRAPH_CAS_MODE`,
+ * `"CEE_V5_GRAPH_CAS_MODE"`) — none of which are comments, so all survive.
+ * Deliberately does not model string literals containing comment tokens;
+ * that edge case cannot manufacture a false NEGATIVE for these identifier-
+ * shaped signals. Stripping only removes text, so a currently-passing
+ * (empty-hits) tripwire can never be flipped red by this refinement.
+ */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ') // block + JSDoc comments
+    .replace(/\/\/[^\n]*/g, ' '); // line comments
+}
+
+/**
  * Returns repo-relative paths of files under `dirs` (plus `extraFiles`)
- * whose content matches `pattern`. `__tests__` directories are excluded:
- * a substrate is "landed" when it exists in shipping code, not when a
- * src-colocated test merely names it (graph-identity's own tests already
- * name graphIdentityHash today).
+ * whose SHIPPING CODE (comments stripped, see `stripComments`) matches
+ * `pattern`. `__tests__` directories are excluded: a substrate is "landed"
+ * when it exists in shipping code, not when a src-colocated test merely
+ * names it (graph-identity's own tests already name graphIdentityHash
+ * today).
  */
 function filesMatching(dirs: readonly string[], ext: string, pattern: RegExp, extraFiles: readonly string[] = []): string[] {
   const hits: string[] = [];
@@ -136,7 +162,7 @@ function filesMatching(dirs: readonly string[], ext: string, pattern: RegExp, ex
   }
   expect(paths.length, `substrate scan found no ${ext} files under [${dirs.join(', ')}] — the tripwire is scanning nothing`).toBeGreaterThan(0);
   for (const abs of paths) {
-    if (pattern.test(readFileSync(abs, 'utf-8'))) hits.push(repoRel(abs));
+    if (pattern.test(stripComments(readFileSync(abs, 'utf-8')))) hits.push(repoRel(abs));
   }
   return hits;
 }
