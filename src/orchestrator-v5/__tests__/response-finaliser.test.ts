@@ -36,6 +36,8 @@ import { finaliseV5Response } from '../response-finaliser.js';
 import type { ValidationError } from '../routing/validator.js';
 import type { ComposeContext } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import type { FreshnessDerivation } from '../context/freshness.js';
+import { AnalysisReadyPayload as CeeAnalysisReadyPayloadSchema } from '../../schemas/analysis-ready.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────
 
@@ -189,6 +191,136 @@ describe('finaliseV5Response — behaviour', () => {
     const tsA = (a.analysis_ready as { computed_at?: string }).computed_at!;
     const tsB = (b.analysis_ready as { computed_at?: string }).computed_at!;
     expect(new Date(tsB).getTime()).toBeGreaterThan(new Date(tsA).getTime());
+  });
+});
+
+// ─── Group 2.5: freshness-only synthesis (Mission 3 transport recovery) ───
+//
+// A legacy/unparseable graph reload derives an honest 'unknown' freshness
+// verdict but builds no structural readiness payload. The finaliser
+// synthesises a minimal science-free analysis_ready carrier for EXACTLY the
+// two legacy/unparseable reasons; every other no-readiness case keeps the
+// omit behaviour. Widening the gate (stale-without-readiness, other unknown
+// reasons such as edit_graph's derivation_failed) is a separate product
+// decision — the omission tests below are enforcing pins, not placeholders.
+
+describe('finaliseV5Response — freshness-only synthesis', () => {
+  function derivation(overrides: Partial<FreshnessDerivation> = {}): FreshnessDerivation {
+    return {
+      freshness: 'unknown',
+      reason: 'current_graph_hash_unavailable',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'sha256:prior',
+      current_graph_hash: null,
+      computed_at: '2026-05-10T10:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('synthesises a freshness-only block for unknown/current_graph_hash_unavailable with no readiness payload', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, { freshness: derivation() });
+
+    const ar = finalised.analysis_ready as Record<string, unknown>;
+    expect(ar).toBeDefined();
+    expect(ar.freshness).toBe('unknown');
+    expect(ar.freshness_reason).toBe('current_graph_hash_unavailable');
+    expect(ar.status).toBe('blocked');
+    expect(ar.options).toEqual([]);
+    expect(ar.goal_node_id).toBe('');
+    expect(ar.bias_findings).toEqual([]);
+    expect(ar.graph_hash_at_run).toBe('sha256:prior');
+    expect('current_graph_hash' in ar).toBe(false);
+    // computed_at preserves the selected fact's run timestamp.
+    expect(ar.computed_at).toBe('2026-05-10T10:00:00.000Z');
+
+    // Science-free: no claim-bearing keys ride the synthesized carrier.
+    expect('blockers' in ar).toBe(false);
+    expect('model_adjustments' in ar).toBe(false);
+    expect('user_questions' in ar).toBe(false);
+    expect('coaching_summary' in ar).toBe(false);
+
+    // Wire-valid at both the boundary and the CEE schema.
+    OlumiResponseSchema.parse(finalised);
+    CeeAnalysisReadyPayloadSchema.parse(ar);
+  });
+
+  it('synthesises for legacy_fact_missing_hash; null fact timestamp falls back to wire-emit time', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({
+        reason: 'legacy_fact_missing_hash',
+        graph_hash_at_run: null,
+        computed_at: null,
+      }),
+    });
+    const ar = finalised.analysis_ready as Record<string, unknown>;
+    expect(ar.freshness).toBe('unknown');
+    expect(ar.freshness_reason).toBe('legacy_fact_missing_hash');
+    expect('graph_hash_at_run' in ar).toBe(false);
+    expect(ar.computed_at).toBeTypeOf('string');
+    expect(new Date(ar.computed_at as string).toISOString()).toBe(ar.computed_at);
+    OlumiResponseSchema.parse(finalised);
+  });
+
+  it('a real readiness payload wins over synthesis on the same unknown verdict', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      analysisReady: fixturePayload(),
+      freshness: derivation(),
+    });
+    const ar = finalised.analysis_ready as Record<string, unknown>;
+    expect(ar.status).toBe('ready');
+    expect((ar.options as unknown[]).length).toBe(2);
+    expect(ar.freshness).toBe('unknown');
+  });
+
+  it('does NOT synthesise for freshness none (no prior analysis)', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({
+        freshness: 'none',
+        reason: 'no_successful_run_analysis_fact',
+        selected_fact_index: null,
+        graph_hash_at_run: null,
+        computed_at: null,
+      }),
+    });
+    expect('analysis_ready' in finalised).toBe(false);
+  });
+
+  it('does NOT synthesise for freshness fresh without a readiness payload', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({
+        freshness: 'fresh',
+        reason: 'graph_hash_match',
+        current_graph_hash: 'sha256:prior',
+      }),
+    });
+    expect('analysis_ready' in finalised).toBe(false);
+  });
+
+  it('does NOT synthesise for stale without a readiness payload (known follow-up, deliberately unrecovered)', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({
+        freshness: 'stale',
+        reason: 'graph_hash_diverged',
+        current_graph_hash: 'sha256:current',
+      }),
+    });
+    expect('analysis_ready' in finalised).toBe(false);
+  });
+
+  it('does NOT synthesise for unknown with non-allowlisted reasons (derivation_failed, invariant_failed)', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    for (const reason of ['derivation_failed', 'invariant_failed'] as const) {
+      const finalised = finaliseV5Response(env, {
+        freshness: derivation({ reason, selected_fact_index: null, graph_hash_at_run: null, computed_at: null }),
+      });
+      expect('analysis_ready' in finalised).toBe(false);
+    }
   });
 });
 

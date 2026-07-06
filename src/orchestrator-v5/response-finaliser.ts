@@ -84,6 +84,8 @@ import { config } from '../config/index.js';
 
 import {
   attachComputedAt,
+  FRESHNESS_ONLY_SYNTHESIS_REASONS,
+  synthesiseFreshnessOnlyAnalysisReady,
   type AnalysisReadyPayload,
 } from './compose/analysis-ready-emit.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
@@ -148,11 +150,16 @@ export interface FinaliserContext {
    *                         invalidated for now; documented in dispatch
    *                         result type.
    *
-   * Undefined ⇒ no analysis_ready stamped on the response. The body still
-   * gets the brand and the WeakSet membership — those signal "the helper
-   * ran", independent of whether readiness was set. The UI's null-as-
-   * unknown handling treats absence as "no fresh readiness this turn",
-   * not as a blocker.
+   * Undefined ⇒ no analysis_ready stamped on the response, with ONE
+   * exception (Mission 3 transport recovery): when `ctx.freshness`
+   * carries an honest 'unknown' verdict for a legacy/unparseable-graph
+   * reason (FRESHNESS_ONLY_SYNTHESIS_REASONS), the finaliser synthesises
+   * a minimal freshness-only block so the already-computed verdict is not
+   * dropped at the wire. All other undefined cases still omit the block —
+   * the body still gets the brand and the WeakSet membership; those
+   * signal "the helper ran", independent of whether readiness was set.
+   * The UI's null-as-unknown handling treats absence as "no fresh
+   * readiness this turn", not as a blocker.
    */
   readonly analysisReady?: AnalysisReadyPayload;
   /**
@@ -215,8 +222,20 @@ export function finaliseV5Response(
   const scrubbed = debugEnabled
     ? ceeTraceClean
     : sanitiseEnrichmentBlocks(ceeTraceClean, ctx.analysisReady ?? null);
-  const stamped: OlumiResponse = ctx.analysisReady
-    ? { ...scrubbed, analysis_ready: attachComputedAt(ctx.analysisReady, ctx.freshness) }
+  // Mission 3 transport recovery: a legacy/unparseable graph reload derives
+  // an honest 'unknown' freshness verdict but builds no structural readiness
+  // payload, and freshness can only ride the wire inside analysis_ready.
+  // Synthesise a minimal science-free carrier for exactly those reasons;
+  // every other no-readiness case (none/fresh/stale, other unknown reasons)
+  // keeps the omit behaviour.
+  const payloadForStamp: AnalysisReadyPayload | undefined =
+    ctx.analysisReady ??
+    (ctx.freshness?.freshness === 'unknown' &&
+    FRESHNESS_ONLY_SYNTHESIS_REASONS.has(ctx.freshness.reason)
+      ? synthesiseFreshnessOnlyAnalysisReady()
+      : undefined);
+  const stamped: OlumiResponse = payloadForStamp
+    ? { ...scrubbed, analysis_ready: attachComputedAt(payloadForStamp, ctx.freshness) }
     : { ...scrubbed };
   FINALISED_RESPONSES.add(stamped);
   return stamped as FinalisedV5Response;
