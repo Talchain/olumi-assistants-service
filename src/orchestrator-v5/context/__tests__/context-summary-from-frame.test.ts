@@ -50,8 +50,11 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
   it('projects every base field from the frame alone', () => {
     const summary = contextSummaryFromFrame(frame);
     expect(summary).not.toBeNull();
-    expect(summary!.version).toBe('1.1.0');
+    // 1.2.0 — Mission 1: additive chips_emitted (optional) + constant
+    // graph_hash_kind label.
+    expect(summary!.version).toBe('1.2.0');
     expect(summary!.analysis_state).toEqual(frame.diagnostics.analysisStateSummary);
+    expect(summary!.graph_hash_kind).toBe('analysis_affecting');
     expect(summary!.graph_counts).toEqual(COUNTS);
     expect(summary!.canonical_state_source).toBe('turn_executor');
   });
@@ -64,6 +67,27 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
 
   it('capabilities_present stays an honest null (not threaded into the frame yet — M6)', () => {
     expect(contextSummaryFromFrame(frame)!.capabilities_present).toBeNull();
+  });
+
+  it('chips_emitted projects the frame id list verbatim, and is absent when the frame carries none (Mission 1)', () => {
+    // The frame's chipsEmitted is an id list BY TYPE — labels/messages
+    // structurally cannot cross this seam (the executor extracts ids from
+    // the composed response before buildFrame ever sees the chips).
+    const withChips = buildFrame({
+      freshness,
+      canonicalState,
+      canonicalStateSource: 'turn_executor',
+      recentChanges: projectRecentChangesToFrame(CHANGES),
+      graphCounts: COUNTS,
+      priorTurnCount: 5,
+      chipsEmitted: ['chip_action_rerun_analysis', 'floor_rerun_analysis'],
+    });
+    expect(contextSummaryFromFrame(withChips)!.chips_emitted).toEqual([
+      'chip_action_rerun_analysis',
+      'floor_rerun_analysis',
+    ]);
+    // Honest absence on the base frame (no chipsEmitted threaded).
+    expect('chips_emitted' in contextSummaryFromFrame(frame)!).toBe(false);
   });
 
   it('PARITY: matches the legacy part-assembled summary on every previously-populated field', () => {

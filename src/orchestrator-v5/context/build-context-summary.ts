@@ -52,8 +52,13 @@ import type { PendingActionKind } from '../session/pending-action.js';
  * truth + redacted pending-action observability). Frame-projection only
  * (`contextSummaryFromFrame`); the legacy parts-assembled builder never
  * emits it (no frame ⇒ no pending source).
+ * 1.2.0 — Mission 1 (context authority): additive optional `chips_emitted`
+ * (chip IDS only, frame-projection only) + constant `graph_hash_kind`
+ * label so no consumer mistakes the summary's 16-hex analysis-affecting
+ * hashes for the CEE-local 64-hex graphIdentityHash (which is on NO wire
+ * or diagnostic surface).
  */
-export const V5_CONTEXT_SUMMARY_VERSION = '1.1.0';
+export const V5_CONTEXT_SUMMARY_VERSION = '1.2.0';
 
 /**
  * Provenance of the canonical state this summary projects. Determined by the
@@ -133,6 +138,14 @@ export interface V5ContextSummary {
   readonly version: typeof V5_CONTEXT_SUMMARY_VERSION;
   /** Canonical analysis state, redacted to counts/statuses/predicates/hashes. */
   readonly analysis_state: AnalysisStateSummary;
+  /**
+   * Mission 1 — which hash FAMILY `analysis_state.graph_hash_at_run` /
+   * `current_graph_hash` belong to. Constant today: the 16-hex
+   * analysis-affecting hash (`computeAnalysisAffectingGraphHash`). The
+   * CEE-local 64-hex graphIdentityHash is on NO wire or diagnostic
+   * surface — a consumer must never read these fields as identity.
+   */
+  readonly graph_hash_kind: 'analysis_affecting';
   /** Graph entity counts, or null when the turn had no graph. */
   readonly graph_counts: ContextSummaryGraphCounts | null;
   /** Count of recent turns in the assembled context, or null if not threaded. */
@@ -173,6 +186,13 @@ export interface V5ContextSummary {
    * (same absence rule as `pending`).
    */
   readonly rerun?: ContextSummaryRerun;
+  /**
+   * Mission 1 — the suggested-action IDS the composed response carried
+   * (contract identifiers only: `chip_action_*`, `floor_*`, `prop_<hash>`;
+   * never labels or messages). FRAME-PROJECTION ONLY (same absence rule as
+   * `pending`): absent ⇒ not observed at this seam, never "no chips".
+   */
+  readonly chips_emitted?: readonly string[];
 }
 
 /** Minimal structural graph view for counting — content is never read. */
@@ -238,6 +258,9 @@ export function buildV5ContextSummary(
   return {
     version: V5_CONTEXT_SUMMARY_VERSION,
     analysis_state: summariseCanonicalAnalysisState(input.canonicalState),
+    // Constant label — see the type doc. The summary's hashes are ALWAYS
+    // the analysis-affecting family, on both builder lanes.
+    graph_hash_kind: 'analysis_affecting',
     graph_counts: input.graphCounts ?? null,
     recent_turn_count: input.recentTurnCount ?? null,
     recent_change_count: input.recentChangeCount ?? null,
