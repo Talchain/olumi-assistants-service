@@ -668,3 +668,135 @@ describe('A8b — source-rejection grounding (Capability 2A acceptance target, a
     }
   });
 });
+
+describe('A4/A8 — restore/version/rollback claims are false success on non-durable turns (harness-only breadth)', () => {
+  // The src runtime detectors (SUCCESS_CLAIM_PATTERNS, mutation-language)
+  // deliberately do NOT cover restore/revert/rolled-back verbs or
+  // version-noun claims today — no version substrate exists, and the
+  // runtime swap must stay precision-first. The HARNESS classifies replay
+  // transcripts, where a false RED is the safe direction, so it carries
+  // this claim class now. See OPENING_SUCCESS_CLAIM's doc in invariants.ts
+  // and the ISSUE-9022 / ISSUE-9025 hooks for the src-side ownership.
+
+  it('non-mutating follow_up opening "Restored the earlier version." → A4 fail', () => {
+    const f = a4NoFalseSuccess(
+      obs({
+        role: 'follow_up',
+        body: { assistant_text: 'Restored the earlier version of your model.' },
+      }),
+    );
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.evidence).toMatch(/Restored/);
+  });
+
+  it('reload opening "Rolled back the changes." → A4 fail', () => {
+    const f = a4NoFalseSuccess(
+      obs({
+        role: 'reload',
+        body: { assistant_text: 'Rolled back the changes you made earlier.' },
+      }),
+    );
+    expect(f[0]!.status).toBe('fail');
+  });
+
+  it('determiner-gated Committed: "Committed the change." fails A4, "Committed spend of £10k rises." does not', () => {
+    const claim = a4NoFalseSuccess(
+      obs({ role: 'follow_up', body: { assistant_text: 'Committed the change to your model.' } }),
+    );
+    expect(claim[0]!.status).toBe('fail');
+    const domainProse = a4NoFalseSuccess(
+      obs({ role: 'follow_up', body: { assistant_text: 'Committed spend of £10k rises under Option A.' } }),
+    );
+    expect(domainProse[0]!.status).toBe('pass');
+  });
+
+  it('mutate_intent "I’ve restored your previous version." with unchanged hash → A8 fail (phantom)', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'a1b2c3d4e5f6a1b2',
+        body: {
+          assistant_text: 'I’ve restored your previous version.',
+          analysis_ready: { status: 'ready', current_graph_hash: 'a1b2c3d4e5f6a1b2' },
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('fail');
+    expect(f[0]!.evidence).toMatch(/phantom/i);
+  });
+
+  it('mutate_intent "Saved a version checkpoint for you." + proposal-only pending → A8 fail', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        body: {
+          assistant_text: 'Saved a version checkpoint for you.',
+          pending_actions: [{ action: { kind: 'proposed_concept' } }],
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('fail');
+  });
+
+  it('"The model has been rolled back." (passive) on mutate_intent with unchanged hash → A8 fail', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'a1b2c3d4e5f6a1b2',
+        body: {
+          assistant_text: 'The model has been rolled back to the earlier state.',
+          analysis_ready: { status: 'ready', current_graph_hash: 'a1b2c3d4e5f6a1b2' },
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('fail');
+  });
+
+  it('honest counterpart passes: decline copy with no completion claim on mutate_intent → A8 pass', () => {
+    // Mirrors the real V5_STRUCTURAL_DECLINE_TEXT shape ("I haven't changed
+    // the model. This version can't make that kind of model edit yet.") —
+    // "version" as a bare noun with no created/saved/restored verb must NOT
+    // trip the version-claim shape.
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'a1b2c3d4e5f6a1b2',
+        body: {
+          assistant_text:
+            'I haven’t changed the model. This version can’t make that kind of model edit yet.',
+          analysis_ready: { status: 'ready', current_graph_hash: 'a1b2c3d4e5f6a1b2' },
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('"I’ve committed to helping you compare the options." (idiom) → A8 pass, not a commit claim', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'a1b2c3d4e5f6a1b2',
+        body: {
+          assistant_text: 'I’ve committed to helping you compare the options carefully.',
+          analysis_ready: { status: 'ready', current_graph_hash: 'a1b2c3d4e5f6a1b2' },
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('pass');
+  });
+
+  it('safe direction: a restore-verb claim on a turn whose hash DID move → A8 pass (durable, honest)', () => {
+    const f = a8NonCommittingNoFalseSuccess(
+      obs({
+        role: 'mutate_intent',
+        priorGraphHash: 'a1b2c3d4e5f6a1b2',
+        body: {
+          assistant_text: 'Restored the earlier factor values.',
+          analysis_ready: { status: 'ready', current_graph_hash: 'b2c3d4e5f6a1b2c3' },
+        },
+      }),
+    );
+    expect(f[0]!.status).toBe('pass');
+    expect(f[0]!.evidence).toMatch(/durable/i);
+  });
+});
