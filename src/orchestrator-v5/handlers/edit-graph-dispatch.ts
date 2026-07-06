@@ -63,6 +63,7 @@ import {
   loadPersistedGraphStrict,
 } from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import { config } from '../../config/index.js';
 import {
@@ -1577,6 +1578,18 @@ export async function dispatchEditGraph(
   //     already-degraded store — while the outer assembly `finally` still
   //     emits the single edit turn event.
   let persistedPostEditGraph: unknown = graphState;
+  // A3 graph CAS observe-mode: expected-base hashes for this dispatch's
+  // graph-bearing commit. Derived ONLY from the strict SERVER-SIDE persisted
+  // read below (`loadPersistedGraphStrict`) — the same trusted base the merge
+  // uses — NEVER from the request-supplied `graphState` (which is untrusted
+  // and may be the graph being written; trusted base rule, see
+  // graph-cas-conflict.ts). Stays `undefined` (→ `no_expected`, never a
+  // conflict) when there is no applied mutation to persist or the mode is
+  // 'off'. A degraded strict read throws below (pre-existing fail-closed
+  // behaviour), so no expected hash is ever manufactured from a failed read.
+  let expectedGraphCasHashes:
+    | ReturnType<typeof computeExpectedGraphCasHashes>
+    | undefined;
   if (successfulAppliedMutation) {
     let strictBase: unknown;
     try {
@@ -1597,6 +1610,14 @@ export async function dispatchEditGraph(
       throw new Error(
         'edit_graph: refusing to persist applied mutation — persisted merge base unavailable (degraded read)',
       );
+    }
+    // A3 graph CAS: hash the strict server base for the commit's expected
+    // fields — reusing the read this path already performs (no extra I/O).
+    // `strictBase` null = genuinely-empty scenarios.graph → expected hashes
+    // {null, null} ("server base read, no graph") → `first_write` when the
+    // graph is still absent at write time, `no_expected` otherwise.
+    if (config.features.graphCasMode !== 'off') {
+      expectedGraphCasHashes = computeExpectedGraphCasHashes(strictBase ?? null);
     }
     persistedPostEditGraph = mergeAppliedGraphForPersistence({
       appliedGraph: editResult.appliedGraph!,
@@ -2250,6 +2271,11 @@ export async function dispatchEditGraph(
       duration_ms: Date.now() - startedAt,
       handler_facts: editGraphFact ? [editGraphFact] : [],
       graph: graphForCommit,
+      // A3 graph CAS: expected-base hashes from the strict server read above
+      // (undefined when no applied mutation / mode off — the CAS hook only
+      // runs for graph-bearing writes, and `graph` is only set on applied
+      // mutations, so coverage is complete on this path).
+      ...(expectedGraphCasHashes !== undefined ? expectedGraphCasHashes : {}),
       ...(pendingActionsForCommit !== undefined
         ? { pending_actions: pendingActionsForCommit }
         : {}),
