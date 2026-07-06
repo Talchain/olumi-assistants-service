@@ -462,7 +462,6 @@ describe('isAllowlistedPath — 15 paths', () => {
     '$.improvement_guidance[0]',
     '$.factor_sensitivity[2].interpretation',
     '$.m1_review[0].text',
-    '$.m1_coaching[0].text',
     '$.rationale',
     '$.robustness_synthesis',
     '$.review_cards[0].what',
@@ -484,6 +483,11 @@ describe('isAllowlistedPath — 15 paths', () => {
     '$.review_cards[0].items[0].factor_id',
     '$.review_cards[0].items[0].factor_label',
     '$.fragile_edges[0]',
+    // Tier-3 claim-safety cage (Brief 5): m1_coaching prose is no longer
+    // an allow-listed scrub-and-keep leaf — the walker suppresses it
+    // outright (see the dedicated Tier-3 suppression cases below and
+    // tests/contract/tier3-leak-guard.runtime.test.ts).
+    '$.m1_coaching[0].text',
   ])('rejects structural path %s', (path) => {
     expect(isAllowlistedPath(path)).toBe(false);
   });

@@ -2,9 +2,16 @@
  * V5 staging assurance — Tier-2 / Tier-3 claim-safety negative guard.
  *
  * AUDIT BOUNDARY 7 (non-negotiable). PR #301 (Brief 4 claim-safety &
- * provenance contract) is merged as DOCTRINE ONLY — there is no runtime
- * enforcement. Therefore Tier-2 and Tier-3 fields/concepts are NOT
- * runtime-safe to surface in user-visible claims.
+ * provenance contract) was merged as DOCTRINE ONLY. Mission 2 (Brief 5)
+ * added the RUNTIME cage for the four ratified Tier-3 keys —
+ * `src/orchestrator-v5/compose/claim-safety-cage.ts` (Tier-2 double lock
+ * + Tier-3 deny + the m1_coaching prose suppression in
+ * sanitise-enrichment) — and this scanner now imports those keys from
+ * the cage, so the assurance guard and the runtime enforcement share ONE
+ * source of truth and cannot drift. Tier-2 fields remain NOT
+ * claim-permitted (both locks closed); the vocabulary-only Tier-3
+ * categories below remain doctrine-guarded pending ratified string forms
+ * (Brief 4 §9).
  *
  * This guard is the assurance suite's NEGATIVE assertion: it scans
  * user-facing `assistant_text` and chip labels/messages and FAILS the run
@@ -27,6 +34,8 @@
  * tests (a leaking output fails; normal coaching prose passes).
  */
 
+import { TIER3_LEAK_BLOCK_FIELDS } from '../../../src/orchestrator-v5/compose/claim-safety-cage.js';
+
 /**
  * Exact field/identifier substrings (case-insensitive). These are
  * snake_case wire/field names from the Brief 4 tier map and the PLoT V2
@@ -34,17 +43,19 @@
  * contains them, so a plain case-insensitive substring match is safe.
  */
 export const BLOCKED_FIELD_IDENTIFIERS: readonly string[] = [
+  // The four RATIFIED Tier-3 deny keys, imported from the runtime cage
+  // (single source of truth — see module header).
+  ...TIER3_LEAK_BLOCK_FIELDS,
+  // Assurance-side extras: singular forms, Tier-2 candidates (identifier
+  // leakage is wrong regardless of claim-permission), and internal
+  // carriers with no ratified cage entry yet.
   'factor_sensitivity',
   'confidence_tier',
-  'edge_e_values',
   'edge_e_value',
-  'inference_warnings',
   'inference_warning',
-  'flip_thresholds',
   'flip_threshold',
   'e_values',
   'dominant_factor',
-  'm1_coaching',
   'isl_engine',
   'evidence_quality',
   'report_confidence',
