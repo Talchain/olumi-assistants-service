@@ -72,6 +72,9 @@ export function contextSummaryFromFrame(
   return {
     version: V5_CONTEXT_SUMMARY_VERSION,
     analysis_state: analysisState,
+    // Constant label — the frame's hashes are single-sourced from the
+    // freshness authority, which is the analysis-affecting family.
+    graph_hash_kind: 'analysis_affecting',
     graph_counts: frame.model.counts ?? null,
     recent_turn_count: frame.conversation.priorTurnCount,
     recent_change_count: frame.conversation.recentChangeCount,
@@ -130,6 +133,12 @@ export function contextSummaryFromFrame(
               frame.diagnostics.rerun.comparisonCandidatesReady,
           },
         }
+      : {}),
+    // Mission 1 — chip IDS the composed response carried (pure pass-through
+    // of the frame's already-extracted id list; ids are contract
+    // identifiers, no user content). Omitted when the frame carries none.
+    ...(frame.diagnostics.chipsEmitted !== undefined
+      ? { chips_emitted: frame.diagnostics.chipsEmitted }
       : {}),
   };
 }
