@@ -25,6 +25,7 @@ import {
   TIER2_CANDIDATE_FIELDS,
   TIER2_COACHING_ALLOWLIST,
   TIER3_LEAK_BLOCK_FIELDS,
+  TIER3_TRANSPORT_BANNED_FIELDS,
   isClaimUsable,
   isTier3LeakBlocked,
 } from '../../src/orchestrator-v5/compose/claim-safety-cage.js';
@@ -62,6 +63,22 @@ describe('Tier-2 cage — locks are closed at ship', () => {
     expect(Object.isFrozen(TIER2_CANDIDATE_FIELDS)).toBe(true);
     expect(Object.isFrozen(TIER3_LEAK_BLOCK_FIELDS)).toBe(true);
     expect(Object.isFrozen(TIER2_COACHING_ALLOWLIST)).toBe(true);
+  });
+
+  it('lock 2 is runtime-immutable, not just type-readonly: Set mutators THROW (Object.freeze alone does not stop .add on a Set)', () => {
+    const mutable = TIER2_COACHING_ALLOWLIST as Set<string>;
+    expect(() => mutable.add('factor_sensitivity')).toThrow(/read-only/);
+    expect(() => mutable.delete('anything')).toThrow(/read-only/);
+    expect(() => mutable.clear()).toThrow(/read-only/);
+    expect(TIER2_COACHING_ALLOWLIST.size).toBe(0);
+  });
+
+  it('the transport-banned subset is exactly the Tier-3 ∩ not-keep-listed intersection (m1_coaching), frozen and a subset of the deny set', () => {
+    expect([...TIER3_TRANSPORT_BANNED_FIELDS]).toEqual(['m1_coaching']);
+    expect(Object.isFrozen(TIER3_TRANSPORT_BANNED_FIELDS)).toBe(true);
+    for (const field of TIER3_TRANSPORT_BANNED_FIELDS) {
+      expect(TIER3_LEAK_BLOCK_FIELDS).toContain(field);
+    }
   });
 });
 
@@ -150,5 +167,59 @@ describe('Tier-3 m1_coaching prose block — the red-first runtime proof', () =>
       expect(entry.text).toBe(SUPPRESSED_PROSE_FALLBACK);
     }
     expect(JSON.stringify(result.enrichment)).not.toContain('TIER3-M1-SENTINEL');
+  });
+});
+
+describe('Tier-3 wire backstop — transport-banned subtrees are DELETED at the finaliser seam (adversarial-review fix)', () => {
+  it('UNKNOWN prose fields inside m1_coaching cannot ride the wire: the whole subtree is dropped in backstop mode', () => {
+    // The .text-only suppression left a hole: a prose field the walker
+    // does not know by name (e.g. `headline`) survived byte-preserved.
+    // In wire-backstop mode the transport-banned subtree is deleted
+    // outright — m1_coaching on the wire is already a contract anomaly
+    // (it is not in the P0B keep-list).
+    const enrichment: Record<string, unknown> = {
+      m1_coaching: [
+        { text: M1_SENTINEL, headline: `${M1_SENTINEL} via unknown field` },
+      ],
+      summary: 'A perfectly ordinary summary.',
+    };
+    const result = sanitiseEnrichment(enrichment, null, null, {
+      dropTier3TransportBanned: true,
+    });
+    const out = result.enrichment as Record<string, unknown>;
+    expect('m1_coaching' in out).toBe(false);
+    expect(JSON.stringify(result.enrichment)).not.toContain('TIER3-M1-SENTINEL');
+    // Non-Tier-3 content untouched.
+    expect(out.summary).toBe('A perfectly ordinary summary.');
+  });
+
+  it('default (enricher/fact) mode keeps the subtree with only the known prose leaf suppressed — the m1 adapter still reads the structured enums', () => {
+    const enrichment: Record<string, unknown> = {
+      m1_coaching: [{ text: M1_SENTINEL, readiness: 'ready', headline_type: 'positive' }],
+    };
+    const result = sanitiseEnrichment(enrichment);
+    const out = result.enrichment as {
+      m1_coaching: Array<{ text?: string; readiness?: string; headline_type?: string }>;
+    };
+    expect(out.m1_coaching).toHaveLength(1);
+    expect(out.m1_coaching[0]!.text).toBe(SUPPRESSED_PROSE_FALLBACK);
+    // Adapter-v1 starvation guard: structured enums preserved.
+    expect(out.m1_coaching[0]!.readiness).toBe('ready');
+    expect(out.m1_coaching[0]!.headline_type).toBe('positive');
+  });
+
+  it('transport-KEPT Tier-3 fields (flip_thresholds etc.) are NOT deleted in backstop mode — claim-permission is the other axis', () => {
+    const enrichment: Record<string, unknown> = {
+      flip_thresholds: [{ factor_id: 'fac_x', flip_value: null }],
+      edge_e_values: [],
+      inference_warnings: [],
+    };
+    const result = sanitiseEnrichment(enrichment, null, null, {
+      dropTier3TransportBanned: true,
+    });
+    const out = result.enrichment as Record<string, unknown>;
+    expect(Array.isArray(out.flip_thresholds)).toBe(true);
+    expect(out.edge_e_values).toEqual([]);
+    expect(out.inference_warnings).toEqual([]);
   });
 });

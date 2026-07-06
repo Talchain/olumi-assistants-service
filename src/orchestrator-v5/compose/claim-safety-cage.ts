@@ -60,10 +60,23 @@ export const TIER2_CANDIDATE_FIELDS: readonly string[] = Object.freeze([
  * "either lock alone yields zero surfaced fields"). Append-only via a
  * reviewed G2 decision; never populated by default. The unit test pins
  * emptiness so accidental population fails the required gate.
+ *
+ * Runtime immutability is REAL, not cosmetic: `Object.freeze` on a Set
+ * does not stop `.add()/.delete()/.clear()` (they mutate internal slots),
+ * so the mutators are overridden to throw — a runtime `.add()` from any
+ * code that cast away the ReadonlySet type fails loudly instead of
+ * silently opening lock 2 (adversarial review, Mission 2).
  */
-export const TIER2_COACHING_ALLOWLIST: ReadonlySet<string> = Object.freeze(
-  new Set<string>(),
-);
+export const TIER2_COACHING_ALLOWLIST: ReadonlySet<string> = (() => {
+  const set = new Set<string>();
+  const throwReadonly = (): never => {
+    throw new Error('TIER2_COACHING_ALLOWLIST is read-only — populating a field is Brief 4 gate G2, a reviewed code change, never a runtime mutation.');
+  };
+  set.add = throwReadonly;
+  set.delete = throwReadonly;
+  set.clear = throwReadonly;
+  return Object.freeze(set);
+})();
 
 /**
  * The four RATIFIED, literal-bearing Tier-3 deny keys (Brief 5 §1
@@ -79,6 +92,26 @@ export const TIER3_LEAK_BLOCK_FIELDS: readonly string[] = Object.freeze([
   'flip_thresholds',
   'edge_e_values',
   'inference_warnings',
+  'm1_coaching',
+]);
+
+/**
+ * The subset of Tier-3 deny fields that are ALSO transport-banned (not in
+ * the P0B keep-list): these must not appear on the WIRE at all, so the
+ * response-finaliser backstop DELETES them from block enrichment rather
+ * than merely suppressing known prose leaves — an unknown prose field
+ * inside a transport-banned subtree must not ride to users just because
+ * the walker did not know its name (adversarial review, Mission 2).
+ *
+ * Deliberately NOT the whole Tier-3 set: `flip_thresholds`,
+ * `edge_e_values` and `inference_warnings` are keep-listed
+ * (transport-clean, claim-denied — Brief 4 C1's two-axes split), so
+ * deleting them would break the transport contract. And deliberately
+ * NOT applied on the enricher/fact path: the m1 adapter reads
+ * m1_coaching's structured enums for the v11 prompt; deleting the
+ * subtree there would recreate the adapter-v1 starvation regression.
+ */
+export const TIER3_TRANSPORT_BANNED_FIELDS: readonly string[] = Object.freeze([
   'm1_coaching',
 ]);
 

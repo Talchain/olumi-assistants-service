@@ -32,6 +32,14 @@ const V5_ROOT = fileURLToPath(new URL('../../src/orchestrator-v5', import.meta.u
 const PRODUCER_DIRS = ['compose', 'coaching', 'routing', 'tools/handlers'] as const;
 
 /**
+ * Root-level orchestrator-v5 files are ALSO scanned (non-recursive):
+ * compose.ts and response-finaliser.ts are the transport keep-list and
+ * the wire backstop — the two seams a new Tier-3 reference would most
+ * plausibly land in unnoticed (adversarial-review widening).
+ */
+const SCAN_ROOT_FILES = true;
+
+/**
  * Files allowed to mention a ratified Tier-3 key, relative to
  * src/orchestrator-v5, each with its classification:
  *   cage        — the claim-safety cage itself / the suppression site
@@ -44,6 +52,12 @@ const PRODUCER_DIRS = ['compose', 'coaching', 'routing', 'tools/handlers'] as co
 const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured' | 'doc'>([
   ['compose/claim-safety-cage.ts', 'cage'],
   ['compose/sanitise-enrichment.ts', 'cage'],
+  // flip-proposal + phase3-blocks DO feed user-facing surfaces (the P0.2
+  // "Test X at N" proposal chip; flip_threshold/bias review cards behind
+  // the decision-review autofire flag). They are PRE-EXISTING, reviewed
+  // surfaces that read Tier-3 fields as structured data — their claim
+  // posture is the Brief 4 §9 escalation lane, not this guard's, which
+  // only prevents NEW unreviewed sites.
   ['compose/flip-proposal.ts', 'structured'],
   ['compose/phase3-blocks.ts', 'structured'],
   ['coaching/decision-review-enricher.ts', 'transport'],
@@ -51,6 +65,9 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured' | 'doc'>([
   ['coaching/types.ts', 'doc'],
   ['routing/post-analysis-advice-gate.ts', 'structured'],
   ['tools/handlers/explanation-fallback.ts', 'doc'],
+  // Root-level seams (non-recursive root scan):
+  ['compose.ts', 'transport'],
+  ['response-finaliser.ts', 'cage'],
 ]);
 
 const TIER3_PATTERN = new RegExp(TIER3_LEAK_BLOCK_FIELDS.join('|'));
@@ -77,6 +94,14 @@ function producerFiles(): Array<{ rel: string; source: string }> {
         rel: relative(V5_ROOT, abs).split('\\').join('/'),
         source: readFileSync(abs, 'utf-8'),
       });
+    }
+  }
+  if (SCAN_ROOT_FILES) {
+    for (const entry of readdirSync(V5_ROOT)) {
+      const full = join(V5_ROOT, entry);
+      if (!statSync(full).isFile()) continue;
+      if (!entry.endsWith('.ts') || entry.endsWith('.d.ts') || entry.endsWith('.test.ts')) continue;
+      files.push({ rel: entry, source: readFileSync(full, 'utf-8') });
     }
   }
   return files;

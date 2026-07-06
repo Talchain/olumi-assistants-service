@@ -18,7 +18,7 @@
  */
 
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
-import { isTier3LeakBlocked } from './claim-safety-cage.js';
+import { isTier3LeakBlocked, TIER3_TRANSPORT_BANNED_FIELDS } from './claim-safety-cage.js';
 import {
   HARD_BAN_PATTERNS,
   WARNING_PATTERNS,
@@ -427,15 +427,38 @@ export interface SanitiseEnrichmentResult {
  * by deep-clone: the contract acceptance test asserts byte-equal on
  * the excluded subtrees pre/post.
  */
+export interface SanitiseEnrichmentOptions {
+  /**
+   * WIRE-BACKSTOP mode (response-finaliser only): DELETE the Tier-3
+   * transport-banned subtrees (`TIER3_TRANSPORT_BANNED_FIELDS`, today
+   * `m1_coaching`) outright instead of only suppressing their known
+   * prose leaves. A transport-banned subtree reaching the wire is
+   * already a contract anomaly, and an UNKNOWN prose field inside it
+   * must not ride to users just because this walker does not know its
+   * name. Default OFF: on the enricher/fact path the m1 adapter still
+   * reads m1_coaching's structured enums for the v11 prompt, so there
+   * only the known prose leaf is suppressed (adapter-v1 starvation
+   * regression guard).
+   */
+  readonly dropTier3TransportBanned?: boolean;
+}
+
 export function sanitiseEnrichment(
   enrichment: Record<string, unknown>,
   graph: LabelResolverContext['graph'] = null,
   analysisReady: LabelResolverContext['analysisReady'] = null,
+  options: SanitiseEnrichmentOptions = {},
 ): SanitiseEnrichmentResult {
   const ctx: LabelResolverContext = { graph, analysisReady, enrichment };
   // Node 17+ global; `globalThis.` prefix avoids a no-undef lint hit
   // under the project's lint config (matches src/orchestrator/patch-applier.ts pattern).
   const cloned = globalThis.structuredClone(enrichment) as Record<string, unknown>;
+  // Tier-3 claim-safety cage, wire-backstop posture (see options doc).
+  if (options.dropTier3TransportBanned === true) {
+    for (const key of TIER3_TRANSPORT_BANNED_FIELDS) {
+      if (key in cloned) delete cloned[key];
+    }
+  }
   const hardBans: Array<{ path: string; hit: string }> = [];
   const warnings: Array<{ path: string; hit: string }> = [];
 
