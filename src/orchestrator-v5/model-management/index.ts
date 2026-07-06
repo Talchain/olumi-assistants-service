@@ -80,3 +80,34 @@ export type {
   ModelVersionEvent,
   VersionEventSink,
 } from './types.js';
+
+// Strict boundary contracts (dark, prep-only — no route consumes these yet;
+// the wiring slice will parse ingress / validate egress with them).
+export {
+  CreateVersionRequestSchema,
+  RestoreVersionRequestSchema,
+  ListVersionsRequestSchema,
+  GetCurrentVersionRequestSchema,
+  ModelVersionSummaryResponseSchema,
+  ModelVersionRecordResponseSchema,
+  VersionWriteOutcomeResponseSchema,
+  VersionComparisonResponseSchema,
+  ListVersionsResponseSchema,
+  CurrentVersionResponseSchema,
+  ModelManagementErrorResponseSchema,
+  VersionCasConflictResponseSchema,
+} from './contracts.js';
+export type {
+  CreateVersionRequest,
+  RestoreVersionRequestContract,
+  ListVersionsRequest,
+  GetCurrentVersionRequest,
+  ModelVersionSummaryResponse,
+  ModelVersionRecordResponse,
+  VersionWriteOutcomeResponse,
+  VersionComparisonResponse,
+  ListVersionsResponse,
+  CurrentVersionResponse,
+  ModelManagementErrorResponse,
+  VersionCasConflictResponse,
+} from './contracts.js';

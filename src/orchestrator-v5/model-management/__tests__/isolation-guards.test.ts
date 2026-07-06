@@ -47,9 +47,9 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
 );
 
 /** External bare specifiers permitted in production (pure libs / the sanctioned
- *  service-role client — no live-path coupling). `zod` is intentionally absent
- *  until the PR that introduces the strict boundary schemas adds it. */
-const EXTERNAL_ALLOWED = new Set(['@supabase/supabase-js']);
+ *  service-role client — no live-path coupling). `zod` was added with the strict
+ *  boundary-contract module (contracts.ts) — a pure schema lib, no coupling. */
+const EXTERNAL_ALLOWED = new Set(['@supabase/supabase-js', 'zod']);
 
 /** Belt-and-braces: specific live surfaces that must NEVER appear in a production
  *  import (the allowlist already excludes them; this states the intent readably and
@@ -210,11 +210,12 @@ describe('model-management isolation guards — meta-checks (the enforcer cannot
     expect(importAllowed(moduleDir, '../../orchestrator/context/stable-stringify.js')).toBe(true);
     expect(importAllowed(moduleDir, '../../utils/telemetry.js')).toBe(true);
     expect(importAllowed(moduleDir, '@supabase/supabase-js')).toBe(true);
-    // Off-list / not-yet-allowed / forbidden:
+    // zod is now allowlisted (added with the strict boundary-contract module):
+    expect(importAllowed(moduleDir, 'zod')).toBe(true);
+    // Off-list / forbidden:
     expect(importAllowed(moduleDir, '../context/graph-hash.js')).toBe(false);
     expect(importAllowed(moduleDir, '../turn-executor.js')).toBe(false);
     expect(importAllowed(moduleDir, '../session/store.js')).toBe(false);
-    expect(importAllowed(moduleDir, 'zod')).toBe(false); // added by a later stacked PR, not yet
     expect(importAllowed(moduleDir, 'lodash')).toBe(false);
   });
 
