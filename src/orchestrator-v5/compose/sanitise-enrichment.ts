@@ -18,6 +18,7 @@
  */
 
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
+import { isTier3LeakBlocked } from './claim-safety-cage.js';
 import {
   HARD_BAN_PATTERNS,
   WARNING_PATTERNS,
@@ -165,7 +166,11 @@ const ALLOWLISTED_LEAF_PATHS: ReadonlyArray<RegExp> = [
   /^\$\.improvement_guidance\[\d+\]$/,
   /^\$\.factor_sensitivity\[\d+\]\.interpretation$/,
   /^\$\.m1_review\[\d+\]\.text$/,
-  /^\$\.m1_coaching\[\d+\]\.text$/,
+  // `$.m1_coaching[*].text` was REMOVED from this allow-list (Brief 5
+  // blocking precondition): m1_coaching is a ratified Tier-3 deny field
+  // (claim-safety-cage.ts), so its prose is fail-closed SUPPRESSED by the
+  // walker below — never scrubbed-and-kept. The prose-clean allowance
+  // contradicted its Tier-3 status.
   /^\$\.rationale$/,
   /^\$\.robustness_synthesis$/,
   /^\$\.review_cards\[\d+\]\.what$/,
@@ -530,6 +535,17 @@ export function sanitiseEnrichment(
       const v = rec[field];
       if (typeof v !== 'string' || v.length === 0) continue;
       const path = `$.${arrayKey}[${i}].${field}`;
+      // Tier-3 claim-safety cage (Brief 5): prose belonging to a ratified
+      // Tier-3 deny field is SUPPRESSED outright — never scrubbed-and-kept.
+      // Same fail-shut marker as a hard-ban hit, so array length and
+      // structural siblings stay stable for consumers. Today this covers
+      // m1_coaching (the one Tier-3 field with a prose leaf in this
+      // walker); membership is owned by claim-safety-cage.ts so the
+      // runtime block and the assurance scanner cannot drift.
+      if (isTier3LeakBlocked(arrayKey)) {
+        rec[field] = SUPPRESSED_PROSE_FALLBACK;
+        continue;
+      }
       if (!isAllowlistedPath(path)) continue;
       const scrubbed = sanitiseEnrichmentText(v, ctx);
       for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });

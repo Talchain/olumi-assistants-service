@@ -1,0 +1,154 @@
+/**
+ * Tier-3 leak guard — Part B runtime assertions (Brief 5 §5b) + the
+ * Tier-2 cage decision matrix (Brief 5 §2).
+ *
+ * RED-FIRST PROOF (Mission 2): the m1_coaching suppression test below
+ * was written BEFORE the cage change to sanitise-enrichment and run
+ * against the pre-cage walker, where it FAILED — the sentinel coaching
+ * prose survived `sanitiseEnrichment` byte-preserved (scrubbed for
+ * hard-ban tokens only, then KEPT as an allow-listed prose leaf) and
+ * would have reached the wire through the response-finaliser backstop
+ * (`sanitiseEnrichmentBlocks`), which shares this exact walker. That is
+ * the leak: `m1_coaching` is Tier-3 deny (Brief 4 §4) yet had a live
+ * prose transport path. With the cage (fail-closed suppression of
+ * `m1_coaching[].text` in the walker) the same test is GREEN.
+ *
+ * Doctrine is not enforcement: these tests bind the Brief 4 tiers to
+ * runtime behaviour — the flag default, the empty allow-list, the
+ * fail-closed decision order, and the prose block — so a regression is
+ * a required-gate failure, not a doc violation.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  TIER2_CANDIDATE_FIELDS,
+  TIER2_COACHING_ALLOWLIST,
+  TIER3_LEAK_BLOCK_FIELDS,
+  isClaimUsable,
+  isTier3LeakBlocked,
+} from '../../src/orchestrator-v5/compose/claim-safety-cage.js';
+import {
+  sanitiseEnrichment,
+  SUPPRESSED_PROSE_FALLBACK,
+} from '../../src/orchestrator-v5/compose/sanitise-enrichment.js';
+import { config } from '../../src/config/index.js';
+
+/**
+ * Deliberately scrub-proof sentinel: no hard-ban vocabulary, no node
+ * ids, no numerics — nothing the prose scrubber would touch. If this
+ * string survives the walker, the ONLY thing that kept it out of a
+ * user-facing surface was luck, not the cage.
+ */
+const M1_SENTINEL =
+  'TIER3-M1-SENTINEL unverified science coaching prose that must never reach a user-facing surface.';
+
+describe('Tier-2 cage — locks are closed at ship', () => {
+  it('CEE_COACHING_TIER2_ENABLED parses to false by default (lock 1)', () => {
+    expect(config.cee.coachingTier2Enabled).toBe(false);
+  });
+
+  it('TIER2_COACHING_ALLOWLIST ships EMPTY (lock 2) — populating it is a G2 decision, not a default', () => {
+    expect(TIER2_COACHING_ALLOWLIST.size).toBe(0);
+  });
+
+  it('the candidate set and the deny set are the ratified Brief 4/5 members, frozen', () => {
+    expect([...TIER2_CANDIDATE_FIELDS].sort()).toEqual(
+      ['confidence_tier', 'factor_sensitivity', 'robustness'].sort(),
+    );
+    expect([...TIER3_LEAK_BLOCK_FIELDS].sort()).toEqual(
+      ['edge_e_values', 'flip_thresholds', 'inference_warnings', 'm1_coaching'].sort(),
+    );
+    expect(Object.isFrozen(TIER2_CANDIDATE_FIELDS)).toBe(true);
+    expect(Object.isFrozen(TIER3_LEAK_BLOCK_FIELDS)).toBe(true);
+    expect(Object.isFrozen(TIER2_COACHING_ALLOWLIST)).toBe(true);
+  });
+});
+
+describe('isClaimUsable — fail-closed at every fork (Brief 5 §2 decision order)', () => {
+  const FULLY_OPEN = {
+    tier2Enabled: true,
+    companionStatusClaimSafe: true,
+    freshness: 'fresh',
+  } as const;
+
+  it('Tier-3 fields are denied even with every other gate open', () => {
+    for (const field of TIER3_LEAK_BLOCK_FIELDS) {
+      expect(isClaimUsable(field, FULLY_OPEN), field).toBe(false);
+      expect(isTier3LeakBlocked(field), field).toBe(true);
+    }
+  });
+
+  it('Tier-2 candidates are denied with the flag OFF (lock 1)', () => {
+    for (const field of TIER2_CANDIDATE_FIELDS) {
+      expect(isClaimUsable(field, { ...FULLY_OPEN, tier2Enabled: false }), field).toBe(false);
+    }
+  });
+
+  it('Tier-2 candidates are denied with the flag ON because the allow-list is empty (lock 2 — defence in depth)', () => {
+    for (const field of TIER2_CANDIDATE_FIELDS) {
+      expect(isClaimUsable(field, FULLY_OPEN), field).toBe(false);
+    }
+  });
+
+  it('an unknown / unclassified field is denied (deny-by-default)', () => {
+    expect(isClaimUsable('some_future_science_field', FULLY_OPEN)).toBe(false);
+  });
+
+  it('companion-status unverified (omitted) is denied — a caller cannot pass the gate without wiring the check', () => {
+    expect(
+      isClaimUsable('factor_sensitivity', { tier2Enabled: true, freshness: 'fresh' }),
+    ).toBe(false);
+  });
+
+  it('non-fresh (stale / unknown / none / absent) freshness is denied', () => {
+    for (const freshness of ['stale', 'unknown', 'none', null, undefined] as const) {
+      expect(
+        isClaimUsable('factor_sensitivity', {
+          tier2Enabled: true,
+          companionStatusClaimSafe: true,
+          freshness: freshness ?? undefined,
+        }),
+        String(freshness),
+      ).toBe(false);
+    }
+  });
+});
+
+describe('Tier-3 m1_coaching prose block — the red-first runtime proof', () => {
+  it('m1_coaching[].text is fail-closed suppressed by the enrichment walker (pre-cage: the sentinel survived byte-preserved)', () => {
+    const enrichment: Record<string, unknown> = {
+      m1_coaching: [{ text: M1_SENTINEL, top_fragile_edge: { from: 'a', to: 'b' } }],
+      summary: 'A perfectly ordinary summary.',
+    };
+    const result = sanitiseEnrichment(enrichment);
+    const out = result.enrichment as {
+      m1_coaching: Array<{ text?: string; top_fragile_edge?: unknown }>;
+      summary?: string;
+    };
+    // Non-vacuous: the entry itself survives (array length / structural
+    // siblings untouched — index alignment preserved for consumers).
+    expect(out.m1_coaching).toHaveLength(1);
+    expect(out.m1_coaching[0]!.top_fragile_edge).toEqual({ from: 'a', to: 'b' });
+    // THE CAGE: the Tier-3 prose never survives — replaced by the
+    // fail-shut suppression marker, mirroring the walker's existing
+    // hard-ban posture, NOT deleted (length/shape stability).
+    expect(out.m1_coaching[0]!.text).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(JSON.stringify(result.enrichment)).not.toContain('TIER3-M1-SENTINEL');
+    // Control: non-Tier-3 prose leaves are untouched by the cage.
+    expect(out.summary).toBe('A perfectly ordinary summary.');
+  });
+
+  it('the block holds for every entry of a multi-entry m1_coaching array', () => {
+    const enrichment: Record<string, unknown> = {
+      m1_coaching: [{ text: `${M1_SENTINEL} one` }, { text: `${M1_SENTINEL} two` }],
+    };
+    const result = sanitiseEnrichment(enrichment);
+    const out = result.enrichment as { m1_coaching: Array<{ text?: string }> };
+    expect(out.m1_coaching).toHaveLength(2);
+    for (const entry of out.m1_coaching) {
+      expect(entry.text).toBe(SUPPRESSED_PROSE_FALLBACK);
+    }
+    expect(JSON.stringify(result.enrichment)).not.toContain('TIER3-M1-SENTINEL');
+  });
+});

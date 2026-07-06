@@ -605,6 +605,19 @@ const ConfigSchema = z.object({
     // (the always-on coaching policy engine) and CEE_COACHING_STATE_PACK_ENABLED
     // (the diagnostic-only `_context_summary` sub-block).
     coachingContextPromptEnabled: booleanString.default(false),
+    // V5 Tier-2 claim-permission master lock (CEE_COACHING_TIER2_ENABLED —
+    // Brief 5 "the cage, not the activation"). Lock 1 of two independent
+    // locks on Tier-2 claim usage (Brief 4 §3 candidates: factor_sensitivity,
+    // confidence_tier, robustness). Lock 2 is TIER2_COACHING_ALLOWLIST
+    // (compose/claim-safety-cage.ts), which ships EMPTY — so even flipping
+    // this flag surfaces ZERO fields until a field is deliberately
+    // allowlisted (Brief 4 gate G2, a separate per-field decision with
+    // science sign-off). Default OFF. Flag-off is byte-identical: nothing
+    // consults the Tier-2 gate for output today; the cage exists so future
+    // coaching/DSK surfacing has a mechanical, fail-closed permission check
+    // instead of doctrine-only guidance. Transport is unaffected either way
+    // (the P0B keep-list owns transport; claim-permission is the other axis).
+    coachingTier2Enabled: booleanString.default(false),
     // V5 option-identity freshness guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD).
     // When true, the freshness derivation additionally compares the analysed
     // option identities carried on the selected run_analysis fact
@@ -1049,6 +1062,7 @@ function parseConfig(): Config {
       pendingConfirmationTruthEnabled: env.CEE_PENDING_CONFIRMATION_TRUTH_ENABLED,
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
       coachingContextPromptEnabled: env.CEE_COACHING_CONTEXT_PROMPT_ENABLED,
+      coachingTier2Enabled: env.CEE_COACHING_TIER2_ENABLED,
       optionIdentityFreshnessGuard: env.CEE_OPTION_IDENTITY_FRESHNESS_GUARD,
       postAnalysisLoopEnabled: env.CEE_POST_ANALYSIS_LOOP_ENABLED,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
