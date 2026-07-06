@@ -352,3 +352,67 @@ describe('compareVersions wiring', () => {
     }
   });
 });
+
+describe('getCurrentVersion — resolve the head pointer to a record', () => {
+  it('present: resolves the pointer and returns the record (scenario-scoped read)', async () => {
+    const store = makeStore({
+      getCurrentVersionId: vi.fn().mockResolvedValue(TARGET_ID),
+      getVersion: vi.fn().mockResolvedValue(record()),
+    });
+    const service = makeService(store);
+    const result = await service.getCurrentVersion(SCENARIO);
+    expect(result).toEqual({ status: 'ok', value: record() });
+    // Owner isolation: the resolved read is scoped to THIS scenario + the
+    // pointer id — the store's scenario_id+id filter means a version from
+    // another scenario can never leak through the current-version read.
+    expect(store.getCurrentVersionId).toHaveBeenCalledWith(SCENARIO);
+    expect(store.getVersion).toHaveBeenCalledWith(SCENARIO, TARGET_ID);
+  });
+
+  it('none: null pointer ⇒ ok with null (empty state), getVersion untouched', async () => {
+    const store = makeStore({
+      getCurrentVersionId: vi.fn().mockResolvedValue(null),
+    });
+    const service = makeService(store);
+    const result = await service.getCurrentVersion(SCENARIO);
+    expect(result).toEqual({ status: 'ok', value: null });
+    expect(store.getVersion).not.toHaveBeenCalled();
+  });
+
+  it('dangling pointer (set but unresolvable) ⇒ honest version_not_found, not a masked null', async () => {
+    const store = makeStore({
+      getCurrentVersionId: vi.fn().mockResolvedValue(TARGET_ID),
+      getVersion: vi.fn().mockResolvedValue(null),
+    });
+    const service = makeService(store);
+    const result = await service.getCurrentVersion(SCENARIO);
+    expect(result.status).toBe('error');
+    if (result.status === 'error') {
+      expect(result.error.code).toBe('version_not_found');
+      expect(result.error.recoverable).toBe(false);
+      expect(result.error.message).toContain(TARGET_ID);
+    }
+  });
+
+  it('flag off ⇒ disabled, pointer never read', async () => {
+    const store = makeStore({
+      getCurrentVersionId: vi.fn(),
+    });
+    const service = new ModelManagementService({ store, isEnabled: () => false });
+    expect(await service.getCurrentVersion(SCENARIO)).toEqual({ status: 'disabled' });
+    expect(store.getCurrentVersionId).not.toHaveBeenCalled();
+  });
+
+  it('store failure ⇒ fail-closed store_error, never a throw', async () => {
+    const store = makeStore({
+      getCurrentVersionId: vi.fn().mockRejectedValue(new Error('pooler down')),
+    });
+    const service = makeService(store);
+    const result = await service.getCurrentVersion(SCENARIO);
+    expect(result.status).toBe('error');
+    if (result.status === 'error') {
+      expect(result.error.code).toBe('store_error');
+      expect(result.error.recoverable).toBe(false);
+    }
+  });
+});
