@@ -111,3 +111,8 @@ export type {
   ModelManagementErrorResponse,
   VersionCasConflictResponse,
 } from './contracts.js';
+
+// CEE-side product copy (dark, prep-only — one source for the wiring slice /
+// UI-facing layer; guest wording is PROVISIONAL, see copy.ts header).
+export { MODEL_MANAGEMENT_COPY, MODEL_MANAGEMENT_ERROR_COPY } from './copy.js';
+export type { CopyBlock } from './copy.js';
