@@ -111,10 +111,10 @@ describe('replay-fixture manifest — expected exit codes are enforced, not just
 
 describe('replay-manifest integrity — the gate must be provably able to fail', () => {
   it('the pinned fixture population does not shrink below the known floor', () => {
-    // 5 = today's committed population. Shrinking the manifest (deleting
+    // 6 = today's committed population. Shrinking the manifest (deleting
     // fixtures + their pins together) would otherwise pass every per-fixture
     // assertion while measuring less and less.
-    expect(MANIFEST.length, 'manifest lost fixtures — shrinking the pinned population needs review').toBeGreaterThanOrEqual(5);
+    expect(MANIFEST.length, 'manifest lost fixtures — shrinking the pinned population needs review').toBeGreaterThanOrEqual(6);
   });
 
   it('at least one fixture is pinned RED (expected_exit=1)', () => {
