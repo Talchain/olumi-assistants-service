@@ -705,7 +705,9 @@ function logFinalisedResponse(
       // boolean only — no graph hashes or content values. Preserves the
       // pre-recovery "should be carrying readiness but isn't" signal that
       // `analysis_ready_emitted: false` used to give on unknown turns.
+      // forbidden-exempt: freshness VERDICT enum (fresh|stale|unknown|none), Tier-1 status transport — honest null when no analysis_ready ships, not a science-value fallback
       analysis_ready_freshness: ar?.freshness ?? null,
+      // forbidden-exempt: freshness REASON code (stable debug/telemetry string), honest null when absent — not a science-value fallback
       analysis_ready_freshness_reason: ar?.freshness_reason ?? null,
       analysis_ready_freshness_only_synthesised: freshnessOnlySynthesised && ar != null,
       egress_ok: egressOk,
