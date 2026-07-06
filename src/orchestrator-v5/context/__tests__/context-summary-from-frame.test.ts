@@ -322,6 +322,9 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
     const PINNED: Record<keyof Required<V5ContextSummary>, true> = {
       version: true,
       analysis_state: true,
+      // Mission 1: constant hash-family label — emitted by BOTH builder
+      // lanes (frame projection + legacy parts), see build-context-summary.
+      graph_hash_kind: true,
       graph_counts: true,
       recent_turn_count: true,
       recent_change_count: true,
@@ -330,8 +333,11 @@ describe('contextSummaryFromFrame (T4 Slice 2)', () => {
       coaching_state_pack: true,
       pending: true,
       rerun: true,
+      // Mission 1: chip IDS from the frame (frame-projection only; absent
+      // on the legacy lane — same honest-absence rule as pending/rerun).
+      chips_emitted: true,
     };
-    expect(Object.keys(PINNED).length).toBe(10);
+    expect(Object.keys(PINNED).length).toBe(12);
   });
 
   it('is pure: same frame → deeply-equal summaries; frame not mutated', () => {
