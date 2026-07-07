@@ -213,22 +213,20 @@ describe('shadow replay: captured add-factor flow (2× update_node_field)', () =
     expect(d.assistantText).toBeNull();
   });
 
-  it('RED PIN (live defect): sanctioned per-option intervention fields trip FIELD_NOT_ALLOWED', () => {
+  it('sanctioned per-option intervention fields no longer trip FIELD_NOT_ALLOWED (they hold as tunables)', () => {
     const d = evaluateEditGraphMutations(shadowInput(ADD_FACTOR_OPS));
 
-    // RED PIN — CURRENT behaviour, matching the live capture byte-for-byte:
-    // the 2× update_node_field envelopes (fields
-    // `data/interventions/fac_client_referral_rate` on o-a / o-b) are
-    // REJECTED with FIELD_NOT_ALLOWED even though edit_graph validated and
-    // applied the very same ops. The reconciliation commit flips these to
-    // held TUNABLE_APPLY_HELD (sanctioned vocabulary → doctrine posture,
-    // not a schema-class reject).
+    // GREEN (was the RED pin of the live capture): the 2× update_node_field
+    // envelopes (fields `data/interventions/fac_client_referral_rate` on
+    // o-a / o-b) are sanctioned edit vocabulary → doctrine posture held
+    // TUNABLE_APPLY_HELD, NOT a FIELD_NOT_ALLOWED reject.
     const fieldEvents = emitted.filter((e) => e.kind === 'update_node_field');
     expect(fieldEvents).toHaveLength(2);
     for (const e of fieldEvents) {
-      expect(e.name).toBe('v5.candidate_mutation.rejected');
-      expect(e.blocker_code).toBe(FIELD_NOT_ALLOWED);
+      expect(e.name).toBe('v5.candidate_mutation.held');
+      expect(e.blocker_code).toBe(TUNABLE_APPLY_HELD);
     }
+    expect(emitted.some((e) => e.blocker_code === FIELD_NOT_ALLOWED)).toBe(false);
 
     // add_node holds at the §6 structural posture (unchanged).
     const addNode = emitted.find((e) => e.kind === 'add_node');
@@ -249,27 +247,31 @@ describe('shadow replay: captured add-factor flow (2× update_node_field)', () =
 });
 
 describe('shadow replay: plain value edits (the dominant sanctioned edit class)', () => {
-  it('RED PIN: slash-keyed `data/value` on an existing factor rejects FIELD_NOT_ALLOWED', () => {
+  it('slash-keyed `data/value` on an existing factor holds as a tunable (was rejected FIELD_NOT_ALLOWED)', () => {
     const d = evaluateEditGraphMutations(shadowInput(VALUE_EDIT_OPS));
-    expect(d.verdictCounts.rejected).toBe(1);
+    expect(d.verdictCounts.held).toBe(1);
+    expect(d.verdictCounts.rejected).toBeUndefined();
     const e = emitted.find((x) => x.kind === 'update_node_field');
-    expect(e?.name).toBe('v5.candidate_mutation.rejected');
-    expect(e?.blocker_code).toBe(FIELD_NOT_ALLOWED);
-    expect(d.governing).toBe('rejected');
+    expect(e?.name).toBe('v5.candidate_mutation.held');
+    expect(e?.blocker_code).toBe(TUNABLE_APPLY_HELD);
+    expect(d.governing).toBe('held');
   });
 
-  it('RED PIN: whole-object `observed_state` update rejects FIELD_NOT_ALLOWED (allowlist only names producer-unreachable dotted `observed_state.*` spellings)', () => {
+  it('whole-object `observed_state` update holds as a tunable (was rejected FIELD_NOT_ALLOWED)', () => {
     const d = evaluateEditGraphMutations(shadowInput(OBSERVED_STATE_OPS));
-    expect(d.verdictCounts.rejected).toBe(1);
-    expect(emitted.some((e) => e.blocker_code === FIELD_NOT_ALLOWED)).toBe(true);
+    expect(d.verdictCounts.held).toBe(1);
+    expect(d.verdictCounts.rejected).toBeUndefined();
+    expect(emitted.some((e) => e.blocker_code === FIELD_NOT_ALLOWED)).toBe(false);
   });
 
-  it('RED PIN: goal_threshold value-edit class rejects FIELD_NOT_ALLOWED (Mission B sanctioned write, refereed as forbidden)', () => {
+  it('goal_threshold value-edit class holds as a tunable (Mission B write is sanctioned vocabulary)', () => {
     const d = evaluateEditGraphMutations(shadowInput(GOAL_THRESHOLD_OPS));
     // One update_node fans into 4 envelopes (one per goal_threshold* field);
-    // ALL are rejected today.
-    expect(d.verdictCounts.rejected).toBe(4);
-    expect(d.governing).toBe('rejected');
+    // every one is sanctioned → held TUNABLE_APPLY_HELD, zero rejects.
+    expect(d.verdictCounts.held).toBe(4);
+    expect(d.verdictCounts.rejected).toBeUndefined();
+    expect(emitted.some((e) => e.blocker_code === FIELD_NOT_ALLOWED)).toBe(false);
+    expect(d.governing).toBe('held');
   });
 });
 
@@ -305,15 +307,14 @@ describe('negative controls (protected fields keep rejecting)', () => {
         { op: 'update_edge', path: 'f-spend::g-bookings', value: { validation: { status: 'ok' } }, old_value: {} },
       ]),
     );
-    // RED: today these fall out as generic FIELD_NOT_ALLOWED. The
-    // reconciliation reclassifies them PIPELINE_OWNED_FIELD (precise code:
-    // pipeline-recomputed / pipeline-review stamps), still rejected.
+    // Post-reconciliation these carry the PRECISE code: PIPELINE_OWNED_FIELD
+    // (pipeline-recomputed / pipeline-review stamps) — still rejected.
     const nodeEvent = emitted.find((x) => x.kind === 'update_node_field');
     expect(nodeEvent?.name).toBe('v5.candidate_mutation.rejected');
-    expect(nodeEvent?.blocker_code).toBe(FIELD_NOT_ALLOWED);
+    expect(nodeEvent?.blocker_code).toBe(PIPELINE_OWNED_FIELD);
     const edgeEvent = emitted.find((x) => x.kind === 'update_edge_field');
     expect(edgeEvent?.name).toBe('v5.candidate_mutation.rejected');
-    expect(edgeEvent?.blocker_code).toBe(FIELD_NOT_ALLOWED);
+    expect(edgeEvent?.blocker_code).toBe(PIPELINE_OWNED_FIELD);
   });
 
   it('unknown / invented fields still reject: FIELD_NOT_ALLOWED', () => {
@@ -336,11 +337,10 @@ describe('negative controls (protected fields keep rejecting)', () => {
     );
     const events = emitted.filter((x) => x.kind === 'update_edge_field');
     expect(events).toHaveLength(2);
-    // RED: `defaulted` (CIL pipeline flag) currently rejects as generic
-    // FIELD_NOT_ALLOWED; the reconciliation reclassifies it
-    // PIPELINE_OWNED_FIELD, still rejected.
+    // `defaulted` (CIL pipeline flag) rejects with the precise
+    // PIPELINE_OWNED_FIELD code post-reconciliation.
     expect(events[0]?.name).toBe('v5.candidate_mutation.rejected');
-    expect(events[0]?.blocker_code).toBe(FIELD_NOT_ALLOWED);
+    expect(events[0]?.blocker_code).toBe(PIPELINE_OWNED_FIELD);
     // `strength` is on the edge allowlist both before and after.
     expect(events[1]?.name).toBe('v5.candidate_mutation.held');
     expect(events[1]?.blocker_code).toBe(TUNABLE_APPLY_HELD);
