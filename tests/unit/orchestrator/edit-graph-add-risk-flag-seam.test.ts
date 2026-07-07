@@ -105,6 +105,19 @@ const GENERIC =
   "I wasn't able to apply that change — it would create an inconsistency in the model structure. You could try describing the change differently, or I can rebuild the model from an updated brief.";
 
 /**
+ * Lane 22 — the non-guidance structural-rejection copy is no longer the
+ * vague GENERIC line: the caller now vets the translated violation
+ * catalogue entries into `user_safe_reasons`, and the helper surfaces the
+ * first two. These are the exact expected renderings for the two fixtures
+ * below (NO_PATH_TO_GOAL for the targeted add-risk patch; CYCLE_DETECTED
+ * for the cycle patch).
+ */
+const HONEST_NO_PATH =
+  "I wasn't able to apply that change. This change would leave a node that cannot reach the goal. You could describe the change differently, or I can rebuild the model from an updated brief.";
+const HONEST_CYCLE =
+  "I wasn't able to apply that change. This change would create a circular dependency in the model. You could describe the change differently, or I can rebuild the model from an updated brief.";
+
+/**
  * Compound add-risk message: bypasses the deterministic bare-add-risk
  * clarification pre-route (proven by the e2e suite) AND classifies as
  * `structural` intent, so a non-repairable structural violation rejects
@@ -205,21 +218,29 @@ describe('Cap-2A flag seam — the real edit-graph.ts conditional', () => {
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });
 
-  it('flag OFF, same turn → byte-identical generic suppression copy', async () => {
+  it('flag OFF, same turn → honest actionable-reason copy (Lane 22; no placeholder guidance)', async () => {
     setGuidanceFlag(false);
     const result = await runRejectionTurn('aaaaaaa2-0000-4000-8000-000000000002', TARGETED_ADD_RISK_OPS);
 
     expect(llmChatMock).toHaveBeenCalled();
-    expect(result.response.assistant_text).toBe(GENERIC);
+    // Lane 22: the vague GENERIC line is replaced by the vetted
+    // NO_PATH_TO_GOAL catalogue reason. The flag-OFF invariant that matters
+    // is preserved: no placeholder guidance without the flag.
+    expect(result.response.assistant_text).toBe(HONEST_NO_PATH);
+    expect(result.response.assistant_text).not.toBe(ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER);
+    expect(result.response.assistant_text).not.toBe(GENERIC);
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });
 
-  it('flag ON + non-targeted structural rejection (cycle) → byte-identical generic copy', async () => {
+  it('flag ON + non-targeted structural rejection (cycle) → honest actionable-reason copy (no broadening)', async () => {
     setGuidanceFlag(true);
     const result = await runRejectionTurn('aaaaaaa3-0000-4000-8000-000000000003', CYCLE_OPS);
 
     expect(llmChatMock).toHaveBeenCalled();
-    expect(result.response.assistant_text).toBe(GENERIC);
+    // Classifier still returns null (no guidance broadening); Lane 22 copy
+    // carries the CYCLE_DETECTED catalogue reason instead of GENERIC.
+    expect(result.response.assistant_text).toBe(HONEST_CYCLE);
+    expect(result.response.assistant_text).not.toBe(ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER);
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });
 

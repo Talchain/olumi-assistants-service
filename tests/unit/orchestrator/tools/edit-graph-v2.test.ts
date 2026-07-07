@@ -674,7 +674,8 @@ describe("envelope and coaching wiring", () => {
 
   // Test 10b (R10 safety sibling): an UNSAFE no-op summary that makes a
   // terse false-success claim must NOT be preserved — it falls back to the
-  // deterministic NO_OP_FALLBACK_TEXT. This retains the Codex-P0 Mode-B
+  // deterministic clarify copy (Lane 22: composeEditClarifyResponse parts,
+  // formerly NO_OP_FALLBACK_TEXT). This retains the Codex-P0 Mode-B
   // safety coverage the old Test 10 enforced. Note: a sentence-leading
   // "Updated X to Y" is INLINE-rewritten into a safe proposal frame by
   // enforceProposalLanguage *before* the trip test (so that path is safely
@@ -707,8 +708,9 @@ describe("envelope and coaching wiring", () => {
     // The false-success claim must not reach the user.
     expect(result.assistantText).not.toContain("Done — value set");
     expect(result.assistantText).not.toContain("value set");
-    // Deterministic forward-looking copy used instead.
-    expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
+    // Deterministic forward-looking clarify copy used instead (Lane 22).
+    expect(result.assistantText).toMatch(/Tell me the specific factor/i);
+    expect(result.assistantText).toContain("The model is unchanged so far.");
   });
 
   // Test 11: substantive ops (add_node/add_edge) + prior analysis → suggested action chip
@@ -1187,6 +1189,59 @@ describe("prompt loading", () => {
     expect(result.blocks).toEqual([]);
     expect(result.diagnostics?.validation_outcome).toBe("graph_structure_invalid");
     expect(result.diagnostics?.validation_violation_codes.length).toBeGreaterThan(0);
+  });
+
+  // Lane 22 (live 2026-07-07 session-ending failure) — structural-rejection
+  // honesty. The rejection copy must carry the claim-safe actionable reason
+  // from the VIOLATION_MESSAGES catalogue (not the vague generic line), and
+  // the known dead-end "Simplify the change" chip (whose exact prompt text
+  // needed the chip-simplify-intercept to break a no-op loop) must be gone.
+  it("structural rejection surfaces the claim-safe actionable reason and drops the dead-end chip", async () => {
+    patchPreValidationEnabledForTest = true;
+
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "remove_node",
+          path: "/nodes/goal_1",
+          old_value: { id: "goal_1", kind: "goal", label: "Revenue" },
+          impact: "high",
+          rationale: "Remove goal node",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Removed goal.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove goal node",
+      adapter,
+      "req-struct-honesty",
+      "turn-struct-honesty",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    const text = result.assistantText ?? "";
+    // Actionable catalogue reason surfaced (one of the user-facing
+    // VIOLATION_MESSAGES strings), not the vague generic copy.
+    expect(text).toMatch(
+      /cannot reach the goal|no goal node|circular dependency|no connections|fewer than two options|no decision node/i,
+    );
+    expect(text).not.toContain("inconsistency in the model structure");
+    // Raw internal detail stays suppressed.
+    expect(text).not.toMatch(/\bgoal_1\b/);
+
+    // Dead-end chip replaced: no "Simplify the change" label, and the exact
+    // interceptor-trapped prompt text is gone.
+    const labels = (result.suggestedActions ?? []).map((a) => a.label);
+    const prompts = (result.suggestedActions ?? []).map((a) => a.prompt);
+    expect(labels).not.toContain("Simplify the change");
+    expect(prompts).not.toContain("Try a simpler version of this change.");
+    // The user still has affordances.
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels).toContain("Rebuild from updated brief");
   });
 
   it("returns a concise recovery question after repeated structural outputs for a narrow request", async () => {

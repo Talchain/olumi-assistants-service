@@ -315,13 +315,63 @@ function stripTrailingKindWord(
 /** Standalone affirmatives that don't carry topical content. */
 const STANDALONE_AGREEMENT = /^\s*(?:yes|yeah|yep|sure|ok|okay|please|absolutely)\s*[.!?]?\s*$/i;
 
+/**
+ * Lane 22 (live 2026-07-07 3-for-3 edit-lane failure) — affirmative
+ * prefix. The $-anchored STANDALONE_AGREEMENT rejected every
+ * "Yes, <anything>" reply, including the verbatim live miss "Yes, add
+ * that velocity target." The prefix alone is NOT sufficient: the
+ * remainder must be short politeness ("Yes please.") or carry a
+ * continuation imperative ("add / update / do / apply ..."), so a fresh
+ * statement that merely opens with "Okay so ..." does not resume. A
+ * negation or contrary token anywhere in the text disqualifies, and an
+ * explicit value assignment ("Yes, set the price to 30.") falls through
+ * to the real edit path.
+ */
+const AFFIRMATIVE_PREFIX =
+  /^\s*(?:yes|yeah|yep|sure|ok|okay|absolutely|great|perfect)\b[\s,.!:;-]*/i;
+
+/**
+ * Politeness-only remainder after an affirmative prefix ("Yes please.",
+ * "Ok thanks, go ahead."). Anything longer must carry a continuation
+ * imperative to count as agreement.
+ */
+const POLITE_REMAINDER =
+  /^(?:(?:please|thanks|thank\s+you|now|do|it|that|go\s+ahead|proceed)[\s.,!?]*)*$/i;
+
+/**
+ * Continuation imperatives that make an affirmative-prefixed remainder an
+ * actionable agreement ("Yes, add that velocity target.", "Ok, please
+ * update the model now."). Deliberately verbs-of-carrying-forward only —
+ * no analytical verbs — so "Yes, explain the result" does not resume.
+ */
+const CONTINUATION_IMPERATIVE =
+  /\b(?:add|include|update|apply|make|do|go|proceed|continue|put|set|use)\b/i;
+
+/**
+ * Bare imperative agreement — the reply IS the instruction to carry the
+ * proposal forward, without an affirmative prefix: "Add it.",
+ * "Include it.", "add it to the model", "Do it.". Anchored at start and
+ * bounded to pronoun-ish objects so a fresh concrete edit ("Add a churn
+ * factor at 20%") still routes through the normal edit path.
+ */
+const BARE_IMPERATIVE_AGREEMENT =
+  /^\s*(?:add|include|do)\s+(?:it|that|this)\b(?:\s+(?:to|in)\s+the\s+(?:model|decision))?[\s.!?]*$/i;
+
 const AGREEMENT_PHRASES: ReadonlyArray<RegExp> = [
   /\b(?:that'?s|that is)\s+(?:a\s+)?good\s+idea\b/i,
   /\b(?:let'?s|lets)\s+(?:do|involve|add|include|try|go)\b/i,
   /\bhow\s+(?:should|do|could|would)\s+(?:we|i|you)\s+(?:update|modify|change|adjust)\s+the\s+(?:model|decision)\b/i,
   /\bfor\s+that\s+(?:risk|factor|item)\b/i,
   /\bgo\s+ahead\b/i,
+  /\bgo\s+for\s+it\b/i,
   /\bplease\s+(?:do|add)\b/i,
+  // Lane 22 whitelist gaps (brief-listed): "yes please", "sounds good",
+  // "do it/that", "add it/that". Each is negation-window-guarded at the
+  // scan site like every other phrase.
+  /\byes,?\s+please\b/i,
+  /\bsounds\s+good\b/i,
+  /\bdo\s+(?:it|that)\b/i,
+  /\badd\s+(?:it|that)\b/i,
 ];
 
 const NEGATION_TOKENS: ReadonlyArray<RegExp> = [
@@ -416,17 +466,49 @@ export function extractProposedConcept(
 /**
  * Decide whether the user's current turn message is an affirmative
  * continuation of the prior proposal. Returns true for short standalone
- * affirmatives ("yes", "ok") and for richer continuations ("that's a good
- * idea, let's add it", "how should we update the model?", "for that
- * risk…"). A negation token within 30 characters before any phrase match
- * disqualifies the match — "no, not a good idea" must not resume.
+ * affirmatives ("yes", "ok"), affirmative-prefixed continuations
+ * ("Yes, add that velocity target.", "Yes please."), bare imperative
+ * carries ("Add it.", "include it in the model"), and richer phrase
+ * continuations ("that's a good idea, let's add it", "how should we
+ * update the model?"). A negation token within 30 characters before any
+ * phrase match disqualifies the match — "no, not a good idea" must not
+ * resume — and the affirmative-prefix / bare-imperative rules reject on
+ * a negation or contrary token ANYWHERE in the evaluated text.
+ *
+ * Lane 22 (live 2026-07-07): messages longer than
+ * MAX_AGREEMENT_MESSAGE_LENGTH are no longer auto-rejected — the FINAL
+ * sentence is evaluated instead, so a pasted-back proposal question
+ * followed by "Yes, please update the model now." (the second verbatim
+ * live miss) resumes.
  */
 export function detectsContinuationAgreement(message: string | null | undefined): boolean {
   if (typeof message !== 'string') return false;
   const trimmed = message.trim();
-  if (trimmed.length === 0 || trimmed.length > MAX_AGREEMENT_MESSAGE_LENGTH) return false;
+  if (trimmed.length === 0) return false;
+  if (trimmed.length > MAX_AGREEMENT_MESSAGE_LENGTH) {
+    // Oversized message (e.g. pasted-back proposal + short reply):
+    // evaluate the final sentence alone, bounded by the same cap.
+    const finalSentence = lastSentenceOf(trimmed);
+    if (
+      finalSentence !== null
+      && finalSentence.length > 0
+      && finalSentence.length <= MAX_AGREEMENT_MESSAGE_LENGTH
+      && finalSentence.length < trimmed.length
+    ) {
+      return detectsContinuationAgreement(finalSentence);
+    }
+    return false;
+  }
 
   if (STANDALONE_AGREEMENT.test(trimmed)) {
+    return true;
+  }
+
+  if (matchesAffirmativePrefixAgreement(trimmed)) {
+    return true;
+  }
+
+  if (BARE_IMPERATIVE_AGREEMENT.test(trimmed) && !containsNegationOrContrary(trimmed)) {
     return true;
   }
 
@@ -436,7 +518,158 @@ export function detectsContinuationAgreement(message: string | null | undefined)
     if (hasLeadingNegation(trimmed, m.index)) continue;
     return true;
   }
+
+  // Multi-sentence fallback: a pasted question / restated context followed
+  // by an affirmative closing sentence ("<pasted question>? Yes, please
+  // update the model now."). Only the FINAL sentence is retried so an
+  // affirmative buried mid-message does not resume.
+  const finalSentence = lastSentenceOf(trimmed);
+  if (
+    finalSentence !== null
+    && finalSentence.length > 0
+    && finalSentence.length < trimmed.length
+  ) {
+    if (
+      STANDALONE_AGREEMENT.test(finalSentence)
+      || matchesAffirmativePrefixAgreement(finalSentence)
+      || (BARE_IMPERATIVE_AGREEMENT.test(finalSentence)
+        && !containsNegationOrContrary(finalSentence))
+    ) {
+      return true;
+    }
+  }
   return false;
+}
+
+/**
+ * Affirmative-prefix agreement rule (see AFFIRMATIVE_PREFIX). True when
+ * the text opens with an affirmative, carries no negation/contrary token
+ * anywhere, no explicit value assignment (a concrete edit instruction is
+ * not consent — it routes to the real edit path), and the remainder is
+ * either politeness-only or carries a continuation imperative.
+ */
+function matchesAffirmativePrefixAgreement(text: string): boolean {
+  const prefixMatch = AFFIRMATIVE_PREFIX.exec(text);
+  if (!prefixMatch) return false;
+  if (containsNegationOrContrary(text)) return false;
+  const remainder = text.slice(prefixMatch[0].length).trim();
+  if (remainder.length === 0) return true;
+  if (POLITE_REMAINDER.test(remainder)) return true;
+  if (VALUE_ASSIGNMENT.test(remainder)) return false;
+  return CONTINUATION_IMPERATIVE.test(remainder);
+}
+
+/**
+ * Contrary imperatives — verbs that reverse or park the proposal
+ * ("Drop the velocity target idea."). Kept separate from
+ * NEGATION_TOKENS because the 30-char phrase window check must stay
+ * byte-identical; these guard only the whole-text rules (affirmative
+ * prefix, bare imperative, concept overlap).
+ */
+const CONTRARY_TOKENS: ReadonlyArray<RegExp> = [
+  /\bdrop\b/i,
+  /\bremove\b/i,
+  /\bforget\b/i,
+  /\bscrap\b/i,
+  /\bdelete\b/i,
+  /\bhold\s+off\b/i,
+  /\brather\s+not\b/i,
+];
+
+/**
+ * Explicit value assignment ("to 30", "by 5%", "at 0.4") — the shape of a
+ * fully-specified edit instruction. Consent never needs a number.
+ */
+const VALUE_ASSIGNMENT = /\b(?:to|by|at)\s+-?[\d.]/i;
+
+/** Any negation or contrary token anywhere in the text. */
+function containsNegationOrContrary(text: string): boolean {
+  return (
+    NEGATION_TOKENS.some((p) => p.test(text))
+    || CONTRARY_TOKENS.some((p) => p.test(text))
+  );
+}
+
+/**
+ * Final sentence of a message (sentence boundaries: ./!/? followed by
+ * whitespace, or a newline). Returns null when the text has no boundary
+ * (single-sentence messages are already fully evaluated).
+ */
+function lastSentenceOf(text: string): string | null {
+  const sentences = text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (sentences.length <= 1) return null;
+  return sentences[sentences.length - 1] ?? null;
+}
+
+/**
+ * Stopwords + generic filler excluded from concept-overlap tokens. The
+ * remaining "significant" tokens are the concept's identity — for
+ * "20% velocity target as a constraint" they are {velocity, target,
+ * constraint}.
+ */
+const OVERLAP_STOPWORDS: ReadonlySet<string> = new Set([
+  'the', 'a', 'an', 'as', 'of', 'to', 'and', 'or', 'in', 'on', 'for',
+  'with', 'at', 'by', 'from', 'into', 'that', 'this', 'it', 'its',
+]);
+
+/** Interrogative openers — a question about the concept is not consent. */
+const INTERROGATIVE_LEAD =
+  /^\s*(?:what|why|how|when|where|which|who|should|would|could|can|does|do|did|is|are|was|were|will)\b/i;
+
+/**
+ * Lane 22 — concept token-overlap predicate. The most robust resume
+ * signal: the reply names the pending concept ("velocity target"
+ * appeared VERBATIM in both the live proposal and the live reply and
+ * was ignored). True when at least two significant concept tokens (or
+ * all of them, for one-token concepts) appear as whole words in the
+ * reply, the reply carries no negation/contrary token, is not an
+ * interrogative-led question about the concept, and carries no explicit
+ * value assignment (a concrete edit instruction is not consent).
+ */
+function conceptTokenOverlapAgreement(message: string, concept: string): boolean {
+  const significant = concept
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((t) => t.length >= 3 && !OVERLAP_STOPWORDS.has(t) && /[a-z]/.test(t));
+  if (significant.length === 0) return false;
+  const required = Math.min(2, significant.length);
+  let hits = 0;
+  for (const token of new Set(significant)) {
+    const re = new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (re.test(message)) hits += 1;
+    if (hits >= required) break;
+  }
+  if (hits < required) return false;
+  if (containsNegationOrContrary(message)) return false;
+  if (INTERROGATIVE_LEAD.test(message)) return false;
+  if (VALUE_ASSIGNMENT.test(message)) return false;
+  return true;
+}
+
+/**
+ * Concept-aware agreement — the single matcher both resume call sites
+ * (the pre-LLM intercept and the post-LLM no-op recovery) reach through
+ * `decideProposalContinuation`. Extends `detectsContinuationAgreement`
+ * with the concept token-overlap predicate so a reply that names the
+ * pending concept resumes even when it matches no whitelisted phrase.
+ */
+export function detectsProposalAgreement(
+  message: string | null | undefined,
+  concept: string | null | undefined,
+): boolean {
+  if (detectsContinuationAgreement(message)) return true;
+  if (typeof message !== 'string' || typeof concept !== 'string') return false;
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  const evaluated =
+    trimmed.length > MAX_AGREEMENT_MESSAGE_LENGTH
+      ? lastSentenceOf(trimmed) ?? ''
+      : trimmed;
+  if (evaluated.length === 0 || evaluated.length > MAX_AGREEMENT_MESSAGE_LENGTH) return false;
+  return conceptTokenOverlapAgreement(evaluated, concept);
 }
 
 /**
@@ -739,6 +972,16 @@ export function decideProposalContinuation(
   input: DecideProposalContinuationInput,
 ): ProposalContinuationDecision | null {
   if (input.pendingProposedConcept === null) return null;
+  // Already-disambiguated factor messages ("Add X as a factor affecting
+  // Y.") are fully-actionable Stage 3 instructions — never intercept
+  // them, even when they token-overlap the stored concept. They route
+  // through the existing edit_graph dispatch with full context.
+  if (
+    typeof input.message === 'string'
+    && ADD_AS_FACTOR_DISAMBIGUATED.test(input.message)
+  ) {
+    return null;
+  }
   if (detectsAddAsFactorIntent(input.message)) {
     const candidateAffects = pickCandidateAffectLabels(input.nodes ?? null);
     const built = buildFactorAffectClarifierResponse({
@@ -751,7 +994,7 @@ export function decideProposalContinuation(
       suggestedActions: built.suggestedActions,
     };
   }
-  if (detectsContinuationAgreement(input.message)) {
+  if (detectsProposalAgreement(input.message, input.pendingProposedConcept.concept)) {
     const built = buildProposalStageOneResponse({
       concept: input.pendingProposedConcept.concept,
       preferred_kind: input.pendingProposedConcept.preferred_kind,

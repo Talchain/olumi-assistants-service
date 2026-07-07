@@ -137,9 +137,15 @@ describe('goal-target join: "set the success target to 15%" (chip-context dead-e
 
     // Honest receipt naming the target — and it survives the egress
     // guards (no success-claim pattern, no forbidden internal vocabulary).
+    // Lane 22: the forward promise is conditional ("once the analysis can
+    // measure this goal") because goal-fit is currently suppressed for goal
+    // nodes without a value channel — the old unconditional "The next
+    // analysis will score your options against this target." promise was
+    // false for every registration today.
     expect(outcome.assistant_text).toBe(
-      'Success target set: Revenue at least 15%. The next analysis will score your options against this target.',
+      "Success target set: Revenue at least 15%. I'll flag how your options score against it once the analysis can measure this goal.",
     );
+    expect(outcome.assistant_text).not.toContain('The next analysis will score');
     expect(findSuccessClaimHit(outcome.assistant_text)).toBeNull();
     expect(findForbiddenPhraseHit(outcome.assistant_text)).toBeNull();
 

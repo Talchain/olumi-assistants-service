@@ -1425,6 +1425,23 @@ export async function dispatchEditGraph(
           reason: resumeOutcome.rejection,
         });
         interceptEmittedInvalidation = true;
+      } else if (
+        resumeOutcome.rejection === null
+        && resumeOutcome.decision === null
+      ) {
+        // Lane 22 — the pre-LLM gate previously declined SILENTLY here: a
+        // live, valid pending proposal existed but the agreement matcher
+        // said no-match, and nothing was emitted (the live 2026-07-07 miss
+        // was invisible until the post-LLM zero-operations sub-case). Emit
+        // the no-match outcome from the gate itself so the matcher's miss
+        // rate is measurable. `no_pending` (the steady state on most
+        // turns) still emits nothing.
+        emit(TelemetryEvents.V5ProposalContinuationResumed, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          outcome: 'no_agreement',
+          pre_llm: true,
+        });
       }
       const earlyDecision = resumeOutcome.decision;
       if (earlyDecision !== null) {
@@ -1780,6 +1797,31 @@ export async function dispatchEditGraph(
         derivation_error: err instanceof Error ? err.message : String(err),
       },
     );
+  }
+
+  // Lane 22 — missed-resume visibility on the ops-produced paths. When a
+  // live, valid pending proposal existed (the resume gate passed) but the
+  // turn went to the LLM and produced an edit outcome — applied OR
+  // rejected — the missed resume was previously invisible: the
+  // zero-operations recovery sub-case below is the ONLY place that
+  // emitted `no_agreement`. Emit it here for the complementary paths so
+  // dashboards see every turn where a pending proposal coexisted with an
+  // LLM edit outcome. `ops_produced` distinguishes this emit from the
+  // zero-ops one; the pre-LLM gate's own no-match emit is distinguished
+  // by `pre_llm: true`.
+  if (
+    pendingProposedConceptForRecovery !== null
+    && !proposalEarlyEmitted
+    && (editResult.wasRejected || (editResult.operations?.length ?? 0) > 0)
+  ) {
+    emit(TelemetryEvents.V5ProposalContinuationResumed, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      outcome: 'no_agreement',
+      pre_llm: false,
+      ops_produced: true,
+      edit_was_rejected: editResult.wasRejected,
+    });
   }
 
   // ── Graph Management referee gate (lane 8, CEE_GRAPH_MANAGEMENT_MODE) ──

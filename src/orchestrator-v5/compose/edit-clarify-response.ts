@@ -115,6 +115,27 @@ export function composeEditClarifyResponse(
 }
 
 /**
+ * Lane 22 — deterministic fallback PARTS for the V4 edit_graph no-op
+ * branch (edit-graph.ts). When the LLM no-ops and the R10 preservation
+ * gate declines the LLM's clarifying question, the branch previously
+ * shipped canned copy with ZERO chips (buildNoOpRecoveryChips emits no
+ * chips without a preceding validator referential error). This helper
+ * reuses the SAME copy + chip builder as the route-level intercepts
+ * (composeEditClarifyResponse) so the no-op fallback carries 1–3
+ * factor/option-label chips and copy that already passes the egress
+ * phrase guards. Returned as parts (text + chips) rather than an
+ * OlumiResponse because the V4 handler composes its own result shape.
+ */
+export function buildEditClarifyFallbackParts(
+  nodes: readonly EditClarifyComposerNode[] | null | undefined,
+): { readonly text: string; readonly chips: readonly SuggestedAction[] } {
+  return {
+    text: `${LEAD_TEXT} ${CLOSING_TEXT}`,
+    chips: buildClarifyChips(nodes ?? []),
+  };
+}
+
+/**
  * Pick up to three text-prompt chips from canonical graph labels.
  * Selection order:
  *   1. Factor-kind nodes (the most common edit target), preserving

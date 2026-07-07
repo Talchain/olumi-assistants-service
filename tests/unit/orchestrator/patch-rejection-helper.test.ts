@@ -165,4 +165,78 @@ describe('buildPatchRejectionEnvelope', () => {
       expect.stringContaining('suppressed'),
     );
   });
+
+  // Lane 22 (live 2026-07-07 session-ending failure): a NO_PATH_TO_GOAL
+  // structural rejection shipped only vague copy while the claim-safe
+  // actionable reason ("This change would leave a node that cannot reach
+  // the goal.") was suppressed. `user_safe_reasons` carries CALLER-VETTED
+  // translated reasons (VIOLATION_MESSAGES members only) into the copy;
+  // the raw `violations` field stays suppressed exactly as before.
+  it('surfaces caller-vetted user_safe_reasons in structural_violation copy', () => {
+    const envelope = buildPatchRejectionEnvelope(
+      {
+        reason: 'structural_violation',
+        detail: 'Consider simplifying the change or approaching it differently.',
+        violations: ['NO_PATH_TO_GOAL raw detail with node ids fac_x'],
+        user_safe_reasons: [
+          'This change would leave a node that cannot reach the goal.',
+        ],
+        suggested_actions: [
+          { role: 'facilitator', label: 'What would work instead?', prompt: 'What would work instead?' },
+        ],
+      },
+      'test-turn-id-3',
+      mockContext,
+    );
+
+    expect(envelope.assistant_text).toContain(
+      'This change would leave a node that cannot reach the goal.',
+    );
+    // The raw violation string stays suppressed.
+    expect(envelope.assistant_text).not.toContain('fac_x');
+    expect(envelope.assistant_text).not.toContain('NO_PATH_TO_GOAL');
+    // The vague generic line is replaced, not appended.
+    expect(envelope.assistant_text).not.toContain('inconsistency in the model structure');
+  });
+
+  it('caps user_safe_reasons at two and dedupes them', () => {
+    const envelope = buildPatchRejectionEnvelope(
+      {
+        reason: 'structural_violation',
+        detail: 'Consider simplifying the change or approaching it differently.',
+        user_safe_reasons: [
+          'This change would leave a node that cannot reach the goal.',
+          'This change would leave a node that cannot reach the goal.',
+          'This change would create a circular dependency in the model.',
+          'The model would have no goal node.',
+        ],
+        suggested_actions: [
+          { role: 'facilitator', label: 'What would work instead?', prompt: 'What would work instead?' },
+        ],
+      },
+      'test-turn-id-4',
+      mockContext,
+    );
+
+    const text = envelope.assistant_text!;
+    expect(text.match(/cannot reach the goal/g)).toHaveLength(1);
+    expect(text).toContain('circular dependency in the model');
+    expect(text).not.toContain('no goal node');
+  });
+
+  it('empty user_safe_reasons falls back to the generic structural copy (byte-identical default)', () => {
+    const envelope = buildPatchRejectionEnvelope(
+      {
+        reason: 'structural_violation',
+        detail: 'Consider simplifying the change or approaching it differently.',
+        user_safe_reasons: [],
+        suggested_actions: [
+          { role: 'facilitator', label: 'What would work instead?', prompt: 'What would work instead?' },
+        ],
+      },
+      'test-turn-id-5',
+      mockContext,
+    );
+    expect(envelope.assistant_text).toContain('inconsistency in the model structure');
+  });
 });

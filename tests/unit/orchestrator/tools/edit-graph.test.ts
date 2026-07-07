@@ -1454,7 +1454,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     // Deterministic forward-looking default must fire when no warnings either.
     // Forward-looking (not a denial) so it passes the V5 egress forbidden-
     // phrase guard intact — see edit-graph.ts NO_OP_FALLBACK_TEXT comment.
-    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).toMatch(/Tell me the specific factor/i);
     expect(text).not.toMatch(/\bno changes were\b/i);
     // No-commit contract preserved.
     expect(result.wasRejected).toBe(false);
@@ -1507,7 +1507,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     // Coaching content does NOT reach assistant_text.
     expect(text).not.toMatch(/I['’]ve\s+applied/i);
     // Deterministic copy used instead.
-    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).toMatch(/Tell me the specific factor/i);
   });
 
   it("LLM emits operations=[] with FALSE-SUCCESS warning text → no leak to assistant_text (Codex P0)", async () => {
@@ -1531,7 +1531,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     expect(text).not.toContain("Updated Price");
     expect(text).not.toContain("Done");
     expect(text).not.toContain("value set");
-    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).toMatch(/Tell me the specific factor/i);
   });
 
   it("LLM emits operations=[] with JARGON warning text → no leak to assistant_text (Codex P0)", async () => {
@@ -1554,7 +1554,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     );
     const text = result.assistantText ?? "";
     expect(text).not.toMatch(/\bvalidator\b/i);
-    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).toMatch(/Tell me the specific factor/i);
   });
 
   it("LLM emits operations=[] with no warnings and no coaching → safe default", async () => {
@@ -1571,7 +1571,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
       "req-1",
       "turn-1",
     );
-    expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
+    expect(result.assistantText).toMatch(/Tell me the specific factor/i);
     expect(result.assistantText).not.toMatch(/\bno changes were\b/i);
     expect(result.wasRejected).toBe(false);
     expect(result.appliedGraph).toBeNull();

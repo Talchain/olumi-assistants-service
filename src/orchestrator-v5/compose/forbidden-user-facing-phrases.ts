@@ -340,7 +340,13 @@ export const EDIT_INTERNALS_PATTERNS: readonly RegExp[] = [
   /\boperations?\b/i,
   /\bgraph\b/i,
   /\b(?:node|edge)s?\b/i,
-  /\bpath\b/i,
+  // Lane 22: bare `path` REMOVED from the decline set. It is legitimate
+  // decision English ("no path from the option to the goal" carries the
+  // same meaning as the approved NO_PATH_TO_GOAL user copy "cannot reach
+  // the goal"), and it cost the user a claim-safe clarifying question in
+  // the live 2026-07-07 session class. Raw internal path SHAPES are still
+  // declined by the dotted-path pattern below (`operations.path`), and
+  // snake_case ids / ascii arrows keep their own patterns.
   // snake_case internal ids: fac_price, dec_launch, opt_hire_local
   /\b[a-z]+_[a-z0-9_]+\b/i,
   // dotted internal paths: operations.path, node.id (≥2 chars each side so
