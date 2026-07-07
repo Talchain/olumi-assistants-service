@@ -30,8 +30,8 @@ import type { SessionTurnWithContent } from '../session/conversation-content.js'
 import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
 import type {
-  AnalysisResponseSummary,
   DriverSummary,
+  FlipThreshold,
   OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
@@ -43,6 +43,10 @@ import {
   formatAnalysisForContext,
   type DisplaySafeAnalysis,
 } from '../format/format-analysis-for-context.js';
+import type {
+  AnalysisResponseSummaryWithSignals,
+  TippingPointSignal,
+} from './analysis-signals.js';
 import {
   formatGraphForContext,
   type DisplaySafeGraph,
@@ -108,6 +112,34 @@ export interface ContextPackAnalysisFragileEdge {
   readonly to_label: string;
 }
 
+/**
+ * Lane 21 (P0-A) — raw tipping-point projection entry. Values are raw
+ * floats (handler-facing); the display formatter bands them into
+ * decision-language phrases and never surfaces the numbers.
+ * `no_flip_within_bounds` carries the producer-attested "no flip point
+ * exists in the tested range" fact (staging `flip_reason:
+ * 'no_effect_within_bounds'`).
+ */
+export interface ContextPackAnalysisFlipThreshold {
+  readonly factor_label: string;
+  readonly current_value: number | null;
+  readonly flip_value: number | null;
+  readonly unit: string | null;
+  readonly no_flip_within_bounds: boolean;
+}
+
+/** Lane 21 — raw evidence-gap (VOI) projection entry. `voi_score` ∈ [0,1]. */
+export interface ContextPackAnalysisEvidenceGap {
+  readonly factor_label: string;
+  readonly voi_score: number;
+}
+
+/** Lane 21 — goal-fit scoring provenance (PLoT #204). Fact + basis only. */
+export interface ContextPackAnalysisGoalFit {
+  readonly scored: boolean;
+  readonly basis: string | null;
+}
+
 export interface ContextPackAnalysis {
   readonly status: string;
   readonly leading_option: ContextPackAnalysisOption | null;
@@ -123,6 +155,30 @@ export interface ContextPackAnalysis {
    * structured access without parsing.
    */
   readonly fragile_edges: readonly ContextPackAnalysisFragileEdge[];
+  /**
+   * Lane 21 (P0-A) breadth widening. The four fields below are OPTIONAL on
+   * the interface (one legacy call site — chip-click-dispatch — hand-builds
+   * a narrow projection for `buildAnalysisProjectionSummary` and does not
+   * carry them) but the routed `projectAnalysis` path ALWAYS populates them
+   * so the LLM-facing display projection can represent the whole analysis:
+   *
+   *  - `options`: EVERY scale-guard-valid option (label + raw probability),
+   *    sorted by win probability descending — not just the leading pair.
+   *    Bounded by {@link MAX_PROJECTED_OPTIONS}.
+   *  - `flip_thresholds`: tipping-point entries (top-level staging signals
+   *    when attached, else the per-option `summary.flip_thresholds`).
+   *  - `fragile_edge_count`: the UNCAPPED count behind the capped
+   *    `fragile_edges` label list. Fail-closed under lever suppression:
+   *    when any edge is suppressed the count collapses to the filtered
+   *    list length rather than repeating the producer count.
+   *  - `evidence_gaps` / `goal_fit`: VOI + goal-fit provenance signals
+   *    (see `./analysis-signals.ts`), raw here, banded by the formatter.
+   */
+  readonly options?: readonly ContextPackAnalysisOption[];
+  readonly flip_thresholds?: readonly ContextPackAnalysisFlipThreshold[];
+  readonly fragile_edge_count?: number;
+  readonly evidence_gaps?: readonly ContextPackAnalysisEvidenceGap[];
+  readonly goal_fit?: ContextPackAnalysisGoalFit | null;
   // V5 state-trust: `staleness_reason` removed from the prompt-visible
   // analysis section — freshness is now a deterministic verdict on the
   // wire (`analysis_ready.freshness`) and a telemetry signal
@@ -323,7 +379,13 @@ export interface AssembleContextPackInput {
    * compact path. Passthrough only — assembler does not introspect.
    */
   readonly compactedConstraints?: readonly unknown[] | null;
-  readonly analysis?: AnalysisResponseSummary | null;
+  /**
+   * The compact analysis summary, optionally carrying the Lane 21 signal
+   * extensions (tipping points / evidence-gap VOI / goal-fit provenance —
+   * see `./analysis-signals.ts`). Plain `AnalysisResponseSummary` values
+   * remain assignable; the extensions are additive and optional.
+   */
+  readonly analysis?: AnalysisResponseSummaryWithSignals | null;
   /**
    * V5 Task 1.4: when the analysis came from a server-side fallback
    * (prior handler facts, not this request's body), the caller supplies a
@@ -646,6 +708,23 @@ function isProbabilityValid(
 const TOP_DRIVER_CAP = 3;
 
 /**
+ * Lane 21 (P0-A): the ROUTED ContextPack projection carries up to five
+ * drivers — parity with the top-5 derivation in `compactAnalysis` and the
+ * five factors the UI renders. The chip-click dispatch keeps the legacy
+ * default cap of {@link TOP_DRIVER_CAP}; ordering/sign logic is shared via
+ * `projectTopDrivers` so only the breadth differs.
+ */
+export const CONTEXT_PACK_TOP_DRIVER_CAP = 5;
+
+/**
+ * Lane 21 (P0-A): bound on the widened all-options projection so a
+ * degenerate many-option graph cannot blow the prompt budget. Realistic
+ * graphs carry ≤ 8 options; overflow count is surfaced by the display
+ * formatter, never silently dropped.
+ */
+export const MAX_PROJECTED_OPTIONS = 12;
+
+/**
  * P0b-1 — source-only fragile-edge lever suppression, shared by `projectAnalysis`
  * (routed path) and the chip-click dispatch so the two re-projection sites cannot
  * drift (mirrors how `projectTopDrivers` is shared).
@@ -686,7 +765,8 @@ export function filterLeverSourcedFragileEdges<E extends { from_id?: string; fro
  *   1. drop non-finite magnitudes;
  *   2. re-attach the sign via `toSignedInfluenceValue` (`neutral` → 0);
  *   3. sort by absolute signed value, descending;
- *   4. cap at `TOP_DRIVER_CAP`.
+ *   4. cap at `cap` (default `TOP_DRIVER_CAP`; the routed ContextPack path
+ *      passes `CONTEXT_PACK_TOP_DRIVER_CAP` — Lane 21 breadth widening).
  * Because the sort runs AFTER `neutral` is zeroed, a no-effect driver is always
  * demoted (and usually capped out) in both paths — it can never lead a "would
  * shift the most" claim on one path while being demoted on the other.
@@ -694,6 +774,7 @@ export function filterLeverSourcedFragileEdges<E extends { from_id?: string; fro
 export function projectTopDrivers(
   drivers: readonly DriverSummary[],
   controlledFactorIds?: ReadonlySet<string>,
+  cap: number = TOP_DRIVER_CAP,
 ): ContextPackAnalysisDriver[] {
   // Spine A backstop: drop any driver whose factor is option-controlled BEFORE
   // the projection strips `factor_id` (the structural match key). Authority is
@@ -730,11 +811,35 @@ export function projectTopDrivers(
       sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
     }))
     .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
-    .slice(0, TOP_DRIVER_CAP);
+    .slice(0, cap);
+}
+
+/**
+ * Map a per-option `FlipThreshold` (compactAnalysis derivation — always a
+ * complete numeric pair) into the widened tipping-point projection shape.
+ */
+function tippingFromFlipThreshold(entry: FlipThreshold): ContextPackAnalysisFlipThreshold {
+  return {
+    factor_label: entry.factor_label,
+    current_value: entry.current_value,
+    flip_value: entry.flip_value,
+    unit: entry.unit,
+    no_flip_within_bounds: false,
+  };
+}
+
+function tippingFromSignal(entry: TippingPointSignal): ContextPackAnalysisFlipThreshold {
+  return {
+    factor_label: entry.factor_label,
+    current_value: entry.current_value,
+    flip_value: entry.flip_value,
+    unit: entry.unit,
+    no_flip_within_bounds: entry.no_flip_within_bounds,
+  };
 }
 
 function projectAnalysis(
-  analysis: AnalysisResponseSummary | null,
+  analysis: AnalysisResponseSummaryWithSignals | null,
   stalenessReason: string | null,
   controlledFactorIds?: ReadonlySet<string>,
 ): ContextPackAnalysis | null {
@@ -773,9 +878,12 @@ function projectAnalysis(
   // 2. Top drivers — shared with the chip-click dispatch via projectTopDrivers:
   //    filter non-finite, re-attach sign (neutral → 0), sort by |signed value|,
   //    cap. Keeping both reattachment sites on one helper prevents drift.
+  //    Lane 21: the routed path carries up to five drivers (UI parity); the
+  //    chip path keeps the legacy default cap.
   const topDrivers: ContextPackAnalysisDriver[] = projectTopDrivers(
     analysis.top_drivers,
     controlledFactorIds,
+    CONTEXT_PACK_TOP_DRIVER_CAP,
   );
 
   // 3. Robustness band: null when source is unknown / empty; do not fabricate.
@@ -784,6 +892,51 @@ function projectAnalysis(
     typeof rawBand === 'string' && rawBand.trim().length > 0 && rawBand !== 'unknown'
       ? rawBand
       : null;
+
+  // 4. Lane 21 breadth: every valid option (F.6 passthrough — filter + sort
+  //    only, values untouched), bounded by MAX_PROJECTED_OPTIONS.
+  const allOptions: ContextPackAnalysisOption[] = validOptions
+    .slice(0, MAX_PROJECTED_OPTIONS)
+    .map((o) => ({ label: o.option_label, probability: o.win_probability }));
+
+  // 5. Lane 21 tipping points: prefer the attached top-level staging signals
+  //    (see analysis-signals.ts — the per-option derivation is structurally
+  //    empty on staging); fall back to the per-option summary.flip_thresholds.
+  const tippingSignals = analysis.tipping_points ?? [];
+  const flipThresholds: ContextPackAnalysisFlipThreshold[] =
+    tippingSignals.length > 0
+      ? tippingSignals.map(tippingFromSignal)
+      : (analysis.flip_thresholds ?? []).map(tippingFromFlipThreshold);
+
+  // 6. P0b-1: drop lever-SOURCED fragile edges before they reach the prose /
+  //    validation surfaces (explain_results, explanation-fallback, advice gate —
+  //    all read this same projection). Source-only; the output shape is unchanged
+  //    ({from_label,to_label}), so the strict ContextPack schema is unaffected.
+  const sourceFragile = analysis.top_fragile_edges ?? [];
+  const filteredFragile = filterLeverSourcedFragileEdges(sourceFragile, controlledFactorIds);
+  // Lane 21: uncapped count behind the capped list. FAIL-CLOSED under lever
+  // suppression: once any edge is suppressed the producer's uncapped count can
+  // no longer be attested (it may include other lever-sourced edges beyond the
+  // capped list), so collapse to the filtered list length.
+  const suppressionFired = filteredFragile.length < sourceFragile.length;
+  const fragileEdgeCount = suppressionFired
+    ? filteredFragile.length
+    : Math.max(
+        typeof analysis.fragile_edge_count === 'number' &&
+          Number.isFinite(analysis.fragile_edge_count) &&
+          analysis.fragile_edge_count >= 0
+          ? analysis.fragile_edge_count
+          : 0,
+        filteredFragile.length,
+      );
+
+  // 7. Lane 21 signal passthrough — raw values; banding is the formatter's job.
+  const evidenceGaps: ContextPackAnalysisEvidenceGap[] = (analysis.evidence_gaps ?? [])
+    .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
+    .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
+  const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit
+    ? { scored: analysis.goal_fit.scored, basis: analysis.goal_fit.basis }
+    : null;
 
   // stalenessReason is intentionally not threaded into the projection —
   // V5 state-trust removed it from the prompt-visible shape. Reading the
@@ -798,17 +951,15 @@ function projectAnalysis(
     margin_pp: marginPp,
     robustness_band: robustnessBand,
     top_drivers: topDrivers,
-    // P0b-1: drop lever-SOURCED fragile edges before they reach the prose /
-    // validation surfaces (explain_results, explanation-fallback, advice gate —
-    // all read this same projection). Source-only; the output shape is unchanged
-    // ({from_label,to_label}), so the strict ContextPack schema is unaffected.
-    fragile_edges: filterLeverSourcedFragileEdges(
-      analysis.top_fragile_edges ?? [],
-      controlledFactorIds,
-    ).map((e) => ({
+    fragile_edges: filteredFragile.map((e) => ({
       from_label: e.from_label,
       to_label: e.to_label,
     })),
+    options: allOptions,
+    flip_thresholds: flipThresholds,
+    fragile_edge_count: fragileEdgeCount,
+    evidence_gaps: evidenceGaps,
+    goal_fit: goalFit,
   };
 }
 

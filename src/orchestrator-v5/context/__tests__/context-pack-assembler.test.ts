@@ -622,7 +622,11 @@ describe('non-production runtime gate', () => {
 });
 
 describe('projectAnalysis — enriched projection', () => {
-  it('caps top_drivers at 3 and sorts by absolute magnitude descending', () => {
+  // Lane 21 (P0-A): the routed projection cap widened 3 → 5
+  // (CONTEXT_PACK_TOP_DRIVER_CAP) so the LLM sees the same driver breadth
+  // the UI renders. Ordering rule unchanged. A sixth driver is still capped
+  // out — see the breadth suite (context-pack-analysis-breadth.test.ts).
+  it('caps top_drivers at 5 on the routed path and sorts by absolute magnitude descending', () => {
     const pack = assembleContextPack({
       payload: BASE_PAYLOAD,
       priorTurns: [],
@@ -640,6 +644,8 @@ describe('projectAnalysis — enriched projection', () => {
       { factor_label: 'Big −', sensitivity_value: -0.80 },
       { factor_label: 'Big +', sensitivity_value: 0.60 },
       { factor_label: 'Med +', sensitivity_value: 0.40 },
+      { factor_label: 'Small +', sensitivity_value: 0.05 },
+      { factor_label: 'Tiny −', sensitivity_value: -0.01 },
     ]);
   });
 
@@ -806,7 +812,13 @@ describe('projectAnalysis — enriched projection', () => {
     }
   });
 
-  it('analysis section stays under 800 chars for a realistic 4-option, 3-driver run', () => {
+  // Lane 21 (P0-A): budget raised from 800 — the raw section now carries
+  // EVERY option plus tipping/VOI/goal-fit signal slots (breadth was the
+  // point: the old ~600-char projection starved the LLM). The measured size
+  // for this fixture is ~1.25k; 1800 leaves headroom without letting the
+  // section grow unbounded. The LLM-facing budget is asserted separately on
+  // the display projection (format-analysis-for-context.test.ts).
+  it('analysis section stays under 1800 chars for a realistic 4-option, 3-driver run', () => {
     const pack = assembleContextPack({
       payload: BASE_PAYLOAD,
       priorTurns: [],
@@ -832,7 +844,7 @@ describe('projectAnalysis — enriched projection', () => {
       analysisStalenessReason: null,
     });
     const chars = JSON.stringify(pack.analysis ?? {}).length;
-    expect(chars).toBeLessThan(800);
+    expect(chars).toBeLessThan(1800);
   });
 
   it('scale guard: degradation log fires when the dropped option would have been the leader', () => {
