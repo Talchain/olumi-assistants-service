@@ -111,8 +111,20 @@ function resolveGoalThresholdCap(
   existingCap: unknown,
   raw: number,
   unit: string | undefined,
+  existingUnit: unknown,
 ): number | null {
+  // '%' targets ALWAYS normalise against 100 (review hardening, 2026-07-07):
+  // an inherited absolute cap from a previous registration (e.g. cap 1000
+  // from an "800 customers" target) must not distort a percentage
+  // re-registration — 80% against cap 1000 would silently score options
+  // against 0.08 instead of 0.8 while the receipt passes the honesty guard.
+  if (unit === '%' && raw > 0 && raw <= 100) return 100;
+  // An existing cap is only reusable when the units are compatible —
+  // a cap minted for one unit is meaningless for another.
+  const unitsCompatible =
+    unit === existingUnit || (unit === undefined && existingUnit === undefined);
   if (
+    unitsCompatible &&
     typeof existingCap === 'number' &&
     Number.isFinite(existingCap) &&
     existingCap > 0 &&
@@ -120,7 +132,6 @@ function resolveGoalThresholdCap(
   ) {
     return existingCap;
   }
-  if (unit === '%' && raw > 0 && raw <= 100) return 100;
   if (raw > 0) return raw * 1.25;
   return null;
 }
@@ -344,6 +355,18 @@ export function createAddConstraintHandler(): HandlerFn {
       // claim). The constraint entry still lands.
       const isGoalTargetSet = targetNode.kind === 'goal' && operator === '>=';
 
+      // Review hardening (2026-07-07): a success target must be a positive
+      // number — the shared value schema is a plain z.number(), so without
+      // this guard "-5%" would persist a negative goal_threshold that ships
+      // to PLoT/ISL unbounded.
+      if (isGoalTargetSet && !(params.value > 0)) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'A success target must be a positive number — tell me the target value again.',
+          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+        );
+      }
+
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
         const next = existing
@@ -359,10 +382,16 @@ export function createAddConstraintHandler(): HandlerFn {
               goalNode.goal_threshold_cap,
               params.value,
               newConstraint.unit,
+              goalNode.goal_threshold_unit,
             );
             goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
+            // Unit is ALWAYS reconciled (review hardening): keeping a stale
+            // '%' unit when a unitless absolute target re-registers would
+            // display "900%" — a unitless registration clears the old unit.
             if (newConstraint.unit !== undefined) {
               goalNode.goal_threshold_unit = newConstraint.unit;
+            } else {
+              delete goalNode.goal_threshold_unit;
             }
             if (cap !== null) {
               goalNode.goal_threshold_cap = cap;
