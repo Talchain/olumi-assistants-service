@@ -75,14 +75,14 @@ const REQUIRED_GATE_CATEGORY_EXCLUSIONS = ["tests/integration/**"];
 const STANDALONE_TOOL_EXCLUSIONS = ["tools/graph-evaluator/**"];
 
 // Currently-red in-process test files — exact paths only (no globs).
+// 2026-07-07 (lane CEE-W4 test hygiene): five files fixed green and
+// restored to the gate per the "remove a path only once it is genuinely
+// green again" rule above: d1-followup-fixes,
+// turn-executor-explain-precondition-chip, turn-executor-recoverable-handler,
+// chip-click-dispatch, chip-click-dispatch-analysis-ready.
 const REQUIRED_GATE_RED_EXCLUSIONS = [
-  "src/orchestrator-v5/__tests__/d1-followup-fixes.test.ts",
-  "src/orchestrator-v5/__tests__/turn-executor-explain-precondition-chip.test.ts",
   "src/orchestrator-v5/__tests__/turn-executor-failure-responses.test.ts",
   "src/orchestrator-v5/__tests__/turn-executor-handler.test.ts",
-  "src/orchestrator-v5/__tests__/turn-executor-recoverable-handler.test.ts",
-  "src/orchestrator-v5/handlers/__tests__/chip-click-dispatch-analysis-ready.test.ts",
-  "src/orchestrator-v5/handlers/__tests__/chip-click-dispatch.test.ts",
   "tests/contract/endpoint-feature-matrix.test.ts",
   "tests/contract/phase2-numeric-format.test.ts",
   "tests/unit/cee.progressive-degradation.test.ts",
