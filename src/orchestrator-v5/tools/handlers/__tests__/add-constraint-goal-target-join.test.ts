@@ -101,7 +101,7 @@ function goalNodeOf(graph: unknown): Record<string, unknown> {
 }
 
 describe('goal-target join: "set the success target to 15%" (chip-context dead-end repro)', () => {
-  it('RED PIN (live dead-end): the constraint FACT lands but NO threshold reaches the goal node', async () => {
+  it('lands the threshold on the goal node AND keeps the constraint fact (single derivation)', async () => {
     const handler = createAddConstraintHandler();
     const outcome = await handler(
       buildInvocation(
@@ -110,28 +110,86 @@ describe('goal-target join: "set the success target to 15%" (chip-context dead-e
       ),
     );
 
-    // The constraint channel lands…
+    // The constraint channel (existing behaviour) still lands.
     const mutated = outcome.mutated_graph as GraphV3T;
     expect(mutated.goal_constraints).toHaveLength(1);
     expect(mutated.goal_constraints![0].node_id).toBe('g-revenue');
     expect(mutated.goal_constraints![0].operator).toBe('>=');
     expect(mutated.goal_constraints![0].value).toBe(15); // user units
 
-    // …but the goal node's threshold fields NEVER update (the dead-end):
-    // the UI keeps "Set a target to see your chances".
+    // THE JOIN (GREEN): the goal node's threshold fields land in the SAME
+    // sanctioned write. (RED pin before the join: all four stayed
+    // undefined — the live dead-end.)
     const goal = goalNodeOf(mutated);
-    expect(goal.goal_threshold_raw).toBeUndefined();
-    expect(goal.goal_threshold_unit).toBeUndefined();
-    expect(goal.goal_threshold_cap).toBeUndefined();
-    expect(goal.goal_threshold).toBeUndefined();
+    expect(goal.goal_threshold_raw).toBe(15);
+    expect(goal.goal_threshold_unit).toBe('%');
+    expect(goal.goal_threshold_cap).toBe(100); // % → cap 100 (doctrine)
+    expect(goal.goal_threshold).toBeCloseTo(0.15); // raw/cap, model units
 
-    // …and decision context has_goal_target stays false
-    // (user_scale_target derives ONLY from goal_threshold_raw).
+    // Decision context derives has_goal_target === true from the mutated
+    // graph (build-turn-context: user_scale_target !== null).
     const ctx = deriveDecisionContext(null, mutated);
-    expect(ctx.goal_translation.user_scale_target).toBeNull();
+    expect(ctx.goal_translation.user_scale_target).toBe('15 %');
 
-    // The receipt does not name a success target — generic constraint copy.
-    expect(outcome.assistant_text).toBe('Added constraint: Revenue must be at least 15%.');
+    // Honest receipt naming the target.
+    expect(outcome.assistant_text).toBe(
+      'Success target set: Revenue at least 15%. The next analysis will score your options against this target.',
+    );
+
+    // Fact channel unchanged (frozen @talchain/schemas shape).
+    expect(outcome.handler_facts).toHaveLength(1);
+    expect(outcome.handler_facts[0].fact_type).toBe('add_constraint');
+  });
+
+  it('resolves the cap by headroom (25% above target, doctrine) when no unit/cap is known', async () => {
+    const handler = createAddConstraintHandler();
+    const outcome = await handler(
+      buildInvocation(
+        buildD1Fixture(),
+        goalTargetProposal({ constraintType: 'at_least', value: 800 }),
+      ),
+    );
+    const goal = goalNodeOf(outcome.mutated_graph);
+    expect(goal.goal_threshold_raw).toBe(800);
+    expect(goal.goal_threshold_cap).toBe(1000); // 800 * 1.25
+    expect(goal.goal_threshold).toBeCloseTo(0.8);
+    const ctx = deriveDecisionContext(null, outcome.mutated_graph);
+    expect(ctx.goal_translation.user_scale_target).toBe('800');
+  });
+
+  it('respects an existing valid goal_threshold_cap over re-derivation', async () => {
+    const handler = createAddConstraintHandler();
+    const graph = buildD1Fixture();
+    const goal = graph.nodes.find((n) => n.kind === 'goal')!;
+    (goal as Record<string, unknown>).goal_threshold_cap = 200;
+    const outcome = await handler(
+      buildInvocation(graph, goalTargetProposal({ constraintType: 'at_least', value: 15, unit: '%' })),
+    );
+    const mutatedGoal = goalNodeOf(outcome.mutated_graph);
+    expect(mutatedGoal.goal_threshold_cap).toBe(200);
+    expect(mutatedGoal.goal_threshold).toBeCloseTo(0.075);
+  });
+
+  it('restating the target updates the SAME constraint and the threshold together (idempotent join)', async () => {
+    const handler = createAddConstraintHandler();
+    const first = await handler(
+      buildInvocation(
+        buildD1Fixture(),
+        goalTargetProposal({ constraintType: 'at_least', value: 15, unit: '%' }),
+      ),
+    );
+    const second = await handler(
+      buildInvocation(
+        first.mutated_graph as GraphV3T,
+        goalTargetProposal({ constraintType: 'at_least', value: 20, unit: '%' }),
+      ),
+    );
+    const mutated = second.mutated_graph as GraphV3T;
+    expect(mutated.goal_constraints).toHaveLength(1);
+    expect(mutated.goal_constraints![0].value).toBe(20);
+    const goal = goalNodeOf(mutated);
+    expect(goal.goal_threshold_raw).toBe(20);
+    expect(goal.goal_threshold).toBeCloseTo(0.2);
   });
 });
 
