@@ -1,0 +1,180 @@
+{
+  "name": "golden-journey-v1-gm-held-ack",
+  "description": "SYNTHETIC RED fixture for the Graph Management HELD phantom-success class (§6.6, lane 8). A held GM verdict surfaces as an apply_proposed_change pending confirmation and NO durable graph write; the assistant text on such a turn must therefore never carry ack-shaped prose. Turn 2 is the defect: a mutate_intent turn ships the held pending, the graph hash does not move, and the prose still claims 'I've updated the Budget factor' — the A8 classifier must FAIL it (phantom success: a claimed mutation with no commit). Turn 3 is the honest counterpart built by the live wiring (edit-graph-referee-gate.ts held template + confirm chip + pending) and must stay GREEN — held flows never emit ack prose by construction. Generic decision content — no real scenario data.",
+  "expected_milestones": [
+    "A8 fail: mutate_intent turn carries a held apply_proposed_change pending, an unmoved graph hash, and 'I've updated…' ack prose",
+    "PASS: the honest held turn (hold copy + confirm chip + pending, no ack prose) stays green"
+  ],
+  "transcript": {
+    "note": "Hand-authored synthetic observations (same construction path as the false-restore fixture). Graph hashes are opaque 16-hex-style tokens, mirroring the wire analysis-affecting hash — NEVER 64-hex (the 64-char graphIdentityHash is CEE-local and on no wire surface).",
+    "diagnostic_trace_enabled": true,
+    "timing_debug_enabled": false,
+    "observations": [
+      {
+        "step": "1_run_analysis",
+        "role": "analysis",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "The analysis is complete. Hire two senior engineers comes out ahead, with a 62% win probability against the offshore option's 26%.",
+          "suggested_actions": [
+            {
+              "id": "chip_explain_leader",
+              "label": "Why does it lead?",
+              "message": "Why does the leading option come out ahead?",
+              "action_type": "what_would_flip"
+            }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-07T09:00:00.000Z",
+            "options": [
+              {
+                "option_id": "opt_hire",
+                "label": "Hire two senior engineers",
+                "win_probability": 0.62
+              },
+              {
+                "option_id": "opt_offshore",
+                "label": "Engage an offshore partner",
+                "win_probability": 0.26
+              }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "handler",
+            "correlation_ids": {
+              "request_id": "req-gm-1",
+              "scenario_id": "scn-gmheld",
+              "turn_id": "turn-1"
+            }
+          },
+          "_timings": {
+            "turn": {
+              "total_ms": 2100
+            }
+          }
+        }
+      },
+      {
+        "step": "2_held_with_ack_prose",
+        "role": "mutate_intent",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "I've updated the Budget factor to 60000, so the model now reflects the higher spend you asked for.",
+          "suggested_actions": [
+            {
+              "id": "gmh_1f2e3d4c5b6a",
+              "label": "Continue with this change",
+              "message": "Yes"
+            }
+          ],
+          "pending_actions": [
+            {
+              "action": {
+                "kind": "apply_proposed_change"
+              }
+            }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-07T09:00:00.000Z",
+            "options": [
+              {
+                "option_id": "opt_hire",
+                "label": "Hire two senior engineers",
+                "win_probability": 0.62
+              },
+              {
+                "option_id": "opt_offshore",
+                "label": "Engage an offshore partner",
+                "win_probability": 0.26
+              }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "direct_answer",
+            "correlation_ids": {
+              "request_id": "req-gm-2",
+              "scenario_id": "scn-gmheld",
+              "turn_id": "turn-2"
+            }
+          },
+          "_timings": {
+            "turn": {
+              "total_ms": 1200
+            }
+          }
+        }
+      },
+      {
+        "step": "3_held_honest",
+        "role": "mutate_intent",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "I'm holding that change rather than applying it straight away. Nothing in the model moves until you confirm. Reply yes to continue, or tell me what to adjust instead.",
+          "suggested_actions": [
+            {
+              "id": "gmh_1f2e3d4c5b6a",
+              "label": "Continue with this change",
+              "message": "Yes"
+            }
+          ],
+          "pending_actions": [
+            {
+              "action": {
+                "kind": "apply_proposed_change"
+              }
+            }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-07T09:00:00.000Z",
+            "options": [
+              {
+                "option_id": "opt_hire",
+                "label": "Hire two senior engineers",
+                "win_probability": 0.62
+              },
+              {
+                "option_id": "opt_offshore",
+                "label": "Engage an offshore partner",
+                "win_probability": 0.26
+              }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "direct_answer",
+            "correlation_ids": {
+              "request_id": "req-gm-3",
+              "scenario_id": "scn-gmheld",
+              "turn_id": "turn-3"
+            }
+          },
+          "_timings": {
+            "turn": {
+              "total_ms": 900
+            }
+          }
+        }
+      }
+    ]
+  }
+}

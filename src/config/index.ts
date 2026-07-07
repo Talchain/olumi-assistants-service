@@ -222,6 +222,70 @@ function createEnvEnforcedMode(
 }
 
 /**
+ * Environment-enforced three-state mode for the Graph Management live wiring
+ * (CEE_GRAPH_MANAGEMENT_MODE). Values: 'off' | 'shadow' | 'live'
+ * (lowercased + trimmed). Mirrors `createEnvEnforcedMode` (the A3 CAS flag)
+ * deliberately — same invalid-value fallback, same prod auto-downgrade shape.
+ *
+ * Policy:
+ * - Invalid or empty values fall back to the code default with a console
+ *   warning — NEVER a boot failure.
+ * - In prod, 'live' is DOWNGRADED to 'shadow' with an [AUDIT] warning and a
+ *   configOverrideEvents entry. Live GM verdict-routing (held → pending
+ *   confirmation, stale → refresh recovery) is a user-visible behaviour
+ *   change gated on staged evidence; prod must never flip straight to live.
+ * - staging/local/test: the requested mode is honoured (staging is where
+ *   shadow → live evidence is gathered).
+ *
+ * @param defaultValue - Code default ('off' for graphManagementMode).
+ * @param settingName  - Env var name for logging/audit events.
+ */
+function createEnvEnforcedGraphManagementMode(
+  defaultValue: "off" | "shadow" | "live",
+  settingName: string,
+) {
+  return z
+    .union([z.string(), z.undefined()])
+    .transform((val): "off" | "shadow" | "live" => {
+      const env = getRuntimeEnv();
+
+      let requested: "off" | "shadow" | "live" = defaultValue;
+      if (val !== undefined) {
+        const lower = val.toLowerCase().trim();
+        if (lower === "off" || lower === "shadow" || lower === "live") {
+          requested = lower;
+        } else if (lower === "") {
+          requested = defaultValue;
+        } else {
+          console.warn(
+            `[CONFIG] ${settingName}: invalid value "${val}" — falling back to "${defaultValue}" ` +
+              `(valid values: off | shadow | live)`,
+          );
+          requested = defaultValue;
+        }
+      }
+
+      // Prod: live downgrades to shadow (never boot-fails, never routes
+      // production edit turns through unproven GM verdict handling).
+      if (env === "prod" && requested === "live") {
+        console.warn(
+          `[AUDIT] ${settingName}=live is not permitted in production — downgraded to "shadow"`,
+        );
+        configOverrideEvents.push({
+          settingName,
+          requestedValue: "live",
+          actualValue: "shadow",
+          env,
+          reason: "production_lockdown",
+        });
+        return "shadow";
+      }
+
+      return requested;
+    });
+}
+
+/**
  * Optional URL string that treats empty/undefined as undefined
  * In test mode, invalid URLs are treated as undefined (lenient)
  * In production mode, invalid URLs fail validation (strict)
@@ -394,6 +458,22 @@ const ConfigSchema = z.object({
     // writes pre-RPC via GraphStaleWriteError (rides the existing
     // StateCommitFailedError handling; no wire-shape change).
     graphCasMode: createEnvEnforcedMode("off", "CEE_V5_GRAPH_CAS_MODE"),
+    // CEE_GRAPH_MANAGEMENT_MODE — Graph Management referee live wiring
+    // ('off' | 'shadow' | 'live'). Gates the edit_graph → CandidateMutation
+    // Envelope → referee seam in edit-graph-dispatch.ts.
+    // 'off' (default): zero referee calls, byte-identical edit path.
+    // 'shadow': the referee evaluates every envelope and emits redacted
+    // v5.candidate_mutation.<verdict> telemetry; the existing path proceeds
+    // UNCHANGED (the A3 CAS-observe pattern). 'live' (staging-gated,
+    // auto-downgraded to 'shadow' in prod): verdicts route — would_apply
+    // proceeds through the existing apply path; held emits a real pending
+    // confirmation; stale/rejected/clarify_required emit recovery templates.
+    // GM never writes graph state itself in ANY mode — the single durable
+    // writer remains commitDirectAnswer.
+    graphManagementMode: createEnvEnforcedGraphManagementMode(
+      "off",
+      "CEE_GRAPH_MANAGEMENT_MODE",
+    ),
   }),
 
   // Prompt Cache Configuration
@@ -937,6 +1017,7 @@ function parseConfig(): Config {
       orchestratorV5: env.ENABLE_V5_ORCHESTRATOR,
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
       graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
+      graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

@@ -1,6 +1,13 @@
 /**
- * Track 3 — Graph Management Core (isolated typed-mutation referee).
- * OFF-PATH: no live V5 code imports this module (proven by isolation-guards.test.ts).
+ * Track 3 — Graph Management Core (typed-mutation referee).
+ *
+ * LIVE-WIRED (lane 8, 2026-07-07): the edit_graph dispatch seam
+ * (src/orchestrator-v5/handlers/edit-graph-dispatch.ts) consumes this module
+ * behind the env-enforced CEE_GRAPH_MANAGEMENT_MODE flag (off | shadow |
+ * live, default off; prod auto-downgrades live → shadow). The module itself
+ * remains import-isolated (isolation-guards.test.ts): it never imports
+ * commit / turn-executor / persistence / hash-derivation — the referee still
+ * only CONSUMES the frame and NEVER applies or persists a mutation.
  */
 export * from './reason-codes.js';
 export {
@@ -58,3 +65,18 @@ export {
   type DualDraftProposalType,
   type AdapterContext,
 } from './adapters/dual-draft.js';
+export {
+  contextFrameToMutationFrame,
+  narrowFrameFreshness,
+} from './adapters/context-frame.js';
+export {
+  editOperationsToCandidateEnvelopes,
+  parseEdgeTargetPath,
+  type EditPatchOperationLike,
+  type EditProducerContext,
+} from './adapters/edit-graph-producer.js';
+export {
+  mutationTargetKey,
+  supersedesHeldCandidate,
+  collapseSupersededHeld,
+} from './pending-projection.js';

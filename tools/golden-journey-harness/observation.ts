@@ -271,12 +271,26 @@ export function getHandlerId(body: WireBody | undefined): string | undefined {
 }
 
 /**
- * True when the turn carries a `proposed_*` pending action — i.e. it emitted a
- * PROPOSAL the user must still confirm, not a durable mutation. A8 treats this
- * as "no commit happened": a turn that proposes must not also claim it applied.
+ * True when the turn carries a proposal-class pending action — i.e. it emitted
+ * a PROPOSAL the user must still confirm, not a durable mutation. A8 treats
+ * this as "no commit happened": a turn that proposes must not also claim it
+ * applied.
+ *
+ * Two shapes count (§6.6, lane 8):
+ *  - `proposed_*` kinds (the original proposal-memory class); and
+ *  - `apply_proposed_change` — the propose-then-confirm patch AND the Graph
+ *    Management HELD projection (a held mutation surfaces as exactly this
+ *    pending). A held GM verdict coexisting with ack-shaped prose is the
+ *    phantom-success class the gm-held-ack RED fixture pins.
+ * Safe direction: a false RED is recoverable (a real mutation moves the graph
+ * hash and passes A8 via `hashMoved` before this signal is consulted).
  */
 export function hasProposedPendingAction(body: WireBody | undefined): boolean {
   const pa = body?.pending_actions;
   if (!Array.isArray(pa)) return false;
-  return pa.some((p) => typeof p?.action?.kind === 'string' && /^proposed[_-]/.test(p.action.kind));
+  return pa.some(
+    (p) =>
+      typeof p?.action?.kind === 'string' &&
+      (/^proposed[_-]/.test(p.action.kind) || p.action.kind === 'apply_proposed_change'),
+  );
 }

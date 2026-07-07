@@ -303,9 +303,13 @@ describe('hook model-versions-substrate (ISSUE-9025, owner: Model Management)', 
   });
 
   // TODO: ISSUE-9025 (narrowed) — restore/version/compare wording honesty
-  // against real version state; blocked until MM gains live call sites (the
-  // Apply/Reject slice) so version claims can occur at all, and ISSUE-9022's
-  // src-side restore/version claim detection ships. Owner: Model Management.
+  // against real version state; blocked until ISSUE-9022's src-side
+  // restore/version claim detection ships. NOTE (lane 8, 2026-07-07): MM
+  // gained its FIRST live call site — the flag-gated commit-seam saveVersion
+  // hook in commit.ts (fire-and-forget, never surfaces version PROSE to the
+  // user), so the "no version claim can occur" premise is now narrowed to
+  // user-facing surfaces: restore/compare remain dark and CEE still emits no
+  // version wording. Owner: Model Management.
   it.skip('ENFORCING (when unblocked): restore/version/compare wording is grounded in real version state; uncommitted claims swap or block', () => {
     expect.unreachable('blocked-future: MM is dark with zero live call sites — no version claim can reach a user yet');
   });
@@ -314,26 +318,46 @@ describe('hook model-versions-substrate (ISSUE-9025, owner: Model Management)', 
 // ── HOOK 4: ratified CandidateMutationEnvelope (ISSUE-9026) ────────────────
 
 describe('hook candidate-mutation-envelope-ratified (ISSUE-9026, owner: Track 4 / contract ratification)', () => {
-  // ISSUE-9026 PARTIALLY CONVERTED (2026-07-07): the Graph Management referee
-  // module landed DARK via PR #341, bringing CandidateMutationEnvelope into
-  // src (isolated, zero live imports). Tripwire deleted per its instructions.
-  // The full repoint of tests/unit/t4-contract/candidate-mutation-envelope.test.ts
-  // onto the module export is DEFERRED to the next Graph Management session:
-  // the "assertions survive verbatim" claim must be verified against the
-  // round-3 contract alignment (Docs/t4), not assumed at merge time. Until
-  // then both shapes exist with an explicit reconciliation owner — a dated
-  // exception to the "do not keep both alive" rule, tracked on the program
-  // board (Track 4 / GM entry slice).
+  // ISSUE-9026 FULLY CONVERTED (lane 8, 2026-07-07): the deferred repoint of
+  // tests/unit/t4-contract/candidate-mutation-envelope.test.ts onto the
+  // module export is DONE — drift was reconciled assertion-by-assertion (six
+  // documented payload deltas, all in the ratified fail-closed direction;
+  // see the spec's header + the lane-8 evidence report) and the inline shape
+  // is RETIRED. Live wiring landed the SAME session (Paul's GM/MM mandate):
+  // the edit_graph dispatch consumes the module behind CEE_GRAPH_MANAGEMENT_
+  // MODE (env-enforced, default off, prod live→shadow downgrade), so the
+  // old "zero live imports" isolation pin is replaced by SCHEMA-OWNERSHIP
+  // enforcement — the envelope's Zod definition stays module-owned; every
+  // other src reference is a consumer import, never a second definition.
 
-  it('ENFORCING: the envelope module is present and stays isolated (zero live imports)', () => {
-    const hits = filesMatching(['src'], '.ts', /CandidateMutationEnvelope/);
-    expect(hits, 'CandidateMutationEnvelope vanished from src — ISSUE-9026 regressed').not.toEqual([]);
-    for (const hit of hits) {
+  it('ENFORCING: the envelope schema DEFINITION stays owned by the graph-management module', () => {
+    const definitionHits = filesMatching(['src'], '.ts', /CandidateMutationEnvelopeV1\s*=/);
+    expect(
+      definitionHits,
+      'CandidateMutationEnvelopeV1 definition vanished from src — ISSUE-9026 regressed',
+    ).not.toEqual([]);
+    for (const hit of definitionHits) {
       expect(
         hit.startsWith('src/orchestrator-v5/graph-management/'),
-        `CandidateMutationEnvelope leaked outside the isolated module: ${hit} — live wiring is a gated Track 4 slice`,
+        `A second CandidateMutationEnvelopeV1 definition exists outside the owning module: ${hit} — ` +
+          'consumers must import the shared export, never re-define the shape',
       ).toBe(true);
     }
+  });
+
+  it('ENFORCING: the envelope is consumed on the live edit path behind the mode flag', () => {
+    const wiringHits = filesMatching(['src/orchestrator-v5/handlers'], '.ts', /graph-management/);
+    expect(
+      wiringHits,
+      'The edit dispatch no longer references graph-management — the lane-8 live wiring regressed',
+    ).not.toEqual([]);
+    const configSrc = readFileSync(join(REPO_ROOT, 'src/config/index.ts'), 'utf-8');
+    expect(
+      /graphManagementMode:\s*createEnvEnforcedGraphManagementMode\(\s*"off"\s*,\s*"CEE_GRAPH_MANAGEMENT_MODE"\s*,?\s*\)/.test(
+        configSrc,
+      ),
+      'CEE_GRAPH_MANAGEMENT_MODE must remain env-enforced default-off (dark-by-default invariant)',
+    ).toBe(true);
   });
 
   it('ENFORCING: the module ships its own envelope-schema and isolation suites', () => {
@@ -345,11 +369,20 @@ describe('hook candidate-mutation-envelope-ratified (ISSUE-9026, owner: Track 4 
     }
   });
 
-  // TODO: ISSUE-9026 (narrowed) — repoint the t4-contract spec at the module
-  // export with verbatim-assertion parity proven (or drift reconciled), then
-  // retire the inline shape. Owner: Track 4 / next Graph Management session.
-  it.skip('ENFORCING (when unblocked): the t4-contract spec asserts against the shared export, not a local shape', () => {
-    expect.unreachable('blocked-future: inline-vs-module shape parity not yet reconciled (round-3 contract alignment)');
+  it('ENFORCING (ISSUE-9026 un-skipped): the t4-contract spec asserts against the shared export, not a local shape', () => {
+    const specPath = join(REPO_ROOT, 'tests/unit/t4-contract/candidate-mutation-envelope.test.ts');
+    expect(existsSync(specPath), 't4-contract spec missing').toBe(true);
+    const spec = readFileSync(specPath, 'utf-8');
+    // Repointed: imports the shared module export …
+    expect(
+      /from\s+['"][^'"]*src\/orchestrator-v5\/graph-management\/index\.js['"]/.test(spec),
+      't4-contract spec must import CandidateMutationEnvelopeV1 from the graph-management module',
+    ).toBe(true);
+    // … and the inline shape is retired (no local discriminated-union rebuild).
+    expect(
+      /discriminatedUnion/.test(spec),
+      't4-contract spec must not re-define the envelope inline (both shapes alive)',
+    ).toBe(false);
   });
 });
 
