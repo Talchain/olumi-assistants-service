@@ -23,6 +23,8 @@
 import type {
   ContextPackAnalysis,
   ContextPackAnalysisDriver,
+  ContextPackAnalysisEvidenceGap,
+  ContextPackAnalysisFlipThreshold,
   ContextPackAnalysisFragileEdge,
 } from '../context/context-pack-assembler.js';
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
@@ -33,6 +35,50 @@ export interface DisplaySafeAnalysisOption {
   /** Integer-percent string, e.g. `"86%"`. Never a raw decimal. */
   readonly win_probability: string;
 }
+
+/**
+ * Lane 21 (P0-A) — one entry of the full ranked option list. `rank` is a
+ * string ("1", "2", …) to preserve the structural no-numbers-anywhere
+ * invariant of the display-safe projection; array order matches rank.
+ */
+export interface DisplaySafeRankedOption {
+  readonly rank: string;
+  readonly label: string;
+  /** Integer-percent string, e.g. `"72%"`. Never a raw decimal. */
+  readonly win_probability: string;
+}
+
+/** Lane 21 — banded tipping-risk entry. `risk` is decision-language prose. */
+export interface DisplaySafeTippingPoint {
+  readonly label: string;
+  readonly risk: string;
+}
+
+/** Lane 21 — banded value-of-information entry (influence-band vocabulary). */
+export interface DisplaySafeEvidenceGap {
+  readonly label: string;
+  readonly value_of_information: string;
+}
+
+/**
+ * Lane 21 — LLM-facing char budget for the serialised (2-space-indented)
+ * display-safe analysis projection. The pre-widening projection measured
+ * ~603 chars and starved the LLM; breadth-first widening must still stay
+ * bounded so the ~21k-char routing prompt keeps its shape. Asserted by
+ * the maximal-fixture budget test.
+ */
+export const DISPLAY_ANALYSIS_CHAR_BUDGET = 4000;
+
+/**
+ * Relative-distance thresholds for the tipping-risk band phrases
+ * (presentation bands, not science): |flip − current| / |current|
+ * below `small` reads as a small shift, below `moderate` as a moderate
+ * shift, else a large shift.
+ */
+export const FLIP_PROXIMITY_BANDS = {
+  small: 0.1,
+  moderate: 0.35,
+} as const;
 
 export interface DisplaySafeAnalysisDriver {
   readonly label: string;
@@ -57,6 +103,22 @@ export interface DisplaySafeAnalysis {
   readonly top_drivers?: readonly DisplaySafeAnalysisDriver[];
   /** Labels only — no `exists_probability`, no `strength`. */
   readonly fragile_edges?: readonly DisplaySafeFragileEdge[];
+  /**
+   * Lane 21 (P0-A) breadth fields. All optional, all omitted (never null /
+   * never empty-array) when the raw source is missing or empty:
+   *
+   *  - `options`: EVERY option, ranked, integer-percent probability.
+   *  - `tipping_points`: banded flip-risk phrases (never raw thresholds).
+   *  - `fragile_edge_count`: string count behind the capped edge list.
+   *  - `value_of_information`: banded VOI per evidence-gap factor
+   *    (influence-band vocabulary; near-zero entries dropped).
+   *  - `goal_fit`: prose stating THAT goal fit was scored and its basis.
+   */
+  readonly options?: readonly DisplaySafeRankedOption[];
+  readonly tipping_points?: readonly DisplaySafeTippingPoint[];
+  readonly fragile_edge_count?: string;
+  readonly value_of_information?: readonly DisplaySafeEvidenceGap[];
+  readonly goal_fit?: string;
 }
 
 /**
@@ -88,6 +150,105 @@ function formatOption(label: string, probability: number): DisplaySafeAnalysisOp
 }
 
 /**
+ * Lane 21 — banded tipping-risk phrase (doctrine A2: the LLM never sees the
+ * raw current/flip values).
+ *
+ *   tippingRiskPhrase(100, 88, false)
+ *     → "a moderate decrease could flip the result"     (12% relative shift)
+ *   tippingRiskPhrase(0.3, 0.297, false)
+ *     → "close to a tipping point — a small decrease could flip the result"
+ *   tippingRiskPhrase(10, 20, false)
+ *     → "only a large increase would flip the result"
+ *   tippingRiskPhrase(0, 5, false)
+ *     → "an increase in this factor could flip the result"  (relative
+ *        distance undefined at current = 0 — direction only, no band)
+ *   tippingRiskPhrase(null, null, true)
+ *     → "no flip point found within the tested range"       (producer-attested)
+ *
+ * Returns null when nothing can be said safely (no flip pair, no attested
+ * no-flip) — the caller omits the entry rather than fabricating a claim.
+ */
+export function tippingRiskPhrase(
+  currentValue: number | null,
+  flipValue: number | null,
+  noFlipWithinBounds: boolean,
+): string | null {
+  if (noFlipWithinBounds) return 'no flip point found within the tested range';
+  if (
+    typeof currentValue !== 'number' ||
+    !Number.isFinite(currentValue) ||
+    typeof flipValue !== 'number' ||
+    !Number.isFinite(flipValue)
+  ) {
+    return null;
+  }
+  const direction = flipValue >= currentValue ? 'increase' : 'decrease';
+  if (currentValue === 0) {
+    // Relative distance undefined — direction only, no proximity band.
+    return `an ${direction} in this factor could flip the result`;
+  }
+  const relative = Math.abs(flipValue - currentValue) / Math.abs(currentValue);
+  if (relative < FLIP_PROXIMITY_BANDS.small) {
+    return `close to a tipping point — a small ${direction} could flip the result`;
+  }
+  if (relative < FLIP_PROXIMITY_BANDS.moderate) {
+    return `a moderate ${direction} could flip the result`;
+  }
+  return `only a large ${direction} would flip the result`;
+}
+
+/**
+ * Lane 21 — band a normalised [0,1] value-of-information score using the
+ * SHARED influence-band vocabulary (single source of truth:
+ * `./influence-bands.ts`). Near-zero scores return null so the caller drops
+ * the entry instead of rendering noise; non-finite scores return null.
+ */
+export function voiBandPhrase(voiScore: number): string | null {
+  if (!Number.isFinite(voiScore)) return null;
+  const abs = Math.abs(voiScore);
+  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return null;
+  return bandFromMagnitude(abs);
+}
+
+const GOAL_FIT_BASIS_PHRASES: Readonly<Record<string, string>> = {
+  modelled_outcome_distribution: 'goal fit was scored from the modelled outcome distribution',
+};
+
+/**
+ * Lane 21 — goal-fit provenance prose (PLoT #204). States THAT goal fit was
+ * scored and its basis; never values. Unknown basis tokens are humanised
+ * (underscores → spaces) rather than echoed raw.
+ */
+function goalFitPhrase(goalFit: { scored: boolean; basis: string | null }): string | null {
+  if (!goalFit.scored) return null;
+  if (goalFit.basis === null) return 'goal fit was scored';
+  return (
+    GOAL_FIT_BASIS_PHRASES[goalFit.basis] ??
+    `goal fit was scored from ${goalFit.basis.replace(/_/g, ' ')}`
+  );
+}
+
+function formatTippingPoint(
+  entry: ContextPackAnalysisFlipThreshold,
+): DisplaySafeTippingPoint | null {
+  const risk = tippingRiskPhrase(
+    entry.current_value,
+    entry.flip_value,
+    entry.no_flip_within_bounds,
+  );
+  if (risk === null) return null;
+  return { label: entry.factor_label, risk };
+}
+
+function formatEvidenceGap(
+  entry: ContextPackAnalysisEvidenceGap,
+): DisplaySafeEvidenceGap | null {
+  const band = voiBandPhrase(entry.voi_score);
+  if (band === null) return null;
+  return { label: entry.factor_label, value_of_information: band };
+}
+
+/**
  * Project the raw `ContextPackAnalysis` into the display-safe shape
  * sent to Sonnet. The structured `{from_label, to_label}` fragile-edge
  * pair lives directly on `ContextPackAnalysis.fragile_edges`, so this
@@ -110,6 +271,11 @@ export function formatAnalysisForContext(
     robustness_band?: string;
     top_drivers?: readonly DisplaySafeAnalysisDriver[];
     fragile_edges?: readonly DisplaySafeFragileEdge[];
+    options?: readonly DisplaySafeRankedOption[];
+    tipping_points?: readonly DisplaySafeTippingPoint[];
+    fragile_edge_count?: string;
+    value_of_information?: readonly DisplaySafeEvidenceGap[];
+    goal_fit?: string;
   } = {
     status: raw.status,
   };
@@ -149,6 +315,57 @@ export function formatAnalysisForContext(
         to_label: e.to_label,
       }),
     );
+  }
+
+  // Lane 21 (P0-A) breadth fields — every field below follows the file's
+  // omission semantics (absent, never null / empty).
+
+  // Full ranked option list. The raw projection arrives sorted by win
+  // probability descending and bounded (MAX_PROJECTED_OPTIONS); rank is a
+  // string so no raw number ever enters the display projection.
+  const rawOptions = raw.options ?? [];
+  if (rawOptions.length > 0) {
+    out.options = rawOptions.map((o, i) => ({
+      rank: String(i + 1),
+      label: o.label,
+      win_probability: formatProbability(o.probability, 'display'),
+    }));
+  }
+
+  // Banded tipping risks. Entries with nothing safe to say are dropped by
+  // the formatter (null risk), never fabricated.
+  const tipping = (raw.flip_thresholds ?? [])
+    .map(formatTippingPoint)
+    .filter((t): t is DisplaySafeTippingPoint => t !== null);
+  if (tipping.length > 0) {
+    out.tipping_points = tipping;
+  }
+
+  // Uncapped fragile-edge count as a string (no-numbers invariant). Only
+  // rendered when there is something to count.
+  if (
+    typeof raw.fragile_edge_count === 'number' &&
+    Number.isFinite(raw.fragile_edge_count) &&
+    raw.fragile_edge_count > 0
+  ) {
+    out.fragile_edge_count = String(raw.fragile_edge_count);
+  }
+
+  // Banded VOI per evidence-gap factor (shared influence-band vocabulary);
+  // near-zero entries dropped as noise.
+  const gaps = (raw.evidence_gaps ?? [])
+    .map(formatEvidenceGap)
+    .filter((g): g is DisplaySafeEvidenceGap => g !== null);
+  if (gaps.length > 0) {
+    out.value_of_information = gaps;
+  }
+
+  // Goal-fit provenance prose (fact + basis, never values).
+  if (raw.goal_fit) {
+    const phrase = goalFitPhrase(raw.goal_fit);
+    if (phrase !== null) {
+      out.goal_fit = phrase;
+    }
   }
 
   return out;

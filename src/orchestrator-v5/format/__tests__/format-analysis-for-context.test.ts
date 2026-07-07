@@ -22,6 +22,9 @@ import type {
 import {
   formatAnalysisForContext,
   influencePhrase,
+  tippingRiskPhrase,
+  voiBandPhrase,
+  DISPLAY_ANALYSIS_CHAR_BUDGET,
   type DisplaySafeAnalysis,
 } from '../format-analysis-for-context.js';
 import { sanitiseAssistantTextProse } from '../numeric-prose-formatter.js';
@@ -234,6 +237,170 @@ describe('influencePhrase', () => {
     expect(influencePhrase(Number.NaN)).toBe('no material influence');
     expect(influencePhrase(Number.POSITIVE_INFINITY)).toBe('no material influence');
     expect(influencePhrase(Number.NEGATIVE_INFINITY)).toBe('no material influence');
+  });
+});
+
+// Lane 21 (P0-A) — breadth widening of the display-safe projection.
+// Every option represented (ranked, integer-percent), tipping risks and VOI
+// in banded phrasing only, goal-fit provenance as prose, fragile-edge count
+// as a string. Doctrine A2 binding: NO raw numbers anywhere in the output.
+describe('Lane 21 display-safe breadth', () => {
+  it('renders ALL options with string ranks and integer-percent probabilities', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: [
+          { label: 'Hire locally', probability: 0.719 },
+          { label: 'Status quo', probability: 0.225 },
+          { label: 'Offshore partner', probability: 0.054 },
+          { label: 'Tiered pricing', probability: 0.001 },
+        ],
+      }),
+    );
+    expect(out!.options).toEqual([
+      { rank: '1', label: 'Hire locally', win_probability: '72%' },
+      { rank: '2', label: 'Status quo', win_probability: '23%' },
+      { rank: '3', label: 'Offshore partner', win_probability: '5%' },
+      { rank: '4', label: 'Tiered pricing', win_probability: '0%' },
+    ]);
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('omits the options list when the source is missing or empty', () => {
+    expect(formatAnalysisForContext(rawAnalysis())!).not.toHaveProperty('options');
+    expect(
+      formatAnalysisForContext(rawAnalysis({ options: [] }))!,
+    ).not.toHaveProperty('options');
+  });
+
+  it('renders tipping points as banded risk phrases — never raw values', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        flip_thresholds: [
+          // |88-100|/100 = 12% → moderate decrease
+          { factor_label: 'Marketing Spend', current_value: 100, flip_value: 88, unit: 'GBP', no_flip_within_bounds: false },
+          // |0.297-0.3|/0.3 = 1% → small decrease (close to tipping point)
+          { factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.297, unit: null, no_flip_within_bounds: false },
+          // producer-attested no-flip
+          { factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
+        ],
+      }),
+    );
+    expect(out!.tipping_points).toEqual([
+      { label: 'Marketing Spend', risk: 'a moderate decrease could flip the result' },
+      { label: 'Engineering Capacity', risk: 'close to a tipping point — a small decrease could flip the result' },
+      { label: 'Offshore Engagement', risk: 'no flip point found within the tested range' },
+    ]);
+    const json = JSON.stringify(out);
+    expect(json).not.toContain('88');
+    expect(json).not.toContain('0.297');
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('renders a large-shift tipping phrase and a direction-only phrase for zero current values', () => {
+    expect(tippingRiskPhrase(10, 20, false)).toBe('only a large increase would flip the result');
+    expect(tippingRiskPhrase(0, 5, false)).toBe('an increase in this factor could flip the result');
+    expect(tippingRiskPhrase(null, null, true)).toBe('no flip point found within the tested range');
+    expect(tippingRiskPhrase(null, null, false)).toBeNull();
+    expect(tippingRiskPhrase(10, null, false)).toBeNull();
+  });
+
+  it('renders the fragile-edge count as a string alongside the label list', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        fragile_edges: [{ from_label: 'A', to_label: 'B' }],
+        fragile_edge_count: 7,
+      }),
+    );
+    expect(out!.fragile_edge_count).toBe('7');
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('bands evidence-gap VOI with the shared influence-band vocabulary', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        evidence_gaps: [
+          { factor_label: 'Talent Market Tightness', voi_score: 0.63 },
+          { factor_label: 'Hiring Cost', voi_score: 0.97 },
+          { factor_label: 'Irrelevant Factor', voi_score: 0.01 },
+        ],
+      }),
+    );
+    expect(out!.value_of_information).toEqual([
+      { label: 'Talent Market Tightness', value_of_information: 'moderate' },
+      { label: 'Hiring Cost', value_of_information: 'very strong' },
+      // near-zero VOI entries are dropped, not rendered as noise
+    ]);
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('voiBandPhrase reuses the influence-band thresholds', () => {
+    expect(voiBandPhrase(0.2)).toBe('weak');
+    expect(voiBandPhrase(0.5)).toBe('moderate');
+    expect(voiBandPhrase(0.8)).toBe('strong');
+    expect(voiBandPhrase(0.96)).toBe('very strong');
+    expect(voiBandPhrase(0.01)).toBeNull();
+    expect(voiBandPhrase(Number.NaN)).toBeNull();
+  });
+
+  it('renders the goal-fit basis as prose — the fact it was scored, never values', () => {
+    const modelled = formatAnalysisForContext(
+      rawAnalysis({ goal_fit: { scored: true, basis: 'modelled_outcome_distribution' } }),
+    );
+    expect(modelled!.goal_fit).toBe(
+      'goal fit was scored from the modelled outcome distribution',
+    );
+
+    const bare = formatAnalysisForContext(
+      rawAnalysis({ goal_fit: { scored: true, basis: null } }),
+    );
+    expect(bare!.goal_fit).toBe('goal fit was scored');
+
+    const absent = formatAnalysisForContext(rawAnalysis({ goal_fit: null }));
+    expect(absent!).not.toHaveProperty('goal_fit');
+  });
+
+  it('keeps a maximal widened projection inside the display char budget with no numbers anywhere', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: Array.from({ length: 12 }, (_, i) => ({
+          label: `Long Option Label Number ${String(i + 1).padStart(2, '0')} With Detail`,
+          probability: Math.max(0.01, 0.9 - i * 0.07),
+        })),
+        top_drivers: [
+          rawDriver('Marketing Spend Allocation Across Channels', 0.97),
+          rawDriver('Engineering Capacity Constraints In Q3', -0.82),
+          rawDriver('Customer Acquisition Cost Trend', 0.55),
+          rawDriver('Local Talent Market Tightness', -0.31),
+          rawDriver('Regulatory Approval Timeline', 0.12),
+        ],
+        fragile_edges: [
+          { from_label: 'Marketing Spend Allocation', to_label: 'New Leads Generated' },
+          { from_label: 'Engineering Capacity', to_label: 'Time to Market' },
+          { from_label: 'Talent Market Tightness', to_label: 'Hiring Velocity' },
+        ],
+        fragile_edge_count: 9,
+        flip_thresholds: [
+          { factor_label: 'Marketing Spend', current_value: 100, flip_value: 88, unit: 'GBP', no_flip_within_bounds: false },
+          { factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.297, unit: null, no_flip_within_bounds: false },
+          { factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
+        ],
+        evidence_gaps: [
+          { factor_label: 'Talent Market Tightness', voi_score: 0.63 },
+          { factor_label: 'Hiring Cost Uncertainty', voi_score: 0.42 },
+          { factor_label: 'Churn Rate Confidence', voi_score: 0.31 },
+        ],
+        goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+      }),
+    );
+    const serialised = JSON.stringify(out, null, 2);
+    expect(serialised.length).toBeLessThan(DISPLAY_ANALYSIS_CHAR_BUDGET);
+    expect(serialised).not.toMatch(/\b0\.\d{2,}/);
+    assertNoNumbersAnywhere(out);
+
+    // The Track 2A regex sanitiser must see nothing to rewrite.
+    const result = sanitiseAssistantTextProse(serialised);
+    expect(result.probability_rewrites).toBe(0);
+    expect(result.sensitivity_rewrites).toBe(0);
   });
 });
 
