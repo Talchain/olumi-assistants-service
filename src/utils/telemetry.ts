@@ -1456,6 +1456,33 @@ export const TelemetryEvents = {
   CeeStage2EdgeCountInvariantViolated: "cee.stage2.edge_count_invariant_violated",
   CeePostEnrichInvariantViolation: "cee.post_enrich.invariant_violation",
 
+  // Lane CEE-D (edit-loop reliability) — additive parse-shape recovery
+  // event: parseEditGraphResponse received a BARE SINGLE-OPERATION object
+  // (either emitted directly by the model, or produced by the greedy
+  // object extraction slicing the first op out of a prose-wrapped
+  // single-op legacy array) and wrapped it into `operations: [op]`
+  // instead of failing with 'v2 response missing required "operations"
+  // array'. Payload: { op } — the operation kind only, no user text.
+  EditGraphBareSingleOpWrapped: "edit_graph.bare_single_op_wrapped",
+
+  // Lane CEE-D (edit-loop reliability) — relative-delta resolution at the
+  // set_factor_value dispatch seam (turn-executor STEP 2, before
+  // validateToolCall). A proposal carrying a relative percent expression
+  // (structured { value, unit:'%' } with increase/decrease, or a string
+  // "+5%"/"-10%") was resolved against the factor's CURRENT value into an
+  // absolute `set` proposal. Live trace: request_id baca4f1c ("increase
+  // it slightly by 5%" → PARAMETER_INVALID → recovered template).
+  // Payload (system ids + closed enums only — no user values):
+  //   - request_id / scenario_id
+  //   - handler_id: 'set_factor_value'
+  //   - target_id: node id
+  //   - direction: 'increase' | 'decrease'
+  //   - source_shape: 'structured_percent' | 'string_percent'
+  //   - value_unit_guard_skipped: boolean — the P0-A containment guard is
+  //     bypassed for the resolved proposal because the % token was
+  //     deliberately consumed by the resolution, not silently dropped.
+  V5RelativeDeltaResolved: "v5.turn_executor.relative_delta_resolved",
+
   // V5 post-analysis exploration intercept — fires when route-v2's
   // `tryPostAnalysisLabelIntercept` short-circuits a chip-click /
   // free-text submission that would otherwise dispatch into V4

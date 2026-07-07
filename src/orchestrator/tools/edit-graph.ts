@@ -1787,7 +1787,13 @@ export async function handleEditGraph(
         '',
         ...(intentInstruction ? ['## Narrow Edit Constraint', intentInstruction, ''] : []),
         '## Previous (Invalid) Operations',
-        JSON.stringify(lastRawOps ?? [], null, 2),
+        // Lane CEE-D (edit-loop reliability): embed previous ops in the SAME
+        // JSON OBJECT shape the repair prompt mandates for output
+        // ({ "operations": [...] }). A bare array here primed the model
+        // toward the v1 bare-array response format, contradicting the
+        // repair prompt's own "Respond ONLY with a corrected JSON object"
+        // instruction and priming repeat parse failures.
+        JSON.stringify({ operations: lastRawOps ?? [] }, null, 2),
       ].join('\n');
     }
 
@@ -1876,7 +1882,12 @@ export async function handleEditGraph(
       validationOutcome = 'parse_failed';
       setViolationCodes(['parse_error']);
       recoveryPathChosen = 'repair_retry';
-      lastRawOps = [];
+      // Lane CEE-D (edit-loop reliability): PRESERVE lastRawOps across a
+      // parse failure. Resetting to [] here wiped the previous attempt's
+      // operations out of the next repair message — the model lost the
+      // very context it needed to correct, priming repeat failures. A
+      // first-attempt parse failure leaves lastRawOps undefined, which the
+      // repair message renders as { "operations": [] } (nothing to keep).
       lastValidationResult = { valid: false, operations: [], zodErrors: undefined, referentialErrors: [{ index: 0, op: 'unknown', path: '', message: error instanceof Error ? error.message : String(error) }] };
       continue;
     }
@@ -3222,10 +3233,21 @@ function extractJson(text: string): unknown {
     // Fall through to regex extraction
   }
 
-  // Try to extract a JSON object
+  // Try to extract a JSON object.
+  //
+  // Lane CEE-D (edit-loop reliability): the greedy object extraction MUST
+  // NOT throw past the array fallback. A prose-wrapped legacy-array
+  // response with 2+ operations mis-extracts `{op1}, {op2}` (first `{` →
+  // last `}`), which is not valid JSON — previously the unguarded
+  // JSON.parse here threw a SyntaxError and the array branch below was
+  // never reached (live failure class: 2/3 LLM-path edit attempts failed).
   const objectMatch = cleaned.match(/\{[\s\S]*\}/);
   if (objectMatch) {
-    return JSON.parse(objectMatch[0]);
+    try {
+      return JSON.parse(objectMatch[0]);
+    } catch {
+      // Fall through to array extraction (legacy format).
+    }
   }
 
   // Try to extract a JSON array (legacy format)
@@ -3301,6 +3323,29 @@ export function parseEditGraphResponse(text: string): EditGraphLLMResult {
 
     // Validate required field
     if (!Array.isArray(obj.operations)) {
+      // Lane CEE-D (edit-loop reliability): a BARE SINGLE-OPERATION object
+      // — either emitted directly by the model, or produced by the greedy
+      // object extraction mis-slicing the first op out of a prose-wrapped
+      // single-op legacy array — previously died here with the live error
+      // 'v2 response missing required "operations" array'. When the object
+      // is unambiguously a patch operation (known `op` + string `path`),
+      // wrap it into `operations: [op]` and continue. Same safe coaching
+      // defaults as the legacy-array branch (non-empty ops case).
+      if (isBareSinglePatchOp(obj)) {
+        emit(TelemetryEvents.EditGraphBareSingleOpWrapped, {
+          op: obj.op as string,
+        });
+        log.info(
+          { event: 'edit_graph.bare_single_op_wrapped', op: obj.op },
+          'edit_graph wrapped bare single-operation object into operations array',
+        );
+        return {
+          operations: [normaliseOperation(obj)],
+          removed_edges: [],
+          warnings: [],
+          coaching: { summary: 'Proposed graph edit.', rerun_recommended: false },
+        };
+      }
       throw new Error('v2 response missing required "operations" array');
     }
 
@@ -3378,13 +3423,138 @@ export function nestDottedKeys(value: Record<string, unknown>): Record<string, u
   return result ?? value;
 }
 
+/** Ops whose Zod schemas require a `value` payload. */
+const VALUE_REQUIRING_OPS: ReadonlySet<string> = new Set([
+  'add_node',
+  'update_node',
+  'add_edge',
+  'update_edge',
+]);
+
+/** The full operation vocabulary (mirrors PatchOperation.op / _PatchOp). */
+const KNOWN_PATCH_OPS: ReadonlySet<string> = new Set([
+  'add_node',
+  'remove_node',
+  'update_node',
+  'add_edge',
+  'remove_edge',
+  'update_edge',
+]);
+
+/**
+ * Keys that belong to the OPERATION envelope, not the payload. Everything
+ * else on a raw op object is candidate inline payload.
+ */
+const RESERVED_OP_KEYS: ReadonlySet<string> = new Set([
+  'op',
+  'path',
+  'value',
+  'old_value',
+  'impact',
+  'rationale',
+]);
+
+/**
+ * Alternate keys models have used in place of `value`. Checked in
+ * declaration order; a lift only happens when EXACTLY ONE is present
+ * (ambiguity → leave the op alone and let Zod reject it into the repair
+ * loop).
+ */
+const ALTERNATE_VALUE_KEYS: readonly string[] = [
+  'new_value',
+  'newValue',
+  'updated_value',
+  'updatedValue',
+  'data',
+  'payload',
+  'node',
+  'edge',
+  'fields',
+  'updates',
+  'properties',
+  'changes',
+];
+
+/**
+ * Lane CEE-D (edit-loop reliability): a bare single-operation object —
+ * `{ op, path, ... }` with a known op — is unambiguously a patch
+ * operation, not a malformed v2 envelope. Used by parseEditGraphResponse
+ * to wrap it into `operations: [op]` instead of failing with the live
+ * 'v2 response missing required "operations" array' error.
+ */
+function isBareSinglePatchOp(obj: Record<string, unknown>): boolean {
+  return (
+    typeof obj.op === 'string' &&
+    KNOWN_PATCH_OPS.has(obj.op) &&
+    typeof obj.path === 'string' &&
+    obj.path.length > 0
+  );
+}
+
+/**
+ * Lane CEE-D (edit-loop reliability): lift inline / alternate-key payloads
+ * into `value` for value-requiring ops (add_node / update_node / add_edge /
+ * update_edge) where the payload location is UNAMBIGUOUS. Live failure:
+ * PatchOperationSchema requires `value` for these ops, but models sometimes
+ * put the payload under an alternate key (`new_value`, `data`, …) or inline
+ * at the top level of the op object — producing the zod 'value — Required'
+ * rejection and burning repair attempts.
+ *
+ * Lift rules (each lift is logged):
+ *   1. EXACTLY ONE alternate key present → lift its value into `value`.
+ *   2. NO alternate key, but non-reserved top-level keys present → lift
+ *      those keys as an inline payload record.
+ *   3. Anything ambiguous (2+ alternate keys) or absent → return the op
+ *      unchanged; Zod rejects it into the existing repair loop.
+ */
+function liftAlternateValuePayload(raw: Record<string, unknown>): Record<string, unknown> {
+  if (raw.value !== undefined) return raw;
+  const op = raw.op;
+  if (typeof op !== 'string' || !VALUE_REQUIRING_OPS.has(op)) return raw;
+
+  const presentAlternates = ALTERNATE_VALUE_KEYS.filter((k) => raw[k] !== undefined);
+  if (presentAlternates.length === 1) {
+    const key = presentAlternates[0]!;
+    const lifted: Record<string, unknown> = { ...raw, value: raw[key] };
+    delete lifted[key];
+    log.info(
+      { event: 'edit_graph.value_lifted', op, source: 'alternate_key', alternate_key: key },
+      `edit_graph lifted alternate-key payload "${key}" into value for ${op}`,
+    );
+    return lifted;
+  }
+  if (presentAlternates.length > 1) return raw; // ambiguous — leave for Zod + repair
+
+  const inlineKeys = Object.keys(raw).filter(
+    (k) => !RESERVED_OP_KEYS.has(k) && raw[k] !== undefined,
+  );
+  if (inlineKeys.length > 0) {
+    const payload: Record<string, unknown> = {};
+    for (const k of inlineKeys) payload[k] = raw[k];
+    const lifted: Record<string, unknown> = {};
+    for (const k of Object.keys(raw)) {
+      if (RESERVED_OP_KEYS.has(k)) lifted[k] = raw[k];
+    }
+    lifted.value = payload;
+    log.info(
+      { event: 'edit_graph.value_lifted', op, source: 'inline_payload', field_count: inlineKeys.length },
+      `edit_graph lifted ${inlineKeys.length} inline payload field(s) into value for ${op}`,
+    );
+    return lifted;
+  }
+
+  return raw;
+}
+
 /**
  * Normalise a single raw operation from the LLM:
+ * - Lift inline / alternate-key payloads into `value` (value-requiring ops)
  * - Convert v2 paths to pipeline format
  * - Restructure dotted keys (strength.mean → nested) for canonical format
  * - Preserve impact/rationale as extra fields (stripped later)
  */
-function normaliseOperation(raw: Record<string, unknown>): PatchOperation & { impact?: string; rationale?: string } {
+function normaliseOperation(rawInput: Record<string, unknown>): PatchOperation & { impact?: string; rationale?: string } {
+  const raw = liftAlternateValuePayload(rawInput);
   const { path: normalisedPath, field } = normalisePath(String(raw.path ?? ''));
 
   let value = raw.value as unknown;

@@ -235,6 +235,7 @@ import {
   buildGraphLookup,
   type GraphLookupStats,
 } from './routing/graph-lookup-adapter.js';
+import { resolveRelativeFactorDelta } from './routing/resolve-relative-factor-delta.js';
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
 import { validateExplanationAnswer } from './routing/validator-explanation.js';
 import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
@@ -4202,11 +4203,44 @@ export async function runTurnExecutor(
     // STEPS 2–4: execute-intent path (VALIDATE → EXECUTE → CONFIRM)
     // ==================================================================
     if (routingResult.type === 'tool_call' && routingResult.proposal.intent_class === 'execute') {
-      const action = routingResult.proposal.action;
+      let action = routingResult.proposal.action;
       const proposedHandlerId = action.handler_id as V5ActionType;
       resolutionStatus = action.entity.resolution_status;
       proposedHandlerIdForLog = action.handler_id;
       proposedHandlerIdForOutcome = action.handler_id;
+
+      // Lane CEE-D (edit-loop reliability) — relative-delta resolution for
+      // set_factor_value, BEFORE validateToolCall so the validator, the
+      // P0-A value/unit containment, and the handler all see the same
+      // resolved absolute proposal. Live trace request_id baca4f1c:
+      // "increase it slightly by 5%" → structured percent delta on a £
+      // factor → unit_mismatch → PARAMETER_INVALID → recovered template,
+      // while an absolute set succeeded in the same session (91a45b0a).
+      // The resolver rewrites an unambiguous relative percent expression
+      // (structured '%' with increase/decrease, or a "+5%"/"-10%" string)
+      // into an absolute `set` against the factor's CURRENT value. When
+      // the current value is unavailable/ambiguous — or the factor itself
+      // is a % factor (pp semantics already work) — it declines and the
+      // proposal flows through today's clarify/recovery path unchanged
+      // (never guess). Every downstream guard still runs against the
+      // resolved value (cap range, finiteness, unit match).
+      let relativeDeltaResolved = false;
+      if (proposedHandlerId === 'set_factor_value') {
+        const relOutcome = resolveRelativeFactorDelta(action, graphLookupForValidate);
+        if (relOutcome.resolved) {
+          relativeDeltaResolved = true;
+          action = relOutcome.action;
+          emit(TelemetryEvents.V5RelativeDeltaResolved, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: 'set_factor_value',
+            target_id: relOutcome.telemetry.target_id,
+            direction: relOutcome.telemetry.direction,
+            source_shape: relOutcome.telemetry.source_shape,
+            value_unit_guard_skipped: true,
+          });
+        }
+      }
 
       // STEP 2 — VALIDATE. Structural checks (handler existence, resolution
       // status, kind, parameter bounds) ALWAYS run. Graph-dependent checks
@@ -4288,9 +4322,19 @@ export async function runTurnExecutor(
       // ONLY the unresolvable case; clean numeric / matching-unit / untyped-
       // factor edits are untouched. Reuses the recoverable-validator path
       // (clarify, direct_answer, graph unchanged, no handler executes).
+      // Lane CEE-D: the P0-A raw-message check is SKIPPED when the
+      // relative-delta resolver rewrote this proposal. The guard exists to
+      // catch unit tokens the pipeline silently DROPPED; here the '%'
+      // token in the message was deliberately CONSUMED by the resolution
+      // (grounded against the factor's current value), so comparing the
+      // message's percent family against the factor's unit family would
+      // falsely refuse the resolved absolute proposal. The skip is
+      // recorded on the v5.turn_executor.relative_delta_resolved event
+      // (value_unit_guard_skipped: true).
       if (
         validationResult.valid &&
         proposedHandlerId === 'set_factor_value' &&
+        !relativeDeltaResolved &&
         graphLookupForValidate?.findFactorObservedState !== undefined
       ) {
         const factorObs = graphLookupForValidate.findFactorObservedState(action.entity.id);
