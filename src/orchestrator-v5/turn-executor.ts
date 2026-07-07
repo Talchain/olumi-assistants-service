@@ -88,6 +88,10 @@ import {
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
+import {
+  decideGoalTargetReceipt,
+  GOAL_TARGET_NOT_SAVED_TEXT,
+} from './compose/goal-target-receipt-guard.js';
 import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
 import {
@@ -5883,6 +5887,44 @@ export async function runTurnExecutor(
           scenarioId: context.session_id,
         });
       })();
+      // Lane 20 — goal-target receipt honesty guard (STEP 6.6-class swap
+      // discipline for success-target claims, mirrored from the edit_graph
+      // dispatch guard). A "Success target set" receipt (formatGoalTargetSet
+      // on the add_constraint path, or any composed equivalent) may ship
+      // ONLY when the graph committed THIS turn actually REGISTERS the
+      // target — a goal-kind node carrying a finite `goal_threshold_raw`,
+      // the exact field `has_goal_target` / the UI goal chip / PLoT's
+      // explicit-threshold path read. This closes the "merge seam stripped
+      // it / handler regressed" class where the receipt is composed from
+      // handler-local state while the POST-MERGE `graphForCommit` no longer
+      // carries the contract. Non-mutating turns may honestly DESCRIBE an
+      // already-registered target (backed by the persisted graph). The swap
+      // runs BEFORE commitTurn so the stored assistant_message equals the
+      // honest wire copy; a commit FAILURE already withholds the receipt
+      // via the STEP 7 catch (STATE_COMMIT_FAILED), so together the
+      // formatGoalTargetSet class ships only on a durable commit whose
+      // graph carries the threshold.
+      {
+        const goalReceiptDecision = decideGoalTargetReceipt({
+          assistantText: composedOk.assistant_text,
+          commitGraph: graphForCommit ?? null,
+          persistedGraph: context.persistedGraph ?? null,
+        });
+        if (goalReceiptDecision.verdict === 'swap') {
+          log.warn(
+            {
+              event: 'v5.turn_executor.goal_target_receipt_swapped',
+              request_id: requestId,
+              scenario_id: context.session_id,
+              handler_id: handlerIdForCommit ?? null,
+              reason: goalReceiptDecision.reason,
+              graph_committed: graphForCommit !== null && graphForCommit !== undefined,
+            },
+            'V5 TurnExecutor — success-target receipt claimed a registration the commit graph does not carry (no goal_threshold_raw on a goal node); swapped for the honest fallback before commit',
+          );
+          composedOk = { ...composedOk, assistant_text: GOAL_TARGET_NOT_SAVED_TEXT };
+        }
+      }
       // Proposal-capture hash keeps its pre-fix input — the graph this
       // turn reasoned over (mutated graph when present, else the request
       // echo) — so pending-action preconditions.graph_hash semantics are

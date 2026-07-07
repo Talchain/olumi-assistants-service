@@ -201,10 +201,50 @@ const NUMERIC_BY_PATTERN_SOURCE =
   String.raw`\b(?:${VALUE_UPDATE_VERBS_BY.join('|')})\s+${ARTICLE_PREFIX}` +
   `${OBJECT_WINDOW_BY}\\s+by\\s+\\S`;
 
+/**
+ * Clause C — goal-target phrasings (lane 20). Verbs that may drive the
+ * explicit "success target" noun phrase. Broader than the clause-A verb set
+ * (the noun disambiguates: "raise the success target" is unambiguously a
+ * value intent, unlike bare "raise X").
+ */
+const GOAL_TARGET_VERBS: ReadonlyArray<string> = Object.freeze([
+  ...VALUE_UPDATE_VERBS_TO,
+  ...VALUE_UPDATE_VERBS_BY,
+  'change',
+  'adjust',
+  'make',
+]);
+
+/**
+ * Clause C — `<verb> … success target …` (lane 20).
+ *
+ * The live staging leak (scenario 55df6984…, turn fac8dc19…, 2026-07-07):
+ * "Set a success target OF a 15% cost reduction …" carries no ` to `, so
+ * clause A never fired, the message dispatched to the edit_graph LLM, and
+ * the edit stamped non-contract fields (`value`/`type`/`description`) onto
+ * the goal node under a false "Success target … set" receipt — while the
+ * canonical goal-threshold contract (`goal_threshold_raw`/`_unit`/`_cap`/
+ * `goal_threshold`, the ONLY fields `has_goal_target` / the UI goal chip /
+ * PLoT's explicit-threshold path read) stayed unwritten. Goal-target
+ * registration is `add_constraint`'s contract (router tool-schema teaches
+ * it; validation-registry accepts entity kind 'goal'; the lane-15 join
+ * stamps the quad in the same validated write), so these phrasings MUST
+ * reach the TurnExecutor tool-use path.
+ *
+ * Shape: gate verb, then at most 4 tokens (articles/adjectives — "a new",
+ * "our", "the current"), then the literal noun phrase. The tight token
+ * window keeps figurative distant co-occurrence ("update the model and
+ * describe the success target") out of the gate; the preposition is
+ * deliberately unconstrained (of/to/at/…) — that variance is exactly what
+ * clause A missed.
+ */
+const GOAL_TARGET_PATTERN_SOURCE =
+  String.raw`\b(?:${GOAL_TARGET_VERBS.join('|')})\b(?:\s+\S+){0,4}?\s+success\s+target\b`;
+
 // Whole-regex with the meta-noun guard at position 0. Use the multi-line
 // `String.raw` literal-free composition so the structure is auditable.
 const VALUE_UPDATE_REGEX = new RegExp(
-  `${META_NOUN_GUARD}(?:${SET_UPDATE_TO_PATTERN_SOURCE}|${NUMERIC_BY_PATTERN_SOURCE})`,
+  `${META_NOUN_GUARD}(?:${SET_UPDATE_TO_PATTERN_SOURCE}|${NUMERIC_BY_PATTERN_SOURCE}|${GOAL_TARGET_PATTERN_SOURCE})`,
   'i',
 );
 
@@ -245,4 +285,5 @@ export const __testOnly = Object.freeze({
   META_NOUNS,
   VALUE_UPDATE_VERBS_TO,
   VALUE_UPDATE_VERBS_BY,
+  GOAL_TARGET_VERBS,
 });

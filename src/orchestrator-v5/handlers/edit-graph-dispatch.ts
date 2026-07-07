@@ -36,6 +36,10 @@ import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
   findSuccessClaimHit,
 } from '../compose/forbidden-user-facing-phrases.js';
+import {
+  decideGoalTargetReceipt,
+  GOAL_TARGET_NOT_SAVED_TEXT,
+} from '../compose/goal-target-receipt-guard.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import { getSystemPromptMeta } from '../../adapters/llm/prompt-loader.js';
 import {
@@ -2355,6 +2359,38 @@ export async function dispatchEditGraph(
     const graphForCommit = effectiveAppliedMutation
       ? persistedPostEditGraph ?? undefined
       : undefined;
+    // Lane 20 — goal-target receipt honesty guard (STEP 6.6-class swap
+    // discipline for success-target claims). The live 313e7b61 leak: the
+    // edit LLM stamped non-contract fields onto the goal node and shipped
+    // "Success target … set …" while the canonical registration contract
+    // (`goal_threshold_raw` — the field `has_goal_target` / the UI goal
+    // chip / PLoT's explicit-threshold path read) was never written. A
+    // registration claim may ship ONLY when the graph committed THIS turn
+    // registers the target; a non-mutating turn may describe an
+    // already-registered target (backed by the frame base — the strict
+    // persisted read when loaded, else the ingress echo). Swap happens
+    // BEFORE commit so the stored assistant_message equals the honest
+    // wire copy. Fallback copy is pre-swept against the forbidden-phrase
+    // and success-claim guards (goal-target-receipt-guard.test.ts).
+    const goalReceiptDecision = decideGoalTargetReceipt({
+      assistantText: response.assistant_text,
+      commitGraph: graphForCommit ?? null,
+      persistedGraph: gmFrameBase,
+    });
+    if (goalReceiptDecision.verdict === 'swap') {
+      log.warn(
+        {
+          event: 'v5.edit_graph.goal_target_receipt_swapped',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          reason: goalReceiptDecision.reason,
+          applied_mutation: effectiveAppliedMutation,
+          graph_committed: graphForCommit !== undefined,
+        },
+        'V5 edit_graph — success-target receipt claimed a registration the committed graph does not carry (no goal_threshold_raw on a goal node); swapped for the honest fallback before commit',
+      );
+      response = { ...response, assistant_text: GOAL_TARGET_NOT_SAVED_TEXT };
+    }
     // V5 P0 — when the early-emit intercept or the no-op recovery
     // produced a refreshed `proposed_concept` pending action, persist
     // it so the next turn can resume. Combine it with the chip-derived
