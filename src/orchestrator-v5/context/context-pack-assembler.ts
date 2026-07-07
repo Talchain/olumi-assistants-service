@@ -719,8 +719,8 @@ export const CONTEXT_PACK_TOP_DRIVER_CAP = 5;
 /**
  * Lane 21 (P0-A): bound on the widened all-options projection so a
  * degenerate many-option graph cannot blow the prompt budget. Realistic
- * graphs carry ≤ 8 options; overflow count is surfaced by the display
- * formatter, never silently dropped.
+ * graphs carry ≤ 8 options; options beyond the cap are truncated at the
+ * slice below (no overflow disclosure reaches the formatter today).
  */
 export const MAX_PROJECTED_OPTIONS = 12;
 
