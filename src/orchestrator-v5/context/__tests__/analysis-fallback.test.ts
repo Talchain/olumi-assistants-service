@@ -1182,3 +1182,208 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
     expect(out.summary.top_drivers).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lane 21 (P0-A) — gate reconciliation: the projection and the fallback must
+// consult the SAME top-level enrichment source. Before this lane,
+// buildAnalysisFromPriorFacts gated the entire enrichment projection on
+// `compactAnalysis(enrichment).options.length > 0`; when that gate failed the
+// minimal win_probabilities path silently returned `top_drivers: []`,
+// `robustness_level: 'unknown'`, and no fragile edges even though the
+// top-level enrichment carried all three. The composite
+// `reconcileAnalysisSummaryWithEnrichment` is the single seam shared by this
+// fallback and the turn-executor body-analysis_state ingress path.
+// ---------------------------------------------------------------------------
+
+import {
+  reconcileAnalysisSummaryWithEnrichment,
+} from '../analysis-fallback.js';
+import type { AnalysisResponseSummary } from '../../../orchestrator/context/analysis-compact.js';
+
+/** Staging-shaped enrichment whose option_comparison is UNUSABLE (entries
+ *  carry no option identity), but whose top-level drivers / robustness /
+ *  flip / VOI / goal-fit surfaces are all present. */
+function topLevelOnlyEnrichment(): Record<string, unknown> {
+  return {
+    meta: { seed_used: 7, n_samples: 1000, response_hash: 'h-lane21' },
+    analysis_status: 'computed',
+    option_comparison: [{ status: 'computed' }, { status: 'computed' }],
+    factor_sensitivity: [
+      { factor_id: 'f1', factor_label: 'Engineering Capacity', elasticity: 0.43, direction: 'positive' },
+      { factor_id: 'f2', factor_label: 'Offshore Engagement', elasticity: 0.34, direction: 'negative' },
+    ],
+    robustness: {
+      level: 'moderate',
+      fragile_edges: [
+        { edge_id: 'f1->o1', from_id: 'f1', to_id: 'o1', from_label: 'Engineering Capacity', to_label: 'Delivery Throughput', switch_probability: 0.45 },
+      ],
+    },
+    flip_thresholds: [
+      { factor_id: 'f1', factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.24, unit: 'engineers' },
+      { factor_id: 'f2', factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, flip_reason: 'no_effect_within_bounds' },
+    ],
+    m1_coaching: {
+      evidence_gaps: [
+        { factor_id: 'f3', factor_label: 'Talent Market Tightness', voi_score: 0.6327 },
+      ],
+    },
+    critiques: [{ code: 'CONSTRAINT_GOALFIT_MODELLED_BASIS', severity: 'info' }],
+  };
+}
+
+describe('Lane 21 — fallback/projection source reconciliation', () => {
+  it('minimal win_probabilities path no longer returns empty drivers/robustness when top-level enrichment data exists', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.72, 'opt-b': 0.28 },
+        summary: 'Prior run',
+        enrichment: topLevelOnlyEnrichment(),
+      },
+    } as unknown as HandlerFact;
+
+    const summary = buildAnalysisFromPriorFacts([fact]);
+    expect(summary).not.toBeNull();
+    // Options still come from win_probabilities (enrichment carries no
+    // usable option identity)…
+    expect(summary!.options.map((o) => o.option_id)).toEqual(['opt-a', 'opt-b']);
+    // …but the top-level enrichment surfaces are no longer dropped:
+    expect(summary!.top_drivers.map((d) => d.factor_label)).toEqual([
+      'Engineering Capacity',
+      'Offshore Engagement',
+    ]);
+    expect(summary!.robustness_level).toBe('moderate');
+    expect(summary!.top_fragile_edges?.[0]).toMatchObject({
+      from_label: 'Engineering Capacity',
+      to_label: 'Delivery Throughput',
+    });
+    expect(summary!.fragile_edge_count).toBe(1);
+  });
+
+  it('minimal path attaches the Lane 21 signals (tipping / VOI / goal-fit)', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.72, 'opt-b': 0.28 },
+        summary: 'Prior run',
+        enrichment: topLevelOnlyEnrichment(),
+      },
+    } as unknown as HandlerFact;
+
+    const summary = buildAnalysisFromPriorFacts([fact]) as
+      | (AnalysisResponseSummary & {
+          tipping_points?: unknown;
+          evidence_gaps?: unknown;
+          goal_fit?: unknown;
+        })
+      | null;
+    expect(summary?.tipping_points).toEqual([
+      { factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.24, unit: 'engineers', no_flip_within_bounds: false },
+      { factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
+    ]);
+    expect(summary?.evidence_gaps).toEqual([
+      { factor_label: 'Talent Market Tightness', voi_score: 0.6327 },
+    ]);
+    expect(summary?.goal_fit).toEqual({
+      scored: true,
+      basis: 'modelled_outcome_distribution',
+    });
+  });
+
+  it('enriched (options > 0) path ALSO attaches the Lane 21 signals', () => {
+    const enrichment = {
+      ...topLevelOnlyEnrichment(),
+      option_comparison: [
+        { option_id: 'opt-a', option_label: 'Hire locally', win_probability: 0.72 },
+        { option_id: 'opt-b', option_label: 'Status quo', win_probability: 0.28 },
+      ],
+    };
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.72, 'opt-b': 0.28 },
+        summary: 'Prior run',
+        enrichment,
+      },
+    } as unknown as HandlerFact;
+
+    const summary = buildAnalysisFromPriorFacts([fact]) as
+      | (AnalysisResponseSummary & { tipping_points?: unknown; goal_fit?: unknown })
+      | null;
+    expect(summary?.options.map((o) => o.option_label)).toEqual([
+      'Hire locally',
+      'Status quo',
+    ]);
+    expect(summary?.tipping_points).toBeDefined();
+    expect(summary?.goal_fit).toEqual({
+      scored: true,
+      basis: 'modelled_outcome_distribution',
+    });
+  });
+
+  it('composite reconcile helper: applies drivers + fragile overrides + signals in one pass (turn-executor parity seam)', () => {
+    const base: AnalysisResponseSummary = {
+      winner: { option_id: 'opt-a', option_label: 'A', win_probability: 0.7 },
+      options: [
+        { option_id: 'opt-a', option_label: 'A', win_probability: 0.7, outcome_mean: 0 },
+        { option_id: 'opt-b', option_label: 'B', win_probability: 0.3, outcome_mean: 0 },
+      ],
+      top_drivers: [],
+      robustness_level: 'unknown',
+      fragile_edge_count: 0,
+      margin: 0.4,
+      margin_pp: 40,
+      analysis_status: 'complete',
+    };
+    const out = reconcileAnalysisSummaryWithEnrichment(base, topLevelOnlyEnrichment());
+    expect(out.top_driver_source).toBe('top_level');
+    expect(out.fragile_edge_source).toBe('top_level');
+    expect(out.summary.top_drivers).toHaveLength(2);
+    expect(out.summary.top_fragile_edges).toHaveLength(1);
+    expect(out.summary.tipping_points).toHaveLength(2);
+    expect(out.summary.evidence_gaps).toHaveLength(1);
+    expect(out.summary.goal_fit).toEqual({ scored: true, basis: 'modelled_outcome_distribution' });
+    // Robustness is NOT touched by the composite (compactAnalysis already
+    // derived it on both call paths) — the minimal fallback path merges it
+    // separately from the enrichment-derived summary.
+    expect(out.summary.robustness_level).toBe('unknown');
+  });
+
+  it('composite reconcile helper: per-option data wins; signals still attach', () => {
+    const base: AnalysisResponseSummary = {
+      winner: { option_id: 'opt-a', option_label: 'A', win_probability: 0.7 },
+      options: [
+        { option_id: 'opt-a', option_label: 'A', win_probability: 0.7, outcome_mean: 0 },
+      ],
+      top_drivers: [
+        { factor_id: 'pf', factor_label: 'Per-Option Driver', sensitivity: 0.9, direction: 'positive' },
+      ],
+      robustness_level: 'stable',
+      fragile_edge_count: 2,
+      top_fragile_edges: [
+        { from_label: 'X', to_label: 'Y', from_id: 'x' },
+      ],
+      margin: null,
+      margin_pp: null,
+      analysis_status: 'complete',
+    };
+    const out = reconcileAnalysisSummaryWithEnrichment(base, topLevelOnlyEnrichment());
+    expect(out.top_driver_source).toBe('per_option');
+    expect(out.fragile_edge_source).toBe('per_option');
+    expect(out.summary.top_drivers[0]!.factor_label).toBe('Per-Option Driver');
+    expect(out.summary.top_fragile_edges?.[0]).toMatchObject({ from_label: 'X' });
+    expect(out.summary.tipping_points).toHaveLength(2);
+  });
+});
