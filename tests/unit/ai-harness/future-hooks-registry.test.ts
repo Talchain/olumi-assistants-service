@@ -314,22 +314,42 @@ describe('hook model-versions-substrate (ISSUE-9025, owner: Model Management)', 
 // ── HOOK 4: ratified CandidateMutationEnvelope (ISSUE-9026) ────────────────
 
 describe('hook candidate-mutation-envelope-ratified (ISSUE-9026, owner: Track 4 / contract ratification)', () => {
-  it('TRIPWIRE: CandidateMutationEnvelope is not exported from src yet', () => {
+  // ISSUE-9026 PARTIALLY CONVERTED (2026-07-07): the Graph Management referee
+  // module landed DARK via PR #341, bringing CandidateMutationEnvelope into
+  // src (isolated, zero live imports). Tripwire deleted per its instructions.
+  // The full repoint of tests/unit/t4-contract/candidate-mutation-envelope.test.ts
+  // onto the module export is DEFERRED to the next Graph Management session:
+  // the "assertions survive verbatim" claim must be verified against the
+  // round-3 contract alignment (Docs/t4), not assumed at merge time. Until
+  // then both shapes exist with an explicit reconciliation owner — a dated
+  // exception to the "do not keep both alive" rule, tracked on the program
+  // board (Track 4 / GM entry slice).
+
+  it('ENFORCING: the envelope module is present and stays isolated (zero live imports)', () => {
     const hits = filesMatching(['src'], '.ts', /CandidateMutationEnvelope/);
-    expect(
-      hits,
-      'CandidateMutationEnvelope appears in src — the ratified shared shape may have landed. Convert ' +
-        'deliberately: (1) repoint tests/unit/t4-contract/candidate-mutation-envelope.test.ts at the shared ' +
-        'export (its header plans exactly this: assertions survive verbatim, only the import changes); ' +
-        '(2) retire that file’s isolation guard; (3) un-skip the ISSUE-9026 case; (4) delete this tripwire. ' +
-        'Do NOT keep both shapes alive — the inline spec exists only because no shared export did.',
-    ).toEqual([]);
+    expect(hits, 'CandidateMutationEnvelope vanished from src — ISSUE-9026 regressed').not.toEqual([]);
+    for (const hit of hits) {
+      expect(
+        hit.startsWith('src/orchestrator-v5/graph-management/'),
+        `CandidateMutationEnvelope leaked outside the isolated module: ${hit} — live wiring is a gated Track 4 slice`,
+      ).toBe(true);
+    }
   });
 
-  // TODO: ISSUE-9026 — envelope-shape assertions against the ratified shared
-  // export. Owner: Track 4 / graph-data contract ratification.
+  it('ENFORCING: the module ships its own envelope-schema and isolation suites', () => {
+    for (const rel of [
+      'src/orchestrator-v5/graph-management/__tests__/envelope-schema.test.ts',
+      'src/orchestrator-v5/graph-management/__tests__/isolation-guards.test.ts',
+    ]) {
+      expect(existsSync(join(REPO_ROOT, rel)), `GM guard suite missing: ${rel}`).toBe(true);
+    }
+  });
+
+  // TODO: ISSUE-9026 (narrowed) — repoint the t4-contract spec at the module
+  // export with verbatim-assertion parity proven (or drift reconciled), then
+  // retire the inline shape. Owner: Track 4 / next Graph Management session.
   it.skip('ENFORCING (when unblocked): the t4-contract spec asserts against the shared export, not a local shape', () => {
-    expect.unreachable('blocked-future: the envelope is defined only in Docs/t4 + the isolated spec test');
+    expect.unreachable('blocked-future: inline-vs-module shape parity not yet reconciled (round-3 contract alignment)');
   });
 });
 

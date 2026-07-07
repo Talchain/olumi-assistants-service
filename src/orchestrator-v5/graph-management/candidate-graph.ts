@@ -1,0 +1,196 @@
+/**
+ * Track 3 — candidate-graph construction over the V5-owned seam
+ * `applyAndValidateMutation` (apply-graph-mutation.ts). PURE: builds an in-memory
+ * candidate; NO persistence, no DB, no live runtime writes. Uses no V4 patch/apply
+ * machinery (enforced by isolation-guards.test.ts). Ported from the PR #300 spike,
+ * adapted to the T4.0 envelope payloads.
+ *
+ * Correctness rail: candidate graphs are constructed ONLY through this seam. The
+ * persistence merge seam (`mergeMutatedGraphForPersistence`) is NEVER imported
+ * here — it is exercised solely by the merge-parity fixtures (import boundary,
+ * Paul #1).
+ */
+import { applyAndValidateMutation } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
+import { GraphV3, type GraphV3T, type NodeV3T, type EdgeV3T } from '../../schemas/cee-v3.js';
+import {
+  CANDIDATE_BUILD_FAILED,
+  ENTITY_NOT_FOUND,
+  GRAPH_INVARIANT_VIOLATED,
+} from './reason-codes.js';
+import type { MutationBlocker } from './types.js';
+
+export interface CandidateBuildResult {
+  readonly candidate?: Record<string, unknown>;
+  readonly error?: MutationBlocker;
+}
+
+/** Payload sub-shapes the builders consume (structural subset of the envelope). */
+export interface RenamePayload {
+  readonly node_id: string;
+  readonly to_label: string;
+}
+export interface AddOptionPayload {
+  readonly option: {
+    readonly id: string;
+    readonly label: string;
+    readonly parent_decision_id?: string;
+    readonly edges: ReadonlyArray<{
+      readonly to_factor_id: string;
+      readonly strength?: { readonly mean: number; readonly std: number };
+      readonly effect_direction?: 'positive' | 'negative';
+    }>;
+    readonly interventions?: Readonly<Record<string, Record<string, unknown>>>;
+  };
+}
+
+/**
+ * Map a candidate-build error to a REDACTED blocker. Crucial: `err.message` from
+ * `applyAndValidateMutation` / D1 embeds raw ids (e.g. `Node <node_id> not found`),
+ * so it MUST NOT reach `blocker.readable` — the readable is a fixed per-code string
+ * (path/code only, never a payload value; T4.0 §5 redaction). Only the two D1 codes
+ * that belong to the mutation vocabulary map through; every other D1 code collapses
+ * to CANDIDATE_BUILD_FAILED (keeping `code` inside MUTATION_REASON_CODES).
+ */
+function toBlocker(err: unknown): MutationBlocker {
+  if (err instanceof D1HandlerError) {
+    switch (err.code) {
+      case 'GRAPH_INVARIANT_VIOLATED':
+        return { code: GRAPH_INVARIANT_VIOLATED, readable: 'The candidate graph failed schema validation.' };
+      case 'ENTITY_NOT_FOUND':
+        return { code: ENTITY_NOT_FOUND, readable: 'A referenced entity was not found in the graph.' };
+      default:
+        return { code: CANDIDATE_BUILD_FAILED, readable: 'Candidate construction failed.' };
+    }
+  }
+  return { code: CANDIDATE_BUILD_FAILED, readable: 'Candidate construction failed.' };
+}
+
+const DEFAULT_STRENGTH = { mean: 0.5, std: 0.1 } as const;
+
+/** Deep-clone the mutated graph before exposing it so it does not alias input arrays. */
+function exposeCandidate(mutatedGraph: Record<string, unknown>): Record<string, unknown> {
+  return structuredClone(mutatedGraph);
+}
+
+function makeEdge(
+  from: string,
+  to: string,
+  strength?: { readonly mean: number; readonly std: number },
+  effectDirection?: 'positive' | 'negative',
+): EdgeV3T {
+  return {
+    from,
+    to,
+    strength: strength ? { ...strength } : { ...DEFAULT_STRENGTH },
+    exists_probability: 0.9,
+    effect_direction: effectDirection ?? 'positive',
+  };
+}
+
+export function buildRenameCandidate(
+  persistedGraph: unknown,
+  payload: RenamePayload,
+): CandidateBuildResult {
+  try {
+    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+      const node = clone.nodes.find((n) => n.id === payload.node_id);
+      if (!node) {
+        throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${payload.node_id} not found in graph.`);
+      }
+      const before = { label: node.label };
+      node.label = payload.to_label;
+      return { before, after: { label: payload.to_label } };
+    });
+    return { candidate: exposeCandidate(mutatedGraph) };
+  } catch (err) {
+    return { error: toBlocker(err) };
+  }
+}
+
+export function buildAddOptionCandidate(
+  persistedGraph: unknown,
+  payload: AddOptionPayload,
+): CandidateBuildResult {
+  try {
+    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+      const optionNode: NodeV3T = {
+        id: payload.option.id,
+        kind: 'option',
+        label: payload.option.label,
+        ...(payload.option.interventions
+          ? { interventions: { ...payload.option.interventions } }
+          : {}),
+      };
+      clone.nodes.push(optionNode);
+      if (payload.option.parent_decision_id) {
+        clone.edges.push(makeEdge(payload.option.parent_decision_id, payload.option.id));
+      }
+      for (const e of payload.option.edges) {
+        clone.edges.push(makeEdge(payload.option.id, e.to_factor_id, e.strength, e.effect_direction));
+      }
+      return { before: null, after: { option_id: payload.option.id } };
+    });
+    return { candidate: exposeCandidate(mutatedGraph) };
+  } catch (err) {
+    return { error: toBlocker(err) };
+  }
+}
+
+// ============================================================================
+// Graph predicates (add_option held-reason discriminators — PR #300, verified live)
+// ============================================================================
+
+/** TOP-LEVEL options[] is an ARRAY (even empty). → OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE. */
+export function graphHasTopLevelOptions(graph: unknown): boolean {
+  if (graph === null || typeof graph !== 'object') return false;
+  return Array.isArray((graph as { options?: unknown }).options);
+}
+
+/** TOP-LEVEL `options` is present but NOT an array. → GRAPH_OPTIONS_MALFORMED. */
+export function graphOptionsAreMalformed(graph: unknown): boolean {
+  if (graph === null || typeof graph !== 'object') return false;
+  const options = (graph as { options?: unknown }).options;
+  return options !== null && options !== undefined && !Array.isArray(options);
+}
+
+/**
+ * Whether the CURRENT graph parses as GraphV3 (structural validity). Used to
+ * distinguish a malformed BASE graph (an environmental hold → CURRENT_GRAPH_UNREADABLE)
+ * from a genuinely invalid CANDIDATE (a producer fault → rejected): both otherwise
+ * surface as `GRAPH_INVARIANT_VIOLATED` from `applyAndValidateMutation`'s two parse
+ * steps (ingress vs post-mutation), which the redacted blocker cannot tell apart.
+ * Total (never throws). Note: GraphV3 strips top-level `options`, so a malformed
+ * `options` is caught separately by `graphOptionsAreMalformed`.
+ */
+export function currentGraphIsParseable(graph: unknown): boolean {
+  try {
+    return GraphV3.safeParse(graph).success;
+  } catch {
+    return false;
+  }
+}
+
+/** A node with `nodeId` already exists. → OPTION_ID_COLLISION for add_option. */
+export function graphHasNodeId(graph: unknown, nodeId: string): boolean {
+  if (graph === null || typeof graph !== 'object') return false;
+  const nodes = (graph as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodes)) return false;
+  return nodes.some(
+    (n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === nodeId,
+  );
+}
+
+/** An edge `from → to` exists. Used by R3 referential integrity (update/remove edge). */
+export function graphHasEdge(graph: unknown, from: string, to: string): boolean {
+  if (graph === null || typeof graph !== 'object') return false;
+  const edges = (graph as { edges?: unknown }).edges;
+  if (!Array.isArray(edges)) return false;
+  return edges.some(
+    (e) =>
+      e !== null &&
+      typeof e === 'object' &&
+      (e as { from?: unknown }).from === from &&
+      (e as { to?: unknown }).to === to,
+  );
+}

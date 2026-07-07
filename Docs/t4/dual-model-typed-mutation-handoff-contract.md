@@ -79,8 +79,12 @@ R1. **Schema gate (fail-closed):** envelope parses against v1 `.strict()` schema
     never raw values (structured-outputs doctrine).
 R2. **Stale gate:** `base_graph_hash` ≠ frame's current analysis-affecting hash →
     `stale` (#300 `base-hash-gate`). No partial credit: staleness beats every other verdict.
-R3. **Referential integrity:** target ids exist; `add_*` ids do not collide
-    (`OPTION_ID_COLLISION` class); graph caps respected (dual-draft G11).
+R3. **Referential integrity:** target ids exist (incl. `add_option` linkage — parent decision +
+    every target factor — enforced in the core, `ENTITY_NOT_FOUND` on a dangling target); `add_*`
+    ids do not collide (`OPTION_ID_COLLISION` for options / `ENTITY_ID_COLLISION` for nodes).
+    **Graph-cap enforcement (dual-draft G11) is DEFERRED** — the isolated core (Track 3, PR #341)
+    does NOT enforce node/edge caps yet and mints no `GRAPH_CAP_EXCEEDED`; caps land with a later
+    candidate-cap slice. (See the Track 3 engineering report for the implemented-vs-deferred split.)
 R4. **Field-safety:** payload touches only allowlisted fields (G10); engine-boundary claim
     scan on any free text (no EVPI / flip-point / quantified-probability prose — G14).
 R5. **Candidate build:** apply to a CLONE via the live seam `applyAndValidateMutation()`;
