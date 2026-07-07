@@ -211,7 +211,11 @@ describe('findForbiddenPhraseHit — boundary cases', () => {
 // ---------------------------------------------------------------------------
 
 describe('audited recovery constants — no forbidden phrase', () => {
-  it('route-v2.ts EDIT_GRAPH_RECOVERY_TEXT is clean', async () => {
+  // Known slow (pre-existing): the dynamic import pulls in route-v2's
+  // full module graph (fastify route + orchestrator + adapters), which
+  // can exceed the 5s default test timeout on a cold transform cache.
+  // The assertion itself is trivial — the budget only covers the import.
+  it('route-v2.ts EDIT_GRAPH_RECOVERY_TEXT is clean', { timeout: 30_000 }, async () => {
     const { EDIT_GRAPH_RECOVERY_TEXT } = await import(
       '../../../orchestrator/route-v2.js'
     );
