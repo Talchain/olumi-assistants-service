@@ -61,26 +61,31 @@ import {
   countUnionParams,
 } from "../../src/cee/draft/anthropic-graph-schema.js";
 
-// ── Budgets (post-v8 measured values + small headroom) ─────────────────────
-// Measured on 2026-07-07 (v8): ~3.2KB serialized, 9 unions, 7 objects.
+// ── Budgets (post-v8 measured values) ───────────────────────────────────────
+// Measured on 2026-07-07 (v8): 3,194 bytes, 9 unions, 5 enums / 17 values,
+// 8 object schemas (by this file's walk, which counts the root) / 52
+// properties (7 optional).
 //
 // SERIALIZED_BYTES_BUDGET = 3400 pins the schema under the empirically-found
 // compile boundary: live probes on 2026-07-07 showed HTTP 200 at 3,194B
-// (7 object schemas — the v8 shape) and 400 "compiled grammar is too large"
-// at 3,539B (9 object schemas) and above, on every current model
-// (sonnet-4-5/4-6/5, opus-4-6/4-8, haiku-4-5 — the limit is API-wide).
-// 3,400B sits inside the verified-PASS side of that 3.1–3.5KB boundary with
-// ~200B headroom over the v8 measurement. Bytes are a PROXY for structural
-// surface — if you raise this number, you MUST re-verify compilation live
-// (scripts/probe-grammar-compile.mjs) before merging.
+// (the v8 shape, byte-identical to what this repo now builds) and 400
+// "compiled grammar is too large" at 3,539B (v7 minus the whole coaching
+// subtree) and above, on every current model (sonnet-4-5/4-6/5,
+// opus-4-6/4-8, haiku-4-5 — the limit is API-wide). Bytes are a PROXY for
+// structural surface — if you raise this number, you MUST re-verify
+// compilation live (scripts/probe-grammar-compile.mjs) before merging.
 const SERIALIZED_BYTES_BUDGET = 3400;
 const UNION_PARAMS_BUDGET = 16; // Anthropic hard limit
 const UNION_PARAMS_TRIPWIRE = 10; // current 9 + 1 headroom
 const OPTIONAL_PARAMS_BUDGET = 24; // Anthropic hard limit
-const OPTIONAL_PARAMS_TRIPWIRE = 17; // current 15 + 2 headroom
-const ENUM_VALUES_TRIPWIRE = 30; // current 25 + headroom
-const OBJECT_NODES_TRIPWIRE = 8; // v8 measured 7 + 1 headroom (13 → 7 at v8;
-// object count was the dominant compile-cost driver in the live bisect)
+const OPTIONAL_PARAMS_TRIPWIRE = 9; // v8 measured 7 + 2 headroom
+const ENUM_VALUES_TRIPWIRE = 20; // v8 measured 17 + headroom
+// Object-schema count is pinned EXACTLY: the live bisect showed structural
+// surface is the dominant compile cost, and a 9-object variant of this
+// family already failed. Adding any object schema must be a deliberate,
+// live-verified decision (update this pin + run the probe).
+const OBJECT_NODES_TRIPWIRE = 8; // v8 measured 8 (root + nodes.items + data +
+// interventions.items + prior + edges.items + strength + gc.items)
 
 interface Stats {
   objects: number;

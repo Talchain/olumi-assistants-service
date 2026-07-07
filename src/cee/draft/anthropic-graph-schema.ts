@@ -49,6 +49,33 @@
  *
  * Post-v7 union count: 9 / 16. Post-v7 optional count: 15 / 24
  * (causal_claims per-variant fields are optional in the grammar).
+ *
+ * GRAMMAR BUDGET (v8 — 2026-07-07 stringified aux fields, Lane 26):
+ * v7 was NOT enough: the post-v7 schema (4,578B) still drew 400 "compiled
+ * grammar is too large" on EVERY current model (verified live 2026-07-07,
+ * 15-probe bisect), so every production draft silently fell back to
+ * prompt-only JSON. The bisect showed total structural surface
+ * (object schemas × properties) is the dominant compile cost: v7 carried
+ * 13 object schemas / 72 properties, and even deleting the entire
+ * coaching subtree (3,539B, 9 objects) still failed. The PASS/FAIL
+ * boundary for this schema family sits between ~3.2KB / 7 objects (PASS)
+ * and ~3.5KB / 9 objects (FAIL). No prune keeping all six top-level keys
+ * as structured objects can fit — the aux content must leave the grammar.
+ * v8 therefore declares the three aux subtrees — coaching, causal_claims,
+ * topology_plan — as `{ type: "string" }` fields carrying JSON-encoded
+ * payloads (the same pattern data.encoding_map already uses), keeping
+ * full grammar enforcement on nodes/edges/goal_constraints. Verified
+ * compiling live: HTTP 200 at 3,194B on claude-sonnet-4-6 (probe 14).
+ *  - Ingress: parseStringifiedAuxFields() in adapters/llm/normalisation.ts
+ *    JSON.parses the three strings before Zod/downstream consumers; on
+ *    parse failure the field is dropped, which degrades to exactly the
+ *    canonical-empty defaults Stage 5 already emits (identical to the
+ *    prompt-only fallback path — enforcement never worse than status quo).
+ *  - Aux value-set enforcement stays downstream, as v7 already had it:
+ *    normalise-legacy-coaching + canonical CoachingSchema, item-wise
+ *    validateCausalClaims Zod drop, Stage 5/6 topology_plan passthrough.
+ *  - Re-verify ANY schema amendment live with
+ *    scripts/probe-grammar-compile.mjs before merging.
  * Serialized size is pinned by tests/unit/anthropic-graph-schema-grammar-budget.test.ts;
  * see that file for how to verify grammar compilation against the live API.
  */
@@ -190,119 +217,31 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
       },
     },
     // rationales omitted — legacy carry, no consumer enforcement.
-    // causal_claims, coaching, topology_plan: declared below per v0.11.0.
-    // v7 grammar-size reduction: the 4-branch discriminated-union anyOf was
-    // the largest union in the tree and a dominant grammar-compilation cost.
-    // Collapsed to ONE flat object: `type` keeps its enum (structure-
-    // defining); the per-variant fields (from/to/via/between/
-    // stated_strength) are grammar-optional. The canonical discriminated
-    // union stays enforced downstream — validateCausalClaims Zod-parses each
-    // claim (CausalClaimSchema) and DROPS malformed ones item-wise with a
-    // CAUSAL_CLAIM_DROPPED warning, exactly as on the prompt-only path.
-    causal_claims: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          type: {
-            type: "string",
-            enum: ["direct_effect", "mediation_only", "no_direct_effect", "unmeasured_confounder"],
-          },
-          from: { type: "string" },
-          to: { type: "string" },
-          via: { type: "string" },
-          between: {
-            type: "array",
-            items: { type: "string" },
-          },
-          // 4-band contract (very_strong|strong|moderate|slight) enforced by
-          // the shared CausalClaimSchema downstream; plain string here (v7).
-          stated_strength: { type: "string" },
-        },
-        required: ["type"],
-        additionalProperties: false,
-      },
-    },
-    topology_plan: {
-      type: "array",
-      items: { type: "string" },
-    },
-    coaching: {
-      type: "object",
-      properties: {
-        summary: { type: "string" },
-        strengthen_items: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              label: { type: "string" },
-              detail: { type: "string" },
-              action_type: {
-                type: "string",
-                enum: ["add_option", "add_constraint", "add_risk", "reframe_goal"],
-              },
-              // Optional during transition — LLM may emit legacy values
-              // (framing|confidence|blindspots) which the ingress normaliser
-              // at anthropic.ts:884 maps to canonical BiasType before any
-              // downstream parse. v7: plain string — the previous canonical
-              // enum actively FORBADE the legacy values the normaliser is
-              // documented to handle, forcing the model to guess a canonical
-              // value under structured outputs.
-              bias_category: { type: "string" },
-            },
-            required: ["id", "label", "detail", "action_type"],
-            additionalProperties: false,
-          },
-        },
-        // Optional during v192b → v194 transition. The legacy normaliser at
-        // `src/adapters/llm/normalise-legacy-coaching.ts` converts the
-        // legacy widening_log array shape to canonical object; Stage 5
-        // emits a canonical-empty coaching block (incl. empty widening_log
-        // + bias_signals) when the LLM produces no meaningful coaching,
-        // and Stage 6 V3 transform mirrors that default for legacy paths.
-        widening_log: {
-          type: "object",
-          properties: {
-            elements_added: {
-              type: "array",
-              items: { type: "string" },
-            },
-            elements_considered_but_excluded: {
-              type: "array",
-              items: { type: "string" },
-            },
-            // v7: plain string (grammar budget); canonical Zod owns
-            // complete|partial|thin downstream.
-            brief_completeness: { type: "string" },
-          },
-          required: [
-            "elements_added",
-            "elements_considered_but_excluded",
-            "brief_completeness",
-          ],
-          additionalProperties: false,
-        },
-        bias_signals: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              // v7: plain string (grammar budget); same BiasType domain as
-              // bias_category — legacy values normalised at ingress,
-              // canonical Zod enforces downstream.
-              type: { type: "string" },
-              detail: { type: "string" },
-            },
-            required: ["type", "detail"],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ["summary", "strengthen_items"],
-      additionalProperties: false,
-    },
+    // v8 stringified aux fields (see GRAMMAR BUDGET (v8) above): the three
+    // v0.11.0 aux subtrees are JSON-STRING fields — the grammar guarantees
+    // a string, the prompt instructs JSON-encoded content, and
+    // parseStringifiedAuxFields() (adapters/llm/normalisation.ts) parses
+    // them back to objects/arrays at ingress before Zod/downstream
+    // consumers. Do NOT re-objectify these without a live compile check
+    // (scripts/probe-grammar-compile.mjs): the 2026-07-07 bisect proved no
+    // schema keeping all six top-level keys as structured objects compiles.
+    // Expected content, enforced downstream exactly as at v7:
+    //  - causal_claims: JSON-encoded array of claim objects; canonical
+    //    discriminated union enforced by validateCausalClaims (item-wise
+    //    Zod drop with CAUSAL_CLAIM_DROPPED warning).
+    //  - topology_plan: JSON-encoded string[] (≤15 structural lines).
+    //  - coaching: JSON-encoded object {summary, strengthen_items,
+    //    widening_log?, bias_signals?}; legacy shapes converted by
+    //    normalise-legacy-coaching.ts, canonical CoachingSchema downstream.
+    // No `description` keywords (by-construction invariant + grammar-size
+    // budget): the JSON-string instruction to the model rides on the user
+    // message instead — STRUCTURED_OUTPUTS_AUX_STRING_REMINDER in
+    // adapters/llm/anthropic.ts, appended only when structured outputs is
+    // active. This keeps the wire schema byte-identical to the live-verified
+    // compiling probe shape (3,194B, HTTP 200 on claude-sonnet-4-6).
+    causal_claims: { type: "string" },
+    topology_plan: { type: "string" },
+    coaching: { type: "string" },
     goal_constraints: {
       type: "array",
       items: {
