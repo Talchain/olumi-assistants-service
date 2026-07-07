@@ -41,6 +41,10 @@ import type { GraphV3T } from '../../../../schemas/cee-v3.js';
 import { createAddConstraintHandler } from '../add-constraint.js';
 import { buildD1Fixture } from '../d1-shared/__tests__/fixtures.js';
 import { deriveDecisionContext } from '../../../coaching/decision-context.js';
+import {
+  findForbiddenPhraseHit,
+  findSuccessClaimHit,
+} from '../../../compose/forbidden-user-facing-phrases.js';
 
 function buildInvocation(graph: GraphV3T, proposal: ProposalAction): HandlerInvocation {
   return {
@@ -131,10 +135,13 @@ describe('goal-target join: "set the success target to 15%" (chip-context dead-e
     const ctx = deriveDecisionContext(null, mutated);
     expect(ctx.goal_translation.user_scale_target).toBe('15 %');
 
-    // Honest receipt naming the target.
+    // Honest receipt naming the target — and it survives the egress
+    // guards (no success-claim pattern, no forbidden internal vocabulary).
     expect(outcome.assistant_text).toBe(
       'Success target set: Revenue at least 15%. The next analysis will score your options against this target.',
     );
+    expect(findSuccessClaimHit(outcome.assistant_text)).toBeNull();
+    expect(findForbiddenPhraseHit(outcome.assistant_text)).toBeNull();
 
     // Fact channel unchanged (frozen @talchain/schemas shape).
     expect(outcome.handler_facts).toHaveLength(1);
