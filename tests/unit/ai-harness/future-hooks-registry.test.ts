@@ -189,26 +189,53 @@ describe('future-hooks registry — integrity', () => {
 // ── HOOK 1: A3 CAS observe-mode (ISSUE-9023) ───────────────────────────────
 
 describe('hook a3-cas-observe-mode (ISSUE-9023, owner: Canonical State / A3, PR #346)', () => {
-  it('TRIPWIRE: no CAS-mode flag exists in src/config yet', () => {
+  // ISSUE-9023 CONVERTED (2026-07-07): PR #346 landed CEE_V5_GRAPH_CAS_MODE and
+  // observe-mode was flipped on staging with Paul's authorisation. Tripwire
+  // deleted per its own instructions; enforcing coverage below. Deliberately
+  // NOT asserted: atomic CAS enforcement — A3 is app-side stale-write
+  // OBSERVATION with a TOCTOU window; true atomicity is future RPC v3 work.
+
+  it('ENFORCING: A3 substrate is present in src/config', () => {
     const hits = filesMatching(['src/config'], '.ts', /CEE_V5_GRAPH_CAS_MODE|CEE_GRAPH_IDENTITY_CAS_MODE/);
-    expect(
-      hits,
-      'A3 observe-mode substrate appears PRESENT (a CAS-mode flag landed in src/config — expected from PR #346 ' +
-        'or equivalent). This tripwire failing is the intended handoff, planned for in the harness completion ' +
-        'pass: (1) convert the ISSUE-9023 it.skip below into enforcing coverage — assert observe mode is ' +
-        'DEFAULT-OFF (flag absent/off ⇒ zero behaviour change), NON-BLOCKING (observe never rejects a write), ' +
-        'and DIAGNOSTIC-ONLY (v5.graph_cas.evaluated telemetry, no product copy change); assert enforce cannot ' +
-        'be enabled accidentally (prod auto-downgrades enforce→observe). (2) Do NOT assert atomic CAS ' +
-        'enforcement — A3 is app-side stale-write OBSERVATION with a TOCTOU window; true atomicity is future ' +
-        'RPC v3 work. (3) Then delete this tripwire. The A3/#346 owner should expect this conversion as part ' +
-        'of landing A3.',
-    ).toEqual([]);
+    expect(hits, 'A3 CAS-mode flag disappeared from src/config — ISSUE-9023 regressed').not.toEqual([]);
   });
 
-  // TODO: ISSUE-9023 — A3 CAS observe-mode assurance; blocked until PR #346 (or
-  // equivalent) lands CEE_V5_GRAPH_CAS_MODE. Owner: Canonical State / A3.
-  it.skip('ENFORCING (when unblocked): observe mode is default-off, non-blocking, diagnostic-only; enforcement cannot engage accidentally; no strict-CAS claims', () => {
-    expect.unreachable('blocked-future: A3 observe-mode substrate (PR #346) has not merged');
+  it('ENFORCING: observe mode is default-off and enforce cannot engage accidentally in prod', () => {
+    // Raw source (not stripComments): an earlier string literal containing "/*"
+    // makes the comment-stripper swallow the flag-definition region. Behavioural
+    // enforcement lives in tests/unit/config.graph-cas-mode.test.ts; these are
+    // source pins against silent default/lockdown edits.
+    const configSrc = readFileSync(join(REPO_ROOT, 'src/config/index.ts'), 'utf-8');
+    // Code default is "off": flag absent ⇒ zero behaviour change.
+    expect(
+      /graphCasMode:\s*createEnvEnforcedMode\(\s*"off"\s*,\s*"CEE_V5_GRAPH_CAS_MODE"\s*\)/.test(configSrc),
+      'graphCasMode code default must remain "off" (default-off invariant)',
+    ).toBe(true);
+    // Prod lockdown: requested enforce downgrades to observe, never boots into
+    // a blocking mode on a non-atomic app-side check.
+    expect(
+      /env\s*===\s*"prod"\s*&&\s*requested\s*===\s*"enforce"/.test(configSrc),
+      'prod enforce→observe downgrade guard missing from createEnvEnforcedMode',
+    ).toBe(true);
+  });
+
+  it('ENFORCING: observe mode is diagnostic-only (telemetry registered) and behaviourally covered', () => {
+    // Diagnostic surface: the observation event is a registered telemetry name.
+    const telemetrySrc = readFileSync(join(REPO_ROOT, 'src/utils/telemetry.ts'), 'utf-8');
+    expect(
+      telemetrySrc.includes('v5.graph_cas.evaluated'),
+      'v5.graph_cas.evaluated must stay a registered telemetry event (diagnostic-only contract)',
+    ).toBe(true);
+    // Non-blocking behaviour is owned by the A3 suites shipped with #346 —
+    // assert they still exist so the behavioural contract cannot silently
+    // vanish while this registry test stays green.
+    for (const rel of [
+      'tests/unit/config.graph-cas-mode.test.ts',
+      'src/orchestrator-v5/session/__tests__/supabase-store-graph-cas.test.ts',
+      'src/orchestrator-v5/context/__tests__/graph-cas-conflict.test.ts',
+    ]) {
+      expect(existsSync(join(REPO_ROOT, rel)), `A3 behavioural suite missing: ${rel}`).toBe(true);
+    }
   });
 });
 
