@@ -39,6 +39,32 @@ const SUPPRESS_CASES: ReadonlyArray<Case> = [
       'All of our developers are middleweight, so please update the existing team maturity to be mid-weight developers',
     expect: true,
   },
+  // Clause C — goal-target phrasings (lane 20). The live staging leak
+  // (scenario 55df6984…, turn fac8dc19…, 2026-07-07): "set a success
+  // target OF …" carries no " to ", missed clause A, dispatched to
+  // edit_graph, and the edit LLM wrote non-contract fields onto the
+  // goal node under a false "Success target … set" receipt. Goal-target
+  // registration is add_constraint's contract (the only writer of
+  // goal_threshold_raw/_unit/_cap/goal_threshold), so these phrasings
+  // must reach the TurnExecutor tool-use path.
+  {
+    label: 'goal target "of" (live leak, verbatim)',
+    message:
+      'Set a success target of a 15% cost reduction on the goal Reduce Operating Costs',
+    expect: true,
+  },
+  {
+    label: 'goal target "of" without goal name',
+    message: 'Set a success target of a 15% cost reduction',
+    expect: true,
+  },
+  {
+    label: 'goal target "to" (lane-15 dead-end phrasing)',
+    message: 'Set the success target to a 15% increase',
+    expect: true,
+  },
+  { label: 'goal target raise',                 message: 'Raise the success target to 20%',                                expect: true },
+  { label: 'goal target update at',             message: 'Update our success target at 90% retention',                     expect: true },
 ];
 
 const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
@@ -72,6 +98,10 @@ const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
   // Trivial non-edits
   { label: 'meta question',                     message: 'What about team dynamics?',                                      expect: false },
   { label: 'plain greeting',                    message: 'Hello',                                                          expect: false },
+  // Goal-target NON-edits (lane 20) — questions/descriptions about the
+  // target carry no gate verb driving the noun, and must not be swept.
+  { label: 'goal target question',              message: 'What is our success target?',                                    expect: false },
+  { label: 'goal target explain',               message: 'Explain the success target',                                     expect: false },
 
   // Meta-noun guard — model-quality requests with "the model" / "the
   // graph" / "the diagram" as the verb's object are whole-graph
