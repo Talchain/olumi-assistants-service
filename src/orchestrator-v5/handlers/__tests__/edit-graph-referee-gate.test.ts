@@ -241,7 +241,7 @@ describe('shadow mode never blocks', () => {
 
   it('emits exactly one registered v5.candidate_mutation.<verdict> event per envelope', () => {
     evaluateEditGraphMutations(baseInput({ mode: 'shadow', operations: [RENAME_OP, FIELD_OP] }));
-    const names = emitSpy.mock.calls.map((c) => c[0]);
+    const names = emitSpy.mock.calls.map((c: readonly unknown[]) => c[0]);
     expect(names).toEqual([
       telemetry.TelemetryEvents.V5CandidateMutationWouldApply,
       telemetry.TelemetryEvents.V5CandidateMutationHeld,

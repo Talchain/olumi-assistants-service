@@ -144,7 +144,7 @@ describe('flag ON', () => {
     expect(req.graph).toMatchObject({ nodes: GRAPH.nodes.map((n) => ({ id: n.id })) });
     // Telemetry: registered event, content-free fields.
     const mmEvents = emitSpy.mock.calls.filter(
-      (c) => c[0] === telemetry.TelemetryEvents.V5ModelVersionCreated,
+      (c: readonly unknown[]) => c[0] === telemetry.TelemetryEvents.V5ModelVersionCreated,
     );
     expect(mmEvents).toHaveLength(1);
     expect(mmEvents[0]![1]).toMatchObject({
@@ -216,7 +216,7 @@ describe('flag ON', () => {
     await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, createNoopSessionStore());
     await drainMicrotasks();
     const mmEvents = emitSpy.mock.calls.filter(
-      (c) => c[0] === telemetry.TelemetryEvents.V5ModelVersionCreated,
+      (c: readonly unknown[]) => c[0] === telemetry.TelemetryEvents.V5ModelVersionCreated,
     );
     expect(mmEvents[0]![1]).toMatchObject({ status: 'deduped' });
   });

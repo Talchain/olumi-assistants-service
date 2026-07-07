@@ -310,8 +310,9 @@ describe('hook model-versions-substrate (ISSUE-9025, owner: Model Management)', 
   // user), so the "no version claim can occur" premise is now narrowed to
   // user-facing surfaces: restore/compare remain dark and CEE still emits no
   // version wording. Owner: Model Management.
+  // TODO: ISSUE-9025 — narrowed skip; full rationale in the block above.
   it.skip('ENFORCING (when unblocked): restore/version/compare wording is grounded in real version state; uncommitted claims swap or block', () => {
-    expect.unreachable('blocked-future: MM is dark with zero live call sites — no version claim can reach a user yet');
+    expect.unreachable('blocked-future: restore/compare dark and no user-facing version wording — no version claim can reach a user yet');
   });
 });
 
