@@ -97,6 +97,74 @@ export function normaliseNodeKind(kind: string): CanonicalNodeKind {
   return normalised;
 }
 
+// ============================================================================
+// STRINGIFIED AUX FIELDS (v8 — 2026-07-07 grammar-size fix, Lane 26)
+// The Anthropic draft schema declares coaching, causal_claims, and
+// topology_plan as `{ type: "string" }` JSON-string fields (see the GRAMMAR
+// BUDGET (v8) note in src/cee/draft/anthropic-graph-schema.ts) — the full
+// object subtrees pushed the compiled grammar past Anthropic's unpublished
+// size limit, 400-failing structured outputs on every draft. This ingress
+// parse converts the strings back to objects/arrays BEFORE Zod and every
+// downstream consumer (normalise-legacy-coaching, validateCausalClaims,
+// Stage 5 Package).
+// ============================================================================
+
+const STRINGIFIED_AUX_FIELDS = [
+  { key: 'coaching', expect: 'object' },
+  { key: 'causal_claims', expect: 'array' },
+  { key: 'topology_plan', expect: 'array' },
+] as const;
+
+/**
+ * Parse the v8 JSON-string aux fields in place.
+ *
+ * Shape-based and tolerant by design:
+ * - Field absent, or already an object/array (prompt-only fallback path,
+ *   OpenAI adapter, legacy fixtures) → untouched.
+ * - Valid JSON string of the expected shape → replaced with the parsed value.
+ * - Double-encoded string (model JSON-encoded the JSON string once more) →
+ *   parsed twice. A single parse can never yield a valid final shape when it
+ *   yields a string, so the second attempt is unambiguous.
+ * - Malformed JSON or wrong shape → the field is DROPPED. Downstream then
+ *   behaves exactly as when the LLM omits the field — Stage 5 emits the
+ *   canonical-empty coaching block; causal_claims / topology_plan are
+ *   omitted from the response — which is identical to today's prompt-only
+ *   fallback behaviour. Enforcement is therefore never worse than status
+ *   quo, while nodes/edges/goal_constraints gain full grammar enforcement.
+ */
+export function parseStringifiedAuxFields(obj: Record<string, unknown>): void {
+  for (const { key, expect } of STRINGIFIED_AUX_FIELDS) {
+    const raw = obj[key];
+    if (typeof raw !== 'string') continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+      // Double-encoded edge case: unwrap exactly one extra layer.
+      if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+    } catch {
+      parsed = undefined;
+    }
+
+    const shapeOk = expect === 'array'
+      ? Array.isArray(parsed)
+      : parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+
+    if (shapeOk) {
+      obj[key] = parsed;
+    } else {
+      delete obj[key];
+      log.warn({
+        event: 'llm.normalisation.aux_field_parse_failed',
+        field: key,
+        expected_shape: expect,
+        raw_length: raw.length,
+        raw_preview: raw.slice(0, 120),
+      }, `Draft aux field "${key}" was not a JSON-encoded ${expect} — dropped (canonical-empty default applies downstream)`);
+    }
+  }
+}
+
 /**
  * Normalise all node kinds in a draft response before Zod validation.
  * Also coerces string numbers to actual numbers for belief/weight.
@@ -106,6 +174,10 @@ export function normaliseDraftResponse(raw: unknown): unknown {
 
   const obj = raw as Record<string, unknown>;
   let normalisedCount = 0;
+
+  // v8 stringified aux fields: must run before the coaching sentinel
+  // coercion below and before any Zod/downstream consumer sees the fields.
+  parseStringifiedAuxFields(obj);
 
   // ========================================================================
   // PRE-NORMALISATION DIAGNOSTIC: Capture raw LLM output shape for edge

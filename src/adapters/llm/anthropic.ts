@@ -284,6 +284,21 @@ const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - Every option needs a complete path to goal: option → controllable → outcome/risk → goal
 - 2–6 options maximum`;
 
+// v8 stringified aux fields (2026-07-07, Lane 26): appended to the user
+// message ONLY when structured outputs is active. The grammar declares
+// coaching / causal_claims / topology_plan as `{ type: "string" }` fields
+// (see GRAMMAR BUDGET (v8) in src/cee/draft/anthropic-graph-schema.ts), so
+// the model physically cannot emit objects there — this reminder tells it
+// to put the JSON-ENCODED content the system prompt describes inside those
+// strings, rather than prose. On the prompt-only fallback path the reminder
+// is omitted and the model emits the object shapes the system prompt
+// documents; parseStringifiedAuxFields() accepts both shapes at ingress.
+const STRUCTURED_OUTPUTS_AUX_STRING_REMINDER = `\n\nOUTPUT FORMAT OVERRIDE (structured mode):
+Emit "coaching", "causal_claims", and "topology_plan" as JSON-encoded STRINGS.
+Each must contain exactly the JSON value the schema instructions describe
+(coaching object, causal_claims array, topology_plan string array), serialised
+with correctly escaped quotes. Example: "topology_plan": "[\\"line 1\\",\\"line 2\\"]".`;
+
 // Defense-in-depth cap on total document context chars (grounding module enforces 50k upstream)
 const MAX_DOC_CONTEXT_CHARS = 60_000;
 
@@ -651,7 +666,16 @@ export async function draftGraphWithAnthropic(
         max_tokens: maxTokens,
         temperature: draftTemperature,
         system: prompt.system,
-        messages: [{ role: "user", content: prompt.userContent }],
+        // v8: in structured mode the grammar forces the aux fields to be
+        // strings — append the JSON-string instruction so the string CONTENT
+        // is the JSON the system prompt describes. Omitted on the prompt-only
+        // path (incl. the 400 fallback rebuild), where objects are expected.
+        messages: [{
+          role: "user",
+          content: useStructuredOutputs
+            ? prompt.userContent + STRUCTURED_OUTPUTS_AUX_STRING_REMINDER
+            : prompt.userContent,
+        }],
         ...(useStructuredOutputs
           ? {
               output_config: {
