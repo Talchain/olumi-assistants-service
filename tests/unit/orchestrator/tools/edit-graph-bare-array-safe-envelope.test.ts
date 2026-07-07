@@ -844,7 +844,7 @@ describe('edit_graph v9 Phase 1 — end-to-end gold case (bare-array LLM output)
       { plotClient: makePlotClientSuccess(), maxRetries: 1 },
     );
 
-    expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
+    expect(result.assistantText).toMatch(/Tell me the specific factor/i);
     expect(result.assistantText).not.toContain('Proposed graph edit.');
     expect(result.assistantText).not.toMatch(/\bno changes were\b/i);
     expect(result.appliedGraph).toBeNull();

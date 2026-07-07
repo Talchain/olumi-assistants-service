@@ -3841,11 +3841,21 @@ export async function runTurnExecutor(
           // "add team morale as a factor" the user sees a proposal
           // that the next-turn no-op recovery should be able to resume.
           // The helper is a no-op when no proposal pattern matches.
+          // Lane 22 (live 2026-07-07): both live proposal captures
+          // persisted with EMPTY preconditions because this hash was
+          // computed from the RAW request `options.graphState`, which is
+          // absent on follow-up turns — the hash helper returns null for
+          // a missing graph and the pending action then carries no
+          // graph_hash, making hash-divergence invalidation inert. Use
+          // `graphStateForTurn` instead: the same authoritative graph
+          // this turn reasoned over (request graphState when present,
+          // else the persisted-graph fallback loaded by
+          // buildTurnContext).
           const adviceGraphHash = (() => {
             try {
               return (
                 computeAnalysisAffectingGraphHash(
-                  (options.graphState as GraphStateIngress | null | undefined) ?? undefined,
+                  (graphStateForTurn as GraphStateIngress | null | undefined) ?? undefined,
                 ) ?? null
               );
             } catch {
@@ -5925,14 +5935,19 @@ export async function runTurnExecutor(
           composedOk = { ...composedOk, assistant_text: GOAL_TARGET_NOT_SAVED_TEXT };
         }
       }
-      // Proposal-capture hash keeps its pre-fix input — the graph this
-      // turn reasoned over (mutated graph when present, else the request
-      // echo) — so pending-action preconditions.graph_hash semantics are
-      // unchanged by the persistence fix above.
+      // Proposal-capture hash — the graph this turn reasoned over
+      // (mutated graph when present, else the resolved turn graph).
+      // Lane 22 (live 2026-07-07): the fallback was previously the RAW
+      // request `options.graphState`, which is absent on follow-up turns —
+      // both live proposal captures persisted with EMPTY preconditions
+      // (no graph_hash), so hash-divergence invalidation was inert.
+      // `graphStateForTurn` is the request graphState when present, else
+      // the persisted-graph fallback loaded by buildTurnContext — the
+      // same authority every other per-turn graph consumer uses.
       const graphForProposalHash =
         handlerOutcome?.mutated_graph !== undefined
           ? handlerOutcome.mutated_graph
-          : options.graphState;
+          : graphStateForTurn;
       let commitStartedAt = 0;
       if (timingsEnabled) {
         commitStartedAt = Date.now();

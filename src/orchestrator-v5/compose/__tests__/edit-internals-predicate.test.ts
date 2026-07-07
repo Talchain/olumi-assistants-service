@@ -27,7 +27,6 @@ describe('findEditInternalsHit — catch-all (each banned family trips)', () => 
     ['nodes', 'Two nodes are affected.'],
     ['edge', 'Which edge to strengthen?'],
     ['edges', 'Both edges changed.'],
-    ['path', 'The path was invalid.'],
     ['snake_case id', 'Did you mean fac_price?'],
     ['dotted internal path', 'See operations.path for the detail.'],
     ['ascii edge arrow', 'The fac_x->goal_revenue link.'],
@@ -58,6 +57,16 @@ describe('findEditInternalsHit — false-positive guard (clean prose is preserve
 
   it('does NOT trip on ordinary sentence-boundary periods', () => {
     expect(findEditInternalsHit('Tell me the factor. Then the value.')).toBeNull();
+  });
+
+  it('does NOT trip on bare "path" (Lane 22 relaxation — legitimate decision English)', () => {
+    expect(
+      findEditInternalsHit('There is no path from that option to the goal. Should I connect it?'),
+    ).toBeNull();
+  });
+
+  it('still trips on dotted internal path shapes despite the bare-path relaxation', () => {
+    expect(findEditInternalsHit('See operations.path for the detail.')).not.toBeNull();
   });
 
   it('returns null for empty input', () => {

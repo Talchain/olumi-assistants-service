@@ -8,6 +8,7 @@ import {
   decideProposalContinuation,
   detectsAddAsFactorIntent,
   detectsContinuationAgreement,
+  detectsProposalAgreement,
   extractProposedConcept,
   findProposedConceptAction,
   findProposedConceptEntry,
@@ -436,6 +437,156 @@ describe('detectsContinuationAgreement', () => {
       "That's a good idea. Let's involve the team in the hiring process. "
       + 'For that risk, how should we update the decision model?';
     expect(detectsContinuationAgreement(userTurn)).toBe(true);
+  });
+});
+
+// Lane 22 (live 2026-07-07 session, 3-for-3 edit-lane failure) — the
+// agreement-matcher misses that dropped the resumed proposal. Table-driven:
+// each accept row is a real or realistic reply to a captured proposal that
+// must resume; each reject row must keep NOT resuming.
+describe('detectsContinuationAgreement — affirmative-prefix and imperative forms (live misses)', () => {
+  it.each([
+    // Live miss #1 (verbatim): assistant proposed "add the 20% velocity
+    // target as a constraint", user agreed with content after "Yes,".
+    'Yes, add that velocity target.',
+    // Live miss #2 tail (verbatim).
+    'Yes, please update the model now.',
+    // $-anchored STANDALONE_AGREEMENT missed even bare politeness pairs.
+    'Yes please.',
+    'yes please',
+    'Ok, go ahead.',
+    'Sure, do it.',
+    // Whitelist gaps called out in the brief.
+    'Sounds good.',
+    'sounds good, do it',
+    'Do it.',
+    'Add it.',
+    'add it to the model',
+    'Include it.',
+    'Yes, do that.',
+    'Go for it.',
+  ])('accepts: %s', (m) => {
+    expect(detectsContinuationAgreement(m)).toBe(true);
+  });
+
+  it('accepts a pasted question followed by an affirmative sentence (live miss #2 shape)', () => {
+    const pasted =
+      'Would you like me to add the 20% velocity target as a constraint '
+      + 'so the analysis can check your options against it? '
+      + 'Yes, please update the model now.';
+    expect(detectsContinuationAgreement(pasted)).toBe(true);
+  });
+
+  it('accepts a long pasted question + affirmative tail even past the 400-char cap', () => {
+    const filler = 'This is context the user pasted back before answering. '.repeat(9);
+    const message = `${filler}Yes, please update the model now.`;
+    expect(message.length).toBeGreaterThan(400);
+    expect(detectsContinuationAgreement(message)).toBe(true);
+  });
+
+  it.each([
+    'Yes, but do not add it.',
+    "Yes, but don't add the velocity target.",
+    'No, skip the velocity target.',
+    'Ok, but not that one.',
+    'Sure, but never add it.',
+  ])('still rejects negated forms: %s', (m) => {
+    expect(detectsContinuationAgreement(m)).toBe(false);
+  });
+
+  it('still rejects a fresh statement that merely opens with an affirmative word', () => {
+    // "Okay so ..." steers to a new topic; the remainder carries no
+    // continuation imperative, so the prefix alone must not resume.
+    expect(
+      detectsContinuationAgreement('Okay so the market has three segments beyond this one.'),
+    ).toBe(false);
+  });
+
+  it('does not swallow a fully-specified value edit behind an affirmative prefix', () => {
+    // "Yes, set the price to 30." is a complete edit instruction — it must
+    // route to the real edit path, not the Stage 1 ladder.
+    expect(detectsContinuationAgreement('Yes, set the price to 30.')).toBe(false);
+    expect(detectsContinuationAgreement('Ok, update the budget to 1.5 million.')).toBe(false);
+  });
+});
+
+describe('detectsProposalAgreement — concept token-overlap (live miss #1 robustness)', () => {
+  const concept = '20% velocity target as a constraint';
+
+  it.each([
+    'Yes, add that velocity target.',
+    'Please include the velocity target.',
+    "Let's go with the velocity target.",
+    'add the velocity target',
+  ])('resumes when the reply names the pending concept: %s', (m) => {
+    expect(detectsProposalAgreement(m, concept)).toBe(true);
+  });
+
+  it('does not resume on a negated or contrary reference to the concept', () => {
+    expect(detectsProposalAgreement('Drop the velocity target idea.', concept)).toBe(false);
+    expect(detectsProposalAgreement("Don't add the velocity target.", concept)).toBe(false);
+  });
+
+  it('does not resume on an interrogative reference to the concept', () => {
+    expect(
+      detectsProposalAgreement('Why would the velocity target matter here?', concept),
+    ).toBe(false);
+  });
+
+  it('does not resume when the reply shares no tokens with the concept', () => {
+    expect(detectsProposalAgreement('Focus on churn instead of this.', concept)).toBe(false);
+  });
+
+  it('requires two overlapping tokens for multi-token concepts', () => {
+    // "target" alone is too weak a signal for this concept.
+    expect(detectsProposalAgreement('The target seems fine.', concept)).toBe(false);
+  });
+
+  it('does not resume on an explicit value assignment naming the concept', () => {
+    // A concrete value instruction is a fresh edit, not consent.
+    expect(
+      detectsProposalAgreement('Set the velocity target to 25%.', concept),
+    ).toBe(false);
+  });
+});
+
+describe('decideProposalContinuation — live-miss end-to-end (Stage 1 resume)', () => {
+  const pending = {
+    concept: '20% velocity target as a constraint',
+    preferred_kind: 'either' as const,
+  };
+
+  it('live miss #1: "Yes, add that velocity target." resumes Stage 1', () => {
+    const d = decideProposalContinuation({
+      message: 'Yes, add that velocity target.',
+      pendingProposedConcept: pending,
+      nodes: [],
+    });
+    expect(d).not.toBeNull();
+    expect(d!.stage).toBe('stage_one');
+    expect(d!.assistantText).toContain(pending.concept);
+  });
+
+  it('live miss #2: pasted question + "Yes, please update the model now." resumes Stage 1', () => {
+    const d = decideProposalContinuation({
+      message:
+        'Would you like me to add the 20% velocity target as a constraint '
+        + 'so the analysis can check your options against it? '
+        + 'Yes, please update the model now.',
+      pendingProposedConcept: pending,
+      nodes: [],
+    });
+    expect(d).not.toBeNull();
+    expect(d!.stage).toBe('stage_one');
+  });
+
+  it('an already-disambiguated factor instruction is NEVER intercepted (falls through to edit dispatch)', () => {
+    const d = decideProposalContinuation({
+      message: 'Add velocity target as a factor affecting Revenue.',
+      pendingProposedConcept: pending,
+      nodes: [],
+    });
+    expect(d).toBeNull();
   });
 });
 

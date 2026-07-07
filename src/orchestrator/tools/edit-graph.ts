@@ -85,6 +85,7 @@ import {
 } from "../../orchestrator-v5/handlers/edit-rejection-text.js";
 import { enforceRepairVocabularyDenylist } from "../shared/repair-vocabulary-denylist.js";
 import { buildNoOpRecoveryChips } from "./edit-graph-noop-chips.js";
+import { buildEditClarifyFallbackParts } from "../../orchestrator-v5/compose/edit-clarify-response.js";
 
 // ============================================================================
 // Types
@@ -272,10 +273,13 @@ function getMaxPatchOperations(): number {
 // dishonest — the user should restate their request more specifically.
 const PROPOSE_AND_CONFIRM_FALLBACK_TEXT = 'I’ve drafted a change that fits your description, but I need the specifics to apply it directly. Tell me the specific factor and value you’d like, and I’ll make the change directly.';
 
-// No-op path fallback. Forward-looking by design — see the comment at
-// the no-op branch on why a denial-shaped default ("No changes were
-// needed") would be rewritten by the V5 egress forbidden-phrase guard.
-const NO_OP_FALLBACK_TEXT = 'I couldn’t see a concrete change to make from that description. Tell me the specific factor and value you’d like, and I’ll apply it directly.';
+// No-op path fallback: Lane 22 replaced the chip-less canned copy that
+// lived here ("I couldn't see a concrete change to make…") with the
+// shared clarify composer parts (buildEditClarifyFallbackParts), so the
+// declined-preservation branch always ships deterministic copy WITH 1–3
+// factor/option-label chips. The copy remains forward-looking by design —
+// a denial-shaped default ("No changes were needed") would be rewritten
+// by the V5 egress forbidden-phrase guard.
 
 /**
  * Build the propose-and-confirm assistant text. Surfaces the concrete
@@ -1902,7 +1906,7 @@ export async function handleEditGraph(
       // target), the user should keep that specific, useful question instead of
       // a generic dead-end. We scrub it with the SAME stack as the success
       // path, then a conservative trip test DECLINES preservation — falling
-      // back to the deterministic NO_OP_FALLBACK_TEXT — whenever the candidate
+      // back to the deterministic clarify copy + chips — whenever the candidate
       // is empty, makes a success/mutation claim, carries a denial/jargon
       // phrase, internal vocabulary, or a raw id/path. A preserved question
       // never contains a success claim by construction, so the V5 false-success
@@ -1925,28 +1929,63 @@ export async function handleEditGraph(
         if (proposalGuard.leaked && proposalGuard.suffixed) {
           noOpCandidate = proposalGuard.suffixed;
         }
+        // Lane 22 — R10 relaxation (transform, not decline): the edit
+        // prompt teaches the LLM the word "graph", so its clarifying
+        // questions routinely say "the graph" where product copy says
+        // "the model". Substituting the domain synonym is claim-safe
+        // and lets an otherwise-clean question survive the trip test
+        // below instead of being scrubbed to canned copy (live
+        // 2026-07-07: coaching_dropped:true, clarification_preserved:
+        // false). Case of the leading letter is preserved.
+        noOpCandidate = noOpCandidate.replace(/\bgraph\b/gi, (m) =>
+          m[0] === 'G' ? 'Model' : 'model',
+        );
       }
       const noOpClarificationPreserved =
         noOpCandidate.trim().length > 0 &&
         findSuccessClaimHit(noOpCandidate) === null &&
         findForbiddenPhraseHit(noOpCandidate) === null &&
         findEditInternalsHit(noOpCandidate) === null;
+
+      // Lane 22 — richer deterministic fallback. When preservation
+      // declines (or there is no candidate at all), reuse the SAME copy +
+      // factor/option-label chips as the route-level edit intercepts
+      // (composeEditClarifyResponse) instead of the chip-less canned
+      // NO_OP_FALLBACK_TEXT. The copy passes the egress phrase guards
+      // (pinned by the edit-clarify-response tests).
+      const clarifyFallback = noOpClarificationPreserved
+        ? null
+        : buildEditClarifyFallbackParts(
+            context.graph.nodes as ReadonlyArray<{ id: string; kind: string; label: string }>,
+          );
       const assistantText = noOpClarificationPreserved
         ? noOpCandidate
-        : NO_OP_FALLBACK_TEXT;
+        : clarifyFallback!.text;
 
       // V5 edit lifecycle recovery v1 — deterministic chips for the
-      // no-op branch. Source: validator referential errors only (the
-      // only available anchor that maps cleanly back to a graph node
-      // ID). PLoT errors carry a free-text reason string with no
-      // structured factor/edge anchor, so a no-op preceded ONLY by a
-      // PLoT failure produces zero chips — the "no safe anchor → no
-      // chips" contract. Strictly additive: existing telemetry,
-      // assistant_text, blocks, and graph fields are unchanged.
-      const recoveryChips = buildNoOpRecoveryChips({
+      // no-op branch. Source: validator referential errors first (the
+      // only anchor that maps cleanly back to a graph node ID). PLoT
+      // errors carry a free-text reason string with no structured
+      // factor/edge anchor, so a no-op preceded ONLY by a PLoT failure
+      // previously produced zero chips. Lane 22: when no
+      // referential-error chips are available and the LLM's question was
+      // not preserved, fall back to the clarify label chips so the user
+      // always has an affordance (the live 2026-07-07 no-op shipped
+      // canned copy with ZERO chips).
+      const referentialChips = buildNoOpRecoveryChips({
         referentialErrors: lastValidationResult?.referentialErrors,
         nodes: context.graph.nodes,
       });
+      const recoveryChips =
+        referentialChips.length > 0
+          ? referentialChips
+          : clarifyFallback !== null
+            ? clarifyFallback.chips.map((c) => ({
+                label: c.label,
+                prompt: c.message,
+                role: 'facilitator' as const,
+              }))
+            : [];
 
       log.info(
         {
@@ -2218,7 +2257,9 @@ export async function handleEditGraph(
           detail: 'Try a different approach to the change.',
           violations: [applyErr.message],
           suggested_actions: [
-            { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a simpler version of this change.' },
+            // Lane 22 — dead-end "Simplify the change" chip replaced (see
+            // the structural-validation rejection site for the rationale).
+            { role: 'facilitator', label: 'What would work instead?', prompt: 'What would work instead?' },
           ],
         };
         const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
@@ -2315,12 +2356,32 @@ export async function handleEditGraph(
           { request_id: requestId, attempt, violations: structResult.violations.map((v) => v.code) },
           'edit_graph rejected — structural validation failed',
         );
+        // Lane 22 — vetted, claim-safe reasons: ONLY codes with an entry in
+        // the user-facing VIOLATION_MESSAGES catalogue qualify (raw
+        // `v.detail` strings carry internal ids and stay suppressed).
+        const userSafeReasons = [
+          ...new Set(
+            structResult.violations
+              .map((v) => VIOLATION_MESSAGES[v.code])
+              .filter((m): m is string => typeof m === 'string' && m.length > 0),
+          ),
+        ].slice(0, 2);
         const rejectionCtx: PatchRejectionContext = {
           reason: 'structural_violation',
           detail: 'Consider simplifying the change or approaching it differently.',
           violations: translatedViolations,
+          ...(userSafeReasons.length > 0 ? { user_safe_reasons: userSafeReasons } : {}),
           suggested_actions: [
-            { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a simpler version of this change.' },
+            // Lane 22 — the old "Simplify the change" chip was a known
+            // dead-end: its prompt re-entered the V4 edit LLM with no
+            // context, no-oped, and needed an exact-text interceptor
+            // (chip-simplify-intercept.ts, closed loop documented since
+            // 2026-05-22) to break the loop. Replaced with a
+            // question-shaped prompt that carries no edit verb, so it
+            // routes to the conversational path instead of a guaranteed
+            // no-op edit dispatch. The interceptor stays for
+            // already-rendered legacy chips.
+            { role: 'facilitator', label: 'What would work instead?', prompt: 'What would work instead?' },
             { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
           ],
         };

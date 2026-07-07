@@ -119,8 +119,18 @@ export function formatConstraintUpdated(input: ConstraintAddedInput): string {
  * Receipt for a goal-target set through the add_constraint goal-threshold
  * join (lane CEE-W5 Mission B). Names the target honestly and states only
  * what durably happened (the threshold is stamped on the goal node in the
- * same committed write); the analysis claim is forward-looking, not a
- * success claim about existing results. provisional_doctrine_v0.
+ * same committed write). provisional_doctrine_v0.
+ *
+ * Lane 22 honesty fix: the previous second sentence promised "The next
+ * analysis will score your options against this target." — FALSE for
+ * every goal-target registration today (goal-fit is deterministically
+ * suppressed for goal nodes without a value channel; the PLoT
+ * threshold-normalisation fix and the target_base doctrine implementation
+ * are both pending). The receipt now promises only what the system can
+ * honour: the target is saved, and goal fit is flagged once the analysis
+ * can score it. The conditional "once" keeps the second sentence outside
+ * the goal-target claim class (goal-target-receipt-guard
+ * NEGATION_CONDITIONAL_RE) while sentence one remains guarded.
  */
 export function formatGoalTargetSet(input: {
   readonly goalLabel: string;
@@ -128,7 +138,7 @@ export function formatGoalTargetSet(input: {
   readonly unit?: string;
 }): string {
   const value = formatValueWithUnit(input.value, input.unit);
-  return `Success target set: ${input.goalLabel} at least ${value}. The next analysis will score your options against this target.`;
+  return `Success target set: ${input.goalLabel} at least ${value}. I'll flag how your options score against it once the analysis can measure this goal.`;
 }
 
 export interface EdgeAdjustmentInput {

@@ -36,6 +36,19 @@ export interface PatchRejectionContext {
    * rejection, so the default copy is byte-identical to before.
    */
   structural_guidance?: string;
+  /**
+   * Lane 22 — claim-safe, CALLER-VETTED actionable reasons for a
+   * structural_violation rejection. The caller must populate this ONLY
+   * from the user-facing VIOLATION_MESSAGES catalogue (never raw
+   * validator detail — that stays in `violations`, which remains
+   * suppressed from user copy exactly as before). When present and
+   * non-empty, the first two distinct reasons are surfaced in
+   * assistant_text so the user learns WHY the change was declined
+   * ("This change would leave a node that cannot reach the goal.")
+   * instead of only vague copy — the live 2026-07-07 session ended on
+   * this suppression.
+   */
+  user_safe_reasons?: string[];
   /** Node operation count (for budget_exceeded reason). */
   node_ops?: number;
   /** Edge operation count (for budget_exceeded reason). */
@@ -115,6 +128,25 @@ function buildAssistantText(ctx: PatchRejectionContext): string {
   // rejection → the generic copy below is byte-identical to before.
   if (typeof ctx.structural_guidance === 'string' && ctx.structural_guidance.length > 0) {
     return ctx.structural_guidance;
+  }
+
+  // Lane 22 — surface the claim-safe actionable reason(s) when the caller
+  // vetted them (VIOLATION_MESSAGES members only). Distinct reasons, first
+  // two, replacing the vague generic line. Raw `violations` remain
+  // suppressed above regardless.
+  if (Array.isArray(ctx.user_safe_reasons) && ctx.user_safe_reasons.length > 0) {
+    const distinct = [
+      ...new Set(
+        ctx.user_safe_reasons.filter((r) => typeof r === 'string' && r.length > 0),
+      ),
+    ].slice(0, 2);
+    if (distinct.length > 0) {
+      return (
+        "I wasn't able to apply that change. "
+        + distinct.join(' ')
+        + ' You could describe the change differently, or I can rebuild the model from an updated brief.'
+      );
+    }
   }
 
   return "I wasn't able to apply that change — it would create an inconsistency in the model structure. You could try describing the change differently, or I can rebuild the model from an updated brief.";
