@@ -17,14 +17,27 @@
  * The v7 reduction (see the GRAMMAR BUDGET (v7) note in
  * src/cee/draft/anthropic-graph-schema.ts) pruned non-load-bearing enums
  * and collapsed the causal_claims 4-branch object anyOf, taking the
- * serialized schema to ~4.6KB, 9/16 unions, 7 enums / 25 enum values.
+ * serialized schema to ~4.6KB, 9/16 unions, 7 enums / 25 enum values —
+ * STILL over the compiler limit (verified live 2026-07-07: 400 on every
+ * current model at 4,578B).
+ *
+ * v8 (2026-07-07, Lane 26) is the empirically-verified fix: coaching,
+ * causal_claims, and topology_plan are declared `{ type: "string" }`
+ * JSON-string fields (the encoding_map pattern), keeping full grammar
+ * enforcement on nodes/edges/goal_constraints. A 15-probe live bisect
+ * located the compile PASS/FAIL boundary for this schema family between
+ * 3,194B / 7 object schemas (PASS — the v8 shape) and 3,539B / 9 object
+ * schemas (FAIL — v7 minus the entire coaching subtree). Total structural
+ * surface (objects × properties) is the dominant cost driver; killing all
+ * unions, all enums, or all optionality individually did NOT rescue the
+ * v7 schema. See scripts/probe-grammar-compile.mjs for the live tripwire.
  *
  * WHAT THE BUDGETS MEAN
  * ---------------------
  * Anthropic does not publish the grammar-compiler limit; serialized bytes,
  * enum values, union branches, and object/property counts are PROXIES that
  * correlate with compiled-grammar size. The budgets below pin the current
- * (post-v7) complexity with small headroom so future amendments cannot
+ * (post-v8) complexity with small headroom so future amendments cannot
  * silently re-inflate the schema the way v0.11.0 did. A budget pass does
  * NOT guarantee compilation — verify live (below) after any schema change.
  *
@@ -48,16 +61,26 @@ import {
   countUnionParams,
 } from "../../src/cee/draft/anthropic-graph-schema.js";
 
-// ── Budgets (post-v7 measured values + small headroom) ─────────────────────
-// Measured on 2026-07-07: 4578 bytes, 9 unions (18 branches), 7 enums with
-// 25 values, 13 objects / 72 properties (15 optional), max 12 props/object.
-const SERIALIZED_BYTES_BUDGET = 5000;
+// ── Budgets (post-v8 measured values + small headroom) ─────────────────────
+// Measured on 2026-07-07 (v8): ~3.2KB serialized, 9 unions, 7 objects.
+//
+// SERIALIZED_BYTES_BUDGET = 3400 pins the schema under the empirically-found
+// compile boundary: live probes on 2026-07-07 showed HTTP 200 at 3,194B
+// (7 object schemas — the v8 shape) and 400 "compiled grammar is too large"
+// at 3,539B (9 object schemas) and above, on every current model
+// (sonnet-4-5/4-6/5, opus-4-6/4-8, haiku-4-5 — the limit is API-wide).
+// 3,400B sits inside the verified-PASS side of that 3.1–3.5KB boundary with
+// ~200B headroom over the v8 measurement. Bytes are a PROXY for structural
+// surface — if you raise this number, you MUST re-verify compilation live
+// (scripts/probe-grammar-compile.mjs) before merging.
+const SERIALIZED_BYTES_BUDGET = 3400;
 const UNION_PARAMS_BUDGET = 16; // Anthropic hard limit
 const UNION_PARAMS_TRIPWIRE = 10; // current 9 + 1 headroom
 const OPTIONAL_PARAMS_BUDGET = 24; // Anthropic hard limit
 const OPTIONAL_PARAMS_TRIPWIRE = 17; // current 15 + 2 headroom
 const ENUM_VALUES_TRIPWIRE = 30; // current 25 + headroom
-const OBJECT_NODES_TRIPWIRE = 16; // current 13 + headroom
+const OBJECT_NODES_TRIPWIRE = 8; // v8 measured 7 + 1 headroom (13 → 7 at v8;
+// object count was the dominant compile-cost driver in the live bisect)
 
 interface Stats {
   objects: number;
@@ -139,34 +162,32 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — grammar-size budget", () => {
     expect(stats.objects).toBeLessThanOrEqual(OBJECT_NODES_TRIPWIRE);
   });
 
-  it("causal_claims items are a SINGLE flat object (no multi-branch object anyOf)", () => {
-    // The 4-branch discriminated-union anyOf was the dominant new union of
-    // the v0.11.0 amendment; the discriminated union is enforced downstream
-    // by CausalClaimSchema (invalid claims dropped item-wise with a
-    // CAUSAL_CLAIM_DROPPED warning). A reintroduced anyOf here must be a
-    // deliberate, live-verified decision.
-    const schema = ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as {
-      properties: { causal_claims: { items: Record<string, unknown> } };
-    };
-    const items = schema.properties.causal_claims.items;
-    expect(items.anyOf).toBeUndefined();
-    expect(items.type).toBe("object");
-    // The flat shape must remain a SUPERSET of every canonical variant so
-    // the grammar can never block a claim the downstream Zod would accept.
-    const props = Object.keys(items.properties as object);
-    for (const key of ["type", "from", "to", "via", "between", "stated_strength"]) {
-      expect(props, `causal_claims grammar lost superset key "${key}"`).toContain(key);
+  it("aux subtrees (coaching, causal_claims, topology_plan) are JSON-string fields — v8", () => {
+    // v8 (2026-07-07): the three aux subtrees MUST be `{ type: "string" }`
+    // JSON-string fields (the encoding_map pattern). The live bisect proved
+    // no schema keeping all six top-level keys as structured objects can
+    // compile — even v7-minus-the-entire-coaching-subtree failed at 3,539B.
+    // Re-objectifying ANY of these fields will silently break structured
+    // outputs for every production draft (400 → prompt-only fallback).
+    // Enforcement for the aux content lives downstream, exactly as on the
+    // prompt-only path: normalise-legacy-coaching + canonical CoachingSchema
+    // for coaching, validateCausalClaims item-wise Zod drop for
+    // causal_claims, Stage 5/6 passthrough for topology_plan.
+    const props = (ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as {
+      properties: Record<string, Record<string, unknown>>;
+      required: string[];
+    }).properties;
+    for (const key of ["coaching", "causal_claims", "topology_plan"]) {
+      expect(props[key], `schema lost required aux field "${key}"`).toBeDefined();
+      expect(props[key].type, `aux field "${key}" must be a JSON-string field (v8)`).toBe("string");
+      expect(props[key].anyOf, `aux field "${key}" must not be a union`).toBeUndefined();
+      expect(props[key].properties, `aux field "${key}" must not be an object schema`).toBeUndefined();
+      expect(props[key].items, `aux field "${key}" must not be an array schema`).toBeUndefined();
     }
-    // Only `type` may be required — requiring a per-variant field would
-    // force it onto variants that don't carry it.
-    expect(items.required).toEqual(["type"]);
-    const typeEnum = (items.properties as Record<string, { enum?: string[] }>).type.enum;
-    expect(typeEnum).toEqual([
-      "direct_effect",
-      "mediation_only",
-      "no_direct_effect",
-      "unmeasured_confounder",
-    ]);
+    // All six top-level keys stay required — the LLM must always emit them.
+    expect((ANTHROPIC_DRAFT_GRAPH_SCHEMA as { required: string[] }).required.slice().sort()).toEqual(
+      ["causal_claims", "coaching", "edges", "goal_constraints", "nodes", "topology_plan"],
+    );
   });
 
   it("load-bearing enums are retained (kind, category, operator, effect_direction)", () => {
