@@ -396,6 +396,86 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     expect(result.graph.nodes.length).toBeGreaterThan(0);
   });
 
+  it("emits cee.draft_graph.structured_outputs_fell_back telemetry on 'compiled grammar is too large' fallback (Lane 3 — non-silent degradation)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    // The live staging failure: grammar-compilation capacity 400.
+    createSpy
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            "The compiled grammar is too large. Simplify your tool schemas or reduce the number of strict tools."
+          ),
+          { status: 400 }
+        )
+      )
+      .mockResolvedValueOnce(makeAnthropicResponse(VALID_GRAPH_JSON));
+
+    // Same module registry as the adapter import below, so the sink is
+    // installed on the exact telemetry instance the adapter calls.
+    const telemetry = await import("../../src/utils/telemetry.js");
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    telemetry.setTestSink((name, data) => events.push({ name, data }));
+
+    try {
+      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      const result = await draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      });
+
+      // Fallback happened and succeeded.
+      expect(createSpy).toHaveBeenCalledTimes(2);
+      expect(result.graph.nodes.length).toBeGreaterThan(0);
+
+      // The degradation is NOT silent: the telemetry event fired with the
+      // diagnostic payload (alongside the WARN-level pino log).
+      const fellBack = events.filter(
+        (e) => e.name === telemetry.TelemetryEvents.CeeStructuredOutputsFellBack
+      );
+      expect(fellBack).toHaveLength(1);
+      expect(fellBack[0].data.operation).toBe("draft_graph");
+      expect(fellBack[0].data.model).toBe("claude-sonnet-4-6");
+      expect(String(fellBack[0].data.error_snippet)).toContain("compiled grammar is too large");
+      expect(Number(fellBack[0].data.schema_bytes)).toBeGreaterThan(0);
+    } finally {
+      telemetry.setTestSink(null);
+    }
+  });
+
+  it("does NOT emit the fell-back event when structured outputs succeeds", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    createSpy.mockResolvedValueOnce(makeAnthropicResponse(VALID_GRAPH_JSON));
+
+    const telemetry = await import("../../src/utils/telemetry.js");
+    const events: Array<{ name: string }> = [];
+    telemetry.setTestSink((name) => events.push({ name }));
+
+    try {
+      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      await draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      });
+
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(
+        events.some(
+          (e) => e.name === telemetry.TelemetryEvents.CeeStructuredOutputsFellBack
+        )
+      ).toBe(false);
+    } finally {
+      telemetry.setTestSink(null);
+    }
+  });
+
   it("uses system parameter (not first user message) for the prompt", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");

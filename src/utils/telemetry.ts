@@ -71,6 +71,15 @@ export const TelemetryEvents = {
   DraftGraphLegacyCoachingValueNormalised: "cee.draft_graph.legacy_coaching_value_normalised",
   DraftGraphContractDefaultApplied: "cee.draft_graph.contract_default_applied",
 
+  // Lane 3 (2026-07-07): structured-outputs degradation must NOT be silent.
+  // Fires (alongside the WARN-level pino log at the call site) when the
+  // Anthropic adapter's draft_graph structured-outputs request is rejected
+  // by the API (e.g. "compiled grammar is too large") and the call falls
+  // back to prompt-only JSON mode. Non-zero in production means every
+  // draft is paying the slow un-constrained path — investigate the schema
+  // grammar budget (tests/unit/anthropic-graph-schema-grammar-budget.test.ts).
+  CeeStructuredOutputsFellBack: "cee.draft_graph.structured_outputs_fell_back",
+
   CeeExplainGraphRequested: "cee.explain_graph.requested",
   CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
   CeeExplainGraphFailed: "cee.explain_graph.failed",
@@ -672,6 +681,32 @@ export const TelemetryEvents = {
   //   graph_hash, analysis_graph_hash, version: string | null
   //   snapshot_timing: 'pre_dispatch' | null
   V5CoachingStatePersisted: "v5.coaching_state.persisted",
+
+  // A3 graph CAS observe-mode. Emitted once per graph-bearing append() when
+  // CEE_V5_GRAPH_CAS_MODE != 'off', AFTER the pre-RPC evaluation and BEFORE
+  // the append_turn_atomic_v2 call. App-side stale-write OBSERVATION only —
+  // NOT atomic CAS (a SELECT-then-write TOCTOU window remains; see
+  // Docs/v5/proposals/append-turn-atomic-v3-graph-cas.md). Privacy contract:
+  // correlation IDs + closed-enum category/reason + hash PREFIXES + timing
+  // ONLY — never raw graph content, labels, values or prose. Fields:
+  //   scenario_id, turn_id: string           (correlation only)
+  //   mode: 'observe' | 'enforce'            (the active mode)
+  //   category: GraphCasConflictCategory     (closed enum — graph-cas-conflict.ts)
+  //   reason: GraphCasConflictReason         (closed enum)
+  //   expected_identity_hash, current_identity_hash, incoming_identity_hash:
+  //     string | null                        (16-hex prefixes of the 64-hex identity hashes)
+  //   expected_analysis_hash, current_analysis_hash: string | null  (already 16-hex)
+  //   select_ms: number | null               (pre-write scenarios SELECT latency)
+  //   select_failed: boolean
+  V5GraphCasEvaluated: "v5.graph_cas.evaluated",
+
+  // A3 graph CAS — enforce mode ONLY (never observe; enforce is auto-downgraded
+  // to observe in prod). Emitted when a write categorised as
+  // analysis_affecting_conflict is blocked pre-RPC via GraphStaleWriteError
+  // (which extends StateCommitFailedError, so the existing typed failure
+  // envelope handles it — no wire-shape change). Same privacy contract and
+  // field set as V5GraphCasEvaluated.
+  V5GraphCasWriteBlocked: "v5.graph_cas.write_blocked",
 
   // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching
   // LIFECYCLE is derived (prior pre-dispatch snapshot vs current pre-dispatch coaching_state

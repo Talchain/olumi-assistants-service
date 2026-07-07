@@ -101,6 +101,10 @@ export function buildFrame(input: BuildFrameInput): CanonicalContextFrame {
       // (the source-scan allowlist forbids importing the fact selectors here);
       // passed through verbatim. Omitted when the caller does not thread it.
       ...(input.rerunReadiness !== undefined ? { rerun: input.rerunReadiness } : {}),
+      // Mission 1 — chip IDS from the already-composed response, passed
+      // through verbatim (ids only; never labels/messages). Omitted when
+      // the caller does not thread them — honest absence.
+      ...(input.chipsEmitted !== undefined ? { chipsEmitted: input.chipsEmitted } : {}),
     },
     // Track 2 — pending diagnostics: already-tallied counts passed through
     // verbatim (the builder never sees PendingAction[] and cannot re-derive

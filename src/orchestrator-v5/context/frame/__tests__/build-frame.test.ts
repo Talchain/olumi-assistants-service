@@ -45,9 +45,21 @@ function baseInput(overrides: Partial<BuildFrameInput> = {}): BuildFrameInput {
 
 describe('buildFrame — pure projection over authority outputs (Increment 2)', () => {
   it('version is the frame contract version', () => {
-    // 0.2.0 — Track 2: additive optional `pending` diagnostics block +
-    // threaded conversation.pendingConfirmation truth.
-    expect(buildFrame(baseInput()).version).toBe('0.2.0');
+    // 0.3.0 — Mission 1: additive optional diagnostics.chipsEmitted
+    // (chip ids only). 0.2.0 was Track 2's pending diagnostics block.
+    expect(buildFrame(baseInput()).version).toBe('0.3.0');
+  });
+
+  it('chipsEmitted passes through verbatim when threaded, and is absent otherwise (Mission 1)', () => {
+    const withChips = buildFrame(
+      baseInput({ chipsEmitted: ['chip_action_rerun_analysis', 'prop_ab12cd34ef56'] }),
+    );
+    expect(withChips.diagnostics.chipsEmitted).toEqual([
+      'chip_action_rerun_analysis',
+      'prop_ab12cd34ef56',
+    ]);
+    // Honest absence: not threaded ⇒ no key (never an empty-array claim).
+    expect('chipsEmitted' in buildFrame(baseInput()).diagnostics).toBe(false);
   });
 
   it('freshness projection equals the freshness authority output, verbatim', () => {

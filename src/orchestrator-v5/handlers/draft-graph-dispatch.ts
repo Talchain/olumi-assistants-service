@@ -522,6 +522,16 @@ export async function dispatchDraftGraph(
         llm_calls_used: 1 + m2LlmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
+        // A3 graph CAS observe-mode: the draft path is DELIBERATELY
+        // uninstrumented — no expectedGraphIdentityHash / expectedGraph
+        // AnalysisHash are threaded (undefined). This path performs no
+        // server-side persisted-graph read (it never runs buildTurnContext),
+        // and manufacturing an expected base from request input would violate
+        // the trusted-base rule (graph-cas-conflict.ts). The CAS hook
+        // therefore categorises draft writes as `first_write` on fresh
+        // scenarios and `no_expected`/`not_instrumented` on redrafts — that
+        // IS the coverage metric for this path, not a gap to "fix" by
+        // trusting the request.
         graph: draftResult.graphOutput ?? undefined,
         briefText: briefTextForCommit,
         // V5 Stage 2B-1b: the route-v2 draft path never runs buildTurnContext,

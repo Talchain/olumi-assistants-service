@@ -63,9 +63,23 @@ import {
  * Opening-line success claim. Mirrors the product's `SUCCESS_CLAIM_PATTERNS`
  * — a line that opens with a mutation verb followed by content. On a turn
  * that did not durably mutate, this is a false success claim (A4).
+ *
+ * DELIBERATELY BROADER than src `SUCCESS_CLAIM_PATTERNS`: the harness also
+ * flags Restored/Reverted/Rolled back/Committed-style claims, which the
+ * product runtime does NOT detect today (restore/version wording is a
+ * Model-Management-owned future gap — the runtime's `version|versions`
+ * noun exclusion in mutation-language.ts is intentional while no version
+ * substrate exists). The asymmetry is safe and intended: the harness only
+ * CLASSIFIES replayed transcripts (a false RED is the safe direction and is
+ * caught by the pinned replay fixtures); the runtime detector swaps live
+ * copy and must stay precision-first. Do not "fix" this by narrowing the
+ * harness list back to the src list.
+ *
+ * `Committed` is determiner-gated ("Committed the/a/your …") so that
+ * decision-domain openers like "Committed spend of £10k …" do not match.
  */
 const OPENING_SUCCESS_CLAIM =
-  /^\s*(?:Updated|Set|Added|Removed|Changed|Edited|Applied|Adjusted|Modified|Created)\s+\S/m;
+  /^\s*(?:Updated|Set|Added|Removed|Changed|Edited|Applied|Adjusted|Modified|Created|Restored|Reverted|Rolled\s+back|Committed\s+(?:a|an|the|your|this|it))\s+\S/m;
 
 /** Staleness acknowledgement — text OR a rerun/refresh chip. Mirrors `assertExplainLeaderStale`. */
 function hasStalenessSignal(body: WireBody | undefined): boolean {
@@ -577,12 +591,28 @@ const A8_EXCLUDED_ROLES: ReadonlyArray<TurnRole> = ['draft', 'analysis', 'rerun_
  * rejection copy (generic suppression or the Cap-2A placeholder) trips it.
  */
 function hasStrongMutationAck(rawText: string): boolean {
+  // restore/revert/rollback/commit verbs are harness-only breadth — see the
+  // OPENING_SUCCESS_CLAIM doc for why the harness is deliberately broader
+  // than the src runtime detectors. `committed(?!\s+to\b)` keeps the
+  // "I've committed to helping you…" idiom out.
   const FIRST_PERSON_ACK =
-    /\bI(?:'ve| have| just)?\s+(?:updated|changed|adjusted|set|added|removed|applied|modified|created)\b/i;
+    /\bI(?:'ve| have| just)?\s+(?:updated|changed|adjusted|set|added|removed|applied|modified|created|restored|reverted|committed(?!\s+to\b)|rolled\s+back)\b/i;
   const PASSIVE_OR_STATE_ACK =
-    /\bhas been (?:updated|changed|adjusted|set|added|removed|applied)\b|\bnow (?:has|shows|reflects)\b/i;
+    /\bhas been (?:updated|changed|adjusted|set|added|removed|applied|restored|reverted|committed|rolled\s+back)\b|\bnow (?:has|shows|reflects)\b/i;
+  // Version-claim shape: "created/saved/restored a (new|earlier|previous)
+  // version/snapshot/checkpoint". No version substrate exists (no
+  // model_versions table, no restore path), so ANY such claim on a
+  // non-durable turn is phantom success. Covers "saved …", which none of
+  // the verb lists above include.
+  const VERSION_CLAIM =
+    /\b(?:creat(?:ed|ing)|saved|restor(?:ed|ing))\s+(?:(?:a|an|the|your)\s+)?(?:new\s+|earlier\s+|previous\s+)?(?:version|snapshot|checkpoint)s?\b/i;
   const text = normaliseApostrophes(rawText);
-  return OPENING_SUCCESS_CLAIM.test(text) || FIRST_PERSON_ACK.test(text) || PASSIVE_OR_STATE_ACK.test(text);
+  return (
+    OPENING_SUCCESS_CLAIM.test(text) ||
+    FIRST_PERSON_ACK.test(text) ||
+    PASSIVE_OR_STATE_ACK.test(text) ||
+    VERSION_CLAIM.test(text)
+  );
 }
 
 export function a8NonCommittingNoFalseSuccess(obs: TurnObservation): Finding[] {

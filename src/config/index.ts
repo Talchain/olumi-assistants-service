@@ -20,8 +20,10 @@ import { getRuntimeEnv } from "./env-resolver.js";
  */
 interface ConfigOverrideEvent {
   settingName: string;
-  requestedValue: boolean;
-  actualValue: boolean;
+  // boolean for the enforced-boolean flags; string for enforced-mode flags
+  // (e.g. CEE_V5_GRAPH_CAS_MODE 'enforce' → 'observe').
+  requestedValue: boolean | string;
+  actualValue: boolean | string;
   env: string;
   reason: string;
 }
@@ -152,6 +154,70 @@ function createEnvEnforcedBoolean(
 
       // Local/test: allow requested value
       return requestedValue;
+    });
+}
+
+/**
+ * Environment-enforced three-state mode for the A3 graph CAS hook
+ * (CEE_V5_GRAPH_CAS_MODE). Values: 'off' | 'observe' | 'enforce'
+ * (lowercased + trimmed).
+ *
+ * Policy (mirrors createEnvEnforcedBoolean's production_lockdown pattern):
+ * - Invalid or empty values fall back to the code default with a console
+ *   warning — NEVER a boot failure (a typo in an env var must not take the
+ *   service down).
+ * - In prod, 'enforce' is DOWNGRADED to 'observe' with an [AUDIT] warning and
+ *   a configOverrideEvents entry. A3 enforcement is provisional and app-side
+ *   (SELECT-then-write, not atomic); it must not block production writes
+ *   until the RPC-v3 in-transaction CAS exists and is separately approved.
+ * - staging/local/test: the requested mode is honoured (staging is where
+ *   observe → enforce evidence is gathered).
+ *
+ * @param defaultValue - Code default ('off' for graphCasMode).
+ * @param settingName  - Env var name for logging/audit events.
+ */
+function createEnvEnforcedMode(
+  defaultValue: "off" | "observe" | "enforce",
+  settingName: string,
+) {
+  return z
+    .union([z.string(), z.undefined()])
+    .transform((val): "off" | "observe" | "enforce" => {
+      const env = getRuntimeEnv();
+
+      let requested: "off" | "observe" | "enforce" = defaultValue;
+      if (val !== undefined) {
+        const lower = val.toLowerCase().trim();
+        if (lower === "off" || lower === "observe" || lower === "enforce") {
+          requested = lower;
+        } else if (lower === "") {
+          requested = defaultValue;
+        } else {
+          console.warn(
+            `[CONFIG] ${settingName}: invalid value "${val}" — falling back to "${defaultValue}" ` +
+              `(valid values: off | observe | enforce)`,
+          );
+          requested = defaultValue;
+        }
+      }
+
+      // Prod: enforce downgrades to observe (never boot-fails, never blocks
+      // production writes on a non-atomic app-side check).
+      if (env === "prod" && requested === "enforce") {
+        console.warn(
+          `[AUDIT] ${settingName}=enforce is not permitted in production — downgraded to "observe"`,
+        );
+        configOverrideEvents.push({
+          settingName,
+          requestedValue: "enforce",
+          actualValue: "observe",
+          env,
+          reason: "production_lockdown",
+        });
+        return "observe";
+      }
+
+      return requested;
     });
 }
 
@@ -317,6 +383,17 @@ const ConfigSchema = z.object({
     // This is a known naming issue. Rename to CEE_V1_ROUTE_DISABLED planned post-pilot.
     pipelineV4Enabled: booleanString.default(true),
     orchestratorV5: booleanString.default(false), // ENABLE_V5_ORCHESTRATOR — V5 slice A0 scaffold (contracts + ingress/egress B1 validation only, no TurnExecutor). Route returns 404 when false.
+    // CEE_V5_GRAPH_CAS_MODE — A3 graph CAS observe-mode ('off' | 'observe' | 'enforce').
+    // App-side stale-write OBSERVATION at the single live scenarios.graph write
+    // chokepoint (SupabaseSessionStore.append → append_turn_atomic_v2). NOT atomic
+    // CAS — a SELECT-then-write TOCTOU window remains; true atomicity is the
+    // RPC-v3 proposal (Docs/v5/proposals/append-turn-atomic-v3-graph-cas.md).
+    // 'off' (default): zero SELECTs, byte-identical write path. 'observe': evaluate
+    // + telemetry, commit always proceeds. 'enforce' (provisional, non-prod only —
+    // auto-downgraded to 'observe' in prod): block analysis_affecting_conflict
+    // writes pre-RPC via GraphStaleWriteError (rides the existing
+    // StateCommitFailedError handling; no wire-shape change).
+    graphCasMode: createEnvEnforcedMode("off", "CEE_V5_GRAPH_CAS_MODE"),
   }),
 
   // Prompt Cache Configuration
@@ -605,6 +682,19 @@ const ConfigSchema = z.object({
     // (the always-on coaching policy engine) and CEE_COACHING_STATE_PACK_ENABLED
     // (the diagnostic-only `_context_summary` sub-block).
     coachingContextPromptEnabled: booleanString.default(false),
+    // V5 Tier-2 claim-permission master lock (CEE_COACHING_TIER2_ENABLED —
+    // Brief 5 "the cage, not the activation"). Lock 1 of two independent
+    // locks on Tier-2 claim usage (Brief 4 §3 candidates: factor_sensitivity,
+    // confidence_tier, robustness). Lock 2 is TIER2_COACHING_ALLOWLIST
+    // (compose/claim-safety-cage.ts), which ships EMPTY — so even flipping
+    // this flag surfaces ZERO fields until a field is deliberately
+    // allowlisted (Brief 4 gate G2, a separate per-field decision with
+    // science sign-off). Default OFF. Flag-off is byte-identical: nothing
+    // consults the Tier-2 gate for output today; the cage exists so future
+    // coaching/DSK surfacing has a mechanical, fail-closed permission check
+    // instead of doctrine-only guidance. Transport is unaffected either way
+    // (the P0B keep-list owns transport; claim-permission is the other axis).
+    coachingTier2Enabled: booleanString.default(false),
     // V5 option-identity freshness guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD).
     // When true, the freshness derivation additionally compares the analysed
     // option identities carried on the selected run_analysis fact
@@ -662,6 +752,18 @@ const ConfigSchema = z.object({
     chipEngineEnabled: booleanString.default(true), // CEE_CHIP_ENGINE_ENABLED — typed chip engine (WS5)
     postFlightValidatorEnabled: booleanString.default(false), // CEE_POST_FLIGHT_VALIDATOR_ENABLED — post-flight response validation (WS7) — not wired
     guidedIntakeEnabled: booleanString.default(false), // CEE_GUIDED_INTAKE_ENABLED — BIL wire-up for thin briefs (WS3) — not wired
+    // Model Management v1 (CEE_MODEL_VERSIONS_ENABLED — Layer 2, DARK).
+    // Gates every entry point of src/orchestrator-v5/model-management/
+    // (save/list/get/restore/compare versions). Default OFF; flag-off is a
+    // fail-closed typed 'disabled' no-op at every entry point — no Supabase
+    // call, no hashing, no behaviour change anywhere (the module has zero
+    // production call sites this slice; nothing is wired into routes or the
+    // turn-executor). Env-enforced: locked false in prod; staging requires an
+    // explicit opt-in (audit-logged). The backing migration
+    // (20260705120000_v5_model_versions.sql) is AUTHORED-NOT-EXECUTED and
+    // separately Paul-gated — do not enable this flag anywhere before that
+    // migration is live, or every call degrades to a typed store error.
+    modelVersionsEnabled: createEnvEnforcedBoolean(false, "CEE_MODEL_VERSIONS_ENABLED"),
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -834,6 +936,7 @@ function parseConfig(): Config {
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
       orchestratorV5: env.ENABLE_V5_ORCHESTRATOR,
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
+      graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
@@ -1049,6 +1152,7 @@ function parseConfig(): Config {
       pendingConfirmationTruthEnabled: env.CEE_PENDING_CONFIRMATION_TRUTH_ENABLED,
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
       coachingContextPromptEnabled: env.CEE_COACHING_CONTEXT_PROMPT_ENABLED,
+      coachingTier2Enabled: env.CEE_COACHING_TIER2_ENABLED,
       optionIdentityFreshnessGuard: env.CEE_OPTION_IDENTITY_FRESHNESS_GUARD,
       postAnalysisLoopEnabled: env.CEE_POST_ANALYSIS_LOOP_ENABLED,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
@@ -1066,6 +1170,7 @@ function parseConfig(): Config {
       chipEngineEnabled: env.CEE_CHIP_ENGINE_ENABLED,
       postFlightValidatorEnabled: env.CEE_POST_FLIGHT_VALIDATOR_ENABLED,
       guidedIntakeEnabled: env.CEE_GUIDED_INTAKE_ENABLED,
+      modelVersionsEnabled: env.CEE_MODEL_VERSIONS_ENABLED,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,

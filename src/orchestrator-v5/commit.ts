@@ -165,6 +165,27 @@ export interface CommitMetadata {
    * graph here closes it for every turn that operates on a graph.
    */
   readonly contentGraph?: unknown;
+  /**
+   * A3 graph CAS observe-mode: expected-base identity hash (64-hex) captured
+   * at turn start from a SERVER-SIDE persisted-graph read. Threaded VERBATIM
+   * to `SessionTurnWrite.expectedGraphIdentityHash` — commit.ts performs no
+   * recomputation and no fallback derivation here.
+   *
+   * TRUSTED BASE RULE: callers must derive this only from a server read
+   * (`context.persistedGraph` via the turn-executor `commitTurn` wrapper, or
+   * edit-graph-dispatch's `loadPersistedGraphStrict` base). NEVER from
+   * request-supplied `graph_state`. `undefined` = not instrumented
+   * (`no_expected`, never a conflict); `null` = server base read but graph
+   * absent/unparseable. See graph-cas-conflict.ts.
+   */
+  readonly expectedGraphIdentityHash?: string | null;
+  /**
+   * A3 graph CAS observe-mode: expected-base analysis-affecting hash (16-hex)
+   * from the same server read as `expectedGraphIdentityHash`. Threaded
+   * verbatim to `SessionTurnWrite.expectedGraphAnalysisHash`. Same
+   * undefined/null convention.
+   */
+  readonly expectedGraphAnalysisHash?: string | null;
 }
 
 /**
@@ -566,6 +587,10 @@ export async function commitDirectAnswer(
     coaching_state: metadata.coaching_state,
     userMessage,
     assistantMessage,
+    // A3 graph CAS: verbatim pass-through of the caller's server-read
+    // expected-base hashes (undefined when the path is not instrumented).
+    expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
+    expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
   });
 
   // Post-success observability. The turn's state is now durably committed; the

@@ -253,7 +253,15 @@ function sanitiseEnrichmentBlocks(
     // are absent, and the walker is the only path that covers
     // review_cards / factor_sensitivity / gaps / robustness /
     // m1_review / m1_coaching / improvement_guidance.
-    const result = sanitiseEnrichment(enrichment, null, analysisReady);
+    // WIRE BACKSTOP (Tier-3 cage): this is the LAST seam before the
+    // response ships, so transport-banned Tier-3 subtrees are DELETED
+    // here (dropTier3TransportBanned) — an unknown prose field inside
+    // them must not reach users. The enricher/fact path deliberately
+    // does NOT set this option (the m1 adapter reads m1_coaching's
+    // structured enums for the v11 prompt).
+    const result = sanitiseEnrichment(enrichment, null, analysisReady, {
+      dropTier3TransportBanned: true,
+    });
     mutated = true;
     return { ...b, enrichment: result.enrichment };
   });

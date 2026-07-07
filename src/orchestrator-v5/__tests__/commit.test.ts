@@ -117,6 +117,71 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     });
   });
 
+  // A3 graph CAS observe-mode: the expected-base hashes must thread VERBATIM
+  // from CommitMetadata to SessionStore.append — commit.ts never recomputes,
+  // never falls back, and preserves the undefined (not instrumented) vs null
+  // (server base read, graph absent) distinction exactly.
+  describe('A3 graph CAS — expected-hash verbatim pass-through', () => {
+    function makeSpyStore(): {
+      readonly store: SessionStore;
+      readonly appendCalls: Array<SessionTurnWrite>;
+    } {
+      const appendCalls: Array<SessionTurnWrite> = [];
+      const noop = createNoopSessionStore({ appendId: 'row-cas' });
+      const spy = vi.spyOn(noop, 'append').mockImplementation(async (write) => {
+        appendCalls.push(write);
+        return { id: 'row-cas' };
+      });
+      void spy;
+      return { store: noop, appendCalls };
+    }
+
+    it('threads both expectedGraphIdentityHash and expectedGraphAnalysisHash verbatim', async () => {
+      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const identity = 'a'.repeat(64);
+      const analysis = 'b'.repeat(16);
+      const { store, appendCalls } = makeSpyStore();
+      await commitDirectAnswer(
+        composed,
+        {
+          ...META,
+          graph: { nodes: [], edges: [] },
+          expectedGraphIdentityHash: identity,
+          expectedGraphAnalysisHash: analysis,
+        },
+        store,
+      );
+      expect(appendCalls).toHaveLength(1);
+      expect(appendCalls[0].expectedGraphIdentityHash).toBe(identity);
+      expect(appendCalls[0].expectedGraphAnalysisHash).toBe(analysis);
+    });
+
+    it('threads null verbatim (server base read, graph absent — NOT collapsed to undefined)', async () => {
+      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const { store, appendCalls } = makeSpyStore();
+      await commitDirectAnswer(
+        composed,
+        {
+          ...META,
+          graph: { nodes: [], edges: [] },
+          expectedGraphIdentityHash: null,
+          expectedGraphAnalysisHash: null,
+        },
+        store,
+      );
+      expect(appendCalls[0].expectedGraphIdentityHash).toBeNull();
+      expect(appendCalls[0].expectedGraphAnalysisHash).toBeNull();
+    });
+
+    it('omission → undefined on the write (uninstrumented path stays uninstrumented)', async () => {
+      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const { store, appendCalls } = makeSpyStore();
+      await commitDirectAnswer(composed, META, store);
+      expect(appendCalls[0].expectedGraphIdentityHash).toBeUndefined();
+      expect(appendCalls[0].expectedGraphAnalysisHash).toBeUndefined();
+    });
+  });
+
   // #239 review (finding 2): pendings must derive from the EGRESS-FINALISED
   // chip set, so a chip the finalizer drops cannot leave an orphaned resumable
   // pending that a later "yes" short-confirm could resume.

@@ -177,6 +177,7 @@ import {
   computeAnalysisAffectingGraphHash,
   computeDeterministicGraphHash,
 } from './context/graph-hash.js';
+import { computeExpectedGraphCasHashes } from './context/graph-cas-conflict.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import {
   deriveAnalysisFreshness,
@@ -187,7 +188,6 @@ import {
 import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
-  canonicalStateFromFreshness,
   summariseCoachingStatePack,
   type CanonicalAnalysisState,
 } from './context/canonical-analysis-state.js';
@@ -592,9 +592,26 @@ export async function runTurnExecutor(
     meta: Parameters<typeof commitDirectAnswer>[1],
     store?: Parameters<typeof commitDirectAnswer>[2],
   ): Promise<Awaited<ReturnType<typeof commitDirectAnswer>>> => {
+    // A3 graph CAS observe-mode: derive the expected-base hashes ONLY from
+    // the server-side persisted read buildTurnContext performed at turn start
+    // (`context.persistedGraph`) — NEVER from request-supplied graph_state,
+    // which may be the very graph being written (trusted base rule; see
+    // graph-cas-conflict.ts). Computed only for graph-bearing commits with
+    // the mode on, so flag-off / graph-free commits pay zero hashing.
+    // buildTurnContext degrades a failed scenarios read to null, which maps
+    // to expected=null → `no_expected`/`first_write` — categories that are
+    // never enforced, so a degraded read can never block a write.
+    const expectedGraphCasHashes =
+      meta.graph !== undefined && config.features.graphCasMode !== 'off'
+        ? computeExpectedGraphCasHashes(context.persistedGraph)
+        : undefined;
     const result = await commitDirectAnswer(
       resp,
       {
+        // Injected BEFORE ...meta so a call site could still override; no
+        // current call site does (the wrapper's server-read derivation is
+        // the single trusted source on this path).
+        ...(expectedGraphCasHashes ?? {}),
         // V5 Signature Loop — carry forward the prior turn's pendings by default
         // so a non-consuming turn does not wipe a live proposal (behaviour #2).
         // Placed BEFORE `...meta` so a call site can still override it; the
@@ -750,6 +767,44 @@ export async function runTurnExecutor(
   // gap where set_factor_value / add_constraint / adjust_edge_strength
   // mutated the graph but turn_outcome.graph_mutated stayed false.
   let handlerEmittedMutatedGraph = false;
+  // Mission 1 (context authority): ONE pre-dispatch canonical verdict for
+  // every non-execute consumer — the flag-gated coaching prompt pack, the
+  // clarify / coach / converse chip sites, and the finalise fallback —
+  // memoised so those surfaces cannot diverge (previously the prompt pack
+  // used a PARTIAL `canonicalStateFromFreshness` object while the finalise
+  // fallback recomputed a full one: two canonical objects per turn).
+  // Execute turns use the post-dispatch `canonicalStateForRun` instead —
+  // the fact chain and graph hash change mid-turn there, so pre-dispatch
+  // state would be wrong for them. Pure and cheap; reads the same
+  // authorities the routing freshness was derived from, at call time
+  // (all stable once routing freshness exists). Returns undefined before
+  // the routing-freshness derivation (early exits stay honestly absent).
+  let nonExecuteCanonicalMemo: CanonicalAnalysisState | null | undefined;
+  const canonicalStateForNonExecute = (): CanonicalAnalysisState | undefined => {
+    if (nonExecuteCanonicalMemo === undefined) {
+      nonExecuteCanonicalMemo =
+        freshness === null
+          ? null
+          : selectCanonicalAnalysisState({
+              handlerFacts: [],
+              priorFacts: context.prior_facts,
+              readiness: deriveCanonicalReadiness(
+                canonicalReadinessGraphForRun,
+                graphStateForTurn,
+                analysisReadyForTurn,
+              ),
+              currentGraphHash: currentAnalysisGraphHashForTurn,
+              // Option-identity guard: same raw graph source as the
+              // routing-freshness hash. undefined when the flag is off.
+              currentGraphOptionIds: config.cee.optionIdentityFreshnessGuard
+                ? extractGraphOptionIds(
+                    context.persistedGraph ?? graphStateForTurn ?? null,
+                  )
+                : undefined,
+            });
+    }
+    return nonExecuteCanonicalMemo ?? undefined;
+  };
 
   // Routing log fields — closured so the finally block can emit one record
   // per turn regardless of which terminal path fires (success / typed
@@ -1231,13 +1286,15 @@ export async function runTurnExecutor(
       // prompt-safe `CoachingStatePack`. Assembled ONLY when the behaviour flag
       // is on AND a freshness verdict exists; otherwise the field is omitted so
       // the assembled pack — and the serialised prompt — is byte-identical to
-      // today. `canonicalStateFromFreshness` is the named pre-dispatch seam the
-      // route fallback also uses; `summariseCoachingStatePack` ignores the
-      // hash / degraded fields it does not carry.
+      // today. Mission 1 (context authority): sourced from the SHARED
+      // memoised pre-dispatch canonical (`canonicalStateForNonExecute`) —
+      // the same object the clarify/coach/converse chips and the finalise
+      // fallback read — instead of a separate partial
+      // `canonicalStateFromFreshness` object, so the prompt pack and the
+      // chips can never disagree. The full verdict is contradiction-aware;
+      // `summariseCoachingStatePack` still omits hashes/degraded detail.
       if (config.cee.coachingContextPromptEnabled && freshness !== null) {
-        coachingPromptCanonical = canonicalStateFromFreshness(freshness, {
-          readiness: analysisReadyForTurn,
-        });
+        coachingPromptCanonical = canonicalStateForNonExecute() ?? null;
       }
       const coachingContext = coachingPromptCanonical
         ? summariseCoachingStatePack(coachingPromptCanonical)
@@ -3532,12 +3589,16 @@ export async function runTurnExecutor(
 
       // V5 Context Management v1 — stale-rerun sibling guard.
       //
-      // Fires when prior analysis exists but is `stale` (graph hash
-      // diverged) AND the user is asking an analytical question
-      // (explain / what_drove / what_would_flip / rerun_question) AND
-      // there is no concrete mutation signal. Routes to a deterministic
-      // direct_answer that nudges re-run, mirroring the Phase 3
-      // stale-safe coaching block copy + action shape.
+      // Fires when prior analysis exists but is NOT confirmed current —
+      // `stale` (graph hash diverged; copy asserts the change) or
+      // `unknown` (currency unconfirmable; copy must NOT assert a
+      // change — authority parity) — AND the user is asking an
+      // analytical question (explain / what_drove / what_would_flip /
+      // rerun_question) AND there is no INDEPENDENT mutation signal
+      // (flip-overlap phrasings stay analytical per Issue #195; a
+      // genuine edit clause keeps mutation precedence). Routes to a
+      // deterministic direct_answer that nudges re-run, mirroring the
+      // Phase 3 stale-safe coaching block copy + action shape.
       //
       // Runs BEFORE `tryPostAnalysisAdviceGate` so the fresh-path gate
       // sees the same input shape it always has — the gate continues
@@ -3554,6 +3615,7 @@ export async function runTurnExecutor(
           matched: staleOutcome.matched,
           unmatched_reason: staleOutcome.matched ? null : staleOutcome.reason,
           intent_class: staleOutcome.matched ? staleOutcome.intent_class : null,
+          mode: staleOutcome.matched ? staleOutcome.mode : null,
           freshness: freshness?.freshness ?? null,
         });
         if (staleOutcome.matched) {
@@ -3658,13 +3720,13 @@ export async function runTurnExecutor(
           // to the slow generic LLM router when the thin projection is blank but
           // fresh, usable state exists. Flag OFF → both fields absent (undefined)
           // → the gate's relaxation branch is dead → behaviour byte-identical.
-          // `canonicalStateFromFreshness` is the same pure pre-dispatch seam the
-          // coaching-context pack and the route fallback already use.
-          ...(config.cee.postAnalysisLoopEnabled && freshness !== null
+          // Mission 1 (context authority): sourced from the SHARED memoised
+          // pre-dispatch canonical — the same object the chips, coaching pack
+          // and finalise fallback read — replacing a separate partial
+          // `canonicalStateFromFreshness` object.
+          ...(config.cee.postAnalysisLoopEnabled && canonicalStateForNonExecute()
             ? {
-                canonicalState: canonicalStateFromFreshness(freshness, {
-                  readiness: analysisReadyForTurn,
-                }),
+                canonicalState: canonicalStateForNonExecute()!,
                 recentChanges: contextPack.recent_changes,
               }
             : {}),
@@ -5207,13 +5269,19 @@ export async function runTurnExecutor(
           current_turn_fact_count: handlerFactsForCommit.length,
         },
       );
-      // V5 M5 (read-only / diagnostic) — assemble the canonical analysis state
-      // from the SAME unified fact set and post-handler graph hash that
-      // `freshness` above derived from. Pure read-only: no dispatch, no
-      // control-flow, no mutation, no I/O. Surfaced ONLY through the flag-gated
-      // (default-off) redacted context-summary diagnostic at the route seam —
-      // deliberately NOT passed to `generateChips` below (that would activate
-      // M2 chip behaviour, out of scope here).
+      // V5 M5 → Mission 1 (context authority) — assemble the canonical
+      // analysis state from the SAME unified fact set and post-handler graph
+      // hash that `freshness` above derived from. Pure read-only: no dispatch,
+      // no mutation, no I/O. Surfaced through the flag-gated redacted
+      // context-summary diagnostic at the route seam AND (Mission 1) threaded
+      // to `generateChips` below, so execute-path chips read the composed
+      // verdict — same freshness derivation as `turnOutcome`, plus the
+      // contradiction-aware `requiresRerun`/usability predicates — instead of
+      // re-deriving from local fact scans. (The earlier "deliberately NOT
+      // passed to generateChips" deferral was the M5 read-only slice; Mission 1
+      // is the deliberate activation, with the chip-generator's canonical
+      // branches already covered by chip-generator-canonical-convergence
+      // tests.)
       //
       // Graph-authority consistency: readiness here is derived from
       // `canonicalReadinessGraphForRun` — the SAME graph the freshness hash was
@@ -5257,6 +5325,11 @@ export async function runTurnExecutor(
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
+        // Mission 1 (context authority): the post-dispatch canonical verdict
+        // — same fact chain + hash as `turnOutcome.analysis_freshness`, plus
+        // contradiction-aware requiresRerun — so chips read the composed
+        // authority instead of local scans.
+        canonicalState: canonicalStateForRun,
       });
 
       // V5 P0.2 — flip-threshold proposal emission (Seam 1). On a
@@ -5398,6 +5471,11 @@ export async function runTurnExecutor(
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
+        // Mission 1 (context authority): the shared pre-dispatch canonical
+        // verdict — same object the coaching pack and finalise fallback read.
+        ...(canonicalStateForNonExecute()
+          ? { canonicalState: canonicalStateForNonExecute()! }
+          : {}),
       });
       // Area C (deterministic-copy hardening): the routing LLM can emphasise a
       // fragment of the user's question with markdown bold as if it were a
@@ -5449,10 +5527,13 @@ export async function runTurnExecutor(
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
-        // Coaching Context Pack v1 (carry-in #3): thread the live canonical
-        // verdict so the rerun/explore chips agree with it. Flag-gated —
-        // null when the flag is off ⇒ omitted ⇒ chips byte-identical to today.
-        ...(coachingPromptCanonical ? { canonicalState: coachingPromptCanonical } : {}),
+        // Mission 1 (context authority): the shared pre-dispatch canonical
+        // verdict, threaded UNCONDITIONALLY (was flag-gated via the coaching
+        // pack object) — chips, prompt pack and finalise fallback now read
+        // ONE memoised object and cannot disagree.
+        ...(canonicalStateForNonExecute()
+          ? { canonicalState: canonicalStateForNonExecute()! }
+          : {}),
       });
       // Phase 2 workstream A: post-analysis coaching wrapper for the
       // `analyse` stage direct_answer path. Mines the latest fresh
@@ -5509,10 +5590,13 @@ export async function runTurnExecutor(
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
-        // Coaching Context Pack v1 (carry-in #3): thread the live canonical
-        // verdict so the rerun/explore chips agree with it. Flag-gated —
-        // null when the flag is off ⇒ omitted ⇒ chips byte-identical to today.
-        ...(coachingPromptCanonical ? { canonicalState: coachingPromptCanonical } : {}),
+        // Mission 1 (context authority): the shared pre-dispatch canonical
+        // verdict, threaded UNCONDITIONALLY (was flag-gated via the coaching
+        // pack object) — chips, prompt pack and finalise fallback now read
+        // ONE memoised object and cannot disagree.
+        ...(canonicalStateForNonExecute()
+          ? { canonicalState: canonicalStateForNonExecute()! }
+          : {}),
       });
       // Phase 2 workstream A: same wrapper as the coach path. Catches
       // the LLM's text-only direct_answer in `analyse` stage and
@@ -6195,21 +6279,12 @@ export async function runTurnExecutor(
     //     fabricates freshness/readiness; both come from the real fact chain +
     //     hash via deriveAnalysisFreshness / deriveCanonicalReadiness.
     if (canonicalStateForRun === undefined && freshness !== null) {
-      canonicalStateForRun = selectCanonicalAnalysisState({
-        handlerFacts: [],
-        priorFacts: context.prior_facts,
-        readiness: deriveCanonicalReadiness(
-          canonicalReadinessGraphForRun,
-          graphStateForTurn,
-          analysisReadyForTurn,
-        ),
-        currentGraphHash: currentAnalysisGraphHashForTurn,
-        // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): same raw
-        // graph source as the routing-freshness hash above. undefined when off.
-        currentGraphOptionIds: config.cee.optionIdentityFreshnessGuard
-          ? extractGraphOptionIds(context.persistedGraph ?? graphStateForTurn ?? null)
-          : undefined,
-      });
+      // Mission 1 (context authority): reuse the SAME memoised pre-dispatch
+      // canonical the clarify/coach/converse chips and the coaching prompt
+      // pack read (identical inputs to the inline derivation this replaced),
+      // so the frame/diagnostic verdict is byte-identical to the one that
+      // drove this turn's chips — one canonical object per non-execute turn.
+      canonicalStateForRun = canonicalStateForNonExecute();
     }
     // T4 Slice 2 — build the canonical context frame ONCE, here at the single
     // finalise seam every path funnels through. Pure wrap of the authority
@@ -6272,6 +6347,10 @@ export async function runTurnExecutor(
             ? { ...pendingDiagnosticsForTurn, lifecycle: pendingLifecycleForRun }
             : pendingDiagnosticsForTurn,
           rerunReadiness,
+          // Mission 1 — chip IDS from the ALREADY-composed response (ids
+          // only; the builder never sees SuggestedAction objects, so
+          // labels/messages structurally cannot cross into the frame).
+          chipsEmitted: (response?.suggested_actions ?? []).map((a) => a.id),
         });
       } catch {
         // Never block the response on frame construction (mirrors the

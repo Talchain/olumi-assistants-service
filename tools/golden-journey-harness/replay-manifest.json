@@ -23,6 +23,12 @@
       "expected_exit": 1,
       "gating_invariant": "A12",
       "expected_failing_invariants": ["A12", "A5"]
+    },
+    {
+      "file": "golden-journey-v1-false-restore",
+      "expected_exit": 1,
+      "gating_invariant": "A8",
+      "expected_failing_invariants": ["A1", "A4", "A8"]
     }
   ]
 }

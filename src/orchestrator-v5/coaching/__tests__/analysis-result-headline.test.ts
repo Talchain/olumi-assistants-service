@@ -477,7 +477,11 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A currently leads.');
+    // provisional_doctrine_v0 (Mission B): level 'low' now appends the
+    // robustness-honesty sentence; the Case E floor itself is unchanged.
+    expect(out).toBe(
+      'Option A currently leads. The result is not yet robust — small changes could flip it.',
+    );
     // The strong-case clauses must NOT appear.
     expect(out).not.toContain('because');
     expect(out).not.toContain('sensitive to');
@@ -1109,7 +1113,11 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Hire X currently leads.');
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence; the Case E floor itself is unchanged.
+    expect(out).toBe(
+      'Hire X currently leads. The result is not yet robust — small changes could flip it.',
+    );
   });
 
   it('Case E preserves partial status suffix', () => {
@@ -1531,7 +1539,11 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A is currently only fractionally ahead, so the options are effectively tied.');
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence; the near-tie line itself is unchanged.
+    expect(out).toBe(
+      'Option A is currently only fractionally ahead, so the options are effectively tied. The result is not yet robust — small changes could flip it.',
+    );
     // No driver / fragility / probability / margin number at a near-tie.
     expect(out!).not.toContain('because');
     expect(out!).not.toContain('sensitive to');
@@ -1818,8 +1830,10 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       status_kind: 'ok',
     });
     // Fragility is preferred over the driver as the single named sensitivity.
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence after the caution shape.
     expect(out).toBe(
-      'Hire Contractor currently leads by 14 percentage points, but treat this as provisional: the result is sensitive to Overtime Intensity.',
+      'Hire Contractor currently leads by 14 percentage points, but treat this as provisional: the result is sensitive to Overtime Intensity. The result is not yet robust — small changes could flip it.',
     );
     expect(out).not.toContain('because'); // never the confident driver framing
     // Descriptor reports the enriched case (NOT 'E'), so the handler does not
@@ -1892,7 +1906,11 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A currently leads.');
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence; the Case E floor itself is unchanged.
+    expect(out).toBe(
+      'Option A currently leads. The result is not yet robust — small changes could flip it.',
+    );
     expect(out).not.toContain('sensitive to');
   });
 
@@ -2024,7 +2042,11 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
     const out = buildAnalysisResultHeadline(input);
-    expect(out).toBe('Option A currently leads.');
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence; the Case E floor itself is unchanged.
+    expect(out).toBe(
+      'Option A currently leads. The result is not yet robust — small changes could flip it.',
+    );
     expect(out).not.toContain('percentage points');
     expect(out).not.toContain('sensitive to');
     expect(describeAnalysisHeadline(input).case).toBe('E');

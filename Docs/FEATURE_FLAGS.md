@@ -39,6 +39,7 @@
 | `CEE_ORCHESTRATOR_CONTEXT_ENABLED` | `false` | orchestrator/context-fabric/renderer.ts | No | |
 | `ENABLE_DSK_V0` | `false` | orchestrator/dsk-loader.ts, lookup/analysis-lookup.ts | No | |
 | `DSK_ENABLED` | `false` | decision-review/science-claims.ts, shape-check.ts | No | |
+| `CEE_MODEL_VERSIONS_ENABLED` | `false` | orchestrator-v5/model-management/service.ts | No | Model Management v1 (Layer 2) — DARK: gates every entry point of the isolated model-management module (save/list/get/restore/compare versions); flag-off is a fail-closed typed `disabled` no-op. Zero production call sites (nothing wired into routes/turn-executor). Env-enforced: locked `false` in prod; staging true requires explicit opt-in (audit-logged). Do NOT enable before the Paul-gated migration `20260705120000_v5_model_versions.sql` is executed — see Docs/v5/model-management-v1-implementation-notes.md |
 
 ## CEE Pipeline
 
@@ -130,6 +131,55 @@
 | `PERF_METRICS_ENABLED` | `true` | plugins/performance-monitoring.ts | No | |
 | `SHARE_STORAGE_INMEMORY` | `false` | utils/share-storage.ts | No | |
 | `RESEARCH_ENABLED` | `false` | orchestrator/tools/research-topic.ts | No | |
+
+---
+
+## V5 Graph CAS (A3 observe-mode)
+
+| Env Var | Default | Consumed In | `.env.example` | Notes |
+|---------|---------|-------------|----------------|-------|
+| `CEE_V5_GRAPH_CAS_MODE` | `off` | orchestrator-v5/session/supabase-store.ts (hook), turn-executor.ts + handlers/edit-graph-dispatch.ts (expected-base threading), session/index.ts (factory) | No | Three-state mode, NOT a boolean: `off` \| `observe` \| `enforce` (lowercased/trimmed; invalid/empty → `off` with a console warn, never a boot failure) |
+
+**What it does.** App-side stale-write **observation** at the single live
+`scenarios.graph` write chokepoint (`commitDirectAnswer` →
+`SupabaseSessionStore.append()` → `append_turn_atomic_v2`). When not `off`,
+each graph-bearing write performs one pre-RPC PK SELECT of the current
+`scenarios.graph`, categorises the write against the server-read expected base
+captured at turn start (`src/orchestrator-v5/context/graph-cas-conflict.ts`),
+and emits `v5.graph_cas.evaluated`. This is **not atomic CAS and not complete
+write safety** — the SELECT and the RPC are separate round-trips (a
+SELECT-then-write TOCTOU window). True atomicity is the `append_turn_atomic_v3`
+design artifact (`Docs/v5/proposals/append-turn-atomic-v3-graph-cas.md`), not
+built.
+
+**Modes.**
+- `off` (default): zero SELECTs, byte-identical write path (test-pinned).
+- `observe`: evaluate + telemetry; the commit ALWAYS proceeds — no code path
+  from the hook to a thrown error, changed response, or skipped RPC.
+- `enforce` (provisional): blocks ONLY `analysis_affecting_conflict` writes
+  pre-RPC via `GraphStaleWriteError` (extends `StateCommitFailedError`, so it
+  rides the existing typed failure envelope — no wire-shape change).
+  `self_noop` (idempotent replays / duplicate submissions),
+  `cosmetic_concurrent_edit`, `no_expected`, `first_write`, `match` and every
+  `unavailable` reason always proceed. **In prod, `enforce` auto-downgrades to
+  `observe`** with an `[AUDIT]` warning + a `production_lockdown`
+  config-override event.
+
+**Coverage caveat (do not over-claim from this telemetry).** A3 instruments
+only the live app write chokepoint through `append_turn_atomic_v2`. It does
+NOT prove system-wide absence of stale writes. Not covered: service-role
+manual writes, direct database writes, any direct UI writes if they exist,
+and dormant/legacy functions that still exist but are now grant-closed to
+`authenticated` (`store_draft_graph`, legacy `append_turn_atomic` — A4 closed
+that authenticated exposure at the grant layer; it is not an open
+`authenticated` surface). Low conflict volume = low conflict volume on the
+instrumented path only. RPC v3 remains the path to true atomic write safety.
+
+**Post-merge staging rollout step (requires Paul's approval — env flip, not
+code):** set `CEE_V5_GRAPH_CAS_MODE=observe` on the cee-staging Render
+environment to start collecting conflict-rate telemetry. Do NOT set `enforce`
+anywhere without a separate decision backed by observe-mode evidence; prod
+stays `off` (and downgrades `enforce` regardless).
 
 ---
 
