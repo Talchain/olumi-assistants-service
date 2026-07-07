@@ -48,8 +48,12 @@ export type { CanonicalStateSource } from '../build-context-summary.js';
  * Frame schema version. Bumped when the frame contract changes shape.
  * 0.2.0 — Track 2: additive optional `pending` diagnostics block +
  * threaded `conversation.pendingConfirmation` truth.
+ * 0.3.0 — Mission 1 (context authority): additive optional
+ * `diagnostics.chipsEmitted` (chip IDS only — contract identifiers, no
+ * labels/messages) so the debug surface can prove which affordances the
+ * turn actually offered.
  */
-export const CANONICAL_CONTEXT_FRAME_VERSION = '0.2.0';
+export const CANONICAL_CONTEXT_FRAME_VERSION = '0.3.0';
 export type CanonicalContextFrameVersion =
   typeof CANONICAL_CONTEXT_FRAME_VERSION;
 
@@ -234,6 +238,16 @@ export interface FrameDiagnostics {
    * fact-selection authorities).
    */
   readonly rerun?: FrameRerunReadiness;
+  /**
+   * Mission 1 — the suggested-action IDS this turn's composed response
+   * carries (optional, additive). IDs ONLY: chip ids are contract
+   * identifiers (`chip_action_*`, `floor_*`, `prop_<hash>`) with no user
+   * content — labels/messages never cross this boundary. Threaded by the
+   * caller from the already-composed response (wrap-never-re-derive: the
+   * builder receives ids, never SuggestedAction objects). Omitted ⇒ not
+   * observed at this seam (e.g. a hand-built frame), never "no chips".
+   */
+  readonly chipsEmitted?: readonly string[];
 }
 
 // ── pending projection (Track 2) — redacted pending-action observability ──
@@ -368,6 +382,14 @@ export interface BuildFrameInput {
    * Optional; omitted ⇒ no rerun diagnostics on this frame.
    */
   readonly rerunReadiness?: FrameRerunReadiness;
+  /**
+   * Mission 1 — suggested-action IDS from the ALREADY-composed response
+   * (ids extracted by the caller; the builder never sees SuggestedAction
+   * objects, so labels/messages structurally cannot cross). Placed into
+   * `diagnostics.chipsEmitted` verbatim. Optional; omitted ⇒ no chip
+   * observability on this frame.
+   */
+  readonly chipsEmitted?: readonly string[];
 }
 
 /**
