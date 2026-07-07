@@ -270,26 +270,44 @@ describe('hook graph-identity-exposure (ISSUE-9024, owner: Canonical State)', ()
 // ── HOOK 3: model-versions substrate (ISSUE-9025) ──────────────────────────
 
 describe('hook model-versions-substrate (ISSUE-9025, owner: Model Management)', () => {
-  it('TRIPWIRE: no model_versions substrate exists in src or migrations yet', () => {
-    const sqlHits = [
-      ...filesMatching(['supabase/migrations'], '.sql', /model_versions/),
-      ...filesMatching(['migrations'], '.sql', /model_versions/),
-    ];
+  // ISSUE-9025 PARTIALLY CONVERTED (2026-07-07): the model_versions substrate
+  // landed dark via PR #349 (+#354–#357 stack). Tripwire deleted per its own
+  // instructions; substrate-presence and dark-by-default are enforced below.
+  // The wording-honesty half stays skipped (narrowed precondition below):
+  // with zero live call sites no restore/version claim can occur, and
+  // ISSUE-9022's src-side claim detection has not shipped.
+
+  it('ENFORCING: model_versions substrate is present in migrations and src', () => {
+    const sqlHits = filesMatching(['supabase/migrations'], '.sql', /model_versions/);
     const tsHits = filesMatching(['src'], '.ts', /\bmodel_versions\b/);
-    expect(
-      [...sqlHits, ...tsHits],
-      'A model_versions substrate appears to have landed. Convert deliberately: (1) un-skip the ISSUE-9025 ' +
-        'case — enforce version/restore honesty against real version state; (2) un-skip ISSUE-9022 in ' +
-        'wording-honesty-completion.test.ts once src-side restore/version claim detection ships (the ' +
-        "mutation-language 'version' noun exclusion is the owner's to revisit); (3) delete this tripwire. " +
-        'Until then the harness A4/A8 replay classifiers carry the restore/version claim class.',
-    ).toEqual([]);
+    expect(sqlHits, 'model_versions migration disappeared — ISSUE-9025 regressed').not.toEqual([]);
+    expect(tsHits, 'model_versions service module disappeared — ISSUE-9025 regressed').not.toEqual([]);
   });
 
-  // TODO: ISSUE-9025 — version/restore honesty enforcement; blocked until a
-  // model_versions (or equivalent) substrate exists. Owner: Model Management.
+  it('ENFORCING: Model Management stays dark by default (env-enforced flag, prod-locked)', () => {
+    // Raw source (not stripComments — see the A3 hook note above).
+    const configSrc = readFileSync(join(REPO_ROOT, 'src/config/index.ts'), 'utf-8');
+    expect(
+      /createEnvEnforcedBoolean\(\s*false\s*,\s*"CEE_MODEL_VERSIONS_ENABLED"\s*\)/.test(configSrc),
+      'CEE_MODEL_VERSIONS_ENABLED must remain env-enforced default-false (dark invariant)',
+    ).toBe(true);
+    // The module's own gates must keep existing: flag-off no-op behaviour and
+    // the migration's security-load-bearing lines are pinned by these suites.
+    for (const rel of [
+      'src/orchestrator-v5/model-management/__tests__/service-flag-gate.test.ts',
+      'src/orchestrator-v5/model-management/__tests__/migration-static-guards.test.ts',
+      'src/orchestrator-v5/model-management/__tests__/store-adapter.test.ts',
+    ]) {
+      expect(existsSync(join(REPO_ROOT, rel)), `MM guard suite missing: ${rel}`).toBe(true);
+    }
+  });
+
+  // TODO: ISSUE-9025 (narrowed) — restore/version/compare wording honesty
+  // against real version state; blocked until MM gains live call sites (the
+  // Apply/Reject slice) so version claims can occur at all, and ISSUE-9022's
+  // src-side restore/version claim detection ships. Owner: Model Management.
   it.skip('ENFORCING (when unblocked): restore/version/compare wording is grounded in real version state; uncommitted claims swap or block', () => {
-    expect.unreachable('blocked-future: no version substrate (no table, no pointer, no restore path)');
+    expect.unreachable('blocked-future: MM is dark with zero live call sites — no version claim can reach a user yet');
   });
 });
 
