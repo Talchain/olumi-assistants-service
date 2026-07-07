@@ -71,6 +71,15 @@ export const TelemetryEvents = {
   DraftGraphLegacyCoachingValueNormalised: "cee.draft_graph.legacy_coaching_value_normalised",
   DraftGraphContractDefaultApplied: "cee.draft_graph.contract_default_applied",
 
+  // Lane 3 (2026-07-07): structured-outputs degradation must NOT be silent.
+  // Fires (alongside the WARN-level pino log at the call site) when the
+  // Anthropic adapter's draft_graph structured-outputs request is rejected
+  // by the API (e.g. "compiled grammar is too large") and the call falls
+  // back to prompt-only JSON mode. Non-zero in production means every
+  // draft is paying the slow un-constrained path — investigate the schema
+  // grammar budget (tests/unit/anthropic-graph-schema-grammar-budget.test.ts).
+  CeeStructuredOutputsFellBack: "cee.draft_graph.structured_outputs_fell_back",
+
   CeeExplainGraphRequested: "cee.explain_graph.requested",
   CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
   CeeExplainGraphFailed: "cee.explain_graph.failed",

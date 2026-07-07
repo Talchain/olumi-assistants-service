@@ -137,6 +137,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         DraftGraphLegacyCoachingValueNormalised: "cee.draft_graph.legacy_coaching_value_normalised",
         DraftGraphContractDefaultApplied: "cee.draft_graph.contract_default_applied",
 
+        // Lane 3 (2026-07-07): structured-outputs fallback must not be silent
+        CeeStructuredOutputsFellBack: "cee.draft_graph.structured_outputs_fell_back",
+
         // Connectivity validation (P0 diagnostics)
         CeeConnectivityCheck: "cee.draft_graph.connectivity_check",
 
@@ -980,6 +983,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // Multi-turn clarifier events are diagnostic and logged locally
       const debugOnlyEvents: string[] = [
         TelemetryEvents.Stage,
+        // Structured-outputs fallback: diagnostic WARN companion, no Datadog metric
+        TelemetryEvents.CeeStructuredOutputsFellBack,
         TelemetryEvents.CostCalculationUnknownModel,
         TelemetryEvents.IslConfigInvalidTimeout,
         TelemetryEvents.IslConfigInvalidMaxRetries,
@@ -1368,6 +1373,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // v0.11.0 schema amendment — observable transition signals
         "cee.draft_graph.legacy_coaching_value_normalised",
         "cee.draft_graph.contract_default_applied",
+
+        // Lane 3 (2026-07-07): structured-outputs fallback observability
+        "cee.draft_graph.structured_outputs_fell_back",
 
         // Connectivity validation (P0 diagnostics)
         "cee.draft_graph.connectivity_check",

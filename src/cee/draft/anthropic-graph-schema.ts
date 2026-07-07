@@ -26,10 +26,31 @@
  * empty defaults so the canonical Zod parse passes downstream. `rationales`
  * remains omitted (legacy carry, no consumer enforcement).
  *
- * Post-amendment union count: 10 / 16 (one new anyOf for the
- * causal_claims discriminated-union items).
- * Post-amendment optional count: 10 / 24 (added widening_log,
- * bias_signals, strengthen_items[*].bias_category as optional).
+ * GRAMMAR BUDGET (v7 — 2026-07-07 grammar-size reduction, Lane 3):
+ * The v6 amendment reintroduced the "compiled grammar is too large" 400
+ * previously fixed on 2026-04-02 (commit 7eaee1131 slimmed an 11KB schema
+ * to 3.2KB after the same error; v6 re-inflated it to ~5.5KB and every
+ * staging draft_graph fell back to prompt-only JSON at ~48s). v7 prunes
+ * non-load-bearing constraints WITHOUT changing the accepted output
+ * surface — the grammar becomes a strict superset and downstream Zod /
+ * ingress normalisers remain the enforcement (identical to what already
+ * happens on the prompt-only fallback path, which has no grammar at all):
+ *  - causal_claims: 4-branch object anyOf collapsed to ONE flat object
+ *    (type enum kept; per-variant fields optional). Malformed claims are
+ *    dropped item-wise by validateCausalClaims (CAUSAL_CLAIM_DROPPED).
+ *  - Enums replaced by plain strings where a downstream normaliser/Zod
+ *    owns the value set: data.extractionType, data.factor_type,
+ *    strengthen_items[*].bias_category (the enum actively FOUGHT the
+ *    documented legacy-value transition), widening_log.brief_completeness,
+ *    bias_signals[*].type, causal stated_strength.
+ * Load-bearing enums kept: node kind, factor category, edge
+ * effect_direction / edge_type, goal_constraints operator,
+ * strengthen_items action_type (UI chip dispatch), causal type.
+ *
+ * Post-v7 union count: 9 / 16. Post-v7 optional count: 15 / 24
+ * (causal_claims per-variant fields are optional in the grammar).
+ * Serialized size is pinned by tests/unit/anthropic-graph-schema-grammar-budget.test.ts;
+ * see that file for how to verify grammar compilation against the live API.
  */
 
 // Helpers for nullable types (required field that can be null)
@@ -71,8 +92,11 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           data: nullableObject(
             {
               value: { type: "number" },
-              extractionType: { type: "string", enum: ["explicit", "inferred"] },
-              factor_type: { type: "string", enum: ["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"] },
+              // v7: enums pruned to plain strings (grammar-size budget).
+              // Downstream Zod/normalisers own the value sets; the prompt
+              // still instructs the canonical values.
+              extractionType: { type: "string" },
+              factor_type: { type: "string" },
               uncertainty_drivers: { type: "array", items: { type: "string" } },
               interventions: {
                 type: "array",
@@ -167,58 +191,36 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
     },
     // rationales omitted — legacy carry, no consumer enforcement.
     // causal_claims, coaching, topology_plan: declared below per v0.11.0.
+    // v7 grammar-size reduction: the 4-branch discriminated-union anyOf was
+    // the largest union in the tree and a dominant grammar-compilation cost.
+    // Collapsed to ONE flat object: `type` keeps its enum (structure-
+    // defining); the per-variant fields (from/to/via/between/
+    // stated_strength) are grammar-optional. The canonical discriminated
+    // union stays enforced downstream — validateCausalClaims Zod-parses each
+    // claim (CausalClaimSchema) and DROPS malformed ones item-wise with a
+    // CAUSAL_CLAIM_DROPPED warning, exactly as on the prompt-only path.
     causal_claims: {
       type: "array",
       items: {
-        anyOf: [
-          {
-            type: "object",
-            properties: {
-              type: { type: "string", enum: ["direct_effect"] },
-              from: { type: "string" },
-              to: { type: "string" },
-              stated_strength: {
-                type: "string",
-                enum: ["very_strong", "strong", "moderate", "slight"],
-              },
-            },
-            required: ["type", "from", "to", "stated_strength"],
-            additionalProperties: false,
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: ["direct_effect", "mediation_only", "no_direct_effect", "unmeasured_confounder"],
           },
-          {
-            type: "object",
-            properties: {
-              type: { type: "string", enum: ["mediation_only"] },
-              from: { type: "string" },
-              via: { type: "string" },
-              to: { type: "string" },
-            },
-            required: ["type", "from", "via", "to"],
-            additionalProperties: false,
+          from: { type: "string" },
+          to: { type: "string" },
+          via: { type: "string" },
+          between: {
+            type: "array",
+            items: { type: "string" },
           },
-          {
-            type: "object",
-            properties: {
-              type: { type: "string", enum: ["no_direct_effect"] },
-              from: { type: "string" },
-              to: { type: "string" },
-            },
-            required: ["type", "from", "to"],
-            additionalProperties: false,
-          },
-          {
-            type: "object",
-            properties: {
-              type: { type: "string", enum: ["unmeasured_confounder"] },
-              between: {
-                type: "array",
-                items: { type: "string" },
-              },
-            },
-            required: ["type", "between"],
-            additionalProperties: false,
-          },
-        ],
+          // 4-band contract (very_strong|strong|moderate|slight) enforced by
+          // the shared CausalClaimSchema downstream; plain string here (v7).
+          stated_strength: { type: "string" },
+        },
+        required: ["type"],
+        additionalProperties: false,
       },
     },
     topology_plan: {
@@ -244,16 +246,11 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               // Optional during transition — LLM may emit legacy values
               // (framing|confidence|blindspots) which the ingress normaliser
               // at anthropic.ts:884 maps to canonical BiasType before any
-              // downstream parse.
-              bias_category: {
-                type: "string",
-                enum: [
-                  "anchoring",
-                  "narrow_framing",
-                  "status_quo_bias",
-                  "overconfidence",
-                ],
-              },
+              // downstream parse. v7: plain string — the previous canonical
+              // enum actively FORBADE the legacy values the normaliser is
+              // documented to handle, forcing the model to guess a canonical
+              // value under structured outputs.
+              bias_category: { type: "string" },
             },
             required: ["id", "label", "detail", "action_type"],
             additionalProperties: false,
@@ -276,10 +273,9 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               type: "array",
               items: { type: "string" },
             },
-            brief_completeness: {
-              type: "string",
-              enum: ["complete", "partial", "thin"],
-            },
+            // v7: plain string (grammar budget); canonical Zod owns
+            // complete|partial|thin downstream.
+            brief_completeness: { type: "string" },
           },
           required: [
             "elements_added",
@@ -293,15 +289,10 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           items: {
             type: "object",
             properties: {
-              type: {
-                type: "string",
-                enum: [
-                  "anchoring",
-                  "narrow_framing",
-                  "status_quo_bias",
-                  "overconfidence",
-                ],
-              },
+              // v7: plain string (grammar budget); same BiasType domain as
+              // bias_category — legacy values normalised at ingress,
+              // canonical Zod enforces downstream.
+              type: { type: "string" },
               detail: { type: "string" },
             },
             required: ["type", "detail"],

@@ -687,6 +687,17 @@ export async function draftGraphWithAnthropic(
               { model, error: (callErr as Error).message },
               "[Anthropic] Structured Outputs rejected by API — falling back to prompt-only JSON mode"
             );
+            // Lane 3 (2026-07-07): the fallback must not be silent — emit a
+            // queryable telemetry event alongside the WARN log so dashboards
+            // catch a permanently-degraded draft path (every draft paying
+            // prompt-only latency, e.g. the "compiled grammar is too large"
+            // regression reintroduced by the v0.11.0 schema amendment).
+            emit(TelemetryEvents.CeeStructuredOutputsFellBack, {
+              operation: "draft_graph",
+              model,
+              error_snippet: ((callErr as Error).message ?? "unknown").slice(0, 200),
+              schema_bytes: JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA).length,
+            });
             useStructuredOutputs = false;
             const fallback = buildCallParams(false);
             body = fallback.body;
@@ -2426,6 +2437,16 @@ export async function chatWithAnthropic(
               { model, error: (callErr as Error).message },
               "[Anthropic] Structured Outputs rejected by API — falling back to prompt-only JSON mode"
             );
+            // Lane 3 (2026-07-07): non-silent fallback — same event as the
+            // draft_graph path, distinguished by `operation`.
+            emit(TelemetryEvents.CeeStructuredOutputsFellBack, {
+              operation: "chat",
+              model,
+              error_snippet: ((callErr as Error).message ?? "unknown").slice(0, 200),
+              schema_bytes: normalisedOutputSchema
+                ? JSON.stringify(normalisedOutputSchema).length
+                : 0,
+            });
             useStructuredOutputs = false;
             const fallback = buildChatCallParams(false);
             createBody = fallback.body;

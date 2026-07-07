@@ -55,6 +55,60 @@ import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 
 export const MAX_HEADLINE_CHARS = 220;
 
+// ============================================================================
+// Lane 3 narration-completeness tails (Mission B — provisional_doctrine_v0)
+// ============================================================================
+
+/**
+ * Robustness honesty sentence (provisional_doctrine_v0). Appended to the
+ * deterministic headline (before any status suffix) when the envelope says
+ * the result is not robust: `robustness.is_robust === false` OR
+ * `robustness.level === 'low'`. One plain clause — no numbers, no labels.
+ */
+const NOT_ROBUST_SENTENCE =
+  ' The result is not yet robust — small changes could flip it.';
+
+/**
+ * Elimination floor: an option with a finite win_probability strictly below
+ * this value is "effectively eliminated". Mirrors the mission wording
+ * "<1% win probability".
+ */
+const ELIMINATED_WIN_PROBABILITY_CEILING = 0.01;
+
+/**
+ * Minimum number of effectively-eliminated options before the narration
+ * mentions it. One dead option in a two-way race is just the loser; two or
+ * more is real information about the field narrowing.
+ */
+const ELIMINATED_MIN_COUNT = 2;
+
+/**
+ * Eliminated-options sentence (provisional_doctrine_v0). Count is always
+ * >= ELIMINATED_MIN_COUNT so the plural is fixed. "1%" is an integer
+ * percentage (no raw decimal) so the defence-in-depth decimal rule holds.
+ */
+function eliminatedSentence(count: number): string {
+  return ` ${count} options are effectively eliminated (each has less than a 1% chance of winning).`;
+}
+
+/**
+ * Upper bound for the eliminated-count rendered by the grammar
+ * (`\d{1,3}`). An emission with a 4+ digit count would fail the registry
+ * grammar and fall back to the locked template — acceptable defence for a
+ * pathological >999-option envelope.
+ */
+const ELIMINATED_SENTENCE_MAX_CHARS = eliminatedSentence(999).length;
+
+/**
+ * Registry-side maximum length for a deterministic run_analysis
+ * assistant_text. The base headline (including any status suffix) is capped
+ * at {@link MAX_HEADLINE_CHARS} exactly as before; the Mission B narration
+ * tails (robustness honesty + eliminated options) are budgeted on top so
+ * honest tails can never force a fallback to a stronger-case shed.
+ */
+export const MAX_ASSISTANT_TEXT_CHARS =
+  MAX_HEADLINE_CHARS + NOT_ROBUST_SENTENCE.length + ELIMINATED_SENTENCE_MAX_CHARS;
+
 /**
  * Minimum win_probability for the leading option before the headline may emit a
  * CONFIDENT "currently leads" (cases A–D). A leader below this threshold is too
@@ -242,11 +296,23 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const winnerLabel = winner.label;
   const winnerProbability = winner.winnerProb;
   const driverLabel = resolveTopDriverLabel(enrichment, interventionControlledFactorIds);
-  const fragileLabel = resolveFragileLabel(enrichment);
-  const suffix = statusSuffix(status_kind);
+  // Mission A (provisional_doctrine_v0): the caution candidate replaces the
+  // bare fragile label. It is claim-safe by construction — a factor that is
+  // option-pinned (sensitivity_score === 0 / zero_reason ===
+  // 'intervention_override' / structurally controlled) is never named as
+  // "the result is sensitive to X".
+  const caution = resolveCautionCandidate(enrichment, interventionControlledFactorIds);
+  // Mission B (provisional_doctrine_v0): narration-completeness tail —
+  // robustness honesty + eliminated options — appended to EVERY emitted
+  // case shape, before the status suffix. The base headline stays within
+  // MAX_HEADLINE_CHARS; the tail rides on its own budget (lengthCap) so an
+  // honest tail never forces a stronger case to shed information.
+  const narrationTail = buildNarrationTail(enrichment, winner);
+  const suffix = `${narrationTail}${statusSuffix(status_kind)}`;
+  const lengthCap = MAX_HEADLINE_CHARS + narrationTail.length;
   const marginBucket = computeMarginBucket(winner);
   const hasDriver = driverLabel !== null;
-  const hasFragility = fragileLabel !== null;
+  const hasFragility = caution !== null;
 
   // Margin fragment (copy priority #2): rendered only when a runner-up
   // probability exists in the SAME source. Uses the SSOT formatter
@@ -259,24 +325,27 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
 
   // Stronger cases only fire when probability/margin gates pass.
   if (hasMeaningfulLead(winner)) {
-    if (hasFragility) {
-      // Caution shapes (priority #3 + #4): a fragile assumption exists, so name
+    if (caution !== null) {
+      // Caution shapes (priority #3 + #4): a fragility signal exists, so name
       // ONLY that one validation reason and frame the result as provisional —
       // never also the driver. This follows the copy priority order (leading
       // option, margin, provisional framing, one specific reason) AND makes the
       // "same factor as both driver and caveat" repetition impossible by
       // construction. Case A = with margin; Case C = margin shed under length.
+      // provisional_doctrine_v0: the reason body has three claim-safe variants
+      // (named factor / fragile link / generic provisional) — see
+      // cautionReasonText.
       const cautionTail =
-        `, but treat this as provisional: the result is sensitive to ${fragileLabel}.${suffix}`;
+        `, but treat this as provisional: ${cautionReasonText(caution)}.${suffix}`;
       const caseA = `${winnerLabel} currently leads${marginFragment}${cautionTail}`;
-      if (caseA.length <= MAX_HEADLINE_CHARS) {
+      if (caseA.length <= lengthCap) {
         return {
           text: caseA,
           descriptor: buildDescriptor('A', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
       const caseC = `${winnerLabel} currently leads${cautionTail}`;
-      if (caseC.length <= MAX_HEADLINE_CHARS) {
+      if (caseC.length <= lengthCap) {
         return {
           text: caseC,
           descriptor: buildDescriptor('C', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -289,14 +358,14 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // statement, so the PR #221 direction-honest path is not engaged here.
       const driverTail = ` because ${driverLabel} is the strongest driver.${suffix}`;
       const caseBMargin = `${winnerLabel} currently leads${marginFragment}${driverTail}`;
-      if (caseBMargin.length <= MAX_HEADLINE_CHARS) {
+      if (caseBMargin.length <= lengthCap) {
         return {
           text: caseBMargin,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
       const caseB = `${winnerLabel} currently leads${driverTail}`;
-      if (caseB.length <= MAX_HEADLINE_CHARS) {
+      if (caseB.length <= lengthCap) {
         return {
           text: caseB,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -307,7 +376,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // No driver, no fragility, but a margin is available — surface it
       // (preferred over a bare probability number per the copy priority order).
       const caseDMargin = `${winnerLabel} currently leads${marginFragment}.${suffix}`;
-      if (caseDMargin.length <= MAX_HEADLINE_CHARS) {
+      if (caseDMargin.length <= lengthCap) {
         return {
           text: caseDMargin,
           descriptor: buildDescriptor('D', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -323,7 +392,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       const caseD =
         `${winnerLabel} currently leads with ${pct}% probability.` +
         ` Run the follow-up checks before treating this as final.${suffix}`;
-      if (caseD.length <= MAX_HEADLINE_CHARS) {
+      if (caseD.length <= lengthCap) {
         return {
           text: caseD,
           descriptor: buildDescriptor('D', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -354,7 +423,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // Effectively tied (≤ 1pp): no margin number, no lead-strength claim.
       const caseTied =
         `${winnerLabel} is currently only fractionally ahead, so the options are effectively tied.${suffix}`;
-      if (caseTied.length <= MAX_HEADLINE_CHARS) {
+      if (caseTied.length <= lengthCap) {
         return {
           text: caseTied,
           descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
@@ -364,7 +433,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // 1pp < margin < 5pp: a small but real lead — state it, flag closeness.
       const caseClose =
         `${winnerLabel} currently leads${marginFragment}, but the options are close.${suffix}`;
-      if (caseClose.length <= MAX_HEADLINE_CHARS) {
+      if (caseClose.length <= lengthCap) {
         return {
           text: caseClose,
           descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
@@ -434,14 +503,22 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     softConfidenceMarginPp >= Math.round(MIN_LEAD_MARGIN * 100) &&
     (hasFragility || hasDriver)
   ) {
-    const sensitivityTarget = fragileLabel ?? driverLabel;
-    if (sensitivityTarget !== null) {
+    // provisional_doctrine_v0: fragility candidate preferred (already
+    // claim-safe); a genuine (non-pinned, non-zero) driver is the fallback
+    // sensitivity target.
+    const scReason =
+      caution !== null
+        ? cautionReasonText(caution)
+        : driverLabel !== null
+          ? `the result is sensitive to ${driverLabel}`
+          : null;
+    if (scReason !== null) {
       const cautionTail =
-        `, but treat this as provisional: the result is sensitive to ${sensitivityTarget}.${suffix}`;
+        `, but treat this as provisional: ${scReason}.${suffix}`;
       // Prefer the margin-bearing shape (Case A grammar); shed the margin under
       // the length cap (Case C grammar) before giving up to Case E.
       const scWithMargin = `${winnerLabel} currently leads${marginFragment}${cautionTail}`;
-      if (marginText !== null && scWithMargin.length <= MAX_HEADLINE_CHARS) {
+      if (marginText !== null && scWithMargin.length <= lengthCap) {
         return {
           text: scWithMargin,
           descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
@@ -453,7 +530,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // condition's lower floor already excluded the very weak < 0.30 leads), so
       // it is a caveated, bounded fallback — not a free-for-all sub-40% claim.
       const scNoMargin = `${winnerLabel} currently leads${cautionTail}`;
-      if (scNoMargin.length <= MAX_HEADLINE_CHARS) {
+      if (scNoMargin.length <= lengthCap) {
         return {
           text: scNoMargin,
           descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
@@ -469,8 +546,8 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // No "best", "winner", "recommended", "optimal", "preferred". No
   // probability number. No driver/fragility clauses.
   const caseE = `${winnerLabel} currently leads.${suffix}`;
-  const reason = deriveCaseEReason(winner, driverLabel, fragileLabel);
-  if (caseE.length <= MAX_HEADLINE_CHARS) {
+  const reason = deriveCaseEReason(winner, driverLabel, hasFragility);
+  if (caseE.length <= lengthCap) {
     return {
       text: caseE,
       descriptor: buildDescriptor('E', reason, { hasDriver, hasFragility, marginBucket }),
@@ -504,7 +581,7 @@ function buildDescriptor(
 function deriveCaseEReason(
   winner: ResolvedWinner,
   driverLabel: string | null,
-  fragileLabel: string | null,
+  hasFragility: boolean,
 ): HeadlineFallbackReason {
   // Soft confidence: absolute probability gate failed.
   if (winner.winnerProb < MIN_LEAD_PROBABILITY) return 'soft_confidence';
@@ -517,7 +594,7 @@ function deriveCaseEReason(
   // reach Case E at this point are: (a) Case D-shape (no driver, no
   // fragility) overshot the length cap, or (b) a Case A/B/C with
   // driver/fragility overshot it.
-  if (driverLabel === null && fragileLabel === null) {
+  if (driverLabel === null && !hasFragility) {
     return 'no_driver_no_fragility';
   }
   return 'length_cap';
@@ -570,6 +647,14 @@ interface ResolvedWinner {
    * waived; only the absolute probability check applies.
    */
   readonly runnerUpProb: number | null;
+  /**
+   * Mission B (provisional_doctrine_v0): number of NON-winner entries in
+   * the SAME accepted source with a finite win_probability strictly below
+   * {@link ELIMINATED_WIN_PROBABILITY_CEILING} (i.e. effectively
+   * eliminated, <1% chance of winning). Same-source so the count can
+   * never mix probabilities across envelope shapes.
+   */
+  readonly eliminatedCount: number;
 }
 
 /**
@@ -620,6 +705,7 @@ function resolveWinner(
     if (winnerProb === null || winnerProb < 0 || winnerProb > 1) continue;
 
     let runnerUpProb: number | null = null;
+    let eliminatedCount = 0;
     for (const raw of source) {
       const rId =
         (typeof raw.option_id === 'string' && raw.option_id) ||
@@ -629,8 +715,9 @@ function resolveWinner(
       const p = readNumber(raw.win_probability);
       if (p === null || p < 0 || p > 1) continue;
       if (runnerUpProb === null || p > runnerUpProb) runnerUpProb = p;
+      if (p < ELIMINATED_WIN_PROBABILITY_CEILING) eliminatedCount += 1;
     }
-    return { label: cleanedLabel, winnerProb, runnerUpProb };
+    return { label: cleanedLabel, winnerProb, runnerUpProb, eliminatedCount };
   }
   return null;
 }
@@ -692,9 +779,14 @@ function resolveTopDriverLabel(
     const controlledMatchId =
       (typeof entry.node_id === 'string' && entry.node_id) || idGuess;
     const isControlled =
-      controlledFactorIds !== undefined &&
-      controlledMatchId.length > 0 &&
-      controlledFactorIds.has(controlledMatchId);
+      (controlledFactorIds !== undefined &&
+        controlledMatchId.length > 0 &&
+        controlledFactorIds.has(controlledMatchId)) ||
+      // Mission A (provisional_doctrine_v0): an envelope-declared pin is as
+      // authoritative as the structural controlled set — an
+      // intervention_override lever must never be named a driver even when
+      // the caller could not supply interventionControlledFactorIds.
+      entry.zero_reason === 'intervention_override';
 
     const score = computeDriverScore(entry);
     if (score === null) continue;
@@ -709,6 +801,11 @@ function resolveTopDriverLabel(
       topControlled = true;
     }
     if (isControlled) continue; // never NAME an option-controlled lever
+    // Mission A (provisional_doctrine_v0): a zero-score factor is not a
+    // driver-of-change — never name it as "the strongest driver" (the
+    // pre-doctrine code would name a sensitivity_score: 0 factor when all
+    // scores were zero).
+    if (score === 0) continue;
 
     const rawLabel =
       (typeof entry.factor_label === 'string' && entry.factor_label) ||
@@ -739,7 +836,131 @@ function computeDriverScore(entry: Record<string, unknown>): number | null {
   return Math.abs(elasticity) * (confidence ?? 1);
 }
 
-function resolveFragileLabel(enrichment: Record<string, unknown>): string | null {
+// ============================================================================
+// Mission A — claim-safe caution candidate (provisional_doctrine_v0)
+// ============================================================================
+
+/**
+ * The single validation reason the caution shapes may name. Three claim-safe
+ * variants:
+ *  - `factor`  — a genuinely non-pinned node label: "the result is sensitive
+ *                to {label}" (unchanged legacy wording).
+ *  - `edge`    — the fragile LINK itself: "the link between {from} and {to}
+ *                is fragile". Used when the only nameable node is
+ *                option-pinned — the fragility claim is about the edge
+ *                (switch_probability), which is truthfully grounded even
+ *                when the endpoint factor's sensitivity is zero.
+ *  - `generic` — "the result is not highly stable". Used when
+ *                fragility exists but pin-suppression removed every safe
+ *                named candidate.
+ */
+type CautionCandidate =
+  | { readonly kind: 'factor'; readonly label: string }
+  | { readonly kind: 'edge'; readonly fromLabel: string; readonly toLabel: string }
+  | { readonly kind: 'generic' };
+
+function cautionReasonText(caution: CautionCandidate): string {
+  switch (caution.kind) {
+    case 'factor':
+      return `the result is sensitive to ${caution.label}`;
+    case 'edge':
+      return `the link between ${caution.fromLabel} and ${caution.toLabel} is fragile`;
+    case 'generic':
+      return 'the result is not highly stable';
+  }
+}
+
+/** Case-insensitive, trimmed key for label-based pin matching. */
+function normaliseLabelKey(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+interface PinnedFactorIndex {
+  readonly ids: ReadonlySet<string>;
+  readonly labels: ReadonlySet<string>;
+}
+
+/**
+ * Collect the factors that must NEVER be described as "sensitive" or as a
+ * driver-of-change (Mission A claim-safety rule, provisional_doctrine_v0):
+ *  - factor_sensitivity entries with sensitivity_score === 0, OR
+ *  - zero_reason === 'intervention_override' (option-pinned lever), OR
+ *  - ids in the structural interventionControlledFactorIds set.
+ * Indexed by structural id (factor_id / node_id / id) AND by normalised
+ * label, because fragile-edge entries reference nodes by id while the
+ * rendered candidate is a label.
+ */
+function collectPinnedFactors(
+  enrichment: Record<string, unknown>,
+  controlledFactorIds?: ReadonlySet<string>,
+): PinnedFactorIndex {
+  const ids = new Set<string>(controlledFactorIds ?? []);
+  const labels = new Set<string>();
+  const arr = enrichment.factor_sensitivity;
+  if (Array.isArray(arr)) {
+    for (const raw of arr) {
+      const entry = readRecord(raw);
+      if (!entry) continue;
+      const sensitivity = readNumber(entry.sensitivity_score);
+      const pinned =
+        entry.zero_reason === 'intervention_override' || sensitivity === 0;
+      if (!pinned) continue;
+      for (const key of ['factor_id', 'node_id', 'id'] as const) {
+        const v = entry[key];
+        if (typeof v === 'string' && v.length > 0) ids.add(v);
+      }
+      for (const key of ['factor_label', 'label'] as const) {
+        const v = entry[key];
+        if (typeof v === 'string' && v.length > 0) labels.add(normaliseLabelKey(v));
+      }
+    }
+  }
+  return { ids, labels };
+}
+
+function isPinnedFactor(
+  id: string | null,
+  label: string | null,
+  pinned: PinnedFactorIndex,
+): boolean {
+  if (id !== null && id.length > 0 && pinned.ids.has(id)) return true;
+  if (label !== null && pinned.labels.has(normaliseLabelKey(label))) return true;
+  return false;
+}
+
+interface FragileEdgeCandidate {
+  readonly prob: number;
+  /** Clean label the legacy shape would name (from preferred, then to). */
+  readonly namedLabel: string | null;
+  /** Structural id of whichever node supplied namedLabel. */
+  readonly namedId: string | null;
+  readonly fromClean: string | null;
+  readonly toClean: string | null;
+}
+
+/**
+ * Resolve the claim-safe caution candidate from robustness.fragile_edges.
+ *
+ * Selection order (provisional_doctrine_v0):
+ *  1. Highest-switch_probability edge with a resolvable node label, when
+ *     that node is NOT pinned → factor wording (bit-identical behaviour to
+ *     the legacy resolveFragileLabel for the non-pinned case).
+ *  2. The pinned best edge phrased as a LINK when both endpoints resolve →
+ *     edge wording. The claim transfers to the edge, which is genuinely
+ *     fragile.
+ *  3. The next-strongest edge with a non-pinned resolvable label → factor
+ *     wording.
+ *  4. Any remaining edge with both endpoints resolvable → edge wording.
+ *  5. Fragility exists but nothing safely nameable → generic wording.
+ *
+ * Returns null (no caution clause at all) only on the legacy thin-data
+ * paths: robustness high/absent, no fragile edges, or no edge with any
+ * resolvable label (unchanged from resolveFragileLabel).
+ */
+function resolveCautionCandidate(
+  enrichment: Record<string, unknown>,
+  controlledFactorIds?: ReadonlySet<string>,
+): CautionCandidate | null {
   // Robust scenarios skip the fragility clause entirely.
   const level = readRobustnessLevel(enrichment);
   if (level === 'high') return null;
@@ -750,27 +971,86 @@ function resolveFragileLabel(enrichment: Record<string, unknown>): string | null
   if (!Array.isArray(fragile) || fragile.length === 0) return null;
 
   const labelMap = buildNodeLabelMap(readGraph(enrichment));
+  const pinned = collectPinnedFactors(enrichment, controlledFactorIds);
 
-  let bestLabel: string | null = null;
-  let bestProb = -Infinity;
+  const candidates: FragileEdgeCandidate[] = [];
   for (const raw of fragile) {
     const entry = readRecord(raw);
     if (!entry) continue;
     const prob = readNumber(entry.switch_probability) ?? 0;
-    const label = pickFragileEdgeLabel(entry, labelMap);
-    if (label === null) continue;
-    if (prob > bestProb) {
-      bestProb = prob;
-      bestLabel = label;
+    candidates.push({ prob, ...resolveFragileEdgeParts(entry, labelMap) });
+  }
+  // Stable sort: descending switch_probability, original order on ties —
+  // matches the legacy "strictly greater wins, first seen keeps ties" pick.
+  candidates.sort((a, b) => b.prob - a.prob);
+
+  const best = candidates.find((c) => c.namedLabel !== null);
+  if (!best) return null; // legacy thin-data path: nothing resolvable at all
+
+  // 1. Non-pinned best label → unchanged factor wording.
+  if (!isPinnedFactor(best.namedId, best.namedLabel, pinned)) {
+    return { kind: 'factor', label: best.namedLabel as string };
+  }
+  // 2. Pinned best: prefer the SAME strongest edge as a link claim.
+  if (best.fromClean !== null && best.toClean !== null) {
+    return { kind: 'edge', fromLabel: best.fromClean, toLabel: best.toClean };
+  }
+  // 3. Next-strongest non-pinned named candidate.
+  for (const c of candidates) {
+    if (c === best) continue;
+    if (c.namedLabel !== null && !isPinnedFactor(c.namedId, c.namedLabel, pinned)) {
+      return { kind: 'factor', label: c.namedLabel };
     }
   }
-  return bestLabel;
+  // 4. Any other edge with both endpoints nameable.
+  for (const c of candidates) {
+    if (c === best) continue;
+    if (c.fromClean !== null && c.toClean !== null) {
+      return { kind: 'edge', fromLabel: c.fromClean, toLabel: c.toClean };
+    }
+  }
+  // 5. Fragility is real but no safe named candidate survived suppression.
+  return { kind: 'generic' };
 }
 
-function pickFragileEdgeLabel(
+// ============================================================================
+// Mission B — narration-completeness tail (provisional_doctrine_v0)
+// ============================================================================
+
+/** True when the envelope plainly reports a non-robust result. */
+function isNotRobust(enrichment: Record<string, unknown>): boolean {
+  const rob = readRecord(enrichment.robustness);
+  if (!rob) return false;
+  if (rob.is_robust === false) return true;
+  return rob.level === 'low';
+}
+
+/**
+ * Build the Mission B narration tail: robustness honesty first, then the
+ * eliminated-options clause. Empty string when neither applies — the
+ * headline is then byte-identical to the pre-doctrine output.
+ */
+function buildNarrationTail(
+  enrichment: Record<string, unknown>,
+  winner: ResolvedWinner,
+): string {
+  let tail = '';
+  if (isNotRobust(enrichment)) tail += NOT_ROBUST_SENTENCE;
+  if (winner.eliminatedCount >= ELIMINATED_MIN_COUNT) {
+    tail += eliminatedSentence(winner.eliminatedCount);
+  }
+  return tail;
+}
+
+/**
+ * Resolve both endpoints of a fragile edge (direct labels first, then the
+ * graph label map), sanitised. `namedLabel`/`namedId` reproduce the legacy
+ * single-label preference exactly: FROM when clean, else TO.
+ */
+function resolveFragileEdgeParts(
   edge: Record<string, unknown>,
   labelMap: Map<string, string>,
-): string | null {
+): Omit<FragileEdgeCandidate, 'prob'> {
   const directFrom =
     typeof edge.from_label === 'string' && edge.from_label.length > 0
       ? edge.from_label
@@ -791,13 +1071,15 @@ function pickFragileEdgeLabel(
   const resolvedFrom = directFrom ?? (fromId ? labelMap.get(fromId) ?? null : null);
   const resolvedTo = directTo ?? (toId ? labelMap.get(toId) ?? null : null);
 
-  const idGuessFrom = fromId ?? '';
-  const idGuessTo = toId ?? '';
+  const cleanFrom =
+    resolvedFrom !== null ? sanitiseLabel(resolvedFrom, fromId ?? '') : null;
+  const cleanTo =
+    resolvedTo !== null ? sanitiseLabel(resolvedTo, toId ?? '') : null;
 
-  const cleanFrom = resolvedFrom !== null ? sanitiseLabel(resolvedFrom, idGuessFrom) : null;
-  if (cleanFrom !== null) return cleanFrom;
-  const cleanTo = resolvedTo !== null ? sanitiseLabel(resolvedTo, idGuessTo) : null;
-  return cleanTo;
+  if (cleanFrom !== null) {
+    return { namedLabel: cleanFrom, namedId: fromId, fromClean: cleanFrom, toClean: cleanTo };
+  }
+  return { namedLabel: cleanTo, namedId: cleanTo !== null ? toId : null, fromClean: cleanFrom, toClean: cleanTo };
 }
 
 // `sanitiseLabel` is imported from ../context/enrichment-graph-labels.ts.
@@ -896,47 +1178,62 @@ const PARTIAL_SUFFIX_RE_SRC = escapeForRegex(PARTIAL_SUFFIX);
 const UNKNOWN_SUFFIX_RE_SRC = escapeForRegex(UNKNOWN_SUFFIX);
 const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_SRC})?`;
 
+// Mission B narration tail (provisional_doctrine_v0): optional robustness
+// honesty sentence, then optional eliminated-options sentence, then the
+// optional status suffix — in exactly that order, mirroring
+// buildNarrationTail + statusSuffix composition in computeHeadline.
+const NOT_ROBUST_RE_SRC = escapeForRegex(NOT_ROBUST_SENTENCE);
+const ELIMINATED_RE_SRC =
+  ' \\d{1,3} options are effectively eliminated \\(each has less than a 1% chance of winning\\)\\.';
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?${STATUS_SUFFIX_PATTERN}`;
+
+// Mission A caution-reason alternation (provisional_doctrine_v0): the three
+// claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
+// improvised "provisional" prose cannot ride through the caution shapes.
+const CAUTION_REASON_PATTERN =
+  '(?:the result is sensitive to .+?|the link between .+? and .+? is fragile|the result is not highly stable)';
+
 const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // Case A: winner + margin + provisional caution naming the fragile reason.
   new RegExp(
-    `^.+? currently leads by \\d{1,3} percentage points?, but treat this as provisional: the result is sensitive to .+?\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads by \\d{1,3} percentage points?, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
   ),
   // Case C: provisional caution naming the fragile reason, no margin.
   new RegExp(
-    `^.+? currently leads, but treat this as provisional: the result is sensitive to .+?\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
   ),
   // Case B (with margin): winner + margin + driver.
   new RegExp(
-    `^.+? currently leads by \\d{1,3} percentage points? because .+? is the strongest driver\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads by \\d{1,3} percentage points? because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
   ),
   // Case B (no margin): winner + driver.
   new RegExp(
-    `^.+? currently leads because .+? is the strongest driver\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
   ),
   // Case D (margin only): winner + margin.
   new RegExp(
-    `^.+? currently leads by \\d{1,3} percentage points?\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads by \\d{1,3} percentage points?\\.${TAIL_PATTERN}$`,
   ),
   // Case D (probability): winner + integer-percentage probability + nudge.
   new RegExp(
-    `^.+? currently leads with \\d{1,3}% probability\\. Run the follow-up checks before treating this as final\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads with \\d{1,3}% probability\\. Run the follow-up checks before treating this as final\\.${TAIL_PATTERN}$`,
   ),
   // Case NT (close): small but real lead, flagged as close.
   new RegExp(
-    `^.+? currently leads by \\d{1,3} percentage points?, but the options are close\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? currently leads by \\d{1,3} percentage points?, but the options are close\\.${TAIL_PATTERN}$`,
   ),
   // Case NT (tied): effectively tied, no margin number.
   new RegExp(
-    `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${STATUS_SUFFIX_PATTERN}$`,
+    `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${TAIL_PATTERN}$`,
   ),
   // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
-  // MUST stay last — the trailing `\\.${STATUS_SUFFIX_PATTERN}$` anchor is
+  // MUST stay last — the trailing `\\.${TAIL_PATTERN}$` anchor is
   // strictly less specific than the other cases and would not match their
   // outputs (those extend "leads" with " by N percentage points", "because",
   // ", but", "with N% probability", or " is currently only fractionally
   // ahead" before the terminal period), so ordering is for clarity rather
   // than correctness.
-  new RegExp(`^.+? currently leads\\.${STATUS_SUFFIX_PATTERN}$`),
+  new RegExp(`^.+? currently leads\\.${TAIL_PATTERN}$`),
 ];
 
 function matchesHeadlineGrammar(text: string): boolean {
@@ -976,7 +1273,10 @@ function matchesHeadlineGrammar(text: string): boolean {
  */
 export function isAllowedRunAnalysisAssistantText(text: unknown): boolean {
   if (typeof text !== 'string') return false;
-  if (text.length === 0 || text.length > MAX_HEADLINE_CHARS) return false;
+  // Length rule: base headline stays within MAX_HEADLINE_CHARS by
+  // construction; the outer registry cap adds the Mission B tail budget
+  // (provisional_doctrine_v0) — see MAX_ASSISTANT_TEXT_CHARS.
+  if (text.length === 0 || text.length > MAX_ASSISTANT_TEXT_CHARS) return false;
   if (text.includes('\n') || text.includes('\r')) return false;
   if (RUN_ANALYSIS_LOCKED_TEMPLATES.has(text)) return true;
   if (!matchesHeadlineGrammar(text)) return false;
