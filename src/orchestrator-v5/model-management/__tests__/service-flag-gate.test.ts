@@ -45,7 +45,7 @@ const GRAPH = {
 };
 
 describe('ModelManagementService — flag OFF is a typed fail-closed no-op at EVERY entry point', () => {
-  it('saveVersion / restoreVersion / listVersions / getVersion / compareVersions all return disabled', async () => {
+  it('saveVersion / restoreVersion / listVersions / getVersion / getCurrentVersion / compareVersions all return disabled', async () => {
     const store = explodingStore();
     const sink = explodingSink();
     const service = new ModelManagementService({
@@ -59,6 +59,7 @@ describe('ModelManagementService — flag OFF is a typed fail-closed no-op at EV
       await service.restoreVersion({ scenario_id: SCENARIO, version_id: VERSION_A }),
       await service.listVersions(SCENARIO),
       await service.getVersion(SCENARIO, VERSION_A),
+      await service.getCurrentVersion(SCENARIO),
       await service.compareVersions(SCENARIO, VERSION_A, VERSION_B),
     ];
 

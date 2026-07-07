@@ -177,6 +177,51 @@ export class ModelManagementService {
   }
 
   /**
+   * Resolve the scenario's current-version head pointer to its full record.
+   *
+   *  - flag off                → `disabled`.
+   *  - pointer NULL            → `ok` with `value: null` (no versions yet — an
+   *                              empty state, not an error; the UI's "no saved
+   *                              versions" case). No `getVersion` call is made.
+   *  - pointer → record        → `ok` with the record.
+   *  - pointer → absent record → `version_not_found` (the head pointer does not
+   *                              resolve; the `ON DELETE SET NULL` FK should make
+   *                              this impossible, so it is surfaced honestly as a
+   *                              data inconsistency rather than masked as "none").
+   *
+   * Scenario-scoped read: `getCurrentVersionId` reads the pointer off the
+   * scenario row and `getVersion` filters by BOTH `scenario_id` and `id`, so a
+   * pointer can only ever resolve to a version owned by this scenario — a
+   * cross-scenario version can never leak through the current-version read
+   * (owner isolation is the scenario's own; this method adds no new trust).
+   */
+  async getCurrentVersion(
+    scenarioId: string,
+  ): Promise<ModelManagementResult<ModelVersionRecord | null>> {
+    if (!this.isEnabled()) return { status: 'disabled' };
+    try {
+      const currentId = await this.store.getCurrentVersionId(scenarioId);
+      if (currentId === null) {
+        return { status: 'ok', value: null };
+      }
+      const record = await this.store.getVersion(scenarioId, currentId);
+      if (record === null) {
+        return {
+          status: 'error',
+          error: {
+            code: 'version_not_found',
+            recoverable: false,
+            message: `Current-version pointer ${currentId} does not resolve to a version for scenario ${scenarioId}.`,
+          },
+        };
+      }
+      return { status: 'ok', value: record };
+    } catch (err) {
+      return mapThrownError(err);
+    }
+  }
+
+  /**
    * Compare two persisted versions (direction: `from` → `to`), CEE-side:
    * identity-hash short-circuit, else analysis-affecting equivalence + a
    * compact structural diff summary (compare.ts).
