@@ -46,6 +46,8 @@ import { PENDING_ACTIONS_PER_TURN_CAP } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
+import { config } from '../config/index.js';
+import { getModelManagementService } from './model-management/index.js';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -676,6 +678,27 @@ export async function commitDirectAnswer(
     );
   }
 
+  // Lane 8 — Model Management version hook (CEE_MODEL_VERSIONS_ENABLED).
+  // Fires ONLY after the durable append succeeded AND a graph was persisted
+  // this commit. Fire-and-forget under the version-event-sink non-blocking
+  // contract: any MM failure logs and NEVER affects the turn result. Flag
+  // off ⇒ byte-identical commit path (no service construction, no env reads
+  // — pinned by commit-model-version-hook.test.ts). The graph handed to MM
+  // is `graphForStore` — the EXACT object the store just persisted — so the
+  // Group A identity envelope MM computes (computeGraphIdentityHash inside
+  // ModelManagementService.saveVersion) matches the store's own identity
+  // read of scenarios.graph.
+  if (config.cee.modelVersionsEnabled === true && metadata.graph !== undefined) {
+    void recordModelVersionForCommit({
+      scenarioId: metadata.scenario_id,
+      turnId: metadata.turn_id,
+      turnClass: metadata.turn_class,
+      handlerId: metadata.handler_id,
+      graph: graphForStore,
+      persistedRowId,
+    });
+  }
+
   const graphPersisted = metadata.graph !== undefined;
   return {
     response,
@@ -684,6 +707,74 @@ export async function commitDirectAnswer(
     graphPersisted,
     pendingLifecycle,
   };
+}
+
+/**
+ * Lane 8 — commit-seam Model Management version hook (flag-gated caller).
+ *
+ * Non-blocking contract (mirrors version-event-sink.ts): every failure —
+ * service construction (missing SUPABASE_* env), RPC error, telemetry fault
+ * — is caught and logged at warn; nothing propagates to the turn result.
+ * Idempotency: `event_id` is DETERMINISTIC on the turn id, so a retried
+ * turn (same scenario_id + turn_id) re-drives the same journey event, which
+ * the RPC dedupes by event_id; an identical graph additionally no-op-dedupes
+ * against the current head inside the RPC.
+ */
+async function recordModelVersionForCommit(args: {
+  readonly scenarioId: string;
+  readonly turnId: string;
+  readonly turnClass: ConversationTurnClass;
+  readonly handlerId: V5ActionType | null;
+  readonly graph: unknown;
+  readonly persistedRowId: string;
+}): Promise<void> {
+  try {
+    const service = getModelManagementService();
+    const result = await service.saveVersion({
+      scenario_id: args.scenarioId,
+      graph: args.graph,
+      // Content-free label from turn context (handler id / turn class only).
+      label: `commit:${args.handlerId ?? args.turnClass}`,
+      provenance: 'commit',
+      event_id: `model_version_created_turn_${args.turnId}`,
+    });
+    emit(TelemetryEvents.V5ModelVersionCreated, {
+      scenario_id: args.scenarioId,
+      turn_id: args.turnId,
+      turn_row_id: args.persistedRowId,
+      status:
+        result.status === 'ok'
+          ? result.value.deduped
+            ? 'deduped'
+            : 'ok'
+          : result.status,
+      version_number: result.status === 'ok' ? result.value.version_number : null,
+      graph_identity_hash_prefix:
+        result.status === 'ok' ? result.value.graph_identity_hash.slice(0, 16) : null,
+      error_code: result.status === 'error' ? result.error.code : null,
+      provenance: 'commit',
+    });
+    if (result.status === 'error' || result.status === 'conflict') {
+      log.warn(
+        {
+          scenario_id: args.scenarioId,
+          turn_id: args.turnId,
+          status: result.status,
+          error_code: result.status === 'error' ? result.error.code : 'cas_conflict',
+        },
+        'ModelManagement — version event sink emit failed (commit-seam saveVersion returned non-ok; turn result unaffected)',
+      );
+    }
+  } catch (err) {
+    log.warn(
+      {
+        scenario_id: args.scenarioId,
+        turn_id: args.turnId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      'ModelManagement — version event sink emit failed (commit-seam version hook threw; turn result unaffected)',
+    );
+  }
 }
 
 /**

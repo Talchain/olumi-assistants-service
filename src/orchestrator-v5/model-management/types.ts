@@ -16,6 +16,8 @@
  *        are refused with a typed, recoverable sign-in-required error.
  */
 
+import type { GraphCasConflictCategory } from '../context/graph-cas-conflict.js';
+
 // ---------------------------------------------------------------------------
 // Version rows.
 // ---------------------------------------------------------------------------
@@ -66,12 +68,15 @@ export interface VersionWriteOutcome {
 // ---------------------------------------------------------------------------
 
 /**
- * CAS-conflict vocabulary term. Named `analysis_affecting_conflict` for
- * consistency with the A3 CAS vocabulary. NOTE: defined as a LOCAL string
- * literal because the A3 CAS interface (#346) has not landed on staging —
- * when it does, import the term from its module instead of this constant.
+ * CAS-conflict vocabulary term — BOUND to the landed A3 CAS vocabulary
+ * (src/orchestrator-v5/context/graph-cas-conflict.ts, PR #346): the
+ * `satisfies GraphCasConflictCategory` constraint makes any drift between
+ * this literal and the A3 closed enum a compile error (the queued cleanup
+ * from the pre-#346 local-literal note). Type-only import — no runtime
+ * coupling into the CAS hook.
  */
-export const CAS_CONFLICT_KIND = 'analysis_affecting_conflict' as const;
+export const CAS_CONFLICT_KIND =
+  'analysis_affecting_conflict' as const satisfies GraphCasConflictCategory;
 
 export interface VersionCasConflict {
   readonly kind: typeof CAS_CONFLICT_KIND;
