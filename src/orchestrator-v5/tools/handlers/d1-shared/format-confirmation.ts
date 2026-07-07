@@ -115,6 +115,22 @@ export function formatConstraintUpdated(input: ConstraintAddedInput): string {
   return `Updated constraint: ${input.targetLabel} must be ${phrase} ${value}.`;
 }
 
+/**
+ * Receipt for a goal-target set through the add_constraint goal-threshold
+ * join (lane CEE-W5 Mission B). Names the target honestly and states only
+ * what durably happened (the threshold is stamped on the goal node in the
+ * same committed write); the analysis claim is forward-looking, not a
+ * success claim about existing results. provisional_doctrine_v0.
+ */
+export function formatGoalTargetSet(input: {
+  readonly goalLabel: string;
+  readonly value: number;
+  readonly unit?: string;
+}): string {
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Success target set: ${input.goalLabel} at least ${value}. The next analysis will score your options against this target.`;
+}
+
 export interface EdgeAdjustmentInput {
   readonly fromLabel: string;
   readonly toLabel: string;

@@ -38,6 +38,7 @@ import { D1HandlerError } from './d1-shared/errors.js';
 import {
   formatConstraintAdded,
   formatConstraintUpdated,
+  formatGoalTargetSet,
 } from './d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
@@ -90,6 +91,38 @@ interface ResolvedParams {
   readonly value: number;
   readonly label?: string;
   readonly unit?: string;
+}
+
+/**
+ * Lane CEE-W5 Mission B — goal-threshold join (Gate-item-8 dead-end).
+ *
+ * Resolve the normalisation denominator for a goal success target,
+ * following the draft-extraction doctrine (defaults-v19 GOAL THRESHOLD /
+ * CAP SELECTION, provisional_doctrine_v0):
+ *   1. an existing valid goal_threshold_cap (>= the raw target) wins;
+ *   2. '%' targets within 0–100 normalise against 100;
+ *   3. otherwise a 25% headroom cap above the target (never cap === target,
+ *      which would force goal_threshold = 1.0 and kill probability spread).
+ * Returns null when no sound denominator exists (non-positive target) —
+ * the caller then stamps raw/unit only, which still registers the target
+ * (`has_goal_target` derives from goal_threshold_raw).
+ */
+function resolveGoalThresholdCap(
+  existingCap: unknown,
+  raw: number,
+  unit: string | undefined,
+): number | null {
+  if (
+    typeof existingCap === 'number' &&
+    Number.isFinite(existingCap) &&
+    existingCap > 0 &&
+    existingCap >= raw
+  ) {
+    return existingCap;
+  }
+  if (unit === '%' && raw > 0 && raw <= 100) return 100;
+  if (raw > 0) return raw * 1.25;
+  return null;
 }
 
 function resolveParams(invocation: HandlerInvocation): ResolvedParams {
@@ -291,6 +324,26 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
+      // Lane CEE-W5 Mission B — the goal-threshold JOIN. An `at_least`
+      // constraint whose target IS the goal node is the conversational
+      // "set the success target" intent (tool-schema routes it here;
+      // validation-registry accepts entity kind 'goal'). Historically the
+      // constraint fact landed while the goal node's threshold fields —
+      // the ONLY source `has_goal_target` / the UI goal chip / PLoT's
+      // explicit-threshold path read — stayed unset (Gate-item-8
+      // dead-end). Stamp them in the SAME validated write below (single
+      // derivation from the same params, same sanctioned commit path:
+      // mutated_graph → mergeMutatedGraphForPersistence →
+      // commitDirectAnswer — no new writer). With goal_threshold now
+      // explicit on the goal node, PLoT's auto_goal_threshold synthesis
+      // no longer triggers — the user threshold travels explicitly.
+      //
+      // `at_most` goal constraints deliberately do NOT stamp a threshold:
+      // ISL computes P(samples >= threshold) (MINIMISATION doctrine —
+      // encoding a "keep below" bound as a >=-threshold would invert the
+      // claim). The constraint entry still lands.
+      const isGoalTargetSet = targetNode.kind === 'goal' && operator === '>=';
+
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
         const next = existing
@@ -299,6 +352,24 @@ export function createAddConstraintHandler(): HandlerFn {
             )
           : [...list, constraintParse.data];
         clone.goal_constraints = next;
+        if (isGoalTargetSet) {
+          const goalNode = clone.nodes.find((n) => n.id === targetId);
+          if (goalNode) {
+            const cap = resolveGoalThresholdCap(
+              goalNode.goal_threshold_cap,
+              params.value,
+              newConstraint.unit,
+            );
+            goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
+            if (newConstraint.unit !== undefined) {
+              goalNode.goal_threshold_unit = newConstraint.unit;
+            }
+            if (cap !== null) {
+              goalNode.goal_threshold_cap = cap;
+              goalNode.goal_threshold = params.value / cap; // model units (0–1)
+            }
+          }
+        }
         return {
           before: existing ? (existing as Record<string, unknown>) : null,
           after: constraintParse.data as unknown as Record<string, unknown>,
@@ -337,8 +408,16 @@ export function createAddConstraintHandler(): HandlerFn {
         value: params.value,
         ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
       };
-      const assistantText =
-        existing !== undefined
+      // Goal-target sets get the honest target-naming receipt (the
+      // threshold IS stamped in the committed write above); everything
+      // else keeps the existing constraint copy byte-for-byte.
+      const assistantText = isGoalTargetSet
+        ? formatGoalTargetSet({
+            goalLabel: targetNode.label,
+            value: params.value,
+            ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
+          })
+        : existing !== undefined
           ? formatConstraintUpdated(formatInput)
           : formatConstraintAdded(formatInput);
 
