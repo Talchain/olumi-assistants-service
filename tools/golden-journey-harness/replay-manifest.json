@@ -1,34 +1,62 @@
 {
   "description": "Single source of truth for golden-journey replay fixture expectations. Consumed by BOTH the required unit test (tests/unit/golden-journey-harness/replay-fixtures.test.ts, in-process via evaluateReplayFixture) and the advisory replay-gate script (scripts/ci/golden-journey-replay-gate.sh, out-of-process via the CLI --json-summary). Do not encode these expectations a third time. Exit codes (harness index.ts): 0 = no gating fail, 1 = >=1 gating fail, 2 = fatal (malformed fixture, fail-closed), 3 = auth/preflight/deploy halt (live only). `expected_failing_invariants` pins the exact sorted set of invariant IDs with status 'fail' (gating AND advisory): an advisory classifier that silently stops failing on a mixed-invariant RED fixture is invisible to the exit code alone. Values are CAPTURED, never hand-authored — re-capture with: pnpm tsx tools/golden-journey-harness/index.ts --replay tools/golden-journey-harness/fixtures/<file>.json --out /tmp/r.md --json-summary /tmp/s.json ; then copy failing_invariants. A legitimate classifier/budget change surfaces here as a manifest diff — update it deliberately in the same PR, with the diff explained.",
   "fixtures": [
-    { "file": "golden-journey-v1", "expected_exit": 0, "expected_failing_invariants": [] },
+    {
+      "file": "golden-journey-v1",
+      "expected_exit": 0,
+      "expected_failing_invariants": []
+    },
     {
       "file": "golden-journey-v1-defects",
       "expected_exit": 1,
       "gating_invariant": "A8",
-      "expected_failing_invariants": ["A10", "A11", "A8"]
+      "expected_failing_invariants": [
+        "A10",
+        "A11",
+        "A8"
+      ]
     },
     {
       "file": "golden-journey-v1-f4835349-regression",
       "expected_exit": 0,
-      "expected_failing_invariants": ["A10"]
+      "expected_failing_invariants": [
+        "A10"
+      ]
     },
     {
       "file": "golden-journey-v1-add-risk-rejection",
       "expected_exit": 0,
-      "expected_failing_invariants": ["A10", "A8b"]
+      "expected_failing_invariants": [
+        "A10",
+        "A8b"
+      ]
     },
     {
       "file": "golden-journey-v1-context-drop",
       "expected_exit": 1,
       "gating_invariant": "A12",
-      "expected_failing_invariants": ["A12", "A5"]
+      "expected_failing_invariants": [
+        "A12",
+        "A5"
+      ]
     },
     {
       "file": "golden-journey-v1-false-restore",
       "expected_exit": 1,
       "gating_invariant": "A8",
-      "expected_failing_invariants": ["A1", "A4", "A8"]
+      "expected_failing_invariants": [
+        "A1",
+        "A4",
+        "A8"
+      ]
+    },
+    {
+      "file": "golden-journey-v1-gm-held-ack",
+      "expected_exit": 1,
+      "gating_invariant": "A8",
+      "expected_failing_invariants": [
+        "A8"
+      ]
     }
   ]
 }

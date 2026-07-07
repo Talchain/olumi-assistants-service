@@ -78,6 +78,9 @@ export interface SaveVersionWrite {
   /** Optional write-time CAS: expected CURRENT HEAD identity hash,
    *  evaluated in-transaction by the RPC under the scenarios row lock. */
   readonly expected_graph_identity_hash?: string;
+  /** Optional caller-supplied journey event id (idempotency key; the RPC
+   *  mints a row-keyed id when absent). */
+  readonly event_id?: string;
 }
 
 export interface RestoreVersionWrite {
@@ -142,7 +145,9 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
       p_hash_algorithm: write.hash_algorithm,
       p_label: write.label ?? null,
       p_provenance: write.provenance ?? null,
-      p_event_id: null, // RPC mints a deterministic id keyed on the new row
+      // Caller-supplied idempotency key when present (commit-seam hook:
+      // deterministic on the turn id); else the RPC mints a row-keyed id.
+      p_event_id: write.event_id ?? null,
       p_expected_graph_identity_hash: write.expected_graph_identity_hash ?? null,
     });
     if (error) {

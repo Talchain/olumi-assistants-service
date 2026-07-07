@@ -47,6 +47,13 @@ export interface SaveVersionRequest {
   readonly provenance?: string;
   /** Optional write-time CAS: expected current-head identity hash. */
   readonly expected_graph_identity_hash?: string;
+  /**
+   * Optional caller-supplied journey event id (idempotency key). When set,
+   * the RPC uses it verbatim instead of minting one keyed on the new row —
+   * the commit-seam hook passes a value DETERMINISTIC on the turn id so a
+   * retried turn re-drives the same event (deduped RPC-side by event_id).
+   */
+  readonly event_id?: string;
 }
 
 export interface RestoreVersionRequest {
@@ -117,6 +124,7 @@ export class ModelManagementService {
         ...(request.expected_graph_identity_hash !== undefined
           ? { expected_graph_identity_hash: request.expected_graph_identity_hash }
           : {}),
+        ...(request.event_id !== undefined ? { event_id: request.event_id } : {}),
       }),
     );
   }

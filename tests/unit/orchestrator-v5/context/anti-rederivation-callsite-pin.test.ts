@@ -94,7 +94,12 @@ const EXPECTED: Record<string, Record<string, number>> = {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 2, // approved seam (canonical-state composition)
     'src/orchestrator-v5/turn-executor.ts': 3, // approved assembly seam (frozen file)
     'src/orchestrator-v5/handlers/chip-click-dispatch.ts': 3, // TOLERATED ad-hoc debt — do not add more
-    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 2, // TOLERATED ad-hoc debt — do not add more
+    // 2026-07-07 lane-8: +2 — the GM referee gate's pre-edit freshness
+    // re-projection (strict persisted-base frame authority for the referee's
+    // R2 stale gate; see edit-graph-referee-gate.ts + lane-8 evidence report).
+    // Deliberate, reviewed; still ad-hoc debt — migrate with the frame-consumer
+    // audit, do not add more.
+    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 4,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)

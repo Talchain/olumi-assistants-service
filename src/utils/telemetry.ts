@@ -708,6 +708,30 @@ export const TelemetryEvents = {
   // field set as V5GraphCasEvaluated.
   V5GraphCasWriteBlocked: "v5.graph_cas.write_blocked",
 
+  // Graph Management referee (CEE_GRAPH_MANAGEMENT_MODE != 'off'). One event
+  // per refereed CandidateMutationEnvelope, name = the verdict (T4.0 §5
+  // no-silent-outcome contract: every held/stale/rejected/clarify verdict
+  // has exactly one event). REDACTED payload (graph-management/telemetry.ts
+  // mutationTelemetryEvent + the seam's mode/dispatch fields): closed-enum
+  // kind/verdict/mutation_class/blocker_code, base_hash_match boolean,
+  // provenance source, scenario/turn ids, latency — NEVER payload values,
+  // labels, or candidate graph internals. `mode` ('shadow' | 'live') rides
+  // alongside so dashboards can split observation from routing.
+  V5CandidateMutationWouldApply: "v5.candidate_mutation.would_apply",
+  V5CandidateMutationHeld: "v5.candidate_mutation.held",
+  V5CandidateMutationStale: "v5.candidate_mutation.stale",
+  V5CandidateMutationRejected: "v5.candidate_mutation.rejected",
+  V5CandidateMutationClarifyRequired: "v5.candidate_mutation.clarify_required",
+
+  // Model Management (CEE_MODEL_VERSIONS_ENABLED) — commit-seam version hook.
+  // Emitted AFTER a durable graph-bearing commit when the fire-and-forget
+  // saveVersion call resolves. Content-free: scenario/turn ids, outcome
+  // status ('ok' | 'deduped' | 'disabled' | 'conflict' | 'error'),
+  // version_number, 16-hex-prefixed graph_identity_hash, error code — never
+  // graph content or labels. Non-blocking contract: emit/save failures log
+  // and NEVER affect the turn result.
+  V5ModelVersionCreated: "v5.model_versions.version_created",
+
   // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching
   // LIFECYCLE is derived (prior pre-dispatch snapshot vs current pre-dispatch coaching_state
   // + per-source evaluability). Same privacy contract as the other coaching events: STANDARD

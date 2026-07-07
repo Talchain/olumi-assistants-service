@@ -16,7 +16,7 @@
  * applied `candidate_id` resolves to PROPOSAL_ALREADY_APPLIED (idempotency).
  */
 import { PROPOSAL_ALREADY_APPLIED } from './reason-codes.js';
-import type { MutationBlocker, RefereeVerdict } from './types.js';
+import type { CandidateMutationEnvelope, MutationBlocker, RefereeVerdict } from './types.js';
 
 /**
  * Local mirror of the `apply_proposed_change` (standard) PendingActionAction
@@ -79,4 +79,74 @@ export function idempotencyBlocker(candidateId: string, ledger: AppliedLedger): 
         readable: 'This candidate has already been applied; re-presenting it is a no-op.',
       }
     : null;
+}
+
+// ---------------------------------------------------------------------------
+// §6.7 supersession — a newer candidate targeting the same entity supersedes
+// the older held one. MODULE-LOCAL and PURE: no persistence, no store reads.
+// The live wiring realises supersession by keying the held pending's public
+// handle on `mutationTargetKey`, so the commit-time carry-forward's existing
+// same-key supersession rule ("newer wins") retires the older held offer.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stable target key for a PARSED candidate envelope — the entity the mutation
+ * touches. Two candidates with the same key compete for the same entity, so
+ * only the newest may stay held (no stacked, contradictory holds).
+ * Content-free: ids only, never labels/values.
+ */
+export function mutationTargetKey(env: CandidateMutationEnvelope): string {
+  switch (env.kind) {
+    case 'add_node':
+      return `node:${env.payload.node.id}`;
+    case 'rename_node':
+    case 'update_node_field':
+    case 'remove_node':
+      return `node:${env.payload.node_id}`;
+    case 'add_option':
+      return `node:${env.payload.option.id}`;
+    case 'add_edge':
+      return `edge:${env.payload.edge.from}->${env.payload.edge.to}`;
+    case 'update_edge_field':
+    case 'remove_edge':
+      return `edge:${env.payload.from_node}->${env.payload.to_node}`;
+    case 'flag_uncertainty':
+    case 'clarification':
+      return `ref:${env.payload.target_ref}`;
+    default: {
+      const _never: never = env;
+      return _never;
+    }
+  }
+}
+
+/**
+ * §6.7 predicate: does `newer` supersede `older` in the held set?
+ * True iff both target the same entity (same {@link mutationTargetKey}) and
+ * the newer envelope is a DIFFERENT candidate (a re-presented identical
+ * candidate_id is the idempotency path, not supersession).
+ */
+export function supersedesHeldCandidate(
+  older: CandidateMutationEnvelope,
+  newer: CandidateMutationEnvelope,
+): boolean {
+  return (
+    older.candidate_id !== newer.candidate_id &&
+    mutationTargetKey(older) === mutationTargetKey(newer)
+  );
+}
+
+/**
+ * Collapse a held-candidate list (oldest → newest order) to the surviving
+ * set: for each target key only the NEWEST candidate remains. Order of the
+ * survivors follows the input order of their final occurrence. Pure.
+ */
+export function collapseSupersededHeld(
+  held: readonly CandidateMutationEnvelope[],
+): readonly CandidateMutationEnvelope[] {
+  const latestByKey = new Map<string, CandidateMutationEnvelope>();
+  for (const env of held) {
+    latestByKey.set(mutationTargetKey(env), env);
+  }
+  return [...latestByKey.values()];
 }

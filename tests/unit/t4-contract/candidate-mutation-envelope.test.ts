@@ -1,106 +1,45 @@
 /**
- * T4.0 — Candidate mutation envelope v1: EXECUTABLE SPEC (isolated, off-path).
+ * T4.0 — Candidate mutation envelope v1: EXECUTABLE SPEC.
  *
- * This file is the machine-checkable form of
- * `Docs/t4/dual-model-typed-mutation-handoff-contract.md` §1–§2 (schema gate).
- * It exists so the hand-off contract cannot silently rot before T4 opens: the
- * envelope's fail-closed properties (unknown version, unknown kind, extra
- * fields, missing provenance → reject) are asserted on every required CI run.
+ * REPOINTED (ISSUE-9026, lane 8, 2026-07-07): this spec now asserts against
+ * the SHARED module export — `CandidateMutationEnvelopeV1` from
+ * src/orchestrator-v5/graph-management — instead of the pre-ratification
+ * inline shape. The inline schema is RETIRED (both shapes must never stay
+ * alive); the module schema is the single executable form of
+ * `Docs/t4/dual-model-typed-mutation-handoff-contract.md` §1–§2.
  *
- * DELIBERATELY ISOLATED: the schema is defined inline and imports nothing from
- * `src/` — no turn-executor, no context frame, no freshness, no persistence,
- * no dual-draft (T3) code. When the T4 typed-mutation slice opens, the real
- * module is cut from the contract doc and THIS spec is repointed at it (the
- * assertions must survive verbatim; only the import changes).
+ * PARITY VERIFICATION (the deferred ISSUE-9026 check, reconciled
+ * assertion-by-assertion — every delta below is a deliberate round-3
+ * contract alignment where the RATIFIED module shape supersedes the
+ * pre-ratification inline sketch; full log in
+ * Docs/lanes/lane8-gm-mm-live-integration-evidence.md):
+ *   1. add_node payload — inline permissive `{ node: record }` → module
+ *      STRICT `{ node: { id, kind∈NodeKind, label } }`; fixture gains
+ *      `kind: 'factor'` (strictness increased, fail-closed direction).
+ *   2. add_option payload — inline `{ option: record }` → module strict
+ *      option shape; fixture gains the REQUIRED `edges: []` array.
+ *   3. update_edge_field — inline `{ edge_id, … }` → module names the edge
+ *      by its endpoints `{ from_node, to_node, field, from, to }` (edges
+ *      have no standalone id in GraphV3).
+ *   4. remove_node — inline `{ id, reason }` → module `{ node_id, reason }`.
+ *   5. remove_edge — inline `{ id, reason }` → module
+ *      `{ from_node, to_node, reason }` (same endpoint-naming rationale).
+ *   6. rename_node — inline REQUIRED `from_label` → module makes it
+ *      OPTIONAL (`to_label` stays required); the fixture keeps supplying it,
+ *      so the assertion body survives verbatim.
+ *   All rejection assertions (unknown version / unknown kind / extra
+ *   top-level fields / extra payload fields per kind / missing provenance /
+ *   empty evidence_pointer / missing + null base_graph_hash) survive
+ *   VERBATIM. The former "no imports from src/" isolation guard is RETIRED
+ *   per the hook's own conversion instructions — importing the shared
+ *   export is now the point (enforced by future-hooks-registry.test.ts).
  */
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
 
-// ---------------------------------------------------------------------------
-// Contract §1 — CandidateMutationEnvelope v1 (inline executable spec)
-// ---------------------------------------------------------------------------
-
-const CANDIDATE_KINDS = [
-  'add_node',
-  'add_edge',
-  'update_node_field',
-  'update_edge_field',
-  'rename_node',
-  'add_option',
-  'remove_node',
-  'remove_edge',
-  'flag_uncertainty',
-  'clarification',
-] as const;
-
-const ProvenanceSchema = z
-  .object({
-    source: z.enum(['dual_model_m2', 'edit_graph_llm', 'flip_proposal', 'user_direct']),
-    evidence_pointer: z.string().min(1),
-    rationale: z.string().optional(),
-    model_id: z.string().optional(),
-  })
-  .strict();
-
-const IdentitySchema = z
-  .object({
-    scenario_id: z.string().min(1),
-    turn_id: z.string().min(1),
-  })
-  .strict();
-
-/**
- * Per-kind payloads. v1 keeps them minimal but ALREADY `.strict()` — the
- * fail-closed property under test is structural (extra/unknown fields reject),
- * not the field inventory, which the T4 slice will widen per the contract.
- */
-const PayloadByKind = {
-  add_node: z.object({ node: z.record(z.unknown()) }).strict(),
-  add_edge: z.object({ edge: z.record(z.unknown()) }).strict(),
-  update_node_field: z
-    .object({ node_id: z.string().min(1), field: z.string().min(1), from: z.unknown(), to: z.unknown() })
-    .strict(),
-  update_edge_field: z
-    .object({ edge_id: z.string().min(1), field: z.string().min(1), from: z.unknown(), to: z.unknown() })
-    .strict(),
-  rename_node: z
-    .object({ node_id: z.string().min(1), from_label: z.string().min(1), to_label: z.string().min(1) })
-    .strict(),
-  add_option: z.object({ option: z.record(z.unknown()) }).strict(),
-  remove_node: z.object({ id: z.string().min(1), reason: z.string().min(1) }).strict(),
-  remove_edge: z.object({ id: z.string().min(1), reason: z.string().min(1) }).strict(),
-  flag_uncertainty: z.object({ target_ref: z.string().min(1), question: z.string().min(1) }).strict(),
-  clarification: z.object({ target_ref: z.string().min(1), question: z.string().min(1) }).strict(),
-} satisfies Record<(typeof CANDIDATE_KINDS)[number], z.ZodTypeAny>;
-
-function envelopeBranch<K extends (typeof CANDIDATE_KINDS)[number]>(kind: K) {
-  return z
-    .object({
-      envelope_version: z.literal(1),
-      candidate_id: z.string().uuid(),
-      kind: z.literal(kind),
-      base_graph_hash: z.string().min(1), // null/absent FORBIDDEN — stale gate needs it
-      payload: PayloadByKind[kind],
-      provenance: ProvenanceSchema,
-      identity: IdentitySchema,
-    })
-    .strict();
-}
-
-// Explicit tuple (no cast): zod's discriminatedUnion type-checks every branch.
-// Totality vs CANDIDATE_KINDS is enforced by the valid-example loop below.
-const CandidateMutationEnvelopeV1 = z.discriminatedUnion('kind', [
-  envelopeBranch('add_node'),
-  envelopeBranch('add_edge'),
-  envelopeBranch('update_node_field'),
-  envelopeBranch('update_edge_field'),
-  envelopeBranch('rename_node'),
-  envelopeBranch('add_option'),
-  envelopeBranch('remove_node'),
-  envelopeBranch('remove_edge'),
-  envelopeBranch('flag_uncertainty'),
-  envelopeBranch('clarification'),
-]);
+import {
+  CANDIDATE_KINDS,
+  CandidateMutationEnvelopeV1,
+} from '../../../src/orchestrator-v5/graph-management/index.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures — one VALID example per kind (contract §6.1)
@@ -118,22 +57,40 @@ const BASE = {
 } as const;
 
 const VALID_BY_KIND: Record<(typeof CANDIDATE_KINDS)[number], unknown> = {
-  add_node: { ...BASE, kind: 'add_node', payload: { node: { id: 'n-risk-1', label: 'Churn risk' } } },
+  // Delta 1 (ratified strictness): node requires id + kind + label.
+  add_node: {
+    ...BASE,
+    kind: 'add_node',
+    payload: { node: { id: 'n-risk-1', kind: 'risk', label: 'Churn risk' } },
+  },
   add_edge: { ...BASE, kind: 'add_edge', payload: { edge: { from: 'n-1', to: 'n-2' } } },
   update_node_field: {
     ...BASE,
     kind: 'update_node_field',
     payload: { node_id: 'n-1', field: 'label', from: 'Old', to: 'New' },
   },
+  // Delta 3 (ratified naming): edges are addressed by endpoints, not edge_id.
   update_edge_field: {
     ...BASE,
     kind: 'update_edge_field',
-    payload: { edge_id: 'e-1', field: 'strength', from: 'weak', to: 'strong' },
+    payload: { from_node: 'n-1', to_node: 'n-2', field: 'strength', from: 'weak', to: 'strong' },
   },
+  // Delta 6: from_label is OPTIONAL in the ratified shape; supplying it stays valid.
   rename_node: { ...BASE, kind: 'rename_node', payload: { node_id: 'n-1', from_label: 'A', to_label: 'B' } },
-  add_option: { ...BASE, kind: 'add_option', payload: { option: { id: 'opt-3', label: 'Hybrid' } } },
-  remove_node: { ...BASE, kind: 'remove_node', payload: { id: 'n-9', reason: 'duplicate of n-2' } },
-  remove_edge: { ...BASE, kind: 'remove_edge', payload: { id: 'e-9', reason: 'no causal support' } },
+  // Delta 2 (ratified strictness): option requires its edges[] linkage array.
+  add_option: {
+    ...BASE,
+    kind: 'add_option',
+    payload: { option: { id: 'opt-3', label: 'Hybrid', edges: [] } },
+  },
+  // Delta 4: node_id, not id.
+  remove_node: { ...BASE, kind: 'remove_node', payload: { node_id: 'n-9', reason: 'duplicate of n-2' } },
+  // Delta 5: endpoint naming, not id.
+  remove_edge: {
+    ...BASE,
+    kind: 'remove_edge',
+    payload: { from_node: 'n-1', to_node: 'n-9', reason: 'no causal support' },
+  },
   flag_uncertainty: {
     ...BASE,
     kind: 'flag_uncertainty',
@@ -150,7 +107,7 @@ const VALID_BY_KIND: Record<(typeof CANDIDATE_KINDS)[number], unknown> = {
 // Spec
 // ---------------------------------------------------------------------------
 
-describe('T4.0 candidate mutation envelope v1 — executable spec', () => {
+describe('T4.0 candidate mutation envelope v1 — executable spec (module export)', () => {
   describe('accepts one valid example per kind (contract §6.1)', () => {
     for (const kind of CANDIDATE_KINDS) {
       it(`parses a valid ${kind} envelope`, () => {
@@ -205,28 +162,6 @@ describe('T4.0 candidate mutation envelope v1 — executable spec', () => {
     it('rejects a null base_graph_hash', () => {
       const bad = { ...(VALID_BY_KIND.add_edge as object), base_graph_hash: null };
       expect(CandidateMutationEnvelopeV1.safeParse(bad).success).toBe(false);
-    });
-  });
-
-  describe('isolation guard (contract §0 — off-path until T4 opens)', () => {
-    it('no file in tests/unit/t4-contract/ imports from src/ (fail-closed against premature wiring)', async () => {
-      const { readFileSync, readdirSync } = await import('node:fs');
-      const { dirname, join } = await import('node:path');
-      const { fileURLToPath } = await import('node:url');
-      const dir = dirname(fileURLToPath(import.meta.url));
-      const files = readdirSync(dir).filter((f) => f.endsWith('.ts'));
-      // Non-vacuous by construction: the directory must contain at least this
-      // spec, and every spec must import at least vitest (review finding: a
-      // zero-match scan previously passed without asserting anything).
-      expect(files.length).toBeGreaterThan(0);
-      for (const file of files) {
-        const source = readFileSync(join(dir, file), 'utf-8');
-        const importLines = source.split('\n').filter((l) => /^\s*import\s/.test(l));
-        expect(importLines.length).toBeGreaterThanOrEqual(1);
-        for (const line of importLines) {
-          expect(line).not.toMatch(/from\s+['"][^'"]*(src\/|\.\.\/\.\.\/src)/);
-        }
-      }
     });
   });
 });

@@ -84,6 +84,11 @@ import {
   findProposedConceptAction,
   resolveProposalResume,
 } from '../coaching/proposal-continuation.js';
+import {
+  evaluateEditGraphMutations,
+  type EditGmDecision,
+} from './edit-graph-referee-gate.js';
+import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
 
@@ -1590,6 +1595,10 @@ export async function dispatchEditGraph(
   let expectedGraphCasHashes:
     | ReturnType<typeof computeExpectedGraphCasHashes>
     | undefined;
+  // Graph Management (lane 8): frame-authority PRE-edit base for the referee
+  // gate — the strict persisted read when available, else the ingress echo
+  // (the same fallback rule the persistence merge applies).
+  let gmFrameBase: unknown = graphState;
   if (successfulAppliedMutation) {
     let strictBase: unknown;
     try {
@@ -1619,6 +1628,7 @@ export async function dispatchEditGraph(
     if (config.features.graphCasMode !== 'off') {
       expectedGraphCasHashes = computeExpectedGraphCasHashes(strictBase ?? null);
     }
+    gmFrameBase = strictBase ?? graphState;
     persistedPostEditGraph = mergeAppliedGraphForPersistence({
       appliedGraph: editResult.appliedGraph!,
       // null here = a GENUINELY empty scenarios.graph (the strict read
@@ -1765,6 +1775,125 @@ export async function dispatchEditGraph(
         edit_was_rejected: editResult.wasRejected,
         derivation_error: err instanceof Error ? err.message : String(err),
       },
+    );
+  }
+
+  // ── Graph Management referee gate (lane 8, CEE_GRAPH_MANAGEMENT_MODE) ──
+  // off: zero referee calls, byte-identical path (pinned by
+  // edit-graph-dispatch-graph-management-modes.test.ts). shadow: the referee
+  // evaluates every envelope and emits redacted v5.candidate_mutation.*
+  // telemetry; the existing path proceeds UNCHANGED. live: blocked verdicts
+  // route below — the mutation is NOT persisted, no ack prose, no edit fact,
+  // no analysis_ready stamp (structural honesty). GM never writes graph
+  // state itself; the single durable writer remains commitDirectAnswer.
+  const gmMode = config.features.graphManagementMode;
+  let gmDecision: EditGmDecision | null = null;
+  let gmCurrentHash: string | null = null;
+  if (gmMode !== 'off' && successfulAppliedMutation && (editResult.operations?.length ?? 0) > 0) {
+    try {
+      gmCurrentHash = computeAnalysisAffectingGraphHash(
+        gmFrameBase as GraphStateIngress | null | undefined,
+      );
+    } catch {
+      gmCurrentHash = null; // frame gate fails closed (unreadable → held)
+    }
+    let gmBaseHash: string | null = null;
+    try {
+      // The hash of the graph the candidate ops were generated against (the
+      // ingress echo handleEditGraph edited). When the frame base IS the
+      // ingress (no persisted graph), the two are identical by construction.
+      gmBaseHash =
+        gmFrameBase === graphState
+          ? gmCurrentHash
+          : computeAnalysisAffectingGraphHash(graphState as GraphStateIngress | null | undefined);
+    } catch {
+      gmBaseHash = null;
+    }
+    // PRE-edit freshness for the frame: was the last analysis current
+    // against the graph the candidates were generated on? Re-uses the SAME
+    // prior facts the post-edit derivation loaded (pure re-projection, no
+    // extra I/O). A degraded prior-fact load fails closed to 'unknown'.
+    const gmFreshness: FrameFreshness =
+      freshness.reason === 'derivation_failed'
+        ? 'unknown'
+        : deriveAnalysisFreshness(priorFactsForRecovery, gmCurrentHash).freshness;
+    gmDecision = evaluateEditGraphMutations({
+      mode: gmMode,
+      operations: editResult.operations!,
+      rationales: editResult.operation_meta?.map((m) => m?.rationale),
+      currentGraph: gmFrameBase,
+      currentGraphHash: gmCurrentHash,
+      baseGraphHash: gmBaseHash,
+      freshness: gmFreshness,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+  }
+  const gmBlockedApply = gmDecision !== null && gmDecision.blockApply;
+  // Structural honesty: every downstream success effect (persist, edit fact,
+  // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
+  // live-blocked verdict can never surface an applied-mutation signal.
+  const effectiveAppliedMutation = successfulAppliedMutation && !gmBlockedApply;
+  if (gmBlockedApply && gmDecision !== null) {
+    // Replace the V4 success narration wholesale: verdict template text
+    // (provisional_doctrine_v0), verdict-appropriate chips, and a redacted
+    // public-reason details block (codes + fixed readables only — never
+    // RefereeVerdict.candidate internals). The finaliser egress guard below
+    // still backstops this copy like every other emit path.
+    response = {
+      ...response,
+      assistant_text: gmDecision.assistantText ?? response.assistant_text,
+      suggested_actions: (gmDecision.suggestedActions ?? []).map((c) => ({
+        id: c.id,
+        label: c.label,
+        message: c.message,
+        ...(c.action_type !== undefined ? { action_type: c.action_type } : {}),
+      })),
+      ...(gmDecision.publicReason !== null
+        ? {
+            blocks: [
+              {
+                type: 'error',
+                error_code: 'INTERNAL_ERROR',
+                severity: 'warn',
+                details: gmDecision.publicReason,
+              },
+            ] as OlumiResponse['blocks'],
+          }
+        : {}),
+    };
+    // The graph did NOT change this turn — re-derive the wire freshness
+    // against the UNCHANGED frame base so staleness is never claimed off an
+    // unpersisted mutation. A derivation_failed verdict is kept as-is
+    // (honest degradation beats a fabricated re-derivation).
+    if (freshness.reason !== 'derivation_failed') {
+      freshness = deriveAnalysisFreshness(
+        priorFactsForRecovery,
+        gmCurrentHash,
+        config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(gmFrameBase)
+          : undefined,
+      );
+    }
+    // R7 per-turn event honesty: the mutation did not apply.
+    ev.branch = `graph_management_${gmDecision.governing}`;
+    ev.outcome =
+      gmDecision.governing === 'rejected'
+        ? 'rejected'
+        : gmDecision.governing === 'held'
+          ? 'proposal'
+          : 'clarify';
+    log.info(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        mode: gmMode,
+        governing: gmDecision.governing,
+        verdict_counts: gmDecision.verdictCounts,
+        pending_emitted: (gmDecision.pendingActions?.length ?? 0) > 0,
+      },
+      'V5 edit_graph — Graph Management live gate blocked the apply path (mutation NOT persisted)',
     );
   }
 
@@ -2047,7 +2176,9 @@ export async function dispatchEditGraph(
   // committed — gated by `successfulAppliedMutation` (Codex round-2
   // P1) so an impossible appliedGraph+empty-operations shape cannot
   // stamp analysis_ready from an unpersisted graph.
-  const analysisReady: AnalysisReadyPayload | undefined = successfulAppliedMutation
+  // Lane 8: gated on the EFFECTIVE predicate — a GM-live-blocked mutation
+  // must not stamp analysis_ready from a graph that was never persisted.
+  const analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? computeStructuralReadiness(editResult.appliedGraph!)
     : undefined;
 
@@ -2108,7 +2239,10 @@ export async function dispatchEditGraph(
     let richBuilderThrew = false;
     let richBuilderError: Error | undefined;
     try {
-      editGraphFact = buildEditGraphHandlerFact(factBuilderInput);
+      // Lane 8: a GM-live-blocked mutation persists NO graph, so it must
+      // also emit NO edit receipt fact (the builders derive "applied" from
+      // editResult alone and cannot see the block).
+      editGraphFact = gmBlockedApply ? null : buildEditGraphHandlerFact(factBuilderInput);
     } catch (err) {
       richBuilderThrew = true;
       richBuilderError = err instanceof Error ? err : new Error(String(err));
@@ -2120,7 +2254,7 @@ export async function dispatchEditGraph(
     // outcomes (rejected, noop, zero-ops) skip this entirely.
     let genericBuilderThrew = false;
     let genericBuilderError: Error | undefined;
-    if (!editGraphFact && successfulAppliedMutation) {
+    if (!editGraphFact && effectiveAppliedMutation) {
       try {
         editGraphFact = buildGenericEditGraphHandlerFact(factBuilderInput);
       } catch (fallbackErr) {
@@ -2173,7 +2307,7 @@ export async function dispatchEditGraph(
     // before reaching `commitDirectAnswer`. We never commit the
     // pair {graph: appliedGraph, handler_facts: []} for an applied
     // mutation.
-    if (!editGraphFact && successfulAppliedMutation) {
+    if (!editGraphFact && effectiveAppliedMutation) {
       log.error(
         {
           request_id: requestId,
@@ -2218,7 +2352,7 @@ export async function dispatchEditGraph(
     // same object every hash in this dispatch derived from keeps
     // wire freshness, pending-action hashes and the next turn's
     // persisted-graph hash in lockstep.
-    const graphForCommit = successfulAppliedMutation
+    const graphForCommit = effectiveAppliedMutation
       ? persistedPostEditGraph ?? undefined
       : undefined;
     // V5 P0 — when the early-emit intercept or the no-op recovery
@@ -2250,6 +2384,20 @@ export async function dispatchEditGraph(
       );
       pendingActionsForCommit = [proposalPendingForCommit, ...chipDerived].slice(0, 3);
     }
+    // Lane 8: a GM-live HELD verdict persists its REAL pending confirmation
+    // (apply_proposed_change; resume is structurally decline-with-clarify —
+    // see edit-graph-referee-gate.ts). Mutually exclusive with the proposal
+    // path above (that path requires a non-applied editResult; GM only
+    // engages on applied ones), but GM wins deterministically if both ever
+    // co-occur.
+    if (
+      gmBlockedApply &&
+      gmDecision !== null &&
+      gmDecision.pendingActions !== null &&
+      gmDecision.pendingActions.length > 0
+    ) {
+      pendingActionsForCommit = [...gmDecision.pendingActions].slice(0, 3);
+    }
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -2274,8 +2422,11 @@ export async function dispatchEditGraph(
       // A3 graph CAS: expected-base hashes from the strict server read above
       // (undefined when no applied mutation / mode off — the CAS hook only
       // runs for graph-bearing writes, and `graph` is only set on applied
-      // mutations, so coverage is complete on this path).
-      ...(expectedGraphCasHashes !== undefined ? expectedGraphCasHashes : {}),
+      // mutations, so coverage is complete on this path). Lane 8: omitted on
+      // a GM-live-blocked turn — no graph is written, so no CAS observation.
+      ...(expectedGraphCasHashes !== undefined && !gmBlockedApply
+        ? expectedGraphCasHashes
+        : {}),
       ...(pendingActionsForCommit !== undefined
         ? { pending_actions: pendingActionsForCommit }
         : {}),
@@ -2317,8 +2468,9 @@ export async function dispatchEditGraph(
       // nodes/edges — so the typed value is kept rather than casting
       // the raw merged object. Null when no successful applied
       // mutation, so route-v2 doesn't stamp a non-persisted graph
-      // onto the wire envelope.
-      graph: successfulAppliedMutation ? editResult.appliedGraph ?? null : null,
+      // onto the wire envelope. Lane 8: EFFECTIVE predicate — a GM-live
+      // blocked mutation never surfaces its unpersisted graph.
+      graph: effectiveAppliedMutation ? editResult.appliedGraph ?? null : null,
       freshness,
     };
   } catch (err) {

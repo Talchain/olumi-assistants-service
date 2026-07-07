@@ -39,13 +39,18 @@ function collectModuleSourceFiles(dir: string): string[] {
 const moduleFiles = collectModuleSourceFiles(moduleDir);
 
 /** The ONLY cross-boundary seam targets a production file may import from. NOTE:
- *  graph-hash.js is DELIBERATELY absent — Track 3 consumes the hash via the frame. */
+ *  graph-hash.js is DELIBERATELY absent — Track 3 consumes the hash via the frame.
+ *  context/frame/types.js is the SANCTIONED type-only seam for the
+ *  CanonicalContextFrame → MutationFrame adapter (lane 8 live wiring): import
+ *  direction is graph-management → context/frame types, never the reverse,
+ *  and the frame types module carries no hash-derivation runtime. */
 const ALLOWED_RESOLVED = new Set(
   [
     '../tools/handlers/d1-shared/apply-graph-mutation.js',
     '../tools/handlers/d1-shared/errors.js',
     '../tools/handlers/analysis-ready-core.js',
     '../../schemas/cee-v3.js',
+    '../context/frame/types.js',
   ].map((s) => resolve(moduleDir, s)),
 );
 

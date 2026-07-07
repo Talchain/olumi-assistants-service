@@ -1,10 +1,13 @@
 /**
- * Model Management v1 — module entry (Layer 2, DARK).
+ * Model Management v1 — module entry (Layer 2).
  *
- * ZERO production call sites this slice: nothing in routes, the
- * turn-executor, or any live path imports this module (Track 3 isolation
- * discipline). The factory below exists so the later, separately-reviewed
- * wiring slice has a single seam to consume.
+ * ONE sanctioned production call site (lane 8, 2026-07-07): the flag-gated
+ * commit-seam version hook in src/orchestrator-v5/commit.ts consumes
+ * `getModelManagementService()` after a durable graph-bearing append when
+ * CEE_MODEL_VERSIONS_ENABLED is true (fire-and-forget; failures never affect
+ * the turn). Everything else (routes, turn-executor, restore/compare
+ * surfaces) remains unwired; isolation-guards.test.ts enforces the exact
+ * call-site set.
  *
  * Env-read pattern — call-time, not module-load (mirrors
  * session/index.ts and its documented rationale): tests can stub env
