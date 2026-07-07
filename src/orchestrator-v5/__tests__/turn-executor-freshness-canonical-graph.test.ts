@@ -24,8 +24,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { finaliseV5Response } from '../response-finaliser.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -373,6 +376,85 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(evt!.data.freshness).toBe('unknown');
     expect(evt!.data.reason).toBe('current_graph_hash_unavailable');
     expect(evt!.data.current_graph_hash).toBeNull();
+  });
+
+  it('legacy/unparseable persisted graph reload ships analysis_ready.freshness=unknown on the wire (Mission 3)', async () => {
+    // The TRUE gap the Codex round-3 P1 test above does not hit: that test
+    // passes a VALID request graphState, so GraphV3 parse succeeds and a
+    // structural readiness payload ships anyway. On a real reload of a
+    // legacy/unparseable scenario the request carries NO graphState either —
+    // readiness is never computed, and pre-Mission-3 the honest 'unknown'
+    // verdict was dropped at the finaliser because freshness had no
+    // analysis_ready carrier. This test composes the run result into the
+    // finaliser exactly as route-v2's turn-executor exit does and asserts
+    // the verdict now rides the wire in a minimal science-free block.
+    installPriorRunAnalysisFact(PRE_EDIT_HASH);
+    (global as Record<string, unknown>).__test_persisted_graph = {
+      nodes: 'not-an-array',
+      edges: [],
+    };
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkTextResult('explanation after reload of legacy scenario'),
+    );
+
+    const run = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'what did the analysis say?' },
+      'req-m3-freshness-only',
+      { routingAdapter },
+    );
+
+    // Gap preconditions: verdict computed, readiness not.
+    expect(run.analysisReady).toBeUndefined();
+    expect(run.freshness?.freshness).toBe('unknown');
+    expect(run.freshness?.reason).toBe('current_graph_hash_unavailable');
+
+    // Mirror route-v2's turn-executor exit context (route-v2.ts sendFinalised200).
+    const finalised = finaliseV5Response(run.response, {
+      analysisReady: run.analysisReady,
+      ...(run.freshness ? { freshness: run.freshness } : {}),
+    });
+
+    const ar = finalised.analysis_ready as Record<string, unknown>;
+    expect(ar, 'freshness-only analysis_ready must ship on the wire').toBeDefined();
+    expect(ar.freshness).toBe('unknown');
+    expect(ar.freshness_reason).toBe('current_graph_hash_unavailable');
+    expect(ar.status).toBe('blocked');
+    expect(ar.options).toEqual([]);
+    expect(ar.bias_findings).toEqual([]);
+    // Science-free carrier: no claim-bearing keys.
+    expect('blockers' in ar).toBe(false);
+    expect('model_adjustments' in ar).toBe(false);
+    expect('user_questions' in ar).toBe(false);
+    OlumiResponseSchema.parse(finalised);
+  });
+
+  it('same reload with NO prior analysis (freshness none) still omits analysis_ready', async () => {
+    // Counter-pin: synthesis only carries an existing verdict about a prior
+    // analysis. With no run_analysis fact the verdict is 'none' and the
+    // wire stays clean — no block is invented.
+    (global as Record<string, unknown>).__test_persisted_graph = {
+      nodes: 'not-an-array',
+      edges: [],
+    };
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkTextResult('nothing analysed yet'),
+    );
+
+    const run = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'what is here?' },
+      'req-m3-none',
+      { routingAdapter },
+    );
+
+    expect(run.analysisReady).toBeUndefined();
+    expect(run.freshness?.freshness).toBe('none');
+
+    const finalised = finaliseV5Response(run.response, {
+      analysisReady: run.analysisReady,
+      ...(run.freshness ? { freshness: run.freshness } : {}),
+    });
+    expect('analysis_ready' in finalised).toBe(false);
+    OlumiResponseSchema.parse(finalised);
   });
 
   it('falls back to request graphState when persisted graph is absent (first-draft turn)', async () => {

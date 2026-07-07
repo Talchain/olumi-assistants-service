@@ -15,7 +15,7 @@
  * integration test (see `tests/integration/orchestrator/route-v2-chip-click-explain.test.ts`).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -617,7 +617,18 @@ describe('dispatchDeterministicChipClick — happy-path prior-fact reconstructio
 });
 
 describe('dispatchDeterministicChipClick — run_analysis regression', () => {
-  beforeEach(() => {
+  // V5 latency gate (#209, d92702d4): the decision_review auto-fire on the
+  // chip-click run_analysis path is gated behind
+  // `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW` (default false → skip with
+  // reason `autofire_disabled`). This regression test pins the legacy
+  // await path ("enricher still runs"), so run it with the flag on —
+  // same pattern as turn-executor-decision-review-resilience.test.ts.
+  let priorAwaitFlag: string | undefined;
+  beforeEach(async () => {
+    priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
     vi.clearAllMocks();
     buildTurnContextMock.mockResolvedValue(DEFAULT_TURN_CONTEXT);
     // run_analysis takes its existing heavyweight code path: scenario
@@ -683,6 +694,16 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     expect(explainResultsHandlerMock).not.toHaveBeenCalled();
     expect(whatWouldFlipHandlerMock).not.toHaveBeenCalled();
   });
+
+  afterEach(async () => {
+    if (priorAwaitFlag === undefined) {
+      delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    } else {
+      process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+    }
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
+  });
 });
 
 // ===========================================================================
@@ -731,7 +752,19 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     };
   }
 
-  beforeEach(() => {
+  // V5 latency gate (#209, d92702d4): the conditional "What should we
+  // validate?" prompt chip keys off CURRENT-turn decision_review
+  // enrichment, which only attaches on the legacy await path
+  // (`V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true`; default false skips the
+  // auto-fire with reason `autofire_disabled`). Run this parity suite with
+  // the flag on so the enricher-injected shapes below actually reach the
+  // chip generator.
+  let priorAwaitFlag: string | undefined;
+  beforeEach(async () => {
+    priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
     vi.clearAllMocks();
     buildTurnContextMock.mockResolvedValue(DEFAULT_TURN_CONTEXT);
     loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue({
@@ -762,6 +795,16 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
       persisted_row_id: 'row-1',
       graphPersisted: false,
     });
+  });
+
+  afterEach(async () => {
+    if (priorAwaitFlag === undefined) {
+      delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    } else {
+      process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+    }
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
   });
 
   it('emits the executable explain_results + what_would_flip chips after successful run_analysis (parity with routed path)', async () => {

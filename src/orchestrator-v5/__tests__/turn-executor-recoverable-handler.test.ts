@@ -284,21 +284,19 @@ describe('TurnExecutor — recoverable handler outcomes (Phase 2.6)', () => {
     // invariant broken" (fatal). Per the locked plan, this stays fatal
     // until the cause-kind is split or enriched. Pinned regression so
     // any future change that flips it to recoverable trips this assertion.
+    //
+    // Test-hygiene fix (2026-07): the original mock proposal used
+    // `entity.kind: 'factor'`, which is not in EntityKindSchema, so the
+    // proposal never parsed — the pin was landing on the parse-failure
+    // path, not the dispatch registry-miss it names. That masked drift
+    // surfaced when the bounded routing fallback (schema_repair_failed →
+    // committed 200 direct_answer) replaced the fatal parse envelope.
+    // Use the known-good PROPOSAL_RUN_ANALYSIS (parses + passes the
+    // default validation registry) so execution genuinely reaches
+    // dispatch, where the EMPTY handler registry below raises
+    // UnhandledTurnClassError(reason='handler_not_registered').
     const routingAdapter = mockRoutingAdapter(async () =>
-      mkToolUseResult({
-        intent_class: 'execute',
-        action: {
-          handler_id: 'set_factor_value',
-          entity: {
-            id: 'fac_unknown',
-            kind: 'factor',
-            resolution_status: 'resolved',
-            resolution_method: 'id_match',
-          },
-          parameters: [],
-          cited_context_fields: [],
-        },
-      }),
+      mkToolUseResult(PROPOSAL_RUN_ANALYSIS),
     );
     // Pass an empty handler registry — proposed handler is in V5ActionType
     // but not registered, so dispatch raises UnhandledTurnClassError with

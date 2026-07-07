@@ -592,7 +592,7 @@ function sendFinalised200(
       );
     }
   }
-  logFinalisedResponse(requestId, exitPath, wireBody, egress.ok);
+  logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);
 }
 
@@ -686,9 +686,13 @@ function logFinalisedResponse(
   exitPath: V5ExitPath,
   finalisedResponse: unknown,
   egressOk: boolean,
+  freshnessOnlySynthesised: boolean,
 ): void {
-  const ar = (finalisedResponse as { analysis_ready?: { status?: string; computed_at?: string } } | undefined)
-    ?.analysis_ready;
+  const ar = (
+    finalisedResponse as
+      | { analysis_ready?: { status?: string; computed_at?: string; freshness?: string; freshness_reason?: string } }
+      | undefined
+  )?.analysis_ready;
   log.info(
     {
       event: 'v5.response.finalised',
@@ -697,6 +701,15 @@ function logFinalisedResponse(
       analysis_ready_emitted: ar != null,
       analysis_ready_status: ar?.status ?? null,
       computed_at: ar?.computed_at ?? null,
+      // Mission 3 transport recovery observability. Enum/reason code +
+      // boolean only — no graph hashes or content values. Preserves the
+      // pre-recovery "should be carrying readiness but isn't" signal that
+      // `analysis_ready_emitted: false` used to give on unknown turns.
+      // forbidden-exempt: freshness VERDICT enum (fresh|stale|unknown|none), Tier-1 status transport — honest null when no analysis_ready ships, not a science-value fallback
+      analysis_ready_freshness: ar?.freshness ?? null,
+      // forbidden-exempt: freshness REASON code (stable debug/telemetry string), honest null when absent — not a science-value fallback
+      analysis_ready_freshness_reason: ar?.freshness_reason ?? null,
+      analysis_ready_freshness_only_synthesised: freshnessOnlySynthesised && ar != null,
       egress_ok: egressOk,
     },
     'V5 response finalised',

@@ -25,6 +25,7 @@ import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
 import { makeMessagePayload } from './fixtures.js';
 import { normaliseFactorValue } from '../tools/handlers/d1-shared/normalise-factor-value.js';
+import { SET_FACTOR_VALUE_USER_GUIDANCE } from '../tools/handlers/d1-shared/user-guidance.js';
 import { AdjustEdgeStrengthStdSchema } from '../tools/handlers/adjust-edge-strength.js';
 import { buildD1Fixture } from '../tools/handlers/d1-shared/__tests__/fixtures.js';
 
@@ -62,7 +63,13 @@ describe('P1-5 — normaliseFactorValue rejects over-cap when unit supplied', ()
     expect(caught?.message).toContain('150%');
     expect(caught?.message).toContain('100%');
     expect(caught?.message).not.toMatch(/\d\s+%/);
-    expect(caught?.userGuidance).toContain('exceeds');
+    expect(caught?.message).toContain('exceeds');
+    // P1.1 follow-up (P1.2, commit 8f0dc939): `userGuidance` is the
+    // handler's canonical War-Room-locked recovery phrase — the detailed
+    // value/cap wording lives on `message` (the predicate's
+    // `specific_issue`), which the recoverable composer surfaces when
+    // present. See d1-shared/user-guidance.ts.
+    expect(caught?.userGuidance).toBe(SET_FACTOR_VALUE_USER_GUIDANCE);
   });
 
   it('formats currency caps with prefix unit and thousands separators', () => {
@@ -83,8 +90,10 @@ describe('P1-5 — normaliseFactorValue rejects over-cap when unit supplied', ()
     expect(caught).not.toBeNull();
     expect(caught?.message).toContain('£150,000');
     expect(caught?.message).toContain('£100,000');
-    expect(caught?.userGuidance).toContain('£150,000');
-    expect(caught?.userGuidance).toContain('£100,000');
+    // P1.1 follow-up (P1.2, commit 8f0dc939): the formatted values live on
+    // `message` / `specific_issue`; `userGuidance` is the canonical
+    // War-Room-locked phrase and must NOT leak parameter detail.
+    expect(caught?.userGuidance).toBe(SET_FACTOR_VALUE_USER_GUIDANCE);
   });
 
   it('rejects negative raw_value when unit supplied', () => {
