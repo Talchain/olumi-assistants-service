@@ -164,7 +164,11 @@ describe('goal-target join: "set the success target to 15%" (chip-context dead-e
     expect(ctx.goal_translation.user_scale_target).toBe('800');
   });
 
-  it('respects an existing valid goal_threshold_cap over re-derivation', async () => {
+  it("'%' targets normalise against 100 even when a stale absolute cap exists (review hardening 2026-07-07)", async () => {
+    // HARDENED: the old rule let an inherited absolute cap (e.g. 200 from a
+    // prior absolute registration) win over the '%' doctrine, silently
+    // scoring a 15% target as 0.075 while the receipt passed the honesty
+    // guard. '%' now always normalises against 100.
     const handler = createAddConstraintHandler();
     const graph = buildD1Fixture();
     const goal = graph.nodes.find((n) => n.kind === 'goal')!;
@@ -173,8 +177,25 @@ describe('goal-target join: "set the success target to 15%" (chip-context dead-e
       buildInvocation(graph, goalTargetProposal({ constraintType: 'at_least', value: 15, unit: '%' })),
     );
     const mutatedGoal = goalNodeOf(outcome.mutated_graph);
+    expect(mutatedGoal.goal_threshold_cap).toBe(100);
+    expect(mutatedGoal.goal_threshold).toBeCloseTo(0.15);
+  });
+
+  it('an existing cap is still respected for unit-compatible re-registrations', async () => {
+    const handler = createAddConstraintHandler();
+    const graph = buildD1Fixture();
+    const goal = graph.nodes.find((n) => n.kind === 'goal')!;
+    (goal as Record<string, unknown>).goal_threshold_cap = 200;
+    (goal as Record<string, unknown>).goal_threshold_unit = 'customers';
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        goalTargetProposal({ constraintType: 'at_least', value: 150, unit: 'customers' }),
+      ),
+    );
+    const mutatedGoal = goalNodeOf(outcome.mutated_graph);
     expect(mutatedGoal.goal_threshold_cap).toBe(200);
-    expect(mutatedGoal.goal_threshold).toBeCloseTo(0.075);
+    expect(mutatedGoal.goal_threshold).toBeCloseTo(0.75);
   });
 
   it('restating the target updates the SAME constraint and the threshold together (idempotent join)', async () => {

@@ -70,19 +70,37 @@ const ALLOWED_NODE_FIELD_ROOTS: ReadonlySet<string> = new Set([
   'display_value',
   'observed_state',
   'data',
-  'goal_threshold',
-  'goal_threshold_raw',
-  'goal_threshold_unit',
-  'goal_threshold_cap',
+  // goal_threshold* deliberately REMOVED (review hardening, 2026-07-07):
+  // the threshold quad has exactly one sanctioned writer (add_constraint's
+  // goal-join, which keeps raw/unit/cap/normalised consistent). A candidate
+  // setting goal_threshold alone creates the registered/scored desync the
+  // receipt guard exists to prevent — referee holds it, the conversational
+  // writer path is unaffected (tool handlers are not enveloped).
   'goal_constraints',
   'encoding_map',
   'prior',
   'factor_type',
-  'extractionType',
+  // extractionType REMOVED: extraction provenance is pipeline-owned (see
+  // PIPELINE_OWNED_SEGMENTS) — a producer must not relabel how a value
+  // entered the model.
   'uncertainty_drivers',
   'intercept',
   'interventions',
   'is_baseline',
+]);
+
+/**
+ * Within the observed_state/data subtree only these sub-fields are tunable
+ * (the old exact allowlist, restored as a depth-1 rule after the root-only
+ * relaxation was found to sanction provenance-class sub-fields like
+ * `observed_state.source`). `interventions` allows deeper paths
+ * (data/interventions/<factor_id>).
+ */
+const ALLOWED_OBSERVED_SUBKEYS: ReadonlySet<string> = new Set([
+  'value',
+  'baseline',
+  'unit',
+  'interventions',
 ]);
 
 /**
@@ -129,6 +147,13 @@ const PIPELINE_OWNED_ROOTS: ReadonlySet<string> = new Set([
   'validation',
   'defaulted',
   'origin',
+  // Extraction-provenance stamps (review hardening, 2026-07-07): these mark
+  // HOW a value entered the model and must never be producer-writable —
+  // relabelling an AI-invented value as user-extracted is a provenance
+  // integrity breach.
+  'source',
+  'extractiontype',
+  'raw_value',
 ]);
 
 /** Conservative engine-claim patterns applied to every candidate string leaf (G14). */
@@ -154,8 +179,57 @@ export interface FieldSafetyResult {
 
 function isPipelineOwned(field: string): boolean {
   const f = field.toLowerCase();
-  if (PIPELINE_OWNED_ROOTS.has(fieldRootOf(f))) return true;
+  // Segment-wise (review hardening): the owned set is screened on EVERY path
+  // segment, not just the root — `observed_state.provenance` and `data/origin`
+  // are as owned as their bare spellings. Exact-segment match preserved (a
+  // hypothetical `origin_label` still passes).
+  if (f.split(/[./]/).some((seg) => PIPELINE_OWNED_ROOTS.has(seg))) return true;
   return PIPELINE_OWNED_MARKERS.some((m) => f.includes(m));
+}
+
+/** Recursively collect every object key in a payload value (lowercased). */
+function collectObjectKeys(value: unknown, out: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const el of value) collectObjectKeys(el, out);
+  } else if (value !== null && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      out.add(k.toLowerCase());
+      collectObjectKeys(v, out);
+    }
+  }
+}
+
+/**
+ * Depth-1 subtree rule for observed_state/data field paths, plus a smuggle
+ * guard for whole-object writes: an object payload must not carry pipeline-
+ * owned keys at any depth, and a whole-object observed_state/data write may
+ * only carry the tunable sub-keys (the field-path check cannot see keys
+ * riding inside the payload value).
+ */
+function checkObservedSubtree(field: string, payloadValue: unknown): FieldSafetyResult {
+  const segs = field.toLowerCase().split(/[./]/);
+  const root = segs[0];
+  const isObserved = root === 'observed_state' || root === 'data';
+  if (isObserved && segs.length > 1 && !ALLOWED_OBSERVED_SUBKEYS.has(segs[1]!)) {
+    return { ok: false, code: FIELD_NOT_ALLOWED };
+  }
+  if (payloadValue !== null && typeof payloadValue === 'object') {
+    const keys = new Set<string>();
+    collectObjectKeys(payloadValue, keys);
+    for (const k of keys) {
+      if (PIPELINE_OWNED_ROOTS.has(k)) return { ok: false, code: PIPELINE_OWNED_FIELD };
+    }
+    if (isObserved && segs.length === 1) {
+      for (const k of keys) {
+        // depth-1 keys of a whole-object write must be tunable sub-keys;
+        // deeper keys (inside interventions maps) are factor ids — allow.
+        if (!ALLOWED_OBSERVED_SUBKEYS.has(k) && typeof (payloadValue as Record<string, unknown>)[k] !== 'undefined' && Object.prototype.hasOwnProperty.call(payloadValue, k)) {
+          return { ok: false, code: FIELD_NOT_ALLOWED };
+        }
+      }
+    }
+  }
+  return { ok: true };
 }
 
 function scanText(text: unknown): boolean {
@@ -194,12 +268,16 @@ export function checkFieldSafety(envelope: CandidateMutationEnvelope): FieldSafe
     if (!ALLOWED_NODE_FIELD_ROOTS.has(fieldRootOf(field))) {
       return { ok: false, code: FIELD_NOT_ALLOWED };
     }
+    const sub = checkObservedSubtree(field, envelope.payload.to);
+    if (!sub.ok) return sub;
   } else if (envelope.kind === 'update_edge_field') {
     const field = envelope.payload.field;
     if (isPipelineOwned(field)) return { ok: false, code: PIPELINE_OWNED_FIELD };
     if (!ALLOWED_EDGE_FIELD_ROOTS.has(fieldRootOf(field))) {
       return { ok: false, code: FIELD_NOT_ALLOWED };
     }
+    const sub = checkObservedSubtree(field, envelope.payload.to);
+    if (!sub.ok) return sub;
   }
 
   // (b) engine-claim scan on ALL free text (G14 "any free text"): every string leaf in

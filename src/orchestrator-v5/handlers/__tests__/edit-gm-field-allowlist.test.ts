@@ -264,14 +264,16 @@ describe('shadow replay: plain value edits (the dominant sanctioned edit class)'
     expect(emitted.some((e) => e.blocker_code === FIELD_NOT_ALLOWED)).toBe(false);
   });
 
-  it('goal_threshold value-edit class holds as a tunable (Mission B write is sanctioned vocabulary)', () => {
+  it('goal_threshold edits are sanctioned-writer-only: piecemeal candidates reject (review hardening 2026-07-07)', () => {
     const d = evaluateEditGraphMutations(shadowInput(GOAL_THRESHOLD_OPS));
-    // One update_node fans into 4 envelopes (one per goal_threshold* field);
-    // every one is sanctioned → held TUNABLE_APPLY_HELD, zero rejects.
-    expect(d.verdictCounts.held).toBe(4);
-    expect(d.verdictCounts.rejected).toBeUndefined();
-    expect(emitted.some((e) => e.blocker_code === FIELD_NOT_ALLOWED)).toBe(false);
-    expect(d.governing).toBe('held');
+    // HARDENED: the threshold quad has exactly ONE sanctioned writer — the
+    // add_constraint goal-join, which keeps raw/unit/cap/normalised
+    // consistent. Piecemeal candidate writes create the registered/scored
+    // desync the receipt guard exists to prevent → all 4 reject.
+    expect(d.verdictCounts.rejected).toBe(4);
+    expect(d.verdictCounts.held).toBeUndefined();
+    expect(emitted.some((e) => e.blocker_code === FIELD_NOT_ALLOWED)).toBe(true);
+    expect(d.governing).toBe('rejected');
   });
 });
 

@@ -78,16 +78,48 @@ export const GOAL_TARGET_NOT_SAVED_TEXT =
  */
 const GOAL_TARGET_CLAIM_RE =
   /\bsuccess\s+target\b[^.?!\n]*\b(?:set|saved|registered|recorded|added|updated|applied|configured|in\s+place)\b/i;
-/** Offer/question screen: noun phrase inside an interrogative sentence. */
-const OFFER_QUESTION_RE = /\bsuccess\s+target\b[^.!]*\?/i;
+/**
+ * Verb-first perfective claims ("I've set the success target to 15%") —
+ * the highest-probability paraphrase of the original leak; covered here
+ * rather than left to the line-anchored generic success-claim class
+ * (review hardening, 2026-07-07).
+ */
+const VERB_FIRST_CLAIM_RE =
+  /\b(?:i(?:'ve| have)?|we(?:'ve| have)?)\s+(?:now\s+|just\s+)?(?:set|saved|registered|recorded|updated|applied|configured)\b[^.?!\n]*\bsuccess\s+target\b/i;
+/**
+ * Negation/conditional screen (sentence-scoped): honest statements that a
+ * target is NOT set, or forward-looking/conditional coaching ("once a
+ * success target is set…"), are not registration claims — swapping them
+ * would itself be an honesty failure.
+ */
+const NEGATION_CONDITIONAL_RE =
+  /\b(?:no|not|never|none|isn't|hasn't|haven't|wasn't|won't|can't|cannot|couldn't|yet\s+to|still\s+needs?|once|until|unless)\b/i;
+
+/** Split into sentences; newline is always a boundary. */
+function sentencesOf(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 export function claimsGoalTargetRegistration(
   text: string | null | undefined,
 ): boolean {
   if (typeof text !== 'string' || text.trim().length === 0) return false;
-  if (!GOAL_TARGET_CLAIM_RE.test(text)) return false;
-  if (OFFER_QUESTION_RE.test(text)) return false;
-  return true;
+  // Sentence-scoped (review hardening): the OLD whole-text question screen
+  // let ANY later '?' rescue a genuine claim ("…set on the goal — shall I
+  // rerun?"), and negations/conditionals in other sentences leaked in. A
+  // sentence is a claim iff it matches a claim shape, is not itself a
+  // question, and carries no negation/conditional marker.
+  for (const sentence of sentencesOf(text)) {
+    if (sentence.endsWith('?')) continue;
+    if (NEGATION_CONDITIONAL_RE.test(sentence)) continue;
+    if (GOAL_TARGET_CLAIM_RE.test(sentence) || VERB_FIRST_CLAIM_RE.test(sentence)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
