@@ -19,6 +19,8 @@
  *      CHECK caps at 8000, under PLoT's 10000, so this should never fire).
  */
 
+import { readFileSync } from 'node:fs';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { config } from '../../../../config/index.js';
@@ -31,8 +33,18 @@ import {
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
 } from '../run-analysis.js';
-import happyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy.json' with { type: 'json' };
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+
+// Read the fixture via fs rather than a `with { type: 'json' }` import
+// attribute: the full tsconfig (module=Node16, the typecheck-drift ratchet's
+// config) rejects import attributes with TS2823, and this file must stay OUT
+// of the frozen error baseline.
+const happyFixture = JSON.parse(
+  readFileSync(
+    new URL('../../../../../tests/fixtures/plot/v2-run-golden-happy.json', import.meta.url),
+    'utf8',
+  ),
+) as V2RunResponseEnvelope;
 
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const BRIEF = 'Should we hire locally or offshore? Budget £250k, decide by Q3.';
@@ -54,16 +66,17 @@ function makeScenarioSnapshot(
 }
 
 function makeScenarioReader(snapshot: RunAnalysisScenarioSnapshot): ScenarioReader {
-  return vi.fn<[string, AbortSignal | undefined], Promise<RunAnalysisScenarioSnapshot>>(
-    () => Promise.resolve(snapshot),
-  );
+  return vi.fn<ScenarioReader>(() => Promise.resolve(snapshot));
 }
 
 function makeCapturingPlotClient(): { client: PLoTClient; payloads: Array<Record<string, unknown>> } {
   const payloads: Array<Record<string, unknown>> = [];
   const run = vi.fn<
-    [Record<string, unknown>, string, PLoTClientRunOpts | undefined],
-    Promise<V2RunResponseEnvelope>
+    (
+      payload: Record<string, unknown>,
+      requestId: string,
+      opts?: PLoTClientRunOpts,
+    ) => Promise<V2RunResponseEnvelope>
   >((payload) => {
     payloads.push(payload);
     return Promise.resolve(JSON.parse(JSON.stringify(happyFixture)) as V2RunResponseEnvelope);

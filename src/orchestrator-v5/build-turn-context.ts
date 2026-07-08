@@ -260,6 +260,16 @@ export interface RunAnalysisScenarioSnapshot {
    * and `goal_node_id`.
    */
   readonly rawPersistedGraph: unknown;
+  /**
+   * Lane 28 — brief pipeline: the persisted `scenarios.brief_text`,
+   * loaded on the SAME round trip as the graph (via
+   * `loadPersistedScenarioStateStrict` → `store.loadGraphAndBriefText`).
+   * Absent (not null) when no brief is persisted — the construction
+   * site spreads the key conditionally. Mirrors the optional
+   * `briefText` on run-analysis.ts's `RunAnalysisScenarioSnapshot`
+   * (the handler-side declaration of this same snapshot shape).
+   */
+  readonly briefText?: string;
 }
 
 // v0.7.0 schema note: the ingress `OrchestratorTurnPayload` is a discriminated
