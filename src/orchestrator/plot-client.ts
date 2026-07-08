@@ -21,6 +21,12 @@
  * - No retry for 4xx (deterministic client errors)
  * - Retry uses remaining turn budget, not a fresh timeout
  * - If remaining budget after backoff < 2s, retry is skipped
+ * - EXCEPTION (FIX 1/B, brief-bearing runs): a `/v2/run` payload carrying a
+ *   non-empty `brief` triggers PLoT's synchronous, LLM-backed decision-review
+ *   callback chain. That chain is expensive and non-idempotent, so a
+ *   brief-bearing run is NEVER retried — on timeout, 5xx, OR network error —
+ *   regardless of remaining budget. See `isBriefBearingRunPayload` /
+ *   `skipRetryEntirely`.
  *
  * Outbound validation (H.5):
  * - /v2/run: graph present, options non-empty array with option_id strings, goal_node_id non-empty string
@@ -303,8 +309,9 @@ function isRetryableError(error: unknown): boolean {
  *
  * Brief-bearing runs trigger PLoT's synchronous CEE decision-review callback
  * chain (see PLOT_RUN_BRIEF_TIMEOUT_MS doc comment) — they need the extended
- * timeout budget and must NOT be retried on timeout (retrying would re-fire
- * that expensive LLM-backed chain a second time).
+ * timeout budget and must NOT be retried on ANY error class (timeout, 5xx,
+ * or network — see FIX B, C2) — retrying would re-fire that expensive
+ * LLM-backed chain a second time.
  */
 function isBriefBearingRunPayload(payload: Record<string, unknown>): boolean {
   const brief = payload["brief"];
@@ -369,9 +376,10 @@ class PLoTClientImpl implements PLoTClient {
     // H.5: Outbound structural validation
     validateRunPayload(payload);
 
-    // FIX 1: brief-bearing runs trigger PLoT's synchronous CEE decision-review
-    // callback chain — they need a longer timeout budget and must not be
-    // retried on timeout (see PLOT_RUN_BRIEF_TIMEOUT_MS doc comment).
+    // FIX 1 (extended by FIX B, C2): brief-bearing runs trigger PLoT's
+    // synchronous CEE decision-review callback chain — they need a longer
+    // timeout budget and must not be retried on ANY error class (timeout,
+    // 5xx, or network — see PLOT_RUN_BRIEF_TIMEOUT_MS doc comment).
     const briefBearing = isBriefBearingRunPayload(payload);
     const timeoutMs = briefBearing ? PLOT_RUN_BRIEF_TIMEOUT_MS : PLOT_RUN_TIMEOUT_MS;
 
@@ -380,7 +388,7 @@ class PLoTClientImpl implements PLoTClient {
       'run',
       requestId,
       opts,
-      { skipRetryOnTimeout: briefBearing },
+      { skipRetryEntirely: briefBearing },
     ) as Promise<V2RunResponseEnvelope>;
   }
 
@@ -405,7 +413,7 @@ class PLoTClientImpl implements PLoTClient {
     operation: string,
     requestId: string,
     opts?: PLoTClientRunOpts,
-    retryConfig?: { skipRetryOnTimeout?: boolean },
+    retryConfig?: { skipRetryEntirely?: boolean },
   ): Promise<T> {
     try {
       return await fn();
@@ -415,19 +423,30 @@ class PLoTClientImpl implements PLoTClient {
         throw firstError;
       }
 
-      // FIX 1: a brief-bearing timeout means PLoT's synchronous, LLM-backed
-      // decision-review callback chain very likely ran (or nearly ran) to
-      // completion. Retrying would re-fire that entire expensive chain a
-      // second time (the "retry storm" observed in the flag-activation
-      // trial: 2x decision-review LLM calls, ~68s turn). Structurally
-      // impossible: never retry a brief-bearing run on timeout.
-      if (retryConfig?.skipRetryOnTimeout && firstError instanceof PLoTTimeoutError) {
+      // FIX 1 (extended by FIX B, C2): a brief-bearing run's synchronous,
+      // LLM-backed decision-review callback chain may have already run (or
+      // nearly run) to completion by the time ANY retryable error surfaces —
+      // not just a timeout. A 5xx or network error while that expensive,
+      // non-idempotent chain is in flight is just as likely to mean the
+      // chain already fired; retrying would re-fire it a second time (the
+      // "retry storm" observed in the flag-activation trial: 2x
+      // decision-review LLM calls, ~68s turn). Structurally impossible:
+      // never retry a brief-bearing run, on ANY error class (timeout, 5xx,
+      // or network) — `firstError` is already confirmed retryable by the
+      // `isRetryableError` check above, so no class-specific check is
+      // needed here.
+      if (retryConfig?.skipRetryEntirely) {
         log.warn(
           {
             request_id: requestId,
             operation,
+            error_kind: firstError instanceof PLoTTimeoutError
+              ? 'timeout'
+              : firstError instanceof PLoTError
+                ? '5xx'
+                : 'network',
           },
-          "PLoT retry skipped — brief-bearing timeout; retrying would double the LLM-backed decision-review chain",
+          "PLoT retry skipped — brief-bearing run; retrying would double the LLM-backed decision-review chain",
         );
         throw firstError;
       }

@@ -493,6 +493,58 @@ describe("PLoT Client Retry Logic (H.4)", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(2);
       expect(result.meta.seed_used).toBe(42);
     });
+
+    // FIX B (1.41 fix round, C2) — the retry-storm guard previously only
+    // checked `firstError instanceof PLoTTimeoutError`. A 5xx or network
+    // error firing WHILE the expensive, non-idempotent decision-review LLM
+    // chain is running would still re-fire the whole chain a second time.
+    // A brief-bearing run must never retry on ANY retryable error class.
+    it("a brief-bearing 5xx does NOT retry (retry-storm structurally impossible for any error class, not just timeout)", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ message: "Service Unavailable" }),
+      });
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+
+      await expect(client.run(briefRun, "req-brief-5xx")).rejects.toThrow(PLoTError);
+
+      // Only the ONE attempt — no retry-storm on a brief-bearing 5xx.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a brief-bearing network error does NOT retry (retry-storm structurally impossible for any error class, not just timeout)", async () => {
+      fetchSpy.mockRejectedValue(new Error("fetch failed: ECONNRESET"));
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+
+      await expect(client.run(briefRun, "req-brief-network")).rejects.toThrow();
+
+      // Only the ONE attempt — no retry-storm on a brief-bearing network error.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a non-brief run still retries on 5xx as before (existing behaviour unchanged)", async () => {
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ message: "Service Unavailable" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
+        });
+
+      const client = createPLoTClient()!;
+      const result = await client.run(VALID_RUN, "req-no-brief-5xx");
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result.meta.seed_used).toBe(42);
+    });
   });
 
   describe("run — idempotency preservation", () => {
