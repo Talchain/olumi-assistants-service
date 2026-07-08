@@ -259,6 +259,60 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     expect(preRouteEvent?.data.downgrade_reason).toBe('non_factor_kind');
   });
 
+  it('1.16b REGRESSION FIXTURE (render request_id 1921f7c1-b295-4056-8b3a-21b4c3ef63fb): exact factor label named verbatim + a decision node sharing tokens → auto-applies to the factor, no LLM call, decision node never offered as a chip', async () => {
+    // Verified Demo-Gate defect: the user named a factor VERBATIM
+    // ("North America Market Growth Rate"). The deterministic matcher
+    // found a perfect substring match (score 1.0) but a decision node
+    // sharing tokens ("Grow North America market share") Dice-matched
+    // too, and — pre-fix — that alone forced clarify (with the decision
+    // node offered as a chip) instead of auto-applying the unique,
+    // exact hit. Post-fix: the type filter excludes the decision node
+    // from the candidate pool entirely, and the dominance check would
+    // have auto-selected regardless. No LLM call; graph mutates.
+    const routingAdapter = throwingRoutingAdapter();
+    const graph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Profit' },
+        { id: 'fac_namg', kind: 'factor', label: 'North America Market Growth Rate' },
+        // Decision node sharing tokens with the message/factor label —
+        // must never surface as a clarify candidate for a factor
+        // value-edit intent.
+        { id: 'dec_expand', kind: 'decision', label: 'Grow North America market share' },
+      ],
+      edges: [],
+    };
+    const result = await runTurnExecutor(
+      payload('Set North America Market Growth Rate to £5m'),
+      'req-pre-route-1.16b-decision-node',
+      { routingAdapter, graphState: graph },
+    );
+    const { response, telemetry } = result;
+
+    // Pre-route auto-selected → adapter never called (zero LLM calls).
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry?.llm_calls_used ?? 0).toBe(0);
+
+    const preRouteEvent = events.find(
+      (e) => e.event === 'v5.deterministic_value_update',
+    );
+    expect(preRouteEvent?.data.matched).toBe(true);
+    expect(preRouteEvent?.data.dispatch).toBe('set_factor_value');
+    expect(telemetry?.turn_class).toBe('handler');
+
+    const patchBlock = response.blocks.find((b) => b.type === 'graph_patch');
+    expect(patchBlock).toMatchObject({
+      operation: 'set_factor_value',
+      target_id: 'fac_namg',
+    });
+
+    // The decision node must never appear as a suggested-action chip
+    // (this turn shouldn't emit chips at all — it auto-applied — but the
+    // assertion pins the type-filter guarantee even if chip generation
+    // changes shape later).
+    const labels = response.suggested_actions.map((a) => a.label);
+    expect(labels).not.toContain('Grow North America market share');
+  });
+
   it('"What if I set the budget to £300k?" → falls through to LLM (negative gate)', async () => {
     // The negative gate fires on "what if". The routing adapter MUST be
     // called — meaning the pre-route declined. We don't need a real
