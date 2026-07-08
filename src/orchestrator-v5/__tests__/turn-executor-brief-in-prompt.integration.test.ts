@@ -120,7 +120,7 @@ describe('Lane 28 — persisted brief reaches the routing prompt end-to-end', ()
     expect(msg).toContain('"truncated": false');
   });
 
-  it('serialises brief: null when no brief was ever persisted (no fabrication)', async () => {
+  it('serialises NO brief key when no brief was ever persisted (no null in the prompt)', async () => {
     mockState.briefText = null;
     const adapter = capturingAdapter('Here is some guidance.');
     await runTurnExecutor(mkPayload('what is the most important factor here?'), 'req-brief-e2e-2', {
@@ -128,7 +128,7 @@ describe('Lane 28 — persisted brief reaches the routing prompt end-to-end', ()
       graphState: GRAPH as never,
     });
     const msg = routedUserMessage(adapter);
-    expect(msg).toContain('"brief": null');
+    expect(msg).not.toContain('"brief"');
     expect(msg).not.toContain('Budget is £250k');
   });
 });

@@ -353,11 +353,13 @@ export const ContextPackSchema = z
     /**
      * Lane 28 — brief pipeline: the user's persisted decision brief
      * (`scenarios.brief_text`), size-bounded with disclosed truncation.
-     * Null when no brief has been persisted for the scenario (or the
-     * persisted value is whitespace-only). Optional in shape for
-     * backwards-compat with hand-built packs; the assembler always emits
-     * it (value or null). This is the field that closes dossier gap G2 —
-     * before it, the brief reached no LLM after the draft turn.
+     * OMITTED (key absent) when no brief has been persisted for the
+     * scenario (or the persisted value is whitespace-only) — the assembler
+     * never emits `brief: null`, so a no-brief pack serialises no `brief`
+     * field into the routing prompt. `.nullable()` is kept only for
+     * tolerant validation of hand-built packs. This is the field that
+     * closes dossier gap G2 — before it, the brief reached no LLM after
+     * the draft turn.
      */
     brief: ContextPackBriefSchema.nullable().optional(),
     graph: ContextPackGraphSchema,

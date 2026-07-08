@@ -261,14 +261,15 @@ export interface ContextPack {
   /**
    * Lane 28 — brief pipeline (dossier gap G2): the user's persisted decision
    * brief, projected via {@link projectBrief} (size-bounded, disclosed
-   * truncation). Null when no brief has been persisted for this scenario.
-   * Serialised into the routing prompt automatically by `buildUserMessage`
-   * (route-with-tool-use.ts) — the LLM finally knows what the decision is
-   * about on every turn after the draft, not just via graph labels.
+   * truncation). Serialised into the routing prompt automatically by
+   * `buildUserMessage` (route-with-tool-use.ts) — the LLM finally knows what
+   * the decision is about on every turn after the draft, not just via graph
+   * labels.
    *
-   * Optional on the interface (hand-built packs and the chip-click narrow
-   * projection don't carry it) but the assembler ALWAYS emits it (value or
-   * null) — the Lane-21 optional-but-always-emitted pattern.
+   * OMITTED (key absent) when no brief has been persisted for this scenario
+   * — the assembler never emits `brief: null`, so a no-brief pack serialises
+   * no `brief` field into the prompt. The type keeps `| null` only for
+   * tolerant reading of hand-built packs.
    */
   readonly brief?: ContextPackBrief | null;
   readonly graph: ContextPackGraph;
@@ -395,8 +396,9 @@ export interface AssembleContextPackInput {
    * scenario, threaded by the turn-executor from
    * `EnrichedTurnContext.scenarioBriefText` (loaded once per turn by
    * `buildTurnContext` via `loadGraphAndBriefText`). Optional for
-   * backwards-compat with callers/tests that don't wire it; absent/null
-   * projects to `brief: null` on the pack.
+   * backwards-compat with callers/tests that don't wire it; absent/null/
+   * whitespace-only means the pack carries NO `brief` key at all (the
+   * assembler omits it — a null is never serialised into the prompt).
    */
   readonly brief?: string | null;
   readonly graph?: GraphWithOptions | null;
@@ -514,7 +516,8 @@ export function assembleContextPack(input: AssembleContextPackInput): ContextPac
  * Rules (mirrors the write-side `normaliseBriefText` discipline — trim first,
  * bound second, disclose always):
  *   - null / undefined / whitespace-only → null (no brief persisted; the
- *     pack says so honestly rather than carrying an empty object).
+ *     assembler then OMITS the `brief` key from the pack entirely — a null
+ *     is never serialised into the routing prompt).
  *   - trimmed length ≤ {@link CONTEXT_PACK_BRIEF_CHAR_CAP} → verbatim
  *     (trimmed) text, `truncated: false`.
  *   - trimmed length >  cap → hard slice at the cap, `truncated: true`,
@@ -613,15 +616,19 @@ export function assembleContextPackWithSummary(
     ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
     : projectGraph(input.graph ?? null);
   const analysisStateSummary = deriveContextPackAnalysisState(input);
+  // Lane 28 — the persisted decision brief (size-bounded, disclosed
+  // truncation). Projected once; when no brief exists the key is OMITTED
+  // entirely (never `brief: null`) so no-brief packs serialise no `brief`
+  // field into the routing prompt — prompt hygiene: don't make the LLM read
+  // a null. When present it is placed early in the literal so the serialised
+  // prompt surfaces "what this decision is about" before the graph/analysis
+  // detail.
+  const projectedBrief = projectBrief(input.brief);
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
     stage: input.payload.stage,
-    // Lane 28 — the persisted decision brief (size-bounded, disclosed
-    // truncation). Emitted on EVERY pack (value or null) and placed early in
-    // the literal so the serialised prompt surfaces "what this decision is
-    // about" before the graph/analysis detail.
-    brief: projectBrief(input.brief),
+    ...(projectedBrief !== null ? { brief: projectedBrief } : {}),
     graph: projectedGraph,
     analysis: rawAnalysis,
     // Display-safe analysis projection — what Sonnet actually sees.

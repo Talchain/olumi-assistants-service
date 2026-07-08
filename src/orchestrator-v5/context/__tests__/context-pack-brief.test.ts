@@ -8,8 +8,9 @@
  *   - `projectBrief` size-bounds the brief at CONTEXT_PACK_BRIEF_CHAR_CAP with
  *     DISCLOSED truncation (`truncated` flag + `original_chars` count — never a
  *     silent slice);
- *   - the assembler emits `brief` on every pack (value or null) and threads
- *     `AssembleContextPackInput.brief` through;
+ *   - the assembler threads `AssembleContextPackInput.brief` through, and
+ *     OMITS the `brief` key entirely when no brief exists (a null is never
+ *     serialised into the routing prompt);
  *   - the strict test-env schema gate accepts the new field;
  *   - `buildUserMessage` (route-with-tool-use) carries the brief into the
  *     serialised prompt automatically — and its absence keeps the prompt
@@ -102,14 +103,26 @@ function assembleWith(brief: string | null | undefined): ContextPack {
 }
 
 describe('assembleContextPack — brief threading', () => {
-  it('emits brief: null when no brief input is supplied (legacy callers)', () => {
+  it('OMITS the brief key when no brief input is supplied (legacy callers)', () => {
+    // Prompt hygiene: a no-brief pack must not carry `brief: null` into the
+    // serialised routing prompt — the key is absent entirely.
     const pack = assembleWith(undefined);
-    expect(pack.brief).toBeNull();
+    expect('brief' in pack).toBe(false);
   });
 
-  it('emits brief: null when the persisted brief is null (nothing persisted yet)', () => {
+  it('OMITS the brief key when the persisted brief is null (nothing persisted yet)', () => {
     const pack = assembleWith(null);
-    expect(pack.brief).toBeNull();
+    expect('brief' in pack).toBe(false);
+  });
+
+  it('OMITS the brief key when the persisted brief is whitespace-only', () => {
+    const pack = assembleWith('   \n ');
+    expect('brief' in pack).toBe(false);
+  });
+
+  it('a no-brief pack still passes the strict ContextPack schema (key optional)', () => {
+    const parsed = ContextPackSchema.safeParse(assembleWith(undefined));
+    expect(parsed.success).toBe(true);
   });
 
   it('projects a persisted brief into the pack', () => {
@@ -197,9 +210,9 @@ describe('brief reaches the serialised routing prompt', () => {
     expect(msg.indexOf('## ContextPack')).toBeLessThan(msg.indexOf('Budget is £250k'));
   });
 
-  it('serialises brief: null when nothing is persisted (no fabricated brief)', async () => {
+  it('serialises NO brief key at all when nothing is persisted (no null in the prompt)', async () => {
     const msg = await promptUserMessageFor(undefined);
-    expect(msg).toContain('"brief": null');
+    expect(msg).not.toContain('"brief"');
     expect(msg).not.toContain('Budget is £250k');
   });
 });
