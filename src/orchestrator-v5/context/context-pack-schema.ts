@@ -90,10 +90,42 @@ const ContextPackAnalysisFragileEdgeSchema = z
   })
   .strict();
 
+/** Lane 21 — raw tipping-point entry (see ContextPackAnalysisFlipThreshold). */
+const ContextPackAnalysisFlipThresholdSchema = z
+  .object({
+    factor_label: z.string(),
+    current_value: z.number().finite().nullable(),
+    flip_value: z.number().finite().nullable(),
+    unit: z.string().nullable(),
+    no_flip_within_bounds: z.boolean(),
+  })
+  .strict();
+
+/** Lane 21 — raw evidence-gap (VOI) entry. */
+const ContextPackAnalysisEvidenceGapSchema = z
+  .object({
+    factor_label: z.string(),
+    voi_score: z.number().finite().nonnegative(),
+  })
+  .strict();
+
+/** Lane 21 — goal-fit scoring provenance (fact + basis, never values). */
+const ContextPackAnalysisGoalFitSchema = z
+  .object({
+    scored: z.boolean(),
+    basis: z.string().nullable(),
+  })
+  .strict();
+
 /**
  * Strict on contract fields. Notably: `staleness_reason` is intentionally
  * NOT permitted here (state-trust removed it from the prompt-visible
  * projection — see `Docs/v5-state-trust-phase0.md`).
+ *
+ * Lane 21 (P0-A): `options` / `flip_thresholds` / `fragile_edge_count` /
+ * `evidence_gaps` / `goal_fit` are optional in shape (the chip-click
+ * dispatch hand-builds a narrow projection without them) but the routed
+ * `projectAnalysis` path always emits them.
  */
 const ContextPackAnalysisSchema = z
   .object({
@@ -104,6 +136,17 @@ const ContextPackAnalysisSchema = z
     robustness_band: z.string().nullable(),
     top_drivers: z.array(ContextPackAnalysisDriverSchema).readonly(),
     fragile_edges: z.array(ContextPackAnalysisFragileEdgeSchema).readonly(),
+    options: z.array(ContextPackAnalysisOptionSchema).readonly().optional(),
+    flip_thresholds: z
+      .array(ContextPackAnalysisFlipThresholdSchema)
+      .readonly()
+      .optional(),
+    fragile_edge_count: z.number().int().nonnegative().optional(),
+    evidence_gaps: z
+      .array(ContextPackAnalysisEvidenceGapSchema)
+      .readonly()
+      .optional(),
+    goal_fit: ContextPackAnalysisGoalFitSchema.nullable().optional(),
   })
   .strict();
 

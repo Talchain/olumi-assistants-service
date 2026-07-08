@@ -169,10 +169,9 @@ import {
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 import {
-  applyTopLevelDriversOverride,
-  applyTopLevelFragileEdgeOverride,
   buildAnalysisFromPriorFacts,
   FALLBACK_STALENESS_REASON,
+  reconcileAnalysisSummaryWithEnrichment,
   type FragileEdgeSource,
   type TopDriverSource,
 } from './context/analysis-fallback.js';
@@ -1181,17 +1180,17 @@ export async function runTurnExecutor(
       const coercedIngress = coerceIngressAnalysis(options.analysisState);
       const ingressSummary = compactAnalysis(coercedIngress);
       if (ingressSummary) {
-        const withDrivers = applyTopLevelDriversOverride(
+        // Lane 21 (P0-A): single composite seam shared with
+        // buildAnalysisFromPriorFacts — drivers + fragile-edge overrides plus
+        // the tipping / VOI / goal-fit signal attachment — so the ingress and
+        // prior-facts paths project identically by construction.
+        const reconciled = reconcileAnalysisSummaryWithEnrichment(
           ingressSummary,
           coercedIngress as unknown as Record<string, unknown>,
         );
-        const reconciled = applyTopLevelFragileEdgeOverride(
-          withDrivers.summary,
-          coercedIngress as unknown as Record<string, unknown>,
-        );
         analysisSummary = reconciled.summary;
-        fragileEdgeSource = reconciled.source;
-        topDriverSource = withDrivers.source;
+        fragileEdgeSource = reconciled.fragile_edge_source;
+        topDriverSource = reconciled.top_driver_source;
       }
       analysisStateSource = 'request';
       // Freshness verdict is independent of whether the request carries

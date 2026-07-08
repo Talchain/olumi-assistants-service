@@ -60,6 +60,12 @@ import {
   type InfluenceDirection,
 } from '../../orchestrator/context/influence-direction.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
+import {
+  deriveEvidenceGapsFromEnrichment,
+  deriveGoalFitFromEnrichment,
+  deriveTippingPointsFromTopLevel,
+  type AnalysisResponseSummaryWithSignals,
+} from './analysis-signals.js';
 import { selectRunAnalysisFact } from './freshness.js';
 
 export const FALLBACK_STALENESS_REASON = 'loaded_from_prior_run_freshness_unknown';
@@ -393,6 +399,60 @@ export function applyTopLevelDriversOverride(
 }
 
 /**
+ * Lane 21 (P0-A) — the SINGLE reconciliation seam between an
+ * `AnalysisResponseSummary` and the raw top-level enrichment record. Shared
+ * by the prior-facts fallback below AND the turn-executor body
+ * `analysis_state` ingress path so the two can never drift:
+ *
+ *   1. `applyTopLevelDriversOverride` — top-level `factor_sensitivity[]`
+ *      fills `top_drivers` when the per-option shape is empty.
+ *   2. `applyTopLevelFragileEdgeOverride` — top-level
+ *      `robustness.fragile_edges[]` fills `top_fragile_edges` +
+ *      `fragile_edge_count` when the per-option shape is empty.
+ *   3. Lane 21 signal attachment (`./analysis-signals.ts`): tipping points
+ *      (top-level `flip_thresholds[]`), evidence-gap VOI
+ *      (`m1_coaching.evidence_gaps[]`), and goal-fit provenance
+ *      (PLoT #204 `goal_fit_basis` / CONSTRAINT_GOALFIT_MODELLED_BASIS).
+ *      Fields are attached only when non-empty — a summary with nothing to
+ *      say stays shaped exactly as before.
+ *
+ * `robustness_level` is deliberately NOT touched here: `compactAnalysis`
+ * already derives it from the same envelope on both call paths; the minimal
+ * win_probabilities path merges it separately (see
+ * `buildAnalysisFromPriorFacts`).
+ */
+export function reconcileAnalysisSummaryWithEnrichment(
+  summary: AnalysisResponseSummary,
+  enrichment: Record<string, unknown>,
+): {
+  summary: AnalysisResponseSummaryWithSignals;
+  top_driver_source: TopDriverSource;
+  fragile_edge_source: FragileEdgeSource;
+} {
+  const { summary: withDrivers, source: topDriverSource } =
+    applyTopLevelDriversOverride(summary, enrichment);
+  const { summary: withFragile, source: fragileEdgeSource } =
+    applyTopLevelFragileEdgeOverride(withDrivers, enrichment);
+
+  const tippingPoints = deriveTippingPointsFromTopLevel(enrichment);
+  const evidenceGaps = deriveEvidenceGapsFromEnrichment(enrichment);
+  const goalFit = deriveGoalFitFromEnrichment(enrichment);
+
+  const withSignals: AnalysisResponseSummaryWithSignals = {
+    ...withFragile,
+    ...(tippingPoints.length > 0 ? { tipping_points: tippingPoints } : {}),
+    ...(evidenceGaps.length > 0 ? { evidence_gaps: evidenceGaps } : {}),
+    ...(goalFit !== null ? { goal_fit: goalFit } : {}),
+  };
+
+  return {
+    summary: withSignals,
+    top_driver_source: topDriverSource,
+    fragile_edge_source: fragileEdgeSource,
+  };
+}
+
+/**
  * Scan prior facts (newest-first, same order as `readRecent`) for the most
  * recent non-noop `run_analysis` fact and project it into an
  * `AnalysisResponseSummary`. Returns null when no usable prior analysis
@@ -405,7 +465,7 @@ export function applyTopLevelDriversOverride(
 export function buildAnalysisFromPriorFacts(
   priorFacts: readonly HandlerFact[],
   optionLabelSource?: readonly OptionLabelSource[],
-): AnalysisResponseSummary | null {
+): AnalysisResponseSummaryWithSignals | null {
   // V5 state-trust: route both the projection and the freshness verdict
   // through the SAME selector. Pre-state-trust this used `priorFacts.find`
   // which picked the FIRST non-noop fact regardless of analysis_status —
@@ -430,9 +490,16 @@ export function buildAnalysisFromPriorFacts(
   // the difference between Step 5 saying "top drivers are not available
   // from this run" and Step 5 surfacing the actual sensitivity figures.
   const enrichment = result.enrichment;
-  if (enrichment && typeof enrichment === 'object' && !Array.isArray(enrichment)) {
-    const fromEnrichment = compactAnalysis(enrichment as V2RunResponseEnvelope);
-    if (fromEnrichment && fromEnrichment.options.length > 0) {
+  const enrichmentRecord =
+    enrichment && typeof enrichment === 'object' && !Array.isArray(enrichment)
+      ? (enrichment as Record<string, unknown>)
+      : null;
+  const fromEnrichment =
+    enrichmentRecord !== null
+      ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope)
+      : null;
+  if (enrichmentRecord !== null && fromEnrichment !== null) {
+    if (fromEnrichment.options.length > 0) {
       // Apply option-label resolution from the current graph when a node
       // matches by id; falls back to whatever compactAnalysis derived.
       const relabelled: OptionSummary[] = fromEnrichment.options.map((o) =>
@@ -453,20 +520,17 @@ export function buildAnalysisFromPriorFacts(
       // drivers and fragile edges live at the envelope TOP LEVEL and would
       // otherwise be dropped before the advice-gate projection that
       // composeExplainResults / composeMeaning read. Reconcile through the
-      // SHARED override helpers so this prior-facts fallback and the body
-      // `analysis_state` ingress path (turn-executor) project identically;
-      // per-option result wins when present.
-      const { summary: withDrivers } = applyTopLevelDriversOverride(
+      // SHARED composite seam (drivers + fragile edges + Lane 21 signals) so
+      // this prior-facts fallback and the body `analysis_state` ingress path
+      // (turn-executor) project identically; per-option result wins when
+      // present.
+      const { summary: reconciled } = reconcileAnalysisSummaryWithEnrichment(
         {
           ...fromEnrichment,
           options: relabelled,
           winner,
         },
-        enrichment as Record<string, unknown>,
-      );
-      const { summary: reconciled } = applyTopLevelFragileEdgeOverride(
-        withDrivers,
-        enrichment as Record<string, unknown>,
+        enrichmentRecord,
       );
       return reconciled;
     }
@@ -526,7 +590,7 @@ export function buildAnalysisFromPriorFacts(
       : null;
   const marginPp = margin === null ? null : Math.round(margin * 1000) / 10;
 
-  return {
+  const minimal: AnalysisResponseSummary = {
     winner,
     options,
     top_drivers: [],
@@ -536,4 +600,41 @@ export function buildAnalysisFromPriorFacts(
     margin_pp: marginPp,
     analysis_status: 'complete',
   };
+
+  // Lane 21 (P0-A) gate reconciliation: before this lane, reaching the
+  // minimal win_probabilities path meant the ENTIRE enrichment was dropped —
+  // `top_drivers: []`, `robustness_level: 'unknown'`, no fragile edges —
+  // even when the well-formed envelope carried all of them at the TOP LEVEL
+  // (the live staging shape: `option_comparison[]` entries can be unusable
+  // for option identity while `factor_sensitivity[]` / `robustness` /
+  // `flip_thresholds[]` / `m1_coaching` are fully populated). Make this path
+  // consult the SAME source as the enriched path: merge the
+  // option-independent fields compactAnalysis derived, then run the shared
+  // composite (drivers + fragile edges + signals). Blocked / failed
+  // envelopes (compactAnalysis → null) still skip — a blocked analysis must
+  // not ground prose.
+  if (enrichmentRecord !== null && fromEnrichment !== null) {
+    const merged: AnalysisResponseSummary = {
+      ...minimal,
+      robustness_level: fromEnrichment.robustness_level,
+      fragile_edge_count: fromEnrichment.fragile_edge_count,
+      top_drivers: fromEnrichment.top_drivers,
+      ...(fromEnrichment.flip_thresholds !== undefined
+        ? { flip_thresholds: fromEnrichment.flip_thresholds }
+        : {}),
+      ...(fromEnrichment.top_fragile_edges !== undefined
+        ? { top_fragile_edges: fromEnrichment.top_fragile_edges }
+        : {}),
+      ...(fromEnrichment.constraint_tensions !== undefined
+        ? { constraint_tensions: fromEnrichment.constraint_tensions }
+        : {}),
+    };
+    const { summary: reconciled } = reconcileAnalysisSummaryWithEnrichment(
+      merged,
+      enrichmentRecord,
+    );
+    return reconciled;
+  }
+
+  return minimal;
 }
