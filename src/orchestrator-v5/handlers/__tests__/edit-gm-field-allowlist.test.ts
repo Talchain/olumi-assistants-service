@@ -38,11 +38,13 @@
  * provenance-class stamps (`provenance`, edge `validation`), and unknown
  * fields.
  *
- * Residual (documented, NOT fixed here): the referee referees each
- * envelope INDEPENDENTLY against the PRE-edit frame graph, so the
- * add_edge (and any update on the not-yet-added node) of an add-factor
- * batch still rejects ENTITY_NOT_FOUND — an intra-batch sequencing gap,
- * out of scope for allowlist tuning (see the lane evidence report).
+ * Residual at the time of this lane (since CLOSED by lane 32 / ROADMAP
+ * 1.34): the referee used to judge each envelope INDEPENDENTLY against the
+ * PRE-edit frame graph, so the add_edge of an add-factor batch rejected
+ * ENTITY_NOT_FOUND. `refereeMutationBatch` is now sequenced — later
+ * envelopes see entities introduced earlier in the batch — so the add_edge
+ * holds at the structural posture and the batch governs 'held' (see
+ * referee-intra-batch-sequencing.test.ts for the full acceptance).
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
@@ -232,17 +234,19 @@ describe('shadow replay: captured add-factor flow (2× update_node_field)', () =
     const addNode = emitted.find((e) => e.kind === 'add_node');
     expect(addNode?.blocker_code).toBe(STRUCTURAL_APPLY_HELD);
 
-    // Residual intra-batch gap (NOT this lane's fix): the add_edge names
-    // the not-yet-added factor, and the referee referees each envelope
-    // independently against the PRE-edit frame graph → ENTITY_NOT_FOUND.
+    // Intra-batch gap CLOSED (lane 32 / ROADMAP 1.34): the add_edge names
+    // the factor added earlier in the SAME batch, and the sequenced
+    // referee judges it against the batch's working view → the §6
+    // structural posture hold, no ENTITY_NOT_FOUND. (Was pinned 'rejected'
+    // while the referee judged every envelope against the PRE-edit frame.)
     const addEdge = emitted.find((e) => e.kind === 'add_edge');
-    expect(addEdge?.name).toBe('v5.candidate_mutation.rejected');
-    expect(addEdge?.blocker_code).toBe(ENTITY_NOT_FOUND);
+    expect(addEdge?.name).toBe('v5.candidate_mutation.held');
+    expect(addEdge?.blocker_code).toBe(STRUCTURAL_APPLY_HELD);
+    expect(emitted.some((e) => e.blocker_code === ENTITY_NOT_FOUND)).toBe(false);
 
-    // Governing verdict for the WHOLE batch is therefore still 'rejected'
-    // (severity precedence) until the intra-batch sequencing gap is
-    // addressed — the honest live-mode expectation for add-factor-with-link.
-    expect(d.governing).toBe('rejected');
+    // Governing verdict for the WHOLE batch is now 'held' — live mode
+    // would hold add-factor-with-link for confirm, not wholesale-block it.
+    expect(d.governing).toBe('held');
   });
 });
 
