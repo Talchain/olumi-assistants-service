@@ -314,6 +314,12 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
     // model_critiques path. Without this test, the only signal that
     // dcResult.model_critique_count is wired into _meta is the captured
     // value of 0 — indistinguishable from the previous hardcoded 0.
+    //
+    // Shape matches the prompt's documented contract (defaults.ts
+    // "DETERMINISTIC COACHING" section: `.model_critiques[]: { type,
+    // severity, message, suggested_action?, affected_node_ids? }`) — FIX 2
+    // (1.41) replaced the previous unbounded any-object-shape passthrough
+    // with an allowlist requiring these fields.
     const enrichment = baseEnrichment({
       m1_coaching: {
         // Default-like readiness/headline_type — flag must flip via critiques alone.
@@ -321,25 +327,31 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
         headline_type: 'neutral',
         evidence_gaps: [],
         model_critiques: [
-          { code: 'BIAS_FRAMING', message: 'Critique A' },
-          { code: 'MISSING_BASELINE', message: 'Critique B' },
+          { type: 'BIAS_FRAMING', severity: 'high', message: 'Critique A' },
+          { type: 'MISSING_BASELINE', severity: 'medium', message: 'Critique B' },
         ],
       },
     });
     const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
     const dc = input.deterministic_coaching;
     expect((dc.model_critiques as ReadonlyArray<unknown>).length).toBe(2);
+    expect((dc.model_critiques as ReadonlyArray<Record<string, unknown>>)[0]).toEqual({
+      type: 'BIAS_FRAMING',
+      severity: 'high',
+      message: 'Critique A',
+    });
     const meta = input._meta!;
     expect(meta.model_critique_count).toBe(2);
     expect(meta.has_deterministic_coaching).toBe(true);
 
-    // Non-object critiques (string / null / array) are filtered out by
-    // filterObjectEntries — locks the defensive behaviour for shape drift.
+    // Non-object critiques (string / null / array) are filtered out
+    // silently (matches the filter-object-entries convention) — locks the
+    // defensive behaviour for shape drift.
     const mixedEnrichment = baseEnrichment({
       m1_coaching: {
         evidence_gaps: [],
         model_critiques: [
-          { code: 'VALID', message: 'ok' },
+          { type: 'VALID', severity: 'low', message: 'ok' },
           'not-an-object',
           null,
           [{ nested: 'array' }],
@@ -349,5 +361,64 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
     const mixedInput = buildInvokeInputForTests(BRIEF, mixedEnrichment, 'opt-1')!;
     expect((mixedInput.deterministic_coaching.model_critiques as unknown[]).length).toBe(1);
     expect(mixedInput._meta!.model_critique_count).toBe(1);
+  });
+
+  it('10. model_critiques allowlist (FIX 2, 1.41): object-shaped entries missing type/severity/message are dropped, not forwarded verbatim', () => {
+    // Prior to FIX 2, `filterObjectEntries` forwarded ANY object-shaped
+    // upstream entry verbatim — no allowlist at all (the flag-activation
+    // trial's read-only assessment named this the one field with zero
+    // hygiene). Now: only entries carrying the three required string
+    // fields survive; unknown/extraneous fields on a valid entry are
+    // dropped (allowlist, not passthrough).
+    const enrichment = baseEnrichment({
+      m1_coaching: {
+        evidence_gaps: [],
+        model_critiques: [
+          // Valid, with an allowlisted optional + an unknown extra field.
+          {
+            type: 'BIAS_FRAMING',
+            severity: 'high',
+            message: 'Critique A',
+            suggested_action: 'Reframe the goal',
+            affected_node_ids: ['node_1', 42, 'node_2'],
+            unknown_upstream_field: { arbitrary: 'blob', big: 'x'.repeat(500) },
+          },
+          // Missing required `message` — dropped.
+          { type: 'MISSING_MESSAGE', severity: 'low' },
+          // Missing required `severity` — dropped.
+          { type: 'MISSING_SEVERITY', message: 'no severity here' },
+        ],
+      },
+    });
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const critiques = input.deterministic_coaching.model_critiques as ReadonlyArray<Record<string, unknown>>;
+    expect(critiques).toHaveLength(1);
+    expect(critiques[0]).toEqual({
+      type: 'BIAS_FRAMING',
+      severity: 'high',
+      message: 'Critique A',
+      suggested_action: 'Reframe the goal',
+      affected_node_ids: ['node_1', 'node_2'], // non-string entry (42) filtered
+    });
+    expect(critiques[0]!.unknown_upstream_field).toBeUndefined();
+  });
+
+  it('11. model_critiques count cap (FIX 2, 1.41): entries beyond MAX_MODEL_CRITIQUES are dropped from the tail, never silently unbounded', () => {
+    const manyCritiques = Array.from({ length: 25 }, (_, i) => ({
+      type: `TYPE_${i}`,
+      severity: 'medium',
+      message: `Critique ${i}`,
+    }));
+    const enrichment = baseEnrichment({
+      m1_coaching: { evidence_gaps: [], model_critiques: manyCritiques },
+    });
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const critiques = input.deterministic_coaching.model_critiques as ReadonlyArray<Record<string, unknown>>;
+    // Bounded regardless of how many the upstream sends.
+    expect(critiques.length).toBeLessThanOrEqual(10);
+    expect(critiques.length).toBe(10);
+    // Kept entries are the FIRST N (stable, not silently reordered).
+    expect(critiques[0]!.type).toBe('TYPE_0');
+    expect(critiques[9]!.type).toBe('TYPE_9');
   });
 });

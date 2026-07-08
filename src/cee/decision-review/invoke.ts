@@ -134,6 +134,75 @@ export interface DecisionReviewInvokeResult {
 }
 
 // ============================================================================
+// FIX 2 (1.41) — prompt size budgets
+//
+// Live evidence (flag-activation trial, 2026-07-08) captured this prompt at
+// ~9.9k input tokens for a MODEST 4-option/5-factor/15-edge decision, with
+// zero capping anywhere on <GRAPH>, <ISL_RESULTS>, or <DETERMINISTIC_COACHING>
+// (each is a raw `JSON.stringify` of whatever the caller forwards — see
+// Docs/lanes for the FIX-2 read-only assessment). Nothing stops this from
+// growing linearly (or worse) with graph/option/factor count on a larger
+// real decision. The caps below are a structural ceiling: array-length caps
+// (primary defense, keeping the most decision-relevant entries — highest
+// |elasticity| factors, highest switch_probability edges, highest
+// win_probability options) plus a hard per-section byte ceiling (backstop
+// for pathological single-entry bloat, e.g. an oversized node.data blob,
+// that array-count capping alone would not catch). Truncation is always
+// disclosed in-prompt via a `[TRUNCATED: ...]` marker — never silent.
+// ============================================================================
+
+/** Max graph.nodes entries forwarded (structural cap — no per-node relevance signal at this layer, so we keep the first N). */
+export const DECISION_REVIEW_MAX_GRAPH_NODES = 40;
+/** Max graph.edges entries forwarded (same rationale as MAX_GRAPH_NODES). */
+export const DECISION_REVIEW_MAX_GRAPH_EDGES = 80;
+/** Max isl_results.factor_sensitivity entries forwarded — ranked by |elasticity| descending when truncating (matches the prompt's own "pick by highest voi/influence, not position" doctrine). */
+export const DECISION_REVIEW_MAX_FACTOR_SENSITIVITY = 15;
+/** Max isl_results.fragile_edges entries forwarded — ranked by switch_probability descending (most severe first) when truncating. */
+export const DECISION_REVIEW_MAX_FRAGILE_EDGES = 15;
+/** Max isl_results.option_comparison entries forwarded — ranked by win_probability descending when truncating. */
+export const DECISION_REVIEW_MAX_OPTION_COMPARISON = 20;
+/** Hard per-section byte ceiling applied AFTER array-count capping — a pure backstop, not the primary mechanism. Chosen well above typical (currently-observed) section sizes so it never clips a normal, well-formed payload. */
+export const DECISION_REVIEW_SECTION_MAX_CHARS = 8_000;
+
+function readSortNum(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+}
+
+/**
+ * Cap an array to `max` entries. Under the cap: no-op (preserves original
+ * order/content exactly — no behaviour change for typical/small payloads).
+ * Over the cap: sorts by `rank` (descending relevance) before truncating,
+ * so the KEPT entries are the most decision-relevant and the DROPPED tail
+ * is the least relevant. Non-array input is treated as empty.
+ */
+function capArray<T>(
+  arr: unknown,
+  max: number,
+  rank?: (a: T, b: T) => number,
+): { kept: T[]; droppedCount: number } {
+  if (!Array.isArray(arr)) return { kept: [], droppedCount: 0 };
+  const list = arr as T[];
+  if (list.length <= max) return { kept: list, droppedCount: 0 };
+  const ranked = rank ? [...list].sort(rank) : list;
+  return { kept: ranked.slice(0, max), droppedCount: list.length - max };
+}
+
+/**
+ * Stringify a (already array-capped) section value, then apply the hard
+ * byte-ceiling backstop. Any truncation (array-level or byte-level) is
+ * disclosed via an appended `[TRUNCATED: ...]` marker — never silent.
+ */
+function boundedJsonBlock(value: unknown, notes: readonly string[]): string {
+  let json = JSON.stringify(value, null, 2);
+  const allNotes = [...notes];
+  if (json.length > DECISION_REVIEW_SECTION_MAX_CHARS) {
+    json = json.slice(0, DECISION_REVIEW_SECTION_MAX_CHARS);
+    allNotes.push(`section body truncated at ${DECISION_REVIEW_SECTION_MAX_CHARS} chars (hard ceiling)`);
+  }
+  return allNotes.length > 0 ? `${json}\n[TRUNCATED: ${allNotes.join('; ')}]` : json;
+}
+
+// ============================================================================
 // User message assembly (identical to route handler's buildUserMessage)
 // ============================================================================
 
@@ -147,16 +216,78 @@ export function buildDecisionReviewUserMessage(
   sections.push(input.brief);
   sections.push('</BRIEF>');
 
+  // GRAPH — cap nodes/edges by count (no decision-relevance signal exists
+  // for individual nodes/edges at this layer; keep the first N).
+  const graphNodesRaw = input.graph['nodes'];
+  const graphEdgesRaw = input.graph['edges'];
+  const nodesCap = capArray<unknown>(graphNodesRaw, DECISION_REVIEW_MAX_GRAPH_NODES);
+  const edgesCap = capArray<unknown>(graphEdgesRaw, DECISION_REVIEW_MAX_GRAPH_EDGES);
+  const cappedGraph: Record<string, unknown> = {
+    ...input.graph,
+    ...(Array.isArray(graphNodesRaw) ? { nodes: nodesCap.kept } : {}),
+    ...(Array.isArray(graphEdgesRaw) ? { edges: edgesCap.kept } : {}),
+  };
+  const graphNotes: string[] = [];
+  if (nodesCap.droppedCount > 0) graphNotes.push(`${nodesCap.droppedCount} additional graph.nodes entries omitted`);
+  if (edgesCap.droppedCount > 0) graphNotes.push(`${edgesCap.droppedCount} additional graph.edges entries omitted`);
+
   sections.push('<GRAPH>');
-  sections.push(JSON.stringify(input.graph, null, 2));
+  sections.push(boundedJsonBlock(cappedGraph, graphNotes));
   sections.push('</GRAPH>');
 
+  // ISL_RESULTS — cap factor_sensitivity / fragile_edges / option_comparison,
+  // ranking by decision-relevance when truncation is actually needed.
+  const islRaw = input.isl_results;
+  const factorSensitivityRaw = islRaw['factor_sensitivity'];
+  const fragileEdgesRaw = islRaw['fragile_edges'];
+  const optionComparisonRaw = islRaw['option_comparison'];
+
+  const factorCap = capArray<Record<string, unknown>>(
+    factorSensitivityRaw,
+    DECISION_REVIEW_MAX_FACTOR_SENSITIVITY,
+    (a, b) => Math.abs(readSortNum(b.elasticity)) - Math.abs(readSortNum(a.elasticity)),
+  );
+  const edgeCap = capArray<Record<string, unknown>>(
+    fragileEdgesRaw,
+    DECISION_REVIEW_MAX_FRAGILE_EDGES,
+    (a, b) => readSortNum(b.switch_probability) - readSortNum(a.switch_probability),
+  );
+  const optionCap = capArray<Record<string, unknown>>(
+    optionComparisonRaw,
+    DECISION_REVIEW_MAX_OPTION_COMPARISON,
+    (a, b) => readSortNum(b.win_probability) - readSortNum(a.win_probability),
+  );
+
+  const cappedIslResults: Record<string, unknown> = {
+    ...islRaw,
+    ...(Array.isArray(factorSensitivityRaw) ? { factor_sensitivity: factorCap.kept } : {}),
+    ...(Array.isArray(fragileEdgesRaw) ? { fragile_edges: edgeCap.kept } : {}),
+    ...(Array.isArray(optionComparisonRaw) ? { option_comparison: optionCap.kept } : {}),
+  };
+  const islNotes: string[] = [];
+  if (factorCap.droppedCount > 0) {
+    islNotes.push(`${factorCap.droppedCount} lower-sensitivity factor_sensitivity entries omitted`);
+  }
+  if (edgeCap.droppedCount > 0) {
+    islNotes.push(`${edgeCap.droppedCount} lower-severity fragile_edges entries omitted`);
+  }
+  if (optionCap.droppedCount > 0) {
+    islNotes.push(`${optionCap.droppedCount} lower-probability option_comparison entries omitted`);
+  }
+
   sections.push('<ISL_RESULTS>');
-  sections.push(JSON.stringify(input.isl_results, null, 2));
+  sections.push(boundedJsonBlock(cappedIslResults, islNotes));
   sections.push('</ISL_RESULTS>');
 
+  // DETERMINISTIC_COACHING — array-length capping (model_critiques allowlist
+  // + count cap) happens upstream at the source
+  // (orchestrator-v5/coaching/decision-review-enricher.ts
+  // normaliseDeterministicCoachingFromM1, mirroring the evidence_gaps
+  // pattern). Here we only apply the hard byte-ceiling backstop, since this
+  // block's shape is caller-defined (the HTTP route handler builds its own
+  // richer deterministic_coaching) and not always the enricher's output.
   sections.push('<DETERMINISTIC_COACHING>');
-  sections.push(JSON.stringify(input.deterministic_coaching, null, 2));
+  sections.push(boundedJsonBlock(input.deterministic_coaching, []));
   sections.push('</DETERMINISTIC_COACHING>');
 
   sections.push('<DECISION_CONTEXT>');

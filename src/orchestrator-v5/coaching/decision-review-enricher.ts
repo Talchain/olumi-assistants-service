@@ -684,6 +684,54 @@ interface DeterministicCoachingResult {
   readonly has_real_data: boolean;
   readonly model_critique_count: number;
   readonly evidence_gaps_dropped_count: number;
+  /** Number of upstream model_critiques entries dropped for missing one of
+   *  the three required fields (type, factor_label, message) — see
+   *  {@link normaliseModelCritique}. Mirrors evidence_gaps_dropped_count. */
+  readonly model_critiques_dropped_count: number;
+  /** Number of well-formed model_critiques entries dropped purely by the
+   *  MAX_MODEL_CRITIQUES count cap (FIX 2, 1.41) — distinct from the
+   *  dropped-for-malformed count above. */
+  readonly model_critiques_capped_count: number;
+}
+
+/**
+ * Max model_critiques entries forwarded to the decision_review prompt
+ * (FIX 2, 1.41 — count cap; mirrors the array-length-capping hygiene
+ * convention used elsewhere in this codebase, e.g.
+ * cee/decision-review/invoke.ts's DECISION_REVIEW_MAX_* constants). Extra
+ * well-formed entries beyond this count are dropped from the tail; the
+ * count is tracked in _meta for observability, never silently.
+ */
+const MAX_MODEL_CRITIQUES = 10;
+
+/**
+ * Map a single upstream m1_coaching.model_critiques[] entry into the
+ * adapter-output shape the decision_review prompt expects (defaults.ts
+ * "DETERMINISTIC COACHING" section: `.model_critiques[]: { type, severity,
+ * message, suggested_action?, affected_node_ids? }`).
+ *
+ * Required: type (string), severity (string), message (string). Returns
+ * null when any required field is missing or wrong-typed — caller
+ * increments the dropped count (mirrors {@link normaliseEvidenceGap}).
+ *
+ * Optional additive passthrough (allowlist only): suggested_action
+ * (string), affected_node_ids (array — non-string entries filtered out).
+ * Unknown upstream fields are NOT forwarded — this closes the gap the
+ * flag-activation trial found (previously `filterObjectEntries` forwarded
+ * arbitrary upstream objects verbatim, no allowlist at all).
+ */
+function normaliseModelCritique(e: Record<string, unknown>): Record<string, unknown> | null {
+  const type = typeof e.type === 'string' && e.type.length > 0 ? e.type : null;
+  const severity = typeof e.severity === 'string' && e.severity.length > 0 ? e.severity : null;
+  const message = typeof e.message === 'string' && e.message.length > 0 ? e.message : null;
+  if (type === null || severity === null || message === null) return null;
+  const out: Record<string, unknown> = { type, severity, message };
+  if (typeof e.suggested_action === 'string') out.suggested_action = e.suggested_action;
+  if (Array.isArray(e.affected_node_ids)) {
+    const ids = e.affected_node_ids.filter((id): id is string => typeof id === 'string');
+    if (ids.length > 0) out.affected_node_ids = ids;
+  }
+  return out;
 }
 
 function normaliseDeterministicCoachingFromM1(
@@ -722,7 +770,21 @@ function normaliseDeterministicCoachingFromM1(
     }
   }
   const rawCrits = m1 && Array.isArray(m1.model_critiques) ? m1.model_critiques : [];
-  const model_critiques = filterObjectEntries(rawCrits);
+  const mappedCritiques: Record<string, unknown>[] = [];
+  let critiquesDropped = 0;
+  for (const c of rawCrits) {
+    // Non-object entries aren't "populated but malformed" — skip silently
+    // without counting (matches the filter-object-entries convention).
+    if (c === null || typeof c !== 'object' || Array.isArray(c)) continue;
+    const n = normaliseModelCritique(c as Record<string, unknown>);
+    if (n) {
+      mappedCritiques.push(n);
+    } else {
+      critiquesDropped++;
+    }
+  }
+  const critiquesCappedCount = Math.max(0, mappedCritiques.length - MAX_MODEL_CRITIQUES);
+  const model_critiques = mappedCritiques.slice(0, MAX_MODEL_CRITIQUES);
 
   const has_real_data =
     readiness !== 'unknown' ||
@@ -735,6 +797,8 @@ function normaliseDeterministicCoachingFromM1(
     has_real_data,
     model_critique_count: model_critiques.length,
     evidence_gaps_dropped_count: dropped,
+    model_critiques_dropped_count: critiquesDropped,
+    model_critiques_capped_count: critiquesCappedCount,
   };
 }
 
