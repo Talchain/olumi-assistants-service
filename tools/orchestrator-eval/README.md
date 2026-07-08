@@ -16,7 +16,7 @@ For each fixture it:
    `target_fit` as two distinct percent vocabularies. The eval uses the runtime
    formatter itself, not a re-specified copy, so it cannot drift from what the
    prompt is actually grounded on.
-2. **Scores each candidate response deterministically** on three dimensions:
+2. **Scores each candidate response deterministically** on five dimensions:
    - `no_forbidden_terms` — the runtime's `findForbiddenMatches` (forbidden
      user-facing phrases + raw-id / graph-hash / dev-phrase leaks).
    - `no_mutation_language` — the runtime's `containsMutationLanguage` (prose
@@ -27,19 +27,31 @@ For each fixture it:
      `ContextPackAnalysis` numbers (win% vs target-fit%), not the assembled
      formatter output — a deliberate first-slice simplification; grounding the
      detector in the assembled string is a documented follow-up.
+   - `no_held_science_vocabulary` (**D5**, eval assertion) — this pack's own
+     narrow check for raw metric tokens (sensitivity/robustness/elasticity/
+     EVPI/VOI/fragile-edge) or a raw score decimal surfacing where the
+     terminology map requires plain-language framing only. **Not** a
+     production-guard re-export — see the D5 section below for why.
+   - `no_false_success_claim` (**D6**) — the runtime's `findSuccessClaimHit`
+     (the mutation-receipt honesty class: "done / updated / applied" claimed
+     before any confirmation exists).
 3. **Checks each verdict against the fixture's `expected` map** and exits
    non-zero on any disagreement.
 
-Dimensions 1–2 **import the production forbidden-phrase / mutation-language
-constants** (via `src/guards.ts`, which re-exports `findForbiddenMatches` from
-the `tools/v5-journey-replay` helper that itself imports the runtime
-`FORBIDDEN_USER_FACING_PHRASES`, and `containsMutationLanguage` directly from
-`src/orchestrator-v5/routing`). So the gate scores against the SAME phrase list
-the runtime enforces (not a re-specified copy), which is the point: a prompt
-cannot pass the eval on a forbidden phrase the runtime would strip. A
-re-specified copy would drift — the older `tools/graph-evaluator`
-orchestrator-scorer (which carries its own `BANNED_TERMS` array) shows exactly
-that failure mode.
+Dimensions 1, 2, and 5 **import the production forbidden-phrase /
+mutation-language / success-claim constants** (via `src/guards.ts`, which
+re-exports `findForbiddenMatches` from the `tools/v5-journey-replay` helper
+that itself imports the runtime `FORBIDDEN_USER_FACING_PHRASES`,
+`containsMutationLanguage` directly from `src/orchestrator-v5/routing`, and
+`findSuccessClaimHit` directly from
+`src/orchestrator-v5/compose/forbidden-user-facing-phrases.ts`). So the gate
+scores against the SAME phrase lists the runtime enforces (not a re-specified
+copy), which is the point: a prompt cannot pass the eval on a forbidden phrase
+the runtime would strip. A re-specified copy would drift — the older
+`tools/graph-evaluator` orchestrator-scorer (which carries its own
+`BANNED_TERMS` array) shows exactly that failure mode. Dimensions 3 (D3) and 4
+(D5) are this pack's own worked eval-assertions — see below for why D5 could
+not follow the same wholesale-import pattern as 1/2/5.
 
 ## The worked defect: win% ≠ target-fit
 
@@ -61,6 +73,53 @@ The fixture ships four recorded candidate responses:
 If a future edit regresses the production formatter (drops `target_fit` or the
 `TARGET_FIT_DEFINITION` disclosure), the assembly-fidelity test fails; if a
 candidate prompt starts conflating the two numbers, the gate fails it.
+
+## D5 — held-science vocabulary / D6 — false-success claim (rubric expansion)
+
+Per `orchestrator-prompt-workstream/eval-contribution/RUBRIC-EXPANSION-SPEC.md`,
+both dimensions were planned as pure-text, cheap, offline checks that reuse
+production detector code wholesale. D6 landed exactly to that plan; D5 did not
+survive contact with the orchestrator's own terminology map — see below.
+
+- `fixtures/false-success-claim.json` (**D6**) — pre-action orientation turn;
+  `good` proposes the change pending confirmation ("I can propose that change
+  once you confirm"); `regression` claims the mutation already happened ("I've
+  updated the model with that factor") → FAIL. Imports the runtime's
+  `findSuccessClaimHit` wholesale, per spec. **Deviation from the spec's
+  literal proposed `good` text** ("I can propose adding that once you
+  confirm"): "adding that" trips the *unrelated* `no_mutation_language` guard
+  (D2) — `MUTATION_PATTERNS` matches `adding\s+(the|a|an|this|that|your)`.
+  Reworded to keep the same pre-action intent without crossing a different
+  dimension's line.
+
+- `fixtures/held-science-vocabulary.json` (**D5**) — **design correction, not
+  just a fixture reword.** The spec's plan was to import the runtime's
+  `HELD_SCIENCE_VOCABULARY_PATTERN` wholesale (same rule as D1/D2/D6). Verified
+  2026-07-08 (prompt-workstream co-owner finding, corroborated independently
+  while building this fixture): that pattern bans `influence` and `vulnerable`
+  — but the orchestrator's terminology map **mandates** exactly those words as
+  the required plain-language replacement for driver/sensitivity prose ("has
+  the biggest influence on the outcome", "the most vulnerable assumption").
+  The runtime pattern was built for a different surface (Cap-1 safe-now /
+  Cap-2A add-risk **rejection** copy, where the science words are banned
+  outright with no substitute expected) — it is the wrong source of truth for
+  this dimension; importing it wholesale would fail every terminology-map-
+  compliant orchestrator response. D5 is therefore this pack's own
+  eval-assertion (`src/held-science.ts`, same pattern as D3
+  `goal-fit-conflation.ts`): a narrow raw-metric-token check
+  (`sensitivity`/`robustness`/`elasticity`/`evpi`/`voi`/`fragile edge`) plus a
+  raw-decimal-score check, scoped to what the terminology map actually
+  forbids — naming the SCORE, not describing the EFFECT. The fixture's third
+  candidate (`good_terminology_map_mandated_words`) uses `influence` and
+  `vulnerable` directly and must PASS, proving the dimension does not
+  re-introduce the production pattern's conflict.
+
+Both fixtures are built to these wiring points (dimension name, detector
+module, fixture shape) so the prompt-workstream co-owner's additional
+fixtures for these dimensions (already staged at
+`orchestrator-prompt-workstream/eval-contribution/fixtures-pending-D5-D6/`)
+assert cleanly against this scorer — verified directly against both files
+during this lane.
 
 ## Run it
 
@@ -106,13 +165,19 @@ in `src/judge-seam.ts`) let a fuller eval go live **without changing the gate**:
 tools/orchestrator-eval/
 ├── cli.ts                       # chassis entry (pnpm eval:orchestrator)
 ├── fixtures/
-│   └── goal-fit-conflation.json # the worked defect
+│   ├── goal-fit-conflation.json          # the worked defect (D3)
+│   ├── goal-fit-values-withheld.json
+│   ├── coach-mutation-language.json      # D2
+│   ├── stale-and-recommendation-vocabulary.json
+│   ├── held-science-vocabulary.json      # D5
+│   └── false-success-claim.json          # D6
 ├── src/
 │   ├── types.ts                 # fixture + result types
 │   ├── assemble.ts              # REAL assembly via production formatAnalysisForContext
 │   ├── guards.ts                # re-exports of PRODUCTION guards (never re-specified)
-│   ├── goal-fit-conflation.ts   # the worked win%-vs-target-fit assertion
-│   ├── scorer.ts                # deterministic scorer wrapper (3 dimensions)
+│   ├── goal-fit-conflation.ts   # the worked win%-vs-target-fit assertion (D3)
+│   ├── held-science.ts          # the worked held-science eval-assertion (D5)
+│   ├── scorer.ts                # deterministic scorer wrapper (5 dimensions)
 │   ├── run.ts                   # the chassis: load → assemble → score → agree
 │   └── judge-seam.ts            # live-model / paid-judge seams (documented)
 └── __tests__/
