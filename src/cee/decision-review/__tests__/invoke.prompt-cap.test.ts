@@ -29,6 +29,9 @@ import {
   DECISION_REVIEW_MAX_FRAGILE_EDGES,
   DECISION_REVIEW_MAX_OPTION_COMPARISON,
   DECISION_REVIEW_MAX_GRAPH_NODES,
+  DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES,
+  DECISION_REVIEW_MAX_BRIEF_CHARS,
+  DECISION_REVIEW_SECTION_MAX_CHARS,
   type DecisionReviewInvokeInput,
 } from '../invoke.js';
 
@@ -76,6 +79,23 @@ function makeOptionComparison(n: number): Record<string, unknown>[] {
 
 function makeGraphNodes(n: number): Record<string, unknown>[] {
   return Array.from({ length: n }, (_, i) => ({ id: `node_${i}`, kind: 'factor', label: `Node ${i}` }));
+}
+
+function makeFlipThresholdData(n: number): Record<string, unknown>[] {
+  // Spread |flip_value - current_value| across a wide range so ranking is
+  // unambiguous — LOWER index = SMALLER distance-to-flip = MORE
+  // decision-relevant (closest to flipping is the most actionable signal,
+  // matching the historical `deriveFlipThresholds` closest-distance doctrine
+  // in src/orchestrator/context/analysis-compact.ts).
+  return Array.from({ length: n }, (_, i) => ({
+    factor_id: `flip_${i}`,
+    factor_label: `Flip Factor ${i}`,
+    current_value: 0,
+    flip_value: i + 1,
+    direction: 'increase',
+    unit: null,
+    elasticity: null,
+  }));
 }
 
 describe('buildDecisionReviewUserMessage — prompt size budgets (FIX 2, 1.41)', () => {
@@ -209,5 +229,110 @@ describe('buildDecisionReviewUserMessage — prompt size budgets (FIX 2, 1.41)',
     expect(message.length).toBeLessThan(30_000);
     expect(message).toContain('[TRUNCATED:');
     expect(message).toContain('hard ceiling');
+  });
+
+  // ==========================================================================
+  // FIX A (1.41 fix round, C1) — FLIP_THRESHOLD_DATA and BRIEF were still
+  // raw uncapped `JSON.stringify` after FIX 2 — defeating the "hard ceiling"
+  // claim. These pin both sections bounded, disclosed, and ranked.
+  // ==========================================================================
+
+  it('an oversized flip_threshold_data fixture produces a BOUNDED <FLIP_THRESHOLD_DATA> section, disclosed', () => {
+    const n = DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES + 20;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ flip_threshold_data: makeFlipThresholdData(n) }),
+      0.4,
+    );
+    expect(message.length).toBeLessThan(30_000);
+    expect(message).toContain('[TRUNCATED:');
+    expect(message).toContain('flip_threshold_data entries omitted');
+  });
+
+  it('flip_threshold_data truncation keeps the closest-to-flip entries (smallest |flip - current|), drops the farthest', () => {
+    const n = DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES + 10;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ flip_threshold_data: makeFlipThresholdData(n) }),
+      0.4,
+    );
+    // flip_0 has distance 1 (closest — most decision-relevant) — must survive.
+    expect(message).toContain('"factor_id": "flip_0"');
+    expect(message).toContain(
+      '"factor_id": "flip_' + (DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES - 1) + '"',
+    );
+    // flip_(n-1) has the largest distance (least relevant) — must be dropped.
+    expect(message).not.toContain('"factor_id": "flip_' + (n - 1) + '"');
+  });
+
+  it('a typical/small flip_threshold_data payload (under the cap) is byte-identical — no marker, no reordering', () => {
+    const flipData = makeFlipThresholdData(3);
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ flip_threshold_data: flipData }),
+      0.4,
+    );
+    expect(message).toContain(JSON.stringify(flipData, null, 2));
+  });
+
+  it('an oversized brief is capped to DECISION_REVIEW_MAX_BRIEF_CHARS, disclosed', () => {
+    const hugeBrief = 'Should we hire? '.repeat(400); // well over the cap
+    const message = buildDecisionReviewUserMessage(baseInput({ brief: hugeBrief }), 0.4);
+    const briefSection = message.slice(
+      message.indexOf('<BRIEF>') + '<BRIEF>'.length,
+      message.indexOf('</BRIEF>'),
+    );
+    expect(briefSection.length).toBeLessThan(DECISION_REVIEW_MAX_BRIEF_CHARS + 200);
+    expect(message).toContain('[TRUNCATED:');
+    expect(message).toContain('brief truncated');
+  });
+
+  it('a typical/small brief (under the cap) is byte-identical — no marker', () => {
+    const brief = 'Should we hire a backend engineer or bring on a contractor?';
+    const message = buildDecisionReviewUserMessage(baseInput({ brief }), 0.4);
+    const briefSection = message.slice(
+      message.indexOf('<BRIEF>') + '<BRIEF>'.length,
+      message.indexOf('</BRIEF>'),
+    ).trim();
+    expect(briefSection).toBe(brief);
+    expect(message).not.toContain('[TRUNCATED:');
+  });
+
+  it('an oversized graph THAT ALSO carries an oversized brief and flip_threshold_data hits BOTH new caps simultaneously and the total prompt stays under the hard per-section ceiling for each capped section', () => {
+    const hugeBrief = 'x'.repeat(DECISION_REVIEW_MAX_BRIEF_CHARS * 5);
+    const n = DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES + 50;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({
+        brief: hugeBrief,
+        graph: { nodes: makeGraphNodes(500), edges: [] },
+        isl_results: {
+          factor_sensitivity: makeFactorSensitivity(500),
+          fragile_edges: makeFragileEdges(500),
+          option_comparison: makeOptionComparison(500),
+        },
+        flip_threshold_data: makeFlipThresholdData(n),
+      }),
+      0.4,
+    );
+
+    // Every disclosed truncation must be present.
+    expect(message).toContain('brief truncated');
+    expect(message).toContain('flip_threshold_data entries omitted');
+    expect(message).toContain('graph.nodes entries omitted');
+
+    // Each capped section individually respects the hard per-section byte
+    // ceiling (plus slack for the disclosure marker text itself).
+    const briefSection = message.slice(
+      message.indexOf('<BRIEF>') + '<BRIEF>'.length,
+      message.indexOf('</BRIEF>'),
+    );
+    expect(briefSection.length).toBeLessThan(DECISION_REVIEW_MAX_BRIEF_CHARS + 200);
+
+    const flipSection = message.slice(
+      message.indexOf('<FLIP_THRESHOLD_DATA>') + '<FLIP_THRESHOLD_DATA>'.length,
+      message.indexOf('</FLIP_THRESHOLD_DATA>'),
+    );
+    expect(flipSection.length).toBeLessThan(DECISION_REVIEW_SECTION_MAX_CHARS + 500);
+
+    // Total prompt is still bounded overall, not scaling linearly with the
+    // combined oversized input.
+    expect(message.length).toBeLessThan(50_000);
   });
 });

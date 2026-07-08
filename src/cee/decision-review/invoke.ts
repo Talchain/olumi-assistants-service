@@ -163,6 +163,29 @@ export const DECISION_REVIEW_MAX_FRAGILE_EDGES = 15;
 export const DECISION_REVIEW_MAX_OPTION_COMPARISON = 20;
 /** Hard per-section byte ceiling applied AFTER array-count capping — a pure backstop, not the primary mechanism. Chosen well above typical (currently-observed) section sizes so it never clips a normal, well-formed payload. */
 export const DECISION_REVIEW_SECTION_MAX_CHARS = 8_000;
+/**
+ * Max flip_threshold_data entries forwarded — ranked by smallest
+ * |flip_value - current_value| (closest-to-flip = most actionable /
+ * decision-relevant) when truncating, mirroring the historical
+ * `deriveFlipThresholds` closest-distance doctrine in
+ * `src/orchestrator/context/analysis-compact.ts`.
+ *
+ * FIX A (1.41 fix round, C1): this section was still raw uncapped
+ * `JSON.stringify` after FIX 2 shipped — one entry per factor, uncapped —
+ * defeating the "hard ceiling" claim for graphs with many flip-eligible
+ * factors.
+ */
+export const DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES = 15;
+/**
+ * Max `<BRIEF>` character length. The brief is user-controlled free text
+ * (no array structure to count-cap), so this is a direct char ceiling with
+ * disclosed truncation — same "never silent" doctrine as the hard
+ * per-section byte ceiling.
+ *
+ * FIX A (1.41 fix round, C1): the brief was still raw, uncapped user input
+ * forwarded verbatim.
+ */
+export const DECISION_REVIEW_MAX_BRIEF_CHARS = 2_000;
 
 function readSortNum(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
@@ -202,6 +225,34 @@ function boundedJsonBlock(value: unknown, notes: readonly string[]): string {
   return allNotes.length > 0 ? `${json}\n[TRUNCATED: ${allNotes.join('; ')}]` : json;
 }
 
+/**
+ * Cap a free-text block (the `<BRIEF>` section — user-controlled, no array
+ * structure to count-cap) to `maxChars`. Under the cap: no-op (byte-identical
+ * for typical/small briefs). Over the cap: hard-slice and disclose via the
+ * same `[TRUNCATED: ...]` marker doctrine as `boundedJsonBlock` — never
+ * silent.
+ */
+function boundedTextBlock(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const omitted = text.length - maxChars;
+  return `${text.slice(0, maxChars)}\n[TRUNCATED: brief truncated at ${maxChars} chars (hard ceiling), ${omitted} chars omitted]`;
+}
+
+/**
+ * Distance-to-flip for a flip_threshold_data entry: |flip_value -
+ * current_value|. Missing/non-numeric fields sort last (treated as least
+ * relevant, not most) so a malformed entry never displaces a well-formed one
+ * from the kept set.
+ */
+function flipDistance(entry: Record<string, unknown>): number {
+  const flip = entry['flip_value'];
+  const current = entry['current_value'];
+  if (typeof flip !== 'number' || typeof current !== 'number' || !Number.isFinite(flip) || !Number.isFinite(current)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.abs(flip - current);
+}
+
 // ============================================================================
 // User message assembly (identical to route handler's buildUserMessage)
 // ============================================================================
@@ -213,7 +264,7 @@ export function buildDecisionReviewUserMessage(
   const sections: string[] = [];
 
   sections.push('<BRIEF>');
-  sections.push(input.brief);
+  sections.push(boundedTextBlock(input.brief, DECISION_REVIEW_MAX_BRIEF_CHARS));
   sections.push('</BRIEF>');
 
   // GRAPH — cap nodes/edges by count (no decision-relevance signal exists
@@ -302,7 +353,16 @@ export function buildDecisionReviewUserMessage(
 
   sections.push('<FLIP_THRESHOLD_DATA>');
   if (input.flip_threshold_data && input.flip_threshold_data.length > 0) {
-    sections.push(JSON.stringify(input.flip_threshold_data, null, 2));
+    const flipCap = capArray<Record<string, unknown>>(
+      input.flip_threshold_data,
+      DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES,
+      (a, b) => flipDistance(a) - flipDistance(b),
+    );
+    const flipNotes: string[] = [];
+    if (flipCap.droppedCount > 0) {
+      flipNotes.push(`${flipCap.droppedCount} farther-from-flip flip_threshold_data entries omitted`);
+    }
+    sections.push(boundedJsonBlock(flipCap.kept, flipNotes));
   } else {
     sections.push('Not available');
   }
