@@ -1,5 +1,34 @@
 # Lane 21 (P0-A) — widen the ContextPack analysis projection to banded full-analysis coverage
 
+> **Record corrections (Lane 30, 2026-07-08 — see
+> `LANE30-goalfit-truthful-context-2026-07-08.md` and the comment on merged
+> PR #369):**
+>
+> 1. **Stage C's "live failure mode" was demonstrated on a synthetic fixture
+>    only.** The reconciliation tests exercise a hand-built
+>    `topLevelOnlyEnrichment()` whose `option_comparison[]` entries carry no
+>    option identity (`[{status:'computed'}, …]`). The in-repo live capture
+>    (`tests/fixtures/cross-service/v5-turn.run-analysis.staging.json`) has
+>    FULL option identity on every `option_comparison[]` entry
+>    (`option_id`/`option_label`/`id`/`label` all present). No in-repo live
+>    capture demonstrates the no-identity shape; the Stage C gate remains
+>    correct as defensive coding, but its motivating scenario is unattested
+>    on live data.
+> 2. **The "full-analysis coverage" title overstated the result.** The
+>    Lane 21 projection did NOT carry: `confidence_tier` (present at the
+>    live envelope top level and already on the compose transport
+>    keep-list), per-option outcome data (`option_comparison[].outcome`),
+>    per-option goal-fit VALUES (`probability_of_joint_goal` — whose absence
+>    produced the verified live claim-integrity defect in scenario 90385279:
+>    win% narrated as target-fit), or `zero_reason` carriage.
+> 3. **What Lane 30 adds:** per-option `target_fit` percent strings + a
+>    never-silent goal-fit prose slot; the #369-audit P1 fix (tipping/VOI
+>    lever suppression by structural `factor_id`); `confidence_tier` prose;
+>    banded per-option `outcome_band`; runtime enforcement of
+>    `DISPLAY_ANALYSIS_CHAR_BUDGET` (previously test-asserted only) with
+>    disclosed priority truncation. `zero_reason` remains out of scope
+>    (doctrine open — documented, not carried).
+
 **Branch:** `claude-lane21/analysis-context-pack` (base: `origin/staging` @ `e122f16b6`)
 **Scope owned:** `src/orchestrator-v5/context/**`, `src/orchestrator-v5/format/**`, route-with-tool-use wiring (one surgical parity edit at the turn-executor ingress seam).
 **Not touched:** PMS / prompt templates (ruling D1), `compose.ts` / transport keep-lists.
