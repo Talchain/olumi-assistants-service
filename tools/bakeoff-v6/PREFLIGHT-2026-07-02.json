@@ -1,0 +1,43 @@
+{
+  "advisor_error": null,
+  "advisor_pairing_ok": true,
+  "arm_gate": {
+    "A": {
+      "allowed": true,
+      "reason": "probe passed"
+    },
+    "B": {
+      "allowed": true,
+      "reason": "probe passed"
+    },
+    "C": {
+      "allowed": true,
+      "reason": "probes passed"
+    },
+    "D": {
+      "allowed": true,
+      "reason": "executor + advisor pairing probes passed"
+    }
+  },
+  "key_present": true,
+  "models": [
+    {
+      "error": null,
+      "generation_ok": true,
+      "models_api_ok": true,
+      "requested_model": "claude-sonnet-4-6",
+      "served_model": "claude-sonnet-4-6"
+    },
+    {
+      "error": null,
+      "generation_ok": true,
+      "models_api_ok": true,
+      "requested_model": "claude-opus-4-8",
+      "served_model": "claude-opus-4-8"
+    }
+  ],
+  "pricing_age_days": 0,
+  "pricing_stale": false,
+  "ran_at": "2026-07-02T01:39:21.502Z",
+  "sdk_version": "0.78.0"
+}

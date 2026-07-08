@@ -1,0 +1,25 @@
+{
+  "name": "bakeoff-v6",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "V6 offline dual-model bake-off platform. Benchmark tooling ONLY — never wired into the product, never PMS, never production.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "provenance": "tsx src/cli/provenance.ts",
+    "preflight": "tsx src/cli/run.ts --stage preflight",
+    "smoke": "tsx src/cli/run.ts --mock --run-id smoke",
+    "press": "tsx src/cli/run.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.5",
+    "vitest": "^4.0.0"
+  }
+}

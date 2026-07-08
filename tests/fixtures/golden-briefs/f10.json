@@ -1,0 +1,10 @@
+{
+  "brief": "We're a 50-person B2B SaaS company doing £3M ARR. We need to decide how to expand our product into the mid-market segment within 12 months.\nGoal: Reach 200 mid-market customers with a net revenue retention rate above 110%.\nOptions we're considering:\n1. Build a dedicated mid-market product tier with enterprise features (SSO, audit logs, custom roles)\n2. Partner with 3-4 system integrators who already serve mid-market clients\n3. Acquire a smaller competitor that already has mid-market traction\nKey factors we think matter:\n* Engineering capacity — we have 20 engineers, 8 of whom are senior\n* Sales cycle length — mid-market deals typically take 3-6 months\n* Product-market fit — we've had 12 inbound enquiries from mid-market companies in the last quarter\n* Integration complexity — mid-market buyers expect integrations with Salesforce, HubSpot, and Slack\n* Competitive pressure — two VC-backed competitors launched mid-market tiers last quarter\n* Cash runway — we have under 18 months of runway at current burn rate\n* Customers churn —  we need to keep monthly churn under 4%. If we go above 10%, we risk becoming unprofitable\nSuccess target: 200 mid-market customers within 12 months.",
+  "metadata": {
+    "archetype": "mid-market-expansion",
+    "id": "f10",
+    "description": "Recovered mid-market/manual-test fixture (F10). Byte-exact; do not normalise or recreate.",
+    "source_bundle": "olumi-debug-2394efe6-20260415.json",
+    "brief_sha256": "337ce06c5c2955596be17254d2307800ad9c7c977ace4acef1648f2ebbd935f1"
+  }
+}
