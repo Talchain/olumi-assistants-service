@@ -39,6 +39,9 @@ export const TIPPING_POINT_SIGNAL_CAP = 3;
  */
 export const OPTION_GOAL_FIT_SIGNAL_CAP = 12;
 
+/** Lane 30 fix 3 — cap for per-option outcome signals (same parity note). */
+export const OPTION_OUTCOME_SIGNAL_CAP = 12;
+
 /**
  * One factor's tipping information, sourced from the top-level
  * `enrichment.flip_thresholds[]` (staging shape) or, when only the
@@ -114,6 +117,25 @@ export interface OptionGoalFitSignal {
 }
 
 /**
+ * Lane 30 fix 3 — one option's modelled-outcome mean, sourced from the
+ * per-option `enrichment.option_comparison[].outcome.mean` (nested staging
+ * shape) or the flat `outcome_mean`. RAW float — banded downstream into an
+ * `outcome_band` phrase (shared influence-band vocabulary), never surfaced
+ * as a number.
+ *
+ * Derived from the enrichment (NOT from `OptionSummary.outcome_mean`)
+ * deliberately: the compact summary DEFAULTS missing outcome means to 0, so
+ * a summary-side read cannot distinguish an honest zero from a fabricated
+ * default — banding a fabricated 0 as "roughly neutral" would be a false
+ * claim. Presence in the raw enrichment row is the honesty predicate.
+ */
+export interface OptionOutcomeSignal {
+  readonly option_id: string | null;
+  readonly option_label: string;
+  readonly outcome_mean: number;
+}
+
+/**
  * Optional signal extensions a producer may attach to an
  * `AnalysisResponseSummary` before it reaches the ContextPack assembler.
  */
@@ -123,6 +145,16 @@ export interface AnalysisSummarySignals {
   readonly goal_fit?: GoalFitSignal | null;
   /** Lane 30 — per-option goal-fit values (see {@link OptionGoalFitSignal}). */
   readonly option_goal_fits?: readonly OptionGoalFitSignal[];
+  /** Lane 30 fix 3 — per-option modelled-outcome means (see {@link OptionOutcomeSignal}). */
+  readonly option_outcomes?: readonly OptionOutcomeSignal[];
+  /**
+   * Lane 30 fix 3 — top-level ordinal confidence tier (PLoT: derived from
+   * `m1_coaching.readiness`; attested values 'strong' | 'fair' |
+   * 'needs_work', but the enrichment passthrough is untyped so this stays
+   * a string). Already on the compose transport keep-list; rendered as
+   * prose by the display formatter.
+   */
+  readonly confidence_tier?: string | null;
 }
 
 /** The summary shape `projectAnalysis` actually consumes. */
@@ -338,6 +370,60 @@ function readOptionIdentity(
     (c): c is string => typeof c === 'string' && c.trim().length > 0,
   );
   return { id, label: labelRaw ?? null };
+}
+
+/**
+ * Lane 30 fix 3 — derive the top-level confidence tier. Non-empty string
+ * only; anything else (absent, blank, non-string) returns null so the
+ * projection omits the field rather than fabricating a tier.
+ */
+export function deriveConfidenceTierFromEnrichment(
+  enrichment: Record<string, unknown>,
+): string | null {
+  const raw = enrichment.confidence_tier;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Lane 30 fix 3 — derive per-option modelled-outcome means from
+ * `enrichment.option_comparison[]`. Reads the nested `outcome.mean` (live
+ * staging shape) or the flat `outcome_mean`; keeps finite numbers only. A
+ * row with NO outcome data is dropped — never defaulted to 0 (see
+ * {@link OptionOutcomeSignal}). Identity, dedupe and cap rules mirror
+ * {@link deriveOptionGoalFitsFromEnrichment}.
+ */
+export function deriveOptionOutcomesFromEnrichment(
+  enrichment: Record<string, unknown>,
+): OptionOutcomeSignal[] {
+  const raw = enrichment.option_comparison;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
+  const out: OptionOutcomeSignal[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const entry = asRecord(item);
+    if (entry === null) continue;
+    const outcomeObj = asRecord(entry.outcome);
+    const mean =
+      typeof entry.outcome_mean === 'number' && Number.isFinite(entry.outcome_mean)
+        ? entry.outcome_mean
+        : outcomeObj !== null &&
+            typeof outcomeObj.mean === 'number' &&
+            Number.isFinite(outcomeObj.mean)
+          ? outcomeObj.mean
+          : null;
+    if (mean === null) continue;
+    const { id, label } = readOptionIdentity(entry);
+    if (id === null && label === null) continue;
+    const dedupeKey = id !== null ? `id:${id}` : `label:${label}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({ option_id: id, option_label: label ?? id!, outcome_mean: mean });
+    if (out.length >= OPTION_OUTCOME_SIGNAL_CAP) break;
+  }
+  return out;
 }
 
 /**

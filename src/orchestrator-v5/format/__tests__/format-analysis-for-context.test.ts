@@ -496,6 +496,67 @@ describe('Lane 30 per-option target-fit', () => {
   });
 });
 
+// Lane 30 fix 3 — confidence tier prose + banded per-option outcomes.
+describe('Lane 30 confidence tier + outcome bands', () => {
+  it('renders known confidence tiers as prose', () => {
+    const needsWork = formatAnalysisForContext(rawAnalysis({ confidence_tier: 'needs_work' }));
+    expect(needsWork!.confidence_tier).toBe('analysis confidence needs work');
+
+    const fair = formatAnalysisForContext(rawAnalysis({ confidence_tier: 'fair' }));
+    expect(fair!.confidence_tier).toBe('analysis confidence is fair');
+
+    const strong = formatAnalysisForContext(rawAnalysis({ confidence_tier: 'strong' }));
+    expect(strong!.confidence_tier).toBe('analysis confidence is strong');
+  });
+
+  it('humanises unknown tier tokens rather than echoing raw, omits when absent', () => {
+    const unknown = formatAnalysisForContext(rawAnalysis({ confidence_tier: 'very_shaky' }));
+    expect(unknown!.confidence_tier).toBe('analysis confidence: very shaky');
+
+    const absent = formatAnalysisForContext(rawAnalysis({ confidence_tier: null }));
+    expect(absent!).not.toHaveProperty('confidence_tier');
+
+    const missing = formatAnalysisForContext(rawAnalysis());
+    expect(missing!).not.toHaveProperty('confidence_tier');
+  });
+
+  it('bands per-option outcomes with the shared vocabulary — never raw means', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: [
+          { label: 'A', probability: 0.72, outcome_mean: 0.237 },
+          { label: 'B', probability: 0.2, outcome_mean: -0.4 },
+          { label: 'C', probability: 0.05, outcome_mean: 0.01 },
+          { label: 'D', probability: 0.03 },
+        ],
+      }),
+    );
+    expect(out!.options).toEqual([
+      { rank: '1', label: 'A', win_probability: '72%', outcome_band: 'weak positive modelled outcome' },
+      { rank: '2', label: 'B', win_probability: '20%', outcome_band: 'moderate negative modelled outcome' },
+      { rank: '3', label: 'C', win_probability: '5%', outcome_band: 'roughly neutral modelled outcome' },
+      { rank: '4', label: 'D', win_probability: '3%' },
+    ]);
+    const json = JSON.stringify(out);
+    expect(json).not.toContain('0.237');
+    expect(json).not.toContain('-0.4');
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('bands the leading option outcome too', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        leading_option: { label: 'A', probability: 0.86, outcome_mean: 0.97 },
+      }),
+    );
+    expect(out!.leading_option).toEqual({
+      label: 'A',
+      win_probability: '86%',
+      outcome_band: 'very strong positive modelled outcome',
+    });
+  });
+});
+
 // brief brief-display-safe-analysis A2 — negative test
 // Formatted analysis serialised through the Track 2A regex sanitiser must
 // produce zero probability_rewrites and zero sensitivity_rewrites. Proves

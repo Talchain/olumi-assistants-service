@@ -46,6 +46,7 @@ import {
 import type {
   AnalysisResponseSummaryWithSignals,
   OptionGoalFitSignal,
+  OptionOutcomeSignal,
   TippingPointSignal,
 } from './analysis-signals.js';
 import {
@@ -114,6 +115,16 @@ export interface ContextPackAnalysisOption {
    * Absent when the producer scored no goal fit for this option.
    */
   readonly goal_fit_probability?: number;
+  /**
+   * Lane 30 fix 3 — this option's modelled-outcome mean, sourced from the
+   * per-option `enrichment.option_comparison[].outcome.mean` via the
+   * `option_outcomes` signal (NEVER from `OptionSummary.outcome_mean`,
+   * whose upstream default of 0 cannot be distinguished from an honest
+   * zero). RAW float — the display formatter bands it (`outcome_band`)
+   * with the shared influence-band vocabulary. Absent when the producer
+   * reported no outcome distribution for this option.
+   */
+  readonly outcome_mean?: number;
 }
 
 export interface ContextPackAnalysisDriver {
@@ -193,6 +204,13 @@ export interface ContextPackAnalysis {
   readonly fragile_edge_count?: number;
   readonly evidence_gaps?: readonly ContextPackAnalysisEvidenceGap[];
   readonly goal_fit?: ContextPackAnalysisGoalFit | null;
+  /**
+   * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
+   * 'strong' | 'fair' | 'needs_work'; kept as a string because the
+   * enrichment passthrough is untyped). Null when the producer reported
+   * none. Rendered as prose by the display formatter.
+   */
+  readonly confidence_tier?: string | null;
   // V5 state-trust: `staleness_reason` removed from the prompt-visible
   // analysis section — freshness is now a deterministic verdict on the
   // wire (`analysis_ready.freshness`) and a telemetry signal
@@ -1008,43 +1026,74 @@ function isValidGoalFitProbability(value: unknown): value is number {
 }
 
 /**
- * Lane 30 — build the per-option goal-fit resolver from the attached
- * `option_goal_fits` signals plus the per-option summary field.
- *
- * Match authority order for a projected option:
- *   1. the option's own `probability_of_goal` (per-option summary data wins
- *      when a producer path populates it);
- *   2. signal matched by STRUCTURAL `option_id` (labels are not identity —
- *      the fallback path relabels options from the current graph);
- *   3. signal matched by label, ONLY for signals that carried no id at all.
- *
- * Returns undefined when no valid value resolves — the projected option then
- * simply omits `goal_fit_probability` and the display formatter renders the
- * explicit "target-fit not scored" disclosure instead.
+ * Lane 30 — option-identity-keyed lookup over a per-option signal array.
+ * Match authority: STRUCTURAL `option_id` first (labels are not identity —
+ * the fallback path relabels options from the current graph); label matching
+ * ONLY for signals that carried no id at all.
  */
-function buildGoalFitResolver(
-  signals: readonly OptionGoalFitSignal[] | undefined,
+function buildOptionSignalLookup<S extends { option_id: string | null; option_label: string }>(
+  signals: readonly S[] | undefined,
+  readValue: (signal: S) => number,
+  isValid: (value: unknown) => value is number,
 ): (option: OptionSummary) => number | undefined {
   const byId = new Map<string, number>();
   const byLabelIdless = new Map<string, number>();
   for (const s of signals ?? []) {
-    if (!isValidGoalFitProbability(s.probability_of_joint_goal)) continue;
+    const value = readValue(s);
+    if (!isValid(value)) continue;
     if (typeof s.option_id === 'string' && s.option_id.trim().length > 0) {
-      if (!byId.has(s.option_id)) byId.set(s.option_id, s.probability_of_joint_goal);
+      if (!byId.has(s.option_id)) byId.set(s.option_id, value);
     } else if (typeof s.option_label === 'string' && s.option_label.trim().length > 0) {
-      if (!byLabelIdless.has(s.option_label)) {
-        byLabelIdless.set(s.option_label, s.probability_of_joint_goal);
-      }
+      if (!byLabelIdless.has(s.option_label)) byLabelIdless.set(s.option_label, value);
     }
   }
   return (option: OptionSummary): number | undefined => {
-    if (isValidGoalFitProbability(option.probability_of_goal)) {
-      return option.probability_of_goal;
-    }
     const viaId = byId.get(option.option_id);
     if (viaId !== undefined) return viaId;
     return byLabelIdless.get(option.option_label);
   };
+}
+
+/**
+ * Lane 30 — per-option goal-fit resolver: the option's own
+ * `probability_of_goal` wins when a producer path populates it (that field
+ * is only ever set from real data, never defaulted), then the
+ * `option_goal_fits` signal lookup. Returns undefined when no valid value
+ * resolves — the projected option then omits `goal_fit_probability` and the
+ * display formatter renders the explicit "target-fit not scored" disclosure
+ * instead.
+ */
+function buildGoalFitResolver(
+  signals: readonly OptionGoalFitSignal[] | undefined,
+): (option: OptionSummary) => number | undefined {
+  const lookup = buildOptionSignalLookup(
+    signals,
+    (s) => s.probability_of_joint_goal,
+    isValidGoalFitProbability,
+  );
+  return (option: OptionSummary): number | undefined => {
+    if (isValidGoalFitProbability(option.probability_of_goal)) {
+      return option.probability_of_goal;
+    }
+    return lookup(option);
+  };
+}
+
+/** Finite check for outcome means (any sign, any magnitude). */
+function isFiniteOutcomeMean(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Lane 30 fix 3 — per-option outcome-mean resolver. SIGNALS ONLY: the
+ * `OptionSummary.outcome_mean` field is deliberately never read because its
+ * upstream default of 0 is indistinguishable from an honest zero (banding a
+ * fabricated 0 as "roughly neutral" would be a false claim).
+ */
+function buildOutcomeResolver(
+  signals: readonly OptionOutcomeSignal[] | undefined,
+): (option: OptionSummary) => number | undefined {
+  return buildOptionSignalLookup(signals, (s) => s.outcome_mean, isFiniteOutcomeMean);
 }
 
 function projectAnalysis(
@@ -1070,16 +1119,19 @@ function projectAnalysis(
   const leadingSrc = validOptions[0];
   const runnerUpSrc = validOptions[1];
 
-  // Lane 30 — per-option goal-fit carriage. One resolver shared by the
-  // leading pair and the full option list so the same option can never show
-  // a goal-fit value in one slot and not the other.
+  // Lane 30 — per-option goal-fit + outcome carriage. Resolvers shared by
+  // the leading pair and the full option list so the same option can never
+  // show a value in one slot and not the other.
   const goalFitFor = buildGoalFitResolver(analysis.option_goal_fits);
+  const outcomeFor = buildOutcomeResolver(analysis.option_outcomes);
   const projectOption = (o: OptionSummary): ContextPackAnalysisOption => {
     const goalFit = goalFitFor(o);
+    const outcomeMean = outcomeFor(o);
     return {
       label: o.option_label,
       probability: o.win_probability,
       ...(goalFit !== undefined ? { goal_fit_probability: goalFit } : {}),
+      ...(outcomeMean !== undefined ? { outcome_mean: outcomeMean } : {}),
     };
   };
 
@@ -1180,6 +1232,13 @@ function projectAnalysis(
     ? { scored: analysis.goal_fit.scored, basis: analysis.goal_fit.basis }
     : null;
 
+  // Lane 30 fix 3 — ordinal confidence tier passthrough (string token; the
+  // formatter renders prose). Null when the producer reported none.
+  const confidenceTier =
+    typeof analysis.confidence_tier === 'string' && analysis.confidence_tier.trim().length > 0
+      ? analysis.confidence_tier
+      : null;
+
   // stalenessReason is intentionally not threaded into the projection —
   // V5 state-trust removed it from the prompt-visible shape. Reading the
   // parameter here keeps the assembler's signature stable for callers
@@ -1202,6 +1261,7 @@ function projectAnalysis(
     fragile_edge_count: fragileEdgeCount,
     evidence_gaps: evidenceGaps,
     goal_fit: goalFit,
+    confidence_tier: confidenceTier,
   };
 }
 

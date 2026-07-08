@@ -61,9 +61,11 @@ import {
 } from '../../orchestrator/context/influence-direction.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
+  deriveConfidenceTierFromEnrichment,
   deriveEvidenceGapsFromEnrichment,
   deriveGoalFitFromEnrichment,
   deriveOptionGoalFitsFromEnrichment,
+  deriveOptionOutcomesFromEnrichment,
   deriveTippingPointsFromTopLevel,
   type AnalysisResponseSummaryWithSignals,
 } from './analysis-signals.js';
@@ -445,6 +447,10 @@ export function reconcileAnalysisSummaryWithEnrichment(
   // filled the per-option gap with win probabilities (live defect,
   // scenario 90385279).
   const optionGoalFits = deriveOptionGoalFitsFromEnrichment(enrichment);
+  // Lane 30 fix 3 — confidence tier (top-level ordinal token) + per-option
+  // modelled-outcome means (banded downstream, never surfaced raw).
+  const confidenceTier = deriveConfidenceTierFromEnrichment(enrichment);
+  const optionOutcomes = deriveOptionOutcomesFromEnrichment(enrichment);
 
   const withSignals: AnalysisResponseSummaryWithSignals = {
     ...withFragile,
@@ -452,6 +458,8 @@ export function reconcileAnalysisSummaryWithEnrichment(
     ...(evidenceGaps.length > 0 ? { evidence_gaps: evidenceGaps } : {}),
     ...(goalFit !== null ? { goal_fit: goalFit } : {}),
     ...(optionGoalFits.length > 0 ? { option_goal_fits: optionGoalFits } : {}),
+    ...(confidenceTier !== null ? { confidence_tier: confidenceTier } : {}),
+    ...(optionOutcomes.length > 0 ? { option_outcomes: optionOutcomes } : {}),
   };
 
   return {

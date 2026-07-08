@@ -422,3 +422,49 @@ describe('ContextPack per-option goal-fit (Lane 30)', () => {
     expect(parsed.success).toBe(true);
   });
 });
+
+// Lane 30 fix 3 — confidence tier + per-option outcome carriage (raw).
+describe('ContextPack confidence tier + option outcomes (Lane 30)', () => {
+  it('passes the confidence_tier ordinal token through, null when absent', () => {
+    const withTier = assemble(makeSummary({ confidence_tier: 'needs_work' }));
+    expect(withTier.analysis?.confidence_tier).toBe('needs_work');
+
+    const without = assemble(makeSummary());
+    expect(without.analysis?.confidence_tier).toBeNull();
+  });
+
+  it('attaches outcome_mean to matching options by structural option_id', () => {
+    const pack = assemble(
+      makeSummary({
+        option_outcomes: [
+          { option_id: 'opt-a', option_label: 'Hire locally', outcome_mean: 0.237 },
+          { option_id: 'opt-c', option_label: 'Status quo', outcome_mean: -0.0996 },
+        ],
+      }),
+    );
+    expect(pack.analysis?.options).toEqual([
+      { label: 'Hire locally', probability: 0.72, outcome_mean: 0.237 },
+      { label: 'Status quo', probability: 0.22, outcome_mean: -0.0996 },
+      { label: 'Offshore partner', probability: 0.05 },
+      { label: 'Tiered pricing', probability: 0.01 },
+    ]);
+    expect(pack.analysis?.leading_option).toEqual({
+      label: 'Hire locally',
+      probability: 0.72,
+      outcome_mean: 0.237,
+    });
+  });
+
+  it('validates against the strict ContextPack schema with tier + outcomes attached', () => {
+    const pack = assemble(
+      makeSummary({
+        confidence_tier: 'fair',
+        option_outcomes: [
+          { option_id: 'opt-a', option_label: 'Hire locally', outcome_mean: 0.237 },
+        ],
+      }),
+    );
+    const parsed = ContextPackSchema.safeParse(pack);
+    expect(parsed.success).toBe(true);
+  });
+});

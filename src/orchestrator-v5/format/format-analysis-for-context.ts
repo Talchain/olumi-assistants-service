@@ -46,6 +46,13 @@ export interface DisplaySafeAnalysisOption {
    * `goal_fit` prose then disclosed the absence explicitly.
    */
   readonly target_fit?: string;
+  /**
+   * Lane 30 fix 3 — banded modelled-outcome phrase for the option (shared
+   * influence-band vocabulary + sign; near-zero → "roughly neutral"), e.g.
+   * `"weak positive modelled outcome"`. Presentation bands, not science.
+   * Absent when the producer reported no outcome distribution.
+   */
+  readonly outcome_band?: string;
 }
 
 /**
@@ -60,6 +67,8 @@ export interface DisplaySafeRankedOption {
   readonly win_probability: string;
   /** Lane 30 — see {@link DisplaySafeAnalysisOption.target_fit}. */
   readonly target_fit?: string;
+  /** Lane 30 fix 3 — see {@link DisplaySafeAnalysisOption.outcome_band}. */
+  readonly outcome_band?: string;
 }
 
 /** Lane 21 — banded tipping-risk entry. `risk` is decision-language prose. */
@@ -139,6 +148,12 @@ export interface DisplaySafeAnalysis {
   readonly fragile_edge_count?: string;
   readonly value_of_information?: readonly DisplaySafeEvidenceGap[];
   readonly goal_fit?: string;
+  /**
+   * Lane 30 fix 3 — analysis confidence prose from the producer's ordinal
+   * tier token (e.g. `'needs_work'` → "analysis confidence needs work").
+   * Omitted when the producer reported no tier.
+   */
+  readonly confidence_tier?: string;
 }
 
 /**
@@ -170,9 +185,35 @@ function isValidGoalFit(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
+/**
+ * Lane 30 fix 3 — band a modelled-outcome mean into decision language using
+ * the SHARED influence-band vocabulary plus sign (presentation bands, not
+ * science — same doctrine as `tippingRiskPhrase`). Near-zero means read as
+ * "roughly neutral" (sign is not meaningful at that scale); non-finite
+ * values return null so the caller omits the field rather than fabricating
+ * a claim.
+ *
+ *   outcomeBandPhrase(0.237)  → "weak positive modelled outcome"
+ *   outcomeBandPhrase(-0.4)   → "moderate negative modelled outcome"
+ *   outcomeBandPhrase(0.01)   → "roughly neutral modelled outcome"
+ */
+export function outcomeBandPhrase(outcomeMean: number): string | null {
+  if (!Number.isFinite(outcomeMean)) return null;
+  const abs = Math.abs(outcomeMean);
+  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'roughly neutral modelled outcome';
+  const band = bandFromMagnitude(abs);
+  const sign = outcomeMean < 0 ? 'negative' : 'positive';
+  return `${band} ${sign} modelled outcome`;
+}
+
 function formatOption(
-  option: Pick<ContextPackAnalysisOption, 'label' | 'probability' | 'goal_fit_probability'>,
+  option: Pick<
+    ContextPackAnalysisOption,
+    'label' | 'probability' | 'goal_fit_probability' | 'outcome_mean'
+  >,
 ): DisplaySafeAnalysisOption {
+  const outcomeBand =
+    typeof option.outcome_mean === 'number' ? outcomeBandPhrase(option.outcome_mean) : null;
   return {
     label: option.label,
     win_probability: formatProbability(option.probability, 'display'),
@@ -182,7 +223,28 @@ function formatOption(
     ...(isValidGoalFit(option.goal_fit_probability)
       ? { target_fit: formatProbability(option.goal_fit_probability, 'display') }
       : {}),
+    // Lane 30 fix 3 — banded modelled outcome (never the raw mean).
+    ...(outcomeBand !== null ? { outcome_band: outcomeBand } : {}),
   };
+}
+
+/**
+ * Lane 30 fix 3 — confidence-tier prose. Known ordinal tokens (the PLoT
+ * producer emits 'strong' | 'fair' | 'needs_work', derived from
+ * `m1_coaching.readiness`) map to fixed phrases; unknown tokens are
+ * humanised (underscores → spaces) behind a stable prefix rather than
+ * echoed raw — same doctrine as the goal-fit basis phrases.
+ */
+const CONFIDENCE_TIER_PHRASES: Readonly<Record<string, string>> = {
+  strong: 'analysis confidence is strong',
+  fair: 'analysis confidence is fair',
+  needs_work: 'analysis confidence needs work',
+};
+
+export function confidenceTierPhrase(tier: string): string {
+  return (
+    CONFIDENCE_TIER_PHRASES[tier] ?? `analysis confidence: ${tier.replace(/_/g, ' ')}`
+  );
 }
 
 /**
@@ -343,6 +405,7 @@ export function formatAnalysisForContext(
     fragile_edge_count?: string;
     value_of_information?: readonly DisplaySafeEvidenceGap[];
     goal_fit?: string;
+    confidence_tier?: string;
   } = {
     status: raw.status,
   };
@@ -447,6 +510,12 @@ export function formatAnalysisForContext(
     out.goal_fit = `${basisPhrase}${GOAL_FIT_VALUES_MISSING_SUFFIX}`;
   } else {
     out.goal_fit = GOAL_FIT_NOT_SCORED_LINE;
+  }
+
+  // Lane 30 fix 3 — confidence-tier prose (ordinal token → phrase). Omitted
+  // when the producer reported no tier (no fabricated confidence claim).
+  if (typeof raw.confidence_tier === 'string' && raw.confidence_tier.trim().length > 0) {
+    out.confidence_tier = confidenceTierPhrase(raw.confidence_tier.trim());
   }
 
   return out;

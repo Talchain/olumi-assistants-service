@@ -10,12 +10,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  deriveConfidenceTierFromEnrichment,
   deriveEvidenceGapsFromEnrichment,
   deriveGoalFitFromEnrichment,
   deriveOptionGoalFitsFromEnrichment,
+  deriveOptionOutcomesFromEnrichment,
   deriveTippingPointsFromTopLevel,
   EVIDENCE_GAP_SIGNAL_CAP,
   OPTION_GOAL_FIT_SIGNAL_CAP,
+  OPTION_OUTCOME_SIGNAL_CAP,
   TIPPING_POINT_SIGNAL_CAP,
 } from '../analysis-signals.js';
 
@@ -178,6 +181,72 @@ describe('deriveOptionGoalFitsFromEnrichment', () => {
     );
     expect(deriveOptionGoalFitsFromEnrichment({})).toEqual([]);
     expect(deriveOptionGoalFitsFromEnrichment({ option_comparison: 'nope' })).toEqual([]);
+  });
+});
+
+// Lane 30 fix 3 — confidence tier (top-level ordinal token, e.g.
+// 'needs_work'; already on the compose transport keep-list) + per-option
+// modelled-outcome means (banded downstream, never surfaced raw).
+describe('deriveConfidenceTierFromEnrichment', () => {
+  it('reads the top-level ordinal token', () => {
+    expect(deriveConfidenceTierFromEnrichment({ confidence_tier: 'needs_work' })).toBe('needs_work');
+    expect(deriveConfidenceTierFromEnrichment({ confidence_tier: 'strong' })).toBe('strong');
+  });
+
+  it('returns null for absent / empty / non-string values', () => {
+    expect(deriveConfidenceTierFromEnrichment({})).toBeNull();
+    expect(deriveConfidenceTierFromEnrichment({ confidence_tier: '' })).toBeNull();
+    expect(deriveConfidenceTierFromEnrichment({ confidence_tier: '  ' })).toBeNull();
+    expect(deriveConfidenceTierFromEnrichment({ confidence_tier: 42 })).toBeNull();
+  });
+});
+
+describe('deriveOptionOutcomesFromEnrichment', () => {
+  it('projects per-option outcome means from the nested outcome object (live staging shape)', () => {
+    const out = deriveOptionOutcomesFromEnrichment({
+      option_comparison: [
+        {
+          option_id: 'opt_hire',
+          option_label: 'Hire Locally',
+          outcome: { mean: 0.23738816930471338, std: 0.2, p10: -0.03, p50: 0.26, p90: 0.48 },
+          win_probability: 0.72,
+        },
+        {
+          option_id: 'opt_hybrid',
+          option_label: 'Hybrid Hub',
+          outcome: { mean: -0.09961921501311619 },
+        },
+      ],
+    });
+    expect(out).toEqual([
+      { option_id: 'opt_hire', option_label: 'Hire Locally', outcome_mean: 0.23738816930471338 },
+      { option_id: 'opt_hybrid', option_label: 'Hybrid Hub', outcome_mean: -0.09961921501311619 },
+    ]);
+  });
+
+  it('supports the flat outcome_mean shape and drops rows without a REAL mean (a defaulted 0 is never fabricated)', () => {
+    const out = deriveOptionOutcomesFromEnrichment({
+      option_comparison: [
+        { option_id: 'a', option_label: 'A', outcome_mean: 0.4 },
+        // No outcome data at all → dropped (never defaulted to 0).
+        { option_id: 'b', option_label: 'B', win_probability: 0.5 },
+        // Non-finite mean → dropped.
+        { option_id: 'c', option_label: 'C', outcome: { mean: Number.NaN } },
+      ],
+    });
+    expect(out).toEqual([{ option_id: 'a', option_label: 'A', outcome_mean: 0.4 }]);
+  });
+
+  it('caps and handles malformed input', () => {
+    const rows = Array.from({ length: OPTION_OUTCOME_SIGNAL_CAP + 2 }, (_, i) => ({
+      option_id: `opt-${i}`,
+      option_label: `Option ${i}`,
+      outcome: { mean: 0.1 },
+    }));
+    expect(deriveOptionOutcomesFromEnrichment({ option_comparison: rows })).toHaveLength(
+      OPTION_OUTCOME_SIGNAL_CAP,
+    );
+    expect(deriveOptionOutcomesFromEnrichment({})).toEqual([]);
   });
 });
 
