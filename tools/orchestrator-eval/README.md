@@ -23,14 +23,21 @@ For each fixture it:
      that reads as an unbacked graph mutation).
    - `no_goal_fit_conflation` — this pack's worked assertion: the leading
      option's **win %** must not be narrated as the chance of **meeting the
-     target**, grounded in the actual numbers the assembly produced.
+     target**. NOTE: the detector currently reads the fixture's RAW
+     `ContextPackAnalysis` numbers (win% vs target-fit%), not the assembled
+     formatter output — a deliberate first-slice simplification; grounding the
+     detector in the assembled string is a documented follow-up.
 3. **Checks each verdict against the fixture's `expected` map** and exits
    non-zero on any disagreement.
 
-Dimensions 1–2 are **imported wholesale from the runtime** (`src/guards.ts`) —
-the whole point is that the gate scores with the same code the runtime uses to
-strip bad output, so a prompt cannot pass the eval and then fail in production.
-A re-specified copy would drift; the older `tools/graph-evaluator`
+Dimensions 1–2 **import the production forbidden-phrase / mutation-language
+constants** (via `src/guards.ts`, which re-exports `findForbiddenMatches` from
+the `tools/v5-journey-replay` helper that itself imports the runtime
+`FORBIDDEN_USER_FACING_PHRASES`, and `containsMutationLanguage` directly from
+`src/orchestrator-v5/routing`). So the gate scores against the SAME phrase list
+the runtime enforces (not a re-specified copy), which is the point: a prompt
+cannot pass the eval on a forbidden phrase the runtime would strip. A
+re-specified copy would drift — the older `tools/graph-evaluator`
 orchestrator-scorer (which carries its own `BANNED_TERMS` array) shows exactly
 that failure mode.
 
