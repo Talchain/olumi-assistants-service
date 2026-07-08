@@ -124,6 +124,13 @@ import {
   PROPOSAL_ALREADY_APPLIED_RESPONSE,
   PROPOSAL_SUPERSEDED_RESPONSE,
 } from './routing/proposed-change-synthesis.js';
+import {
+  executeGmHeldResume,
+  readGmHeldResume,
+  GM_HELD_APPLIED_ASSISTANT_TEXT,
+  GM_HELD_APPLIED_RERUN_CHIP,
+  type GmHeldResumeRead,
+} from './handlers/gm-held-execute.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import {
@@ -1617,6 +1624,172 @@ export async function runTurnExecutor(
         }
         return finalizeRun();
       };
+      // Lane 34 — GM held-execute resume (propose → hold → confirm →
+      // apply). Reached ONLY from the pending_action branch below when the
+      // matched pending is a GM held one AND CEE_GRAPH_MANAGEMENT_MODE is
+      // 'live' at resume time. Hash-gates against the hold-time pin
+      // (like-for-like recompute), delegates re-referee + apply + receipt
+      // to handlers/gm-held-execute.ts, and commits through the single
+      // durable writer. Every decline resolves through the shared
+      // proposed-change recovery closure above (fail-closed; nothing
+      // persisted).
+      const commitGmHeldResume = async (
+        heldPending: PendingAction,
+        read: GmHeldResumeRead,
+      ): Promise<TurnExecutorRunResult> => {
+        if (read.kind !== 'ok') {
+          // Legacy lane-8 pendings / oversize-degraded holds carry no
+          // executable payload — the sanctioned decline (same copy as the
+          // generic synthesis 'invalid' outcome).
+          return commitProposedChangeRecovery('invalid', 'gm_held_execute_no_payload');
+        }
+        // Hash precondition, like-for-like with the hold-time pin: the SAME
+        // hash function over the SAME graph-authority class (persisted
+        // graph, ingress-echo fallback) the gate hashed when it emitted the
+        // pending. (The generic synthesis path compares against
+        // freshness.current_graph_hash, which under analysisReadyGuard can
+        // hash a CANONICALISED graph — a raw recompute avoids false
+        // supersessions while staying fail-closed.)
+        const gmBaseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+        let gmBaseHash: string | null = null;
+        try {
+          gmBaseHash = computeAnalysisAffectingGraphHash(
+            gmBaseGraph as GraphStateIngress | null | undefined,
+          );
+        } catch {
+          gmBaseHash = null;
+        }
+        const pinnedHash = heldPending.preconditions.graph_hash;
+        if (
+          gmBaseHash === null ||
+          typeof pinnedHash !== 'string' ||
+          pinnedHash.length === 0 ||
+          gmBaseHash !== pinnedHash
+        ) {
+          return commitProposedChangeRecovery('superseded', 'gm_held_execute_superseded');
+        }
+        const outcome = executeGmHeldResume({
+          operations: read.operations,
+          currentGraph: gmBaseGraph,
+          currentGraphHash: gmBaseHash,
+          freshness: freshness?.freshness ?? 'unknown',
+          hasExistingAnalysis:
+            freshness?.freshness === 'fresh' || freshness?.freshness === 'stale',
+          scenarioId: context.session_id,
+          turnId: context.request_id,
+          requestId,
+        });
+        if (outcome.status !== 'executed') {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: heldPending.id,
+              outcome: outcome.status,
+              ...(outcome.status === 'referee_blocked'
+                ? { governing: outcome.governing }
+                : { reason: outcome.reason }),
+            },
+            'GM held-execute — confirmed hold declined (fail-closed); nothing persisted',
+          );
+          return commitProposedChangeRecovery('invalid', `gm_held_execute_${outcome.status}`);
+        }
+        // Honest applied path. The receipt text ships ONLY when the commit
+        // below succeeds (a throw surfaces STATE_COMMIT_FAILED instead).
+        const gmReadiness = computeStructuralReadiness(outcome.appliedGraph);
+        const appliedResponse = composeDirectAnswerResponse({
+          assistant_text: GM_HELD_APPLIED_ASSISTANT_TEXT,
+          stage: context.stage,
+          suggested_actions:
+            gmReadiness?.status === 'ready' ? [{ ...GM_HELD_APPLIED_RERUN_CHIP }] : [],
+        });
+        sonnetTextForLog = appliedResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'execute';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        // Durable-text scrub + egress labels must resolve against the
+        // APPLIED graph (set before commitTurn, which snapshots
+        // effectiveTurnGraph as contentGraph); reverted on commit failure
+        // so a failed turn never advertises unpersisted state.
+        const preApplyEffectiveTurnGraph = effectiveTurnGraph;
+        effectiveTurnGraph = outcome.appliedGraph;
+        try {
+          const committed = await commitTurn(appliedResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            // Same rationale as edit-graph-dispatch: fact-level
+            // fact_type='edit_graph' is the canonical discriminator;
+            // expanding V5ActionType is a schemas change out of scope.
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [outcome.fact],
+            graph: outcome.mutatedGraph,
+            // Consumed proposal never carries forward (zombie-chip guard).
+            consumedPendingRefs: [heldPending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+          // Post-commit honesty plumbing: the mutation is durable, so the
+          // turn outcome reports graph_mutated, the structural-claim guard
+          // accepts the receipt, readiness reflects the applied graph, and
+          // wire freshness re-derives against the post-apply hash (an
+          // applied substantive edit honestly reads stale).
+          handlerEmittedMutatedGraph = true;
+          analysisReadyForTurn = gmReadiness;
+          const postApplyHash = ((): string | null => {
+            try {
+              return computeAnalysisAffectingGraphHash(
+                outcome.mutatedGraph as GraphStateIngress | null | undefined,
+              );
+            } catch {
+              return null;
+            }
+          })();
+          freshness = deriveAnalysisFreshness(
+            context.prior_facts,
+            postApplyHash,
+            config.cee.optionIdentityFreshnessGuard
+              ? extractGraphOptionIds(outcome.mutatedGraph)
+              : undefined,
+          );
+          emit(TelemetryEvents.PendingActionConsumed, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            pending_action_id: heldPending.id,
+            kind: heldPending.action.kind,
+            chip_id: heldPending.chip_id,
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+          });
+        } catch (error) {
+          effectiveTurnGraph = preApplyEffectiveTurnGraph;
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'gm_held_execute_apply',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on GM held-execute apply',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
       // Chip-click parity for what_would_flip: route-v2 sets
       // `chipClickResumeIntent` so the resumer treats the click as a
       // confirmation regardless of the chip's natural-language
@@ -1743,6 +1916,23 @@ export async function runTurnExecutor(
         // proceed to handler dispatch — both can short-circuit into a
         // direct-answer recovery without an LLM round-trip.
         if (pending.action.kind === 'apply_proposed_change') {
+          // Lane 34 — GM held-execute wiring. A GM held pending
+          // (inline_patch.handler_id = 'graph_management_held_v1') is
+          // recognised BEFORE the generic synthesis. Live mode executes
+          // the confirmed batch through the dedicated resume path; in
+          // off/shadow (flag flipped back mid-flight — the pending can
+          // only be CREATED in live mode) it falls through to the generic
+          // synthesis, which resolves 'invalid' → the lane-8
+          // decline-with-clarify — byte-identical to the pre-wiring
+          // posture (flag-gated inertness, pinned by
+          // gm-held-execute-route-level.test.ts).
+          const gmHeldRead = readGmHeldResume(pending);
+          if (
+            gmHeldRead.kind !== 'not_gm_held' &&
+            config.features.graphManagementMode === 'live'
+          ) {
+            return commitGmHeldResume(pending, gmHeldRead);
+          }
           const decision = decideProposedChangeSynthesis({
             pending,
             currentGraphHash: freshness?.current_graph_hash ?? undefined,

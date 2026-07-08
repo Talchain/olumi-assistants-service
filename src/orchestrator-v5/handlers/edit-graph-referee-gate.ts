@@ -13,12 +13,16 @@
  *    (the A3 CAS-observe pattern).
  *  - 'live': verdicts route. would_apply (ALL envelopes) → proceed through
  *    the existing apply path unchanged. held → block the persist and emit a
- *    REAL pending confirmation (apply_proposed_change) whose resume is
- *    structurally decline-with-clarify: `inline_patch.handler_id` is NOT in
- *    the synthesis allowlist, so a "yes" resumes into the deterministic
- *    `commitProposedChangeRecovery('invalid')` clarify — never a silent
- *    drop, never an un-reviewed apply (executing held mutations on confirm
- *    is a named follow-up). stale → refresh/rerun recovery. rejected /
+ *    REAL pending confirmation (apply_proposed_change) carrying the
+ *    executable payload: `inline_patch.operations` = the canonical
+ *    validated PatchOperation batch (lane 34). `inline_patch.handler_id`
+ *    stays OUTSIDE the synthesis allowlist — the generic synthesis path
+ *    still resolves 'invalid' → decline-with-clarify — and the dedicated
+ *    GM held-execute resume branch in TurnExecutor (handlers/
+ *    gm-held-execute.ts) executes the confirmed batch ONLY when the mode
+ *    is 'live' at resume time. When the payload cannot be embedded
+ *    (oversize), the pending degrades to the lane-8 decline-with-clarify
+ *    posture. stale → refresh/rerun recovery. rejected /
  *    clarify_required → recovery / clarify templates with the referee's
  *    REDACTED public reason (codes + fixed readables on a wire details
  *    block; blocker readables never enter assistant_text, where the egress
@@ -89,6 +93,13 @@ export interface EditGmEvaluationInput {
   readonly scenarioId: string;
   readonly turnId: string;
   readonly requestId: string;
+  /**
+   * Lane 34 — telemetry attribution for the redacted verdict events.
+   * 'edit_graph' (default) = the hold-time gate at the dispatch seam;
+   * 'gm_held_resume' = the confirm-time re-referee inside the held-execute
+   * resume path. Event NAMES are unchanged (frozen registry).
+   */
+  readonly dispatchPath?: 'edit_graph' | 'gm_held_resume';
 }
 
 export type EditGmGoverningVerdict =
@@ -97,6 +108,29 @@ export type EditGmGoverningVerdict =
   | 'stale'
   | 'rejected'
   | 'clarify_required';
+
+/**
+ * Lane 34 — the GM held pending's dispatch key. Deliberately NOT a
+ * `V5ActionType` and NOT in the synthesis `ALLOWED_HANDLER_IDS`: the generic
+ * proposed-change synthesis resolves it 'invalid' (decline-with-clarify),
+ * and ONLY the dedicated held-execute resume branch (TurnExecutor →
+ * handlers/gm-held-execute.ts, live mode only) recognises it.
+ */
+export const GM_HELD_HANDLER_ID = 'graph_management_held_v1';
+
+/** Lane 34 — pending carries the executable batch; confirm applies it. */
+export const GM_HELD_APPLY_WIRING_EXECUTE = 'held_execute_v1';
+/** Lane 8 posture — pending carries no payload; confirm declines. */
+export const GM_HELD_APPLY_WIRING_DECLINE = 'decline_with_clarify_v0';
+
+/**
+ * Defensive cap on the embedded operations payload (JSON chars). The
+ * pending persists in the `pending_actions` JSONB column alongside the
+ * turn row; an oversized batch must degrade to the decline posture, never
+ * jeopardise the commit write. Batches are ≤ 8 envelopes (referee cap), so
+ * this bound is generous.
+ */
+export const GM_HELD_OPERATIONS_MAX_JSON_CHARS = 16_000;
 
 export interface EditGmDecision {
   readonly governing: EditGmGoverningVerdict;
@@ -275,6 +309,34 @@ function buildHeldPending(
       : `candidate:${heldVerdict.candidate_id ?? 'unknown'}`;
   const proposalRef = gmHeldProposalRef(input.scenarioId, targetKey);
   const nowIso = new Date().toISOString();
+  // Lane 34 — embed the executable payload: the canonical validated
+  // PatchOperation batch handleEditGraph produced (the WHOLE batch — a
+  // confirm applies exactly what the edit pipeline validated and would
+  // have applied). Oversize payloads degrade to the lane-8 decline
+  // posture (no operations key) rather than risking the commit write.
+  const operationsPayload = ((): {
+    readonly apply_wiring: string;
+    readonly operations?: readonly EditPatchOperationLike[];
+    readonly operations_count?: number;
+  } => {
+    try {
+      const serialised = JSON.stringify(input.operations);
+      if (
+        typeof serialised === 'string' &&
+        serialised.length > 0 &&
+        serialised.length <= GM_HELD_OPERATIONS_MAX_JSON_CHARS
+      ) {
+        return {
+          apply_wiring: GM_HELD_APPLY_WIRING_EXECUTE,
+          operations: input.operations,
+          operations_count: input.operations.length,
+        };
+      }
+    } catch {
+      // Unserialisable operations → decline posture (fail-closed).
+    }
+    return { apply_wiring: GM_HELD_APPLY_WIRING_DECLINE };
+  })();
   const pending: PendingAction = {
     id: randomUUID(),
     scenario_id: input.scenarioId,
@@ -283,12 +345,15 @@ function buildHeldPending(
       kind: 'apply_proposed_change',
       proposal_ref: proposalRef,
       inline_patch: {
-        // NOT in the synthesis ALLOWED_HANDLER_IDS: a "yes" resume resolves
-        // to decideProposedChangeSynthesis → 'invalid' → the deterministic
-        // decline-with-clarify recovery. Never a dangling pending a "yes"
+        // NOT in the synthesis ALLOWED_HANDLER_IDS: through the GENERIC
+        // synthesis path a "yes" resolves to 'invalid' → the deterministic
+        // decline-with-clarify recovery. The DEDICATED held-execute branch
+        // (TurnExecutor → handlers/gm-held-execute.ts) recognises this id
+        // and — in live mode only — executes the embedded operations after
+        // re-refereeing them (lane 34). Never a dangling pending a "yes"
         // silently drops; never an un-reviewed apply.
-        handler_id: 'graph_management_held_v1',
-        apply_wiring: 'decline_with_clarify_v0',
+        handler_id: GM_HELD_HANDLER_ID,
+        ...operationsPayload,
         candidate_id: heldVerdict.candidate_id,
         candidate_kind: heldVerdict.kind,
         mutation_class: heldVerdict.mutation_class,
@@ -350,7 +415,7 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       emit(VERDICT_EVENT[v.verdict], {
         ...base,
         mode: input.mode,
-        dispatch_path: 'edit_graph',
+        dispatch_path: input.dispatchPath ?? 'edit_graph',
         request_id: input.requestId,
         governing_candidate: governing !== 'proceed' && i === firstIndexOf(verdicts, governing),
       });

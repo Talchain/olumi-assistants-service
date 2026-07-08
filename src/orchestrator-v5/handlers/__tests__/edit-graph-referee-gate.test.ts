@@ -151,7 +151,7 @@ describe('live verdict routing', () => {
     });
   });
 
-  it('resumable-yes on the held pending is decline-with-clarify by construction (synthesis → invalid, NEVER execute)', () => {
+  it('the GENERIC synthesis path still declines the held pending (lane 34: only the dedicated live-mode held-execute branch may apply it)', () => {
     const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP] }));
     const pending = d.pendingActions![0]!;
     const decision = decideProposedChangeSynthesis({
@@ -161,7 +161,11 @@ describe('live verdict routing', () => {
     });
     // 'invalid' routes to the deterministic commitProposedChangeRecovery
     // clarify copy in the turn-executor — never a silent drop, never an
-    // un-reviewed apply.
+    // un-reviewed apply THROUGH THIS PATH. Lane 34: the TurnExecutor
+    // branches to the dedicated held-execute resume BEFORE this synthesis
+    // when the mode is 'live' (gm-held-execute-route-level.test.ts); in
+    // off/shadow this generic decline remains the fallback posture, so the
+    // handler id MUST stay outside ALLOWED_HANDLER_IDS.
     expect(decision).toEqual({ status: 'invalid', reason: 'unknown_handler_id' });
   });
 
