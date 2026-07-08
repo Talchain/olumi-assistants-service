@@ -28,37 +28,67 @@ user's decision brief reaches NO LLM after the draft turn:
 
 ## Mechanism (what changed, per seam)
 
-### Seam 2 — ContextPack brief field (`9840e1750`)
+### Seam 2 — ContextPack brief field (`9840e1750`, null-omission fix `e993d8748`)
 
 - `projectBrief` (context-pack-assembler.ts): trim → bound at
   `CONTEXT_PACK_BRIEF_CHAR_CAP = 2000` (context-pack-schema.ts) → DISCLOSED
   truncation (`truncated` flag + `original_chars`), never a silent slice.
-  Null / whitespace-only → `brief: null` (honest absence, no fabrication).
-- Strict `ContextPackBriefSchema`; `brief` optional-nullable on the strict
-  test-env schema gate but ALWAYS emitted by the assembler (value or null) —
-  the Lane-21 optional-but-always-emitted pattern.
+- Null / undefined / whitespace-only input → the pack carries **no `brief`
+  key at all** (review fix `e993d8748`; the first cut emitted `brief: null`
+  on every no-brief pack, serialising `"brief": null` into every assembled
+  routing prompt — prompt noise, now pinned absent by test at both unit and
+  turn-executor level).
+- Strict `ContextPackBriefSchema`; `brief` optional (`.nullable()` retained
+  only for tolerant validation of hand-built packs — the assembler never
+  emits null).
 - Turn-executor threads `context.scenarioBriefText` (already loaded once per
   turn by `buildTurnContext` via `loadGraphAndBriefText`) into the assembler;
   `buildUserMessage` serialises the field into the routing prompt
-  automatically. No prompt-content change (Brief I untouched).
+  automatically.
+- **Prompt-content claim, stated precisely:** the prompt TEMPLATES (Brief I /
+  PMS) are untouched — but the merged behaviour DOES change what the routing
+  LLM reads: whenever a brief exists for the scenario, every assembled
+  ContextPack serialises a `brief` field into the routing prompt. That is
+  the feature (gap G2: the brief previously reached no LLM after the draft
+  turn), not a side effect.
 
-### Seam 1 — persist `scenarios.brief_text` (`242a57a2d`)
+### Seam 1 — persist `scenarios.brief_text` (`242a57a2d`, narrowed by `9acf55671`)
 
-- New pure helper `src/orchestrator-v5/session/derive-brief-seed.ts`:
-  derives a seed ONLY from a message-kind, **frame-stage** payload whose
-  trimmed text is ≥ `DRAFT_GRAPH_MIN_BRIEF_LENGTH` (30) and matches the
-  decision-brief shape regex (mirror of route-v2's
-  `DRAFT_GRAPH_DECISION_BRIEF_REGEX`, cross-referenced in both directions).
+- New pure helper `src/orchestrator-v5/session/derive-brief-seed.ts`.
+  After the review narrowing (`9acf55671`), the seed fires ONLY when ALL of:
+  - the scenario has **no committed graph yet** (`hasCommittedGraph: false`
+    — the executor passes `context.persistedGraph != null`, its server-side
+    scenarios read; this mirrors route-v2's actual draft scope of
+    `graph_state == null` + no prior committed turns);
+  - message-kind payload at **frame stage**;
+  - trimmed text ≥ `DRAFT_GRAPH_MIN_BRIEF_LENGTH` (30) and matches the
+    decision-brief shape regex (mirror of route-v2's
+    `DRAFT_GRAPH_DECISION_BRIEF_REGEX`, cross-referenced in both
+    directions);
+  - the trimmed text does **not end with `?`** — a permanent
+    first-write-wins field must not be claimable by any mid-conversation
+    question. (The regex's `\?$` alternative is kept for route-v2
+    mirror-fidelity but is deliberately overridden for seeding.)
   Conservative by design: the RPC write is first-write-wins (`WHERE
   brief_text IS NULL OR brief_text = ''`), so a wrong seed would be
-  permanent — frame chatter and greetings must never become the brief.
-  Values are `normaliseBriefText`-bounded (8000-char DB CHECK, word-boundary
-  truncation).
+  permanent — frame chatter, greetings, and questions must never become the
+  brief. Values are `normaliseBriefText`-bounded (8000-char DB CHECK,
+  word-boundary truncation).
 - Injection at the `commitTurn` wrapper in turn-executor — the same central
   chokepoint that injects `userMessage` and `coaching_state` — so ALL 20
   commit sites seed uniformly: `briefText: meta.briefText ?? briefSeedForTurn`
   (an explicit call-site re-pass wins; seed only when
   `context.scenarioBriefText == null`).
+- **Scope deviation (disclosed):** the lane plan located this seam in
+  `commit.ts`; it landed at the `commitTurn` wrapper in `turn-executor.ts`
+  plus the new `session/derive-brief-seed.ts` helper instead. Why:
+  `commit.ts` receives `briefText` from every caller and cannot distinguish
+  a seed from a re-pass without new coupling to the turn payload, stage, and
+  persisted-graph state; the executor's `commitTurn` wrapper is the existing
+  single chokepoint all 20 commit sites already flow through and it holds
+  exactly the inputs the gate needs (payload + `context.persistedGraph`).
+  The helper lives in `session/` so the session layer does not import the
+  HTTP route.
 - Disclosed truncation reuses the existing `V5BriefTextNormalised` telemetry
   event with the draft-dispatch site's exact shape (registry unchanged — no
   new enum member).
@@ -124,30 +154,65 @@ The other coaching co-blocker (dossier G12 blocker (1)) is
   `CEE_SEND_BRIEF_TO_PLOT=true`, which is Paul-gated on D5. Scenarios with no
   seedable brief still legitimately skip `no_brief`.
 
+## Review fix round (2026-07-08, commits `68fcce1b7`, `9acf55671`, `e993d8748` + this doc)
+
+An adversarial review of the first push (`f9dda538d`) found four issues:
+
+1. **Typecheck Drift (ratchet) CI job FAILED on the first push** — the
+   lane's two new test files added +7 full-tsconfig errors over the frozen
+   462 baseline (vitest-4 `vi.fn` two-generic tuple form, a
+   `with { type: 'json' }` import attribute under the full tsconfig's
+   module=Node16, and an undeclared `briefText` on build-turn-context's
+   `RunAnalysisScenarioSnapshot`). Fixed properly in `68fcce1b7` — baseline
+   file untouched; full `tsc --noEmit` back to 462 == baseline.
+2. **Seed over-triggering (behavioural risk)** — any ≥30-char frame-stage
+   message matching the regex, INCLUDING mid-conversation questions, could
+   permanently claim `scenarios.brief_text`. Narrowed in `9acf55671` (see
+   Seam 1).
+3. **`"brief": null` serialised into every no-brief routing prompt** —
+   omitted in `e993d8748` (see Seam 2).
+4. **Claim-integrity errors in the PR body and this doc** — the "known
+   pre-existing CI reds" list had been copied from plot-lite-service;
+   "no prompt-content change" overstated; RED-first evidence presented as
+   stronger than it is; the commit.ts→turn-executor scope deviation was
+   undisclosed. All corrected in this revision.
+
 ## Verification (commands + counts, all in the lane worktree)
 
-- **RED-first** per seam:
+- **RED-first status: testimonial, not reproducible from git history.**
+  Tests and implementation were bundled in the same commit per seam, so the
+  history contains no checked-in RED state; the counts below are the
+  implementing session's testimony. Exception (fix round): the seed
+  narrowing WAS observed red-then-green — the updated suites run against
+  the PRE-narrowing logic (implementation stashed; JS ignores the extra
+  argument) fail exactly the new gate cases (**6 failed / 12 passed**) and
+  pass **18/18** with the fix.
+- Original per-seam testimony:
   - Seam 2 (`9840e1750`): 12/13 new assertions failed pre-implementation;
     e2e threading test failed with the turn-executor edit stashed.
   - Seam 3: `pnpm exec vitest run run-analysis-brief-to-plot.test.ts
-    build-turn-context.test.ts` → **5 failed / 27 passed** before, **32/32**
-    after.
+    build-turn-context.test.ts` → 5 failed / 27 passed before, 32/32 after.
   - Seam 1: integration seeding case failed (`briefText` undefined — the
-    circular re-pass), unit suite failed on missing module before; **13/13**
+    circular re-pass), unit suite failed on missing module before; 13/13
     after.
-- **Suites:** `src/orchestrator-v5/tools/handlers/__tests__` +
-  `src/orchestrator-v5/handlers/__tests__` + `src/config/__tests__` +
-  `build-turn-context.test.ts` = **824 passed / 0 failed**;
-  `src/orchestrator-v5/__tests__` + `src/utils/__tests__` = **766 passed /
-  0 failed**.
-- **Gates:** `pnpm typecheck:src` clean after every seam; eslint clean on all
-  changed files; `pnpm test:required` run before the PR (result recorded in
-  the PR body).
+- **Suites (after the fix round):** brief-pipeline suites
+  (derive-brief-seed, both turn-executor brief integrations,
+  context-pack-brief, run-analysis-brief-to-plot, build-turn-context) all
+  green; `src/orchestrator-v5/context/__tests__` = 460 passed / 0 failed;
+  full `pnpm test:required` result recorded in the PR body.
+- **Gates:** `pnpm typecheck:src` clean; **full-tsconfig typecheck ratchet
+  462 errors == 462 baseline** (`scripts/ci/typecheck-ratchet.sh` passes
+  locally); eslint clean on changed files.
 - **Wire-identity with flags off:** pinned by test (`'brief' in payload ===
   false` even when the snapshot carries a brief); the ContextPack change is
-  additive-nullable; brief seeding writes through the pre-existing
-  first-write-wins RPC parameter that every commit already passed (`p_brief_text:
-  write.briefText ?? null`).
+  additive (key absent when no brief exists); brief seeding writes through
+  the pre-existing first-write-wins RPC parameter that every commit already
+  passed (`p_brief_text: write.briefText ?? null`).
+- **Known pre-existing CI reds on THIS repo** (verified red on base
+  `staging` @ `8a495c80f`, unrelated to this PR): `Integration Tests
+  (advisory)`, `Full Test Suite (advisory)`, and `Security Audit`. (An
+  earlier revision of this doc/PR body wrongly listed plot-lite-service's
+  pre-existing reds — copied in error.)
 - **NOT verified here:** no live staging run; no Render telemetry pull;
   PLoT-side behaviour with `brief` present was verified by reading PLoT's
   schema/allowlist source, not by a live call. D5 activation evidence is out
