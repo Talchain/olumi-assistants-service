@@ -52,6 +52,39 @@ import { QuantityExtractionResultSchema } from './cqe/schema-types.js';
  */
 export const CONTEXT_PACK_VERSION_LITERAL = '2.0' as const;
 
+/**
+ * Lane 28 — brief pipeline: size bound for the projected decision brief.
+ *
+ * The brief is the user's OWN text (no display-safety banding applies — it is
+ * not model output), but it is prompt-budget-bounded here so a pathological
+ * 8,000-char persisted brief (the `scenarios.brief_text` DB CHECK ceiling)
+ * cannot claim an unbounded share of the ~30k-char routing prompt. Truncation
+ * is DISCLOSED, never silent: the projection carries a `truncated` flag and
+ * the `original_chars` count (see `projectBrief` in
+ * `./context-pack-assembler.ts`), so downstream consumers — and the LLM —
+ * can see that the text is bounded.
+ *
+ * Lives in this module (not the assembler) because the schema enforces the
+ * bound and the assembler imports the schema — the reverse import would
+ * cycle.
+ */
+export const CONTEXT_PACK_BRIEF_CHAR_CAP = 2000;
+
+/**
+ * Lane 28 — the projected decision brief carried on the ContextPack. Strict:
+ * `text` is non-empty and hard-bounded at {@link CONTEXT_PACK_BRIEF_CHAR_CAP}
+ * (the bound is enforced, not advisory); `truncated` + `original_chars`
+ * disclose any truncation. Exported so brief-projection tests can validate
+ * the shape without assembling a whole pack.
+ */
+export const ContextPackBriefSchema = z
+  .object({
+    text: z.string().min(1).max(CONTEXT_PACK_BRIEF_CHAR_CAP),
+    truncated: z.boolean(),
+    original_chars: z.number().int().positive(),
+  })
+  .strict();
+
 const ContextPackGraphSchema = z
   .object({
     nodes: z.array(z.unknown()).readonly(),
@@ -317,6 +350,16 @@ export const ContextPackSchema = z
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
     scenario_id: z.string().min(1),
     stage: z.string(),
+    /**
+     * Lane 28 — brief pipeline: the user's persisted decision brief
+     * (`scenarios.brief_text`), size-bounded with disclosed truncation.
+     * Null when no brief has been persisted for the scenario (or the
+     * persisted value is whitespace-only). Optional in shape for
+     * backwards-compat with hand-built packs; the assembler always emits
+     * it (value or null). This is the field that closes dossier gap G2 —
+     * before it, the brief reached no LLM after the draft turn.
+     */
+    brief: ContextPackBriefSchema.nullable().optional(),
     graph: ContextPackGraphSchema,
     analysis: ContextPackAnalysisSchema.nullable(),
     display_analysis: DisplaySafeAnalysisSchema,

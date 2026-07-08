@@ -57,7 +57,10 @@ import {
   type CqeExtractionSummary,
 } from './cqe/extract-quantities.js';
 import { config, isProduction, isTest } from '../../config/index.js';
-import { ContextPackSchema } from './context-pack-schema.js';
+import {
+  CONTEXT_PACK_BRIEF_CHAR_CAP,
+  ContextPackSchema,
+} from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
 import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
 import { extractGraphOptionIds } from './option-identity.js';
@@ -193,6 +196,21 @@ export interface ContextPackAnalysis {
   // `Docs/v5-state-trust-phase0.md` for the design record.
 }
 
+/**
+ * Lane 28 — brief pipeline: the user's decision brief as projected into the
+ * ContextPack. `text` is the persisted `scenarios.brief_text` (the user's own
+ * words — no display-safety banding applies, unlike model-derived analysis
+ * prose) bounded at {@link CONTEXT_PACK_BRIEF_CHAR_CAP}. Truncation is
+ * DISCLOSED, never silent: `truncated` flags it and `original_chars` carries
+ * the pre-truncation length so no consumer can mistake the bounded text for
+ * the whole brief.
+ */
+export interface ContextPackBrief {
+  readonly text: string;
+  readonly truncated: boolean;
+  readonly original_chars: number;
+}
+
 export interface ContextPackConversationTurn {
   readonly turn_id: string;
   readonly turn_class: string;
@@ -240,6 +258,19 @@ export interface ContextPack {
    */
   readonly scenario_id: string;
   readonly stage: string;
+  /**
+   * Lane 28 — brief pipeline (dossier gap G2): the user's persisted decision
+   * brief, projected via {@link projectBrief} (size-bounded, disclosed
+   * truncation). Null when no brief has been persisted for this scenario.
+   * Serialised into the routing prompt automatically by `buildUserMessage`
+   * (route-with-tool-use.ts) — the LLM finally knows what the decision is
+   * about on every turn after the draft, not just via graph labels.
+   *
+   * Optional on the interface (hand-built packs and the chip-click narrow
+   * projection don't carry it) but the assembler ALWAYS emits it (value or
+   * null) — the Lane-21 optional-but-always-emitted pattern.
+   */
+  readonly brief?: ContextPackBrief | null;
   readonly graph: ContextPackGraph;
   /**
    * Raw, handler-facing analysis projection. Carries float probabilities
@@ -359,6 +390,15 @@ export interface AssembleContextPackInput {
    * follow-up state-queries can be grounded.
    */
   readonly priorFacts?: readonly HandlerFact[];
+  /**
+   * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
+   * scenario, threaded by the turn-executor from
+   * `EnrichedTurnContext.scenarioBriefText` (loaded once per turn by
+   * `buildTurnContext` via `loadGraphAndBriefText`). Optional for
+   * backwards-compat with callers/tests that don't wire it; absent/null
+   * projects to `brief: null` on the pack.
+   */
+  readonly brief?: string | null;
   readonly graph?: GraphWithOptions | null;
   /**
    * V5 Task 1.2: pre-compacted graph projection. When present, the assembler
@@ -468,6 +508,40 @@ export function assembleContextPack(input: AssembleContextPackInput): ContextPac
 }
 
 /**
+ * Lane 28 — brief pipeline: project the persisted decision brief into the
+ * ContextPack shape.
+ *
+ * Rules (mirrors the write-side `normaliseBriefText` discipline — trim first,
+ * bound second, disclose always):
+ *   - null / undefined / whitespace-only → null (no brief persisted; the
+ *     pack says so honestly rather than carrying an empty object).
+ *   - trimmed length ≤ {@link CONTEXT_PACK_BRIEF_CHAR_CAP} → verbatim
+ *     (trimmed) text, `truncated: false`.
+ *   - trimmed length >  cap → hard slice at the cap, `truncated: true`,
+ *     with `original_chars` carrying the full trimmed length — DISCLOSED
+ *     truncation, never a silent slice (contrast `CONVERSATION_TEXT_CAP`'s
+ *     documented hard-slice in commit.ts, which this deliberately does not
+ *     repeat).
+ *
+ * Pure and total; exported for direct unit coverage.
+ */
+export function projectBrief(
+  briefText: string | null | undefined,
+): ContextPackBrief | null {
+  if (briefText == null) return null;
+  const trimmed = briefText.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length <= CONTEXT_PACK_BRIEF_CHAR_CAP) {
+    return { text: trimmed, truncated: false, original_chars: trimmed.length };
+  }
+  return {
+    text: trimmed.slice(0, CONTEXT_PACK_BRIEF_CHAR_CAP),
+    truncated: true,
+    original_chars: trimmed.length,
+  };
+}
+
+/**
  * Derive the redacted canonical analysis-state summary for the ContextPack.
  *
  * Source order:
@@ -543,6 +617,11 @@ export function assembleContextPackWithSummary(
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
     stage: input.payload.stage,
+    // Lane 28 — the persisted decision brief (size-bounded, disclosed
+    // truncation). Emitted on EVERY pack (value or null) and placed early in
+    // the literal so the serialised prompt surfaces "what this decision is
+    // about" before the graph/analysis detail.
+    brief: projectBrief(input.brief),
     graph: projectedGraph,
     analysis: rawAnalysis,
     // Display-safe analysis projection — what Sonnet actually sees.

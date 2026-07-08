@@ -1312,6 +1312,14 @@ export async function runTurnExecutor(
         // did you make?") have no human-readable receipt to ground
         // Sonnet's answer and fall to the legacy `edit_graph` catch-all.
         priorFacts: context.prior_facts,
+        // Lane 28 — brief pipeline (dossier gap G2): the persisted decision
+        // brief (`scenarios.brief_text`, loaded once per turn by
+        // buildTurnContext in the same round trip as the graph). Projected
+        // into `ContextPack.brief` size-bounded with DISCLOSED truncation and
+        // serialised into the routing prompt by buildUserMessage — before
+        // this, the brief reached no LLM after the draft turn. Null when no
+        // brief has been persisted.
+        brief: context.scenarioBriefText,
         graph: compactedGraph ? undefined : graphStateForTurn,
         compactedGraph,
         compactedConstraints,
