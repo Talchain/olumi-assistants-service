@@ -13,8 +13,11 @@
  * These tests pin the fix: the `commitTurn` wrapper (the same central
  * chokepoint that injects `userMessage` and `coaching_state` on every commit
  * site) seeds `briefText` from the turn payload when — and only when — no
- * brief is persisted yet and the message passes the conservative
- * decision-brief shape gate (`deriveBriefTextSeed`). The RPC's
+ * brief is persisted yet, the scenario has NO committed graph yet (the
+ * executor's server-side `context.persistedGraph` read), and the message
+ * passes the conservative decision-brief shape gate including the
+ * no-question rule (`deriveBriefTextSeed`): a permanent first-write-wins
+ * field must not be claimable by any mid-conversation question. The RPC's
  * first-write-wins predicate stays the last line of defence.
  *
  * Mirrors the deterministic mocked-store pattern of
@@ -105,7 +108,9 @@ function committedBriefText(): unknown {
 
 describe('Lane 28 — brief_text seeding at the turn-executor commit chokepoint', () => {
   beforeEach(() => {
-    mockState.persistedGraph = GRAPH;
+    // Default to the seedable state: nothing committed yet. Tests that need
+    // a committed graph set `mockState.persistedGraph` explicitly.
+    mockState.persistedGraph = null;
     mockState.briefText = null;
     mockState.appends = [];
     setTestSink(() => undefined);
@@ -116,7 +121,10 @@ describe('Lane 28 — brief_text seeding at the turn-executor commit chokepoint'
     setTestSink(null);
   });
 
-  it('seeds briefText from a frame-stage decision-brief message when none is persisted', async () => {
+  it('seeds briefText from a first-turn (no committed graph) frame-stage decision brief', async () => {
+    // graphState (the REQUEST graph) is present but the scenario has no
+    // COMMITTED graph — the gate reads the server-side persisted state, not
+    // the request payload.
     await runTurnExecutor(mkPayload(BRIEF, 'frame'), 'req-brief-seed-1', {
       routingAdapter: mockAdapter('Understood — here is a way to think about it.'),
       graphState: GRAPH as never,
@@ -124,7 +132,35 @@ describe('Lane 28 — brief_text seeding at the turn-executor commit chokepoint'
     expect(committedBriefText()).toBe(BRIEF);
   });
 
+  it('does NOT seed once the scenario has a committed graph (mid-conversation turn)', async () => {
+    // The review's poisoning path #1: the framing turn is behind us, so even
+    // a perfectly brief-shaped statement must not claim the permanent
+    // first-write-wins brief slot.
+    mockState.persistedGraph = GRAPH;
+    await runTurnExecutor(mkPayload(BRIEF, 'frame'), 'req-brief-seed-graph', {
+      routingAdapter: mockAdapter('Noted.'),
+      graphState: GRAPH as never,
+    });
+    expect(committedBriefText()).toBeUndefined();
+  });
+
+  it('does NOT seed from a mid-conversation question (a "?" message is never a brief)', async () => {
+    // The review's poisoning path #2: pre-narrowing, any ≥30-char frame
+    // question seeded via the regex's `\?$` alternative and poisoned the
+    // scenario's brief permanently.
+    await runTurnExecutor(
+      mkPayload('What is the best way to grow revenue in the next two quarters?', 'frame'),
+      'req-brief-seed-question',
+      {
+        routingAdapter: mockAdapter('Here are some thoughts.'),
+        graphState: GRAPH as never,
+      },
+    );
+    expect(committedBriefText()).toBeUndefined();
+  });
+
   it('re-passes the already-persisted brief untouched (no reseeding, RPC no-op either way)', async () => {
+    mockState.persistedGraph = GRAPH;
     mockState.briefText = 'The original persisted brief: should we expand into Europe?';
     await runTurnExecutor(mkPayload(BRIEF, 'frame'), 'req-brief-seed-2', {
       routingAdapter: mockAdapter('Noted.'),

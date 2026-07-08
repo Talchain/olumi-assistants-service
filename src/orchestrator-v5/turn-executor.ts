@@ -592,15 +592,23 @@ export async function runTurnExecutor(
   // scenarios, request graph_state present, non-draft shapes) — and the
   // commit sites here re-passed only `context.scenarioBriefText`, a circular
   // no-op when the brief was never written. Derive a seed ONCE per turn:
-  // only when no brief is persisted yet AND the payload is a frame-stage
-  // message passing the conservative decision-brief shape gate (mirrors the
-  // draft-dispatch heuristic; see derive-brief-seed.ts). The RPC's
+  // only when no brief is persisted yet AND the scenario has no COMMITTED
+  // graph (`context.persistedGraph` — the server-side scenarios read; a
+  // committed graph means the framing turn is behind us, and a permanent
+  // first-write-wins field must not be claimable by any mid-conversation
+  // message) AND the payload is a frame-stage, non-question message passing
+  // the conservative decision-brief shape gate (mirrors the draft-dispatch
+  // heuristic's actual scope; see derive-brief-seed.ts). The RPC's
   // first-write-wins predicate (`WHERE brief_text IS NULL OR brief_text =
   // ''`) remains the last line of defence. Injected in `commitTurn` below so
   // ALL commit sites seed uniformly — same doctrine as `userMessage` /
   // `coaching_state`.
   const briefSeedNormForTurn =
-    context.scenarioBriefText == null ? deriveBriefTextSeed(payload) : undefined;
+    context.scenarioBriefText == null
+      ? deriveBriefTextSeed(payload, {
+          hasCommittedGraph: context.persistedGraph != null,
+        })
+      : undefined;
   if (briefSeedNormForTurn?.truncated) {
     // Disclosed truncation — same event + shape as the draft-dispatch write
     // site (existing telemetry enum member; registry unchanged).

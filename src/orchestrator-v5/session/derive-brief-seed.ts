@@ -17,17 +17,30 @@
  * Gate (deliberately conservative — the RPC write is FIRST-WRITE-WINS via
  * `WHERE brief_text IS NULL OR brief_text = ''`, so a wrong seed poisons the
  * scenario's brief permanently):
+ *   - the scenario has NO committed graph yet (`hasCommittedGraph` — the
+ *     executor passes `context.persistedGraph != null`, its server-side
+ *     scenarios read). This mirrors route-v2's actual draft scope
+ *     (`graph_state == null` + no prior committed turns): once a graph
+ *     exists the conversation is past the framing turn, and no
+ *     mid-conversation message should be able to claim the permanent
+ *     first-write-wins brief slot;
  *   - message-kind payload at `stage: 'frame'` only;
  *   - trimmed length ≥ {@link DRAFT_GRAPH_MIN_BRIEF_LENGTH};
- *   - matches the decision-brief shape regex.
- * This mirrors route-v2's `isDraftGraphShape` heuristic (route-v2.ts —
- * `DRAFT_GRAPH_DECISION_BRIEF_REGEX`; keep the two in sync), i.e. "a message
- * that WOULD have drafted (and therefore persisted the brief) had the draft
- * shortcut fired". Two deliberate deltas from route-v2: length and regex are
- * checked on the TRIMMED message (whitespace padding cannot sneak a short
- * message past the gate, and a trailing-space question still counts), and no
- * graph/continuation conditions apply — the RPC predicate already makes
- * re-seeding a no-op.
+ *   - matches the decision-brief shape regex;
+ *   - the trimmed message does NOT end with `?`. Rationale: a permanent
+ *     first-write-wins field must not be claimable by any mid-conversation
+ *     question ("What should I do next?" is a prompt to the assistant, not
+ *     the user's decision brief). The regex's `\?$` alternative is kept for
+ *     mirror-fidelity with route-v2, but this exclusion deliberately
+ *     overrides it for SEEDING: questions never seed.
+ * The shape checks mirror route-v2's `isDraftGraphShape` heuristic
+ * (route-v2.ts — `DRAFT_GRAPH_DECISION_BRIEF_REGEX`; keep the two in sync),
+ * i.e. "a message that WOULD have drafted (and therefore persisted the
+ * brief) had the draft shortcut fired". Deliberate deltas from route-v2:
+ * length and regex are checked on the TRIMMED message (whitespace padding
+ * cannot sneak a short message past the gate), and questions are excluded
+ * outright (see above). The RPC predicate remains the last line of defence
+ * against re-seeding.
  *
  * The returned value is `normaliseBriefText`-bounded (trim → 8000-char cap
  * with word-boundary truncation) so it always satisfies the DB CHECK
@@ -56,8 +69,26 @@ export const BRIEF_SEED_DECISION_REGEX =
   /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
 
 /**
+ * Options for {@link deriveBriefTextSeed}. A dedicated object (not a bare
+ * boolean) so call sites read as `{ hasCommittedGraph: ... }` — the gate is
+ * too consequential for an anonymous positional flag.
+ */
+export interface DeriveBriefTextSeedOptions {
+  /**
+   * Whether the scenario already has a COMMITTED (server-side persisted)
+   * graph. The turn-executor passes `context.persistedGraph != null` — the
+   * same scenarios read `buildTurnContext` performs at turn start. When
+   * true, seeding is refused outright: the scenario is past its framing
+   * turn, and a permanent first-write-wins field must not be claimable by
+   * any later message.
+   */
+  readonly hasCommittedGraph: boolean;
+}
+
+/**
  * Derive a brief-text seed from the turn payload, or `undefined` when the
- * payload must not seed (wrong kind/stage, or fails the brief shape gate).
+ * payload must not seed (graph already committed, wrong kind/stage, fails
+ * the brief shape gate, or is a question — see the module doc).
  *
  * Pure and total. Callers persist `result.value` (via the commit metadata's
  * `briefText`) and disclose `result.truncated` through the existing
@@ -65,11 +96,20 @@ export const BRIEF_SEED_DECISION_REGEX =
  */
 export function deriveBriefTextSeed(
   payload: OrchestratorTurnPayload,
+  options: DeriveBriefTextSeedOptions,
 ): NormaliseBriefTextResult | undefined {
+  // A committed graph means the framing turn is behind us — never seed the
+  // permanent first-write-wins brief slot from a mid-conversation message.
+  if (options.hasCommittedGraph) return undefined;
   if (payload.kind !== 'message') return undefined;
   if (payload.stage !== 'frame') return undefined;
   const trimmed = typeof payload.message === 'string' ? payload.message.trim() : '';
   if (trimmed.length < DRAFT_GRAPH_MIN_BRIEF_LENGTH) return undefined;
   if (!BRIEF_SEED_DECISION_REGEX.test(trimmed)) return undefined;
+  // A permanent first-write-wins field must not be claimable by any
+  // mid-conversation question — "What should I do next?" addresses the
+  // assistant; it is not the user's decision brief. Overrides the regex's
+  // `\?$` alternative (kept only as a route-v2 mirror) for seeding.
+  if (trimmed.endsWith('?')) return undefined;
   return normaliseBriefText(payload.message);
 }
