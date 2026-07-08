@@ -474,3 +474,77 @@ describe('OLUMI_ACTION_TOOL.action.explanation field', () => {
     }
   });
 });
+
+// Top-level answer_text field — ROADMAP 1.38 coach-answer-body fix. The
+// coach and converse tool-call variants previously had no body field at
+// all, so compose could only ship Sonnet's brief pre-tool-call
+// `orientationText` — the fuller authored answer was silently dropped
+// (TRUNCATION-BUG-HANDOVER.md). This adds an OPTIONAL top-level
+// `answer_text`, mirroring the existing `explanation.answer_text` pattern
+// on the execute side. turn-executor.ts prefers it when present and falls
+// back to orientationText when absent (see phase1-behavioural.test.ts for
+// the end-to-end compose-level coverage).
+describe('OLUMI_ACTION_TOOL top-level answer_text field (coach/converse)', () => {
+  it('declares an optional top-level answer_text string on the JSON schema', () => {
+    const props = OLUMI_ACTION_TOOL.input_schema.properties as {
+      answer_text?: { type: string; description?: string };
+    };
+    expect(props.answer_text).toBeDefined();
+    expect(props.answer_text?.type).toBe('string');
+    // Not in the top-level `required` array — optional by construction so
+    // old-shaped responses (answer in leading text) remain valid.
+    expect(OLUMI_ACTION_TOOL.input_schema.required).not.toContain('answer_text');
+  });
+
+  it('parses a coach response carrying answer_text', () => {
+    const result = parseToolCallResponse({
+      intent_class: 'coach',
+      coaching_mode: 'deepen',
+      answer_text: 'The full multi-sentence coaching answer goes here.',
+    });
+    expect(result.intent_class).toBe('coach');
+    if (result.intent_class === 'coach') {
+      expect(result.answer_text).toBe('The full multi-sentence coaching answer goes here.');
+      expect(result.coaching_mode).toBe('deepen');
+    }
+  });
+
+  it('parses a coach response with NO answer_text (backwards-compatible)', () => {
+    const result = parseToolCallResponse(VALID_COACH_INPUT);
+    expect(result.intent_class).toBe('coach');
+    if (result.intent_class === 'coach') {
+      expect(result.answer_text).toBeUndefined();
+    }
+  });
+
+  it('parses a converse response carrying answer_text', () => {
+    const result = parseToolCallResponse({
+      intent_class: 'converse',
+      answer_text: 'The full conversational answer goes here.',
+    });
+    expect(result.intent_class).toBe('converse');
+    if (result.intent_class === 'converse') {
+      expect(result.answer_text).toBe('The full conversational answer goes here.');
+    }
+  });
+
+  it('parses a converse response with NO answer_text (backwards-compatible)', () => {
+    const result = parseToolCallResponse(VALID_CONVERSE_INPUT);
+    expect(result.intent_class).toBe('converse');
+    if (result.intent_class === 'converse') {
+      expect(result.answer_text).toBeUndefined();
+    }
+  });
+
+  it('rejects execute carrying answer_text (execute uses action.explanation.answer_text)', () => {
+    expect(() =>
+      parseToolCallResponse({ ...VALID_EXECUTE_INPUT, answer_text: 'stray body' }),
+    ).toThrow(/answer_text is forbidden/);
+  });
+
+  it('rejects clarify carrying answer_text (clarify uses clarification.question)', () => {
+    expect(() =>
+      parseToolCallResponse({ ...VALID_CLARIFY_INPUT, answer_text: 'stray body' }),
+    ).toThrow(/answer_text is forbidden/);
+  });
+});

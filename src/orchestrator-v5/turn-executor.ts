@@ -5820,11 +5820,26 @@ export async function runTurnExecutor(
       //   (c) set coaching_mode on turn metadata
       // Runtime behaviour matches direct_answer compose; classification is
       // preserved so Phase 2 can evaluate coaching-mode accuracy against the GTX.
-      const sanitised = sanitiseNarrateOutput(routingResult.orientationText);
+      //
+      // ROADMAP 1.38 — the coach tool-call variant now carries an optional
+      // `answer_text` (tool-schema.ts): the FULL coaching answer Sonnet
+      // authored, not just the brief pre-tool-call orientation. Prefer it
+      // when present; fall back to `orientationText` exactly as before when
+      // absent, so old-shaped responses are byte-identical to pre-fix
+      // behaviour. This is the fix for the silent-truncation defect
+      // (TRUNCATION-BUG-HANDOVER.md): previously only `orientationText` —
+      // a single confident sentence — ever reached the user on coach turns.
+      // Trimmed-truthiness on both branches (review nit): an empty or
+      // whitespace-only answer_text must fall back to orientationText,
+      // never ship a blank answer.
+      const coachAnswerSource = routingResult.proposal.answer_text?.trim()
+        ? routingResult.proposal.answer_text
+        : routingResult.orientationText;
+      const sanitised = sanitiseNarrateOutput(coachAnswerSource);
       if (sanitised.contamination_detected) {
         emit(TelemetryEvents.TurnExecutorContaminationNarrate, {
           request_id: requestId,
-          raw_length: routingResult.orientationText.length,
+          raw_length: coachAnswerSource.length,
           sanitised_length: sanitised.output.length,
           turn_class: 'direct_answer',
         });
@@ -5879,10 +5894,23 @@ export async function runTurnExecutor(
       });
       stagesCompleted.push('compose');
     } else {
-      // text_only → inferred converse.
-      const text = routingResult.type === 'text_only'
-        ? routingResult.text
-        : routingResult.orientationText;
+      // text_only → inferred converse. tool_call converse falls in here
+      // too (execute/clarify/coach are exhaustively handled above).
+      //
+      // ROADMAP 1.38 — tool-call converse now carries an optional
+      // `answer_text` (tool-schema.ts), mirroring the coach branch fix
+      // above. Prefer it when present; fall back to `orientationText`
+      // exactly as before when absent (byte-identical to pre-fix
+      // behaviour). text_only responses are unaffected — they already
+      // ship the model's full `.text` and have no separate answer_text
+      // channel.
+      const text =
+        routingResult.type === 'text_only'
+          ? routingResult.text
+          : routingResult.proposal.intent_class === 'converse' &&
+              routingResult.proposal.answer_text?.trim()
+            ? routingResult.proposal.answer_text
+            : routingResult.orientationText;
       const sanitised = sanitiseNarrateOutput(text);
       if (sanitised.contamination_detected) {
         emit(TelemetryEvents.TurnExecutorContaminationNarrate, {

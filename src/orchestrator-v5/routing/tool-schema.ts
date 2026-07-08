@@ -325,6 +325,31 @@ export const OLUMI_ACTION_TOOL = {
         },
         required: ['ambiguity_type', 'question'],
       },
+      // ROADMAP 1.38 — coach-answer-body fix. The coach and converse
+      // (tool-call) branches previously had NO body field: compose could
+      // only ship the brief pre-tool-call leading text (a one-sentence
+      // "orientation", never meant to be the whole answer), so the fuller
+      // coaching/conversational answer Sonnet actually authored was
+      // silently dropped (see TRUNCATION-BUG-HANDOVER.md). This optional
+      // top-level field gives those two branches a real answer channel,
+      // mirroring the `explanation.answer_text` pattern already used by
+      // the execute-side explanation handlers. Optional so responses that
+      // still put the answer in the leading text (today's shape) remain
+      // valid — this is additive, not a breaking change to the contract.
+      answer_text: {
+        type: 'string',
+        description:
+          'Your complete user-facing answer. Populate this when ' +
+          'intent_class is "coach" or "converse": write your FULL coaching ' +
+          'or conversational answer here — every sentence you want the user ' +
+          'to read, not a short lead-in. Do not rely on leading text before ' +
+          'the tool call to carry the answer; leading text is treated as a ' +
+          'brief pre-action orientation only and anything else you say ' +
+          'there may not reach the user in full. Forbidden when ' +
+          'intent_class is "execute" or "clarify" — those carry their ' +
+          'answer via `action.explanation.answer_text` or ' +
+          '`clarification.question` respectively.',
+      },
     },
     required: ['intent_class'],
   },
@@ -342,24 +367,34 @@ export type ToolCallResponse =
       action: ProposalAction;
       coaching_mode?: undefined;
       clarification?: undefined;
+      answer_text?: undefined;
     }
   | {
       intent_class: 'clarify';
       clarification: ProposalClarification;
       coaching_mode?: undefined;
       action?: undefined;
+      answer_text?: undefined;
     }
   | {
       intent_class: 'converse';
       coaching_mode?: undefined;
       action?: undefined;
       clarification?: undefined;
+      // ROADMAP 1.38 — optional full-answer channel. See `answer_text`
+      // description on the JSON schema above for the authoring contract.
+      // Falls back to `orientationText` at compose time when absent.
+      answer_text?: string;
     }
   | {
       intent_class: 'coach';
       coaching_mode?: z.infer<typeof CoachingModeSchema>;
       action?: undefined;
       clarification?: undefined;
+      // ROADMAP 1.38 — optional full-answer channel. See `answer_text`
+      // description on the JSON schema above for the authoring contract.
+      // Falls back to `orientationText` at compose time when absent.
+      answer_text?: string;
     };
 
 export class ToolCallParseError extends Error {
@@ -377,10 +412,13 @@ const RawToolCallSchema = z
     coaching_mode: CoachingModeSchema.optional(),
     action: ProposalActionSchema.optional(),
     clarification: ProposalClarificationSchema.optional(),
+    // ROADMAP 1.38 — optional full-answer channel for coach / converse.
+    // See the JSON schema `answer_text` description above.
+    answer_text: z.string().optional(),
   })
   .strict()
   .superRefine((obj, ctx) => {
-    const { intent_class, action, clarification, coaching_mode } = obj;
+    const { intent_class, action, clarification, coaching_mode, answer_text } = obj;
     if (intent_class === 'execute') {
       if (!action) {
         ctx.addIssue({
@@ -394,6 +432,14 @@ const RawToolCallSchema = z
           code: z.ZodIssueCode.custom,
           path: ['clarification'],
           message: 'clarification is forbidden when intent_class === "execute"',
+        });
+      }
+      if (answer_text !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['answer_text'],
+          message:
+            'answer_text is forbidden when intent_class === "execute" — use action.explanation.answer_text',
         });
       }
     }
@@ -410,6 +456,14 @@ const RawToolCallSchema = z
           code: z.ZodIssueCode.custom,
           path: ['action'],
           message: 'action is forbidden when intent_class === "clarify"',
+        });
+      }
+      if (answer_text !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['answer_text'],
+          message:
+            'answer_text is forbidden when intent_class === "clarify" — use clarification.question',
         });
       }
     }
@@ -481,9 +535,13 @@ export function parseToolCallResponse(toolInput: unknown): ToolCallResponse {
         clarification: data.clarification as ProposalClarification,
       };
     case 'converse':
-      return { intent_class: 'converse' };
+      return { intent_class: 'converse', answer_text: data.answer_text };
     case 'coach':
-      return { intent_class: 'coach', coaching_mode: data.coaching_mode };
+      return {
+        intent_class: 'coach',
+        coaching_mode: data.coaching_mode,
+        answer_text: data.answer_text,
+      };
   }
 }
 
