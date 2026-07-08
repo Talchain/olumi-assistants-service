@@ -94,6 +94,20 @@ describe('the gate — recorded candidates score as the fixture expects', () => 
   });
 });
 
+describe('every checked-in fixture is self-consistent (prompt-workstream live-regression set)', () => {
+  // The corpus grows as the prompt workstream feeds in fixtures reproducing
+  // real staging regressions (goal-fit values-withheld, coach mutation-language,
+  // stale / recommendation vocabulary). Each fixture's `expected` map is a live
+  // assertion: the chassis verdict for every candidate must match it, or the
+  // gate no longer catches the drift the fixture was built to catch.
+  for (const fx of loadFixtures()) {
+    it(`${fx.id}: chassis agreement ok`, () => {
+      const report = runFixture(fx);
+      expect(report.ok).toBe(true);
+    });
+  }
+});
+
 describe('production guards are genuinely wired (not re-specified)', () => {
   const raw = () => goalFitFixture().analysis;
 
