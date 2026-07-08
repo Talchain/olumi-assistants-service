@@ -92,7 +92,13 @@ const EXPECTED: Record<string, Record<string, number>> = {
     'src/orchestrator-v5/context/freshness.ts': 1, // authority (definition)
     'src/orchestrator-v5/build-turn-context.ts': 2, // approved seam (routing/coaching freshness)
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 2, // approved seam (canonical-state composition)
-    'src/orchestrator-v5/turn-executor.ts': 3, // approved assembly seam (frozen file)
+    // 2026-07-08 lane-34: +1 — the GM held-execute resume re-derives wire
+    // freshness against the POST-APPLY graph hash after its mid-turn commit
+    // (the pre-derived frame value is stale by definition once the confirmed
+    // mutation persists; mirrors edit-graph-dispatch's blocked-path
+    // re-derivation). Deliberate, reviewed; migrate with the frame-consumer
+    // audit, do not add more.
+    'src/orchestrator-v5/turn-executor.ts': 4, // approved assembly seam (frozen file)
     'src/orchestrator-v5/handlers/chip-click-dispatch.ts': 3, // TOLERATED ad-hoc debt — do not add more
     // 2026-07-07 lane-8: +2 — the GM referee gate's pre-edit freshness
     // re-projection (strict persisted-base frame authority for the referee's
