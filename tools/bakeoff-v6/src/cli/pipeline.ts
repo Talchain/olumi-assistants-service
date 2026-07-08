@@ -61,6 +61,8 @@ export interface PipelineOptions {
   /** Dir of frozen M1 graphs ({brief_id}.json) for arm C to critique instead of drafting;
    *  null = normal draft. Removes the M1-variation confounder from M2-prompt comparisons. */
   frozenM1Dir: string | null;
+  /** M1 thinking axis: null/"disabled" = no-think mirror; "low"|"medium"|"high" = adaptive+effort. */
+  m1Thinking: string | null;
 }
 
 export interface PipelineSummary {
@@ -221,6 +223,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineSummar
       models: config.models,
       bTokenBudget,
       frozenM1,
+      m1Thinking: opts.m1Thinking ?? undefined,
     });
     const finishedAt = new Date().toISOString();
     const record = assembleRecord(config, prompts, arm, brief, seed, output, startedAt, finishedAt);

@@ -10,7 +10,7 @@ import { buildCallRecord } from "../compute/cost.ts";
 import { mergeProposals } from "../merge/merge.ts";
 import { validateDraftAtBoundary } from "../validate/draft-boundary.ts";
 import { STRUCTURED_OUTPUTS_AUX_STRING_REMINDER } from "../llm/structured-aux.ts";
-import { briefUserContent, emptyOutput, type ArmRunner } from "./types.ts";
+import { briefUserContent, emptyOutput, m1ThinkingConfig, type ArmRunner } from "./types.ts";
 import { ARM_A_MAX_TOKENS } from "./arm-a.ts";
 
 export const ARM_C_M2_MAX_TOKENS = 16_384;
@@ -25,17 +25,20 @@ export const runArmC: ArmRunner = async (input) => {
     // Frozen M1: no API call. Every M2 variant critiques the identical graph.
     m1Raw = input.frozenM1;
   } else {
+    const tc = m1ThinkingConfig(input, ARM_A_MAX_TOKENS);
     const m1Result = await input.client.call({
       purpose: "arm-c-draft-m1",
       model: input.models.C.m1,
       system: input.prompts.armCM1.body,
       // Grammar arm: append the adapter's stringified-aux reminder (mirrors live).
       // No-think mirror = explicit thinking disabled; no temperature (400 on Sonnet 5).
+      // The M1 thinking axis can switch this to adaptive+effort.
       userContent: briefUserContent(input.brief) + STRUCTURED_OUTPUTS_AUX_STRING_REMINDER,
-      maxTokens: ARM_A_MAX_TOKENS,
-      thinking: { type: "disabled" },
+      maxTokens: tc.maxTokens,
+      thinking: tc.thinking,
       outputConfig: {
         format: { type: "json_schema", schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA as Record<string, unknown> },
+        ...(tc.effort ? { effort: tc.effort } : {}),
       },
     });
     out.calls.push(buildCallRecord("arm-c-draft-m1", input.models.C.m1, m1Result));

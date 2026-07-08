@@ -18,12 +18,13 @@ import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../../../src/cee/draft/anthropi
 import { extractJson } from "../llm/client.ts";
 import { buildCallRecord } from "../compute/cost.ts";
 import { STRUCTURED_OUTPUTS_AUX_STRING_REMINDER } from "../llm/structured-aux.ts";
-import { briefUserContent, emptyOutput, type ArmRunner } from "./types.ts";
+import { briefUserContent, emptyOutput, m1ThinkingConfig, type ArmRunner } from "./types.ts";
 
 export const ARM_A_MAX_TOKENS = 16384;
 
 export const runArmA: ArmRunner = async (input) => {
   const out = emptyOutput();
+  const tc = m1ThinkingConfig(input, ARM_A_MAX_TOKENS);
   const result = await input.client.call({
     purpose: "arm-a-draft",
     model: input.models.A.model,
@@ -31,11 +32,13 @@ export const runArmA: ArmRunner = async (input) => {
     // Grammar arm: append the adapter's stringified-aux reminder (mirrors the
     // live path). The v0.4.x no-think draft mirror = explicit thinking disabled
     // (Sonnet 5 defaults to adaptive when omitted); no temperature (400 on Sonnet 5).
+    // The M1 thinking axis (m1ThinkingConfig) can switch this to adaptive+effort.
     userContent: briefUserContent(input.brief) + STRUCTURED_OUTPUTS_AUX_STRING_REMINDER,
-    maxTokens: ARM_A_MAX_TOKENS,
-    thinking: { type: "disabled" },
+    maxTokens: tc.maxTokens,
+    thinking: tc.thinking,
     outputConfig: {
       format: { type: "json_schema", schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA as Record<string, unknown> },
+      ...(tc.effort ? { effort: tc.effort } : {}),
     },
   });
   out.calls.push(buildCallRecord("arm-a-draft", input.models.A.model, result));

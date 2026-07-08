@@ -30,6 +30,7 @@ async function runOnce(runId: string) {
     preflightOnly: false,
     promptSet: null,
     frozenM1Dir: null,
+    m1Thinking: null,
   });
 }
 

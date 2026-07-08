@@ -29,6 +29,15 @@ export interface ArmRunInput {
    * providing the scored round's paired-review input). Absent = normal draft.
    */
   frozenM1?: unknown;
+  /**
+   * M1 thinking axis (arm A + arm C-M1). Undefined/"disabled" = the served
+   * no-think mirror (thinking:{type:"disabled"}). An effort level ("low" |
+   * "medium" | "high") = thinking:{type:"adaptive"} + output_config.effort,
+   * with a raised max_tokens budget (thinking shares the budget; the ~30%
+   * tokenizer can truncate the JSON otherwise). Tests whether a little
+   * structured reasoning improves M1 calibration/mechanism quality.
+   */
+  m1Thinking?: string;
 }
 
 export interface ArmRunOutput {
@@ -48,4 +57,20 @@ export function emptyOutput(): ArmRunOutput {
 
 export function briefUserContent(brief: BriefFixture): string {
   return `Decision brief:\n${brief.brief}`;
+}
+
+/**
+ * M1 call thinking/effort/max-tokens config (shared by arm A and arm C-M1).
+ * Default = the served no-think mirror. An effort level enables adaptive
+ * thinking + output_config.effort and DOUBLES max_tokens (thinking shares the
+ * budget; guards against JSON truncation under the ~30% tokenizer).
+ */
+export function m1ThinkingConfig(
+  input: ArmRunInput,
+  baseMaxTokens: number,
+): { thinking: Record<string, unknown>; effort?: string; maxTokens: number } {
+  const on = input.m1Thinking !== undefined && input.m1Thinking !== "disabled";
+  return on
+    ? { thinking: { type: "adaptive" }, effort: input.m1Thinking, maxTokens: baseMaxTokens * 2 }
+    : { thinking: { type: "disabled" }, maxTokens: baseMaxTokens };
 }
