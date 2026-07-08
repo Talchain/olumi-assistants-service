@@ -110,6 +110,17 @@ anywhere** — that mechanism is orphaned, independent of the V5 autofire path,
 and out of scope here (attaching a genuinely dead field would be new
 plumbing, not "the already-supported typed blocks").
 
+**Dark-ship framing (corrected, fix round) — THREE flags, not two.**
+`buildDecisionReviewUserMessage` (FIX 2's caps) is also called by the
+pre-existing HTTP route `src/routes/assist.v1.decision-review.ts`, gated by
+its own flag `CEE_DECISION_REVIEW_ENABLED` (default **false**, see
+`src/config/index.ts`). So this lane's changes ship dark behind
+`CEE_SEND_BRIEF_TO_PLOT` (FIX 1's timeout path) +
+`V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW` (FIX 3's attach path); the prompt
+caps (FIX 2/A) additionally activate wherever `CEE_DECISION_REVIEW_ENABLED`
+is on — that is intended, the caps ARE the fix for that route too. All three
+flags default `false` today; none is flipped by this PR.
+
 **What this commit adds** (no redundant new flag — reused
 `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW` per the task's stated preference):
 - Strengthened the config comment on `runAnalysisAwaitDecisionReview`
@@ -125,11 +136,18 @@ plumbing, not "the already-supported typed blocks").
   `analysis_result` block, no `review_card`/`coaching`/`evidence` blocks, no
   other field changed.
 
-**Schema skew note**: CEE pins `@talchain/schemas@0.14.0`; UI
-(`DecisionGuideAI`) pins `0.8.1`. `tests/contract/cee-egress-wire-surface-pin.test.ts`
-already documents/pins this skew for the UI-relevant wire surface — worth a
-coordinated check before activating this flag in an environment where the UI
-is on an older pin than assumed here.
+**Schema skew note (corrected, fix round)**: an earlier version of this doc
+claimed the UI pins `@talchain/schemas@0.8.1`. **This is false**, verified
+directly against `DecisionGuideAI` `origin/staging`: UI `package.json` pins
+`file:./vendor/talchain-schemas-0.13.1.tgz` (tarball + sha256 committed;
+re-vendored in commit `8172a027`, merged via UI PR #232 on 2026-07-06 — that
+commit's "(draft, do-not-merge)" message is a fossil, the merge is real and
+live). The real skew is **CEE `0.14.0` vs UI `0.13.1`**, and the vendored
+`0.13.1` already contains all four block kinds
+(`review_card`/`coaching`/`evidence`/`exercise`). `tests/contract/cee-egress-wire-surface-pin.test.ts`
+still documents/pins the UI-relevant wire surface. Given 0.13.1 should accept
+these blocks natively, this is not a pin-coordination project — see the
+corrected activation gate #2 below.
 
 ## Gates run (this worktree)
 
@@ -163,11 +181,16 @@ activation gates are:
    `enrichment.decision_review`, which is what makes `compose.ts`'s Phase 3
    block rebuild (FIX 3) emit `review_card`/`coaching`/`evidence` blocks at
    all.
-2. **UI `@talchain/schemas` pin coordination** — CEE pins `0.14.0`; UI pins
-   `0.8.1`. The tolerated-block sidecar (`tests/contract/cee-egress-wire-surface-pin.test.ts`)
-   handles this skew today, but a real UI pin bump is cleaner before
-   activating in an environment where the UI is on an older pin than assumed
-   here.
+2. **One-emission live check of the schema seam at flip time** (corrected,
+   fix round — this is NOT a pin-coordination project). The real skew is CEE
+   `0.14.0` vs UI `0.13.1` (not `0.8.1` — see the Schema skew note in FIX 3
+   above), and the vendored UI `0.13.1` already contains all four block
+   kinds natively. The tolerated-block sidecar
+   (`tests/contract/cee-egress-wire-surface-pin.test.ts`) is belt-and-braces,
+   not a required bridge. What remains is a live check: emit one real
+   `review_card`/`coaching`/`evidence` payload through the actual wire at
+   flip time and confirm the UI renders it as expected, rather than a schema
+   pin-bump project.
 3. **The orphaned `m1_review` PLoT-callback field** — the
    `CEE_SEND_BRIEF_TO_PLOT` → PLoT `m1_review` mechanism is confirmed
    orphaned (PLoT computes it, CEE never reads it back). Compute-but-never-
@@ -209,6 +232,18 @@ from additive, per the C5 correction at the top of this doc:
   were wired into `DecisionReviewMeta` and its assembly. Also fixed a doc
   typo: "(type, factor_label, message)" → "(type, severity, message)"
   (factor_label is an `evidence_gaps` field, not a `model_critiques` field).
+  **Scope correction (fix round)**: "observability" here means adapter-internal
+  and test-inspectable only — `model_critiques_dropped_count` /
+  `model_critiques_capped_count` land in `DecisionReviewMeta` (`_meta`), NOT
+  in telemetry or logs. This mirrors the pre-existing
+  `evidence_gaps_dropped_count`, which has the same scope (also `_meta`-only,
+  never emitted to telemetry/logs). Separately: `FLIP_THRESHOLD_DATA`
+  truncation (FIX A) ranks kept entries by ascending distance-to-flip
+  (`capArray`'s `rank` sort in `invoke.ts`) whenever the array is over the
+  cap — this re-orders the kept entries relative to their original input
+  order (the dropped *count* is disclosed via the `[TRUNCATED: ...]` marker,
+  but the reordering itself is not separately flagged). Cosmetic for an
+  LLM-only prompt, but worth stating plainly.
 - **FIX D (C5) — additive/docs-only, not RED-first (a doc claim isn't code
   under test).** Corrected this doc's and the PR body's overclaim of "Three
   RED-first fixes" — see the correction note at the top of this doc.
@@ -224,3 +259,34 @@ Gates run for FIX A/B/C: `pnpm typecheck:src` clean after every commit;
 every commit; targeted `vitest run` on every touched/adjacent test file —
 all green (15/15, 41/41, 60/60 respectively — see each commit message for
 the exact count); pre-push hook green on every push.
+
+## Doc-only fix round (2026-07-08, verify-caught)
+
+Three further corrections, doc-and-PR-body-only (no code changed; the
+adversarial dormancy proof stays valid):
+
+1. **Schema-pin claim was false.** This doc and the PR body previously
+   claimed the UI pins `@talchain/schemas@0.8.1`. Verified false against
+   `DecisionGuideAI` `origin/staging`: the UI pins
+   `file:./vendor/talchain-schemas-0.13.1.tgz` (re-vendored via UI PR #232,
+   merged 2026-07-06). Real skew is CEE `0.14.0` vs UI `0.13.1`; `0.13.1`
+   already contains all four block kinds. Activation gate #2 (Follow-ups)
+   is rewritten from a pin-coordination project to a one-emission live
+   check of the schema seam at flip time. See the Schema skew note under
+   FIX 3 and the corrected Follow-ups gate #2.
+2. **Dark-ship framing named only two flags.** `buildDecisionReviewUserMessage`
+   is also shared by the pre-existing `/assist/v1/decision-review` HTTP
+   route, gated by its own `CEE_DECISION_REVIEW_ENABLED` (default false).
+   The lane ships dark behind three flags — `CEE_SEND_BRIEF_TO_PLOT` +
+   `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW`, with the prompt caps
+   additionally activating wherever `CEE_DECISION_REVIEW_ENABLED` is on
+   (intended — the caps are the fix for that route too). See the Dark-ship
+   framing note under FIX 3.
+3. **`_meta` observability claim scoped.** `model_critiques_dropped_count` /
+   `model_critiques_capped_count` land in `DecisionReviewMeta` (`_meta`)
+   only — not telemetry/logs — the same scope as the pre-existing
+   `evidence_gaps_dropped_count`. Also documented: `FLIP_THRESHOLD_DATA`
+   truncation ranks kept entries by ascending distance-to-flip, re-ordering
+   them relative to the original input order (disclosed count, undisclosed
+   order — cosmetic for an LLM prompt). See the Scope correction under
+   FIX C.
