@@ -10,7 +10,20 @@ currently DISCARDED. Live evidence (flag-activation trial,
 UNGROUNDED_NUMBER guard fired + auto-corrected correctly) but flipping the
 enabling flags today is actively harmful: a spurious CEE↔PLoT timeout+retry
 storm (2x LLM calls, ~68s turn) and a structurally uncapped prompt. Three
-RED-first fixes, one commit each, make it safe to flip.
+fixes, one commit each, make it safe to flip.
+
+**Correction (fix round, C5)**: an earlier version of this doc/PR body
+overclaimed "Three RED-first fixes." Precisely: **FIX 1 and FIX 2 are
+RED-first-proven** — each pins a failing test against the pre-fix code before
+the fix lands (timeout-storm reproduction; unbounded-prompt reproduction).
+**FIX 3 is additive / verified-by-inspection, NOT RED-first** — the
+investigation found the block-composition/attach path was *already correct
+and already flag-gated*; there was no bug to reproduce, so no RED state ever
+existed. FIX 3's commit adds a confirmatory test (proving the already-true
+behaviour against the real wire `BlockSchema`) plus a strengthened config
+comment — genuinely useful, but "verified existing correctness," not
+"test-first fix." See the **Fix round (2026-07-08, post-review)** section
+below for the same distinction applied to FIX A/B/C.
 
 ## FIX 1 — timeout budget (`db2a566ae`)
 
@@ -131,14 +144,83 @@ is on an older pin than assumed here.
 
 ## Follow-ups (not done here)
 
-1. The `CEE_SEND_BRIEF_TO_PLOT` → PLoT `m1_review` mechanism is confirmed
-   orphaned (PLoT computes it, CEE never reads it back). Either wire it up
-   properly or remove the dead computation on the PLoT side to stop paying
-   for it.
-2. Before flipping `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true` on staging:
-   coordinate the UI's `@talchain/schemas` pin bump if the review/coaching
-   blocks it needs aren't in its current `0.8.1` pin's UI-relevant surface
-   (see the egress wire-surface pin test).
-3. FIX 1's `PLOT_RUN_BRIEF_TIMEOUT_MS` (75s) is sized off ONE observed trial
+**Correction (fix round, C4)**: the adversarial review claimed the UI
+"renders only the top-1 `review_card` and deliberately does NOT render
+coaching or evidence blocks," and listed a UI renderer build as a follow-up.
+**This is FALSE, verified against `DecisionGuideAI` `origin/staging`**:
+`src/canvas/conversation/InlineBlocks.tsx` renders ALL FOUR block types —
+`case 'v5_review_card'` → `V5ReviewCardBlock`, `'v5_coaching'` →
+`V5CoachingBlock`, `'v5_evidence'` → `V5EvidenceBlock`, `'v5_exercise'` →
+`V5ExerciseBlock` (lines ~306-318) — and
+`src/v5/blocks/mapV5Blocks.ts` maps `review_card`/`coaching`/`evidence` with
+**no top-1 cap**. The renderers are already merged and wired on staging;
+**zero UI build is needed to activate this lane's content**. The genuine
+activation gates are:
+
+1. **The CEE emission flag flip** — `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW`
+   (default `false`, unchanged by this PR) must be flipped `true` for
+   `enrichRunAnalysisWithDecisionReview` to actually run and populate
+   `enrichment.decision_review`, which is what makes `compose.ts`'s Phase 3
+   block rebuild (FIX 3) emit `review_card`/`coaching`/`evidence` blocks at
+   all.
+2. **UI `@talchain/schemas` pin coordination** — CEE pins `0.14.0`; UI pins
+   `0.8.1`. The tolerated-block sidecar (`tests/contract/cee-egress-wire-surface-pin.test.ts`)
+   handles this skew today, but a real UI pin bump is cleaner before
+   activating in an environment where the UI is on an older pin than assumed
+   here.
+3. **The orphaned `m1_review` PLoT-callback field** — the
+   `CEE_SEND_BRIEF_TO_PLOT` → PLoT `m1_review` mechanism is confirmed
+   orphaned (PLoT computes it, CEE never reads it back). Compute-but-never-
+   consumed: either wire it up properly or remove the dead computation on
+   the PLoT side to stop paying for it.
+
+Additional, non-blocking follow-up:
+
+4. FIX 1's `PLOT_RUN_BRIEF_TIMEOUT_MS` (75s) is sized off ONE observed trial
    (~40.5s). Re-verify against a live trial once FIX 2's prompt cap is also
    live on PLoT's side of the callback (this lane cannot change PLoT).
+
+## Fix round (2026-07-08, post-review)
+
+The adversarial review of the original 3-commit PR returned CONCERNS C1-C5.
+Four were valid and closed below; C4 was wrong and is corrected above
+(Follow-ups section) rather than "fixed" in code. Distinguishing RED-first
+from additive, per the C5 correction at the top of this doc:
+
+- **FIX A (C1) — RED-first.** `FLIP_THRESHOLD_DATA` and `BRIEF` in
+  `buildDecisionReviewUserMessage` were still raw uncapped `JSON.stringify`/
+  verbatim text after FIX 2 — the "hard ceiling" claim was incomplete. 6 new
+  test cases in `invoke.prompt-cap.test.ts` were written and confirmed
+  failing (`DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES` /
+  `DECISION_REVIEW_MAX_BRIEF_CHARS` did not exist; sections were unbounded)
+  before `boundedTextBlock` + flip-distance ranking were implemented.
+- **FIX B (C2) — RED-first.** The brief-bearing retry-skip guard
+  (`skipRetryOnTimeout`, now `skipRetryEntirely`) only checked
+  `firstError instanceof PLoTTimeoutError` — a 5xx or network error mid-chain
+  would still retry and double-fire the expensive LLM chain. 2 new cases
+  (brief-bearing 5xx, brief-bearing network error) were written and confirmed
+  failing (2 fetch calls instead of 1) before the guard was broadened to
+  apply to any already-confirmed-retryable error class.
+- **FIX C (C3) — RED-first.** `MAX_MODEL_CRITIQUES`'s doc comment claimed
+  "tracked in `_meta` for observability," but `model_critiques_dropped_count`
+  / `model_critiques_capped_count` were computed and then dropped when
+  building `DecisionReviewMeta`. New assertions on `_meta.model_critiques_*`
+  were written and confirmed failing (`undefined`) before the two fields
+  were wired into `DecisionReviewMeta` and its assembly. Also fixed a doc
+  typo: "(type, factor_label, message)" → "(type, severity, message)"
+  (factor_label is an `evidence_gaps` field, not a `model_critiques` field).
+- **FIX D (C5) — additive/docs-only, not RED-first (a doc claim isn't code
+  under test).** Corrected this doc's and the PR body's overclaim of "Three
+  RED-first fixes" — see the correction note at the top of this doc.
+- **FIX E (C4) — additive/docs-only correction, NOT a code fix.** The
+  review's claimed UI renderer gap was verified false against
+  `DecisionGuideAI` `origin/staging` (see the Follow-ups section above for
+  the evidence and the corrected genuine activation-gate list). No code
+  change was needed or made in response to C4 — the fix is entirely to this
+  doc's (and the PR body's) prose.
+
+Gates run for FIX A/B/C: `pnpm typecheck:src` clean after every commit;
+`bash scripts/ci/typecheck-ratchet.sh` — 462/462 (baseline unchanged) after
+every commit; targeted `vitest run` on every touched/adjacent test file —
+all green (15/15, 41/41, 60/60 respectively — see each commit message for
+the exact count); pre-push hook green on every push.
