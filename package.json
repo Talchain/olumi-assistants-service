@@ -63,7 +63,9 @@
     "dsk:lint": "tsx scripts/dsk-lint.ts",
     "dsk:init": "tsx scripts/dsk-init-registry.ts",
     "dsk:hash": "tsx scripts/dsk-hash.ts",
-    "assurance:v5:staging": "tsx tools/v5-journey-replay/assurance/index.ts"
+    "assurance:v5:staging": "tsx tools/v5-journey-replay/assurance/index.ts",
+    "eval:orchestrator": "tsx tools/orchestrator-eval/cli.ts",
+    "eval:orchestrator:test": "vitest run tools/orchestrator-eval"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
