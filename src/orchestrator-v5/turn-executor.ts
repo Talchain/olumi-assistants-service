@@ -5933,6 +5933,43 @@ export async function runTurnExecutor(
         suggested_actions: coachGuarded.suggested_actions,
       });
       stagesCompleted.push('compose');
+      // CEE_ANSWER_TEXT_REQUIRED compose guard (belt-and-braces layer B,
+      // default OFF — config/index.ts). Layer A (tool-schema.ts) forces a
+      // REPAIR_ONCE retry when a coach tool call omits/blanks answer_text,
+      // which makes a RAW blank answer_text unreachable here once Layer A
+      // has run — but Layer A validates the RAW string, BEFORE the
+      // sanitise/guard pipeline below. This is the genuinely independent
+      // residual layer B closes: a raw answer_text that is non-blank (so
+      // Layer A is satisfied) can still sanitise down to empty — e.g. pure
+      // tag/markup content with no retained inner text — or the coaching
+      // post-check's degrade path can (in principle) hand back blank prose.
+      // Checking the FINAL composedOk.assistant_text, after every existing
+      // step (chip generation, coachWrapper, sanitiser, coaching-output
+      // guard) has already run unchanged, is the only point that actually
+      // reflects what the user would receive — so this also covers Sonnet
+      // 5 adaptive thinking starving orientationText to zero (live-observed
+      // 1/6, acceptance-evidence/sonnet5-reflip/) for any case that slips
+      // past Layer A. Reuses the SAME deterministic copy/chip builder as
+      // the routing schema-repair-failure path
+      // (commitBoundedRoutingFallback) rather than inventing new copy.
+      // Flag OFF: this block never runs — byte-identical to pre-hardening
+      // behaviour (the known live defect this lane hardens against).
+      if (config.features.answerTextRequired && !composedOk.assistant_text.trim()) {
+        const { assistantText: recoveryText, chips: recoveryChips } =
+          buildBoundedFallbackCopyAndChips();
+        emit(TelemetryEvents.V5CoachingEmptyAnswerRecovered, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          intent_class: 'coach',
+          answer_text_length: routingResult.proposal.answer_text?.length ?? 0,
+          orientation_length: routingResult.orientationText.length,
+        });
+        composedOk = composeDirectAnswerResponse({
+          assistant_text: recoveryText,
+          stage: context.stage,
+          suggested_actions: recoveryChips,
+        });
+      }
     } else {
       // text_only → inferred converse. tool_call converse falls in here
       // too (execute/clarify/coach are exhaustively handled above).
@@ -6006,6 +6043,37 @@ export async function runTurnExecutor(
         suggested_actions: converseGuarded.suggested_actions,
       });
       stagesCompleted.push('compose');
+      // CEE_ANSWER_TEXT_REQUIRED compose guard (belt-and-braces layer B,
+      // default OFF — config/index.ts). Mirrors the coach-branch guard
+      // above; see its comment for the full rationale — checks the FINAL
+      // composedOk.assistant_text (post sanitise/guard pipeline) rather
+      // than the raw answer_text/orientationText, since Layer A only
+      // validates the raw string and a non-blank raw string can still
+      // sanitise down to empty. Explicitly scoped to tool_call converse —
+      // text_only converse can never be empty here (tryInterpret's
+      // `empty_response` check already rejects an all-blank text_only
+      // response upstream, in route-with-tool-use.ts).
+      if (
+        config.features.answerTextRequired &&
+        routingResult.type === 'tool_call' &&
+        routingResult.proposal.intent_class === 'converse' &&
+        !composedOk.assistant_text.trim()
+      ) {
+        const { assistantText: recoveryText, chips: recoveryChips } =
+          buildBoundedFallbackCopyAndChips();
+        emit(TelemetryEvents.V5CoachingEmptyAnswerRecovered, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          intent_class: 'converse',
+          answer_text_length: routingResult.proposal.answer_text?.length ?? 0,
+          orientation_length: routingResult.orientationText.length,
+        });
+        composedOk = composeDirectAnswerResponse({
+          assistant_text: recoveryText,
+          stage: context.stage,
+          suggested_actions: recoveryChips,
+        });
+      }
     }
 
     // V5 review: chip_count on every successful compose path, not only on
@@ -6846,29 +6914,20 @@ export async function runTurnExecutor(
   }
 
   /**
-   * Bounded routing-failure fallback (V5 P0 stabilisation).
-   *
-   * Builds a deterministic direct_answer envelope + recovery chips and
-   * commits it via the normal direct_answer commit path. This converts
-   * model-output failures (max_tokens / empty_response / schema_repair_failed)
-   * from a 500 BoundaryError into a 200 OlumiResponse so the user's
-   * session and prior analysis stay usable. failure_type telemetry still
-   * records the underlying cause via `failureType` + `routingErrorCause`
-   * so ops can chase the upstream signal.
-   *
-   * Copy + chips are conditional on the freshness state (three-way):
-   *  - fresh analysis available → reassure "your current analysis is
-   *    still available" + offer Explain results AND Re-run analysis.
-   *  - stale or unknown analysis → stale-safe copy that does NOT
-   *    promise usable state + offer Re-run analysis only (NEVER
-   *    Explain results, which would deepen the trust hit by pointing
-   *    at a projection that no longer matches the live graph).
-   *  - no prior analysis → "try again" copy + no action chips.
+   * Deterministic bounded-recovery copy + chips — freshness-conditional
+   * three-way (fresh / stale-but-present / none), documented in full on
+   * `commitBoundedRoutingFallback` below. Extracted (CEE_ANSWER_TEXT_REQUIRED
+   * lane) so the routing schema-repair-failure fallback AND the compose-layer
+   * empty-answer guard on coach/converse turns (STEP 6.7, coach/converse
+   * branches) share ONE copy/chip source instead of two copies drifting
+   * apart. Pure function of the closured `contextPackForLog` / `freshness`
+   * turn state — no side effects.
    */
-  async function commitBoundedRoutingFallback(
-    err: RoutingError,
-  ): Promise<TurnExecutorRunResult> {
-    failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
+  function buildBoundedFallbackCopyAndChips(): {
+    assistantText: string;
+    chips: SuggestedAction[];
+    analysisFreshAndAvailable: boolean;
+  } {
     const hasAnalysisProjection =
       !!contextPackForLog?.analysis &&
       !!contextPackForLog.analysis.leading_option;
@@ -6916,6 +6975,28 @@ export async function runTurnExecutor(
     } else {
       chips = [];
     }
+    return { assistantText, chips, analysisFreshAndAvailable };
+  }
+
+  /**
+   * Bounded routing-failure fallback (V5 P0 stabilisation).
+   *
+   * Builds a deterministic direct_answer envelope + recovery chips and
+   * commits it via the normal direct_answer commit path. This converts
+   * model-output failures (max_tokens / empty_response / schema_repair_failed)
+   * from a 500 BoundaryError into a 200 OlumiResponse so the user's
+   * session and prior analysis stay usable. failure_type telemetry still
+   * records the underlying cause via `failureType` + `routingErrorCause`
+   * so ops can chase the upstream signal.
+   *
+   * Copy + chips: see `buildBoundedFallbackCopyAndChips` above.
+   */
+  async function commitBoundedRoutingFallback(
+    err: RoutingError,
+  ): Promise<TurnExecutorRunResult> {
+    failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
+    const { assistantText, chips, analysisFreshAndAvailable } =
+      buildBoundedFallbackCopyAndChips();
     const fallbackResponse = composeDirectAnswerResponse({
       assistant_text: assistantText,
       stage: context.stage,
