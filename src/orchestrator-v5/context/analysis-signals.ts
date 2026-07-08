@@ -51,6 +51,16 @@ export const OPTION_GOAL_FIT_SIGNAL_CAP = 12;
  * to flip via this factor" — and is NOT the same as "unknown".
  */
 export interface TippingPointSignal {
+  /**
+   * Lane 30 (#369 audit P1) — structural factor id (`factor_id`/`node_id`/
+   * `id` off the raw row), carried so the ContextPack projection can
+   * suppress option-controlled levers by ID (never by label — labels
+   * collide). INTERNAL match key only: never serialised onto the projected
+   * `ContextPackAnalysisFlipThreshold`. Null when the raw row carried no
+   * id — the consumer FAILS CLOSED on such rows when a controlled-lever
+   * set exists. Optional so hand-built legacy signals stay assignable.
+   */
+  readonly factor_id?: string | null;
   readonly factor_label: string;
   readonly current_value: number | null;
   readonly flip_value: number | null;
@@ -64,6 +74,8 @@ export interface TippingPointSignal {
  * score — banded downstream, never surfaced raw.
  */
 export interface EvidenceGapSignal {
+  /** Lane 30 (#369 audit P1) — see {@link TippingPointSignal.factor_id}. */
+  readonly factor_id?: string | null;
   readonly factor_label: string;
   readonly voi_score: number;
 }
@@ -135,6 +147,21 @@ function readLabel(entry: Record<string, unknown>): string | null {
 }
 
 /**
+ * Lane 30 (#369 audit P1) — read the structural factor id off a raw
+ * enrichment row. TRUE ids only (`factor_id`/`node_id`/`id`); a label is
+ * never promoted to an id (labels collide — a label-as-id would let a
+ * lever's label suppress an unrelated factor, or fail to suppress the
+ * lever). Null when the row carries none.
+ */
+function readFactorId(entry: Record<string, unknown>): string | null {
+  const candidates = [entry.factor_id, entry.node_id, entry.id];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim().length > 0) return c;
+  }
+  return null;
+}
+
+/**
  * Derive tipping-point signals from the TOP-LEVEL `enrichment.flip_thresholds[]`
  * (the staging shape — entries carry `{factor_id, factor_label, current_value,
  * flip_value, unit, flip_reason}`; `flip_value` is null when no flip exists in
@@ -181,6 +208,7 @@ export function deriveTippingPointsFromTopLevel(
     const unit = typeof entry.unit === 'string' && entry.unit.length > 0 ? entry.unit : null;
     seen.add(label);
     out.push({
+      factor_id: readFactorId(entry),
       factor_label: label,
       current_value: currentValue,
       flip_value: flipValue,
@@ -220,7 +248,7 @@ export function deriveEvidenceGapsFromEnrichment(
         : null;
     if (voi === null) continue;
     seen.add(label);
-    out.push({ factor_label: label, voi_score: voi });
+    out.push({ factor_id: readFactorId(entry), factor_label: label, voi_score: voi });
     if (out.length >= EVIDENCE_GAP_SIGNAL_CAP) break;
   }
   return out;

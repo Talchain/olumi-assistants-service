@@ -856,6 +856,72 @@ export function filterLeverSourcedFragileEdges<E extends { from_id?: string; fro
 }
 
 /**
+ * Lane 30 (#369 audit P1) — factor-keyed lever suppression for the tipping
+ * (`flip_thresholds`, section 5) and evidence-gap (`evidence_gaps`, section
+ * 7) projections. Before this lane, `projectAnalysis` filtered top_drivers
+ * and fragile_edges by the intervention-controlled set but NOT these two
+ * sections — an option-controlled lever excluded from the driver list could
+ * still surface as a tipping point ("a small decrease in X could flip the
+ * result") or an evidence gap ("gather data on X"), both of which imply the
+ * user can independently tune / validate the lever. Same doctrine as
+ * {@link filterLeverSourcedFragileEdges}:
+ *
+ *   - authority is STRUCTURAL `factor_id` membership ONLY — never the label
+ *     (labels collide; #308);
+ *   - FAIL-CLOSED: when any lever exists, an entry with no resolvable
+ *     `factor_id` cannot be proven non-lever and is dropped;
+ *   - empty / absent controlled set ⇒ no-op (fail-safe);
+ *   - producer values are never mutated — a suppressed entry is simply not
+ *     surfaced.
+ *
+ * A fired suppression is logged under the EXISTING
+ * `v5.intervention_controlled_driver_suppressed` event (frozen telemetry
+ * registry — no new event names) with a section-specific `source`.
+ */
+export function filterLeverControlledFactorEntries<
+  E extends { factor_id?: string | null; factor_label: string },
+>(
+  entries: readonly E[],
+  controlledFactorIds: ReadonlySet<string> | undefined,
+  source: string,
+): E[] {
+  if (controlledFactorIds === undefined || controlledFactorIds.size === 0) {
+    return entries.slice();
+  }
+  const kept: E[] = [];
+  const suppressedIds: string[] = [];
+  for (const entry of entries) {
+    const id = typeof entry.factor_id === 'string' ? entry.factor_id.trim() : '';
+    if (id.length === 0) {
+      // Fail-closed: unattributable entry while levers exist.
+      suppressedIds.push('<no_factor_id>');
+      continue;
+    }
+    if (controlledFactorIds.has(id)) {
+      suppressedIds.push(id);
+      continue;
+    }
+    kept.push(entry);
+  }
+  if (suppressedIds.length > 0) {
+    // EVIDENCE THE PRODUCER FIX (Science/PLoT Lane A1) IS STILL REQUIRED —
+    // never a sign it is closed. factor_ids are internal identifiers (not
+    // user-facing prose), safe to log.
+    log.warn(
+      {
+        event: 'v5.intervention_controlled_driver_suppressed',
+        source,
+        suppressed_count: suppressedIds.length,
+        suppressed_factor_ids: suppressedIds,
+        producer_fix_required: true,
+      },
+      'V5 Lane 30: suppressed option-controlled lever from analysis projection (producer fix still required)',
+    );
+  }
+  return kept;
+}
+
+/**
  * Project `DriverSummary[]` into the display-safe ContextPack driver shape —
  * the single rule shared by `projectAnalysis` (routed path) and the chip-click
  * dispatch so the two sign-reattachment sites cannot drift:
@@ -1059,11 +1125,22 @@ function projectAnalysis(
   // 5. Lane 21 tipping points: prefer the attached top-level staging signals
   //    (see analysis-signals.ts — the per-option derivation is structurally
   //    empty on staging); fall back to the per-option summary.flip_thresholds.
+  //    Lane 30 (#369 audit P1): BOTH sources are filtered by the
+  //    intervention-controlled set BEFORE factor_id is stripped — an
+  //    option-controlled lever must not surface as a tipping point.
   const tippingSignals = analysis.tipping_points ?? [];
   const flipThresholds: ContextPackAnalysisFlipThreshold[] =
     tippingSignals.length > 0
-      ? tippingSignals.map(tippingFromSignal)
-      : (analysis.flip_thresholds ?? []).map(tippingFromFlipThreshold);
+      ? filterLeverControlledFactorEntries(
+          tippingSignals,
+          controlledFactorIds,
+          'projectAnalysis.flip_thresholds',
+        ).map(tippingFromSignal)
+      : filterLeverControlledFactorEntries(
+          analysis.flip_thresholds ?? [],
+          controlledFactorIds,
+          'projectAnalysis.flip_thresholds',
+        ).map(tippingFromFlipThreshold);
 
   // 6. P0b-1: drop lever-SOURCED fragile edges before they reach the prose /
   //    validation surfaces (explain_results, explanation-fallback, advice gate —
@@ -1087,10 +1164,18 @@ function projectAnalysis(
         filteredFragile.length,
       );
 
-  // 7. Lane 21 signal passthrough — raw values; banding is the formatter's job.
-  const evidenceGaps: ContextPackAnalysisEvidenceGap[] = (analysis.evidence_gaps ?? [])
-    .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
-    .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
+  // 7. Lane 21 signal passthrough — raw values; banding is the formatter's
+  //    job. Lane 30 (#369 audit P1): filtered by the intervention-controlled
+  //    set BEFORE factor_id is stripped — a lever must not surface as an
+  //    evidence gap the user is invited to gather data on.
+  const evidenceGaps: ContextPackAnalysisEvidenceGap[] =
+    filterLeverControlledFactorEntries(
+      analysis.evidence_gaps ?? [],
+      controlledFactorIds,
+      'projectAnalysis.evidence_gaps',
+    )
+      .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
+      .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
   const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit
     ? { scored: analysis.goal_fit.scored, basis: analysis.goal_fit.basis }
     : null;

@@ -1286,11 +1286,11 @@ describe('Lane 21 — fallback/projection source reconciliation', () => {
         })
       | null;
     expect(summary?.tipping_points).toEqual([
-      { factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.24, unit: 'engineers', no_flip_within_bounds: false },
-      { factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
+      { factor_id: 'f1', factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.24, unit: 'engineers', no_flip_within_bounds: false },
+      { factor_id: 'f2', factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
     ]);
     expect(summary?.evidence_gaps).toEqual([
-      { factor_label: 'Talent Market Tightness', voi_score: 0.6327 },
+      { factor_id: 'f3', factor_label: 'Talent Market Tightness', voi_score: 0.6327 },
     ]);
     expect(summary?.goal_fit).toEqual({
       scored: true,

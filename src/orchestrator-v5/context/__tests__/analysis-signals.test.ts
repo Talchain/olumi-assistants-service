@@ -34,8 +34,10 @@ describe('deriveTippingPointsFromTopLevel', () => {
       ],
     });
     expect(out).toEqual([
-      { factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.24, unit: 'engineers', no_flip_within_bounds: false },
-      { factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
+      // Lane 30 (#369 audit P1): factor_id is carried through so the
+      // projection can suppress option-controlled levers structurally.
+      { factor_id: 'f1', factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.24, unit: 'engineers', no_flip_within_bounds: false },
+      { factor_id: 'f2', factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
     ]);
   });
 
@@ -48,7 +50,9 @@ describe('deriveTippingPointsFromTopLevel', () => {
     }));
     const out = deriveTippingPointsFromTopLevel({ flip_thresholds: rows });
     expect(out.length).toBeLessThanOrEqual(TIPPING_POINT_SIGNAL_CAP);
-    expect(out[0]).toMatchObject({ factor_label: 'Duplicated', flip_value: 8 });
+    // Rows without any id resolve factor_id: null (the consumer fails closed
+    // on such rows when a controlled-lever set exists).
+    expect(out[0]).toMatchObject({ factor_label: 'Duplicated', flip_value: 8, factor_id: null });
   });
 
   it('returns [] when flip_thresholds is absent or not an array', () => {
@@ -72,8 +76,9 @@ describe('deriveEvidenceGapsFromEnrichment', () => {
       },
     });
     expect(out).toEqual([
-      { factor_label: 'Talent Market Tightness', voi_score: 0.6327 },
-      { factor_label: 'Hiring Cost', voi_score: 0.2 },
+      // Lane 30 (#369 audit P1): factor_id carried for structural lever suppression.
+      { factor_id: 'f1', factor_label: 'Talent Market Tightness', voi_score: 0.6327 },
+      { factor_id: 'f2', factor_label: 'Hiring Cost', voi_score: 0.2 },
     ]);
   });
 
