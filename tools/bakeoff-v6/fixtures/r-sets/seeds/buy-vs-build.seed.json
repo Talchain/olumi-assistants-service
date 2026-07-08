@@ -1,0 +1,72 @@
+{
+  "ratified": false,
+  "brief_id": "buy-vs-build",
+  "note": "memory aid only — pooled, de-authored M2 proposal loci; NOT R. Ratify per seeds/_RATIFICATION-PROTOCOL.md.",
+  "candidate_items": [
+    {
+      "suggested_kind": "positive",
+      "description": "factor_vendor_dependency only links to outcome_launch_speed; no risk node covers switching cost or vendor lock-in",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_vendor_dependency currently connects only to outcome_launch_speed, not to outcome_fit_to_needs",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal_1 threshold is set to 0.7 score with unit 'score'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_engineering_capacity prior is a uniform range of 0.3 to 0.7 with no extraction source noted",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "The brief frames the choice strictly as 'buy a commercial CRM system or build our own'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_market_maturity prior (uniform 0.6-0.9)",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "elements_considered_but_excluded: 'No team headcount or skill details were mentioned, so no staffing factor was added'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_dev_effort",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "opt_buy, opt_build",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_vendor_fit prior (uniform 0.4-0.8) with no source_quote",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "option_buy -> factor_dev_effort and option_status_quo -> factor_dev_effort edges, same strength as option_build -> factor_dev_effort",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "risk_budget_overrun is only linked from factor_dev_effort and factor_budget_committed, with no factor tied specifically to vendor costs",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal_1 has goal_threshold 0.7 alongside goal_threshold_raw 6 and goal_threshold_unit months",
+      "seen_count": 1
+    }
+  ]
+}

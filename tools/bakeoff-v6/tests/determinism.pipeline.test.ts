@@ -28,6 +28,7 @@ async function runOnce(runId: string) {
     runSeed: 20260702,
     holisticLlm: false,
     preflightOnly: false,
+    promptSet: null,
   });
 }
 

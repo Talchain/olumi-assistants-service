@@ -1,0 +1,47 @@
+{
+  "ratified": false,
+  "brief_id": "hire-vs-contract",
+  "note": "memory aid only — pooled, de-authored M2 proposal loci; NOT R. Ratify per seeds/_RATIFICATION-PROTOCOL.md.",
+  "candidate_items": [
+    {
+      "suggested_kind": "positive",
+      "description": "factor_staffing_mode encoding_map (0=status quo, 0.5=contractors, 1=full-time) feeding factor_skill_fit",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_skill_fit data.display_value: \"50%\", extractionType: \"inferred\"",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "no risk covers hiring or onboarding delay within the 6-month project window",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "decision_staffing options: opt_ft_engineers, opt_contractors, opt_status_quo",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_skill_fit has no incoming edges from option_ft, option_contract, or factor_staffing_mode",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_budget_committed is marked extractionType 'inferred' with value $0 and cap $300,000, with no contractor rate or salary figures in the brief",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "Options list only 'Hire 3 full-time engineers', 'Use contractors', and 'Status Quo'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_skill_fit prior is uniform between 0.4 and 0.8 with no stated source",
+      "seen_count": 1
+    }
+  ]
+}

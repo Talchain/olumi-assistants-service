@@ -32,6 +32,7 @@ async function main(): Promise<void> {
       "run-seed": { type: "string" },
       "holistic-llm": { type: "boolean", default: false },
       stage: { type: "string", default: "full" },
+      "prompt-set": { type: "string" },
     },
   });
 
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
     runSeed: values["run-seed"] ? Number(values["run-seed"]) : DEFAULT_RUN_SEED,
     holisticLlm: Boolean(values["holistic-llm"]),
     preflightOnly: values.stage === "preflight",
+    promptSet: (values["prompt-set"] as string | undefined) ?? null,
   });
 
   console.log(`run dir: ${summary.runDir}`);

@@ -1,0 +1,72 @@
+{
+  "ratified": false,
+  "brief_id": "expand-vs-focus",
+  "note": "memory aid only — pooled, de-authored M2 proposal loci; NOT R. Ratify per seeds/_RATIFICATION-PROTOCOL.md.",
+  "candidate_items": [
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal_1: 'Maximize total company revenue growth'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_us_growth_rate: '30% growth', is_baseline true",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_market_competition: prior range 0.3-0.7, 'Local competitors and regulatory landscape are unknown'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "option_europe: 'Expand into the European market' vs option_status_quo: 'focus on growing US presence'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "risk_opportunity_cost connects only to goal_1, not to outcome_us_revenue_growth",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_eu_market_demand prior range_min 0.3 range_max 0.7",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "option_status_quo, option_europe",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_us_focus_investment: extractionType inferred, 'Level of incremental spend needed to sustain current growth is not specified'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_us_growth_rate: '30%/year'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal_revenue_growth ('Maximize company revenue growth')",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_europe_demand and factor_europe_competition, both marked 'Unknown' with uniform priors and no supporting uncertainty evidence",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "opt_status_quo and opt_europe framed as a binary choice; brief states 'Europe would require $2M investment'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_us_growth_focus uncertainty driver: 'Degree to which reinvesting solely in US sustains current growth trajectory is untested'",
+      "seen_count": 1
+    }
+  ]
+}

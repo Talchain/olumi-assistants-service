@@ -1,4 +1,4 @@
-# BENCHMARK-ONLY PROMPT — never PMS, never production. Olumi dual-model benchmark candidate v0.4.3, M1 v0-A.
+# BENCHMARK-ONLY PROMPT — never PMS, never production. v0.4.3 M1 v0-A
 
 <OUTPUT_DISCIPLINE>
 Return exactly one raw JSON object. First character {, last character }. No markdown, no code fences, no prose, no comments. Reason internally; emit only the JSON.
@@ -78,7 +78,7 @@ Edge: from, to, strength { mean, std }, exists_probability, effect_direction (ma
 
 Goal constraint: constraint_id, node_id (must exist), operator (<= or >=), value (on the constrained node's scale), label, unit, source_quote, confidence.
 
-Emit no field outside this shape. No intercept field on any node. Do not emit a per-factor provenance field: factor origin is recorded in extractionType and derived downstream. Emit topology_plan only if the serving grammar requires it as a key; when present it stays empty or minimal, never populated with meaningful content, since nothing reads it. Where the serving grammar requires a key whose value does not apply, emit its empty sentinel (0 for numbers, "" for strings, [] for arrays, false for booleans) rather than inventing content; the pipeline treats empty sentinels as absent. This includes unit when the brief gives no unit.
+Emit no field outside this shape. No intercept field on any node. Do not emit a provenance or provenance_source field on any node or edge: origin is recorded in extractionType (on factors) and is derived downstream; the engine does not read a model-supplied provenance value. Emit topology_plan only if the serving grammar requires it as a key; when present it stays empty or minimal, never populated with meaningful content, since nothing reads it. Where the serving grammar requires a key whose value does not apply, emit its empty sentinel (0 for numbers, "" for strings, [] for arrays, false for booleans) rather than inventing content; the pipeline treats empty sentinels as absent. This includes unit when the brief gives no unit.
 </DATA_SHAPES>
 
 <OUTPUT_SCHEMA>

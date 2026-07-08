@@ -1,4 +1,4 @@
-# BENCHMARK-ONLY PROMPT — never PMS, never production. v0.4.3 M1 v0-A
+# BENCHMARK-ONLY PROMPT — never PMS, never production. v0.4.3 M1 v0-B (grounded causal_claims)
 
 <OUTPUT_DISCIPLINE>
 Return exactly one raw JSON object. First character {, last character }. No markdown, no code fences, no prose, no comments. Reason internally; emit only the JSON.
@@ -83,7 +83,12 @@ Emit no field outside this shape. No intercept field on any node. Do not emit a 
 
 <OUTPUT_SCHEMA>
 Top-level keys: "nodes", "edges", "causal_claims", "coaching". Optional: "goal_constraints".
-This variant emits "causal_claims": [].
+
+causal_claims: grounded claims only when the model has 5 or more non-structural directed edges; otherwise []. When included, 3 claims, each strictly matching the model:
+- one direct_effect for the strongest direct causal relationship {type, from, to, stated_strength}, where a matching direct edge exists and stated_strength matches its |mean| band (very_strong >= 0.7, strong 0.4-0.69, moderate 0.2-0.39, slight < 0.2);
+- one no_direct_effect {type, from, to} where no direct edge exists between the pair, OR one mediation_only {type, from, via, to} where that mediated path exists;
+- one claim on the most uncertain or contested relationship.
+Do not add claims to explain the model to a user, and do not invent claims to look richer. Ground three or emit fewer.
 
 coaching:
 {
@@ -91,13 +96,13 @@ coaching:
   "strengthen_items": [],
   "bias_signals": [],
   "widening_log": {
-    "elements_added": ["ids of nodes you added that were not explicit in the brief"],
+    "elements_added": ["ids of nodes added, not explicit in the brief"],
     "elements_considered_but_excluded": ["short factual reasons, in plain language, not ids"],
     "brief_completeness": "complete" | "partial" | "thin"
   }
 }
 
-The summary is factual only: name the tension, do not advise, challenge or suggest improvements. strengthen_items and bias_signals stay empty. The summary and exclusion reasons use plain language and carry no node ids, coefficients or raw decimals; elements_added is structured and may carry ids.
+The summary is factual only. strengthen_items and bias_signals stay empty. Prose in plain language, no ids; elements_added may carry ids.
 </OUTPUT_SCHEMA>
 
 <THIN_BRIEF>
@@ -105,5 +110,5 @@ If the brief is under ~20 words with no named options and no numeric targets, st
 </THIN_BRIEF>
 
 <FINAL_AUDIT>
-Silently confirm before emitting: one decision, one goal; 2-6 options; Status Quo present unless impossible; every option has a complete path to the goal; every node has an incident edge; every edge legal, terminality holds, every edge's from and to name a node id that exists in nodes; external factors have no inbound edges; outcomes positive to goal, risks negative, no positive metric in a risk, no orphan outcomes or risks; capex/opex/opportunity separate; every explicit number in data, goal_threshold_raw or a goal_constraint, not only in a label; every guardrail mapped; parameters differentiated only where warranted, each non-bidirected causal |mean| >= 0.05 with std <= |mean|, each bounded inbound |mean| sum <= 1.0; no invented external facts or statistics; every factor has a category and an extractionType; no intercept field; no per-factor provenance field; no field outside the shape (topology_plan only if the grammar requires it, then empty); labels and coaching prose in plain language, free of ids; causal_claims, strengthen_items and bias_signals all []. Fix any failure with the minimum change.
+As v0-A, plus: if causal_claims is non-empty, every direct_effect has a matching edge, every no_direct_effect has no such edge, every mediation_only has its via path, and each stated_strength matches the underlying |mean| band. Emit [] rather than an ungrounded claim.
 </FINAL_AUDIT>

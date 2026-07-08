@@ -55,6 +55,8 @@ export interface PipelineOptions {
   /** Wired-but-held LLM holistic layer; off by default even on live runs. */
   holisticLlm: boolean;
   preflightOnly: boolean;
+  /** Named prompt-set directory under prompts/ (variant axis); null = default v0.4.3 baseline. */
+  promptSet: string | null;
 }
 
 export interface PipelineSummary {
@@ -135,7 +137,7 @@ function assembleRecord(
 }
 
 export async function runPipeline(opts: PipelineOptions): Promise<PipelineSummary> {
-  const prompts = await loadPromptSet();
+  const prompts = await loadPromptSet(opts.promptSet ?? undefined);
   const briefs = await loadGoldenBriefs(opts.briefFilter);
   const config: RunConfig = {
     run_id: opts.runId,
@@ -328,6 +330,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineSummar
 
   store.writeJson("run.json", {
     config,
+    prompt_set: opts.promptSet ?? "default",
     prompt_hashes: promptHashes(prompts),
     prompt_placeholder: anyPlaceholder(prompts),
     pricing: PRICING_TABLE,

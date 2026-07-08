@@ -1,0 +1,67 @@
+{
+  "ratified": false,
+  "brief_id": "technical-debt",
+  "note": "memory aid only — pooled, de-authored M2 proposal loci; NOT R. Ratify per seeds/_RATIFICATION-PROTOCOL.md.",
+  "candidate_items": [
+    {
+      "suggested_kind": "positive",
+      "description": "factor_known_bugs node and its single edge to risk_security_incident",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "goal_engineering_value edges from outcome_system_stability (0.45) and outcome_feature_delivery (0.45)",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "\"200 known bugs\" (factor_known_bugs, raw_value 200)",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "opt_hybrid: \"Partial refactor alongside reduced feature work\" shares identical factor links with opt_refactor and opt_status_quo",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_feature_effort raw_value: 0, factor_refactor_effort raw_value: 8, cap: 8",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_feature_effort extractionType: inferred, uncertainty_drivers: Feature scope for the quarter is not detailed in the brief",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "refactor would take 8 weeks",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "uncertainty_drivers: 8-week estimate could slip if legacy code is more tangled than expected",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_known_bugs (200 bugs, uncertainty_drivers: [])",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "option_refactor vs option_status_quo (only two options modeled)",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_new_feature_time (extractionType: inferred, raw_value: 8)",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal1: \"Maximize overall product health: system stability and feature progress\"",
+      "seen_count": 1
+    }
+  ]
+}

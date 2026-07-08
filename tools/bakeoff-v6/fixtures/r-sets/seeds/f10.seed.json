@@ -1,0 +1,72 @@
+{
+  "ratified": false,
+  "brief_id": "f10",
+  "note": "memory aid only — pooled, de-authored M2 proposal loci; NOT R. Ratify per seeds/_RATIFICATION-PROTOCOL.md.",
+  "candidate_items": [
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_pmf_signal: '12 inbound enquiries last quarter' feeding outcome_customer_acquisition toward goal of 200 customers",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "option_3 'Acquire smaller competitor' and factor_runway 'Under 18 months runway'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_eng_alloc used by both option_1 and option_4 (status quo), cap 20 engineers, 8 senior",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal_1 'Reach 200 mid-market customers with strong retention', goal_threshold_raw 200",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "12 inbound enquiries from mid-market companies in the last quarter",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "edges: []",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "we have under 18 months of runway at current burn rate",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "mid-market deals typically take 3-6 months",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "two VC-backed competitors launched mid-market tiers last quarter",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal_1 threshold 'net revenue retention above 110%' vs only risk_churn feeding goal_1",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_pmf_signal: '12 inbound enquiries last quarter'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "option_acquire and factor_cash_runway ('under 18 months of runway')",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "factor_eng_capacity: 'display_value: 2 of 20 engineers' allocated to option_build",
+      "seen_count": 1
+    }
+  ]
+}

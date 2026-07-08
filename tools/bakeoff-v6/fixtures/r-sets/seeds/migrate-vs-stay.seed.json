@@ -1,0 +1,67 @@
+{
+  "ratified": false,
+  "brief_id": "migrate-vs-stay",
+  "note": "memory aid only — pooled, de-authored M2 proposal loci; NOT R. Ratify per seeds/_RATIFICATION-PROTOCOL.md.",
+  "candidate_items": [
+    {
+      "suggested_kind": "positive",
+      "description": "option_status_quo has no risk or cost factor attached, while option_migrate_mongo carries risk_migration_disruption and risk_delivery_delay",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "coaching.widening_log notes 'No specific cost figures for either database option were given, so cost factors were left out'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_team_familiarity prior: uniform range 0.3 to 0.7, with no raw_value or extraction source",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal_1 label 'Maximize system reliability and long-term data platform fit' and decision_1 'Choose database strategy'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "fac_migration_effort -> out_scalability_gain",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "elements_considered_but_excluded: no cost figures given, so migration budget was not modeled as a separate factor",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "opt_status_quo: Status Quo: stay on PostgreSQL",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "risk_migration_disruption: Service disruption or data integrity issues during cutover",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "factor_schema_flexibility_gain (extractionType: inferred, uncertainty_drivers: 'Benefit depends on how much current schema constraints are actually blocking development')",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "goal_1: 'Maximize system reliability and delivery speed at acceptable cost'; widening_log notes 'No specific cost figures were given, so infrastructure or licensing cost differences were not modeled'",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "positive",
+      "description": "risk_operational_disruption and risk_data_integrity cover the migration event, but no element addresses failure or reversal after migration begins",
+      "seen_count": 1
+    },
+    {
+      "suggested_kind": "affirmative_defer",
+      "description": "Brief states only data volume, request load, and migration duration, with no stated reason for considering MongoDB",
+      "seen_count": 1
+    }
+  ]
+}

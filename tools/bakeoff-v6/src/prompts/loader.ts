@@ -25,8 +25,8 @@ export interface LoadedPrompt {
 
 const BANNER = "BENCHMARK-ONLY";
 
-export async function loadPrompt(name: string): Promise<LoadedPrompt> {
-  const path = join(PROMPTS_DIR, name);
+export async function loadPrompt(name: string, baseDir: string = PROMPTS_DIR): Promise<LoadedPrompt> {
+  const path = join(baseDir, name);
   const raw = await readFile(path, "utf-8");
   return parsePrompt(name, raw);
 }
@@ -75,14 +75,23 @@ export interface PromptSet {
   holisticJudge: LoadedPrompt;
 }
 
-export async function loadPromptSet(): Promise<PromptSet> {
+/**
+ * Load the six prompt slots. `setName` selects a named prompt-set directory
+ * under PROMPTS_DIR (e.g. "v0.4.3-B", "m2-evidence-verbatim"); a prompt-set
+ * directory is COMPLETE (all six slot files). Undefined = the default
+ * PROMPTS_DIR (the v0.4.3 baseline). This is the axis that runs named variants
+ * without file swaps (empowerment contract §3): the run records the set name +
+ * per-file hashes for provenance.
+ */
+export async function loadPromptSet(setName?: string): Promise<PromptSet> {
+  const dir = setName ? join(PROMPTS_DIR, setName) : PROMPTS_DIR;
   const [armA, armB, armCM1, armCM2, armDExecutor, holisticJudge] = await Promise.all([
-    loadPrompt("arm-a.system.txt"),
-    loadPrompt("arm-b.system.txt"),
-    loadPrompt("arm-c.m1.system.txt"),
-    loadPrompt("arm-c.m2.system.txt"),
-    loadPrompt("arm-d.executor.system.txt"),
-    loadPrompt("holistic-judge.system.txt"),
+    loadPrompt("arm-a.system.txt", dir),
+    loadPrompt("arm-b.system.txt", dir),
+    loadPrompt("arm-c.m1.system.txt", dir),
+    loadPrompt("arm-c.m2.system.txt", dir),
+    loadPrompt("arm-d.executor.system.txt", dir),
+    loadPrompt("holistic-judge.system.txt", dir),
   ]);
   return { armA, armB, armCM1, armCM2, armDExecutor, holisticJudge };
 }
