@@ -7,14 +7,26 @@ import { describe, expect, it } from "vitest";
 import { anyPlaceholder, fillSlots, loadPromptSet, parsePrompt } from "../src/prompts/loader.ts";
 
 describe("prompt slots", () => {
-  it("loads the full prompt set; every current prompt is a PLACEHOLDER (smoke-only)", async () => {
+  it("loads the default set; the graded v0.4.4 M1/M2 slots are REAL, non-benchmark arms stay PLACEHOLDER", async () => {
+    // The default PROMPTS_DIR holds the canonical v0.4.4 set. The three slots the
+    // dual-model benchmark actually grades are real, authored copy: armA (M1),
+    // armCM1 (M1 for arm C), armCM2 (M2 reviewer). The arms outside the M1/M2
+    // scope — armB (opus counterfactual), armDExecutor (advisor), holisticJudge —
+    // are not authored, so they stay PLACEHOLDER and anyPlaceholder stays true
+    // (any run touching them is watermarked). The PLACEHOLDER -> watermark
+    // mechanism is further covered by the parsePrompt cases below.
     const set = await loadPromptSet();
     expect(Object.keys(set)).toHaveLength(6);
     for (const prompt of Object.values(set)) {
-      expect(prompt.placeholder).toBe(true);
       expect(prompt.body.length).toBeGreaterThan(50);
       expect(prompt.hash).toMatch(/^[0-9a-f]{64}$/);
     }
+    expect(set.armA.placeholder).toBe(false);
+    expect(set.armCM1.placeholder).toBe(false);
+    expect(set.armCM2.placeholder).toBe(false);
+    expect(set.armB.placeholder).toBe(true);
+    expect(set.armDExecutor.placeholder).toBe(true);
+    expect(set.holisticJudge.placeholder).toBe(true);
     expect(anyPlaceholder(set)).toBe(true);
   });
 
