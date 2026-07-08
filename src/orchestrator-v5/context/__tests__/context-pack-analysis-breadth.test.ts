@@ -237,3 +237,81 @@ describe('ContextPack analysis projection breadth (Lane 21)', () => {
     expect(parsed.success).toBe(true);
   });
 });
+
+// Lane 30 — per-option goal-fit carriage (raw projection). The display-safe
+// rendering (percent strings, target-fit prose) is covered in
+// `../../format/__tests__/format-analysis-for-context.test.ts`; these tests
+// pin the raw value carriage + option-identity matching.
+describe('ContextPack per-option goal-fit (Lane 30)', () => {
+  const GOAL_FITS = [
+    { option_id: 'opt-a', option_label: 'Hire locally', probability_of_joint_goal: 0.293 },
+    { option_id: 'opt-c', option_label: 'Status quo', probability_of_joint_goal: 0.61 },
+  ];
+
+  it('attaches goal_fit_probability to matching options by structural option_id', () => {
+    const pack = assemble(makeSummary({ option_goal_fits: GOAL_FITS }));
+    expect(pack.analysis?.options).toEqual([
+      { label: 'Hire locally', probability: 0.72, goal_fit_probability: 0.293 },
+      { label: 'Status quo', probability: 0.22, goal_fit_probability: 0.61 },
+      { label: 'Offshore partner', probability: 0.05 },
+      { label: 'Tiered pricing', probability: 0.01 },
+    ]);
+    expect(pack.analysis?.leading_option).toEqual({
+      label: 'Hire locally',
+      probability: 0.72,
+      goal_fit_probability: 0.293,
+    });
+    expect(pack.analysis?.runner_up).toEqual({
+      label: 'Status quo',
+      probability: 0.22,
+      goal_fit_probability: 0.61,
+    });
+  });
+
+  it('matches by option_id even when the option was relabelled from the current graph', () => {
+    // buildAnalysisFromPriorFacts relabels options from the CURRENT graph by
+    // id; the enrichment-derived signal keeps the enrichment label. Identity
+    // must therefore be structural (id), not label equality.
+    const pack = assemble(
+      makeSummary({
+        option_goal_fits: [
+          { option_id: 'opt-a', option_label: 'Old Enrichment Label', probability_of_joint_goal: 0.293 },
+        ],
+      }),
+    );
+    expect(pack.analysis?.options?.[0]).toEqual({
+      label: 'Hire locally',
+      probability: 0.72,
+      goal_fit_probability: 0.293,
+    });
+  });
+
+  it('falls back to label matching only when the signal carries no option_id', () => {
+    const pack = assemble(
+      makeSummary({
+        option_goal_fits: [
+          { option_id: null, option_label: 'Status quo', probability_of_joint_goal: 0.4 },
+        ],
+      }),
+    );
+    const statusQuo = pack.analysis?.options?.find((o) => o.label === 'Status quo');
+    expect(statusQuo).toEqual({ label: 'Status quo', probability: 0.22, goal_fit_probability: 0.4 });
+  });
+
+  it('drops an out-of-range goal-fit value rather than projecting a false probability', () => {
+    const pack = assemble(
+      makeSummary({
+        option_goal_fits: [
+          { option_id: 'opt-a', option_label: 'Hire locally', probability_of_joint_goal: 42 },
+        ],
+      }),
+    );
+    expect(pack.analysis?.options?.[0]).toEqual({ label: 'Hire locally', probability: 0.72 });
+  });
+
+  it('validates against the strict ContextPack schema with goal-fit values attached', () => {
+    const pack = assemble(makeSummary({ option_goal_fits: GOAL_FITS }));
+    const parsed = ContextPackSchema.safeParse(pack);
+    expect(parsed.success).toBe(true);
+  });
+});

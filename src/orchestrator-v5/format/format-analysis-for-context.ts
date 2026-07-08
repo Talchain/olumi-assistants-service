@@ -26,6 +26,7 @@ import type {
   ContextPackAnalysisEvidenceGap,
   ContextPackAnalysisFlipThreshold,
   ContextPackAnalysisFragileEdge,
+  ContextPackAnalysisOption,
 } from '../context/context-pack-assembler.js';
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
@@ -34,6 +35,17 @@ export interface DisplaySafeAnalysisOption {
   readonly label: string;
   /** Integer-percent string, e.g. `"86%"`. Never a raw decimal. */
   readonly win_probability: string;
+  /**
+   * Lane 30 — integer-percent string of the option's goal-fit value (the
+   * modelled probability it MEETS THE USER'S TARGET; PLoT #204
+   * `probability_of_joint_goal`). Deliberately a separate key from
+   * `win_probability`: win% says the option beats the alternatives most
+   * often; target_fit says whether it is likely to meet the target — the
+   * two can diverge sharply (live case: 89% win vs 29% target-fit). Absent
+   * when no goal-fit value was scored for this option; the top-level
+   * `goal_fit` prose then disclosed the absence explicitly.
+   */
+  readonly target_fit?: string;
 }
 
 /**
@@ -46,6 +58,8 @@ export interface DisplaySafeRankedOption {
   readonly label: string;
   /** Integer-percent string, e.g. `"72%"`. Never a raw decimal. */
   readonly win_probability: string;
+  /** Lane 30 — see {@link DisplaySafeAnalysisOption.target_fit}. */
+  readonly target_fit?: string;
 }
 
 /** Lane 21 — banded tipping-risk entry. `risk` is decision-language prose. */
@@ -107,12 +121,18 @@ export interface DisplaySafeAnalysis {
    * Lane 21 (P0-A) breadth fields. All optional, all omitted (never null /
    * never empty-array) when the raw source is missing or empty:
    *
-   *  - `options`: EVERY option, ranked, integer-percent probability.
+   *  - `options`: EVERY option, ranked, integer-percent probability
+   *    (Lane 30: plus a `target_fit` percent when goal fit was scored).
    *  - `tipping_points`: banded flip-risk phrases (never raw thresholds).
    *  - `fragile_edge_count`: string count behind the capped edge list.
    *  - `value_of_information`: banded VOI per evidence-gap factor
    *    (influence-band vocabulary; near-zero entries dropped).
-   *  - `goal_fit`: prose stating THAT goal fit was scored and its basis.
+   *  - `goal_fit`: Lane 30 — ALWAYS present on a non-null projection.
+   *    Either the win%-vs-target-fit definition + basis caveat (values
+   *    present), a values-missing disclosure (scored, no values), or the
+   *    explicit "target-fit not scored" line. Never silent — a silent gap
+   *    is what let the LLM narrate win% as target-fit (live defect,
+   *    scenario 90385279).
    */
   readonly options?: readonly DisplaySafeRankedOption[];
   readonly tipping_points?: readonly DisplaySafeTippingPoint[];
@@ -145,8 +165,24 @@ function formatDriver(driver: ContextPackAnalysisDriver): DisplaySafeAnalysisDri
   };
 }
 
-function formatOption(label: string, probability: number): DisplaySafeAnalysisOption {
-  return { label, win_probability: formatProbability(probability, 'display') };
+/** Finite [0,1] check for the raw goal-fit value. */
+function isValidGoalFit(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function formatOption(
+  option: Pick<ContextPackAnalysisOption, 'label' | 'probability' | 'goal_fit_probability'>,
+): DisplaySafeAnalysisOption {
+  return {
+    label: option.label,
+    win_probability: formatProbability(option.probability, 'display'),
+    // Lane 30 — target-fit percent string, only when the raw value is a
+    // valid probability (an out-of-range value is dropped, never rendered
+    // as a false percent).
+    ...(isValidGoalFit(option.goal_fit_probability)
+      ? { target_fit: formatProbability(option.goal_fit_probability, 'display') }
+      : {}),
+  };
 }
 
 /**
@@ -215,6 +251,37 @@ const GOAL_FIT_BASIS_PHRASES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Lane 30 — the definition sentence rendered ONCE (never per option) when
+ * per-option `target_fit` values are present. It binds the two percent
+ * vocabularies apart so the LLM cannot conflate them: `win_probability`
+ * = "wins most often" (beats the alternatives), `target_fit` = "meets your
+ * target" (the modelled probability of goal attainment). The live defect
+ * (scenario 90385279) was exactly this conflation — an 89% win probability
+ * narrated as target attainment when the scored target-fit was 29.3%.
+ */
+export const TARGET_FIT_DEFINITION =
+  'each option\'s target_fit is the modelled probability it meets your target; ' +
+  'win_probability only says how often the option beats the alternatives — ' +
+  'an option can win most often yet still be unlikely to meet the target';
+
+/**
+ * Lane 30 — the DISCLOSED-absence line. Rendered whenever an analysis is
+ * present but nothing attests goal-fit scoring, so the LLM can never fill a
+ * silent gap with win probabilities.
+ */
+export const GOAL_FIT_NOT_SCORED_LINE =
+  'target-fit not scored: no goal-fit values are available for this analysis — ' +
+  'win probabilities show how often each option leads, not whether it meets your target';
+
+/**
+ * Lane 30 — rendered when provenance attests scoring but no per-option
+ * values arrived (appended to the basis phrase).
+ */
+export const GOAL_FIT_VALUES_MISSING_SUFFIX =
+  '; per-option target-fit values are not available for this run — ' +
+  'win probabilities do not measure target-fit';
+
+/**
  * Lane 21 — goal-fit provenance prose (PLoT #204). States THAT goal fit was
  * scored and its basis; never values. Unknown basis tokens are humanised
  * (underscores → spaces) rather than echoed raw.
@@ -281,10 +348,10 @@ export function formatAnalysisForContext(
   };
 
   if (raw.leading_option) {
-    out.leading_option = formatOption(raw.leading_option.label, raw.leading_option.probability);
+    out.leading_option = formatOption(raw.leading_option);
   }
   if (raw.runner_up) {
-    out.runner_up = formatOption(raw.runner_up.label, raw.runner_up.probability);
+    out.runner_up = formatOption(raw.runner_up);
   }
 
   // margin_pp arrives upstream pre-scaled to percentage points
@@ -322,13 +389,14 @@ export function formatAnalysisForContext(
 
   // Full ranked option list. The raw projection arrives sorted by win
   // probability descending and bounded (MAX_PROJECTED_OPTIONS); rank is a
-  // string so no raw number ever enters the display projection.
+  // string so no raw number ever enters the display projection. Lane 30:
+  // each entry carries its `target_fit` percent when the raw option carries
+  // a valid goal-fit value.
   const rawOptions = raw.options ?? [];
   if (rawOptions.length > 0) {
     out.options = rawOptions.map((o, i) => ({
       rank: String(i + 1),
-      label: o.label,
-      win_probability: formatProbability(o.probability, 'display'),
+      ...formatOption(o),
     }));
   }
 
@@ -360,12 +428,25 @@ export function formatAnalysisForContext(
     out.value_of_information = gaps;
   }
 
-  // Goal-fit provenance prose (fact + basis, never values).
-  if (raw.goal_fit) {
-    const phrase = goalFitPhrase(raw.goal_fit);
-    if (phrase !== null) {
-      out.goal_fit = phrase;
-    }
+  // Lane 30 — goal-fit prose. Three DISCLOSED states (never silent, so the
+  // LLM can never fill a target-fit gap with win probabilities):
+  //   1. per-option target_fit values present → the definition sentence
+  //      (win% vs target-fit, stated once) + the basis caveat when known;
+  //   2. provenance attests scoring but no per-option values arrived → the
+  //      basis phrase + an explicit values-missing disclosure;
+  //   3. nothing attests scoring → the explicit "target-fit not scored"
+  //      line.
+  const hasPerOptionGoalFit = [raw.leading_option, raw.runner_up, ...(raw.options ?? [])].some(
+    (o) => o != null && isValidGoalFit(o.goal_fit_probability),
+  );
+  const basisPhrase = raw.goal_fit ? goalFitPhrase(raw.goal_fit) : null;
+  if (hasPerOptionGoalFit) {
+    out.goal_fit =
+      basisPhrase !== null ? `${TARGET_FIT_DEFINITION}; ${basisPhrase}` : TARGET_FIT_DEFINITION;
+  } else if (basisPhrase !== null) {
+    out.goal_fit = `${basisPhrase}${GOAL_FIT_VALUES_MISSING_SUFFIX}`;
+  } else {
+    out.goal_fit = GOAL_FIT_NOT_SCORED_LINE;
   }
 
   return out;

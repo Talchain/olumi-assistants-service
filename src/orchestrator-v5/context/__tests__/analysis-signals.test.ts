@@ -12,8 +12,10 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveEvidenceGapsFromEnrichment,
   deriveGoalFitFromEnrichment,
+  deriveOptionGoalFitsFromEnrichment,
   deriveTippingPointsFromTopLevel,
   EVIDENCE_GAP_SIGNAL_CAP,
+  OPTION_GOAL_FIT_SIGNAL_CAP,
   TIPPING_POINT_SIGNAL_CAP,
 } from '../analysis-signals.js';
 
@@ -88,6 +90,89 @@ describe('deriveEvidenceGapsFromEnrichment', () => {
     expect(deriveEvidenceGapsFromEnrichment({})).toEqual([]);
     expect(deriveEvidenceGapsFromEnrichment({ m1_coaching: null })).toEqual([]);
     expect(deriveEvidenceGapsFromEnrichment({ m1_coaching: { evidence_gaps: 'x' } })).toEqual([]);
+  });
+});
+
+// Lane 30 — per-option goal-fit values (PLoT #204 live shape: see the
+// staging capture at acceptance-evidence/goal-fit/, where each
+// option_comparison[] entry carries probability_of_joint_goal +
+// goal_fit_basis). These are the values whose ABSENCE from the ContextPack
+// let the LLM pass win% off as target-fit (scenario 90385279).
+describe('deriveOptionGoalFitsFromEnrichment', () => {
+  it('projects per-option probability_of_joint_goal with option identity (live #204 shape)', () => {
+    const out = deriveOptionGoalFitsFromEnrichment({
+      option_comparison: [
+        {
+          option_id: 'opt_relocate',
+          option_label: 'Relocate to Manchester',
+          id: 'opt_relocate',
+          label: 'Relocate to Manchester',
+          outcome: { mean: 0.1, std: 0.14, p10: -0.27, p50: -0.12, p90: 0.1 },
+          status: 'computed',
+          win_probability: 0.8706666666666666,
+          probability_of_joint_goal: 0.043,
+          constraint_probabilities: { 'gc-cd88d633': 0.043 },
+          goal_fit_basis: { scored_from: 'modelled_outcome_distribution', node_ids: ['goal_cost'] },
+        },
+        {
+          option_id: 'opt_stay',
+          option_label: 'Stay in London (Status Quo)',
+          win_probability: 0.12891666666666668,
+          probability_of_joint_goal: 0.07375,
+          goal_fit_basis: { scored_from: 'modelled_outcome_distribution', node_ids: ['goal_cost'] },
+        },
+      ],
+    });
+    expect(out).toEqual([
+      { option_id: 'opt_relocate', option_label: 'Relocate to Manchester', probability_of_joint_goal: 0.043 },
+      { option_id: 'opt_stay', option_label: 'Stay in London (Status Quo)', probability_of_joint_goal: 0.07375 },
+    ]);
+  });
+
+  it('drops rows with out-of-range / non-finite / missing probability_of_joint_goal', () => {
+    const out = deriveOptionGoalFitsFromEnrichment({
+      option_comparison: [
+        { option_id: 'a', option_label: 'A', probability_of_joint_goal: 1.5 },
+        { option_id: 'b', option_label: 'B', probability_of_joint_goal: -0.1 },
+        { option_id: 'c', option_label: 'C', probability_of_joint_goal: Number.NaN },
+        { option_id: 'd', option_label: 'D', win_probability: 0.5 },
+        { option_id: 'e', option_label: 'E', probability_of_joint_goal: 0 },
+        { option_id: 'f', option_label: 'F', probability_of_joint_goal: 1 },
+      ],
+    });
+    expect(out).toEqual([
+      { option_id: 'e', option_label: 'E', probability_of_joint_goal: 0 },
+      { option_id: 'f', option_label: 'F', probability_of_joint_goal: 1 },
+    ]);
+  });
+
+  it('drops unidentifiable rows (no id AND no label) and dedupes by identity', () => {
+    const out = deriveOptionGoalFitsFromEnrichment({
+      option_comparison: [
+        { probability_of_joint_goal: 0.5 },
+        { option_id: 'a', option_label: 'A', probability_of_joint_goal: 0.2 },
+        { option_id: 'a', option_label: 'A again', probability_of_joint_goal: 0.9 },
+        // Label-only rows still project (id null) — the consumer matches by label then.
+        { label: 'Label Only', probability_of_joint_goal: 0.3 },
+      ],
+    });
+    expect(out).toEqual([
+      { option_id: 'a', option_label: 'A', probability_of_joint_goal: 0.2 },
+      { option_id: null, option_label: 'Label Only', probability_of_joint_goal: 0.3 },
+    ]);
+  });
+
+  it('caps at OPTION_GOAL_FIT_SIGNAL_CAP and returns [] on missing/malformed input', () => {
+    const rows = Array.from({ length: OPTION_GOAL_FIT_SIGNAL_CAP + 3 }, (_, i) => ({
+      option_id: `opt-${i}`,
+      option_label: `Option ${i}`,
+      probability_of_joint_goal: 0.5,
+    }));
+    expect(deriveOptionGoalFitsFromEnrichment({ option_comparison: rows })).toHaveLength(
+      OPTION_GOAL_FIT_SIGNAL_CAP,
+    );
+    expect(deriveOptionGoalFitsFromEnrichment({})).toEqual([]);
+    expect(deriveOptionGoalFitsFromEnrichment({ option_comparison: 'nope' })).toEqual([]);
   });
 });
 

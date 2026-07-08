@@ -106,6 +106,12 @@ const ContextPackAnalysisOptionSchema = z
   .object({
     label: z.string(),
     probability: z.number().min(0).max(1),
+    /**
+     * Lane 30 — the option's goal-fit value (modelled probability the option
+     * meets the user's target; PLoT #204 `probability_of_joint_goal`).
+     * Optional: absent when the producer scored no goal fit for the option.
+     */
+    goal_fit_probability: z.number().min(0).max(1).optional(),
   })
   .strict();
 

@@ -25,6 +25,7 @@ import {
   tippingRiskPhrase,
   voiBandPhrase,
   DISPLAY_ANALYSIS_CHAR_BUDGET,
+  GOAL_FIT_NOT_SCORED_LINE,
   type DisplaySafeAnalysis,
 } from '../format-analysis-for-context.js';
 import { sanitiseAssistantTextProse } from '../numeric-prose-formatter.js';
@@ -178,6 +179,9 @@ describe('formatAnalysisForContext', () => {
         { label: 'Demand', influence: 'moderate negative influence' },
       ],
       fragile_edges: [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+      // Lane 30 — target-fit absence is DISCLOSED, never silent, so the LLM
+      // cannot fill the gap with win probabilities.
+      goal_fit: GOAL_FIT_NOT_SCORED_LINE,
     });
 
     // Pattern check (regex from brief).
@@ -346,17 +350,14 @@ describe('Lane 21 display-safe breadth', () => {
     const modelled = formatAnalysisForContext(
       rawAnalysis({ goal_fit: { scored: true, basis: 'modelled_outcome_distribution' } }),
     );
-    expect(modelled!.goal_fit).toBe(
+    expect(modelled!.goal_fit).toContain(
       'goal fit was scored from the modelled outcome distribution',
     );
 
     const bare = formatAnalysisForContext(
       rawAnalysis({ goal_fit: { scored: true, basis: null } }),
     );
-    expect(bare!.goal_fit).toBe('goal fit was scored');
-
-    const absent = formatAnalysisForContext(rawAnalysis({ goal_fit: null }));
-    expect(absent!).not.toHaveProperty('goal_fit');
+    expect(bare!.goal_fit).toContain('goal fit was scored');
   });
 
   it('keeps a maximal widened projection inside the display char budget with no numbers anywhere', () => {
@@ -401,6 +402,97 @@ describe('Lane 21 display-safe breadth', () => {
     const result = sanitiseAssistantTextProse(serialised);
     expect(result.probability_rewrites).toBe(0);
     expect(result.sensitivity_rewrites).toBe(0);
+  });
+});
+
+// Lane 30 — per-option goal-fit (target-fit) truthfulness.
+//
+// THE LIVE DEFECT (scenario 90385279, 2026-07-08 ~01:00): asked "how does
+// each option look against my 25% target?", the orchestrator LLM answered
+// with WIN probabilities framed as target-fit ("leads comfortably at 89%")
+// while the delivered probability_of_joint_goal was 29.3% — because the
+// ContextPack carried only a global goal-fit provenance sentence, never the
+// per-option values. These tests pin the fix: per-option target-fit percent
+// strings, clearly distinguished from win probability, and a DISCLOSED
+// absence line when target-fit was not scored (never a silent gap the LLM
+// can fill with win%).
+describe('Lane 30 per-option target-fit', () => {
+  // The live divergence: leader wins 89% of comparisons but meets the
+  // target only 29.3% of the time.
+  const divergent = () =>
+    rawAnalysis({
+      leading_option: { label: 'Relocate to Manchester', probability: 0.89, goal_fit_probability: 0.293 },
+      runner_up: { label: 'Stay in London', probability: 0.11, goal_fit_probability: 0.31 },
+      options: [
+        { label: 'Relocate to Manchester', probability: 0.89, goal_fit_probability: 0.293 },
+        { label: 'Stay in London', probability: 0.11, goal_fit_probability: 0.31 },
+      ],
+      goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+    });
+
+  it('renders per-option target_fit percent strings distinct from win_probability', () => {
+    const out = formatAnalysisForContext(divergent());
+    expect(out!.options).toEqual([
+      { rank: '1', label: 'Relocate to Manchester', win_probability: '89%', target_fit: '29%' },
+      { rank: '2', label: 'Stay in London', win_probability: '11%', target_fit: '31%' },
+    ]);
+    expect(out!.leading_option).toEqual({
+      label: 'Relocate to Manchester',
+      win_probability: '89%',
+      target_fit: '29%',
+    });
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('never attributes the win percent to the target', () => {
+    const out = formatAnalysisForContext(divergent());
+    // The target-fit value for the leader is the goal-fit percent — NOT the
+    // win percent. This is the exact live-defect assertion (0.89 vs 0.293).
+    expect(out!.options![0]!.target_fit).toBe('29%');
+    expect(out!.options![0]!.target_fit).not.toBe(out!.options![0]!.win_probability);
+    // The goal-fit prose must define the distinction and carry no percents.
+    expect(out!.goal_fit).toContain('target_fit');
+    expect(out!.goal_fit).toContain('win_probability');
+    expect(out!.goal_fit).not.toContain('89%');
+    expect(out!.goal_fit).not.toContain('29%');
+  });
+
+  it('states the modelled-outcome basis caveat once, in the goal_fit prose', () => {
+    const out = formatAnalysisForContext(divergent());
+    expect(out!.goal_fit).toContain('goal fit was scored from the modelled outcome distribution');
+    // Basis caveat appears once, not per option.
+    const serialised = JSON.stringify(out);
+    expect(serialised.match(/modelled outcome distribution/g)).toHaveLength(1);
+  });
+
+  it('renders an explicit "target-fit not scored" line when goal-fit is absent — never silent', () => {
+    const out = formatAnalysisForContext(rawAnalysis({ goal_fit: null }));
+    expect(out!.goal_fit).toBe(GOAL_FIT_NOT_SCORED_LINE);
+    expect(out!.goal_fit).toContain('target-fit not scored');
+    // The absence line must warn that win% is not a substitute.
+    expect(out!.goal_fit!.toLowerCase()).toContain('win');
+  });
+
+  it('discloses missing per-option values when provenance says scored but no values arrived', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: [{ label: 'A', probability: 0.7 }],
+        goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+      }),
+    );
+    expect(out!.goal_fit).toContain('goal fit was scored from the modelled outcome distribution');
+    expect(out!.goal_fit).toContain('per-option target-fit values are not available');
+    expect(out!.options![0]!).not.toHaveProperty('target_fit');
+  });
+
+  it('drops an out-of-range goal_fit_probability rather than rendering a wrong percent', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: [{ label: 'A', probability: 0.7, goal_fit_probability: 4.2 }],
+        goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+      }),
+    );
+    expect(out!.options![0]!).not.toHaveProperty('target_fit');
   });
 });
 

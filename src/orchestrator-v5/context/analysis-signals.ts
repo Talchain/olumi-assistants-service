@@ -31,6 +31,15 @@ export const EVIDENCE_GAP_SIGNAL_CAP = 3;
 export const TIPPING_POINT_SIGNAL_CAP = 3;
 
 /**
+ * Lane 30 — cap for per-option goal-fit signals. Numeric parity with
+ * `MAX_PROJECTED_OPTIONS` in `./context-pack-assembler.ts` (the assembler
+ * imports this module, so the constant cannot be imported from there without
+ * a cycle): the goal-fit carriage never needs more entries than the option
+ * list it annotates.
+ */
+export const OPTION_GOAL_FIT_SIGNAL_CAP = 12;
+
+/**
  * One factor's tipping information, sourced from the top-level
  * `enrichment.flip_thresholds[]` (staging shape) or, when only the
  * per-option derivation exists, mapped from `summary.flip_thresholds`.
@@ -69,6 +78,30 @@ export interface GoalFitSignal {
 }
 
 /**
+ * Lane 30 — one option's goal-fit VALUE, sourced from the per-option
+ * `enrichment.option_comparison[].probability_of_joint_goal` (PLoT #204 live
+ * shape; delivered alongside `goal_fit_basis`). This is the field whose
+ * absence from the ContextPack caused the verified live defect (scenario
+ * 90385279): asked how each option looked against a 25% target, the LLM
+ * framed WIN probabilities as target-fit ("leads comfortably at 89%") while
+ * the delivered `probability_of_joint_goal` was 29.3%.
+ *
+ * `probability_of_joint_goal` is RAW (a [0,1] float) — it lives on the
+ * handler-facing projection only; the display formatter renders it as an
+ * integer-percent `target_fit` string, clearly distinguished from win%.
+ *
+ * `option_id` is the structural match key (the consumer relabels options
+ * from the current graph, so label equality is not identity); null only when
+ * the enrichment row carried no id at all — the consumer then falls back to
+ * label matching.
+ */
+export interface OptionGoalFitSignal {
+  readonly option_id: string | null;
+  readonly option_label: string;
+  readonly probability_of_joint_goal: number;
+}
+
+/**
  * Optional signal extensions a producer may attach to an
  * `AnalysisResponseSummary` before it reaches the ContextPack assembler.
  */
@@ -76,6 +109,8 @@ export interface AnalysisSummarySignals {
   readonly tipping_points?: readonly TippingPointSignal[];
   readonly evidence_gaps?: readonly EvidenceGapSignal[];
   readonly goal_fit?: GoalFitSignal | null;
+  /** Lane 30 — per-option goal-fit values (see {@link OptionGoalFitSignal}). */
+  readonly option_goal_fits?: readonly OptionGoalFitSignal[];
 }
 
 /** The summary shape `projectAnalysis` actually consumes. */
@@ -259,4 +294,66 @@ export function deriveGoalFitFromEnrichment(
   }
 
   return null;
+}
+
+/** Read the option identity fields off an `option_comparison[]` entry. */
+function readOptionIdentity(
+  entry: Record<string, unknown>,
+): { id: string | null; label: string | null } {
+  const id =
+    typeof entry.option_id === 'string' && entry.option_id.trim().length > 0
+      ? entry.option_id
+      : typeof entry.id === 'string' && entry.id.trim().length > 0
+        ? entry.id
+        : null;
+  const labelRaw = [entry.option_label, entry.label].find(
+    (c): c is string => typeof c === 'string' && c.trim().length > 0,
+  );
+  return { id, label: labelRaw ?? null };
+}
+
+/**
+ * Lane 30 — derive per-option goal-fit signals from
+ * `enrichment.option_comparison[]` (PLoT #204 live shape: entries carry
+ * `probability_of_joint_goal` + `goal_fit_basis`; see the staging capture in
+ * `acceptance-evidence/goal-fit/`). Defensive rules:
+ *
+ *   - `probability_of_joint_goal` must be a finite number in [0,1] —
+ *     anything else drops the row (no false probability is ever projected).
+ *   - a row must carry SOME option identity (`option_id`/`id` or
+ *     `option_label`/`label`); unidentifiable rows are dropped.
+ *   - deduped by id (or label when id is absent), first occurrence wins.
+ *   - capped at {@link OPTION_GOAL_FIT_SIGNAL_CAP}.
+ *
+ * Values stay RAW here (handler-facing carriage); percent-string banding is
+ * the display formatter's job.
+ */
+export function deriveOptionGoalFitsFromEnrichment(
+  enrichment: Record<string, unknown>,
+): OptionGoalFitSignal[] {
+  const raw = enrichment.option_comparison;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
+  const out: OptionGoalFitSignal[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const entry = asRecord(item);
+    if (entry === null) continue;
+    const value = entry.probability_of_joint_goal;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+      continue;
+    }
+    const { id, label } = readOptionIdentity(entry);
+    if (id === null && label === null) continue;
+    const dedupeKey = id !== null ? `id:${id}` : `label:${label}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({
+      option_id: id,
+      option_label: label ?? id!,
+      probability_of_joint_goal: value,
+    });
+    if (out.length >= OPTION_GOAL_FIT_SIGNAL_CAP) break;
+  }
+  return out;
 }

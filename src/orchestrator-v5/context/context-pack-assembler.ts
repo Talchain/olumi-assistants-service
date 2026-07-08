@@ -45,6 +45,7 @@ import {
 } from '../format/format-analysis-for-context.js';
 import type {
   AnalysisResponseSummaryWithSignals,
+  OptionGoalFitSignal,
   TippingPointSignal,
 } from './analysis-signals.js';
 import {
@@ -103,6 +104,16 @@ export interface ContextPackGraph {
 export interface ContextPackAnalysisOption {
   readonly label: string;
   readonly probability: number;
+  /**
+   * Lane 30 — this option's goal-fit value: the modelled probability the
+   * option meets the user's target(s), sourced from the per-option
+   * `enrichment.option_comparison[].probability_of_joint_goal` (PLoT #204)
+   * via the `option_goal_fits` signal. RAW [0,1] float — handler-facing
+   * only; the display formatter renders it as an integer-percent
+   * `target_fit` string, clearly distinguished from `win_probability`.
+   * Absent when the producer scored no goal fit for this option.
+   */
+  readonly goal_fit_probability?: number;
 }
 
 export interface ContextPackAnalysisDriver {
@@ -924,6 +935,52 @@ function tippingFromSignal(entry: TippingPointSignal): ContextPackAnalysisFlipTh
   };
 }
 
+/** Finite [0,1] check for goal-fit values (no telemetry — the derivation
+ *  already guards; this is defence for hand-built signal inputs). */
+function isValidGoalFitProbability(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * Lane 30 — build the per-option goal-fit resolver from the attached
+ * `option_goal_fits` signals plus the per-option summary field.
+ *
+ * Match authority order for a projected option:
+ *   1. the option's own `probability_of_goal` (per-option summary data wins
+ *      when a producer path populates it);
+ *   2. signal matched by STRUCTURAL `option_id` (labels are not identity —
+ *      the fallback path relabels options from the current graph);
+ *   3. signal matched by label, ONLY for signals that carried no id at all.
+ *
+ * Returns undefined when no valid value resolves — the projected option then
+ * simply omits `goal_fit_probability` and the display formatter renders the
+ * explicit "target-fit not scored" disclosure instead.
+ */
+function buildGoalFitResolver(
+  signals: readonly OptionGoalFitSignal[] | undefined,
+): (option: OptionSummary) => number | undefined {
+  const byId = new Map<string, number>();
+  const byLabelIdless = new Map<string, number>();
+  for (const s of signals ?? []) {
+    if (!isValidGoalFitProbability(s.probability_of_joint_goal)) continue;
+    if (typeof s.option_id === 'string' && s.option_id.trim().length > 0) {
+      if (!byId.has(s.option_id)) byId.set(s.option_id, s.probability_of_joint_goal);
+    } else if (typeof s.option_label === 'string' && s.option_label.trim().length > 0) {
+      if (!byLabelIdless.has(s.option_label)) {
+        byLabelIdless.set(s.option_label, s.probability_of_joint_goal);
+      }
+    }
+  }
+  return (option: OptionSummary): number | undefined => {
+    if (isValidGoalFitProbability(option.probability_of_goal)) {
+      return option.probability_of_goal;
+    }
+    const viaId = byId.get(option.option_id);
+    if (viaId !== undefined) return viaId;
+    return byLabelIdless.get(option.option_label);
+  };
+}
+
 function projectAnalysis(
   analysis: AnalysisResponseSummaryWithSignals | null,
   stalenessReason: string | null,
@@ -947,11 +1004,24 @@ function projectAnalysis(
   const leadingSrc = validOptions[0];
   const runnerUpSrc = validOptions[1];
 
+  // Lane 30 — per-option goal-fit carriage. One resolver shared by the
+  // leading pair and the full option list so the same option can never show
+  // a goal-fit value in one slot and not the other.
+  const goalFitFor = buildGoalFitResolver(analysis.option_goal_fits);
+  const projectOption = (o: OptionSummary): ContextPackAnalysisOption => {
+    const goalFit = goalFitFor(o);
+    return {
+      label: o.option_label,
+      probability: o.win_probability,
+      ...(goalFit !== undefined ? { goal_fit_probability: goalFit } : {}),
+    };
+  };
+
   const leading: ContextPackAnalysisOption | null = leadingSrc
-    ? { label: leadingSrc.option_label, probability: leadingSrc.win_probability }
+    ? projectOption(leadingSrc)
     : null;
   const runnerUp: ContextPackAnalysisOption | null = runnerUpSrc
-    ? { label: runnerUpSrc.option_label, probability: runnerUpSrc.win_probability }
+    ? projectOption(runnerUpSrc)
     : null;
 
   // margin_pp is pre-computed upstream in compactAnalysis — passthrough.
@@ -980,10 +1050,11 @@ function projectAnalysis(
       : null;
 
   // 4. Lane 21 breadth: every valid option (F.6 passthrough — filter + sort
-  //    only, values untouched), bounded by MAX_PROJECTED_OPTIONS.
+  //    only, values untouched), bounded by MAX_PROJECTED_OPTIONS. Lane 30:
+  //    each entry additionally carries its goal-fit value when one resolves.
   const allOptions: ContextPackAnalysisOption[] = validOptions
     .slice(0, MAX_PROJECTED_OPTIONS)
-    .map((o) => ({ label: o.option_label, probability: o.win_probability }));
+    .map(projectOption);
 
   // 5. Lane 21 tipping points: prefer the attached top-level staging signals
   //    (see analysis-signals.ts — the per-option derivation is structurally

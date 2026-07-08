@@ -1386,4 +1386,67 @@ describe('Lane 21 — fallback/projection source reconciliation', () => {
     expect(out.summary.top_fragile_edges?.[0]).toMatchObject({ from_label: 'X' });
     expect(out.summary.tipping_points).toHaveLength(2);
   });
+
+  // Lane 30 — per-option goal-fit values attach through the SAME composite
+  // seam, so the prior-facts fallback AND the turn-executor ingress path both
+  // carry them (the live-defect scenario 90385279 reached the LLM via this
+  // seam with only the global provenance sentence attached).
+  it('composite reconcile helper: attaches per-option goal-fit values (PLoT #204 live shape)', () => {
+    const enrichment = {
+      ...topLevelOnlyEnrichment(),
+      option_comparison: [
+        {
+          option_id: 'opt-a',
+          option_label: 'Relocate to Manchester',
+          win_probability: 0.8706666666666666,
+          probability_of_joint_goal: 0.293,
+          goal_fit_basis: { scored_from: 'modelled_outcome_distribution', node_ids: ['goal_cost'] },
+        },
+        {
+          option_id: 'opt-b',
+          option_label: 'Stay in London',
+          win_probability: 0.12891666666666668,
+          probability_of_joint_goal: 0.07375,
+          goal_fit_basis: { scored_from: 'modelled_outcome_distribution', node_ids: ['goal_cost'] },
+        },
+      ],
+    };
+    const base: AnalysisResponseSummary = {
+      winner: { option_id: 'opt-a', option_label: 'Relocate to Manchester', win_probability: 0.87 },
+      options: [
+        { option_id: 'opt-a', option_label: 'Relocate to Manchester', win_probability: 0.87, outcome_mean: 0 },
+        { option_id: 'opt-b', option_label: 'Stay in London', win_probability: 0.13, outcome_mean: 0 },
+      ],
+      top_drivers: [],
+      robustness_level: 'unknown',
+      fragile_edge_count: 0,
+      margin: 0.74,
+      margin_pp: 74,
+      analysis_status: 'complete',
+    };
+    const out = reconcileAnalysisSummaryWithEnrichment(base, enrichment);
+    expect(out.summary.option_goal_fits).toEqual([
+      { option_id: 'opt-a', option_label: 'Relocate to Manchester', probability_of_joint_goal: 0.293 },
+      { option_id: 'opt-b', option_label: 'Stay in London', probability_of_joint_goal: 0.07375 },
+    ]);
+    // Global provenance also resolves from the same entries.
+    expect(out.summary.goal_fit).toEqual({ scored: true, basis: 'modelled_outcome_distribution' });
+  });
+
+  it('composite reconcile helper: no option_goal_fits key when the enrichment carries no per-option values', () => {
+    const base: AnalysisResponseSummary = {
+      winner: { option_id: 'opt-a', option_label: 'A', win_probability: 0.7 },
+      options: [
+        { option_id: 'opt-a', option_label: 'A', win_probability: 0.7, outcome_mean: 0 },
+      ],
+      top_drivers: [],
+      robustness_level: 'unknown',
+      fragile_edge_count: 0,
+      margin: null,
+      margin_pp: null,
+      analysis_status: 'complete',
+    };
+    const out = reconcileAnalysisSummaryWithEnrichment(base, topLevelOnlyEnrichment());
+    expect(out.summary).not.toHaveProperty('option_goal_fits');
+  });
 });

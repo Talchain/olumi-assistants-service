@@ -63,6 +63,7 @@ import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   deriveEvidenceGapsFromEnrichment,
   deriveGoalFitFromEnrichment,
+  deriveOptionGoalFitsFromEnrichment,
   deriveTippingPointsFromTopLevel,
   type AnalysisResponseSummaryWithSignals,
 } from './analysis-signals.js';
@@ -413,6 +414,8 @@ export function applyTopLevelDriversOverride(
  *      (top-level `flip_thresholds[]`), evidence-gap VOI
  *      (`m1_coaching.evidence_gaps[]`), and goal-fit provenance
  *      (PLoT #204 `goal_fit_basis` / CONSTRAINT_GOALFIT_MODELLED_BASIS).
+ *      Lane 30 adds per-option goal-fit VALUES
+ *      (`option_comparison[].probability_of_joint_goal`) via the same seam.
  *      Fields are attached only when non-empty — a summary with nothing to
  *      say stays shaped exactly as before.
  *
@@ -437,12 +440,18 @@ export function reconcileAnalysisSummaryWithEnrichment(
   const tippingPoints = deriveTippingPointsFromTopLevel(enrichment);
   const evidenceGaps = deriveEvidenceGapsFromEnrichment(enrichment);
   const goalFit = deriveGoalFitFromEnrichment(enrichment);
+  // Lane 30 — per-option goal-fit VALUES (PLoT #204). Without these the
+  // ContextPack carried only the global provenance sentence and the LLM
+  // filled the per-option gap with win probabilities (live defect,
+  // scenario 90385279).
+  const optionGoalFits = deriveOptionGoalFitsFromEnrichment(enrichment);
 
   const withSignals: AnalysisResponseSummaryWithSignals = {
     ...withFragile,
     ...(tippingPoints.length > 0 ? { tipping_points: tippingPoints } : {}),
     ...(evidenceGaps.length > 0 ? { evidence_gaps: evidenceGaps } : {}),
     ...(goalFit !== null ? { goal_fit: goalFit } : {}),
+    ...(optionGoalFits.length > 0 ? { option_goal_fits: optionGoalFits } : {}),
   };
 
   return {
