@@ -178,6 +178,23 @@ export const PLOT_RUN_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("PLOT_RUN_TIMEOUT_MS", 30_000),
 );
 
+/**
+ * PLoT /v2/run call timeout for BRIEF-BEARING requests (default: 75s, clamped 30s–5m).
+ *
+ * When a request carries a decision `brief`, PLoT's `/v2/run` handler synchronously
+ * calls back into CEE (`/assist/v1/review` + the LLM-backed `/assist/v1/decision-review`)
+ * before responding. Live evidence (flag-activation trial, 2026-07-08) measured this
+ * synchronous callback chain at ~40.5s wall time for a modest 4-option graph (including
+ * one internal UNGROUNDED_NUMBER-guard retry) — comfortably exceeding the base 30s
+ * PLOT_RUN_TIMEOUT_MS and causing a spurious CEE-side timeout+retry that fires the
+ * entire (expensive, LLM-backed) callback chain a second time. This budget gives that
+ * chain room to complete without CEE aborting mid-flight. Not applied to non-brief runs,
+ * which do not trigger the callback and should keep the tighter base budget.
+ */
+export const PLOT_RUN_BRIEF_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("PLOT_RUN_BRIEF_TIMEOUT_MS", 75_000),
+);
+
 /** PLoT /v1/validate-patch call timeout (default: 5s, clamped 5s–5m) */
 export const PLOT_VALIDATE_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("PLOT_VALIDATE_TIMEOUT_MS", 5_000),
@@ -392,6 +409,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     ORCHESTRATOR_TURN_BUDGET_MS,
     DRAFT_GRAPH_TURN_BUDGET_MS,
     PLOT_RUN_TIMEOUT_MS,
+    PLOT_RUN_BRIEF_TIMEOUT_MS,
     PLOT_VALIDATE_TIMEOUT_MS,
     EXTRACTION_TIMEOUT_MS,
     PROMPT_STORE_FETCH_TIMEOUT_MS,

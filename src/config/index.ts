@@ -530,11 +530,24 @@ const ConfigSchema = z.object({
     refinementEnabled: booleanString.default(false), // Enable draft refinement feature
     decisionReviewEnabled: booleanString.default(false), // Enable M2 Decision Review endpoint
     decisionReviewRateLimitRpm: z.coerce.number().int().positive().default(30), // Decision review rate limit
-    // V5 run_analysis decision_review auto-fire gate. When false (default),
-    // turn-executor and chip-click-dispatch do NOT await the
-    // `enrichRunAnalysisWithDecisionReview` call — `run_analysis` returns
-    // the deterministic PLoT analysis immediately and `v5.decision_review.skipped`
-    // fires with reason `autofire_disabled`. Env: V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW.
+    // V5 run_analysis decision_review auto-fire + wire-attach gate (1.41
+    // FIX 3). When false (default), turn-executor and chip-click-dispatch
+    // do NOT await the `enrichRunAnalysisWithDecisionReview` call —
+    // `run_analysis` returns the deterministic PLoT analysis immediately
+    // and `v5.decision_review.skipped` fires with reason `autofire_disabled`.
+    // When true: `enrichRunAnalysisWithDecisionReview` runs synchronously,
+    // populating `result.enrichment.decision_review` on the run_analysis
+    // fact; `compose.ts`'s Phase 3 block rebuild (already-supported,
+    // unconditional whenever `enrichment.decision_review` is present) then
+    // turns bias_findings/key_assumptions/pre_mortem/flip_thresholds into
+    // `review_card` / `coaching` / `evidence` wire blocks — no separate
+    // attach flag needed; this IS the attach gate.
+    // Flip deliberately, not by accident: this call shares
+    // `buildDecisionReviewUserMessage` (bounded, 1.41 FIX 2) but is a
+    // direct CEE→LLM call the turn AWAITS synchronously — a slow/failed
+    // call adds directly to user-facing turn latency (there is no PLoT
+    // callback/timeout layer here, so FIX 1's budget work does not apply
+    // to this path). Env: V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW.
     runAnalysisAwaitDecisionReview: booleanString.default(false),
     optionsFeatureVersion: z.string().optional(),
     explainFeatureVersion: z.string().optional(),

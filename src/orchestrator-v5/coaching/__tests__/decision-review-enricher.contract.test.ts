@@ -230,6 +230,11 @@ describe('decision-review-enricher — Tier 3 contract', () => {
     expect(meta.factor_sensitivity_count).toBe(3);
     expect(meta.fragile_edge_count).toBe(1);
     expect(meta.model_critique_count).toBe(0);
+    // FIX C (1.41 fix round, C3): MAX_MODEL_CRITIQUES's doc comment claims
+    // "tracked in _meta for observability" — these two counts must actually
+    // be present on _meta, not just computed and dropped on the floor.
+    expect(meta.model_critiques_dropped_count).toBe(0);
+    expect(meta.model_critiques_capped_count).toBe(0);
     expect(meta.has_deterministic_coaching).toBe(false);
     // margin = 0.48 - 0.25 = 0.23
     expect(meta.margin).toBeCloseTo(0.23, 6);
@@ -253,6 +258,8 @@ describe('decision-review-enricher — Tier 3 contract', () => {
     expect(userMessage).not.toContain('fragile_edge_count');
     expect(userMessage).not.toContain('model_critique_count');
     expect(userMessage).not.toContain('evidence_gaps_dropped_count');
+    expect(userMessage).not.toContain('model_critiques_dropped_count');
+    expect(userMessage).not.toContain('model_critiques_capped_count');
     // Sanity: the user message *is* still populated — proves we didn't accidentally
     // strip everything in the assertion above.
     expect(userMessage).toContain('Engage Offshore Partner');

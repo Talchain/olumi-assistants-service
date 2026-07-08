@@ -21,6 +21,12 @@
  * - No retry for 4xx (deterministic client errors)
  * - Retry uses remaining turn budget, not a fresh timeout
  * - If remaining budget after backoff < 2s, retry is skipped
+ * - EXCEPTION (FIX 1/B, brief-bearing runs): a `/v2/run` payload carrying a
+ *   non-empty `brief` triggers PLoT's synchronous, LLM-backed decision-review
+ *   callback chain. That chain is expensive and non-idempotent, so a
+ *   brief-bearing run is NEVER retried — on timeout, 5xx, OR network error —
+ *   regardless of remaining budget. See `isBriefBearingRunPayload` /
+ *   `skipRetryEntirely`.
  *
  * Outbound validation (H.5):
  * - /v2/run: graph present, options non-empty array with option_id strings, goal_node_id non-empty string
@@ -30,7 +36,7 @@
 
 import { z } from "zod";
 import { config } from "../config/index.js";
-import { PLOT_RUN_TIMEOUT_MS, PLOT_VALIDATE_TIMEOUT_MS } from "../config/timeouts.js";
+import { PLOT_RUN_TIMEOUT_MS, PLOT_RUN_BRIEF_TIMEOUT_MS, PLOT_VALIDATE_TIMEOUT_MS } from "../config/timeouts.js";
 import { log } from "../utils/telemetry.js";
 import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
 
@@ -299,6 +305,20 @@ function isRetryableError(error: unknown): boolean {
 }
 
 /**
+ * Detect whether a /v2/run payload carries a non-empty decision `brief`.
+ *
+ * Brief-bearing runs trigger PLoT's synchronous CEE decision-review callback
+ * chain (see PLOT_RUN_BRIEF_TIMEOUT_MS doc comment) — they need the extended
+ * timeout budget and must NOT be retried on ANY error class (timeout, 5xx,
+ * or network — see FIX B, C2) — retrying would re-fire that expensive
+ * LLM-backed chain a second time.
+ */
+function isBriefBearingRunPayload(payload: Record<string, unknown>): boolean {
+  const brief = payload["brief"];
+  return typeof brief === "string" && brief.trim().length > 0;
+}
+
+/**
  * Sleep that can be cancelled by an AbortSignal.
  * Resolves to true if sleep completed, false if aborted.
  */
@@ -356,11 +376,19 @@ class PLoTClientImpl implements PLoTClient {
     // H.5: Outbound structural validation
     validateRunPayload(payload);
 
+    // FIX 1 (extended by FIX B, C2): brief-bearing runs trigger PLoT's
+    // synchronous CEE decision-review callback chain — they need a longer
+    // timeout budget and must not be retried on ANY error class (timeout,
+    // 5xx, or network — see PLOT_RUN_BRIEF_TIMEOUT_MS doc comment).
+    const briefBearing = isBriefBearingRunPayload(payload);
+    const timeoutMs = briefBearing ? PLOT_RUN_BRIEF_TIMEOUT_MS : PLOT_RUN_TIMEOUT_MS;
+
     return this.runWithRetry(
-      () => this.runOnce(payload, requestId),
+      () => this.runOnce(payload, requestId, timeoutMs),
       'run',
       requestId,
       opts,
+      { skipRetryEntirely: briefBearing },
     ) as Promise<V2RunResponseEnvelope>;
   }
 
@@ -385,12 +413,41 @@ class PLoTClientImpl implements PLoTClient {
     operation: string,
     requestId: string,
     opts?: PLoTClientRunOpts,
+    retryConfig?: { skipRetryEntirely?: boolean },
   ): Promise<T> {
     try {
       return await fn();
     } catch (firstError) {
       // Only retry 5xx and timeout errors
       if (!isRetryableError(firstError)) {
+        throw firstError;
+      }
+
+      // FIX 1 (extended by FIX B, C2): a brief-bearing run's synchronous,
+      // LLM-backed decision-review callback chain may have already run (or
+      // nearly run) to completion by the time ANY retryable error surfaces —
+      // not just a timeout. A 5xx or network error while that expensive,
+      // non-idempotent chain is in flight is just as likely to mean the
+      // chain already fired; retrying would re-fire it a second time (the
+      // "retry storm" observed in the flag-activation trial: 2x
+      // decision-review LLM calls, ~68s turn). Structurally impossible:
+      // never retry a brief-bearing run, on ANY error class (timeout, 5xx,
+      // or network) — `firstError` is already confirmed retryable by the
+      // `isRetryableError` check above, so no class-specific check is
+      // needed here.
+      if (retryConfig?.skipRetryEntirely) {
+        log.warn(
+          {
+            request_id: requestId,
+            operation,
+            error_kind: firstError instanceof PLoTTimeoutError
+              ? 'timeout'
+              : firstError instanceof PLoTError
+                ? '5xx'
+                : 'network',
+          },
+          "PLoT retry skipped — brief-bearing run; retrying would double the LLM-backed decision-review chain",
+        );
         throw firstError;
       }
 
@@ -464,14 +521,18 @@ class PLoTClientImpl implements PLoTClient {
   // Core HTTP operations (single attempt)
   // --------------------------------------------------------------------------
 
-  private async runOnce(payload: Record<string, unknown>, requestId: string): Promise<V2RunResponseEnvelope> {
+  private async runOnce(
+    payload: Record<string, unknown>,
+    requestId: string,
+    timeoutMs: number = PLOT_RUN_TIMEOUT_MS,
+  ): Promise<V2RunResponseEnvelope> {
     const url = `${this.baseUrl}/v2/run`;
     const startTime = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), PLOT_RUN_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     log.info(
-      { url: '/v2/run', request_id: requestId, timeout_ms: PLOT_RUN_TIMEOUT_MS },
+      { url: '/v2/run', request_id: requestId, timeout_ms: timeoutMs },
       "PLoT run request",
     );
 
@@ -573,10 +634,10 @@ class PLoTClientImpl implements PLoTClient {
 
       if (error instanceof Error && (error.name === 'AbortError' || controller.signal.aborted)) {
         log.error(
-          { timeout_ms: PLOT_RUN_TIMEOUT_MS, elapsed_ms: elapsedMs, request_id: requestId },
+          { timeout_ms: timeoutMs, elapsed_ms: elapsedMs, request_id: requestId },
           "PLoT run timed out",
         );
-        throw new PLoTTimeoutError("PLoT run timed out after " + elapsedMs + "ms", 'run', PLOT_RUN_TIMEOUT_MS, elapsedMs);
+        throw new PLoTTimeoutError("PLoT run timed out after " + elapsedMs + "ms", 'run', timeoutMs, elapsedMs);
       }
 
       log.error(
