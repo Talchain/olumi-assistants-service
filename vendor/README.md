@@ -7,71 +7,57 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.13.0.tgz`
+### `talchain-schemas-0.14.0.tgz`
 
-**Purpose:** pre-publish consumption of `@talchain/schemas` v0.13.0.
-v0.13.0 adds the four V5 Phase 3 block types per Analysis tab data
-contract v1.3 (`Docs/v5/v5-analysis-tab-data-contract-v1_3.md`),
-plus the shared schemas they depend on. Additions:
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.14.0
+(rollout step 2 of `olumi-schemas` `docs/enrichment-v1/ROLLOUT.md` —
+CEE is the FIRST consumer to adopt). v0.14.0 is a superset of 0.13.1;
+both deltas over the previously-pinned 0.13.0 are additive:
 
-- `ReviewCardBlockSchema` (emitted by the `decision_review` enricher
-  after `run_analysis`; hero-eligible; eight `card_kind` values).
-- `CoachingBlockSchema` (coaching pass + draft_graph threading;
-  hero-eligible; six `coaching_kind` values).
-- `EvidenceBlockSchema` (evidence-ranking module; hero-eligible;
-  includes the v1.3 §1.3 `factor_ref` ↔ `target_refs` consistency
-  rule enforced via `superRefine`).
-- `ExerciseBlockSchema` (on-demand handler invocation; NOT
-  hero-eligible).
-- Shared: `ActionIntent` (15-value strict union), `TargetRefKind`
-  (7-value, adds `outcome`), `TargetRefSchema`,
-  `Phase3BlockFreshness` (`fresh | stale | pending | failed`),
-  `Phase3BlockSeverity` (`info | warning | critical`).
-- Common metadata block (§0) enforced on all four new block types:
-  `block_id` (UUID), `signal_id`, `created_at` (ISO 8601 with
-  offset), `source_handler`, `graph_hash_at_generation` (required
-  for analysis-derived blocks, optional otherwise), `freshness`.
-- Copy-length caps (§0.2): `title` ≤ 80, `body` ≤ 300,
-  `action_label` ≤ 40 — enforced at the schema boundary as
-  defence-in-depth.
+- **0.13.1 delta (the ingress-skew defusal):** two OPTIONAL keys on
+  `MessageTurnPayloadSchema` — `generate_model` / `explicit_generate`.
+  The schema is `.strict()`, so on 0.13.0 CEE's B1 `validateIngress`
+  REJECTED (422 `INGRESS_CONTRACT_VIOLATION`, fail-closed) any
+  `kind:'message'` turn carrying either key. With this pin CEE now
+  ACCEPTS them — a UI on 0.13.1+ may start emitting the flags on
+  `/orchestrate/v2/turn` without detonating the validator.
+- **0.14.0 delta (opt-in enrichment envelope):** typed
+  `AnalysisEnrichmentSchema` (passthrough + all-optional) for the
+  PLoT→CEE analysis-enrichment payload, `parseAnalysisEnrichment`,
+  and `CEE_UI_ENRICHMENT_KEEP_LIST` — the single source of truth for
+  the 11-key CEE→UI safe-transport keep-list, mirrored against
+  `src/orchestrator-v5/compose.ts` `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`
+  by the drift bolt in `tests/contract/cee-to-ui.contract.test.ts`.
+  No transport field changes, no strictness changes.
 
-Purely additive on the discriminated `BlockSchema` union — existing
-block types (`text`, `error`, `analysis_result`, `graph_patch`,
-`explanation`, `comparison`, `flip_analysis`, `draft_graph`) and
-the existing `HandlerFact` discriminated union are unchanged. CEE
-must add four new cases to the exhaustive switch in
-`src/orchestrator-v5/compose/output-safety.ts` for the build to
-compile after this bump — that is the deliberate boundary signal.
+No CEE import breaks: CEE code imports only names that exist in
+0.13.0; 0.14.0 adds names. No behavioural change until code opts in
+to the new envelope types.
 
-Note: `BlockSchema` is now a `ZodEffects<ZodDiscriminatedUnion>`
-(the §1.3 consistency rule is applied at the union level via
-`.superRefine`). Consumers calling `.parse()` / `.safeParse()` are
-unaffected. Consumers introspecting `.options` / `.discriminator`
-on the discriminated union (none in tree today) would be reading
-through a `ZodEffects` wrapper.
+Source: `olumi-schemas` `main` @ `5612e266632bd759d4b5457923e58517b3a0f531`
+(tag `v0.14.0`; published to GitHub Packages); built via
+`npm ci && npm run prepublishOnly && npm pack` from that commit.
 
-Source lives at `~/Documents/GitHub/olumi-schemas/` on `main`
-(HEAD `b239d4b6` — Merge pull request #3 from
-`feat/phase-3a-block-types`); built via `npm run build && npm pack`
-from source. Not yet published to a private registry.
-
-**Checksum verification:** `vendor/talchain-schemas-0.13.0.tgz.sha256`
-holds the canonical sha256 hash. The pre-push hook
-(`scripts/validate-tarball-sha.sh`) verifies the tarball bytes against
-this manifest on every push.
+**Checksum verification:** `vendor/talchain-schemas-0.14.0.tgz.sha256`
+holds the canonical sha256 hash
+(`4e4915552a36654b7736eb56d42740e44b5c655209b606882782c55aff749767`).
+The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
+tarball bytes against this manifest on every push.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
-restores the prior `vendor/talchain-schemas-0.12.0.tgz`, its
+restores the prior `vendor/talchain-schemas-0.13.0.tgz`, its
 `.sha256` manifest, the prior `package.json` `file:` reference, and
-this README's prior state — i.e. the entire pin returns to v0.12.0 in
+this README's prior state — i.e. the entire pin returns to v0.13.0 in
 one commit. Re-run `pnpm install` after the revert to repopulate
-`node_modules` from the restored tarball.
+`node_modules` from the restored tarball. NOTE: rolling back re-arms
+the 0.13.0 strict-ingress landmine — the UI must not be emitting
+`generate_model`/`explicit_generate` while CEE sits on ≤0.13.0.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
-0.11.0 at coaching-amendment, 0.12.0 at DL-7 edit-graph fact) are
-removed on each bump — only the currently-pinned version lives in
-`vendor/`.
+0.11.0 at coaching-amendment, 0.12.0 at DL-7 edit-graph fact,
+0.13.0 at V5 Phase 3A block types) are removed on each bump — only
+the currently-pinned version lives in `vendor/`.
 
 **How to update:**
 
@@ -97,7 +83,9 @@ shasum -a 256 /path/to/olumi-assistants-service/vendor/talchain-schemas-<version
 ```
 
 **Removal criterion:** delete this tarball + the vendor entry and switch
-`package.json` to a registry version (`"@talchain/schemas": "^0.12.0"`,
-or whatever version is current at the time of registry publication)
-once `olumi-schemas` publishes to the private npm registry. Until then,
-every consuming repo is expected to carry its own `vendor/` copy.
+`package.json` to a registry version (`"@talchain/schemas": "^0.14.0"`,
+or whatever version is current at the time of the switch). 0.14.0 IS
+published to GitHub Packages, but per ROLLOUT.md the staging consumers
+stay on the vendored-tarball mechanism until all three services' prod
+branches are migrated. Until then, every consuming repo is expected to
+carry its own `vendor/` copy.
