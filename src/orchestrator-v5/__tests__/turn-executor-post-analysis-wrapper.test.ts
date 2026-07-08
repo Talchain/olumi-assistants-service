@@ -437,9 +437,12 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     // Mismatched hash → freshness derives to stale/non-fresh.
     mockedPriorFacts = [buildFreshRunAnalysisFact('stale_hash_no_match')];
 
+    // Persistent mock: max_tokens on BOTH attempts — the routing layer now
+    // retries ONCE with an escalated output budget (prompt-workstream fix,
+    // 2026-07-08) before the bounded fallback fires.
     const adapterMock = vi
       .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         content: [{ type: 'text', text: 'Partial answer cut off at...' }],
         stop_reason: 'max_tokens',
         usage: { input_tokens: 10, output_tokens: 2048 } as unknown as ChatWithToolsResult['usage'],
@@ -461,7 +464,8 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
       graphState: baseGraph,
     });
 
-    expect(adapterMock).toHaveBeenCalledTimes(1);
+    // Two calls: truncated first attempt + the single escalated retry.
+    expect(adapterMock).toHaveBeenCalledTimes(2);
     expect(result.telemetry.commit_performed).toBe(true);
     expect(result.telemetry.failure_type).toBe('LLM_UNAVAILABLE');
 
@@ -507,9 +511,11 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     const expectedHash = computeAnalysisAffectingGraphHash(baseGraph)!;
     mockedPriorFacts = [buildFreshRunAnalysisFact(expectedHash)];
 
+    // Persistent mock: max_tokens on BOTH attempts (see the stale-branch
+    // test above — one escalated retry now precedes the bounded fallback).
     const adapterMock = vi
       .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         content: [{ type: 'text', text: 'Partial answer cut off at...' }],
         stop_reason: 'max_tokens',
         usage: { input_tokens: 10, output_tokens: 2048 } as unknown as ChatWithToolsResult['usage'],

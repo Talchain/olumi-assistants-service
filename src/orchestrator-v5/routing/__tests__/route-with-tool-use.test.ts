@@ -417,9 +417,13 @@ describe('routeWithToolUse — error paths', () => {
     ).rejects.toBeInstanceOf(RoutingError);
   });
 
-  it('max_tokens stop reason → RoutingError{cause:"unexpected_stop_reason"}', async () => {
+  it('max_tokens on BOTH attempts → RoutingError{cause:"unexpected_stop_reason"} after ONE retry', async () => {
+    // Prompt-workstream fix (2026-07-08): the first max_tokens now triggers
+    // a single escalated-budget retry (4096) before the unchanged error
+    // path. Both attempts truncating → the pre-existing RoutingError, with
+    // llmCallCount reflecting the extra call.
     const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(mkResult([textBlock('partial')], 'max_tokens')),
+      chatWithTools: vi.fn().mockResolvedValue(mkResult([textBlock('partial')], 'max_tokens')),
     };
 
     let caught: unknown;
@@ -430,6 +434,34 @@ describe('routeWithToolUse — error paths', () => {
     }
     expect(caught).toBeInstanceOf(RoutingError);
     expect((caught as RoutingError).cause).toBe('unexpected_stop_reason');
+    expect((caught as RoutingError).llmCallCount).toBe(2);
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
+    // The retry escalates ONLY the output budget.
+    const firstArgs = adapter.chatWithTools.mock.calls[0]![0] as ChatWithToolsArgs;
+    const retryArgs = adapter.chatWithTools.mock.calls[1]![0] as ChatWithToolsArgs;
+    expect(firstArgs.maxTokens).toBe(2048);
+    expect(retryArgs.maxTokens).toBe(4096);
+    expect(retryArgs.messages).toEqual(firstArgs.messages);
+    expect(retryArgs.tools).toEqual(firstArgs.tools);
+  });
+
+  it('max_tokens then a clean tool call → routing succeeds via the single retry', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([textBlock('partial')], 'max_tokens'))
+        .mockResolvedValueOnce(mkResult([toolCallBlock(VALID_EXECUTE_INPUT)])),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'run analysis', {
+      requestId: 'req-mx-retry',
+      adapter,
+    });
+
+    expect(result.type).toBe('tool_call');
+    // Two real chatWithTools invocations: truncated first attempt + retry.
+    expect(result.llmCallCount).toBe(2);
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
   });
 
   it('empty response (no text, no tool) → RoutingError{cause:"empty_response"}', async () => {

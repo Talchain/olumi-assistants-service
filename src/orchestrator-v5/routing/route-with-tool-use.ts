@@ -48,6 +48,17 @@ import { ORCHESTRATOR_TIMEOUT_MS } from '../../config/timeouts.js';
  * `translateRoutingError` fires faster.
  */
 export const V5_ROUTING_MAX_OUTPUT_TOKENS = 2048;
+
+/**
+ * Escalated output budget for the single max_tokens retry
+ * (prompt-workstream fix, 2026-07-08). Live evidence: ~4-5% of routing
+ * calls ended with `stop_reason: 'max_tokens'` at the 2048 cap (a failed
+ * call burned exactly 2048 completion tokens) and each one shipped the
+ * bounded-fallback apology. The first attempt keeps the 2048 cap (fast
+ * common case); on max_tokens we retry ONCE at 4096 — same messages,
+ * same tools — before falling through to the unchanged error path.
+ */
+export const V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY = 4096;
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -70,6 +81,7 @@ import {
 import {
   LOADED_PROMPT,
   ensureRoutingPromptSnapshot,
+  getCachedRoutingPromptIdentity,
 } from './prompt-loader.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -254,6 +266,7 @@ interface V5PromptCacheEmitArgs {
 }
 
 function emitV5PromptCache(args: V5PromptCacheEmitArgs): void {
+  const servedIdentity = getCachedRoutingPromptIdentity();
   const cacheRead = args.usage?.cache_read_input_tokens;
   const cacheCreate = args.usage?.cache_creation_input_tokens;
   const totalInput = args.usage?.input_tokens;
@@ -282,10 +295,16 @@ function emitV5PromptCache(args: V5PromptCacheEmitArgs): void {
     total_input_tokens: typeof totalInput === 'number' ? totalInput : null,
     cache_hit: cacheHit,
     stable_prefix_bytes: args.stablePrefixBytes,
-    prompt_version: ROUTING_PROMPT_VERSION,
-    prompt_hash: ROUTING_PROMPT_HASH,
-    source_hash: ROUTING_PROMPT_SOURCE_HASH,
-    sent_hash: ROUTING_PROMPT_SENT_HASH,
+    // ROADMAP 1.32 — identity stamp: prefer the SERVED PMS snapshot
+    // identity over the static repo-default constants (which misreport as
+    // v40/21,439 when PMS serves e.g. version 112/21,860). Field names are
+    // unchanged so dashboards keep joining on the same keys. The snapshot
+    // is built before any adapter call on this path, so the constant
+    // fallback only fires in pre-boot/test contexts.
+    prompt_version: servedIdentity?.version ?? ROUTING_PROMPT_VERSION,
+    prompt_hash: servedIdentity?.sent_hash ?? ROUTING_PROMPT_HASH,
+    source_hash: servedIdentity?.raw_hash ?? ROUTING_PROMPT_SOURCE_HASH,
+    sent_hash: servedIdentity?.sent_hash ?? ROUTING_PROMPT_SENT_HASH,
   });
 }
 
@@ -585,7 +604,53 @@ export async function routeWithToolUse(
     stablePrefixBytes,
   });
 
-  const parsedOrError = tryInterpret(firstResult, 1);
+  // max_tokens retry (prompt-workstream fix, 2026-07-08). Live evidence:
+  // ~4-5% of routing calls ended `stop_reason: 'max_tokens'` at the 2048
+  // cap (burning exactly 2048 completion tokens) and each one shipped the
+  // bounded-fallback apology. Retry ONCE with a doubled output budget —
+  // same messages, same tools — before falling through to the unchanged
+  // `unexpected_stop_reason` error path. The event below uses the plain
+  // pino event-string pattern (like `v5.routing_prompt_loaded` /
+  // `v5.prompt_cache.fallback`) — deliberately NOT a new member of the
+  // frozen TelemetryEvents registry. No second V5PromptCache emit for the
+  // retry call: that event's `llm_call: 1 | 2` identifies initial-vs-repair;
+  // the retry's latency + token counts travel on this pino event instead.
+  let llmCallsUsed = 1;
+  if (firstResult.stop_reason === 'max_tokens') {
+    log.info(
+      {
+        event: 'v5.routing.max_tokens_retry',
+        request_id: options.requestId,
+        v5_journey_id: options.sessionId ?? null,
+        first_attempt_latency_ms: firstResult.latencyMs,
+        first_attempt_input_tokens: firstResult.usage?.input_tokens ?? null,
+        first_attempt_output_tokens: firstResult.usage?.output_tokens ?? null,
+        first_attempt_max_tokens: V5_ROUTING_MAX_OUTPUT_TOKENS,
+        retry_max_tokens: V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY,
+      },
+      'V5 routing hit max_tokens — retrying once with a larger output budget',
+    );
+    let retryResult: ChatWithToolsResult;
+    try {
+      retryResult = await adapter.chatWithTools(
+        { ...firstCallArgs, maxTokens: V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY },
+        {
+          requestId: options.requestId,
+          timeoutMs,
+          signal: options.signal,
+        },
+      );
+    } catch (err) {
+      throw translateAdapterError(err, 2);
+    }
+    // If the retry ALSO ends max_tokens, tryInterpret below classifies it
+    // as non_repairable `unexpected_stop_reason` — the pre-existing
+    // bounded-fallback path, unchanged.
+    firstResult = retryResult;
+    llmCallsUsed = 2;
+  }
+
+  const parsedOrError = tryInterpret(firstResult, llmCallsUsed);
   if (parsedOrError.kind === 'ok') return parsedOrError.result;
   if (parsedOrError.kind === 'non_repairable') throw parsedOrError.error;
 
@@ -637,7 +702,7 @@ export async function routeWithToolUse(
       usage: undefined,
       stablePrefixBytes,
     });
-    throw translateAdapterError(err, 2);
+    throw translateAdapterError(err, llmCallsUsed + 1);
   }
 
   emitV5PromptCache({
@@ -649,12 +714,12 @@ export async function routeWithToolUse(
     stablePrefixBytes,
   });
 
-  const secondAttempt = tryInterpret(repairResult, 2);
+  const secondAttempt = tryInterpret(repairResult, llmCallsUsed + 1);
   if (secondAttempt.kind === 'ok') return secondAttempt.result;
   throw new RoutingError(
     'schema_repair_failed',
     `Routing tool-call repair attempt failed: ${secondAttempt.kind === 'non_repairable' ? secondAttempt.error.message : secondAttempt.detail}`,
-    { llmCallCount: 2 },
+    { llmCallCount: llmCallsUsed + 1 },
   );
 }
 
