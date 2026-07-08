@@ -315,6 +315,19 @@ function sendFinalised200(
      * behaviour; do not introduce such a caller.
      */
     readonly frame?: CanonicalContextFrame;
+    /**
+     * ROADMAP 1.42 — VERBATIM Sonnet-5 extended-thinking reasoning, threaded
+     * from `run.reasoning` (turn-executor). Populated only when
+     * `config.features.reasoningCaptureEnabled` (env
+     * `CEE_REASONING_CAPTURE_ENABLED=true`) is set AND the model emitted
+     * thinking blocks. Attached to the wire body as `_reasoning` AFTER
+     * egress validation — same re-attach mechanic as `_context_summary` /
+     * `_diagnostic_trace` — and NEVER on the fallback envelope. Paul ruling
+     * (ROADMAP 1.42): VERBATIM reasoning bypasses the egress claim-safety /
+     * forbidden-phrase cage by design; containment is flag-default-off +
+     * collapsed-default UI + explicit label, not a wire-level scrub.
+     */
+    readonly reasoning?: string;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -372,7 +385,13 @@ function sendFinalised200(
     // copy (defence-in-depth: the route's flag gate is the sole authority,
     // and the strict OlumiResponseSchema must not see an unknown key).
     const hasContextSummary = '_context_summary' in asRecord;
-    if (!hasTimings && !hasTrace && !hasContextSummary) {
+    // ROADMAP 1.42 — `_reasoning` is threaded via `ctx`, never body-attached
+    // by any dispatch path today. Stripped defensively anyway (same
+    // defence-in-depth posture as `_context_summary`): the route's flag
+    // gate at the re-attach block below is the sole authority, and the
+    // strict `OlumiResponseSchema` must not see an unknown key.
+    const hasReasoning = '_reasoning' in asRecord;
+    if (!hasTimings && !hasTrace && !hasContextSummary && !hasReasoning) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
     const cloned = { ...asRecord };
@@ -381,6 +400,7 @@ function sendFinalised200(
     delete cloned._timings;
     delete cloned._diagnostic_trace;
     delete cloned._context_summary;
+    delete cloned._reasoning;
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -591,6 +611,26 @@ function sendFinalised200(
         ctx,
       );
     }
+  }
+  // Re-attach `_reasoning` post-validation on the success path AND only
+  // when `config.features.reasoningCaptureEnabled` is set (ROADMAP 1.42,
+  // same single-flag re-attach shape as `_context_summary` /
+  // `_diagnostic_trace` above). `ctx.reasoning` is threaded from
+  // `run.reasoning` (turn-executor) — VERBATIM Sonnet-5 extended-thinking
+  // text, never derived or re-composed here. The fallback envelope never
+  // carries it; an upstream body-attach with the flag off was dropped by
+  // the strip step above. Spreading breaks WeakSet membership (finaliser
+  // brand), so we re-finalise the augmented body for the preSerialization
+  // hook, same as the other debug surfaces.
+  if (egress.ok && config.features.reasoningCaptureEnabled && ctx.reasoning) {
+    const augmented: OlumiResponseWithDebugFields = {
+      ...wireBody,
+      _reasoning: ctx.reasoning,
+    };
+    wireBody = finaliseV5Response(
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      ctx,
+    );
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);
@@ -2152,6 +2192,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // T4 Slice 2: the once-per-turn canonical context frame. When present,
       // the context-summary diagnostic is projected from the frame alone.
       ...(run.frame ? { frame: run.frame } : {}),
+      // ROADMAP 1.42: thread the turn-executor's VERBATIM captured reasoning
+      // into the flag-gated `_reasoning` sidecar (see sendFinalised200 ctx
+      // jsdoc). Undefined when the flag was off or no thinking was captured.
+      ...(run.reasoning ? { reasoning: run.reasoning } : {}),
     });
   });
 }

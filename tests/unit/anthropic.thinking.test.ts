@@ -606,3 +606,136 @@ describe("chatWithToolsAnthropic — thinking-block filtering", () => {
     expect(assistantText).not.toContain('"type":"thinking"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// chatWithToolsAnthropic — ROADMAP 1.42 reasoning capture (flag-gated)
+// ---------------------------------------------------------------------------
+// CEE_REASONING_CAPTURE_ENABLED default OFF. When on, VERBATIM `thinking`
+// block text is captured into `result.reasoning` — OUT OF BAND from
+// `content` — never `signature`, and `redacted_thinking` is always dropped
+// regardless of the flag. Flag OFF must remain byte-identical to the #385
+// drop+warn behaviour above.
+describe("chatWithToolsAnthropic — reasoning capture (ROADMAP 1.42)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockCreate.mockReset();
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("flag ON: captures thinking text verbatim into result.reasoning, never the signature, content[] stays text+tool_use only", async () => {
+    vi.stubEnv("CEE_REASONING_CAPTURE_ENABLED", "true");
+    const SIGNATURE = "ErICfake_signature_must_never_appear_anywhere";
+    const REASONING_TEXT = "Step 1: consider the tradeoffs. Step 2: pick the safer option.";
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: REASONING_TEXT, signature: SIGNATURE },
+        { type: "text", text: "Here is the plain answer." },
+        { type: "tool_use", id: "tu_1", name: "run_analysis", input: { foo: "bar" } },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "run the analysis" }],
+      tools: [
+        { name: "run_analysis", description: "d", input_schema: { type: "object", properties: {} } },
+      ],
+      model: "claude-sonnet-5",
+    });
+
+    // Reasoning captured verbatim.
+    expect(result.reasoning).toBe(REASONING_TEXT);
+
+    // The signature must NEVER appear anywhere in the serialised result —
+    // neither in content[] nor in the captured reasoning.
+    const serializedResult = JSON.stringify(result);
+    expect(serializedResult).not.toContain(SIGNATURE);
+
+    // content[] is unaffected by the flag: still only text + tool_use blocks,
+    // no thinking block, no reasoning leak into content.
+    const serializedContent = JSON.stringify(result.content);
+    expect(serializedContent).not.toContain('"type":"thinking"');
+    expect(serializedContent).not.toContain(REASONING_TEXT);
+    expect(result.content.every((b) => b.type === "text" || b.type === "tool_use")).toBe(true);
+    expect(result.content).toHaveLength(2);
+  });
+
+  it("flag ON, no thinking block emitted: result.reasoning is undefined", async () => {
+    vi.stubEnv("CEE_REASONING_CAPTURE_ENABLED", "true");
+    mockCreate.mockResolvedValue(makeResponse([{ type: "text", text: "no thinking here" }]));
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-5",
+    });
+
+    expect(result.reasoning).toBeUndefined();
+  });
+
+  it("flag ON: a redacted_thinking block is always dropped, never captured into reasoning", async () => {
+    vi.stubEnv("CEE_REASONING_CAPTURE_ENABLED", "true");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "redacted_thinking", data: "opaque_encrypted_blob" },
+        { type: "text", text: "answer" },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-5",
+    });
+
+    expect(result.reasoning).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("opaque_encrypted_blob");
+    warnSpy.mockRestore();
+  });
+
+  it("flag OFF (default): byte-identical to current drop+warn behaviour — no reasoning field, thinking block dropped", async () => {
+    // Flag deliberately NOT stubbed — default OFF.
+    const SIGNATURE = "ErICdefault_off_signature";
+    const REASONING_TEXT = "internal reasoning that must stay dropped";
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: REASONING_TEXT, signature: SIGNATURE },
+        { type: "text", text: "Here is the plain answer." },
+        { type: "tool_use", id: "tu_1", name: "run_analysis", input: { foo: "bar" } },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "run the analysis" }],
+      tools: [
+        { name: "run_analysis", description: "d", input_schema: { type: "object", properties: {} } },
+      ],
+      model: "claude-sonnet-5",
+    });
+
+    // No `reasoning` key on the result at all when the flag is off.
+    expect(result.reasoning).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(result, "reasoning")).toBe(false);
+
+    const serializedResult = JSON.stringify(result);
+    expect(serializedResult).not.toContain(SIGNATURE);
+    expect(serializedResult).not.toContain(REASONING_TEXT);
+    expect(serializedResult).not.toContain('"type":"thinking"');
+
+    expect(result.content).toHaveLength(2);
+    expect(result.content.every((b) => b.type === "text" || b.type === "tool_use")).toBe(true);
+  });
+});

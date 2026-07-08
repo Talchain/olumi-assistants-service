@@ -565,6 +565,21 @@ export interface ChatWithToolsResult {
   model: string;
   /** Provider-side latency in milliseconds */
   latencyMs: number;
+  /**
+   * ROADMAP 1.42 — captured extended-thinking text, VERBATIM, when
+   * CEE_REASONING_CAPTURE_ENABLED is on and the model emitted `thinking`
+   * blocks. Never populated with `signature` or `redacted_thinking`
+   * content. Absent (undefined) when the flag is off or no thinking
+   * blocks were emitted — existing drop+warn behaviour is unchanged.
+   *
+   * Deliberately NOT part of `content` / `ToolResponseBlock`: `content` is
+   * echoed back to Anthropic on the REPAIR_ONCE path (see
+   * route-with-tool-use.ts buildRepairMessages) and joined into
+   * orientationText. Putting reasoning there would recreate the #385 leak
+   * and risk a protocol-echo 400 from Anthropic (thinking blocks require a
+   * signature to be replayed validly).
+   */
+  reasoning?: string;
 }
 
 /**

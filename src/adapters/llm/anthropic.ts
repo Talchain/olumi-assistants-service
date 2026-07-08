@@ -2756,6 +2756,14 @@ export async function chatWithToolsAnthropic(
     // (see acceptance-evidence/sonnet5-flip). This mirrors the streaming path,
     // which already excludes thinking blocks from the client-visible content.
     const content: ToolResponseBlock[] = [];
+    // ROADMAP 1.42 — when CEE_REASONING_CAPTURE_ENABLED is on, VERBATIM
+    // `thinking` block text is captured OUT-OF-BAND into reasoningParts
+    // (never into `content`, see ChatWithToolsResult.reasoning jsdoc for why).
+    // `block.signature` is NEVER captured — it is Anthropic's opaque replay
+    // token, not reasoning content, and must never reach a client. Any
+    // `redacted_thinking` block is always dropped, flag or no flag — its
+    // `data` field is encrypted/opaque and carries no readable reasoning.
+    const reasoningParts: string[] = [];
     for (const block of response.content) {
       if (block.type === 'text') {
         content.push({ type: 'text' as const, text: block.text });
@@ -2766,6 +2774,8 @@ export async function chatWithToolsAnthropic(
           name: block.name,
           input: block.input as Record<string, unknown>,
         });
+      } else if (config.features.reasoningCaptureEnabled && block.type === 'thinking') {
+        reasoningParts.push(block.thinking);
       } else {
         // Non-text / non-tool_use block — drop it; it must never surface to the user.
         log.warn(
@@ -2773,6 +2783,13 @@ export async function chatWithToolsAnthropic(
           "dropping non-text content block from tool response (not surfaced to client)",
         );
       }
+    }
+    const reasoning = reasoningParts.length > 0 ? reasoningParts.join('\n\n') : undefined;
+    if (reasoning !== undefined) {
+      log.info(
+        { reasoning_chars: reasoning.length },
+        "captured extended-thinking reasoning (ROADMAP 1.42, flag-gated)",
+      );
     }
 
     // Map stop_reason
@@ -2814,6 +2831,7 @@ export async function chatWithToolsAnthropic(
         cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
         cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
       },
+      ...(reasoning !== undefined ? { reasoning } : {}),
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
