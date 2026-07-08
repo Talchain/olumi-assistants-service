@@ -260,6 +260,16 @@ export interface RunAnalysisScenarioSnapshot {
    * and `goal_node_id`.
    */
   readonly rawPersistedGraph: unknown;
+  /**
+   * Lane 28 — brief pipeline: the persisted `scenarios.brief_text`,
+   * loaded on the SAME round trip as the graph (via
+   * `loadPersistedScenarioStateStrict` → `store.loadGraphAndBriefText`).
+   * Absent (not null) when no brief is persisted — the construction
+   * site spreads the key conditionally. Mirrors the optional
+   * `briefText` on run-analysis.ts's `RunAnalysisScenarioSnapshot`
+   * (the handler-side declaration of this same snapshot shape).
+   */
+  readonly briefText?: string;
 }
 
 // v0.7.0 schema note: the ingress `OrchestratorTurnPayload` is a discriminated
@@ -1024,6 +1034,33 @@ export async function loadPersistedGraphStrict(
   return await store.loadGraph(scenarioId);
 }
 
+/**
+ * Strict variant of {@link loadPersistedScenarioState} that does NOT swallow
+ * errors — the combined-read sibling of {@link loadPersistedGraphStrict}.
+ *
+ * Same single-round-trip `scenarios.graph` + `scenarios.brief_text` read via
+ * `SessionStore.loadGraphAndBriefText`, but propagates `SessionReadError`
+ * instead of collapsing to nulls, so callers can distinguish "store
+ * reachable, nothing stored" (null fields) from "store unreachable / RPC
+ * threw" (throws). Lane 28 — brief pipeline: added so
+ * `loadScenarioSnapshotForRunAnalysis` can carry the persisted brief on the
+ * snapshot without a second round trip AND without weakening its existing
+ * strict-read error contract (`scenario_read_failed` vs `analysis_not_ready`
+ * — see the call-site comment below).
+ *
+ * Lives in this module so the `SessionStore` import surface stays bounded to
+ * the three declared integration points: session/, commit.ts,
+ * build-turn-context.ts (enforced by the pre-push `state-write-invariant`
+ * check).
+ */
+export async function loadPersistedScenarioStateStrict(
+  scenarioId: string,
+  sessionStore?: SessionStore,
+): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
+  const store = sessionStore ?? getSessionStore();
+  return await store.loadGraphAndBriefText(scenarioId);
+}
+
 export async function loadScenarioSnapshotForRunAnalysis(
   scenarioId: string,
   requestId: string,
@@ -1034,10 +1071,19 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // `loadPersistedGraph` collapses store errors into null (loadPersistedScenarioState
   // catches and degrades), which would let the NULL-graph recovery below misclassify a
   // transient outage as `analysis_not_ready` ("draft a model first" 200) — masking the
-  // infra failure and dropping retry guidance. `loadPersistedGraphStrict` returns null
-  // ONLY when the store is reachable and no graph is stored (the genuine no-model
-  // case); it throws SessionReadError on a DB/RPC failure.
-  const persistedGraph = await loadPersistedGraphStrict(scenarioId, sessionStore);
+  // infra failure and dropping retry guidance. `loadPersistedScenarioStateStrict`
+  // returns null fields ONLY when the store is reachable and nothing is stored (the
+  // genuine no-model case); it throws SessionReadError on a DB/RPC failure.
+  //
+  // Lane 28 — brief pipeline: the combined strict read also carries the persisted
+  // `scenarios.brief_text` in the SAME round trip (the store's loadGraph already
+  // delegated to loadGraphAndBriefText and discarded the brief), so the snapshot
+  // can surface it for the flag-gated run_analysis → PLoT brief leg with no extra
+  // DB traffic and identical error semantics.
+  const { graph: persistedGraph, briefText } = await loadPersistedScenarioStateStrict(
+    scenarioId,
+    sessionStore,
+  );
   // `== null` (not a truthy check): scope the recovery to a GENUINELY absent graph
   // (null/undefined). A present-but-corrupt falsy value (e.g. `0` / `""`) is malformed,
   // not missing — it falls through to GraphV3.safeParse below and fails into
@@ -1123,6 +1169,12 @@ export async function loadScenarioSnapshotForRunAnalysis(
     ...(parsedGraph.data.goal_constraints !== undefined
       ? { goal_constraints: parsedGraph.data.goal_constraints }
       : {}),
+    // Lane 28 — brief pipeline: the persisted decision brief, loaded above in
+    // the same round trip as the graph. Omitted when null (no brief persisted
+    // / whitespace-coerced) so PLoT's `no_brief` skip stays honest — the
+    // handler only forwards it behind `config.cee.sendBriefToPlot`
+    // (default OFF, doctrine ask D5 Paul-gated).
+    ...(briefText !== null ? { briefText } : {}),
   };
 }
 

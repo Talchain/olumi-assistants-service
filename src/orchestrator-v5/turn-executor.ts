@@ -136,6 +136,7 @@ import {
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
 } from './session/pending-action.js';
+import { deriveBriefTextSeed } from './session/derive-brief-seed.js';
 import { randomUUID } from 'node:crypto';
 import type { ProposalAction } from './routing/types.js';
 import {
@@ -585,6 +586,41 @@ export async function runTurnExecutor(
   // response. Message-kind turns carry payload.message; system-event-kind
   // turns carry no user text and persist NULL.
   const userMessageForTurn = payload.kind === 'message' ? payload.message : undefined;
+  // Lane 28 — brief pipeline seam 1: seed `scenarios.brief_text` centrally.
+  // The only production writer was draft-graph-dispatch, whose route-v2
+  // trigger never fires for turns that reach the TurnExecutor (continuation
+  // scenarios, request graph_state present, non-draft shapes) — and the
+  // commit sites here re-passed only `context.scenarioBriefText`, a circular
+  // no-op when the brief was never written. Derive a seed ONCE per turn:
+  // only when no brief is persisted yet AND the scenario has no COMMITTED
+  // graph (`context.persistedGraph` — the server-side scenarios read; a
+  // committed graph means the framing turn is behind us, and a permanent
+  // first-write-wins field must not be claimable by any mid-conversation
+  // message) AND the payload is a frame-stage, non-question message passing
+  // the conservative decision-brief shape gate (mirrors the draft-dispatch
+  // heuristic's actual scope; see derive-brief-seed.ts). The RPC's
+  // first-write-wins predicate (`WHERE brief_text IS NULL OR brief_text =
+  // ''`) remains the last line of defence. Injected in `commitTurn` below so
+  // ALL commit sites seed uniformly — same doctrine as `userMessage` /
+  // `coaching_state`.
+  const briefSeedNormForTurn =
+    context.scenarioBriefText == null
+      ? deriveBriefTextSeed(payload, {
+          hasCommittedGraph: context.persistedGraph != null,
+        })
+      : undefined;
+  if (briefSeedNormForTurn?.truncated) {
+    // Disclosed truncation — same event + shape as the draft-dispatch write
+    // site (existing telemetry enum member; registry unchanged).
+    emit(TelemetryEvents.V5BriefTextNormalised, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      original_length: briefSeedNormForTurn.originalLength,
+      truncated_length: briefSeedNormForTurn.value?.length ?? 0,
+      reason: 'over_8000_chars',
+    });
+  }
+  const briefSeedForTurn = briefSeedNormForTurn?.value;
   // Track 2 — the last commit's carry-forward lifecycle tally, hoisted here so
   // `finalizeRun` can thread it into the frame's `pending.lifecycle` diagnostics
   // (the tally is only known post-commit; the ORIENT-time pending block carries
@@ -626,6 +662,12 @@ export async function runTurnExecutor(
         ...meta,
         coaching_state: context.coaching_state,
         userMessage: userMessageForTurn,
+        // Lane 28 — brief pipeline seam 1: a call site's explicit briefText
+        // (the main happy path re-passes `context.scenarioBriefText`) wins;
+        // otherwise seed from this turn's payload when it passed the
+        // decision-brief shape gate (undefined on non-qualifying turns —
+        // the RPC then leaves brief_text untouched).
+        briefText: meta.briefText ?? briefSeedForTurn,
         // V5 Conversation Context Reliability: scrub the durable assistant text
         // against `effectiveTurnGraph` — the SAME graph this turn reasoned over
         // and the SAME graph surfaced to the route egress sanitiser (below) —
@@ -1312,6 +1354,14 @@ export async function runTurnExecutor(
         // did you make?") have no human-readable receipt to ground
         // Sonnet's answer and fall to the legacy `edit_graph` catch-all.
         priorFacts: context.prior_facts,
+        // Lane 28 — brief pipeline (dossier gap G2): the persisted decision
+        // brief (`scenarios.brief_text`, loaded once per turn by
+        // buildTurnContext in the same round trip as the graph). Projected
+        // into `ContextPack.brief` size-bounded with DISCLOSED truncation and
+        // serialised into the routing prompt by buildUserMessage — before
+        // this, the brief reached no LLM after the draft turn. Null when no
+        // brief has been persisted.
+        brief: context.scenarioBriefText,
         graph: compactedGraph ? undefined : graphStateForTurn,
         compactedGraph,
         compactedConstraints,
