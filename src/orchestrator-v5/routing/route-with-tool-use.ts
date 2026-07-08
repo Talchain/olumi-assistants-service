@@ -40,25 +40,39 @@ import { ORCHESTRATOR_TIMEOUT_MS } from '../../config/timeouts.js';
 /**
  * Cap on the routing call's output budget. The routing tool-use call
  * emits at most a single `olumi_action` tool_use plus a short leading
- * orientation paragraph; 2048 tokens is generous headroom. The adapter
- * default of 4096 was previously responsible for long wall-time turns
- * (observed 36s) that ended in `stop_reason: max_tokens`. Capping here
- * reduces the worst-case wall time AND moves max_tokens detection
- * earlier, so the bounded-fallback path in turn-executor's
- * `translateRoutingError` fires faster.
+ * orientation paragraph. The adapter default of 4096 was previously
+ * responsible for long wall-time turns (observed 36s) that ended in
+ * `stop_reason: max_tokens`; capping reduces worst-case wall time AND
+ * moves max_tokens detection earlier so the bounded-fallback path fires
+ * faster.
+ *
+ * Raised 2048 -> 3072 for Claude Sonnet 5 (2026-07-08). Two Sonnet-5
+ * effects both consume this budget: (1) the tokenizer produces ~30% more
+ * tokens for the same text, so 2048 held ~30% less content than on
+ * Sonnet 4.6; (2) adaptive thinking is ON BY DEFAULT when the `thinking`
+ * param is omitted (the routing call omits it), and thinking tokens share
+ * `max_tokens` with the output. 3072 keeps the fast common path bounded
+ * while giving the typical coaching answer + light adaptive thinking room
+ * to complete. Tune against the flip's `v5.routing.max_tokens_retry` rate.
+ * Higher-value root-cause lever if the retry rate stays elevated: disable
+ * adaptive thinking on the routing call for Sonnet 5 (a fast classify +
+ * short answer does not need extended reasoning) — see the PR follow-up.
  */
-export const V5_ROUTING_MAX_OUTPUT_TOKENS = 2048;
+export const V5_ROUTING_MAX_OUTPUT_TOKENS = 3072;
 
 /**
  * Escalated output budget for the single max_tokens retry
  * (prompt-workstream fix, 2026-07-08). Live evidence: ~4-5% of routing
- * calls ended with `stop_reason: 'max_tokens'` at the 2048 cap (a failed
- * call burned exactly 2048 completion tokens) and each one shipped the
- * bounded-fallback apology. The first attempt keeps the 2048 cap (fast
- * common case); on max_tokens we retry ONCE at 4096 — same messages,
- * same tools — before falling through to the unchanged error path.
+ * calls ended with `stop_reason: 'max_tokens'` at the old 2048 cap (a
+ * failed call burned exactly 2048 completion tokens) and each one shipped
+ * the bounded-fallback apology. On max_tokens we retry ONCE at this budget
+ * — same messages, same tools — before falling through to the unchanged
+ * error path. Raised 4096 -> 8192 for Sonnet 5: the turns that truncate
+ * are the long coaching/explanation answers, and with the +30% tokenizer
+ * plus adaptive thinking sharing the budget they need real headroom to
+ * finish rather than re-truncating on the retry.
  */
-export const V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY = 4096;
+export const V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY = 8192;
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
