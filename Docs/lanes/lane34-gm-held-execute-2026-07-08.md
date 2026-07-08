@@ -113,14 +113,35 @@ BEFORE the generic synthesis, detect the GM held handler id. Then:
   existing `pending_action.*` lifecycle events.
 - Reserved scenarios (1909b083*/def3cb31*/8e0bf73d*/90385279*/104d65bd*) untouched.
 
-## Verification
-
-(Filled in after gates run — see PR body.)
+## Verification (in worktree `.worktrees/cee-lane34-held-execute`, base `d63a0219c`, `pnpm install` restored deps first)
 
 | Gate | Result |
 |---|---|
-| RED-first | `gm-held-execute-route-level.test.ts` — new-behaviour cases verified FAILING on pristine base `d63a0219c` before implementation (commit history) |
-| `pnpm typecheck:src` | pending |
-| `scripts/ci/typecheck-ratchet.sh` (baseline 462) | pending |
-| `pnpm test:required` | pending |
-| Telemetry registry | pending |
+| RED-first | `gm-held-execute-route-level.test.ts` committed at `9776a78dc`, run against the PRISTINE base: the live-apply case FAILED (decline path, nothing persisted); the four base-posture pins (superseded / legacy no-payload / shadow / off) passed. GREEN at `57a0dd5eb`. |
+| `pnpm typecheck:src` (tsc -p tsconfig.build.json) | clean |
+| `scripts/ci/typecheck-ratchet.sh` | within baseline — 136 files / 462 errors vs baseline 137/462 (the shrink is the pre-existing lane-32 state, not this lane) |
+| `scripts/check-forbidden-boundary-patterns.sh` | at baseline (as-unknown-as 95 / science-fallback 17; an initial +1 double-cast in the new module was reworked to a plain widening copy) |
+| `npx eslint` on all 6 touched files | clean (exit 0) |
+| Focused suites: gate + dispatch-modes + allowlist + all `graph-management/__tests__` + proposed-change route/synthesis/short-confirm + the two new files | 18 files / 350 tests green |
+| New: `gm-held-execute.test.ts` (18) + `gm-held-execute-route-level.test.ts` (5) | green |
+| Frozen telemetry registry (`tests/utils/telemetry-events.test.ts`) | green — no new event names; resume re-uses registered `v5.candidate_mutation.*` members with `dispatch_path: 'gm_held_resume'` + existing `pending_action.*` lifecycle events |
+| `pnpm test:required` | see PR body (run in this worktree at the branch tip) |
+| HOOK-5 (proposal cards) | untriggered — no `proposal_card` token added to `src/schemas` / `src/orchestrator-v5/compose`; tripwire stays armed |
+
+## Follow-ups (not in this lane)
+
+1. **Ordinal/label selection of a GM held pending** ("the first one" when a GM
+   held pending coexists with another live proposal) still resolves through the
+   generic synthesis → decline-with-clarify. The designed confirm surface (typed
+   "yes" / the confirm chip, message "Yes") is wired. Never mis-applies.
+2. **Held UX copy** on the hold turn still invites "yes" generically; a
+   per-verdict richer confirm surface (proposal cards, ISSUE-9027) remains
+   Track 4's, gated by HOOK-5.
+3. **Live-mode flip decision (Paul)** — with #372 + this lane, the two named
+   code blockers from the Brief H scoreboard are addressed; F3
+   (proposal-language misfire on applied edits) remains open on that scoreboard
+   and is not this lane's surface.
+4. **Staging smoke after deploy** — drive a live-mode hold + "yes" end-to-end:
+   expect held turn (pending + chip), then applied turn (graph persisted,
+   edit_graph fact, `v5.candidate_mutation.*` with `dispatch_path:
+   gm_held_resume`, `pending_action.consumed`), rerun clears staleness.
