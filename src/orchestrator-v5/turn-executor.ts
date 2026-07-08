@@ -236,6 +236,7 @@ import {
   type RoutingResult,
   type RoutingToolCallResult,
 } from './routing/route-with-tool-use.js';
+import { getCachedRoutingPromptIdentity } from './routing/prompt-loader.js';
 import {
   validateToolCall,
   type GraphLookup,
@@ -702,20 +703,31 @@ export async function runTurnExecutor(
   let handlerProposedForObs: string | null = null;
   let validatorOutcomeForObs: 'valid' | ValidationError['code'] | null = null;
   let responseTypeForObs: C1TurnClass | null = null;
-  const obsPayload = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
-    request_id: requestId,
-    session_id: context.session_id,
-    v5_journey_id: v5JourneyId,
-    prompt_version: ROUTING_PROMPT_VERSION,
-    prompt_hash: ROUTING_PROMPT_HASH,
-    system_chars: ROUTING_PROMPT_SYSTEM_CHARS,
-    context_pack_chars: contextPackCharsForObs,
-    handler_proposed: handlerProposedForObs,
-    validator_outcome: validatorOutcomeForObs,
-    response_type: responseTypeForObs,
-    stage: context.stage,
-    ...extra,
-  });
+  const obsPayload = (extra: Record<string, unknown> = {}): Record<string, unknown> => {
+    // ROADMAP 1.32 — identity stamp: prefer the SERVED PMS snapshot
+    // identity over the static repo-default constants. The constants
+    // misreport as v40/21,439 whenever PMS serves a different prompt
+    // (live specimen: version 112 / 21,860 chars), so every
+    // turn-lifecycle event carried the wrong identity. Field names are
+    // unchanged (prompt_version / prompt_hash / system_chars) so
+    // dashboards keep joining on the same keys. Falls back to the
+    // constants only when the snapshot has not been built yet (pre-boot).
+    const servedPrompt = getCachedRoutingPromptIdentity();
+    return {
+      request_id: requestId,
+      session_id: context.session_id,
+      v5_journey_id: v5JourneyId,
+      prompt_version: servedPrompt?.version ?? ROUTING_PROMPT_VERSION,
+      prompt_hash: servedPrompt?.sent_hash ?? ROUTING_PROMPT_HASH,
+      system_chars: servedPrompt?.system_chars ?? ROUTING_PROMPT_SYSTEM_CHARS,
+      context_pack_chars: contextPackCharsForObs,
+      handler_proposed: handlerProposedForObs,
+      validator_outcome: validatorOutcomeForObs,
+      response_type: responseTypeForObs,
+      stage: context.stage,
+      ...extra,
+    };
+  };
 
   emit(TelemetryEvents.TurnExecutorStarted, obsPayload());
 
@@ -1479,7 +1491,10 @@ export async function runTurnExecutor(
           request_id: requestId,
           v5_journey_id: v5JourneyId,
           session_id: context.session_id,
-          system_chars: ROUTING_PROMPT_SYSTEM_CHARS,
+          // ROADMAP 1.32 — served-snapshot identity, constant fallback.
+          system_chars:
+            getCachedRoutingPromptIdentity()?.system_chars ??
+            ROUTING_PROMPT_SYSTEM_CHARS,
           context_pack_chars: contextPackCharsForObs,
           conversation_history_turns: contextPack.conversation.recent_turns.length,
           graph_compacted: compactOutcome.kind === 'compacted',
