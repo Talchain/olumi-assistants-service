@@ -33,6 +33,7 @@ async function main(): Promise<void> {
       "holistic-llm": { type: "boolean", default: false },
       stage: { type: "string", default: "full" },
       "prompt-set": { type: "string" },
+      "frozen-m1-dir": { type: "string" },
     },
   });
 
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
     holisticLlm: Boolean(values["holistic-llm"]),
     preflightOnly: values.stage === "preflight",
     promptSet: (values["prompt-set"] as string | undefined) ?? null,
+    frozenM1Dir: (values["frozen-m1-dir"] as string | undefined) ?? null,
   });
 
   console.log(`run dir: ${summary.runDir}`);

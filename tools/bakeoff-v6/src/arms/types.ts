@@ -21,6 +21,14 @@ export interface ArmRunInput {
    * unmatched runs.
    */
   bTokenBudget?: number;
+  /**
+   * Arm C only: a frozen (pre-generated) M1 graph to critique instead of
+   * drafting a fresh one. When set, arm C skips its M1 API call and feeds this
+   * graph to M2 — so every M2 variant critiques the IDENTICAL M1 graph,
+   * removing the M1-variation confounder from M2-prompt comparisons (and
+   * providing the scored round's paired-review input). Absent = normal draft.
+   */
+  frozenM1?: unknown;
 }
 
 export interface ArmRunOutput {

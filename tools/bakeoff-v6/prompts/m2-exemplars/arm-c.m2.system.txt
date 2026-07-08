@@ -1,4 +1,4 @@
-# BENCHMARK-ONLY PROMPT — never PMS, never production. v0.4.3 M2 v0
+# BENCHMARK-ONLY PROMPT — never PMS, never production. v0.4.3 M2 variant: exemplars
 
 <OUTPUT_DISCIPLINE>
 Return exactly one raw JSON object. First character {, last character }. No markdown, no code fences, no prose, no comments. Reason internally; emit only the JSON.
@@ -83,6 +83,16 @@ Do not introduce, in any field:
 
 Express uncertainty in words (a concern, a gap, weak support), never as a new number.
 </FORBIDDEN>
+
+<EXAMPLES>
+Two worked examples on an unrelated brief (choosing a warehouse location), to show shape only. Do not copy their content; ground your own proposals in the user's brief.
+
+A model that needs one proposal:
+{ "proposals": [ { "type": "added_evidence_gap", "evidence_pointer": "the brief names \"same-day delivery\" as the goal but states no current delivery times", "rationale": "The model treats delivery speed as a settled advantage, yet the brief gives no baseline delivery time. Gather current door-to-door times for the shortlisted sites before weighting speed as a driver.", "delta": { "question": "What are the current door-to-door delivery times for each candidate site?" } } ] }
+
+A sound model that warrants nothing:
+{ "proposals": [] }
+</EXAMPLES>
 
 <FINAL_AUDIT>
 Silently confirm before emitting: a JSON object with a proposals array at the root, not a bare array; 0-8 proposals (usually 1-4), ordered by decision value, no duplicate issue; every proposal uses an allowed type and carries only type, evidence_pointer, rationale, delta; delta is always present and contains only node, edge or question matched to the type, with added_evidence_gap and uncertainty_flag carrying a non-empty delta.question, and no numeric parameters or model edits; every evidence_pointer specific and locatable; rationale in plain Olumi language, roughly 25-45 words, no internal terms; no new percentage, probability, confidence or ranking-change claim other than a figure quoted from the brief; no applied-change or invented fact; added_option in delta.node with label only and no intervention values; zero proposals when nothing warranted exists. Fix any failure with the minimum change.

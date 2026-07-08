@@ -8,7 +8,8 @@
  * per arm and never crash the run.
  */
 import { execSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_MODELS, DEFAULT_RUN_SEED } from "../config.ts";
 import { loadGoldenBriefs } from "../fixtures/loader.ts";
@@ -57,6 +58,9 @@ export interface PipelineOptions {
   preflightOnly: boolean;
   /** Named prompt-set directory under prompts/ (variant axis); null = default v0.4.3 baseline. */
   promptSet: string | null;
+  /** Dir of frozen M1 graphs ({brief_id}.json) for arm C to critique instead of drafting;
+   *  null = normal draft. Removes the M1-variation confounder from M2-prompt comparisons. */
+  frozenM1Dir: string | null;
 }
 
 export interface PipelineSummary {
@@ -136,6 +140,26 @@ function assembleRecord(
   return record;
 }
 
+/** Load a frozen M1 graph for a brief. Accepts either a bare graph object or a
+ *  {candidate: graph} / {graph: ...} wrapper (so a raw candidate record or an
+ *  extracted graph both work). Throws if the file is missing — a frozen run must
+ *  have a graph for every brief it runs, else the comparison is silently uneven. */
+async function loadFrozenM1(dir: string, briefId: string): Promise<unknown> {
+  const path = join(dir, `${briefId}.json`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf-8"));
+  } catch (err) {
+    throw new Error(`frozen-M1: cannot read ${path} for brief "${briefId}" — ${(err as Error).message}`);
+  }
+  if (parsed && typeof parsed === "object") {
+    const o = parsed as Record<string, unknown>;
+    if (o.candidate && typeof o.candidate === "object") return o.candidate;
+    if (o.graph && typeof o.graph === "object") return o.graph;
+  }
+  return parsed;
+}
+
 export async function runPipeline(opts: PipelineOptions): Promise<PipelineSummary> {
   const prompts = await loadPromptSet(opts.promptSet ?? undefined);
   const briefs = await loadGoldenBriefs(opts.briefFilter);
@@ -187,6 +211,8 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineSummar
     bTokenBudget?: number
   ): Promise<StoredCandidate> => {
     const startedAt = new Date().toISOString();
+    const frozenM1 =
+      arm === "C" && opts.frozenM1Dir ? await loadFrozenM1(opts.frozenM1Dir, brief.id) : undefined;
     const output = await runArmSafe(runner, {
       brief,
       seed,
@@ -194,6 +220,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineSummar
       client,
       models: config.models,
       bTokenBudget,
+      frozenM1,
     });
     const finishedAt = new Date().toISOString();
     const record = assembleRecord(config, prompts, arm, brief, seed, output, startedAt, finishedAt);

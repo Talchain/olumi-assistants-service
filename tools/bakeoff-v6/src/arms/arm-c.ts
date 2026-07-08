@@ -18,28 +18,33 @@ export const ARM_C_M2_MAX_TOKENS = 16_384;
 export const runArmC: ArmRunner = async (input) => {
   const out = emptyOutput();
 
-  // --- M1 draft (same call shape as the served drafter) ---
-  const m1Result = await input.client.call({
-    purpose: "arm-c-draft-m1",
-    model: input.models.C.m1,
-    system: input.prompts.armCM1.body,
-    // Grammar arm: append the adapter's stringified-aux reminder (mirrors live).
-    // No-think mirror = explicit thinking disabled; no temperature (400 on Sonnet 5).
-    userContent: briefUserContent(input.brief) + STRUCTURED_OUTPUTS_AUX_STRING_REMINDER,
-    maxTokens: ARM_A_MAX_TOKENS,
-    thinking: { type: "disabled" },
-    outputConfig: {
-      format: { type: "json_schema", schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA as Record<string, unknown> },
-    },
-  });
-  out.calls.push(buildCallRecord("arm-c-draft-m1", input.models.C.m1, m1Result));
-
+  // --- M1: either a frozen graph (paired-review / confounder-free M2 compare)
+  //     or a fresh draft (same call shape as the served drafter) ---
   let m1Raw: unknown;
-  try {
-    m1Raw = extractJson(m1Result.text);
-  } catch (err) {
-    out.failure = { stage: "arm-c-m1-parse", message: (err as Error).message };
-    return out;
+  if (input.frozenM1 !== undefined) {
+    // Frozen M1: no API call. Every M2 variant critiques the identical graph.
+    m1Raw = input.frozenM1;
+  } else {
+    const m1Result = await input.client.call({
+      purpose: "arm-c-draft-m1",
+      model: input.models.C.m1,
+      system: input.prompts.armCM1.body,
+      // Grammar arm: append the adapter's stringified-aux reminder (mirrors live).
+      // No-think mirror = explicit thinking disabled; no temperature (400 on Sonnet 5).
+      userContent: briefUserContent(input.brief) + STRUCTURED_OUTPUTS_AUX_STRING_REMINDER,
+      maxTokens: ARM_A_MAX_TOKENS,
+      thinking: { type: "disabled" },
+      outputConfig: {
+        format: { type: "json_schema", schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA as Record<string, unknown> },
+      },
+    });
+    out.calls.push(buildCallRecord("arm-c-draft-m1", input.models.C.m1, m1Result));
+    try {
+      m1Raw = extractJson(m1Result.text);
+    } catch (err) {
+      out.failure = { stage: "arm-c-m1-parse", message: (err as Error).message };
+      return out;
+    }
   }
 
   // M1 must be a well-formed draft at the LLM boundary before merging is

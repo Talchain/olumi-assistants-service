@@ -29,6 +29,7 @@ async function runOnce(runId: string) {
     holisticLlm: false,
     preflightOnly: false,
     promptSet: null,
+    frozenM1Dir: null,
   });
 }
 
