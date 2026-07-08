@@ -851,9 +851,17 @@ const ConfigSchema = z.object({
     // Gates every entry point of src/orchestrator-v5/model-management/
     // (save/list/get/restore/compare versions). Default OFF; flag-off is a
     // fail-closed typed 'disabled' no-op at every entry point — no Supabase
-    // call, no hashing, no behaviour change anywhere (the module has zero
-    // production call sites this slice; nothing is wired into routes or the
-    // turn-executor). Env-enforced: locked false in prod; staging requires an
+    // call, no hashing, no behaviour change. STALE-COMMENT FIX (hygiene
+    // batch, ROADMAP 1.25 item C): this previously said "the module has
+    // zero production call sites this slice; nothing is wired into routes
+    // or the turn-executor" — no longer true as of Lane 8 (2026-07-07): the
+    // ONE sanctioned production call site is the flag-gated commit-seam
+    // version hook in src/orchestrator-v5/commit.ts (fires after a durable,
+    // graph-bearing commit; failures never affect the turn result — see
+    // model-management/index.ts header + commit.ts's
+    // `recordModelVersionForCommit`). Routes/turn-executor/restore-compare
+    // surfaces remain unwired; isolation-guards.test.ts enforces the exact
+    // call-site set. Env-enforced: locked false in prod; staging requires an
     // explicit opt-in (audit-logged). The backing migration
     // (20260705120000_v5_model_versions.sql) is AUTHORED-NOT-EXECUTED and
     // separately Paul-gated — do not enable this flag anywhere before that
