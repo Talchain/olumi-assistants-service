@@ -26,3 +26,23 @@ export { findForbiddenMatches } from '../../v5-journey-replay/forbidden-terms.js
 // `validateExplanationAnswer` and the turn-executor STEP 6 safety check: prose
 // that reads as if a graph mutation happened when none did.
 export { containsMutationLanguage } from '../../../src/orchestrator-v5/routing/mutation-language.js';
+
+// `findSuccessClaimHit` is the runtime detector (mutation-receipt honesty
+// class): prose that claims "done / updated / applied" before a confirmation
+// exists. Used by D6 — false-success claim.
+export { findSuccessClaimHit } from '../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
+
+// NOTE on D5 (held-science vocabulary): the runtime's
+// `HELD_SCIENCE_VOCABULARY_PATTERN` is deliberately NOT re-exported here.
+// Verified 2026-07-08 (prompt-workstream co-owner, corroborated independently
+// while building this fixture): that pattern bans `influence` and
+// `vulnerable` — but the orchestrator terminology map MANDATES those exact
+// words as the required plain-language replacement for driver/sensitivity
+// prose ("has the biggest influence on the outcome", "the most vulnerable
+// assumption"). Importing it wholesale would fail every compliant orchestrator
+// response. The runtime pattern was built for a different surface (Cap-1/
+// Cap-2A held-science REJECTION copy, where the words are banned outright,
+// not replaced) — it is the wrong source of truth for this dimension. D5 is
+// therefore an EVAL-ASSERTION (see held-science.ts), not a production-guard
+// re-export, scoped to the raw-metric-token / raw-decimal leak the
+// terminology map actually forbids.

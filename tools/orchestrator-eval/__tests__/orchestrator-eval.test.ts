@@ -8,8 +8,9 @@
  *   2. THE GATE — the recorded good candidates PASS and the recorded regression
  *      candidates FAIL, and the chassis agrees with the fixture's expectations.
  *   3. GUARD WIRING — the imported PRODUCTION guards (forbidden phrases,
- *      mutation language) actually fire, so the eval and the runtime cannot
- *      drift apart.
+ *      mutation language, false-success claims) actually fire, so the eval
+ *      and the runtime cannot drift apart. D5 (held-science) is this pack's
+ *      own eval-assertion, not a production re-export — see held-science.ts.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -19,14 +20,20 @@ import {
 } from '../../../src/orchestrator-v5/format/format-analysis-for-context.js';
 import { assembleAnalysis } from '../src/assemble.js';
 import { detectGoalFitConflation } from '../src/goal-fit-conflation.js';
+import { findSuccessClaimHit } from '../src/guards.js';
+import { detectHeldScience } from '../src/held-science.js';
 import { scoreCandidate } from '../src/scorer.js';
 import { loadFixtures, runFixture } from '../src/run.js';
 import type { OrchestratorEvalFixture } from '../src/types.js';
 
-function goalFitFixture(): OrchestratorEvalFixture {
-  const fixture = loadFixtures().find((f) => f.id === 'goal-fit-conflation');
-  if (!fixture) throw new Error('goal-fit-conflation fixture not found');
+function fixtureById(id: string): OrchestratorEvalFixture {
+  const fixture = loadFixtures().find((f) => f.id === id);
+  if (!fixture) throw new Error(`${id} fixture not found`);
   return fixture;
+}
+
+function goalFitFixture(): OrchestratorEvalFixture {
+  return fixtureById('goal-fit-conflation');
 }
 
 describe('assembly fidelity (production formatAnalysisForContext)', () => {
@@ -134,4 +141,66 @@ describe('production guards are genuinely wired (not re-specified)', () => {
     expect(mutation?.pass).toBe(false);
     expect(score.pass).toBe(false);
   });
+
+  it('fails a response claiming a mutation already succeeded (D6)', () => {
+    const score = scoreCandidate(raw(), {
+      label: 'false-success',
+      note: 'claims a commit that never happened',
+      source: 'recorded',
+      text: "I've updated the model with that factor.",
+    });
+    const falseSuccess = score.dimensions.find((d) => d.name === 'no_false_success_claim');
+    expect(falseSuccess?.pass).toBe(false);
+    expect(score.pass).toBe(false);
+  });
+});
+
+describe('D5 held-science vocabulary detector (eval assertion, NOT a production re-export)', () => {
+  it('flags a raw metric token', () => {
+    const r = detectHeldScience('Team Seniority has the highest sensitivity value (0.42).');
+    expect(r.held).toBe(true);
+    expect(r.evidence).toBe('sensitivity');
+  });
+
+  it('does NOT flag plain-language impact framing', () => {
+    const r = detectHeldScience('Team Seniority made the biggest difference to the outcome.');
+    expect(r.held).toBe(false);
+  });
+
+  it('does NOT flag terminology-map-mandated words the production pattern would ban (influence/vulnerable)', () => {
+    const r = detectHeldScience(
+      'Team Seniority has the biggest influence on the outcome. The most vulnerable assumption is the seniority link.',
+    );
+    expect(r.held).toBe(false);
+  });
+});
+
+describe('D6 false-success claim detector (wraps the production pattern)', () => {
+  it('flags a completed-mutation claim', () => {
+    expect(findSuccessClaimHit("I've updated the model with that factor.")).not.toBeNull();
+  });
+
+  it('does NOT flag a pre-action proposal awaiting confirmation', () => {
+    expect(findSuccessClaimHit('I can propose that change once you confirm.')).toBeNull();
+  });
+});
+
+describe('D5/D6 fixtures — the gate scores each candidate as expected', () => {
+  for (const id of ['held-science-vocabulary', 'false-success-claim']) {
+    describe(id, () => {
+      const fixture = fixtureById(id);
+      for (const candidate of fixture.candidates) {
+        const expected = fixture.expected[candidate.label];
+        it(`${candidate.label} → ${expected ? 'PASS' : 'FAIL'}`, () => {
+          const score = scoreCandidate(fixture.analysis, candidate);
+          expect(score.pass).toBe(expected);
+        });
+      }
+
+      it('chassis agreement: every candidate verdict matches its expectation', () => {
+        const report = runFixture(fixture);
+        expect(report.ok).toBe(true);
+      });
+    });
+  }
 });
