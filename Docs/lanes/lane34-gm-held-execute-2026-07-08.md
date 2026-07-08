@@ -125,7 +125,7 @@ BEFORE the generic synthesis, detect the GM held handler id. Then:
 | Focused suites: gate + dispatch-modes + allowlist + all `graph-management/__tests__` + proposed-change route/synthesis/short-confirm + the two new files | 18 files / 350 tests green |
 | New: `gm-held-execute.test.ts` (18) + `gm-held-execute-route-level.test.ts` (5) | green |
 | Frozen telemetry registry (`tests/utils/telemetry-events.test.ts`) | green — no new event names; resume re-uses registered `v5.candidate_mutation.*` members with `dispatch_path: 'gm_held_resume'` + existing `pending_action.*` lifecycle events |
-| `pnpm test:required` | see PR body (run in this worktree at the branch tip) |
+| `pnpm test:required` | green at the branch tip — 964 files: 18992 passed / 99 skipped / 13 todo, 0 failed. One reviewed pin update was required: the anti-rederivation call-site guard's `deriveAnalysisFreshness` count for turn-executor moves 3 → 4 (the resume's post-apply wire-freshness re-derivation; justification recorded in the EXPECTED entry per the guard's instructions, mirroring the lane-8 edit-dispatch precedent) |
 | HOOK-5 (proposal cards) | untriggered — no `proposal_card` token added to `src/schemas` / `src/orchestrator-v5/compose`; tripwire stays armed |
 
 ## Follow-ups (not in this lane)
