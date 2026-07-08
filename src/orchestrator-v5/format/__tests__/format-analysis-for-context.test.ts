@@ -25,6 +25,7 @@ import {
   tippingRiskPhrase,
   voiBandPhrase,
   DISPLAY_ANALYSIS_CHAR_BUDGET,
+  GOAL_FIT_NOT_SCORED_LINE,
   type DisplaySafeAnalysis,
 } from '../format-analysis-for-context.js';
 import { sanitiseAssistantTextProse } from '../numeric-prose-formatter.js';
@@ -178,6 +179,9 @@ describe('formatAnalysisForContext', () => {
         { label: 'Demand', influence: 'moderate negative influence' },
       ],
       fragile_edges: [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+      // Lane 30 — target-fit absence is DISCLOSED, never silent, so the LLM
+      // cannot fill the gap with win probabilities.
+      goal_fit: GOAL_FIT_NOT_SCORED_LINE,
     });
 
     // Pattern check (regex from brief).
@@ -346,17 +350,14 @@ describe('Lane 21 display-safe breadth', () => {
     const modelled = formatAnalysisForContext(
       rawAnalysis({ goal_fit: { scored: true, basis: 'modelled_outcome_distribution' } }),
     );
-    expect(modelled!.goal_fit).toBe(
+    expect(modelled!.goal_fit).toContain(
       'goal fit was scored from the modelled outcome distribution',
     );
 
     const bare = formatAnalysisForContext(
       rawAnalysis({ goal_fit: { scored: true, basis: null } }),
     );
-    expect(bare!.goal_fit).toBe('goal fit was scored');
-
-    const absent = formatAnalysisForContext(rawAnalysis({ goal_fit: null }));
-    expect(absent!).not.toHaveProperty('goal_fit');
+    expect(bare!.goal_fit).toContain('goal fit was scored');
   });
 
   it('keeps a maximal widened projection inside the display char budget with no numbers anywhere', () => {
@@ -401,6 +402,249 @@ describe('Lane 21 display-safe breadth', () => {
     const result = sanitiseAssistantTextProse(serialised);
     expect(result.probability_rewrites).toBe(0);
     expect(result.sensitivity_rewrites).toBe(0);
+  });
+});
+
+// Lane 30 — per-option goal-fit (target-fit) truthfulness.
+//
+// THE LIVE DEFECT (scenario 90385279, 2026-07-08 ~01:00): asked "how does
+// each option look against my 25% target?", the orchestrator LLM answered
+// with WIN probabilities framed as target-fit ("leads comfortably at 89%")
+// while the delivered probability_of_joint_goal was 29.3% — because the
+// ContextPack carried only a global goal-fit provenance sentence, never the
+// per-option values. These tests pin the fix: per-option target-fit percent
+// strings, clearly distinguished from win probability, and a DISCLOSED
+// absence line when target-fit was not scored (never a silent gap the LLM
+// can fill with win%).
+describe('Lane 30 per-option target-fit', () => {
+  // The live divergence: leader wins 89% of comparisons but meets the
+  // target only 29.3% of the time.
+  const divergent = () =>
+    rawAnalysis({
+      leading_option: { label: 'Relocate to Manchester', probability: 0.89, goal_fit_probability: 0.293 },
+      runner_up: { label: 'Stay in London', probability: 0.11, goal_fit_probability: 0.31 },
+      options: [
+        { label: 'Relocate to Manchester', probability: 0.89, goal_fit_probability: 0.293 },
+        { label: 'Stay in London', probability: 0.11, goal_fit_probability: 0.31 },
+      ],
+      goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+    });
+
+  it('renders per-option target_fit percent strings distinct from win_probability', () => {
+    const out = formatAnalysisForContext(divergent());
+    expect(out!.options).toEqual([
+      { rank: '1', label: 'Relocate to Manchester', win_probability: '89%', target_fit: '29%' },
+      { rank: '2', label: 'Stay in London', win_probability: '11%', target_fit: '31%' },
+    ]);
+    expect(out!.leading_option).toEqual({
+      label: 'Relocate to Manchester',
+      win_probability: '89%',
+      target_fit: '29%',
+    });
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('never attributes the win percent to the target', () => {
+    const out = formatAnalysisForContext(divergent());
+    // The target-fit value for the leader is the goal-fit percent — NOT the
+    // win percent. This is the exact live-defect assertion (0.89 vs 0.293).
+    expect(out!.options![0]!.target_fit).toBe('29%');
+    expect(out!.options![0]!.target_fit).not.toBe(out!.options![0]!.win_probability);
+    // The goal-fit prose must define the distinction and carry no percents.
+    expect(out!.goal_fit).toContain('target_fit');
+    expect(out!.goal_fit).toContain('win_probability');
+    expect(out!.goal_fit).not.toContain('89%');
+    expect(out!.goal_fit).not.toContain('29%');
+  });
+
+  it('states the modelled-outcome basis caveat once, in the goal_fit prose', () => {
+    const out = formatAnalysisForContext(divergent());
+    expect(out!.goal_fit).toContain('goal fit was scored from the modelled outcome distribution');
+    // Basis caveat appears once, not per option.
+    const serialised = JSON.stringify(out);
+    expect(serialised.match(/modelled outcome distribution/g)).toHaveLength(1);
+  });
+
+  it('renders an explicit "target-fit not scored" line when goal-fit is absent — never silent', () => {
+    const out = formatAnalysisForContext(rawAnalysis({ goal_fit: null }));
+    expect(out!.goal_fit).toBe(GOAL_FIT_NOT_SCORED_LINE);
+    expect(out!.goal_fit).toContain('target-fit not scored');
+    // The absence line must warn that win% is not a substitute.
+    expect(out!.goal_fit!.toLowerCase()).toContain('win');
+  });
+
+  it('discloses missing per-option values when provenance says scored but no values arrived', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: [{ label: 'A', probability: 0.7 }],
+        goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+      }),
+    );
+    expect(out!.goal_fit).toContain('goal fit was scored from the modelled outcome distribution');
+    expect(out!.goal_fit).toContain('per-option target-fit values are not available');
+    expect(out!.options![0]!).not.toHaveProperty('target_fit');
+  });
+
+  it('drops an out-of-range goal_fit_probability rather than rendering a wrong percent', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: [{ label: 'A', probability: 0.7, goal_fit_probability: 4.2 }],
+        goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+      }),
+    );
+    expect(out!.options![0]!).not.toHaveProperty('target_fit');
+  });
+});
+
+// Lane 30 fix 3 — confidence tier prose + banded per-option outcomes.
+describe('Lane 30 confidence tier + outcome bands', () => {
+  it('renders known confidence tiers as prose', () => {
+    const needsWork = formatAnalysisForContext(rawAnalysis({ confidence_tier: 'needs_work' }));
+    expect(needsWork!.confidence_tier).toBe('analysis confidence needs work');
+
+    const fair = formatAnalysisForContext(rawAnalysis({ confidence_tier: 'fair' }));
+    expect(fair!.confidence_tier).toBe('analysis confidence is fair');
+
+    const strong = formatAnalysisForContext(rawAnalysis({ confidence_tier: 'strong' }));
+    expect(strong!.confidence_tier).toBe('analysis confidence is strong');
+  });
+
+  it('humanises unknown tier tokens rather than echoing raw, omits when absent', () => {
+    const unknown = formatAnalysisForContext(rawAnalysis({ confidence_tier: 'very_shaky' }));
+    expect(unknown!.confidence_tier).toBe('analysis confidence: very shaky');
+
+    const absent = formatAnalysisForContext(rawAnalysis({ confidence_tier: null }));
+    expect(absent!).not.toHaveProperty('confidence_tier');
+
+    const missing = formatAnalysisForContext(rawAnalysis());
+    expect(missing!).not.toHaveProperty('confidence_tier');
+  });
+
+  it('bands per-option outcomes with the shared vocabulary — never raw means', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: [
+          { label: 'A', probability: 0.72, outcome_mean: 0.237 },
+          { label: 'B', probability: 0.2, outcome_mean: -0.4 },
+          { label: 'C', probability: 0.05, outcome_mean: 0.01 },
+          { label: 'D', probability: 0.03 },
+        ],
+      }),
+    );
+    expect(out!.options).toEqual([
+      { rank: '1', label: 'A', win_probability: '72%', outcome_band: 'weak positive modelled outcome' },
+      { rank: '2', label: 'B', win_probability: '20%', outcome_band: 'moderate negative modelled outcome' },
+      { rank: '3', label: 'C', win_probability: '5%', outcome_band: 'roughly neutral modelled outcome' },
+      { rank: '4', label: 'D', win_probability: '3%' },
+    ]);
+    const json = JSON.stringify(out);
+    expect(json).not.toContain('0.237');
+    expect(json).not.toContain('-0.4');
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('bands the leading option outcome too', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        leading_option: { label: 'A', probability: 0.86, outcome_mean: 0.97 },
+      }),
+    );
+    expect(out!.leading_option).toEqual({
+      label: 'A',
+      win_probability: '86%',
+      outcome_band: 'very strong positive modelled outcome',
+    });
+  });
+});
+
+// Lane 30 fix 4 — DISPLAY_ANALYSIS_CHAR_BUDGET becomes RUNTIME-ENFORCED.
+// Before this lane the budget was test-asserted only: a live pack with long
+// labels could blow the ~21k-char routing prompt's analysis share silently.
+// Truncation is graceful (keep-priority: leader/runner-up + goal-fit, then
+// sensitivities, then flip/VOI) and ALWAYS disclosed via truncation_note.
+describe('Lane 30 runtime char-budget enforcement', () => {
+  const LONG = (i: number) =>
+    `Extremely Long Option Label ${String(i).padStart(2, '0')} ` +
+    'With An Enormous Amount Of Repeated Qualifier Text That Inflates The Serialised Projection '.repeat(3);
+
+  const oversized = () =>
+    rawAnalysis({
+      leading_option: { label: LONG(1), probability: 0.62, goal_fit_probability: 0.31 },
+      runner_up: { label: LONG(2), probability: 0.38, goal_fit_probability: 0.22 },
+      options: Array.from({ length: 12 }, (_, i) => ({
+        label: LONG(i + 1),
+        probability: Math.max(0.01, 0.62 - i * 0.05),
+        goal_fit_probability: 0.31,
+        outcome_mean: 0.4,
+      })),
+      top_drivers: Array.from({ length: 5 }, (_, i) =>
+        rawDriver(`Driver ${LONG(i + 1)}`, 0.9 - i * 0.1),
+      ),
+      fragile_edges: Array.from({ length: 3 }, (_, i) => ({
+        from_label: `From ${LONG(i + 1)}`,
+        to_label: `To ${LONG(i + 1)}`,
+      })),
+      fragile_edge_count: 9,
+      flip_thresholds: Array.from({ length: 3 }, (_, i) => ({
+        factor_label: `Flip ${LONG(i + 1)}`,
+        current_value: 100,
+        flip_value: 88,
+        unit: 'GBP',
+        no_flip_within_bounds: false,
+      })),
+      evidence_gaps: Array.from({ length: 3 }, (_, i) => ({
+        factor_label: `Gap ${LONG(i + 1)}`,
+        voi_score: 0.63,
+      })),
+      goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+      confidence_tier: 'needs_work',
+    });
+
+  it('keeps the serialised projection inside the budget at runtime (long-label fixture)', () => {
+    const out = formatAnalysisForContext(oversized());
+    const serialised = JSON.stringify(out, null, 2);
+    expect(serialised.length).toBeLessThanOrEqual(DISPLAY_ANALYSIS_CHAR_BUDGET);
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('truncation is DISCLOSED, never silent, and preserves the priority sections', () => {
+    const out = formatAnalysisForContext(oversized());
+    expect(out!.truncation_note).toBeDefined();
+    expect(out!.truncation_note).toContain('truncated');
+    // Highest keep-priority content survives.
+    expect(out!.leading_option).toBeDefined();
+    expect(out!.leading_option!.target_fit).toBe('31%');
+    expect(out!.runner_up).toBeDefined();
+    expect(out!.goal_fit).toBeDefined();
+    expect(out!.status).toBe('complete');
+  });
+
+  it('drops flip/VOI before sensitivities, and sensitivities before the option list', () => {
+    const out = formatAnalysisForContext(oversized());
+    // VOI + tipping must be gone before top_drivers is touched; if
+    // top_drivers is absent then flip/VOI must also be absent.
+    if (out!.top_drivers !== undefined) {
+      expect(out!.value_of_information).toBeUndefined();
+      expect(out!.tipping_points).toBeUndefined();
+    }
+    // The ranked option list (carrier of per-option goal-fit) outlives the
+    // low-priority sections; when trimmed it keeps at least the top two.
+    if (out!.options !== undefined) {
+      expect(out!.options.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('emits no truncation_note when the projection fits the budget', () => {
+    const out = formatAnalysisForContext(rawAnalysis());
+    expect(out!).not.toHaveProperty('truncation_note');
+  });
+
+  it('discloses which sections were omitted', () => {
+    const out = formatAnalysisForContext(oversized());
+    // The oversized fixture cannot fit with VOI + tipping present; both are
+    // named in the disclosure once dropped.
+    expect(out!.truncation_note).toContain('value_of_information');
+    expect(out!.truncation_note).toContain('tipping_points');
   });
 });
 

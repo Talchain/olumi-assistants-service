@@ -31,6 +31,18 @@ export const EVIDENCE_GAP_SIGNAL_CAP = 3;
 export const TIPPING_POINT_SIGNAL_CAP = 3;
 
 /**
+ * Lane 30 — cap for per-option goal-fit signals. Numeric parity with
+ * `MAX_PROJECTED_OPTIONS` in `./context-pack-assembler.ts` (the assembler
+ * imports this module, so the constant cannot be imported from there without
+ * a cycle): the goal-fit carriage never needs more entries than the option
+ * list it annotates.
+ */
+export const OPTION_GOAL_FIT_SIGNAL_CAP = 12;
+
+/** Lane 30 fix 3 — cap for per-option outcome signals (same parity note). */
+export const OPTION_OUTCOME_SIGNAL_CAP = 12;
+
+/**
  * One factor's tipping information, sourced from the top-level
  * `enrichment.flip_thresholds[]` (staging shape) or, when only the
  * per-option derivation exists, mapped from `summary.flip_thresholds`.
@@ -42,6 +54,16 @@ export const TIPPING_POINT_SIGNAL_CAP = 3;
  * to flip via this factor" — and is NOT the same as "unknown".
  */
 export interface TippingPointSignal {
+  /**
+   * Lane 30 (#369 audit P1) — structural factor id (`factor_id`/`node_id`/
+   * `id` off the raw row), carried so the ContextPack projection can
+   * suppress option-controlled levers by ID (never by label — labels
+   * collide). INTERNAL match key only: never serialised onto the projected
+   * `ContextPackAnalysisFlipThreshold`. Null when the raw row carried no
+   * id — the consumer FAILS CLOSED on such rows when a controlled-lever
+   * set exists. Optional so hand-built legacy signals stay assignable.
+   */
+  readonly factor_id?: string | null;
   readonly factor_label: string;
   readonly current_value: number | null;
   readonly flip_value: number | null;
@@ -55,6 +77,8 @@ export interface TippingPointSignal {
  * score — banded downstream, never surfaced raw.
  */
 export interface EvidenceGapSignal {
+  /** Lane 30 (#369 audit P1) — see {@link TippingPointSignal.factor_id}. */
+  readonly factor_id?: string | null;
   readonly factor_label: string;
   readonly voi_score: number;
 }
@@ -69,6 +93,49 @@ export interface GoalFitSignal {
 }
 
 /**
+ * Lane 30 — one option's goal-fit VALUE, sourced from the per-option
+ * `enrichment.option_comparison[].probability_of_joint_goal` (PLoT #204 live
+ * shape; delivered alongside `goal_fit_basis`). This is the field whose
+ * absence from the ContextPack caused the verified live defect (scenario
+ * 90385279): asked how each option looked against a 25% target, the LLM
+ * framed WIN probabilities as target-fit ("leads comfortably at 89%") while
+ * the delivered `probability_of_joint_goal` was 29.3%.
+ *
+ * `probability_of_joint_goal` is RAW (a [0,1] float) — it lives on the
+ * handler-facing projection only; the display formatter renders it as an
+ * integer-percent `target_fit` string, clearly distinguished from win%.
+ *
+ * `option_id` is the structural match key (the consumer relabels options
+ * from the current graph, so label equality is not identity); null only when
+ * the enrichment row carried no id at all — the consumer then falls back to
+ * label matching.
+ */
+export interface OptionGoalFitSignal {
+  readonly option_id: string | null;
+  readonly option_label: string;
+  readonly probability_of_joint_goal: number;
+}
+
+/**
+ * Lane 30 fix 3 — one option's modelled-outcome mean, sourced from the
+ * per-option `enrichment.option_comparison[].outcome.mean` (nested staging
+ * shape) or the flat `outcome_mean`. RAW float — banded downstream into an
+ * `outcome_band` phrase (shared influence-band vocabulary), never surfaced
+ * as a number.
+ *
+ * Derived from the enrichment (NOT from `OptionSummary.outcome_mean`)
+ * deliberately: the compact summary DEFAULTS missing outcome means to 0, so
+ * a summary-side read cannot distinguish an honest zero from a fabricated
+ * default — banding a fabricated 0 as "roughly neutral" would be a false
+ * claim. Presence in the raw enrichment row is the honesty predicate.
+ */
+export interface OptionOutcomeSignal {
+  readonly option_id: string | null;
+  readonly option_label: string;
+  readonly outcome_mean: number;
+}
+
+/**
  * Optional signal extensions a producer may attach to an
  * `AnalysisResponseSummary` before it reaches the ContextPack assembler.
  */
@@ -76,6 +143,18 @@ export interface AnalysisSummarySignals {
   readonly tipping_points?: readonly TippingPointSignal[];
   readonly evidence_gaps?: readonly EvidenceGapSignal[];
   readonly goal_fit?: GoalFitSignal | null;
+  /** Lane 30 — per-option goal-fit values (see {@link OptionGoalFitSignal}). */
+  readonly option_goal_fits?: readonly OptionGoalFitSignal[];
+  /** Lane 30 fix 3 — per-option modelled-outcome means (see {@link OptionOutcomeSignal}). */
+  readonly option_outcomes?: readonly OptionOutcomeSignal[];
+  /**
+   * Lane 30 fix 3 — top-level ordinal confidence tier (PLoT: derived from
+   * `m1_coaching.readiness`; attested values 'strong' | 'fair' |
+   * 'needs_work', but the enrichment passthrough is untyped so this stays
+   * a string). Already on the compose transport keep-list; rendered as
+   * prose by the display formatter.
+   */
+  readonly confidence_tier?: string | null;
 }
 
 /** The summary shape `projectAnalysis` actually consumes. */
@@ -93,6 +172,21 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function readLabel(entry: Record<string, unknown>): string | null {
   const candidates = [entry.factor_label, entry.label];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim().length > 0) return c;
+  }
+  return null;
+}
+
+/**
+ * Lane 30 (#369 audit P1) — read the structural factor id off a raw
+ * enrichment row. TRUE ids only (`factor_id`/`node_id`/`id`); a label is
+ * never promoted to an id (labels collide — a label-as-id would let a
+ * lever's label suppress an unrelated factor, or fail to suppress the
+ * lever). Null when the row carries none.
+ */
+function readFactorId(entry: Record<string, unknown>): string | null {
+  const candidates = [entry.factor_id, entry.node_id, entry.id];
   for (const c of candidates) {
     if (typeof c === 'string' && c.trim().length > 0) return c;
   }
@@ -146,6 +240,7 @@ export function deriveTippingPointsFromTopLevel(
     const unit = typeof entry.unit === 'string' && entry.unit.length > 0 ? entry.unit : null;
     seen.add(label);
     out.push({
+      factor_id: readFactorId(entry),
       factor_label: label,
       current_value: currentValue,
       flip_value: flipValue,
@@ -185,7 +280,7 @@ export function deriveEvidenceGapsFromEnrichment(
         : null;
     if (voi === null) continue;
     seen.add(label);
-    out.push({ factor_label: label, voi_score: voi });
+    out.push({ factor_id: readFactorId(entry), factor_label: label, voi_score: voi });
     if (out.length >= EVIDENCE_GAP_SIGNAL_CAP) break;
   }
   return out;
@@ -259,4 +354,120 @@ export function deriveGoalFitFromEnrichment(
   }
 
   return null;
+}
+
+/** Read the option identity fields off an `option_comparison[]` entry. */
+function readOptionIdentity(
+  entry: Record<string, unknown>,
+): { id: string | null; label: string | null } {
+  const id =
+    typeof entry.option_id === 'string' && entry.option_id.trim().length > 0
+      ? entry.option_id
+      : typeof entry.id === 'string' && entry.id.trim().length > 0
+        ? entry.id
+        : null;
+  const labelRaw = [entry.option_label, entry.label].find(
+    (c): c is string => typeof c === 'string' && c.trim().length > 0,
+  );
+  return { id, label: labelRaw ?? null };
+}
+
+/**
+ * Lane 30 fix 3 — derive the top-level confidence tier. Non-empty string
+ * only; anything else (absent, blank, non-string) returns null so the
+ * projection omits the field rather than fabricating a tier.
+ */
+export function deriveConfidenceTierFromEnrichment(
+  enrichment: Record<string, unknown>,
+): string | null {
+  const raw = enrichment.confidence_tier;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Lane 30 fix 3 — derive per-option modelled-outcome means from
+ * `enrichment.option_comparison[]`. Reads the nested `outcome.mean` (live
+ * staging shape) or the flat `outcome_mean`; keeps finite numbers only. A
+ * row with NO outcome data is dropped — never defaulted to 0 (see
+ * {@link OptionOutcomeSignal}). Identity, dedupe and cap rules mirror
+ * {@link deriveOptionGoalFitsFromEnrichment}.
+ */
+export function deriveOptionOutcomesFromEnrichment(
+  enrichment: Record<string, unknown>,
+): OptionOutcomeSignal[] {
+  const raw = enrichment.option_comparison;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
+  const out: OptionOutcomeSignal[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const entry = asRecord(item);
+    if (entry === null) continue;
+    const outcomeObj = asRecord(entry.outcome);
+    const mean =
+      typeof entry.outcome_mean === 'number' && Number.isFinite(entry.outcome_mean)
+        ? entry.outcome_mean
+        : outcomeObj !== null &&
+            typeof outcomeObj.mean === 'number' &&
+            Number.isFinite(outcomeObj.mean)
+          ? outcomeObj.mean
+          : null;
+    if (mean === null) continue;
+    const { id, label } = readOptionIdentity(entry);
+    if (id === null && label === null) continue;
+    const dedupeKey = id !== null ? `id:${id}` : `label:${label}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({ option_id: id, option_label: label ?? id!, outcome_mean: mean });
+    if (out.length >= OPTION_OUTCOME_SIGNAL_CAP) break;
+  }
+  return out;
+}
+
+/**
+ * Lane 30 — derive per-option goal-fit signals from
+ * `enrichment.option_comparison[]` (PLoT #204 live shape: entries carry
+ * `probability_of_joint_goal` + `goal_fit_basis`; see the staging capture in
+ * `acceptance-evidence/goal-fit/`). Defensive rules:
+ *
+ *   - `probability_of_joint_goal` must be a finite number in [0,1] —
+ *     anything else drops the row (no false probability is ever projected).
+ *   - a row must carry SOME option identity (`option_id`/`id` or
+ *     `option_label`/`label`); unidentifiable rows are dropped.
+ *   - deduped by id (or label when id is absent), first occurrence wins.
+ *   - capped at {@link OPTION_GOAL_FIT_SIGNAL_CAP}.
+ *
+ * Values stay RAW here (handler-facing carriage); percent-string banding is
+ * the display formatter's job.
+ */
+export function deriveOptionGoalFitsFromEnrichment(
+  enrichment: Record<string, unknown>,
+): OptionGoalFitSignal[] {
+  const raw = enrichment.option_comparison;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
+  const out: OptionGoalFitSignal[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const entry = asRecord(item);
+    if (entry === null) continue;
+    const value = entry.probability_of_joint_goal;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+      continue;
+    }
+    const { id, label } = readOptionIdentity(entry);
+    if (id === null && label === null) continue;
+    const dedupeKey = id !== null ? `id:${id}` : `label:${label}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({
+      option_id: id,
+      option_label: label ?? id!,
+      probability_of_joint_goal: value,
+    });
+    if (out.length >= OPTION_GOAL_FIT_SIGNAL_CAP) break;
+  }
+  return out;
 }

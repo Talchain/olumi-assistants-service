@@ -26,6 +26,7 @@ import type {
   ContextPackAnalysisEvidenceGap,
   ContextPackAnalysisFlipThreshold,
   ContextPackAnalysisFragileEdge,
+  ContextPackAnalysisOption,
 } from '../context/context-pack-assembler.js';
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
@@ -34,6 +35,24 @@ export interface DisplaySafeAnalysisOption {
   readonly label: string;
   /** Integer-percent string, e.g. `"86%"`. Never a raw decimal. */
   readonly win_probability: string;
+  /**
+   * Lane 30 — integer-percent string of the option's goal-fit value (the
+   * modelled probability it MEETS THE USER'S TARGET; PLoT #204
+   * `probability_of_joint_goal`). Deliberately a separate key from
+   * `win_probability`: win% says the option beats the alternatives most
+   * often; target_fit says whether it is likely to meet the target — the
+   * two can diverge sharply (live case: 89% win vs 29% target-fit). Absent
+   * when no goal-fit value was scored for this option; the top-level
+   * `goal_fit` prose then disclosed the absence explicitly.
+   */
+  readonly target_fit?: string;
+  /**
+   * Lane 30 fix 3 — banded modelled-outcome phrase for the option (shared
+   * influence-band vocabulary + sign; near-zero → "roughly neutral"), e.g.
+   * `"weak positive modelled outcome"`. Presentation bands, not science.
+   * Absent when the producer reported no outcome distribution.
+   */
+  readonly outcome_band?: string;
 }
 
 /**
@@ -46,6 +65,10 @@ export interface DisplaySafeRankedOption {
   readonly label: string;
   /** Integer-percent string, e.g. `"72%"`. Never a raw decimal. */
   readonly win_probability: string;
+  /** Lane 30 — see {@link DisplaySafeAnalysisOption.target_fit}. */
+  readonly target_fit?: string;
+  /** Lane 30 fix 3 — see {@link DisplaySafeAnalysisOption.outcome_band}. */
+  readonly outcome_band?: string;
 }
 
 /** Lane 21 — banded tipping-risk entry. `risk` is decision-language prose. */
@@ -64,10 +87,33 @@ export interface DisplaySafeEvidenceGap {
  * Lane 21 — LLM-facing char budget for the serialised (2-space-indented)
  * display-safe analysis projection. The pre-widening projection measured
  * ~603 chars and starved the LLM; breadth-first widening must still stay
- * bounded so the ~21k-char routing prompt keeps its shape. Asserted by
- * the maximal-fixture budget test.
+ * bounded so the ~21k-char routing prompt keeps its shape.
+ *
+ * Lane 30 fix 4 — RUNTIME-ENFORCED (previously test-asserted only): see
+ * {@link enforceDisplayAnalysisBudget}. A live pack with pathological label
+ * lengths now truncates gracefully — keep-priority order, disclosed via
+ * `truncation_note` — instead of silently blowing the prompt budget.
  */
 export const DISPLAY_ANALYSIS_CHAR_BUDGET = 4000;
+
+/**
+ * Lane 30 fix 4 — the order in which sections are DROPPED when the
+ * serialised projection exceeds {@link DISPLAY_ANALYSIS_CHAR_BUDGET}
+ * (lowest keep-priority first). Leader/runner-up, goal-fit prose,
+ * confidence tier, margin, robustness and status are never dropped; the
+ * ranked option list (carrier of per-option goal-fit) is tail-trimmed to a
+ * minimum of two entries before it is dropped wholesale as the last resort.
+ */
+export const DISPLAY_ANALYSIS_TRUNCATION_ORDER = [
+  'value_of_information',
+  'tipping_points',
+  'fragile_edges',
+  'top_drivers',
+  'options',
+] as const;
+
+/** Minimum ranked options retained while tail-trimming under the budget. */
+export const DISPLAY_ANALYSIS_MIN_OPTIONS = 2;
 
 /**
  * Relative-distance thresholds for the tipping-risk band phrases
@@ -107,18 +153,38 @@ export interface DisplaySafeAnalysis {
    * Lane 21 (P0-A) breadth fields. All optional, all omitted (never null /
    * never empty-array) when the raw source is missing or empty:
    *
-   *  - `options`: EVERY option, ranked, integer-percent probability.
+   *  - `options`: EVERY option, ranked, integer-percent probability
+   *    (Lane 30: plus a `target_fit` percent when goal fit was scored).
    *  - `tipping_points`: banded flip-risk phrases (never raw thresholds).
    *  - `fragile_edge_count`: string count behind the capped edge list.
    *  - `value_of_information`: banded VOI per evidence-gap factor
    *    (influence-band vocabulary; near-zero entries dropped).
-   *  - `goal_fit`: prose stating THAT goal fit was scored and its basis.
+   *  - `goal_fit`: Lane 30 — ALWAYS present on a non-null projection.
+   *    Either the win%-vs-target-fit definition + basis caveat (values
+   *    present), a values-missing disclosure (scored, no values), or the
+   *    explicit "target-fit not scored" line. Never silent — a silent gap
+   *    is what let the LLM narrate win% as target-fit (live defect,
+   *    scenario 90385279).
    */
   readonly options?: readonly DisplaySafeRankedOption[];
   readonly tipping_points?: readonly DisplaySafeTippingPoint[];
   readonly fragile_edge_count?: string;
   readonly value_of_information?: readonly DisplaySafeEvidenceGap[];
   readonly goal_fit?: string;
+  /**
+   * Lane 30 fix 3 — analysis confidence prose from the producer's ordinal
+   * tier token (e.g. `'needs_work'` → "analysis confidence needs work").
+   * Omitted when the producer reported no tier.
+   */
+  readonly confidence_tier?: string;
+  /**
+   * Lane 30 fix 4 — DISCLOSED truncation marker. Present ONLY when the
+   * runtime budget guard dropped or trimmed sections to fit
+   * {@link DISPLAY_ANALYSIS_CHAR_BUDGET}; names what was omitted so the
+   * LLM knows the analysis carries more detail than shown (and never
+   * infers "no tipping points exist" from a truncated section).
+   */
+  readonly truncation_note?: string;
 }
 
 /**
@@ -145,8 +211,173 @@ function formatDriver(driver: ContextPackAnalysisDriver): DisplaySafeAnalysisDri
   };
 }
 
-function formatOption(label: string, probability: number): DisplaySafeAnalysisOption {
-  return { label, win_probability: formatProbability(probability, 'display') };
+/** Finite [0,1] check for the raw goal-fit value. */
+function isValidGoalFit(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * Lane 30 fix 3 — band a modelled-outcome mean into decision language using
+ * the SHARED influence-band vocabulary plus sign (presentation bands, not
+ * science — same doctrine as `tippingRiskPhrase`). Near-zero means read as
+ * "roughly neutral" (sign is not meaningful at that scale); non-finite
+ * values return null so the caller omits the field rather than fabricating
+ * a claim.
+ *
+ *   outcomeBandPhrase(0.237)  → "weak positive modelled outcome"
+ *   outcomeBandPhrase(-0.4)   → "moderate negative modelled outcome"
+ *   outcomeBandPhrase(0.01)   → "roughly neutral modelled outcome"
+ */
+export function outcomeBandPhrase(outcomeMean: number): string | null {
+  if (!Number.isFinite(outcomeMean)) return null;
+  const abs = Math.abs(outcomeMean);
+  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'roughly neutral modelled outcome';
+  const band = bandFromMagnitude(abs);
+  const sign = outcomeMean < 0 ? 'negative' : 'positive';
+  return `${band} ${sign} modelled outcome`;
+}
+
+function formatOption(
+  option: Pick<
+    ContextPackAnalysisOption,
+    'label' | 'probability' | 'goal_fit_probability' | 'outcome_mean'
+  >,
+): DisplaySafeAnalysisOption {
+  const outcomeBand =
+    typeof option.outcome_mean === 'number' ? outcomeBandPhrase(option.outcome_mean) : null;
+  return {
+    label: option.label,
+    win_probability: formatProbability(option.probability, 'display'),
+    // Lane 30 — target-fit percent string, only when the raw value is a
+    // valid probability (an out-of-range value is dropped, never rendered
+    // as a false percent).
+    ...(isValidGoalFit(option.goal_fit_probability)
+      ? { target_fit: formatProbability(option.goal_fit_probability, 'display') }
+      : {}),
+    // Lane 30 fix 3 — banded modelled outcome (never the raw mean).
+    ...(outcomeBand !== null ? { outcome_band: outcomeBand } : {}),
+  };
+}
+
+/**
+ * Lane 30 fix 3 — confidence-tier prose. Known ordinal tokens (the PLoT
+ * producer emits 'strong' | 'fair' | 'needs_work', derived from
+ * `m1_coaching.readiness`) map to fixed phrases; unknown tokens are
+ * humanised (underscores → spaces) behind a stable prefix rather than
+ * echoed raw — same doctrine as the goal-fit basis phrases.
+ */
+const CONFIDENCE_TIER_PHRASES: Readonly<Record<string, string>> = {
+  strong: 'analysis confidence is strong',
+  fair: 'analysis confidence is fair',
+  needs_work: 'analysis confidence needs work',
+};
+
+export function confidenceTierPhrase(tier: string): string {
+  return (
+    CONFIDENCE_TIER_PHRASES[tier] ?? `analysis confidence: ${tier.replace(/_/g, ' ')}`
+  );
+}
+
+/** Writable view of the projection while it is being assembled/truncated. */
+type MutableDisplaySafeAnalysis = {
+  -readonly [K in keyof DisplaySafeAnalysis]: DisplaySafeAnalysis[K];
+};
+
+/** Serialised size in the SAME form the budget contract measures
+ *  (2-space-indented JSON — the shape `buildUserMessage` embeds). */
+function serialisedLength(out: MutableDisplaySafeAnalysis): number {
+  return JSON.stringify(out, null, 2).length;
+}
+
+/**
+ * Lane 30 fix 4 — runtime enforcement of {@link DISPLAY_ANALYSIS_CHAR_BUDGET}.
+ *
+ * Graceful priority truncation: sections are dropped lowest-keep-priority
+ * first ({@link DISPLAY_ANALYSIS_TRUNCATION_ORDER} — flip/VOI, then fragile
+ * edges, then sensitivities), then the ranked option list is tail-trimmed
+ * (lowest-ranked first, keeping at least
+ * {@link DISPLAY_ANALYSIS_MIN_OPTIONS}) and dropped wholesale only as the
+ * last resort. `status`, the leading pair, `margin`, `robustness_band`,
+ * `goal_fit` and `confidence_tier` are never dropped — goal-fit truthfulness
+ * (this lane's live defect) outranks breadth.
+ *
+ * Every drop/trim is DISCLOSED via `truncation_note` (recomputed before each
+ * measurement so the note's own length is inside the budget arithmetic). If
+ * the projection still exceeds the budget after every drop (pathological
+ * never-dropped labels), the note stays as evidence — nothing is silently
+ * sliced mid-string.
+ */
+function enforceDisplayAnalysisBudget(out: MutableDisplaySafeAnalysis): void {
+  if (serialisedLength(out) <= DISPLAY_ANALYSIS_CHAR_BUDGET) return;
+
+  const omitted: string[] = [];
+  const setNote = (): void => {
+    out.truncation_note =
+      'analysis detail truncated to fit the context budget — omitted: ' +
+      omitted.join(', ') +
+      '; the analysis contains more detail than shown here';
+  };
+
+  const drops: ReadonlyArray<{ name: string; present: () => boolean; drop: () => void }> = [
+    {
+      name: 'value_of_information',
+      present: () => out.value_of_information !== undefined,
+      drop: () => {
+        delete out.value_of_information;
+      },
+    },
+    {
+      name: 'tipping_points',
+      present: () => out.tipping_points !== undefined,
+      drop: () => {
+        delete out.tipping_points;
+      },
+    },
+    {
+      name: 'fragile_edges',
+      present: () => out.fragile_edges !== undefined || out.fragile_edge_count !== undefined,
+      drop: () => {
+        delete out.fragile_edges;
+        delete out.fragile_edge_count;
+      },
+    },
+    {
+      name: 'top_drivers',
+      present: () => out.top_drivers !== undefined,
+      drop: () => {
+        delete out.top_drivers;
+      },
+    },
+  ];
+
+  for (const section of drops) {
+    if (!section.present()) continue;
+    section.drop();
+    omitted.push(section.name);
+    setNote();
+    if (serialisedLength(out) <= DISPLAY_ANALYSIS_CHAR_BUDGET) return;
+  }
+
+  // Tail-trim the ranked option list (lowest-ranked first) before dropping
+  // it wholesale — it carries the per-option goal-fit values this lane
+  // exists to surface.
+  if (out.options !== undefined && out.options.length > DISPLAY_ANALYSIS_MIN_OPTIONS) {
+    omitted.push('lower-ranked options');
+    while (out.options.length > DISPLAY_ANALYSIS_MIN_OPTIONS) {
+      out.options = out.options.slice(0, -1);
+      setNote();
+      if (serialisedLength(out) <= DISPLAY_ANALYSIS_CHAR_BUDGET) return;
+    }
+  }
+  if (out.options !== undefined) {
+    delete out.options;
+    const trimIndex = omitted.indexOf('lower-ranked options');
+    if (trimIndex !== -1) omitted.splice(trimIndex, 1);
+    omitted.push('options');
+    setNote();
+  }
+  // Still over budget → never-dropped sections carry pathological labels.
+  // The note remains as disclosure; nothing is sliced mid-string.
 }
 
 /**
@@ -215,6 +446,37 @@ const GOAL_FIT_BASIS_PHRASES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Lane 30 — the definition sentence rendered ONCE (never per option) when
+ * per-option `target_fit` values are present. It binds the two percent
+ * vocabularies apart so the LLM cannot conflate them: `win_probability`
+ * = "wins most often" (beats the alternatives), `target_fit` = "meets your
+ * target" (the modelled probability of goal attainment). The live defect
+ * (scenario 90385279) was exactly this conflation — an 89% win probability
+ * narrated as target attainment when the scored target-fit was 29.3%.
+ */
+export const TARGET_FIT_DEFINITION =
+  'each option\'s target_fit is the modelled probability it meets your target; ' +
+  'win_probability only says how often the option beats the alternatives — ' +
+  'an option can win most often yet still be unlikely to meet the target';
+
+/**
+ * Lane 30 — the DISCLOSED-absence line. Rendered whenever an analysis is
+ * present but nothing attests goal-fit scoring, so the LLM can never fill a
+ * silent gap with win probabilities.
+ */
+export const GOAL_FIT_NOT_SCORED_LINE =
+  'target-fit not scored: no goal-fit values are available for this analysis — ' +
+  'win probabilities show how often each option leads, not whether it meets your target';
+
+/**
+ * Lane 30 — rendered when provenance attests scoring but no per-option
+ * values arrived (appended to the basis phrase).
+ */
+export const GOAL_FIT_VALUES_MISSING_SUFFIX =
+  '; per-option target-fit values are not available for this run — ' +
+  'win probabilities do not measure target-fit';
+
+/**
  * Lane 21 — goal-fit provenance prose (PLoT #204). States THAT goal fit was
  * scored and its basis; never values. Unknown basis tokens are humanised
  * (underscores → spaces) rather than echoed raw.
@@ -263,28 +525,15 @@ export function formatAnalysisForContext(
 ): DisplaySafeAnalysis | null {
   if (raw === null) return null;
 
-  const out: {
-    status: string;
-    leading_option?: DisplaySafeAnalysisOption;
-    runner_up?: DisplaySafeAnalysisOption;
-    margin?: string;
-    robustness_band?: string;
-    top_drivers?: readonly DisplaySafeAnalysisDriver[];
-    fragile_edges?: readonly DisplaySafeFragileEdge[];
-    options?: readonly DisplaySafeRankedOption[];
-    tipping_points?: readonly DisplaySafeTippingPoint[];
-    fragile_edge_count?: string;
-    value_of_information?: readonly DisplaySafeEvidenceGap[];
-    goal_fit?: string;
-  } = {
+  const out: MutableDisplaySafeAnalysis = {
     status: raw.status,
   };
 
   if (raw.leading_option) {
-    out.leading_option = formatOption(raw.leading_option.label, raw.leading_option.probability);
+    out.leading_option = formatOption(raw.leading_option);
   }
   if (raw.runner_up) {
-    out.runner_up = formatOption(raw.runner_up.label, raw.runner_up.probability);
+    out.runner_up = formatOption(raw.runner_up);
   }
 
   // margin_pp arrives upstream pre-scaled to percentage points
@@ -322,13 +571,14 @@ export function formatAnalysisForContext(
 
   // Full ranked option list. The raw projection arrives sorted by win
   // probability descending and bounded (MAX_PROJECTED_OPTIONS); rank is a
-  // string so no raw number ever enters the display projection.
+  // string so no raw number ever enters the display projection. Lane 30:
+  // each entry carries its `target_fit` percent when the raw option carries
+  // a valid goal-fit value.
   const rawOptions = raw.options ?? [];
   if (rawOptions.length > 0) {
     out.options = rawOptions.map((o, i) => ({
       rank: String(i + 1),
-      label: o.label,
-      win_probability: formatProbability(o.probability, 'display'),
+      ...formatOption(o),
     }));
   }
 
@@ -360,13 +610,35 @@ export function formatAnalysisForContext(
     out.value_of_information = gaps;
   }
 
-  // Goal-fit provenance prose (fact + basis, never values).
-  if (raw.goal_fit) {
-    const phrase = goalFitPhrase(raw.goal_fit);
-    if (phrase !== null) {
-      out.goal_fit = phrase;
-    }
+  // Lane 30 — goal-fit prose. Three DISCLOSED states (never silent, so the
+  // LLM can never fill a target-fit gap with win probabilities):
+  //   1. per-option target_fit values present → the definition sentence
+  //      (win% vs target-fit, stated once) + the basis caveat when known;
+  //   2. provenance attests scoring but no per-option values arrived → the
+  //      basis phrase + an explicit values-missing disclosure;
+  //   3. nothing attests scoring → the explicit "target-fit not scored"
+  //      line.
+  const hasPerOptionGoalFit = [raw.leading_option, raw.runner_up, ...(raw.options ?? [])].some(
+    (o) => o != null && isValidGoalFit(o.goal_fit_probability),
+  );
+  const basisPhrase = raw.goal_fit ? goalFitPhrase(raw.goal_fit) : null;
+  if (hasPerOptionGoalFit) {
+    out.goal_fit =
+      basisPhrase !== null ? `${TARGET_FIT_DEFINITION}; ${basisPhrase}` : TARGET_FIT_DEFINITION;
+  } else if (basisPhrase !== null) {
+    out.goal_fit = `${basisPhrase}${GOAL_FIT_VALUES_MISSING_SUFFIX}`;
+  } else {
+    out.goal_fit = GOAL_FIT_NOT_SCORED_LINE;
   }
+
+  // Lane 30 fix 3 — confidence-tier prose (ordinal token → phrase). Omitted
+  // when the producer reported no tier (no fabricated confidence claim).
+  if (typeof raw.confidence_tier === 'string' && raw.confidence_tier.trim().length > 0) {
+    out.confidence_tier = confidenceTierPhrase(raw.confidence_tier.trim());
+  }
+
+  // Lane 30 fix 4 — runtime char-budget guard (graceful, disclosed).
+  enforceDisplayAnalysisBudget(out);
 
   return out;
 }

@@ -237,3 +237,234 @@ describe('ContextPack analysis projection breadth (Lane 21)', () => {
     expect(parsed.success).toBe(true);
   });
 });
+
+// Lane 30 (#369 audit P1) — lever suppression must cover ALL projection
+// sections. top_drivers + fragile_edges already filtered by the
+// intervention-controlled set; flip_thresholds (section 5) and
+// evidence_gaps (section 7) did NOT — an option-controlled lever excluded
+// from the driver list could still surface as a tipping point or an
+// evidence gap ("gather data on X to reduce uncertainty" → implies the
+// user can tune X). These tests pin the closed bypass.
+describe('ContextPack tipping/VOI lever suppression (Lane 30, #369 audit P1)', () => {
+  const CONTROLLED = new Set(['fac_lever']);
+
+  const TIPPING_SIGNALS = [
+    { factor_id: 'fac_lever', factor_label: 'Factory Capacity', current_value: 10, flip_value: 8, unit: null, no_flip_within_bounds: false },
+    { factor_id: 'fac_market', factor_label: 'Market Demand', current_value: 5, flip_value: 7, unit: null, no_flip_within_bounds: false },
+  ];
+  const EVIDENCE_GAPS = [
+    { factor_id: 'fac_lever', factor_label: 'Factory Capacity', voi_score: 0.9 },
+    { factor_id: 'fac_market', factor_label: 'Market Demand', voi_score: 0.4 },
+  ];
+
+  it('excludes an option-controlled lever from flip_thresholds (signals path)', () => {
+    const pack = assemble(
+      makeSummary({ tipping_points: TIPPING_SIGNALS }),
+      { interventionControlledFactorIds: CONTROLLED },
+    );
+    expect(pack.analysis?.flip_thresholds?.map((t) => t.factor_label)).toEqual([
+      'Market Demand',
+    ]);
+  });
+
+  it('excludes an option-controlled lever from the per-option flip fallback path', () => {
+    const pack = assemble(
+      makeSummary({
+        flip_thresholds: [
+          { factor_id: 'fac_lever', factor_label: 'Factory Capacity', current_value: 10, flip_value: 8, unit: null },
+          { factor_id: 'fac_market', factor_label: 'Market Demand', current_value: 5, flip_value: 7, unit: null },
+        ],
+      }),
+      { interventionControlledFactorIds: CONTROLLED },
+    );
+    expect(pack.analysis?.flip_thresholds?.map((t) => t.factor_label)).toEqual([
+      'Market Demand',
+    ]);
+  });
+
+  it('excludes an option-controlled lever from evidence_gaps (VOI)', () => {
+    const pack = assemble(
+      makeSummary({ evidence_gaps: EVIDENCE_GAPS }),
+      { interventionControlledFactorIds: CONTROLLED },
+    );
+    expect(pack.analysis?.evidence_gaps).toEqual([
+      { factor_label: 'Market Demand', voi_score: 0.4 },
+    ]);
+  });
+
+  it('fails closed: an entry with no resolvable factor_id is dropped when levers exist', () => {
+    const pack = assemble(
+      makeSummary({
+        tipping_points: [
+          { factor_id: null, factor_label: 'Unidentified Factor', current_value: 1, flip_value: 2, unit: null, no_flip_within_bounds: false },
+        ],
+        evidence_gaps: [{ factor_label: 'Unidentified Gap', voi_score: 0.5 }],
+      }),
+      { interventionControlledFactorIds: CONTROLLED },
+    );
+    expect(pack.analysis?.flip_thresholds).toEqual([]);
+    expect(pack.analysis?.evidence_gaps).toEqual([]);
+  });
+
+  it('does not suppress by label — structural factor_id is the only authority', () => {
+    const pack = assemble(
+      makeSummary({
+        tipping_points: [
+          // Same label as a lever, DIFFERENT id → must survive.
+          { factor_id: 'fac_lookalike', factor_label: 'Factory Capacity', current_value: 10, flip_value: 8, unit: null, no_flip_within_bounds: false },
+        ],
+      }),
+      { interventionControlledFactorIds: CONTROLLED },
+    );
+    expect(pack.analysis?.flip_thresholds?.map((t) => t.factor_label)).toEqual([
+      'Factory Capacity',
+    ]);
+  });
+
+  it('is a no-op when no controlled set is supplied (id-less entries still project)', () => {
+    const pack = assemble(
+      makeSummary({ tipping_points: TIPPING_SIGNALS, evidence_gaps: EVIDENCE_GAPS }),
+    );
+    expect(pack.analysis?.flip_thresholds).toHaveLength(2);
+    expect(pack.analysis?.evidence_gaps).toHaveLength(2);
+  });
+
+  it('projected entries still carry NO factor_id (internal match key only)', () => {
+    const pack = assemble(
+      makeSummary({ tipping_points: TIPPING_SIGNALS, evidence_gaps: EVIDENCE_GAPS }),
+      { interventionControlledFactorIds: CONTROLLED },
+    );
+    for (const entry of pack.analysis?.flip_thresholds ?? []) {
+      expect(entry).not.toHaveProperty('factor_id');
+    }
+    for (const entry of pack.analysis?.evidence_gaps ?? []) {
+      expect(entry).not.toHaveProperty('factor_id');
+    }
+    const parsed = ContextPackSchema.safeParse(pack);
+    expect(parsed.success).toBe(true);
+  });
+});
+
+// Lane 30 — per-option goal-fit carriage (raw projection). The display-safe
+// rendering (percent strings, target-fit prose) is covered in
+// `../../format/__tests__/format-analysis-for-context.test.ts`; these tests
+// pin the raw value carriage + option-identity matching.
+describe('ContextPack per-option goal-fit (Lane 30)', () => {
+  const GOAL_FITS = [
+    { option_id: 'opt-a', option_label: 'Hire locally', probability_of_joint_goal: 0.293 },
+    { option_id: 'opt-c', option_label: 'Status quo', probability_of_joint_goal: 0.61 },
+  ];
+
+  it('attaches goal_fit_probability to matching options by structural option_id', () => {
+    const pack = assemble(makeSummary({ option_goal_fits: GOAL_FITS }));
+    expect(pack.analysis?.options).toEqual([
+      { label: 'Hire locally', probability: 0.72, goal_fit_probability: 0.293 },
+      { label: 'Status quo', probability: 0.22, goal_fit_probability: 0.61 },
+      { label: 'Offshore partner', probability: 0.05 },
+      { label: 'Tiered pricing', probability: 0.01 },
+    ]);
+    expect(pack.analysis?.leading_option).toEqual({
+      label: 'Hire locally',
+      probability: 0.72,
+      goal_fit_probability: 0.293,
+    });
+    expect(pack.analysis?.runner_up).toEqual({
+      label: 'Status quo',
+      probability: 0.22,
+      goal_fit_probability: 0.61,
+    });
+  });
+
+  it('matches by option_id even when the option was relabelled from the current graph', () => {
+    // buildAnalysisFromPriorFacts relabels options from the CURRENT graph by
+    // id; the enrichment-derived signal keeps the enrichment label. Identity
+    // must therefore be structural (id), not label equality.
+    const pack = assemble(
+      makeSummary({
+        option_goal_fits: [
+          { option_id: 'opt-a', option_label: 'Old Enrichment Label', probability_of_joint_goal: 0.293 },
+        ],
+      }),
+    );
+    expect(pack.analysis?.options?.[0]).toEqual({
+      label: 'Hire locally',
+      probability: 0.72,
+      goal_fit_probability: 0.293,
+    });
+  });
+
+  it('falls back to label matching only when the signal carries no option_id', () => {
+    const pack = assemble(
+      makeSummary({
+        option_goal_fits: [
+          { option_id: null, option_label: 'Status quo', probability_of_joint_goal: 0.4 },
+        ],
+      }),
+    );
+    const statusQuo = pack.analysis?.options?.find((o) => o.label === 'Status quo');
+    expect(statusQuo).toEqual({ label: 'Status quo', probability: 0.22, goal_fit_probability: 0.4 });
+  });
+
+  it('drops an out-of-range goal-fit value rather than projecting a false probability', () => {
+    const pack = assemble(
+      makeSummary({
+        option_goal_fits: [
+          { option_id: 'opt-a', option_label: 'Hire locally', probability_of_joint_goal: 42 },
+        ],
+      }),
+    );
+    expect(pack.analysis?.options?.[0]).toEqual({ label: 'Hire locally', probability: 0.72 });
+  });
+
+  it('validates against the strict ContextPack schema with goal-fit values attached', () => {
+    const pack = assemble(makeSummary({ option_goal_fits: GOAL_FITS }));
+    const parsed = ContextPackSchema.safeParse(pack);
+    expect(parsed.success).toBe(true);
+  });
+});
+
+// Lane 30 fix 3 — confidence tier + per-option outcome carriage (raw).
+describe('ContextPack confidence tier + option outcomes (Lane 30)', () => {
+  it('passes the confidence_tier ordinal token through, null when absent', () => {
+    const withTier = assemble(makeSummary({ confidence_tier: 'needs_work' }));
+    expect(withTier.analysis?.confidence_tier).toBe('needs_work');
+
+    const without = assemble(makeSummary());
+    expect(without.analysis?.confidence_tier).toBeNull();
+  });
+
+  it('attaches outcome_mean to matching options by structural option_id', () => {
+    const pack = assemble(
+      makeSummary({
+        option_outcomes: [
+          { option_id: 'opt-a', option_label: 'Hire locally', outcome_mean: 0.237 },
+          { option_id: 'opt-c', option_label: 'Status quo', outcome_mean: -0.0996 },
+        ],
+      }),
+    );
+    expect(pack.analysis?.options).toEqual([
+      { label: 'Hire locally', probability: 0.72, outcome_mean: 0.237 },
+      { label: 'Status quo', probability: 0.22, outcome_mean: -0.0996 },
+      { label: 'Offshore partner', probability: 0.05 },
+      { label: 'Tiered pricing', probability: 0.01 },
+    ]);
+    expect(pack.analysis?.leading_option).toEqual({
+      label: 'Hire locally',
+      probability: 0.72,
+      outcome_mean: 0.237,
+    });
+  });
+
+  it('validates against the strict ContextPack schema with tier + outcomes attached', () => {
+    const pack = assemble(
+      makeSummary({
+        confidence_tier: 'fair',
+        option_outcomes: [
+          { option_id: 'opt-a', option_label: 'Hire locally', outcome_mean: 0.237 },
+        ],
+      }),
+    );
+    const parsed = ContextPackSchema.safeParse(pack);
+    expect(parsed.success).toBe(true);
+  });
+});

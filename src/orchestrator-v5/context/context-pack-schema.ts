@@ -106,6 +106,18 @@ const ContextPackAnalysisOptionSchema = z
   .object({
     label: z.string(),
     probability: z.number().min(0).max(1),
+    /**
+     * Lane 30 — the option's goal-fit value (modelled probability the option
+     * meets the user's target; PLoT #204 `probability_of_joint_goal`).
+     * Optional: absent when the producer scored no goal fit for the option.
+     */
+    goal_fit_probability: z.number().min(0).max(1).optional(),
+    /**
+     * Lane 30 fix 3 — the option's modelled-outcome mean (raw float, banded
+     * by the display formatter). Absent when the producer reported no
+     * outcome distribution for the option.
+     */
+    outcome_mean: z.number().finite().optional(),
   })
   .strict();
 
@@ -180,6 +192,13 @@ const ContextPackAnalysisSchema = z
       .readonly()
       .optional(),
     goal_fit: ContextPackAnalysisGoalFitSchema.nullable().optional(),
+    /**
+     * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
+     * 'strong' | 'fair' | 'needs_work'; kept as a string because the
+     * enrichment passthrough is untyped). Null when the producer reported
+     * none; optional so the chip-click narrow projection stays valid.
+     */
+    confidence_tier: z.string().nullable().optional(),
   })
   .strict();
 

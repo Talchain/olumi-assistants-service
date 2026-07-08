@@ -45,6 +45,8 @@ import {
 } from '../format/format-analysis-for-context.js';
 import type {
   AnalysisResponseSummaryWithSignals,
+  OptionGoalFitSignal,
+  OptionOutcomeSignal,
   TippingPointSignal,
 } from './analysis-signals.js';
 import {
@@ -103,6 +105,26 @@ export interface ContextPackGraph {
 export interface ContextPackAnalysisOption {
   readonly label: string;
   readonly probability: number;
+  /**
+   * Lane 30 — this option's goal-fit value: the modelled probability the
+   * option meets the user's target(s), sourced from the per-option
+   * `enrichment.option_comparison[].probability_of_joint_goal` (PLoT #204)
+   * via the `option_goal_fits` signal. RAW [0,1] float — handler-facing
+   * only; the display formatter renders it as an integer-percent
+   * `target_fit` string, clearly distinguished from `win_probability`.
+   * Absent when the producer scored no goal fit for this option.
+   */
+  readonly goal_fit_probability?: number;
+  /**
+   * Lane 30 fix 3 — this option's modelled-outcome mean, sourced from the
+   * per-option `enrichment.option_comparison[].outcome.mean` via the
+   * `option_outcomes` signal (NEVER from `OptionSummary.outcome_mean`,
+   * whose upstream default of 0 cannot be distinguished from an honest
+   * zero). RAW float — the display formatter bands it (`outcome_band`)
+   * with the shared influence-band vocabulary. Absent when the producer
+   * reported no outcome distribution for this option.
+   */
+  readonly outcome_mean?: number;
 }
 
 export interface ContextPackAnalysisDriver {
@@ -182,6 +204,13 @@ export interface ContextPackAnalysis {
   readonly fragile_edge_count?: number;
   readonly evidence_gaps?: readonly ContextPackAnalysisEvidenceGap[];
   readonly goal_fit?: ContextPackAnalysisGoalFit | null;
+  /**
+   * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
+   * 'strong' | 'fair' | 'needs_work'; kept as a string because the
+   * enrichment passthrough is untyped). Null when the producer reported
+   * none. Rendered as prose by the display formatter.
+   */
+  readonly confidence_tier?: string | null;
   // V5 state-trust: `staleness_reason` removed from the prompt-visible
   // analysis section — freshness is now a deterministic verdict on the
   // wire (`analysis_ready.freshness`) and a telemetry signal
@@ -845,6 +874,72 @@ export function filterLeverSourcedFragileEdges<E extends { from_id?: string; fro
 }
 
 /**
+ * Lane 30 (#369 audit P1) — factor-keyed lever suppression for the tipping
+ * (`flip_thresholds`, section 5) and evidence-gap (`evidence_gaps`, section
+ * 7) projections. Before this lane, `projectAnalysis` filtered top_drivers
+ * and fragile_edges by the intervention-controlled set but NOT these two
+ * sections — an option-controlled lever excluded from the driver list could
+ * still surface as a tipping point ("a small decrease in X could flip the
+ * result") or an evidence gap ("gather data on X"), both of which imply the
+ * user can independently tune / validate the lever. Same doctrine as
+ * {@link filterLeverSourcedFragileEdges}:
+ *
+ *   - authority is STRUCTURAL `factor_id` membership ONLY — never the label
+ *     (labels collide; #308);
+ *   - FAIL-CLOSED: when any lever exists, an entry with no resolvable
+ *     `factor_id` cannot be proven non-lever and is dropped;
+ *   - empty / absent controlled set ⇒ no-op (fail-safe);
+ *   - producer values are never mutated — a suppressed entry is simply not
+ *     surfaced.
+ *
+ * A fired suppression is logged under the EXISTING
+ * `v5.intervention_controlled_driver_suppressed` event (frozen telemetry
+ * registry — no new event names) with a section-specific `source`.
+ */
+export function filterLeverControlledFactorEntries<
+  E extends { factor_id?: string | null; factor_label: string },
+>(
+  entries: readonly E[],
+  controlledFactorIds: ReadonlySet<string> | undefined,
+  source: string,
+): E[] {
+  if (controlledFactorIds === undefined || controlledFactorIds.size === 0) {
+    return entries.slice();
+  }
+  const kept: E[] = [];
+  const suppressedIds: string[] = [];
+  for (const entry of entries) {
+    const id = typeof entry.factor_id === 'string' ? entry.factor_id.trim() : '';
+    if (id.length === 0) {
+      // Fail-closed: unattributable entry while levers exist.
+      suppressedIds.push('<no_factor_id>');
+      continue;
+    }
+    if (controlledFactorIds.has(id)) {
+      suppressedIds.push(id);
+      continue;
+    }
+    kept.push(entry);
+  }
+  if (suppressedIds.length > 0) {
+    // EVIDENCE THE PRODUCER FIX (Science/PLoT Lane A1) IS STILL REQUIRED —
+    // never a sign it is closed. factor_ids are internal identifiers (not
+    // user-facing prose), safe to log.
+    log.warn(
+      {
+        event: 'v5.intervention_controlled_driver_suppressed',
+        source,
+        suppressed_count: suppressedIds.length,
+        suppressed_factor_ids: suppressedIds,
+        producer_fix_required: true,
+      },
+      'V5 Lane 30: suppressed option-controlled lever from analysis projection (producer fix still required)',
+    );
+  }
+  return kept;
+}
+
+/**
  * Project `DriverSummary[]` into the display-safe ContextPack driver shape —
  * the single rule shared by `projectAnalysis` (routed path) and the chip-click
  * dispatch so the two sign-reattachment sites cannot drift:
@@ -924,6 +1019,83 @@ function tippingFromSignal(entry: TippingPointSignal): ContextPackAnalysisFlipTh
   };
 }
 
+/** Finite [0,1] check for goal-fit values (no telemetry — the derivation
+ *  already guards; this is defence for hand-built signal inputs). */
+function isValidGoalFitProbability(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * Lane 30 — option-identity-keyed lookup over a per-option signal array.
+ * Match authority: STRUCTURAL `option_id` first (labels are not identity —
+ * the fallback path relabels options from the current graph); label matching
+ * ONLY for signals that carried no id at all.
+ */
+function buildOptionSignalLookup<S extends { option_id: string | null; option_label: string }>(
+  signals: readonly S[] | undefined,
+  readValue: (signal: S) => number,
+  isValid: (value: unknown) => value is number,
+): (option: OptionSummary) => number | undefined {
+  const byId = new Map<string, number>();
+  const byLabelIdless = new Map<string, number>();
+  for (const s of signals ?? []) {
+    const value = readValue(s);
+    if (!isValid(value)) continue;
+    if (typeof s.option_id === 'string' && s.option_id.trim().length > 0) {
+      if (!byId.has(s.option_id)) byId.set(s.option_id, value);
+    } else if (typeof s.option_label === 'string' && s.option_label.trim().length > 0) {
+      if (!byLabelIdless.has(s.option_label)) byLabelIdless.set(s.option_label, value);
+    }
+  }
+  return (option: OptionSummary): number | undefined => {
+    const viaId = byId.get(option.option_id);
+    if (viaId !== undefined) return viaId;
+    return byLabelIdless.get(option.option_label);
+  };
+}
+
+/**
+ * Lane 30 — per-option goal-fit resolver: the option's own
+ * `probability_of_goal` wins when a producer path populates it (that field
+ * is only ever set from real data, never defaulted), then the
+ * `option_goal_fits` signal lookup. Returns undefined when no valid value
+ * resolves — the projected option then omits `goal_fit_probability` and the
+ * display formatter renders the explicit "target-fit not scored" disclosure
+ * instead.
+ */
+function buildGoalFitResolver(
+  signals: readonly OptionGoalFitSignal[] | undefined,
+): (option: OptionSummary) => number | undefined {
+  const lookup = buildOptionSignalLookup(
+    signals,
+    (s) => s.probability_of_joint_goal,
+    isValidGoalFitProbability,
+  );
+  return (option: OptionSummary): number | undefined => {
+    if (isValidGoalFitProbability(option.probability_of_goal)) {
+      return option.probability_of_goal;
+    }
+    return lookup(option);
+  };
+}
+
+/** Finite check for outcome means (any sign, any magnitude). */
+function isFiniteOutcomeMean(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Lane 30 fix 3 — per-option outcome-mean resolver. SIGNALS ONLY: the
+ * `OptionSummary.outcome_mean` field is deliberately never read because its
+ * upstream default of 0 is indistinguishable from an honest zero (banding a
+ * fabricated 0 as "roughly neutral" would be a false claim).
+ */
+function buildOutcomeResolver(
+  signals: readonly OptionOutcomeSignal[] | undefined,
+): (option: OptionSummary) => number | undefined {
+  return buildOptionSignalLookup(signals, (s) => s.outcome_mean, isFiniteOutcomeMean);
+}
+
 function projectAnalysis(
   analysis: AnalysisResponseSummaryWithSignals | null,
   stalenessReason: string | null,
@@ -947,11 +1119,27 @@ function projectAnalysis(
   const leadingSrc = validOptions[0];
   const runnerUpSrc = validOptions[1];
 
+  // Lane 30 — per-option goal-fit + outcome carriage. Resolvers shared by
+  // the leading pair and the full option list so the same option can never
+  // show a value in one slot and not the other.
+  const goalFitFor = buildGoalFitResolver(analysis.option_goal_fits);
+  const outcomeFor = buildOutcomeResolver(analysis.option_outcomes);
+  const projectOption = (o: OptionSummary): ContextPackAnalysisOption => {
+    const goalFit = goalFitFor(o);
+    const outcomeMean = outcomeFor(o);
+    return {
+      label: o.option_label,
+      probability: o.win_probability,
+      ...(goalFit !== undefined ? { goal_fit_probability: goalFit } : {}),
+      ...(outcomeMean !== undefined ? { outcome_mean: outcomeMean } : {}),
+    };
+  };
+
   const leading: ContextPackAnalysisOption | null = leadingSrc
-    ? { label: leadingSrc.option_label, probability: leadingSrc.win_probability }
+    ? projectOption(leadingSrc)
     : null;
   const runnerUp: ContextPackAnalysisOption | null = runnerUpSrc
-    ? { label: runnerUpSrc.option_label, probability: runnerUpSrc.win_probability }
+    ? projectOption(runnerUpSrc)
     : null;
 
   // margin_pp is pre-computed upstream in compactAnalysis — passthrough.
@@ -980,19 +1168,31 @@ function projectAnalysis(
       : null;
 
   // 4. Lane 21 breadth: every valid option (F.6 passthrough — filter + sort
-  //    only, values untouched), bounded by MAX_PROJECTED_OPTIONS.
+  //    only, values untouched), bounded by MAX_PROJECTED_OPTIONS. Lane 30:
+  //    each entry additionally carries its goal-fit value when one resolves.
   const allOptions: ContextPackAnalysisOption[] = validOptions
     .slice(0, MAX_PROJECTED_OPTIONS)
-    .map((o) => ({ label: o.option_label, probability: o.win_probability }));
+    .map(projectOption);
 
   // 5. Lane 21 tipping points: prefer the attached top-level staging signals
   //    (see analysis-signals.ts — the per-option derivation is structurally
   //    empty on staging); fall back to the per-option summary.flip_thresholds.
+  //    Lane 30 (#369 audit P1): BOTH sources are filtered by the
+  //    intervention-controlled set BEFORE factor_id is stripped — an
+  //    option-controlled lever must not surface as a tipping point.
   const tippingSignals = analysis.tipping_points ?? [];
   const flipThresholds: ContextPackAnalysisFlipThreshold[] =
     tippingSignals.length > 0
-      ? tippingSignals.map(tippingFromSignal)
-      : (analysis.flip_thresholds ?? []).map(tippingFromFlipThreshold);
+      ? filterLeverControlledFactorEntries(
+          tippingSignals,
+          controlledFactorIds,
+          'projectAnalysis.flip_thresholds',
+        ).map(tippingFromSignal)
+      : filterLeverControlledFactorEntries(
+          analysis.flip_thresholds ?? [],
+          controlledFactorIds,
+          'projectAnalysis.flip_thresholds',
+        ).map(tippingFromFlipThreshold);
 
   // 6. P0b-1: drop lever-SOURCED fragile edges before they reach the prose /
   //    validation surfaces (explain_results, explanation-fallback, advice gate —
@@ -1016,13 +1216,28 @@ function projectAnalysis(
         filteredFragile.length,
       );
 
-  // 7. Lane 21 signal passthrough — raw values; banding is the formatter's job.
-  const evidenceGaps: ContextPackAnalysisEvidenceGap[] = (analysis.evidence_gaps ?? [])
-    .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
-    .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
+  // 7. Lane 21 signal passthrough — raw values; banding is the formatter's
+  //    job. Lane 30 (#369 audit P1): filtered by the intervention-controlled
+  //    set BEFORE factor_id is stripped — a lever must not surface as an
+  //    evidence gap the user is invited to gather data on.
+  const evidenceGaps: ContextPackAnalysisEvidenceGap[] =
+    filterLeverControlledFactorEntries(
+      analysis.evidence_gaps ?? [],
+      controlledFactorIds,
+      'projectAnalysis.evidence_gaps',
+    )
+      .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
+      .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
   const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit
     ? { scored: analysis.goal_fit.scored, basis: analysis.goal_fit.basis }
     : null;
+
+  // Lane 30 fix 3 — ordinal confidence tier passthrough (string token; the
+  // formatter renders prose). Null when the producer reported none.
+  const confidenceTier =
+    typeof analysis.confidence_tier === 'string' && analysis.confidence_tier.trim().length > 0
+      ? analysis.confidence_tier
+      : null;
 
   // stalenessReason is intentionally not threaded into the projection —
   // V5 state-trust removed it from the prompt-visible shape. Reading the
@@ -1046,6 +1261,7 @@ function projectAnalysis(
     fragile_edge_count: fragileEdgeCount,
     evidence_gaps: evidenceGaps,
     goal_fit: goalFit,
+    confidence_tier: confidenceTier,
   };
 }
 

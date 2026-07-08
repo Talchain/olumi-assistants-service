@@ -43,6 +43,19 @@ export interface DriverSummary {
 }
 
 export interface FlipThreshold {
+  /**
+   * Structural factor id (Lane 30, #369 audit P1). INTERNAL ONLY — never
+   * serialised onto the wire or the strict-validated ContextPack output
+   * (which keeps the `{factor_label, current_value, flip_value, unit,
+   * no_flip_within_bounds}` shape). Carried so the V5 context-pack
+   * assembler can suppress option-controlled-lever tipping points by
+   * structural `factor_id` (never by label — labels collide). Populated
+   * fresh from the raw `factor_sensitivity` entry at derivation time; may
+   * be absent only for legacy hand-built values, which the consumer fails
+   * closed on when a controlled-lever set exists. Mirrors
+   * {@link FragileEdge.from_id}.
+   */
+  factor_id?: string;
   factor_label: string;
   current_value: number;
   flip_value: number;
@@ -435,6 +448,9 @@ function deriveFlipThresholds(
     .sort((a, b) => Math.abs(a.flip_value - a.current_value) - Math.abs(b.flip_value - b.current_value))
     .slice(0, 3)
     .map((entry) => ({
+      // Internal structural id for lever suppression (Lane 30) — see the
+      // FlipThreshold.factor_id doc; never serialised downstream.
+      factor_id: entry.factor_id,
       factor_label: entry.factor_label,
       current_value: entry.current_value,
       flip_value: entry.flip_value,
