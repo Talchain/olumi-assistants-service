@@ -512,3 +512,97 @@ describe("config — thinking budget startup warning", () => {
     _resetConfigCache();
   });
 });
+
+// ---------------------------------------------------------------------------
+// chatWithToolsAnthropic — thinking-block filtering (P0 signature-leak guard)
+// ---------------------------------------------------------------------------
+// Regression guard for the Sonnet-5 flip leak. On a routing tool call, Sonnet 5
+// returns an extended-thinking content block even when we do not request thinking.
+// The non-streaming tool path used to serialise any unexpected block into a text
+// block (JSON.stringify(block)), which leaked the block's opaque signature JSON as
+// a prefix onto user-facing assistant_text on every Run-analysis click
+// (evidence: acceptance-evidence/sonnet5-flip/03-turn2). A `thinking` block must
+// be DROPPED, never surfaced. Independent of the thinking-disable follow-up (S5-D):
+// even with thinking disabled, a stray thinking block must never reach the user.
+describe("chatWithToolsAnthropic — thinking-block filtering", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockCreate.mockReset();
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("drops a thinking block rather than serialising it into a text block", async () => {
+    const SIGNATURE = "ErICfake_opaque_signature_must_not_leak";
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: "internal reasoning", signature: SIGNATURE },
+        { type: "text", text: "Here is the plain answer." },
+        { type: "tool_use", id: "tu_1", name: "run_analysis", input: { foo: "bar" } },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "run the analysis" }],
+      tools: [
+        { name: "run_analysis", description: "d", input_schema: { type: "object", properties: {} } },
+      ],
+      model: "claude-sonnet-5",
+    });
+
+    // No returned block may carry the thinking JSON / signature.
+    const serialized = JSON.stringify(result.content);
+    expect(serialized).not.toContain(SIGNATURE);
+    expect(serialized).not.toContain('"type":"thinking"');
+
+    // The real text block survives verbatim and alone (no JSON prefix, no extra block).
+    const textBlocks = result.content.filter(
+      (b): b is { type: "text"; text: string } => b.type === "text"
+    );
+    expect(textBlocks).toHaveLength(1);
+    expect(textBlocks[0].text).toBe("Here is the plain answer.");
+
+    // The tool_use action still survives.
+    const toolBlocks = result.content.filter(
+      (b): b is { type: "tool_use"; id: string; name: string; input: Record<string, unknown> } =>
+        b.type === "tool_use"
+    );
+    expect(toolBlocks).toHaveLength(1);
+    expect(toolBlocks[0].name).toBe("run_analysis");
+  });
+
+  it("assistant_text composed from the tool response contains only the text, no signature leak", async () => {
+    const SIGNATURE = "ErICanother_fake_signature";
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: "", signature: SIGNATURE },
+        { type: "text", text: "Plain reply." },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-5",
+    });
+
+    // Mirror the assistant_text composition in route-with-tool-use.ts.
+    const assistantText = result.content
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+
+    expect(assistantText).toBe("Plain reply.");
+    expect(assistantText).not.toContain(SIGNATURE);
+    expect(assistantText).not.toContain('"type":"thinking"');
+  });
+});

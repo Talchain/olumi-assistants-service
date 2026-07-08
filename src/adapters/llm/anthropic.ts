@@ -2746,23 +2746,34 @@ export async function chatWithToolsAnthropic(
     clearTimeout(timeoutId);
     const latencyMs = Date.now() - startTime;
 
-    // Map Anthropic content blocks to our ToolResponseBlock type
-    const content: ToolResponseBlock[] = response.content.map((block) => {
+    // Map Anthropic content blocks to our ToolResponseBlock type.
+    // Only `text` and `tool_use` blocks may reach the caller (and thus
+    // user-facing assistant_text). Any other block type — notably Sonnet 5's
+    // extended-thinking `thinking` / `redacted_thinking` blocks, which the model
+    // returns on a routing tool call even when we do not request thinking — is
+    // DROPPED, never serialised. Serialising a thinking block leaked its opaque
+    // signature JSON as a prefix onto assistant_text on every Run-analysis click
+    // (see acceptance-evidence/sonnet5-flip). This mirrors the streaming path,
+    // which already excludes thinking blocks from the client-visible content.
+    const content: ToolResponseBlock[] = [];
+    for (const block of response.content) {
       if (block.type === 'text') {
-        return { type: 'text' as const, text: block.text };
-      }
-      if (block.type === 'tool_use') {
-        return {
+        content.push({ type: 'text' as const, text: block.text });
+      } else if (block.type === 'tool_use') {
+        content.push({
           type: 'tool_use' as const,
           id: block.id,
           name: block.name,
           input: block.input as Record<string, unknown>,
-        };
+        });
+      } else {
+        // Non-text / non-tool_use block — drop it; it must never surface to the user.
+        log.warn(
+          { block_type: (block as any).type },
+          "dropping non-text content block from tool response (not surfaced to client)",
+        );
       }
-      // Unexpected block type — preserve as text for debugging
-      log.warn({ block_type: (block as any).type }, "unexpected content block type in tool response");
-      return { type: 'text' as const, text: JSON.stringify(block) };
-    });
+    }
 
     // Map stop_reason
     const stopReason = response.stop_reason as 'end_turn' | 'tool_use' | 'max_tokens';
