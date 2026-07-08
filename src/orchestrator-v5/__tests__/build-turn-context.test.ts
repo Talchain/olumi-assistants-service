@@ -237,6 +237,29 @@ describe('loadScenarioSnapshotForRunAnalysis', () => {
       { id: 'opt_lead', option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
       { id: 'opt_devs', option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
     ]);
+    // Lane 28 — no brief persisted → the snapshot carries none (the PLoT leg
+    // will then attach nothing, so PLoT's `no_brief` skip stays honest).
+    expect(snapshot.briefText).toBeUndefined();
+  });
+
+  it('Lane 28: carries the persisted brief_text on the snapshot (same round trip as the graph)', async () => {
+    const graph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Goal' },
+        { id: 'opt_a', kind: 'option', label: 'A', interventions: { fac_x: 1 } },
+        { id: 'opt_b', kind: 'option', label: 'B', interventions: { fac_x: 0.5 } },
+        { id: 'fac_x', kind: 'factor', label: 'X', category: 'controllable', observed_state: { value: 1, extractionType: 'explicit', factor_type: 'other' } },
+      ],
+      edges: [
+        { from: 'opt_a', to: 'fac_x', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_b', to: 'fac_x', strength: { mean: 0.5, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'fac_x', to: 'goal_1', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    };
+    const briefText = 'Should we hire locally or offshore? Budget £250k.';
+    const store = createNoopSessionStore({ loadGraphResult: graph, loadBriefTextResult: briefText });
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(BASE.scenario_id, 'req-snap-brief', store);
+    expect(snapshot.briefText).toBe(briefText);
   });
 });
 

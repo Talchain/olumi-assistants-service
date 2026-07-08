@@ -124,6 +124,24 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
 } as const;
 
 // ============================================================================
+// Lane 28 — brief pipeline: outbound brief wire bound
+// ============================================================================
+
+/**
+ * Hard bound for the outbound `brief` field on the PLoT /v2/run payload.
+ *
+ * PLoT's run schema declares `brief: { type: 'string', maxLength: 10000 }`
+ * and allowlists the key (plot-lite-service src/routes/v2/run.ts —
+ * V2_RUN_ALLOWED_KEYS + the schema literal), rejecting anything longer. The
+ * write side already caps `scenarios.brief_text` at 8000 chars (DB CHECK,
+ * see session/normalise-brief-text.ts), which sits UNDER this wire max — so
+ * a legitimately persisted brief is never touched and this bound is pure
+ * defence-in-depth against a constraint drift. When it does fire, the
+ * truncation is DISCLOSED via a warn log (never a silent slice).
+ */
+export const PLOT_BRIEF_MAX_CHARS = 10_000;
+
+// ============================================================================
 // ScenarioReader — dependency injection seam for reading scenario state
 // ============================================================================
 
@@ -156,6 +174,15 @@ export interface RunAnalysisScenarioSnapshot {
    * loadScenarioSnapshotForRunAnalysis always populate it.
    */
   readonly rawPersistedGraph?: unknown;
+  /**
+   * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
+   * scenario, loaded by `loadScenarioSnapshotForRunAnalysis` in the same
+   * round trip as the graph. Omitted when no brief has been persisted (or
+   * the persisted value coerced to null). Forwarded to PLoT as the
+   * top-level `brief` field ONLY behind `config.cee.sendBriefToPlot`
+   * (default OFF — doctrine ask D5, brief-to-PLoT privacy, is Paul-gated).
+   */
+  readonly briefText?: string;
 }
 
 /**
@@ -323,6 +350,33 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.n_samples !== undefined) plotPayload.n_samples = snapshot.n_samples;
     if (snapshot.goal_constraints !== undefined) {
       plotPayload.goal_constraints = snapshot.goal_constraints;
+    }
+    // Lane 28 — brief pipeline seam 3: flag-gated brief leg
+    // (CEE_SEND_BRIEF_TO_PLOT, default OFF — doctrine ask D5 is Paul-gated;
+    // this ships the plumbing dark). PLoT allowlists top-level `brief`
+    // (maxLength 10000) and gates its factor-review / M2 legs on
+    // `!!body.brief`. Rules:
+    //   - flag OFF → no `brief` key ever (wire byte-identical to today);
+    //   - no / whitespace-only persisted brief → no `brief` key (never an
+    //     empty string, so PLoT's `no_brief` skip stays honest);
+    //   - over PLOT_BRIEF_MAX_CHARS (should be impossible — the DB CHECK
+    //     caps at 8000) → bounded with a DISCLOSED warn log, never silent.
+    if (config.cee.sendBriefToPlot && typeof snapshot.briefText === 'string') {
+      const trimmedBrief = snapshot.briefText.trim();
+      if (trimmedBrief.length > 0) {
+        if (trimmedBrief.length > PLOT_BRIEF_MAX_CHARS) {
+          log.warn(
+            {
+              request_id: invocation.requestId,
+              scenario_id: args.scenario_id,
+              brief_chars: trimmedBrief.length,
+              bounded_to: PLOT_BRIEF_MAX_CHARS,
+            },
+            'run_analysis outbound brief exceeds the PLoT wire max — bounded before send (disclosed truncation; investigate how a >8000-char brief was persisted)',
+          );
+        }
+        plotPayload.brief = trimmedBrief.slice(0, PLOT_BRIEF_MAX_CHARS);
+      }
     }
 
     // --- 3.5. Capture freshness metadata BEFORE PLoT call -----------------

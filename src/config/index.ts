@@ -717,6 +717,21 @@ const ConfigSchema = z.object({
     // raw-500 if typed recovery ever misbehaves. Only controls the NULL-graph branch;
     // a present-but-broken graph is still EP2's (default-off) concern.
     runAnalysisNullGraphRecoverable: booleanString.default(true),
+    // Lane 28 — brief pipeline seam 3 (CEE_SEND_BRIEF_TO_PLOT). When true,
+    // run_analysis forwards the persisted decision brief (scenarios.brief_text,
+    // loaded in the same round trip as the graph) as the top-level `brief`
+    // field on the outbound PLoT /v2/run payload. PLoT accepts `brief`
+    // (allowlisted key, maxLength 10000) and gates its factor-review / M2
+    // review legs on `!!body.brief` (`brief_present` telemetry) — with CEE
+    // never sending it, those legs are structurally dead.
+    //
+    // DEFAULT OFF AND MUST STAY OFF until Paul resolves doctrine ask D5
+    // (context-architecture dossier §6, "brief privacy": any objection to the
+    // user's brief text travelling to PLoT?). This flag ships the PLUMBING
+    // dark; activation is Paul's call, not a code decision. With the flag off
+    // the outbound PLoT wire is byte-identical to before the flag existed
+    // (pinned by run-analysis-brief-to-plot.test.ts).
+    sendBriefToPlot: booleanString.default(false),
     // V5 canonical context summary (CEE_CONTEXT_SUMMARY_ENABLED — staging
     // diagnostics + Golden-Journey Harness A1/A2 only). When true, the route
     // attaches a redacted `_context_summary` block (statuses/counts/hashes
@@ -1229,6 +1244,7 @@ function parseConfig(): Config {
       plotEgressScaleNetEnabled: env.CEE_PLOT_EGRESS_SCALE_NET_ENABLED,
       analysisReadyGuardEnabled: env.CEE_RUN_ANALYSIS_READY_GUARD,
       runAnalysisNullGraphRecoverable: env.CEE_RUN_ANALYSIS_NULL_GRAPH_RECOVERABLE,
+      sendBriefToPlot: env.CEE_SEND_BRIEF_TO_PLOT,
       contextSummaryEnabled: env.CEE_CONTEXT_SUMMARY_ENABLED,
       pendingConfirmationTruthEnabled: env.CEE_PENDING_CONFIRMATION_TRUTH_ENABLED,
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
