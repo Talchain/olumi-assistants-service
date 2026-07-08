@@ -48,6 +48,7 @@ import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { getModelManagementService } from './model-management/index.js';
+import type { ModelManagementResult, VersionWriteOutcome } from './model-management/index.js';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -436,6 +437,31 @@ export function finaliseLifecycleAgainstCap(
 }
 
 /**
+ * True when `metadata.graph` counts as "a graph was provided for this
+ * commit" — MM hygiene batch fix (ROADMAP 1.25 MM P1 set, item 1).
+ *
+ * Deliberately `!= null` (excludes BOTH `undefined` AND `null`), not the
+ * `!== undefined` check this used to be. `CommitMetadata.graph` is typed
+ * `unknown`, so a caller CAN pass an explicit `null` (e.g. a handler outcome
+ * typed `GraphStateIngress | null | undefined` — turn-executor.ts's
+ * `outcome.mutatedGraph` cast). `null !== undefined` is `true`, so the old
+ * check let an explicit `null` through as if a graph had been persisted:
+ *   - the Lane 8 MM version hook fired with `graph: null`, and
+ *     `computeGraphIdentityHash` treats `null` as identity-empty, so MM
+ *     logged/returned an `empty_graph` fault for a commit that never even
+ *     tried to write a graph — a spurious warning, not a real MM failure;
+ *   - `graphPersisted` was returned `true` even though nothing was
+ *     written — contradicting the `empty_graph` signal from the same
+ *     commit and telling the caller it's safe to advance
+ *     `stage_indicator='analyse'` on a turn with no graph.
+ * `!= null` makes both a no-op: an explicit `null` is now treated exactly
+ * like an omitted graph (`undefined`) always was.
+ */
+export function graphWasProvided(graph: unknown): boolean {
+  return graph != null;
+}
+
+/**
  * Slice B commit: persist the turn via the session store, return the
  * unchanged response. Throws `StateCommitFailedError` on RPC failure;
  * TurnExecutor's existing catch handles the mapping to `STATE_COMMIT_FAILED`.
@@ -688,7 +714,7 @@ export async function commitDirectAnswer(
   // Group A identity envelope MM computes (computeGraphIdentityHash inside
   // ModelManagementService.saveVersion) matches the store's own identity
   // read of scenarios.graph.
-  if (config.cee.modelVersionsEnabled === true && metadata.graph !== undefined) {
+  if (config.cee.modelVersionsEnabled === true && graphWasProvided(metadata.graph)) {
     void recordModelVersionForCommit({
       scenarioId: metadata.scenario_id,
       turnId: metadata.turn_id,
@@ -699,7 +725,7 @@ export async function commitDirectAnswer(
     });
   }
 
-  const graphPersisted = metadata.graph !== undefined;
+  const graphPersisted = graphWasProvided(metadata.graph);
   return {
     response,
     performed: true,
@@ -710,15 +736,38 @@ export async function commitDirectAnswer(
 }
 
 /**
+ * MM P1 (ROADMAP 1.25 hygiene batch, item 2): true when a `saveVersion`
+ * result is the EXPECTED "guest scenario, no version history" outcome
+ * (SQLSTATE MV001 / error code `sign_in_required`) rather than a genuine MM
+ * fault.
+ *
+ * `sign_in_required` fires on EVERY commit for an unowned (guest) scenario
+ * — `scenarios.user_id IS NULL` (D3 Branch A, "guests refused" — see
+ * `supabase/migrations/20260705120000_v5_model_versions.sql`). That is the
+ * DESIGNED, EXPECTED outcome for guest traffic, not a fault: logging it at
+ * `warn` meant every guest commit logged a warning for behaviour working
+ * exactly as specified, drowning out genuine MM faults (`store_error`, real
+ * CAS conflicts). `recordModelVersionForCommit` uses this to demote that
+ * one case to `debug` — every other error/conflict status stays `warn`
+ * (still actionable).
+ */
+export function isExpectedGuestVersionRefusal(
+  result: ModelManagementResult<VersionWriteOutcome>,
+): boolean {
+  return result.status === 'error' && result.error.code === 'sign_in_required';
+}
+
+/**
  * Lane 8 — commit-seam Model Management version hook (flag-gated caller).
  *
  * Non-blocking contract (mirrors version-event-sink.ts): every failure —
  * service construction (missing SUPABASE_* env), RPC error, telemetry fault
- * — is caught and logged at warn; nothing propagates to the turn result.
- * Idempotency: `event_id` is DETERMINISTIC on the turn id, so a retried
- * turn (same scenario_id + turn_id) re-drives the same journey event, which
- * the RPC dedupes by event_id; an identical graph additionally no-op-dedupes
- * against the current head inside the RPC.
+ * — is caught and logged at warn (except the expected guest-refusal case,
+ * see `isExpectedGuestVersionRefusal`); nothing propagates to the turn
+ * result. Idempotency: `event_id` is DETERMINISTIC on the turn id, so a
+ * retried turn (same scenario_id + turn_id) re-drives the same journey
+ * event, which the RPC dedupes by event_id; an identical graph additionally
+ * no-op-dedupes against the current head inside the RPC.
  */
 async function recordModelVersionForCommit(args: {
   readonly scenarioId: string;
@@ -755,15 +804,24 @@ async function recordModelVersionForCommit(args: {
       provenance: 'commit',
     });
     if (result.status === 'error' || result.status === 'conflict') {
-      log.warn(
-        {
-          scenario_id: args.scenarioId,
-          turn_id: args.turnId,
-          status: result.status,
-          error_code: result.status === 'error' ? result.error.code : 'cas_conflict',
-        },
-        'ModelManagement — version event sink emit failed (commit-seam saveVersion returned non-ok; turn result unaffected)',
-      );
+      const isExpectedGuestRefusal = isExpectedGuestVersionRefusal(result);
+      const logPayload = {
+        scenario_id: args.scenarioId,
+        turn_id: args.turnId,
+        status: result.status,
+        error_code: result.status === 'error' ? result.error.code : 'cas_conflict',
+      };
+      if (isExpectedGuestRefusal) {
+        log.debug(
+          logPayload,
+          'ModelManagement — commit-seam saveVersion skipped (guest scenario, sign-in required; expected, not a fault)',
+        );
+      } else {
+        log.warn(
+          logPayload,
+          'ModelManagement — version event sink emit failed (commit-seam saveVersion returned non-ok; turn result unaffected)',
+        );
+      }
     }
   } catch (err) {
     log.warn(

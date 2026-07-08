@@ -30,6 +30,7 @@ import type { AddConstraintHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GoalConstraintSchema, type GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { resolveGoalThresholdCap } from '../../../utils/goal-threshold-cap.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -93,48 +94,13 @@ interface ResolvedParams {
   readonly unit?: string;
 }
 
-/**
- * Lane CEE-W5 Mission B — goal-threshold join (Gate-item-8 dead-end).
- *
- * Resolve the normalisation denominator for a goal success target,
- * following the draft-extraction doctrine (defaults-v19 GOAL THRESHOLD /
- * CAP SELECTION, provisional_doctrine_v0):
- *   1. an existing valid goal_threshold_cap (>= the raw target) wins;
- *   2. '%' targets within 0–100 normalise against 100;
- *   3. otherwise a 25% headroom cap above the target (never cap === target,
- *      which would force goal_threshold = 1.0 and kill probability spread).
- * Returns null when no sound denominator exists (non-positive target) —
- * the caller then stamps raw/unit only, which still registers the target
- * (`has_goal_target` derives from goal_threshold_raw).
- */
-function resolveGoalThresholdCap(
-  existingCap: unknown,
-  raw: number,
-  unit: string | undefined,
-  existingUnit: unknown,
-): number | null {
-  // '%' targets ALWAYS normalise against 100 (review hardening, 2026-07-07):
-  // an inherited absolute cap from a previous registration (e.g. cap 1000
-  // from an "800 customers" target) must not distort a percentage
-  // re-registration — 80% against cap 1000 would silently score options
-  // against 0.08 instead of 0.8 while the receipt passes the honesty guard.
-  if (unit === '%' && raw > 0 && raw <= 100) return 100;
-  // An existing cap is only reusable when the units are compatible —
-  // a cap minted for one unit is meaningless for another.
-  const unitsCompatible =
-    unit === existingUnit || (unit === undefined && existingUnit === undefined);
-  if (
-    unitsCompatible &&
-    typeof existingCap === 'number' &&
-    Number.isFinite(existingCap) &&
-    existingCap > 0 &&
-    existingCap >= raw
-  ) {
-    return existingCap;
-  }
-  if (raw > 0) return raw * 1.25;
-  return null;
-}
+// `resolveGoalThresholdCap` (Lane CEE-W5 Mission B — goal-threshold join,
+// Gate-item-8 dead-end) now lives in `../../../utils/goal-threshold-cap.js`
+// as the shared cap-resolution doctrine (ROADMAP 1.18, cap-doctrine
+// unification hygiene batch) — the draft-path enricher
+// (cee/factor-extraction/enricher.ts) delegates to the SAME function so a
+// goal target scores identically regardless of registration path. See that
+// module's doc comment for the full doctrine.
 
 function resolveParams(invocation: HandlerInvocation): ResolvedParams {
   const params = invocation.proposal?.parameters ?? [];

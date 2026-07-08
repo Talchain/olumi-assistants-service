@@ -69,11 +69,19 @@ export interface VersionWriteOutcome {
 
 /**
  * CAS-conflict vocabulary term — BOUND to the landed A3 CAS vocabulary
- * (src/orchestrator-v5/context/graph-cas-conflict.ts, PR #346): the
- * `satisfies GraphCasConflictCategory` constraint makes any drift between
- * this literal and the A3 closed enum a compile error (the queued cleanup
- * from the pre-#346 local-literal note). Type-only import — no runtime
- * coupling into the CAS hook.
+ * (src/orchestrator-v5/context/graph-cas-conflict.ts, PR #346).
+ * STALE-COMMENT FIX (hygiene batch, ROADMAP 1.25 item C): this previously
+ * said the `satisfies GraphCasConflictCategory` constraint "makes any drift
+ * between this literal and the A3 closed enum a compile error" — that
+ * overclaims what `satisfies` checks. It only guards that THIS token,
+ * `'analysis_affecting_conflict'`, remains a valid member of
+ * `GraphCasConflictCategory` — i.e. a compile error if the A3 union ever
+ * renames/removes that specific member. It does NOT: catch A3 adding new
+ * category members this file should also handle, verify this is the
+ * semantically-correct category to use here (vs. some other valid member of
+ * the union), or create any bidirectional/exhaustiveness check between the
+ * two vocabularies. Type-only import — no runtime coupling into the CAS
+ * hook.
  */
 export const CAS_CONFLICT_KIND =
   'analysis_affecting_conflict' as const satisfies GraphCasConflictCategory;

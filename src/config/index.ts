@@ -442,9 +442,15 @@ const ConfigSchema = z.object({
     // V1 handlers (e.g. src/orchestrator/tools/explain-results.ts) are
     // stubbed to throw if reached. Set to false only for emergency rollback
     // of V1 AND revert the V1 stubs.
-    // ⚠️ INVERTED SEMANTICS: CEE_PIPELINE_V4_ENABLED=true DISABLES V4 on /v1 routes
-    // (returns 410 V4_DISABLED). CEE_PIPELINE_V4_ENABLED=false ENABLES V4 execution.
-    // This is a known naming issue. Rename to CEE_V1_ROUTE_DISABLED planned post-pilot.
+    // STALE-COMMENT FIX (hygiene batch, ROADMAP 1.30c item D): this
+    // previously asserted the OPPOSITE of the guard code — claiming
+    // CEE_PIPELINE_V4_ENABLED=true DISABLES V4 and =false ENABLES it. The
+    // actual guard (src/orchestrator/route.ts:~102,
+    // `if (!config.features.pipelineV4Enabled) { ...; reply.code(410); }`)
+    // does the reverse: CEE_PIPELINE_V4_ENABLED=false is what returns 410
+    // V4_DISABLED on the /v1 routes; =true is what lets V4 execute
+    // normally. The name itself is fine (plain "enabled" semantics) — only
+    // this comment had it backwards.
     pipelineV4Enabled: booleanString.default(true),
     orchestratorV5: booleanString.default(false), // ENABLE_V5_ORCHESTRATOR — V5 slice A0 scaffold (contracts + ingress/egress B1 validation only, no TurnExecutor). Route returns 404 when false.
     // CEE_V5_GRAPH_CAS_MODE — A3 graph CAS observe-mode ('off' | 'observe' | 'enforce').
@@ -851,9 +857,17 @@ const ConfigSchema = z.object({
     // Gates every entry point of src/orchestrator-v5/model-management/
     // (save/list/get/restore/compare versions). Default OFF; flag-off is a
     // fail-closed typed 'disabled' no-op at every entry point — no Supabase
-    // call, no hashing, no behaviour change anywhere (the module has zero
-    // production call sites this slice; nothing is wired into routes or the
-    // turn-executor). Env-enforced: locked false in prod; staging requires an
+    // call, no hashing, no behaviour change. STALE-COMMENT FIX (hygiene
+    // batch, ROADMAP 1.25 item C): this previously said "the module has
+    // zero production call sites this slice; nothing is wired into routes
+    // or the turn-executor" — no longer true as of Lane 8 (2026-07-07): the
+    // ONE sanctioned production call site is the flag-gated commit-seam
+    // version hook in src/orchestrator-v5/commit.ts (fires after a durable,
+    // graph-bearing commit; failures never affect the turn result — see
+    // model-management/index.ts header + commit.ts's
+    // `recordModelVersionForCommit`). Routes/turn-executor/restore-compare
+    // surfaces remain unwired; isolation-guards.test.ts enforces the exact
+    // call-site set. Env-enforced: locked false in prod; staging requires an
     // explicit opt-in (audit-logged). The backing migration
     // (20260705120000_v5_model_versions.sql) is AUTHORED-NOT-EXECUTED and
     // separately Paul-gated — do not enable this flag anywhere before that
