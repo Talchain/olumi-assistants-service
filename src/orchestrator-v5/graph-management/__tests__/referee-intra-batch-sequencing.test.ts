@@ -18,7 +18,7 @@
  *    ENTITY_NOT_FOUND (negative control);
  *  - single-envelope batches keep byte-identical verdict semantics (pin).
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { refereeMutation, refereeMutationBatch } from '../referee.js';
 import {

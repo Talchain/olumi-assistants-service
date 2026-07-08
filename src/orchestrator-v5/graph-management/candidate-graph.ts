@@ -30,6 +30,19 @@ export interface RenamePayload {
   readonly node_id: string;
   readonly to_label: string;
 }
+export interface AddNodePayload {
+  readonly node: {
+    readonly id: string;
+    readonly kind: NodeV3T['kind'];
+    readonly label: string;
+  };
+}
+export interface AddEdgePayload {
+  readonly edge: {
+    readonly from: string;
+    readonly to: string;
+  };
+}
 export interface AddOptionPayload {
   readonly option: {
     readonly id: string;
@@ -101,6 +114,53 @@ export function buildRenameCandidate(
       const before = { label: node.label };
       node.label = payload.to_label;
       return { before, after: { label: payload.to_label } };
+    });
+    return { candidate: exposeCandidate(mutatedGraph) };
+  } catch (err) {
+    return { error: toBlocker(err) };
+  }
+}
+
+/**
+ * Build the candidate graph for an `add_node` envelope (lane 32 intra-batch
+ * sequencing). Same sanctioned seam as the other builders: the node enters a
+ * GraphV3-validated clone, so the exposed candidate is guaranteed structurally
+ * readable — a payload the schema rejects (e.g. a non-canonical id) surfaces
+ * as a classified error, never a corrupted view.
+ */
+export function buildAddNodeCandidate(
+  persistedGraph: unknown,
+  payload: AddNodePayload,
+): CandidateBuildResult {
+  try {
+    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+      const node: NodeV3T = {
+        id: payload.node.id,
+        kind: payload.node.kind,
+        label: payload.node.label,
+      };
+      clone.nodes.push(node);
+      return { before: null, after: { node_id: payload.node.id } };
+    });
+    return { candidate: exposeCandidate(mutatedGraph) };
+  } catch (err) {
+    return { error: toBlocker(err) };
+  }
+}
+
+/**
+ * Build the candidate graph for an `add_edge` envelope (lane 32 intra-batch
+ * sequencing). The envelope carries endpoints only; strength/existence
+ * defaults mirror `makeEdge` (the add_option linkage defaults).
+ */
+export function buildAddEdgeCandidate(
+  persistedGraph: unknown,
+  payload: AddEdgePayload,
+): CandidateBuildResult {
+  try {
+    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+      clone.edges.push(makeEdge(payload.edge.from, payload.edge.to));
+      return { before: null, after: { from: payload.edge.from, to: payload.edge.to } };
     });
     return { candidate: exposeCandidate(mutatedGraph) };
   } catch (err) {

@@ -23,6 +23,8 @@ import { evaluateFrameGate } from './frame-gate.js';
 import { classifyMutation } from './classify-mutation.js';
 import { checkFieldSafety } from './field-safety.js';
 import {
+  buildAddEdgeCandidate,
+  buildAddNodeCandidate,
   buildRenameCandidate,
   buildAddOptionCandidate,
   currentGraphIsParseable,
@@ -410,12 +412,72 @@ function batchRejected(code: MutationReasonCode, readable: string): RefereeVerdi
 }
 
 /**
- * Referee a batch of raw candidates. Per-envelope verdicts (independent). TOTAL and
- * BOUNDED: a non-array batch, a hostile array whose `length` or element reads throw
- * (Proxy / throwing index getter), and every element resolve to a CLASSIFIED verdict —
- * the function never throws. A batch exceeding the T4.0 `PROPOSAL_CAP` (8) is REJECTED
- * as a whole in O(1), so a sparse hostile array with a huge `length` cannot force
- * unbounded parsing/allocation.
+ * Intra-batch sequencing (lane 32 / ROADMAP 1.34): after an envelope is judged,
+ * advance the batch's WORKING VIEW of the graph so later envelopes see the
+ * entities this envelope introduces. Without this, an add-node +
+ * add-edge-to-that-node batch — the commonest structural edit, which the edit
+ * pipeline itself validates and applies in order — had every referencing
+ * envelope rejected ENTITY_NOT_FOUND against the pre-edit frame graph
+ * (reproduced live 2026-07-07; acceptance-evidence/gm-mm/02-*.md).
+ *
+ * Advance rules (TOTAL — returns the previous view on any failure, so a
+ * non-advancing envelope degrades to the pre-fix judgment for later slots):
+ *  - `rejected` / `stale` verdicts never advance: the mutation would not land
+ *    under any mode, so its entities never materialise;
+ *  - a built candidate (rename_node / add_option) IS the applied view — adopt
+ *    it (candidates are exposed as deep clones; no aliasing);
+ *  - add_node / add_edge that reached STRUCTURAL_APPLY_HELD (i.e. passed
+ *    R1–R4 against the current view) are applied through the same
+ *    `applyAndValidateMutation` seam the candidate builders use, so the
+ *    working view stays GraphV3-validated;
+ *  - update_* change no entity set; remove_* are held-unconfirmed and
+ *    deliberately NOT subtracted (conservative: later references to a
+ *    to-be-removed entity keep the pre-fix judgment);
+ *  - the FRAME is never advanced — R2 keeps comparing every envelope's
+ *    base_graph_hash against the pre-edit frame hash (anti-rederivation).
+ */
+function advanceBatchGraph(
+  workingGraph: unknown,
+  raw: unknown,
+  verdict: RefereeVerdict,
+): unknown {
+  try {
+    if (verdict.verdict === 'rejected' || verdict.verdict === 'stale') {
+      return workingGraph;
+    }
+    if (verdict.candidate !== undefined) {
+      return verdict.candidate;
+    }
+    if (verdict.blocker?.code !== STRUCTURAL_APPLY_HELD) {
+      return workingGraph;
+    }
+    const parsed = parseEnvelope(raw);
+    if (!parsed.ok) return workingGraph; // unreachable: the verdict came from this raw
+    const env = parsed.envelope;
+    if (env.kind === 'add_node') {
+      return buildAddNodeCandidate(workingGraph, env.payload).candidate ?? workingGraph;
+    }
+    if (env.kind === 'add_edge') {
+      return buildAddEdgeCandidate(workingGraph, env.payload).candidate ?? workingGraph;
+    }
+    return workingGraph;
+  } catch {
+    return workingGraph; // TOTALITY: sequencing must never break batch refereeing
+  }
+}
+
+/**
+ * Referee a batch of raw candidates, SEQUENCED: each envelope is judged against
+ * a working view of the graph that includes the entities prior envelopes in the
+ * batch introduce (see `advanceBatchGraph`) — mirroring the in-order apply the
+ * edit pipeline performs. The FIRST envelope always sees the pristine frame
+ * graph, so single-envelope batches are byte-identical to `refereeMutation`.
+ * TOTAL and BOUNDED: a non-array batch, a hostile array whose `length` or
+ * element reads throw (Proxy / throwing index getter), and every element
+ * resolve to a CLASSIFIED verdict — the function never throws. A batch
+ * exceeding the T4.0 `PROPOSAL_CAP` (8) is REJECTED as a whole in O(1), so a
+ * sparse hostile array with a huge `length` cannot force unbounded
+ * parsing/allocation.
  */
 export function refereeMutationBatch(
   rawBatch: unknown,
@@ -435,6 +497,7 @@ export function refereeMutationBatch(
     // Fail closed, bounded: never iterate an over-cap (possibly huge/sparse) array.
     return [batchRejected(BATCH_CAP_EXCEEDED, `Batch exceeds the ${PROPOSAL_CAP}-envelope cap.`)];
   }
+  let workingGraph: unknown = currentGraph;
   const out: RefereeVerdict[] = [];
   for (let i = 0; i < len; i += 1) {
     let raw: unknown;
@@ -444,7 +507,9 @@ export function refereeMutationBatch(
       out.push(batchRejected(SCHEMA_INVALID, 'Batch element could not be read.'));
       continue;
     }
-    out.push(refereeMutation(raw, currentGraph, frame));
+    const verdict = refereeMutation(raw, workingGraph, frame);
+    out.push(verdict);
+    workingGraph = advanceBatchGraph(workingGraph, raw, verdict);
   }
   return out;
 }
