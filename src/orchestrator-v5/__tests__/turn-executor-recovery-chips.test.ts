@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { V5_ROUTING_MAX_OUTPUT_TOKENS, V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY } from '../routing/route-with-tool-use.js';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
@@ -280,7 +281,7 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
       .mockResolvedValueOnce({
         content: [{ type: 'text', text: 'Partial answer cut off at...' }],
         stop_reason: 'max_tokens',
-        usage: { input_tokens: 10, output_tokens: 2048 } as unknown as ChatWithToolsResult['usage'],
+        usage: { input_tokens: 10, output_tokens: V5_ROUTING_MAX_OUTPUT_TOKENS } as unknown as ChatWithToolsResult['usage'],
         model: 'claude-sonnet-4-6',
         latencyMs: 200,
       })
@@ -300,8 +301,8 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
     expect(adapterMock).toHaveBeenCalledTimes(2);
     const firstArgs = adapterMock.mock.calls[0]![0];
     const retryArgs = adapterMock.mock.calls[1]![0];
-    expect(firstArgs.maxTokens).toBe(2048);
-    expect(retryArgs.maxTokens).toBe(4096);
+    expect(firstArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+    expect(retryArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY);
     // Same messages, same tools — only the output budget changes.
     expect(retryArgs.messages).toEqual(firstArgs.messages);
     expect(retryArgs.tools).toEqual(firstArgs.tools);
@@ -323,9 +324,9 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
     expect(retryPayload.request_id).toBe('req-max-tokens-retry');
     expect(retryPayload.first_attempt_latency_ms).toBe(200);
     expect(retryPayload.first_attempt_input_tokens).toBe(10);
-    expect(retryPayload.first_attempt_output_tokens).toBe(2048);
-    expect(retryPayload.first_attempt_max_tokens).toBe(2048);
-    expect(retryPayload.retry_max_tokens).toBe(4096);
+    expect(retryPayload.first_attempt_output_tokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+    expect(retryPayload.first_attempt_max_tokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+    expect(retryPayload.retry_max_tokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY);
   });
 
   it('max_tokens on BOTH routing calls — bounded fallback 200, no further retry (V5 P0 review-P2)', async () => {

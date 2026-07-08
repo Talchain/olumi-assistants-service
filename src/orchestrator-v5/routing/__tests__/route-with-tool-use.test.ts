@@ -26,6 +26,8 @@ import {
   RoutingError,
   routeWithToolUse,
   assertAnthropicMessageProtocol,
+  V5_ROUTING_MAX_OUTPUT_TOKENS,
+  V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY,
 } from '../route-with-tool-use.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../tool-schema.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -439,8 +441,8 @@ describe('routeWithToolUse — error paths', () => {
     // The retry escalates ONLY the output budget.
     const firstArgs = adapter.chatWithTools.mock.calls[0]![0] as ChatWithToolsArgs;
     const retryArgs = adapter.chatWithTools.mock.calls[1]![0] as ChatWithToolsArgs;
-    expect(firstArgs.maxTokens).toBe(2048);
-    expect(retryArgs.maxTokens).toBe(4096);
+    expect(firstArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+    expect(retryArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY);
     expect(retryArgs.messages).toEqual(firstArgs.messages);
     expect(retryArgs.tools).toEqual(firstArgs.tools);
   });
