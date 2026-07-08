@@ -87,10 +87,33 @@ export interface DisplaySafeEvidenceGap {
  * Lane 21 — LLM-facing char budget for the serialised (2-space-indented)
  * display-safe analysis projection. The pre-widening projection measured
  * ~603 chars and starved the LLM; breadth-first widening must still stay
- * bounded so the ~21k-char routing prompt keeps its shape. Asserted by
- * the maximal-fixture budget test.
+ * bounded so the ~21k-char routing prompt keeps its shape.
+ *
+ * Lane 30 fix 4 — RUNTIME-ENFORCED (previously test-asserted only): see
+ * {@link enforceDisplayAnalysisBudget}. A live pack with pathological label
+ * lengths now truncates gracefully — keep-priority order, disclosed via
+ * `truncation_note` — instead of silently blowing the prompt budget.
  */
 export const DISPLAY_ANALYSIS_CHAR_BUDGET = 4000;
+
+/**
+ * Lane 30 fix 4 — the order in which sections are DROPPED when the
+ * serialised projection exceeds {@link DISPLAY_ANALYSIS_CHAR_BUDGET}
+ * (lowest keep-priority first). Leader/runner-up, goal-fit prose,
+ * confidence tier, margin, robustness and status are never dropped; the
+ * ranked option list (carrier of per-option goal-fit) is tail-trimmed to a
+ * minimum of two entries before it is dropped wholesale as the last resort.
+ */
+export const DISPLAY_ANALYSIS_TRUNCATION_ORDER = [
+  'value_of_information',
+  'tipping_points',
+  'fragile_edges',
+  'top_drivers',
+  'options',
+] as const;
+
+/** Minimum ranked options retained while tail-trimming under the budget. */
+export const DISPLAY_ANALYSIS_MIN_OPTIONS = 2;
 
 /**
  * Relative-distance thresholds for the tipping-risk band phrases
@@ -154,6 +177,14 @@ export interface DisplaySafeAnalysis {
    * Omitted when the producer reported no tier.
    */
   readonly confidence_tier?: string;
+  /**
+   * Lane 30 fix 4 — DISCLOSED truncation marker. Present ONLY when the
+   * runtime budget guard dropped or trimmed sections to fit
+   * {@link DISPLAY_ANALYSIS_CHAR_BUDGET}; names what was omitted so the
+   * LLM knows the analysis carries more detail than shown (and never
+   * infers "no tipping points exist" from a truncated section).
+   */
+  readonly truncation_note?: string;
 }
 
 /**
@@ -245,6 +276,108 @@ export function confidenceTierPhrase(tier: string): string {
   return (
     CONFIDENCE_TIER_PHRASES[tier] ?? `analysis confidence: ${tier.replace(/_/g, ' ')}`
   );
+}
+
+/** Writable view of the projection while it is being assembled/truncated. */
+type MutableDisplaySafeAnalysis = {
+  -readonly [K in keyof DisplaySafeAnalysis]: DisplaySafeAnalysis[K];
+};
+
+/** Serialised size in the SAME form the budget contract measures
+ *  (2-space-indented JSON — the shape `buildUserMessage` embeds). */
+function serialisedLength(out: MutableDisplaySafeAnalysis): number {
+  return JSON.stringify(out, null, 2).length;
+}
+
+/**
+ * Lane 30 fix 4 — runtime enforcement of {@link DISPLAY_ANALYSIS_CHAR_BUDGET}.
+ *
+ * Graceful priority truncation: sections are dropped lowest-keep-priority
+ * first ({@link DISPLAY_ANALYSIS_TRUNCATION_ORDER} — flip/VOI, then fragile
+ * edges, then sensitivities), then the ranked option list is tail-trimmed
+ * (lowest-ranked first, keeping at least
+ * {@link DISPLAY_ANALYSIS_MIN_OPTIONS}) and dropped wholesale only as the
+ * last resort. `status`, the leading pair, `margin`, `robustness_band`,
+ * `goal_fit` and `confidence_tier` are never dropped — goal-fit truthfulness
+ * (this lane's live defect) outranks breadth.
+ *
+ * Every drop/trim is DISCLOSED via `truncation_note` (recomputed before each
+ * measurement so the note's own length is inside the budget arithmetic). If
+ * the projection still exceeds the budget after every drop (pathological
+ * never-dropped labels), the note stays as evidence — nothing is silently
+ * sliced mid-string.
+ */
+function enforceDisplayAnalysisBudget(out: MutableDisplaySafeAnalysis): void {
+  if (serialisedLength(out) <= DISPLAY_ANALYSIS_CHAR_BUDGET) return;
+
+  const omitted: string[] = [];
+  const setNote = (): void => {
+    out.truncation_note =
+      'analysis detail truncated to fit the context budget — omitted: ' +
+      omitted.join(', ') +
+      '; the analysis contains more detail than shown here';
+  };
+
+  const drops: ReadonlyArray<{ name: string; present: () => boolean; drop: () => void }> = [
+    {
+      name: 'value_of_information',
+      present: () => out.value_of_information !== undefined,
+      drop: () => {
+        delete out.value_of_information;
+      },
+    },
+    {
+      name: 'tipping_points',
+      present: () => out.tipping_points !== undefined,
+      drop: () => {
+        delete out.tipping_points;
+      },
+    },
+    {
+      name: 'fragile_edges',
+      present: () => out.fragile_edges !== undefined || out.fragile_edge_count !== undefined,
+      drop: () => {
+        delete out.fragile_edges;
+        delete out.fragile_edge_count;
+      },
+    },
+    {
+      name: 'top_drivers',
+      present: () => out.top_drivers !== undefined,
+      drop: () => {
+        delete out.top_drivers;
+      },
+    },
+  ];
+
+  for (const section of drops) {
+    if (!section.present()) continue;
+    section.drop();
+    omitted.push(section.name);
+    setNote();
+    if (serialisedLength(out) <= DISPLAY_ANALYSIS_CHAR_BUDGET) return;
+  }
+
+  // Tail-trim the ranked option list (lowest-ranked first) before dropping
+  // it wholesale — it carries the per-option goal-fit values this lane
+  // exists to surface.
+  if (out.options !== undefined && out.options.length > DISPLAY_ANALYSIS_MIN_OPTIONS) {
+    omitted.push('lower-ranked options');
+    while (out.options.length > DISPLAY_ANALYSIS_MIN_OPTIONS) {
+      out.options = out.options.slice(0, -1);
+      setNote();
+      if (serialisedLength(out) <= DISPLAY_ANALYSIS_CHAR_BUDGET) return;
+    }
+  }
+  if (out.options !== undefined) {
+    delete out.options;
+    const trimIndex = omitted.indexOf('lower-ranked options');
+    if (trimIndex !== -1) omitted.splice(trimIndex, 1);
+    omitted.push('options');
+    setNote();
+  }
+  // Still over budget → never-dropped sections carry pathological labels.
+  // The note remains as disclosure; nothing is sliced mid-string.
 }
 
 /**
@@ -392,21 +525,7 @@ export function formatAnalysisForContext(
 ): DisplaySafeAnalysis | null {
   if (raw === null) return null;
 
-  const out: {
-    status: string;
-    leading_option?: DisplaySafeAnalysisOption;
-    runner_up?: DisplaySafeAnalysisOption;
-    margin?: string;
-    robustness_band?: string;
-    top_drivers?: readonly DisplaySafeAnalysisDriver[];
-    fragile_edges?: readonly DisplaySafeFragileEdge[];
-    options?: readonly DisplaySafeRankedOption[];
-    tipping_points?: readonly DisplaySafeTippingPoint[];
-    fragile_edge_count?: string;
-    value_of_information?: readonly DisplaySafeEvidenceGap[];
-    goal_fit?: string;
-    confidence_tier?: string;
-  } = {
+  const out: MutableDisplaySafeAnalysis = {
     status: raw.status,
   };
 
@@ -517,6 +636,9 @@ export function formatAnalysisForContext(
   if (typeof raw.confidence_tier === 'string' && raw.confidence_tier.trim().length > 0) {
     out.confidence_tier = confidenceTierPhrase(raw.confidence_tier.trim());
   }
+
+  // Lane 30 fix 4 — runtime char-budget guard (graceful, disclosed).
+  enforceDisplayAnalysisBudget(out);
 
   return out;
 }

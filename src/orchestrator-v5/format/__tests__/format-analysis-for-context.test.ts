@@ -557,6 +557,97 @@ describe('Lane 30 confidence tier + outcome bands', () => {
   });
 });
 
+// Lane 30 fix 4 — DISPLAY_ANALYSIS_CHAR_BUDGET becomes RUNTIME-ENFORCED.
+// Before this lane the budget was test-asserted only: a live pack with long
+// labels could blow the ~21k-char routing prompt's analysis share silently.
+// Truncation is graceful (keep-priority: leader/runner-up + goal-fit, then
+// sensitivities, then flip/VOI) and ALWAYS disclosed via truncation_note.
+describe('Lane 30 runtime char-budget enforcement', () => {
+  const LONG = (i: number) =>
+    `Extremely Long Option Label ${String(i).padStart(2, '0')} ` +
+    'With An Enormous Amount Of Repeated Qualifier Text That Inflates The Serialised Projection '.repeat(3);
+
+  const oversized = () =>
+    rawAnalysis({
+      leading_option: { label: LONG(1), probability: 0.62, goal_fit_probability: 0.31 },
+      runner_up: { label: LONG(2), probability: 0.38, goal_fit_probability: 0.22 },
+      options: Array.from({ length: 12 }, (_, i) => ({
+        label: LONG(i + 1),
+        probability: Math.max(0.01, 0.62 - i * 0.05),
+        goal_fit_probability: 0.31,
+        outcome_mean: 0.4,
+      })),
+      top_drivers: Array.from({ length: 5 }, (_, i) =>
+        rawDriver(`Driver ${LONG(i + 1)}`, 0.9 - i * 0.1),
+      ),
+      fragile_edges: Array.from({ length: 3 }, (_, i) => ({
+        from_label: `From ${LONG(i + 1)}`,
+        to_label: `To ${LONG(i + 1)}`,
+      })),
+      fragile_edge_count: 9,
+      flip_thresholds: Array.from({ length: 3 }, (_, i) => ({
+        factor_label: `Flip ${LONG(i + 1)}`,
+        current_value: 100,
+        flip_value: 88,
+        unit: 'GBP',
+        no_flip_within_bounds: false,
+      })),
+      evidence_gaps: Array.from({ length: 3 }, (_, i) => ({
+        factor_label: `Gap ${LONG(i + 1)}`,
+        voi_score: 0.63,
+      })),
+      goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
+      confidence_tier: 'needs_work',
+    });
+
+  it('keeps the serialised projection inside the budget at runtime (long-label fixture)', () => {
+    const out = formatAnalysisForContext(oversized());
+    const serialised = JSON.stringify(out, null, 2);
+    expect(serialised.length).toBeLessThanOrEqual(DISPLAY_ANALYSIS_CHAR_BUDGET);
+    assertNoNumbersAnywhere(out);
+  });
+
+  it('truncation is DISCLOSED, never silent, and preserves the priority sections', () => {
+    const out = formatAnalysisForContext(oversized());
+    expect(out!.truncation_note).toBeDefined();
+    expect(out!.truncation_note).toContain('truncated');
+    // Highest keep-priority content survives.
+    expect(out!.leading_option).toBeDefined();
+    expect(out!.leading_option!.target_fit).toBe('31%');
+    expect(out!.runner_up).toBeDefined();
+    expect(out!.goal_fit).toBeDefined();
+    expect(out!.status).toBe('complete');
+  });
+
+  it('drops flip/VOI before sensitivities, and sensitivities before the option list', () => {
+    const out = formatAnalysisForContext(oversized());
+    // VOI + tipping must be gone before top_drivers is touched; if
+    // top_drivers is absent then flip/VOI must also be absent.
+    if (out!.top_drivers !== undefined) {
+      expect(out!.value_of_information).toBeUndefined();
+      expect(out!.tipping_points).toBeUndefined();
+    }
+    // The ranked option list (carrier of per-option goal-fit) outlives the
+    // low-priority sections; when trimmed it keeps at least the top two.
+    if (out!.options !== undefined) {
+      expect(out!.options.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('emits no truncation_note when the projection fits the budget', () => {
+    const out = formatAnalysisForContext(rawAnalysis());
+    expect(out!).not.toHaveProperty('truncation_note');
+  });
+
+  it('discloses which sections were omitted', () => {
+    const out = formatAnalysisForContext(oversized());
+    // The oversized fixture cannot fit with VOI + tipping present; both are
+    // named in the disclosure once dropped.
+    expect(out!.truncation_note).toContain('value_of_information');
+    expect(out!.truncation_note).toContain('tipping_points');
+  });
+});
+
 // brief brief-display-safe-analysis A2 — negative test
 // Formatted analysis serialised through the Track 2A regex sanitiser must
 // produce zero probability_rewrites and zero sensitivity_rewrites. Proves
