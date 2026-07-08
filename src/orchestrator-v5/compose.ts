@@ -291,8 +291,16 @@ function buildBlocksFromFacts(
  * Dropped fields that look strategically valuable but are NOT currently
  * rendered are recorded as a POST-P0 coaching-contract workstream (see the
  * block comment below) — NOT silently deleted from the future product model.
+ *
+ * Exported for the contract-test drift bolt ONLY
+ * (tests/contract/cee-to-ui.contract.test.ts): @talchain/schemas ≥ 0.14.0
+ * publishes `CEE_UI_ENRICHMENT_KEEP_LIST` as the cross-repo source of truth
+ * for this list, and the bolt asserts the two stay element-for-element
+ * identical. Change this list ONLY in lock-step with the schemas package
+ * (see olumi-schemas docs/enrichment-v1/ROLLOUT.md — envelope evolution
+ * rules).
  */
-const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
+export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   'option_comparison',
   'factor_sensitivity',
   'results',
@@ -417,9 +425,12 @@ function stripInternalKeysDeep(value: unknown): unknown {
  *
  * Returns `undefined` when no kept field is present so the block omits the
  * `enrichment` key (the typical chip-click, autofire-off shape).
+ *
+ * Exported for the CEE→UI wire-shape contract test ONLY
+ * (tests/contract/cee-to-ui.contract.test.ts), so the test exercises the
+ * REAL projection rather than a mirror of it.
  */
-
-function toSafeTransportEnrichment(enrichment: unknown): Record<string, unknown> | undefined {
+export function toSafeTransportEnrichment(enrichment: unknown): Record<string, unknown> | undefined {
   if (enrichment === null || enrichment === undefined || typeof enrichment !== 'object') {
     return undefined;
   }
