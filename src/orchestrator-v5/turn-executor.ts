@@ -3090,12 +3090,29 @@ export async function runTurnExecutor(
       );
 
       // Pure detection function; the guards + dispatch live in this
-      // executor.
+      // executor. `factorIdSet` (computed just above for the
+      // selection-narrowing path) is threaded through as the type filter
+      // too (1.16b) — it already carries the authoritative factor-kind id
+      // set from raw graph state, so the label-matching candidate pool
+      // inside the matcher never surfaces a decision/outcome/risk/action
+      // node as a value-update candidate.
+      //
+      // Guarded on `graphStateForTurn !== null`: `factorIdSet` is derived
+      // FROM `graphStateForTurn.nodes` (see above), so it is only a
+      // trustworthy factor-kind id set when that raw graph was actually
+      // available. The `options.graphLookup` test-override path can
+      // supply a lookup with real candidates while `graphStateForTurn`
+      // stays null (no `graphState` given) — passing an empty
+      // `factorIdSet` there would filter out every real candidate rather
+      // than leaving the pool unfiltered. Falling back to `undefined`
+      // preserves the matcher's documented "no kind information supplied
+      // → unfiltered pool" behaviour for that narrow case.
       let deterministicValueUpdate = tryDeterministicValueUpdate(
         payload.message,
         contextPack.parsed_quantities,
         graphLookupForValidate,
         selectedFactorIds,
+        graphStateForTurn !== null ? factorIdSet : undefined,
       );
 
       // P0 V5 golden-path repair (Wave 2, Path B — selected-deictic):

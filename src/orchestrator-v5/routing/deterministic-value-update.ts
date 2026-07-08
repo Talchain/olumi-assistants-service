@@ -34,10 +34,24 @@
  *   - Pass 2: bigramDice on candidates that did not substring-match,
  *     threshold 0.4. Whole-message-vs-label, mirroring the entity
  *     resolver's existing path.
+ *   - Candidate pool is TYPE-FILTERED to factor-kind node ids when the
+ *     caller supplies `factorNodeIds` (production always does): a
+ *     decision/outcome/risk/action node that shares tokens with the
+ *     message can never surface as a candidate for a value-update intent.
  *
- * Outcome:
- *   - At least one candidate qualifies → `dispatch: 'clarify'` with up to
- *     four candidates sorted by score (substring matches first).
+ * Outcome (1.16b — auto-select vs. clarify boundary):
+ *   - Exactly ONE substring match (score 1.0) that clearly DOMINATES any
+ *     Dice runner-up (gap ≥ `AUTO_SELECT_DOMINANCE_MARGIN`, i.e. the best
+ *     Dice score is below 0.85) → auto-selected: `dispatch:
+ *     'set_factor_value'`, no clarify. A perfect substring hit is not
+ *     defeated by a weak Dice echo.
+ *   - Otherwise, at least one candidate qualifies → `dispatch: 'clarify'`
+ *     with up to four candidates sorted by score (substring matches
+ *     first). This still covers: multiple substring matches; a lone
+ *     Dice-only match (no substring evidence at all); and — the boundary
+ *     this fix preserves — a substring match with a Dice runner-up that
+ *     scores close enough (≥ 0.85) to be a genuine rival, e.g. two
+ *     near-duplicate factor labels.
  *   - No candidate qualifies → `{ matched: false }` (LLM falls through).
  */
 
@@ -263,11 +277,48 @@ export type SkipReason =
  */
 export type SelectedFactorIds = readonly string[];
 
+/**
+ * Minimum score gap a lower-ranked candidate must fall short by (relative
+ * to a top score of 1.0) for the top candidate to be treated as "clearly
+ * dominant" rather than "comparable / genuinely ambiguous". Mirrors
+ * `SUSPICIOUS_DICE_THRESHOLD` in validator.ts (0.15) — same intuition
+ * (a Dice delta under this margin is "too close to call"), reused here so
+ * the two independent ambiguity guards (this pre-route's auto-select vs.
+ * the validator's closer-match check) don't drift onto different notions
+ * of "close".
+ */
+const AUTO_SELECT_DOMINANCE_MARGIN = 0.15;
+
 export function tryDeterministicValueUpdate(
   message: string,
   parsedQuantities: readonly QuantityExtractionResult[],
   graphLookup: GraphLookup | undefined,
   selectedFactorIds: SelectedFactorIds = [],
+  /**
+   * OPTIONAL type filter — ids of factor-kind nodes in the graph. When
+   * provided, the label-matching candidate pool (built from
+   * `graphLookup.listEntitiesByKind('node')`, which buckets factor
+   * together with outcome/decision/risk/action — see the comment at the
+   * candidatesPool site below) is narrowed to ids in this set BEFORE
+   * substring/Dice matching runs. This is a value-update intent, so only
+   * factor nodes are valid targets; a decision/outcome/risk/action node
+   * that happens to share tokens with the message must never appear as a
+   * clarify chip or be counted toward the ambiguity guard below.
+   *
+   * Left undefined by callers that don't have factor-kind information
+   * (e.g. older test fixtures) — the pool is unfiltered in that case,
+   * preserving prior behaviour. Production caller (turn-executor.ts)
+   * always supplies it; it already computes the equivalent set
+   * (`factorIdSet`) for the selection-narrowing path, so this is the
+   * same set threaded one step earlier in the pipeline.
+   *
+   * FALLBACK: when this set is supplied but excludes every candidate
+   * that would otherwise match (no factor-kind node in the graph at
+   * all, or none of the factor-kind nodes share lexical material with
+   * the message), the pool falls back to unfiltered rather than
+   * declining the turn — see the candidatesPool site below for why.
+   */
+  factorNodeIds?: ReadonlySet<string>,
 ): ValueUpdateDispatch {
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
@@ -306,15 +357,42 @@ export function tryDeterministicValueUpdate(
   // Candidate pool: GraphLookup buckets factor / outcome / decision / risk
   // / action node kinds together under EntityKind 'node' (per
   // graph-lookup-adapter.ts:toEntityKind). The interface cannot
-  // disambiguate factor from outcome/risk inside the 'node' bucket.
-  // Substring/Dice matches on this pool may surface non-factor candidates
-  // (e.g. an outcome whose label happens to substring-match the user's
-  // text). We accept this: the chip click on the next turn carries a
-  // disambiguated phrasing into Sonnet's normal routing path, where the
-  // validator catches kind-mismatched proposals via the recoverable
-  // path. Tightening this would require widening GraphLookup to expose
-  // 'factor' separately — deferred (would touch the validator surface).
-  const candidatesPool = graphLookup.listEntitiesByKind('node');
+  // disambiguate factor from outcome/risk inside the 'node' bucket by
+  // itself. When the caller supplies `factorNodeIds` (production always
+  // does — see the parameter doc above), we narrow the pool to factor-kind
+  // ids HERE, before any substring/Dice matching runs, so a decision /
+  // outcome / risk / action node that shares tokens with the message can
+  // never surface as a clarify chip or count toward the ambiguity guard
+  // below, PROVIDED at least one factor candidate is available (see the
+  // fallback note just below). This is a value-update intent — non-factor
+  // nodes are never valid targets for it.
+  const rawCandidatesPool = graphLookup.listEntitiesByKind('node');
+  if (rawCandidatesPool.length === 0) {
+    return { matched: false, skip_reason: 'no_candidate_match' };
+  }
+  const factorFilteredPool =
+    factorNodeIds === undefined
+      ? rawCandidatesPool
+      : rawCandidatesPool.filter((f) => factorNodeIds.has(f.id));
+  // Fallback-to-unfiltered rule: when the type filter would leave NOTHING
+  // to match against (the graph has no factor-kind node at all, or none
+  // of the factor-kind nodes share any lexical material with the
+  // message), fall back to the unfiltered pool rather than declining the
+  // turn outright. This preserves a pre-existing, separately-tested
+  // safety net: a single substring match that resolves to a non-factor
+  // node (e.g. "Set Customer Risk to 5" against a graph with no factor
+  // nodes) still dispatches `set_factor_value`, and the CALLER's
+  // downstream kind-check (turn-executor.ts, re-resolving NodeV3.kind on
+  // raw graph state) downgrades it to `clarify` with `downgrade_reason:
+  // 'non_factor_kind'` — a clearer recovery than silently falling through
+  // to the LLM. When at least one factor candidate DOES exist, the
+  // factor-only pool is used unconditionally and non-factor nodes never
+  // surface as candidates, satisfying the type-filter requirement without
+  // touching that separately-tested downgrade path.
+  const candidatesPool =
+    factorNodeIds !== undefined && factorFilteredPool.length === 0
+      ? rawCandidatesPool
+      : factorFilteredPool;
   if (candidatesPool.length === 0) {
     return { matched: false, skip_reason: 'no_candidate_match' };
   }
@@ -421,19 +499,39 @@ export function tryDeterministicValueUpdate(
     return { matched: false, skip_reason: 'ambiguous_quantity' };
   }
 
-  // V5 D1 golden-path closure (A3.1): exactly ONE substring match (and
-  // no Dice fuzzies) is the gate for handler dispatch. A single Dice
-  // candidate stays clarify because label confidence is too low; multi-
-  // candidate stays clarify by definition. The kind check (factor only)
-  // is the caller's responsibility — see the discriminated union docs.
-  if (substringMatches.length === 1 && diceMatches.length === 0) {
-    return {
-      matched: true,
-      dispatch: 'set_factor_value',
-      candidate: substringMatches[0],
-      quantity,
-      ...(attribution ? { attribution } : {}),
-    };
+  // V5 D1 golden-path closure (A3.1) + 1.16b dominance fix: exactly ONE
+  // substring match is the gate for handler dispatch, PROVIDED it clearly
+  // dominates any Dice runner-up. A single Dice candidate (no substring
+  // match at all) still stays clarify because label confidence is too low
+  // — unchanged. Multi-substring-match stays clarify by definition —
+  // unchanged. The kind check (factor only) is the caller's responsibility
+  // when `factorNodeIds` isn't supplied — see the discriminated union docs.
+  //
+  // 1.16b (Demo-Gate usability defect): previously this branch required
+  // `diceMatches.length === 0`, so a PERFECT substring match (score 1.0)
+  // was defeated by ANY lower-quality Dice runner-up, however weak —
+  // forcing an unnecessary clarify even when the top match was obviously
+  // correct. The fix: a lone substring match still auto-selects as long as
+  // the best Dice runner-up isn't "close" to it. "Close" reuses the same
+  // 0.15 margin validator.ts's SUSPICIOUS_DICE_THRESHOLD uses for its own
+  // closer-match check (AUTO_SELECT_DOMINANCE_MARGIN, defined above) — a
+  // Dice score under 0.85 is a weak echo, not a genuine rival, and must
+  // not block the exact hit. A Dice score at/above 0.85 IS treated as
+  // comparable, so the genuinely-ambiguous case (e.g. two near-duplicate
+  // factor labels) still falls through to clarify below — the two guards
+  // coexist by construction, not by coincidence.
+  if (substringMatches.length === 1) {
+    const topDiceScore = diceMatches.length > 0 ? diceMatches[0]!.score : 0;
+    const isDominant = 1 - topDiceScore >= AUTO_SELECT_DOMINANCE_MARGIN;
+    if (isDominant) {
+      return {
+        matched: true,
+        dispatch: 'set_factor_value',
+        candidate: substringMatches[0],
+        quantity,
+        ...(attribution ? { attribution } : {}),
+      };
+    }
   }
 
   // P0 V5 golden-path repair (Wave 2, Path A — selection narrowing):
