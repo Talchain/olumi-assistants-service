@@ -5,6 +5,7 @@ import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
+import { rejectsSamplingParams } from "../../config/models.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
 import { withRetry } from "../../utils/retry.js";
@@ -2369,8 +2370,12 @@ export async function chatWithAnthropic(
   // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
   const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
   const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
-  // Anthropic requires temperature=1 when extended thinking is active
-  const temperature = thinkingEnabled ? 1 : (args.temperature ?? 0);
+  // Anthropic requires temperature=1 when extended thinking is active.
+  // Sonnet 5 / Opus 4.7+ / Fable 5 REJECT any explicit sampling param with a 400 —
+  // omit temperature entirely for them (undefined is dropped from the request).
+  const temperature = rejectsSamplingParams(model)
+    ? undefined
+    : (thinkingEnabled ? 1 : (args.temperature ?? 0));
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   // Structured Outputs — only active when schema provided, model supported, thinking disabled.
@@ -2624,8 +2629,12 @@ export async function chatWithToolsAnthropic(
   // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
   const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
   const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
-  // Anthropic requires temperature=1 when extended thinking is active
-  const temperature = thinkingEnabled ? 1 : (args.temperature ?? 0);
+  // Anthropic requires temperature=1 when extended thinking is active.
+  // Sonnet 5 / Opus 4.7+ / Fable 5 REJECT any explicit sampling param with a 400 —
+  // omit temperature entirely for them (undefined is dropped from the request).
+  const temperature = rejectsSamplingParams(model)
+    ? undefined
+    : (thinkingEnabled ? 1 : (args.temperature ?? 0));
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   const idempotencyKey = args.requestId || makeIdempotencyKey();
@@ -2853,8 +2862,12 @@ export async function* streamChatWithToolsAnthropic(
   const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'stream_chat_with_tools');
   const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
   const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
-  // Anthropic requires temperature=1 when extended thinking is active
-  const temperature = thinkingEnabled ? 1 : (args.temperature ?? 0);
+  // Anthropic requires temperature=1 when extended thinking is active.
+  // Sonnet 5 / Opus 4.7+ / Fable 5 REJECT any explicit sampling param with a 400 —
+  // omit temperature entirely for them (undefined is dropped from the request).
+  const temperature = rejectsSamplingParams(model)
+    ? undefined
+    : (thinkingEnabled ? 1 : (args.temperature ?? 0));
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   const startTime = Date.now();

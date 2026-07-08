@@ -32,6 +32,12 @@ export interface ModelConfig {
   reasoning?: boolean;
   /** Whether this model supports extended thinking (Anthropic models) */
   extendedThinking?: boolean;
+  /**
+   * Whether this model REJECTS non-default sampling params (temperature/top_p/top_k)
+   * with an HTTP 400. True for Sonnet 5, Opus 4.7/4.8, Fable 5. Callers must OMIT
+   * temperature entirely for these models (see chatWithToolsAnthropic).
+   */
+  rejectsSamplingParams?: boolean;
 }
 
 /**
@@ -278,6 +284,20 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     description: "Claude Sonnet 4 - high-quality balanced model",
     extendedThinking: true,
   },
+  "claude-sonnet-5": {
+    id: "claude-sonnet-5",
+    provider: "anthropic",
+    tier: "quality",
+    enabled: true,
+    maxTokens: 8192,
+    costPer1kTokens: 3.0,
+    averageLatencyMs: 2000,
+    qualityScore: 0.97,
+    description:
+      "Claude Sonnet 5 - balanced model; adaptive thinking on by default; rejects non-default sampling params; ~+30% tokenizer vs 4.6",
+    extendedThinking: true,
+    rejectsSamplingParams: true,
+  },
   "claude-sonnet-4-6": {
     id: "claude-sonnet-4-6",
     provider: "anthropic",
@@ -445,6 +465,18 @@ export function isReasoningModel(modelId: string): boolean {
  */
 export function supportsExtendedThinking(modelId: string): boolean {
   return MODEL_REGISTRY[modelId]?.extendedThinking === true;
+}
+
+/**
+ * Whether a model rejects non-default sampling params (temperature/top_p/top_k)
+ * with an HTTP 400. Callers must OMIT temperature entirely for these models.
+ * Registry lookup first, then a pattern fallback for unregistered dated variants
+ * of the affected families (Sonnet 5, Opus 4.7/4.8, Fable 5).
+ */
+export function rejectsSamplingParams(modelId: string): boolean {
+  const entry = MODEL_REGISTRY[modelId];
+  if (entry !== undefined) return entry.rejectsSamplingParams === true;
+  return /claude-(sonnet-5|opus-4-7|opus-4-8|fable-5)/.test(modelId);
 }
 
 /**
