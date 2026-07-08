@@ -480,6 +480,15 @@ const ConfigSchema = z.object({
       "off",
       "CEE_GRAPH_MANAGEMENT_MODE",
     ),
+    // CEE_REASONING_CAPTURE_ENABLED — ROADMAP 1.42: capture Sonnet-5 extended
+    // thinking VERBATIM (labelled, progressive disclosure) instead of the
+    // #385 drop+warn behaviour. Default OFF; flag-off is byte-identical to
+    // pre-1.42 behaviour (thinking blocks still dropped+warned, never
+    // returned). Enablement is Paul-gated — see
+    // Docs/lanes/LANE-REASONING-CAPTURE-1.42.md for the claim-safety
+    // containment argument (VERBATIM reasoning bypasses the egress
+    // claim-safety/forbidden-phrase cage by ruling).
+    reasoningCaptureEnabled: booleanString.default(false),
   }),
 
   // Prompt Cache Configuration
@@ -1060,6 +1069,7 @@ function parseConfig(): Config {
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
       graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
       graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
+      reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

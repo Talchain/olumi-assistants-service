@@ -361,6 +361,17 @@ export interface TurnExecutorRunResult {
    * turn had no graph (egress + storage both run graph-free, consistently).
    */
   effectiveGraph?: GraphV3T | null;
+  /**
+   * ROADMAP 1.42 — VERBATIM Sonnet-5 extended-thinking text captured from
+   * the routing call's `ChatWithToolsResult.reasoning`, when
+   * CEE_REASONING_CAPTURE_ENABLED is on and the model emitted thinking
+   * blocks. Undefined when the flag is off, or no thinking was emitted.
+   * NEVER attached to `response` / assistant_text here — route-v2 attaches
+   * it to the wire envelope AFTER egress validation (the `_reasoning`
+   * sidecar mechanic), so it must never leak into pre-egress prose or the
+   * fallback envelope.
+   */
+  reasoning?: string;
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -966,6 +977,14 @@ export async function runTurnExecutor(
   // and wire text resolve entity-id labels against the SAME graph and cannot
   // diverge. Null until the graph is parsed below / when the turn has no graph.
   let effectiveTurnGraph: GraphV3T | null = null;
+  // ROADMAP 1.42 — VERBATIM reasoning captured from the real LLM routing
+  // call, hoisted to outer scope (same reason as the fields above) so
+  // `finalizeRun` — declared OUTSIDE the try block below — can read it.
+  // Stashed independently of `routingResult` (itself try-block-scoped) so
+  // it survives any later reassignment. Undefined on every deterministic /
+  // synthesised path and whenever CEE_REASONING_CAPTURE_ENABLED is off.
+  // Surfaced on TurnExecutorRunResult.reasoning by finalizeRun().
+  let capturedReasoning: string | undefined;
 
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
@@ -4388,6 +4407,10 @@ export async function runTurnExecutor(
           signal: turnAbort.signal,
           adapter: options.routingAdapter,
         });
+        // ROADMAP 1.42 — stash VERBATIM reasoning immediately after the real
+        // LLM call. Undefined when the flag was off or no thinking blocks
+        // were emitted (see ChatWithToolsResult.reasoning jsdoc).
+        capturedReasoning = routingResult.rawResult?.reasoning;
         if (timingsEnabled) {
           turnTimings.routing_llm_ms = Date.now() - routingStartedAt;
           // Fix 4: mirror routing cache state from rawResult.usage so the
@@ -6780,6 +6803,11 @@ export async function runTurnExecutor(
       // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
       // so wire label resolution matches the durable-text scrub at commit.
       effectiveGraph: effectiveTurnGraph,
+      // ROADMAP 1.42 — VERBATIM reasoning captured from the routing call
+      // (flag-gated, see `capturedReasoning` above). NEVER attached to
+      // `response` — route-v2 attaches it to the wire envelope as a
+      // post-egress-validation sidecar.
+      ...(capturedReasoning ? { reasoning: capturedReasoning } : {}),
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,

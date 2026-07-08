@@ -58,6 +58,7 @@ function textBlock(text: string): ToolResponseBlock {
 function mkResult(
   content: ToolResponseBlock[],
   stop: ChatWithToolsResult['stop_reason'] = 'tool_use',
+  reasoning?: string,
 ): ChatWithToolsResult {
   return {
     content,
@@ -70,6 +71,7 @@ function mkResult(
     } as unknown as ChatWithToolsResult['usage'],
     model: 'claude-sonnet-4-6',
     latencyMs: 123,
+    ...(reasoning !== undefined ? { reasoning } : {}),
   };
 }
 
@@ -728,5 +730,83 @@ describe('assertAnthropicMessageProtocol', () => {
     expect(() => assertAnthropicMessageProtocol(messages)).toThrow(
       /tool_result tu-orphan.*has no matching tool_use/,
     );
+  });
+});
+
+// -----------------------------------------------------------------------
+// ROADMAP 1.42 — reasoning never leaks into orientationText / text
+// -----------------------------------------------------------------------
+// `ChatWithToolsResult.reasoning` (when the adapter's flag-gated capture is
+// on) rides through on `rawResult` unchanged, but MUST NOT contribute to
+// `orientationText` (tool_call path) or `text` (text_only path) — both are
+// derived solely from `content`'s text blocks. See route-with-tool-use.ts
+// buildRepairMessages / the joinedText derivation.
+describe('routeWithToolUse — reasoning capture never leaks into orientationText/text (ROADMAP 1.42)', () => {
+  const REASONING_TEXT = 'Internal chain of thought that must never reach the user.';
+
+  it('tool_call path: rawResult.reasoning is passed through but orientationText excludes it', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult(
+            [textBlock('Running analysis on your current scenario...'), toolCallBlock(VALID_EXECUTE_INPUT)],
+            'tool_use',
+            REASONING_TEXT,
+          ),
+        ),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'run analysis', {
+      requestId: 'req-reasoning-1',
+      adapter,
+    });
+
+    expect(result.type).toBe('tool_call');
+    if (result.type === 'tool_call') {
+      // The adapter's captured reasoning rides through on rawResult unchanged.
+      expect(result.rawResult.reasoning).toBe(REASONING_TEXT);
+      // But orientationText is derived only from content's text blocks.
+      expect(result.orientationText).toBe('Running analysis on your current scenario...');
+      expect(result.orientationText).not.toContain(REASONING_TEXT);
+    }
+  });
+
+  it('text_only path: rawResult.reasoning is passed through but text excludes it', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult([textBlock('Hello — how can I help?')], 'end_turn', REASONING_TEXT),
+        ),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'hi', {
+      requestId: 'req-reasoning-2',
+      adapter,
+    });
+
+    expect(result.type).toBe('text_only');
+    if (result.type === 'text_only') {
+      expect(result.rawResult.reasoning).toBe(REASONING_TEXT);
+      expect(result.text).toBe('Hello — how can I help?');
+      expect(result.text).not.toContain(REASONING_TEXT);
+    }
+  });
+
+  it('no reasoning captured (flag off / no thinking): rawResult.reasoning is undefined, behaviour unchanged', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([textBlock('Hello!')], 'end_turn')),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'hi', {
+      requestId: 'req-reasoning-3',
+      adapter,
+    });
+
+    expect(result.type).toBe('text_only');
+    expect(result.rawResult.reasoning).toBeUndefined();
   });
 });

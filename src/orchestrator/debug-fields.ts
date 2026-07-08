@@ -115,6 +115,28 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    * needs no runtime coercion.
    */
   readonly _context_summary?: V5ContextSummary;
+  /**
+   * ROADMAP 1.42 — flag-gated PRODUCT sidecar (NOT a debug/diagnostic
+   * surface like its siblings above): VERBATIM Sonnet-5 extended-thinking
+   * reasoning text, for progressive disclosure in the UI (collapsed by
+   * default, explicitly labelled — Paul ruling). Populated only when
+   * `config.features.reasoningCaptureEnabled` (env
+   * `CEE_REASONING_CAPTURE_ENABLED=true`) is set AND the model emitted
+   * thinking blocks. Stripped before strict `OlumiResponseSchema`
+   * validation, re-attached after — same mechanic as `_context_summary`.
+   * Never contains `signature` or `redacted_thinking` content (see
+   * `ChatWithToolsResult.reasoning` jsdoc in `adapters/llm/types.ts`).
+   *
+   * Pending formalisation as a named field on the shared
+   * `@talchain/schemas` contract (0.15.0) once the UI progressive-
+   * disclosure surface lands; lives here as an underscore-prefixed
+   * sidecar in the meantime, consistent with the other debug fields'
+   * additive-tolerance contract described above. UNLIKE the debug
+   * surfaces above, this field IS intended to reach the client UI (it is
+   * flag-gated product content, not an operator-only diagnostic) — the
+   * two-gate `X-Olumi-Debug` header model does NOT apply to it.
+   */
+  readonly _reasoning?: string;
 };
 
 /**
