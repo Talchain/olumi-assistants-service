@@ -22,6 +22,7 @@ import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { synthesiseDisplayValue } from "./display-value.js";
+import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -110,8 +111,17 @@ function isTargetGoalLabel(label: string): boolean {
 }
 
 /**
- * Compute a normalisation cap for a large value.
- * Uses order-of-magnitude rounding: 800 → 1000, 50000 → 100000
+ * Compute a normalisation cap for a large FACTOR-NODE value (display/model
+ * normalisation for regular factor nodes — NOT goal thresholds).
+ * Uses order-of-magnitude rounding: 800 → 1000, 50000 → 100000.
+ *
+ * NOTE (cap-doctrine unification, ROADMAP 1.18): the goal-threshold
+ * redirection branch below does NOT use this function — it delegates to
+ * the shared `resolveGoalThresholdCap` doctrine (../../utils/goal-threshold-cap.js)
+ * so a goal target scores identically via the draft (this file) and chat
+ * (add_constraint handler) registration paths. This function remains the
+ * cap for plain factor nodes (enhance/create branches below), a separate,
+ * unrelated concern (factor display legibility, not goal-fit scoring).
  */
 function computeNormalisationCap(rawValue: number): number {
   if (rawValue <= 0) return 1;
@@ -644,12 +654,33 @@ export async function enrichGraphWithFactorsAsync(
         let cap: number | undefined;
 
         if (factor.unit !== "%" && factor.value > 1) {
-          // Large absolute value - normalize using cap
-          cap = computeNormalisationCap(factor.value);
-          rawValue = factor.value;
-          normalizedValue = factor.value / cap;
+          // Large absolute value - normalise using the SAME cap doctrine as
+          // the chat-path add_constraint handler (cap-doctrine unification,
+          // ROADMAP 1.18): an existing compatible cap wins, else 25%
+          // headroom above the raw target. Deliberately NOT
+          // computeNormalisationCap (order-of-magnitude) — that diverged
+          // from the chat path and scored the same target up to ~5x
+          // differently depending on registration path.
+          const resolvedCap = resolveGoalThresholdCap(
+            currentGoalNode.goal_threshold_cap,
+            factor.value,
+            factor.unit,
+            currentGoalNode.goal_threshold_unit,
+          );
+          if (resolvedCap !== null) {
+            cap = resolvedCap;
+            rawValue = factor.value;
+            normalizedValue = factor.value / resolvedCap;
+          } else {
+            rawValue = factor.value;
+          }
         } else {
-          // Already normalized (percentage or <= 1) - no cap needed
+          // Already normalized (percentage or <= 1) - no cap needed.
+          // NOTE: regex extraction (cee/factor-extraction/index.ts)
+          // pre-divides percentages into a 0-1 fraction before this code
+          // runs, so this branch is already doctrine-equivalent to the
+          // shared '%'→/100 step (just pre-applied) — routing it through
+          // resolveGoalThresholdCap here would double-divide.
           rawValue = factor.value;
         }
 
