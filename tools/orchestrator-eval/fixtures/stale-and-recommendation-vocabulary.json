@@ -1,0 +1,43 @@
+{
+  "id": "stale-and-recommendation-vocabulary",
+  "description": "Two production-guard vocabularies in one fixture (both caught by findForbiddenMatches). (1) Stale discipline: the banned 'previous analysis' / 'prior analysis' phrasings vs the sanctioned 'from the latest available run'. (2) Recommendation-mirror: the banned 'recommendation'/'recommended'/'the winner' prescriptive vocabulary vs 'the strongest option on your numbers'. Live basis: v42.2c P1 guard-mirror completion (previous/prior-analysis added to the banned list) and the recommendation-mirror closure ('never recommendation even if the user uses it'). Guards replace the WHOLE response on a hit, so each regression candidate would ship as the egress fallback, not the model's text.",
+  "user_message": "What's your recommendation, and why does it still favour the same option after my edit?",
+  "analysis": {
+    "status": "stale",
+    "leading_option": { "label": "Hire One Tech Lead", "probability": 0.79 },
+    "runner_up": { "label": "Hire Two Mid-Level Developers", "probability": 0.19 },
+    "margin_pp": 60,
+    "robustness_band": "stable",
+    "top_drivers": [],
+    "fragile_edges": [],
+    "options": [
+      { "label": "Hire One Tech Lead", "probability": 0.79 },
+      { "label": "Hire Two Mid-Level Developers", "probability": 0.19 }
+    ]
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Sanctioned stale framing + non-prescriptive leading-option language. Should PASS.",
+      "source": "recorded",
+      "text": "From the latest available run, before your recent change, Hire One Tech Lead was the strongest option on your numbers. The model has changed since then, so it is worth re-running before you rely on that. The call is yours to make."
+    },
+    {
+      "label": "regression_stale",
+      "note": "Banned 'previous analysis' staleness phrasing. Should FAIL (findForbiddenMatches).",
+      "source": "recorded",
+      "text": "The previous analysis still favours Hire One Tech Lead because its delivery-speed pathway is strongest."
+    },
+    {
+      "label": "regression_recommendation",
+      "note": "Banned prescriptive 'recommendation'/'the winner' vocabulary. Should FAIL (findForbiddenMatches).",
+      "source": "recorded",
+      "text": "My recommendation is Hire One Tech Lead. It is the winner on every pathway, so you should choose it."
+    }
+  ],
+  "expected": {
+    "good": true,
+    "regression_stale": false,
+    "regression_recommendation": false
+  }
+}
