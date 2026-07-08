@@ -1,0 +1,62 @@
+-- ============================================================
+-- REVOKE authenticated EXECUTE on store_draft_graph — repo/live
+-- reconciliation (ROADMAP 1.40, Docs/v5/group-a-canonical-state-
+-- foundation.md §0/§7, security finding 2026-07-04).
+-- Target: Staging Supabase (then prod, on a separate approved promotion)
+-- Date: 2026-07-08
+--
+-- [PAUL-GATED — DB security, do NOT apply without explicit approval]
+--
+-- Problem:
+--   20260422120000_v5_store_draft_graph.sql granted EXECUTE on
+--   store_draft_graph(uuid, jsonb) to `authenticated`. That function is
+--   SECURITY DEFINER with NO ownership predicate on its
+--   `UPDATE scenarios SET graph = p_graph WHERE id = p_scenario_id`
+--   body, so any authenticated user holding a valid JWT can overwrite
+--   ANY scenario's graph by id via the Supabase PostgREST RPC endpoint
+--   (`POST /rest/v1/rpc/store_draft_graph`), bypassing RLS (SECURITY
+--   DEFINER runs as owner). CEE's TS caller
+--   (`SupabaseSessionStore.storeDraftGraph`) has zero production call
+--   sites — the hole is the DB grant, not application code.
+--
+-- Live-safe-today, repo-drift-only:
+--   A live `pg_proc`/`proacl` introspection on 2026-07-08 (Lane A,
+--   orchestrator-verified) found the LIVE grant is already
+--   `{postgres=X, service_role=X}` — NO `authenticated` — i.e. an
+--   equivalent REVOKE was already applied against the live database
+--   out-of-band, outside this repo's migration history. There is no
+--   live cross-tenant hole today; this migration does not "close a
+--   live hole" so much as make the checked-in migration history match
+--   what is already true in the database.
+--
+-- Re-arm risk this migration closes:
+--   Because 20260422120000_v5_store_draft_graph.sql still contains
+--   `GRANT EXECUTE ... TO authenticated` and no migration in this repo
+--   revokes it, a FRESH database build from this repo's migrations (a
+--   new environment, a DR restore-and-replay, or a future prod
+--   promotion that replays migrations rather than cloning live) would
+--   RE-CREATE the authenticated grant and RE-ARM the hole. This
+--   migration is the repo-side fix so `git log supabase/migrations/`
+--   alone is sufficient to reproduce the current safe live state.
+--
+-- Scope:
+--   `store_draft_graph(uuid, jsonb)` ONLY. The related secondary
+--   finding — the legacy 13-arg `append_turn_atomic` also carrying a
+--   live `authenticated` grant (same SECURITY DEFINER / no-ownership-
+--   check class) — is explicitly OUT OF SCOPE for this migration; it
+--   is a separate revoke tracked alongside this one in
+--   group-a-canonical-state-foundation.md §0/§7/§10, not bundled here
+--   to keep this migration a single, reviewable, one-line grant
+--   change.
+--
+-- Fail-closed / reversible:
+--   Revoking `authenticated` EXECUTE leaves `service_role` and
+--   `postgres` untouched — CEE's service-role client (the only
+--   would-be caller, and currently a zero-call-site one) is
+--   unaffected. Re-granting `authenticated` (GRANT EXECUTE ... TO
+--   authenticated) fully reverses this migration if ever needed.
+-- ============================================================
+
+REVOKE EXECUTE ON FUNCTION store_draft_graph(uuid, jsonb) FROM authenticated;
+-- service_role and postgres retain EXECUTE (unchanged) — matches
+-- append_turn_atomic_v2's posture (service-role-only V5 write RPCs).
