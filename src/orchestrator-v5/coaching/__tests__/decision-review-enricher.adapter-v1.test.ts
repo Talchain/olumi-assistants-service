@@ -401,6 +401,11 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
       affected_node_ids: ['node_1', 'node_2'], // non-string entry (42) filtered
     });
     expect(critiques[0]!.unknown_upstream_field).toBeUndefined();
+    // FIX C (1.41 fix round, C3): the 2 malformed entries (missing message,
+    // missing severity) must be counted on _meta, not just silently dropped
+    // from the array.
+    expect(input._meta!.model_critiques_dropped_count).toBe(2);
+    expect(input._meta!.model_critiques_capped_count).toBe(0);
   });
 
   it('11. model_critiques count cap (FIX 2, 1.41): entries beyond MAX_MODEL_CRITIQUES are dropped from the tail, never silently unbounded', () => {
@@ -420,5 +425,11 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
     // Kept entries are the FIRST N (stable, not silently reordered).
     expect(critiques[0]!.type).toBe('TYPE_0');
     expect(critiques[9]!.type).toBe('TYPE_9');
+    // FIX C (1.41 fix round, C3): all 25 upstream entries are well-formed
+    // (0 malformed-drops); 15 are dropped purely by the count cap — that
+    // count must be observable on _meta (the doc comment on
+    // MAX_MODEL_CRITIQUES claims this, but it was never wired through).
+    expect(input._meta!.model_critiques_dropped_count).toBe(0);
+    expect(input._meta!.model_critiques_capped_count).toBe(15);
   });
 });

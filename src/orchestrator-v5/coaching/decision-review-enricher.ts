@@ -373,6 +373,8 @@ function buildInvokeInput(
     model_critique_count: dcResult.model_critique_count,
     has_deterministic_coaching: dcResult.has_real_data,
     evidence_gaps_dropped_count: dcResult.evidence_gaps_dropped_count,
+    model_critiques_dropped_count: dcResult.model_critiques_dropped_count,
+    model_critiques_capped_count: dcResult.model_critiques_capped_count,
     margin,
     robustness_level: robustnessLevel,
   };
@@ -685,7 +687,7 @@ interface DeterministicCoachingResult {
   readonly model_critique_count: number;
   readonly evidence_gaps_dropped_count: number;
   /** Number of upstream model_critiques entries dropped for missing one of
-   *  the three required fields (type, factor_label, message) — see
+   *  the three required fields (type, severity, message) — see
    *  {@link normaliseModelCritique}. Mirrors evidence_gaps_dropped_count. */
   readonly model_critiques_dropped_count: number;
   /** Number of well-formed model_critiques entries dropped purely by the

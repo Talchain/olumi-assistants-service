@@ -63,6 +63,17 @@ export interface DecisionReviewMeta {
    *  the contract test at decision-review-enricher.contract.test.ts §"_meta
    *  is adapter-only" asserts this key never reaches the user message. */
   readonly evidence_gaps_dropped_count: number;
+  /** Number of upstream m1_coaching.model_critiques entries that were
+   *  object-shaped but missing one of the three required fields (type,
+   *  severity, message) — see {@link normaliseModelCritique} in
+   *  decision-review-enricher.ts. Mirrors evidence_gaps_dropped_count.
+   *  Internal observability only — never reaches the user message. */
+  readonly model_critiques_dropped_count: number;
+  /** Number of well-formed model_critiques entries dropped purely by the
+   *  MAX_MODEL_CRITIQUES count cap (FIX 2, 1.41) — distinct from
+   *  model_critiques_dropped_count (malformed entries). Internal
+   *  observability only — never reaches the user message. */
+  readonly model_critiques_capped_count: number;
   /** True when at least one real upstream m1_coaching signal was mapped:
    *  non-default `readiness` or `headline_type`, non-empty `evidence_gaps`,
    *  or non-empty `model_critiques`. False when adapter fell back entirely
