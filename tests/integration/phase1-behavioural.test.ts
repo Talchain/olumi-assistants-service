@@ -351,6 +351,25 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
     expect(response.assistant_text).toBe('A short orientation sentence only.');
   });
 
+  it('coach tool call with EMPTY/whitespace answer_text falls back to orientationText (never ships blank)', async () => {
+    const adapter = {
+      chatWithTools: vi.fn().mockResolvedValueOnce(
+        toolResult(
+          { intent_class: 'coach', coaching_mode: 'reframe', answer_text: '   ' },
+          'A short orientation sentence only.',
+        ),
+      ),
+    };
+
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-blank', {
+      routingAdapter: adapter,
+    });
+
+    expect(telemetry.intent_class).toBe('coach');
+    expect(response.assistant_text).toBe('A short orientation sentence only.');
+    expect(response.assistant_text.trim()).not.toBe('');
+  });
+
   it('converse tool call carrying answer_text ships the full answer, not the short orientationText', async () => {
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(

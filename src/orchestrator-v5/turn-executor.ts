@@ -5829,8 +5829,12 @@ export async function runTurnExecutor(
       // behaviour. This is the fix for the silent-truncation defect
       // (TRUNCATION-BUG-HANDOVER.md): previously only `orientationText` —
       // a single confident sentence — ever reached the user on coach turns.
-      const coachAnswerSource =
-        routingResult.proposal.answer_text ?? routingResult.orientationText;
+      // Trimmed-truthiness on both branches (review nit): an empty or
+      // whitespace-only answer_text must fall back to orientationText,
+      // never ship a blank answer.
+      const coachAnswerSource = routingResult.proposal.answer_text?.trim()
+        ? routingResult.proposal.answer_text
+        : routingResult.orientationText;
       const sanitised = sanitiseNarrateOutput(coachAnswerSource);
       if (sanitised.contamination_detected) {
         emit(TelemetryEvents.TurnExecutorContaminationNarrate, {
@@ -5904,7 +5908,7 @@ export async function runTurnExecutor(
         routingResult.type === 'text_only'
           ? routingResult.text
           : routingResult.proposal.intent_class === 'converse' &&
-              routingResult.proposal.answer_text
+              routingResult.proposal.answer_text?.trim()
             ? routingResult.proposal.answer_text
             : routingResult.orientationText;
       const sanitised = sanitiseNarrateOutput(text);
