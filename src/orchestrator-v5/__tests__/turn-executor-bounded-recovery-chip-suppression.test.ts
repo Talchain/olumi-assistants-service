@@ -33,7 +33,7 @@ import type {
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
-import type { PendingAction } from '../session/pending-action.js';
+import { PENDING_ACTION_DEFAULT_TURN_TTL, type PendingAction } from '../session/pending-action.js';
 
 // ---------------------------------------------------------------------------
 // Session-store mock — replayable per-test (mirrors the fresh-analysis-
@@ -161,7 +161,18 @@ const PRIOR_RUN_ANALYSIS_TURN = {
 
 /** A PendingAction recording that `chip_action_explain_results` was offered
  * on the immediately-prior turn — exactly what `recentlyOfferedChipIds()`
- * reads from `context.most_recent_pending_actions`. */
+ * reads from `context.most_recent_pending_actions`.
+ *
+ * `expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL` (not an
+ * arbitrary large value): every production call site that mints a
+ * chip-derived pending stamps exactly `PENDING_ACTION_DEFAULT_TURN_TTL`
+ * (turn-executor.ts, derive-pending-actions.ts, proposal-continuation.ts,
+ * proposed-change.ts, edit-graph-referee-gate.ts — none pass a `turn_ttl`
+ * override), and `commit.ts`'s carry-forward decrements by exactly 1 per
+ * survived turn. So the undecremented default TTL is the real, load-bearing
+ * signal FIX 3 (F11) uses to distinguish "offered THIS immediately-prior
+ * turn" from "carried forward from an earlier turn" — see
+ * `survivedTwoTurnsAgoPendingAction` below for the contrasting case. */
 function priorExplainResultsPendingAction(): PendingAction {
   return {
     id: 'pa-prior-explain',
@@ -169,9 +180,31 @@ function priorExplainResultsPendingAction(): PendingAction {
     chip_id: 'chip_action_explain_results',
     action: { kind: 'run_analysis' },
     preconditions: {},
-    expires_at_turn_count: 999,
+    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
     expires_at_iso: new Date(Date.now() + 3_600_000).toISOString(),
     emitted_at_iso: new Date(Date.now() - 30_000).toISOString(),
+  };
+}
+
+/** FIX 3 (F11) — a pending action that SURVIVED one carry-forward cycle
+ * (commit.ts's `computeSurvivingPriorPendingsDetailed` decremented its TTL
+ * from `PENDING_ACTION_DEFAULT_TURN_TTL` to `PENDING_ACTION_DEFAULT_TURN_TTL
+ * - 1`), i.e. it was offered TWO turns ago, not on the immediately-prior
+ * turn. The chip-sameness guard's own doc comment and the #390 commit
+ * message both claim suppression is scoped to "the IMMEDIATELY PRIOR
+ * turn" — this fixture is the over-suppression repro: before the fix, its
+ * presence in `most_recent_pending_actions` (a carry-forward survivor, not
+ * a fresh offer) still suppressed the chip for a 2nd consecutive turn. */
+function survivedTwoTurnsAgoPendingAction(): PendingAction {
+  return {
+    id: 'pa-survivor-explain',
+    scenario_id: SCENARIO_ID,
+    chip_id: 'chip_action_explain_results',
+    action: { kind: 'run_analysis' },
+    preconditions: {},
+    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL - 1,
+    expires_at_iso: new Date(Date.now() + 3_600_000).toISOString(),
+    emitted_at_iso: new Date(Date.now() - 90_000).toISOString(),
   };
 }
 
@@ -281,5 +314,36 @@ describe('turn-executor — bounded-recovery chip builder honours the chip-samen
       (a: { id?: string }) => a.id === 'chip_action_explain_results',
     );
     expect(explainChip, 'with no recently-offered chips, explain_results should be offered').toBeDefined();
+  });
+
+  it('FIX 3 (F11, CEE hygiene batch): a pending action carried forward from TWO turns ago (TTL survivor, not a fresh immediately-prior offer) does NOT suppress its chip', async () => {
+    // Over-suppression repro: `most_recent_pending_actions` mixes TTL-
+    // carried survivors with fresh immediately-prior offers (commit.ts's
+    // computeSurvivingPriorPendingsDetailed persists a non-consumed pending
+    // forward, decrementing expires_at_turn_count by 1 each surviving
+    // turn). Before the fix, the guard suppressed on chip_id presence
+    // alone, so this 2-turns-ago survivor wrongly suppressed the chip for
+    // an extra turn — contradicting the guard's own "IMMEDIATELY PRIOR
+    // turn" contract (turn-executor.ts comment + the #390 commit message).
+    mockState.pendingActions = [survivedTwoTurnsAgoPendingAction()];
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(emptyAnswerCoachToolResult()),
+    };
+
+    const result = await runTurnExecutor(
+      mkPayload('help me think this through'),
+      'req-bounded-recovery-chip-suppression-ttl-survivor',
+      { routingAdapter: adapter, graphState: READY_GRAPH as never },
+    );
+
+    const explainChip = result.response.suggested_actions.find(
+      (a: { id?: string }) => a.id === 'chip_action_explain_results',
+    );
+    expect(
+      explainChip,
+      'a TTL-carried survivor from 2 turns ago must not extend suppression beyond the immediately-prior turn',
+    ).toBeDefined();
   });
 });
