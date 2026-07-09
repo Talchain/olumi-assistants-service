@@ -34,7 +34,6 @@ import { resolveGoalThresholdCap } from '../../../utils/goal-threshold-cap.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
-import type { PersistedGraphV3T } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
@@ -370,66 +369,53 @@ export function createAddConstraintHandler(): HandlerFn {
       // fields `computeAnalysisAffectingGraphHash` reads; re-stamping them
       // on a turn whose OWN receipt says "nothing changed" moves the
       // analysis-affecting hash out from under an honest noop claim. Only
-      // stamp when the value genuinely changed this turn.
+      // stamp when the value genuinely changed this turn. The
+      // goal_constraints row upsert below still runs unconditionally
+      // (matching every other D1 handler's noop contract — see
+      // d1-cross-handler.test.ts: a noop turn still returns a
+      // `mutated_graph`, just one whose hash is unchanged because its
+      // content is byte-identical to what was already persisted); it is
+      // ONLY the node-threshold stamp that is gated, since that is the
+      // field the F9 defect actually moved.
       const stampGoalThreshold = isGoalTargetSet && !valueUnchanged;
 
-      let mutatedGraph: PersistedGraphV3T | undefined;
-      let before: Record<string, unknown> | null;
-      let after: Record<string, unknown> | null;
-
-      if (valueUnchanged && !labelChanged) {
-        // True no-op: neither the value nor the label changed. Skip the
-        // mutation closure ENTIRELY — no goal_constraints row rewrite, no
-        // node stamp — so there is nothing for the commit layer to
-        // persist and the analysis-affecting hash cannot move.
-        const beforePayload = existing ? (existing as Record<string, unknown>) : null;
-        mutatedGraph = undefined;
-        before = beforePayload;
-        after = beforePayload;
-      } else {
-        const mutationResult = applyAndValidateMutation(rawGraph, (clone) => {
-          const list = clone.goal_constraints ?? [];
-          const next = existing
-            ? list.map((c) =>
-                c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
-              )
-            : [...list, constraintParse.data];
-          clone.goal_constraints = next;
-          if (stampGoalThreshold) {
-            const goalNode = clone.nodes.find((n) => n.id === targetId);
-            if (goalNode) {
-              const cap = resolveGoalThresholdCap(
-                goalNode.goal_threshold_cap,
-                params.value,
-                newConstraint.unit,
-                goalNode.goal_threshold_unit,
-              );
-              goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
-              // Unit is ALWAYS reconciled (review hardening): keeping a stale
-              // '%' unit when a unitless absolute target re-registers would
-              // display "900%" — a unitless registration clears the old unit.
-              if (newConstraint.unit !== undefined) {
-                goalNode.goal_threshold_unit = newConstraint.unit;
-              } else {
-                delete goalNode.goal_threshold_unit;
-              }
-              if (cap !== null) {
-                goalNode.goal_threshold_cap = cap;
-                goalNode.goal_threshold = params.value / cap; // model units (0–1)
-              }
+      const result = applyAndValidateMutation(rawGraph, (clone) => {
+        const list = clone.goal_constraints ?? [];
+        const next = existing
+          ? list.map((c) =>
+              c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
+            )
+          : [...list, constraintParse.data];
+        clone.goal_constraints = next;
+        if (stampGoalThreshold) {
+          const goalNode = clone.nodes.find((n) => n.id === targetId);
+          if (goalNode) {
+            const cap = resolveGoalThresholdCap(
+              goalNode.goal_threshold_cap,
+              params.value,
+              newConstraint.unit,
+              goalNode.goal_threshold_unit,
+            );
+            goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
+            // Unit is ALWAYS reconciled (review hardening): keeping a stale
+            // '%' unit when a unitless absolute target re-registers would
+            // display "900%" — a unitless registration clears the old unit.
+            if (newConstraint.unit !== undefined) {
+              goalNode.goal_threshold_unit = newConstraint.unit;
+            } else {
+              delete goalNode.goal_threshold_unit;
+            }
+            if (cap !== null) {
+              goalNode.goal_threshold_cap = cap;
+              goalNode.goal_threshold = params.value / cap; // model units (0–1)
             }
           }
-          return {
-            before: existing ? (existing as Record<string, unknown>) : null,
-            after: constraintParse.data as unknown as Record<string, unknown>,
-          };
-        });
-        mutatedGraph = mutationResult.mutatedGraph;
-        before = mutationResult.before;
-        after = mutationResult.after;
-      }
-
-      const result = { mutatedGraph, before, after };
+        }
+        return {
+          before: existing ? (existing as Record<string, unknown>) : null,
+          after: constraintParse.data as unknown as Record<string, unknown>,
+        };
+      });
 
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
@@ -493,7 +479,7 @@ export function createAddConstraintHandler(): HandlerFn {
         assistant_text: assistantText,
         handler_facts: [factCheck.data],
         llm_calls_used: 0,
-        ...(result.mutatedGraph !== undefined ? { mutated_graph: result.mutatedGraph } : {}),
+        mutated_graph: result.mutatedGraph,
       };
     });
   };

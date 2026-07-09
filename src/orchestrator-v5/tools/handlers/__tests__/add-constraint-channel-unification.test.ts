@@ -145,21 +145,30 @@ describe('F9: a true no-op turn must not stamp node threshold fields (analysis-a
 
     // The defect: the OLD code unconditionally stamped
     // goal_threshold_raw/_unit/_cap on the node whenever isGoalTargetSet,
-    // even on a noop turn — moving the analysis-affecting hash. The fix:
-    // a true no-op turn commits NO graph mutation at all.
-    expect(outcome.mutated_graph).toBeUndefined();
-
-    // Positive control: if a graph WERE committed, prove the hash would
-    // in fact have moved (the node gains goal_threshold_raw where it had
-    // none) — grounds why `mutated_graph: undefined` is the load-bearing
-    // assertion above, not an incidental one.
-    const wouldBeGraph = structuredClone(graph) as unknown as GraphStateIngress;
-    const stampedNode = (wouldBeGraph.nodes as Array<Record<string, unknown>>).find(
+    // even on a noop turn — moving the analysis-affecting hash. The fix
+    // gates ONLY the node stamp, not the whole mutation (a noop still
+    // rewrites the goal_constraints row with byte-identical content,
+    // matching every other D1 handler's noop contract — see
+    // d1-cross-handler.test.ts): the returned mutated_graph's hash must
+    // equal the pre-turn hash.
+    expect(
+      computeAnalysisAffectingGraphHash(outcome.mutated_graph as GraphStateIngress),
+    ).toBe(hashBefore);
+    const stampedNode = (outcome.mutated_graph as { nodes: Array<Record<string, unknown>> }).nodes.find(
       (n) => n.id === 'g-revenue',
     )!;
-    stampedNode.goal_threshold_raw = 15;
-    stampedNode.goal_threshold_unit = '%';
-    stampedNode.goal_threshold_cap = 100;
+    expect(stampedNode.goal_threshold_raw).toBeUndefined();
+
+    // Positive control: if the node HAD been (re-)stamped, prove the hash
+    // would in fact have moved — grounds why the assertion above is
+    // load-bearing, not incidental.
+    const wouldBeGraph = structuredClone(graph) as unknown as GraphStateIngress;
+    const wouldBeStampedNode = (wouldBeGraph.nodes as Array<Record<string, unknown>>).find(
+      (n) => n.id === 'g-revenue',
+    )!;
+    wouldBeStampedNode.goal_threshold_raw = 15;
+    wouldBeStampedNode.goal_threshold_unit = '%';
+    wouldBeStampedNode.goal_threshold_cap = 100;
     const hashIfStamped = computeAnalysisAffectingGraphHash(wouldBeGraph);
     expect(hashIfStamped).not.toBe(hashBefore);
   });
