@@ -43,10 +43,10 @@ draft's own interventions (no synthesis). The act-vs-status-quo *structural* chu
 v0 structural metrics (reproducibility, sign-flip) survive but are also re-baselined on the same
 aligned draws for consistency.
 
-## Empirical confirmations (from the aligned re-run)
-- m1-dedup checker post-alignment: _[pending es-v0a/m1dedup-a]_
-- Aligned draft validity (es-v0a 30 draws): _[pending]_
-- Option-differentiation rate (draft's own interventions, per 5 draws): _[pending]_
+## Empirical confirmations (from the aligned re-run, 2026-07-09)
+- **m1-dedup checker post-alignment (seed 17, vs OLD-v0.4.3 aligned):** exact-dup **0** (= OLD 0), near-pairs **2** (= OLD 2), risks **15** (> OLD 13). The pre-align "near 0" did NOT reproduce — but that was a single-draw artifact: under alignment BOTH OLD and m1-dedup show near=2, and both m1-dedup near-pairs are LEGITIMATE parallel factors with clearly-distinguishing labels ("contracted engineers" vs "hired engineers" skill; "refactor time" vs "feature time"), i.e. token-Jaccard heuristic FALSE POSITIVES, not real duplicates. So m1-dedup remains ≥ OLD on every hygiene metric (exact 0=0, near 2=2) and wins risks (15>13). Not a regression; the quality conclusion holds. → **quality-variant conclusions INSENSITIVE, confirmed.**
+- **Aligned draft validity (es-v0a, 30 draws):** 29/30 valid (1 invalid) — the boundary gate is unaffected by the new field (INSENSITIVE, confirmed).
+- **Option-differentiation rate (draft's OWN interventions):** 29/30 draws emit distinct per-option interventions from the LLM directly; [0,1] regime on 30/30. The buy≡build ceiling was fully an artifact of the missing field — dissolved under alignment.
 
 **Closure:** this note + PARITY-CHECKLIST.md (diff every arm prompt against the served prompt's
 structural requirements; justify every omission before a scored run) closes the lesson durably.

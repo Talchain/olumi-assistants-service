@@ -135,7 +135,7 @@ export interface AdaptResult {
  */
 export function adaptDraftToV2(graph: DraftGraph, seed: string, rule: SynthesisRule = "categorical-and-magnitude-cap", normalise = true): AdaptResult {
   const notes: string[] = [];
-  const nodes = graph.nodes ?? [];
+  const nodes = graph?.nodes ?? [];
   const decisionIds = new Set(nodes.filter((n) => n.kind === "decision").map((n) => n.id));
   const optionNodes = nodes.filter((n) => n.kind === "option");
   const optionIds = new Set(optionNodes.map((n) => n.id));
