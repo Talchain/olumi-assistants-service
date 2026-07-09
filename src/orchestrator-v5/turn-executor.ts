@@ -5872,9 +5872,22 @@ export async function runTurnExecutor(
       // Trimmed-truthiness on both branches (review nit): an empty or
       // whitespace-only answer_text must fall back to orientationText,
       // never ship a blank answer.
-      const coachAnswerSource = routingResult.proposal.answer_text?.trim()
-        ? routingResult.proposal.answer_text
+      const coachAnswerText = routingResult.proposal.answer_text;
+      const coachAnswerSource = coachAnswerText?.trim()
+        ? coachAnswerText
         : routingResult.orientationText;
+      // ROADMAP 1.38 — source telemetry (NOT flag-gated; see telemetry.ts).
+      // Measures which channel shipped for THIS turn, independent of the
+      // CEE_ANSWER_TEXT_REQUIRED hardening below — this is what quantifies
+      // v42.2g's population lift in the current prompt-only world.
+      emit(TelemetryEvents.V5CoachingAnswerSource, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        intent_class: 'coach',
+        source: coachAnswerText?.trim() ? 'answer_text' : 'orientation_fallback',
+        answer_text_length: coachAnswerText?.length ?? 0,
+        orientation_length: routingResult.orientationText.length,
+      });
       const sanitised = sanitiseNarrateOutput(coachAnswerSource);
       if (sanitised.contamination_detected) {
         emit(TelemetryEvents.TurnExecutorContaminationNarrate, {
@@ -5988,6 +6001,21 @@ export async function runTurnExecutor(
               routingResult.proposal.answer_text?.trim()
             ? routingResult.proposal.answer_text
             : routingResult.orientationText;
+      // ROADMAP 1.38 — source telemetry (NOT flag-gated; see telemetry.ts).
+      // Same measurement instrument as the coach branch above, scoped to
+      // tool_call converse (the only shape with an answer_text channel to
+      // measure — text_only ships `.text` directly, no pick to record).
+      if (routingResult.type === 'tool_call' && routingResult.proposal.intent_class === 'converse') {
+        const converseAnswerText = routingResult.proposal.answer_text;
+        emit(TelemetryEvents.V5CoachingAnswerSource, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          intent_class: 'converse',
+          source: converseAnswerText?.trim() ? 'answer_text' : 'orientation_fallback',
+          answer_text_length: converseAnswerText?.length ?? 0,
+          orientation_length: routingResult.orientationText.length,
+        });
+      }
       const sanitised = sanitiseNarrateOutput(text);
       if (sanitised.contamination_detected) {
         emit(TelemetryEvents.TurnExecutorContaminationNarrate, {

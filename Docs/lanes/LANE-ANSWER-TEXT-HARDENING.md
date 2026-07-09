@@ -89,27 +89,35 @@ Baseline (pre-flip) `REPAIR_ONCE` retry rate attributable to this rule is
 until `CEE_ANSWER_TEXT_REQUIRED=true`. Once flipped, every coach/converse
 tool call where Sonnet leaves `answer_text` blank/absent will cost one extra
 `chatWithTools` round trip (same mechanism, same latency profile, as the
-existing `max_tokens` retry documented in `route-with-tool-use.ts`). The
-POST-flip rate is genuinely unmeasured: `answer_text` has been optional
-since PR #380 landed the same day as this lane (`b7b2b4048`, 2026-07-08), so
-there is no existing telemetry on how often Sonnet populates it
-spontaneously versus leaving it for `orientationText` to carry (the
-pre-#380 shape, which most of the existing test fixtures still exercise as
-the "backwards-compatible" default). Flipping this flag is therefore also a
-**measurement act**, not just a fix — expect the retry-rate signal (visible
-via the existing `v5.routing.max_tokens_retry`-style informational log
-pattern, or by diffing `llm_calls_used` distribution pre/post-flip) to be
-the first thing worth watching before leaving it on. If the rate is high,
-the fix's own cost (extra latency + tokens on a meaningful fraction of
-coach/converse turns) needs weighing against the defect's severity — this is
-explicitly a Paul-gated call, not one made in this lane.
+existing `max_tokens` retry documented in `route-with-tool-use.ts`). If the
+rate is high, the fix's own cost (extra latency + tokens on a meaningful
+fraction of coach/converse turns) needs weighing against the defect's
+severity — this is explicitly a Paul-gated call, not one made in this lane.
+
+**Measurement instrument (fix-round addition, not flag-gated):** `answer_text`
+has been optional since PR #380 landed the same day as this lane
+(`b7b2b4048`, 2026-07-08), and until this fix round there was genuinely no
+telemetry on how often Sonnet populates it spontaneously versus leaving it
+for `orientationText` to carry (the pre-#380 shape, which most of the
+existing test fixtures still exercise as the "backwards-compatible"
+default). `turn-executor.ts` now emits `v5.coaching.answer_source`
+(`source: 'answer_text' | 'orientation_fallback'`, plus both channels'
+lengths and `intent_class`) at the RAW compose pick site for every
+coach/converse turn — **deliberately independent of the
+`CEE_ANSWER_TEXT_REQUIRED` flag**, so it measures the CURRENT prompt-only
+world (v42.2g) as-is, giving the prompt-workstream's population-lift claim an
+actual instrument instead of an assertion. This closes the measurement gap
+this section used to describe; the retry-rate signal for a POST-flip world
+(visible via the existing `v5.routing.max_tokens_retry`-style informational
+log pattern, or by diffing `llm_calls_used` distribution pre/post-flip)
+remains the thing to watch once the flag itself is flipped.
 
 ## The explain_* prompt-vs-schema latent inconsistency (investigated, filed — not fixed here)
 
 The prompt track flagged a possible inconsistency: "RUNTIME tells `explain_*`
 'natural text ships verbatim' while the schema REQUIRES
-`action.explanation.answer_text`." Investigated against this branch's HEAD
-(same tip as this lane, `81392d152`):
+`action.explanation.answer_text`." Investigated against this lane's base
+(`origin/staging` @ `81392d152`, per the header above):
 
 - **The RUNTIME instruction** (v40 `<RUNTIME>` Explanation block, quoted in
   `Docs/v5/v5-explain-handler-diagnosis.md:25`): *"Never emit a tool call for
@@ -213,11 +221,22 @@ The prompt track flagged a possible inconsistency: "RUNTIME tells `explain_*`
   triggers the guard; checks the `v5.coaching.empty_answer_recovered`
   telemetry event shape (lengths only, asserts `answer_text`/`orientation_text`
   keys are absent from the payload).
-- `tests/utils/telemetry-events.test.ts` — updated for the new frozen event
-  `V5CoachingEmptyAnswerRecovered: "v5.coaching.empty_answer_recovered"` (both
-  the enum snapshot and the spec-compliance frozen list; namespace regex
-  already permits the `coaching` sub-namespace, no regex change needed;
-  registered as debug-only in the Datadog-alignment coverage check).
+- `src/orchestrator-v5/__tests__/turn-executor-answer-source-telemetry.test.ts`
+  (fix-round addition) — `v5.coaching.answer_source`, the NOT-flag-gated
+  measurement instrument: coach and tool-call-converse turns record
+  `source: 'answer_text'` when the raw field is non-blank and
+  `'orientation_fallback'` when it's absent, WITH THE FLAG OFF (default) —
+  proving the instrument observes the current prompt-only world, not just a
+  post-hardening one; text-only converse never emits it (no channel to pick);
+  flag-ON case proves the instrument fires independently of the layer-B
+  recovery event (raw pick vs. post-sanitise final-text check are two
+  different signals, both correctly observable on the same turn).
+- `tests/utils/telemetry-events.test.ts` — updated for two new frozen events:
+  `V5CoachingEmptyAnswerRecovered: "v5.coaching.empty_answer_recovered"` and
+  (fix-round addition) `V5CoachingAnswerSource: "v5.coaching.answer_source"`
+  (enum snapshot, Datadog-alignment debug-only registration, and the
+  spec-compliance frozen list; namespace regex already permits the
+  `coaching` sub-namespace, no regex change needed).
 
 ## Gates
 
@@ -243,9 +262,11 @@ The prompt track flagged a possible inconsistency: "RUNTIME tells `explain_*`
 Touches: `src/config/index.ts` (new flag), `src/orchestrator-v5/routing/tool-schema.ts`
 (layer A), `src/orchestrator-v5/turn-executor.ts` (layer B + the extracted
 `buildBoundedFallbackCopyAndChips` helper, refactored out of
-`commitBoundedRoutingFallback` with no behaviour change), `src/utils/telemetry.ts`
-(new event), `tests/utils/telemetry-events.test.ts` (frozen-list updates), plus
-the three new test files above.
+`commitBoundedRoutingFallback` with no behaviour change; fix-round addition:
+the `v5.coaching.answer_source` emit at both compose pick sites, NOT
+flag-gated), `src/utils/telemetry.ts` (two new events, one from the fix
+round), `tests/utils/telemetry-events.test.ts` (frozen-list updates), plus
+the four new test files above.
 
 Not touched: served RUNTIME prompt text (prompt-workstream's lane, per the
 `explain_*` finding above), `explain_from_structure`/`explain_results`/
