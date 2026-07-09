@@ -1,6 +1,17 @@
 # Model Management v1 — implementation notes (Layer 2, DARK)
 
-**Status:** draft / do-not-merge lane · everything dark · migration AUTHORED, **NOT EXECUTED**
+> **CORRECTION (2026-07-08, CEE hygiene batch FIX 2):** the "migration
+> AUTHORED, NOT EXECUTED" status below described this lane's state as of
+> the original 2026-07-05 authoring date only. Paul's mandated execution
+> approval has since landed and the migration **has been executed on
+> staging** (2026-07-08, build e122f16) — live `model_versions` rows exist.
+> See `acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md` +
+> `Docs/lanes/LANE-MM-P1-COMPLETION-2026-07-09.md` for current status; the
+> rest of this document is left as the historical design record and is NOT
+> updated claim-by-claim beyond this note and the two execution-status
+> lines below.
+
+**Status:** draft / do-not-merge lane · everything dark · migration AUTHORED, **NOT EXECUTED** *(as of 2026-07-05 — see correction above: executed 2026-07-08)*
 **Date:** 2026-07-05
 **Branch:** `claude/layer2-model-management-v1` (base: staging `93d39f1bf`)
 **Decisions carried (both signed 2026-07-05):**
@@ -21,10 +32,12 @@ layer-1 docs lane.
 
 ### 1.1 Migration — `supabase/migrations/20260705120000_v5_model_versions.sql`
 
-**⚠ AUTHORED AS CODE ONLY. It has never been executed anywhere. Execution against any
-database is a separate, Paul-gated approval step** (stated in the file header). Until
-executed, the service module below can only ever return typed store errors on a flag-on
-path — which is why the flag must stay OFF everywhere.
+**⚠ As of 2026-07-05 this was authored as code only and never executed — that
+approval step has since happened: EXECUTED on staging 2026-07-08 (build
+e122f16), see `acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md`.**
+The service module below still only ever returns typed store errors while
+the flag is off (staging opt-in only, prod locked false) — execution alone
+does not change the flag posture.
 
 Contents (all additive):
 
@@ -117,7 +130,7 @@ opt-in and is audit-logged; local/test may enable. Registered in `Docs/FEATURE_F
 
 | File | Pins |
 |---|---|
-| `__tests__/migration-static-guards.test.ts` | SQL-text guardrails: authored-not-executed header; `owner_user_id NOT NULL` + no `auth.users` FK; ENABLE+FORCE RLS; exactly one (SELECT-only) policy; REVOKE (PUBLIC+anon+authenticated) present per function; GRANT EXECUTE to service_role only, never authenticated/anon; unique (scenario_id, version_number); pointer ON DELETE SET NULL; MV001×2 / MV409×2 / MV404×1; FOR UPDATE ×2; append-only (no UPDATE/DELETE of version rows); restore-inserts-new-row; journey-event shape keys |
+| `__tests__/migration-static-guards.test.ts` | SQL-text guardrails: executed-on-staging header (corrected 2026-07-08 — was authored-not-executed); `owner_user_id NOT NULL` + no `auth.users` FK; ENABLE+FORCE RLS; exactly one (SELECT-only) policy; REVOKE (PUBLIC+anon+authenticated) present per function; GRANT EXECUTE to service_role only, never authenticated/anon; unique (scenario_id, version_number); pointer ON DELETE SET NULL; MV001×2 / MV409×2 / MV404×1; FOR UPDATE ×2; append-only (no UPDATE/DELETE of version rows); restore-inserts-new-row; journey-event shape keys |
 | `__tests__/service-flag-gate.test.ts` | flag OFF ⇒ all 5 entry points return typed `disabled` with zero store/sink calls; config default is OFF; flag read at call time |
 | `__tests__/store-adapter.test.ts` | RPC arg shapes (all named args, explicit nulls); MV001/MV404/MV409/other error mapping; dedupe outcome passthrough; list ordering by version_number (graph excluded); getVersion scenario+id filter; pointer read semantics |
 | `__tests__/service.test.ts` | CEE-side envelope computation matches Group A module exactly; empty-graph refusal; guest-refusal copy verbatim; CAS conflict kind `analysis_affecting_conflict`; restore-creates-new-version; event-sink emission (once per durable write, keyed by RPC event id; none on dedupe; sink failure never fails the result); compare wiring + not-found |
@@ -128,7 +141,7 @@ opt-in and is audit-logged; local/test may enable. Registered in `Docs/FEATURE_F
 
 - **No wiring**: no route, no turn-executor path, no handler, no chip/prose surface. The
   module is dead code by design until the separately-reviewed wiring slice.
-- **No SQL executed**: the migration is a file. Executing it is Paul-gated.
+- **No SQL executed** *(stale as of 2026-07-08 — see the correction note at the top of this document: the migration has since been executed on staging under Paul-gated approval)*.
 - **No schemas-package changes**: the identity envelope stays CEE-local per D2 (promote
   nothing this layer); the hash is opaque on any future wire surface.
 - **No guest version history** (D3 Branch A): guests keep today's behaviour — single live

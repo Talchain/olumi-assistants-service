@@ -892,11 +892,32 @@ export async function runTurnExecutor(
   // closes the live defect where 5 consecutive turns offered IDENTICAL
   // chips regardless of what the turns were about. Memoised (cheap, but
   // avoids rebuilding the Set if read more than once per turn).
+  //
+  // FIX 3 (F11, CEE hygiene batch): that field's doc comment only pins
+  // WHICH ROW is read (the last prior turn's), not what its CONTENT is.
+  // commit.ts's `computeSurvivingPriorPendingsDetailed` carries a
+  // non-consumed pending FORWARD across turns (up to
+  // `PENDING_ACTION_DEFAULT_TURN_TTL` total turns), decrementing
+  // `expires_at_turn_count` by exactly 1 per surviving turn — so the same
+  // row can carry a TTL survivor from 2 turns ago alongside (or instead
+  // of) a fresh immediately-prior offer, and both look identical by
+  // chip_id alone. Every production call site that mints a chip-derived
+  // pending stamps exactly `PENDING_ACTION_DEFAULT_TURN_TTL` at creation
+  // (none pass a `turn_ttl` override), so `expires_at_turn_count ===
+  // PENDING_ACTION_DEFAULT_TURN_TTL` is the reliable turn-recency signal:
+  // true only for a pending emitted on the IMMEDIATELY PRIOR turn, false
+  // for anything carried forward at least once. Filtering on it scopes
+  // suppression to the 1 turn this guard's own contract promises, instead
+  // of silently extending it across the full TTL window (chips vanishing
+  // for up to `PENDING_ACTION_DEFAULT_TURN_TTL` consecutive turns while
+  // coaching copy may still invite the now-unavailable action).
   let recentlyOfferedChipIdsMemo: ReadonlySet<string> | undefined;
   const recentlyOfferedChipIds = (): ReadonlySet<string> => {
     if (recentlyOfferedChipIdsMemo === undefined) {
       recentlyOfferedChipIdsMemo = new Set(
-        (context.most_recent_pending_actions ?? []).map((a) => a.chip_id),
+        (context.most_recent_pending_actions ?? [])
+          .filter((a) => a.expires_at_turn_count === PENDING_ACTION_DEFAULT_TURN_TTL)
+          .map((a) => a.chip_id),
       );
     }
     return recentlyOfferedChipIdsMemo;
@@ -4953,6 +4974,12 @@ export async function runTurnExecutor(
             answer_text_length: verdict.payload.answer_text.length,
             evidence_used_count: verdict.payload.evidence_used?.length ?? 0,
             cited_fields_count: verdict.payload.cited_fields?.length ?? 0,
+            // FIX 1 (CEE hygiene batch): auditability for
+            // forbidden_internal_term verdicts — WHAT was flagged, not
+            // just length + error code. Term-only, never an excerpt (see
+            // `forbidden_term_matched` docstring on the verdict payload
+            // for the PII-safety reasoning); null for every other reason.
+            forbidden_term_matched: verdict.payload.forbidden_term_matched ?? null,
           });
           if (
             (verdict.payload.evidence_used && verdict.payload.evidence_used.length > 0) ||

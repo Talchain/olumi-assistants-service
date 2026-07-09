@@ -39,7 +39,7 @@
 | `CEE_ORCHESTRATOR_CONTEXT_ENABLED` | `false` | orchestrator/context-fabric/renderer.ts | No | |
 | `ENABLE_DSK_V0` | `false` | orchestrator/dsk-loader.ts, lookup/analysis-lookup.ts | No | |
 | `DSK_ENABLED` | `false` | decision-review/science-claims.ts, shape-check.ts | No | |
-| `CEE_MODEL_VERSIONS_ENABLED` | `false` | orchestrator-v5/model-management/service.ts | No | Model Management v1 (Layer 2) — DARK: gates every entry point of the isolated model-management module (save/list/get/restore/compare versions); flag-off is a fail-closed typed `disabled` no-op. Zero production call sites (nothing wired into routes/turn-executor). Env-enforced: locked `false` in prod; staging true requires explicit opt-in (audit-logged). Do NOT enable before the Paul-gated migration `20260705120000_v5_model_versions.sql` is executed — see Docs/v5/model-management-v1-implementation-notes.md |
+| `CEE_MODEL_VERSIONS_ENABLED` | `false` | orchestrator-v5/model-management/service.ts | No | Model Management v1 (Layer 2) — DARK: gates every entry point of the isolated model-management module (save/list/get/restore/compare versions); flag-off is a fail-closed typed `disabled` no-op. Zero production call sites (nothing wired into routes/turn-executor). Env-enforced: locked `false` in prod; staging true requires explicit opt-in (audit-logged). The Paul-gated migration `20260705120000_v5_model_versions.sql` has been EXECUTED on staging (2026-07-08, build e122f16 — acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md); this flag's default stays `false` regardless, per its own Env-enforced posture above — see Docs/v5/model-management-v1-implementation-notes.md |
 
 ## CEE Pipeline
 

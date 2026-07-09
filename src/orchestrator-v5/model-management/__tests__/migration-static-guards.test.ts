@@ -1,11 +1,14 @@
 /**
  * Model Management v1 — SQL-text static guards.
  *
- * The migration 20260705120000_v5_model_versions.sql is AUTHORED-NOT-
- * EXECUTED (execution is separately Paul-gated), so nothing can verify it
- * against a live database in this lane. These are cheap textual guardrails
- * that pin the security-load-bearing lines of the FILE so a later edit
- * cannot silently drop them:
+ * CEE hygiene batch (FIX 2) correction: this migration was AUTHORED as
+ * code-only on 2026-07-05, but Paul's mandated execution approval landed
+ * and it has since been EXECUTED on staging (2026-07-08, build e122f16) —
+ * live model_versions rows exist (acceptance-evidence/gm-mm/
+ * 03-mm-owned-scenario-proof.md). This lane still cannot connect to a live
+ * database in CI, so these remain cheap textual guardrails that pin the
+ * security-load-bearing lines of the FILE so a later edit cannot silently
+ * drop them:
  *
  *   - owner_user_id NOT NULL (D3 Branch A — no unowned durable rows)
  *   - ENABLE + FORCE RLS; owner-only SELECT policy; no JWT write policies
@@ -16,8 +19,9 @@
  *   - distinct SQLSTATEs (MV001 guest / MV404 not-found / MV409 CAS)
  *   - append-only: no UPDATE/DELETE of model_versions rows anywhere
  *
- * Live grant-layer verification (pg_proc/proacl) remains the post-execution
- * step — these tests assert the file, not the database.
+ * Live grant-layer verification (pg_proc/proacl) is a separate concern from
+ * these file-level assertions — these tests assert the file's text, not a
+ * live database connection.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -45,10 +49,18 @@ const codeOneline = code.replace(/\s+/g, ' ');
 const FUNCTIONS = ['create_model_version', 'restore_model_version'] as const;
 
 describe('model_versions migration — header + execution posture', () => {
-  it('declares itself authored-as-code-only and never executed (Paul-gated)', () => {
-    expect(sql).toContain('AUTHORED AS CODE ONLY');
-    expect(sql).toContain('NEVER BEEN EXECUTED');
-    expect(sql).toMatch(/Paul-gated/i);
+  it('declares itself EXECUTED on staging with a date + evidence pointer (FIX 2 correction)', () => {
+    // Was: "AUTHORED AS CODE ONLY... NEVER BEEN EXECUTED" — that claim went
+    // stale the moment Paul's execution approval landed and live rows were
+    // written (2026-07-08, acceptance-evidence/gm-mm/
+    // 03-mm-owned-scenario-proof.md). The header must now say so, not
+    // silently keep asserting the pre-execution posture.
+    expect(sql).toMatch(/EXECUTED ON STAGING/);
+    expect(sql).toMatch(/2026-07-08/);
+    expect(sql).toContain('acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md');
+    // Negative: the old false claim must not linger anywhere in the file.
+    expect(sql).not.toMatch(/NEVER BEEN EXECUTED/);
+    expect(sql).not.toMatch(/HAS NEVER BEEN EXECUTED/);
   });
 });
 

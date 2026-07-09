@@ -2,15 +2,20 @@
 -- V5 Layer 2 — Model Management v1: `model_versions` substrate
 -- (Decision 1 Option B + Decision 3 Branch A, both signed 2026-07-05).
 --
--- ⚠️  AUTHORED AS CODE ONLY — THIS FILE HAS NEVER BEEN EXECUTED. ⚠️
---   Execution against any database (staging or otherwise) is a SEPARATE,
---   Paul-gated approval step (layer-1-architecture-decisions-memo-v0 §D1:
---   "the Layer-2 lane may author the migration as code, but execution
---   requires separate Paul approval"). Do not apply, do not include in any
---   automated migration run, until that approval is explicit.
+-- ⚠️  EXECUTED ON STAGING — 2026-07-08 (build e122f16). ⚠️
+--   Paul's mandated execution approval (layer-1-architecture-decisions-memo-v0
+--   §D1) landed; this migration has been APPLIED to staging Supabase, not
+--   merely authored as code. Live rows exist (model_versions version 1 + 2
+--   on scenario `330ffc3c-766b-4b58-9581-5dae191062e0`, pointer-advance +
+--   identical-to-head dedupe all proven; a pre-existing "LIVE-PROVEN" row
+--   from 2026-07-07 on scenario `e39bb25d…` predates this window). Evidence:
+--   acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md (+ STATUS.md).
+--   Do not re-describe this file as unexecuted/not-applied elsewhere in
+--   Docs/ — see the same evidence pointer.
 --
--- Target (when approved): Staging Supabase
+-- Target: Staging Supabase (executed)
 -- Date authored: 2026-07-05
+-- Date executed: 2026-07-08
 --
 -- What this creates (all additive; no existing table's semantics change):
 --   1. `model_versions` — append-only, CEE-owned, service-role-written

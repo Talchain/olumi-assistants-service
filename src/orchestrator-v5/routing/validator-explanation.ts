@@ -159,6 +159,22 @@ export interface ExplanationAnswerVerdict {
     readonly answer_validation_error?: ExplanationAnswerErrorReason;
     readonly evidence_used?: readonly string[];
     readonly cited_fields?: readonly string[];
+    /**
+     * Populated only when `answer_validation_error ===
+     * 'forbidden_internal_term'`: the single fixed-vocabulary term (from
+     * `FORBIDDEN_INTERNAL_TERM_PATTERNS`) that matched, e.g. "node",
+     * "handler", "graph_hash". Deliberately term-only, NOT a surrounding
+     * excerpt: `answer_text` is Sonnet-generated, but its prose routinely
+     * echoes the user's own decision-graph entity labels verbatim (see
+     * this module's test fixtures — "Engineering Capacity drives
+     * Throughput" — those are user-authored labels, not model
+     * vocabulary). An excerpt window around the match could capture that
+     * adjacent user-authored content, which the no-user-decision-text-
+     * in-logs principle (see `turn-executor-validator-log-privacy.test.ts`)
+     * forbids. The matched term itself is always one of the small closed
+     * internal-vocabulary set, never user content, so it is safe to emit.
+     */
+    readonly forbidden_term_matched?: string;
   };
 }
 
@@ -225,9 +241,14 @@ export function validateExplanationAnswer(
   }
 
   // Rule 3: forbidden internal terms (word-boundary matched so "factor"
-  // does not falsely match "fact").
-  if (FORBIDDEN_INTERNAL_TERM_PATTERNS.some((pat) => pat.test(answerText))) {
-    return invalid(answerText, explanation, 'forbidden_internal_term');
+  // does not falsely match "fact"). Capture the matched term (not a
+  // surrounding excerpt — see the payload's `forbidden_term_matched`
+  // docstring) so the verdict is auditable.
+  for (const pattern of FORBIDDEN_INTERNAL_TERM_PATTERNS) {
+    const match = pattern.exec(answerText);
+    if (match) {
+      return invalid(answerText, explanation, 'forbidden_internal_term', match[0]);
+    }
   }
 
   // Rule 6: raw decimal coefficient + false-precision percentage.
@@ -262,6 +283,7 @@ function invalid(
   answerText: string,
   explanation: ProposalExplanation,
   reason: ExplanationAnswerErrorReason,
+  forbiddenTermMatched?: string,
 ): ExplanationAnswerVerdict {
   return {
     skip: false,
@@ -271,6 +293,9 @@ function invalid(
       answer_validation_error: reason,
       evidence_used: explanation.evidence_used,
       cited_fields: explanation.cited_fields,
+      ...(forbiddenTermMatched !== undefined
+        ? { forbidden_term_matched: forbiddenTermMatched }
+        : {}),
     },
   };
 }
