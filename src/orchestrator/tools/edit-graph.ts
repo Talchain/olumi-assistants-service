@@ -3105,11 +3105,19 @@ export async function handleEditGraph(
       }
     }
 
-    // T5: proposal-language guard. edit_graph emits patches with
-    // auto_apply: false (line 2215 above), so any completion-language phrase
-    // in the assistant text is a leak. Scan and replace with the corrective
-    // suffix when matched.
-    if (patchData.auto_apply === false && assistantText) {
+    // T5: proposal-language guard. edit_graph's GraphPatchBlock always
+    // reports auto_apply: false (block-shape contract, unrelated to whether
+    // the graph was actually committed — see GraphPatchBlockData docs), so
+    // `auto_apply === false` alone does NOT mean "not yet applied." This
+    // success branch is unreachable without a real `appliedGraph` (guarded
+    // above — "cannot reach success branch without appliedGraph"), i.e. the
+    // change IS already committed here. Gate on that so the guard only
+    // rewrites genuine pending-proposal narration (e.g. the no-op /
+    // low-confidence branches) — never truthful "Added X" / "I've added X"
+    // language on a turn that actually applied the edit (F3 — GM go-live
+    // acceptance evidence: applied+committed edit_graph turns were being
+    // mislabelled "Proposing to…", violating the four-state copy rule).
+    if (patchData.auto_apply === false && !appliedGraph && assistantText) {
       const guardResult = enforceProposalLanguage(assistantText, 'edit_graph');
       if (guardResult.leaked && guardResult.suffixed) {
         assistantText = guardResult.suffixed;
