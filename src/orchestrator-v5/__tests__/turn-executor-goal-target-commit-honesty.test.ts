@@ -300,6 +300,14 @@ describe('goal-target receipt honesty guard at the STEP 7 commit chokepoint', ()
     const write = appendCalls.at(-1)!;
     expect(write.graph).toBeUndefined();
 
+    // Overnight review F5 — the "applied" edit receipt FACT must be
+    // withheld too, not just the graph. Previously `write.handler_facts`
+    // still carried the phantom `{status:'applied', noop:false}` fact
+    // built from the unbacked mutation, grounding the NEXT turn's LLM on
+    // an edit that never persisted (DL-7 violation) — the existing test
+    // asserted only on `write.graph` and text, never this field.
+    expect(write.handler_facts).toEqual([]);
+
     // …so the receipt must NOT ship; the honest fallback replaces it on
     // BOTH the wire and the stored assistant_message (pre-commit swap).
     expect(result.response.assistant_text).toBe(GOAL_TARGET_NOT_SAVED_TEXT);

@@ -73,6 +73,7 @@ import {
   GOAL_TARGET_NOT_SAVED_TEXT,
   graphRegistersGoalTarget,
 } from '../../compose/goal-target-receipt-guard.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 // ── live-captured shapes ────────────────────────────────────────────
@@ -251,6 +252,86 @@ describe('dispatchEditGraph — lane 20 goal-target receipt honesty (live 313e7b
     // envelope's diagnostics could surface the unbacked mutation even
     // though nothing was actually saved.
     expect(out.graph).toBeNull();
+  });
+
+  // ==========================================================================
+  // Overnight review F5+F6 — a withheld write must be coherent across EVERY
+  // downstream signal (edit receipt fact, analysisReady, freshness), not
+  // just the graph itself. Previously only `metadata.graph` /
+  // `out.graph` were pinned; these extend the same swap scenario.
+  // ==========================================================================
+
+  it('F5: the withheld write does NOT commit an "applied" edit receipt FACT — no phantom edit to ground the next turn on', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      makeLiveGoalValueEditResult(),
+    );
+
+    await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-lane20-f5-fact',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const commitMock = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
+    const metadata = commitMock.mock.calls[0]![1];
+    // Previously this committed a non-empty handler_facts array carrying a
+    // `status: 'applied'` edit-graph fact built from the SAME unbacked
+    // mutation whose graph write was withheld — a receipt narrating an
+    // applied mutation with no persistable graph state behind it (DL-7
+    // violation). A withheld-write turn must emit NO facts, same as any
+    // other non-mutating turn.
+    expect(metadata.handler_facts).toEqual([]);
+  });
+
+  it('F6: the withheld write does NOT stamp analysisReady from the unpersisted graph', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      makeLiveGoalValueEditResult(),
+    );
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-lane20-f6-ready',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    // Previously `analysisReady` was computed from `editResult.appliedGraph`
+    // — the unpersisted graph — regardless of the swap. Nothing persisted
+    // this turn, so no readiness signal should ship either.
+    expect(out.analysisReady).toBeUndefined();
+  });
+
+  it('F6: the withheld write re-derives freshness against the graph that ACTUALLY persists, not a phantom post-edit hash', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      makeLiveGoalValueEditResult(),
+    );
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-lane20-f6-freshness',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    // `loadPersistedGraphStrict` is mocked to resolve null (genuinely-empty
+    // scenarios.graph) for this suite, so the PRE-edit frame base — what
+    // will actually still be in `scenarios.graph` after this withheld-write
+    // turn — is the ingress echo. The phantom hash would instead be derived
+    // from the merged POST-edit graph (the applied, never-persisted
+    // mutation) — a hash the client can never actually observe on its next
+    // read.
+    const preEditHash = computeAnalysisAffectingGraphHash(INGRESS_GRAPH);
+    const phantomPostEditHash = computeAnalysisAffectingGraphHash({
+      nodes: makeLiveGoalValueEditResult().appliedGraph!.nodes,
+      edges: makeLiveGoalValueEditResult().appliedGraph!.edges,
+    } as unknown as GraphStateIngress);
+
+    expect(out.freshness?.current_graph_hash).toBe(preEditHash);
+    expect(out.freshness?.current_graph_hash).not.toBe(phantomPostEditHash);
   });
 
   it('control: a receipt on an edit that DOES register the target ships untouched', async () => {
