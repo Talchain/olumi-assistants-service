@@ -7087,6 +7087,17 @@ export async function runTurnExecutor(
     } else {
       chips = [];
     }
+    // ROADMAP 1.20(b) chip-sameness guard (overnight review F2). This
+    // builder is reached by the STEP 7 unconditional empty-answer backstop
+    // and the CEE_ANSWER_TEXT_REQUIRED compose guard, independently of the
+    // coach/converse `generateChips` call sites that already thread
+    // `recentlyOfferedChipIds()` — without this, a chip offered on the
+    // immediately-prior turn (e.g. `chip_action_explain_results`) is
+    // mechanically re-offered here on the very next turn if it blanks its
+    // answer, the exact defect class the guard closed elsewhere. An honest
+    // empty set beats an identical repeat.
+    const recentlyOffered = recentlyOfferedChipIds();
+    chips = chips.filter((chip) => !recentlyOffered.has(chip.id));
     return { assistantText, chips, analysisFreshAndAvailable };
   }
 
