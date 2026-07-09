@@ -154,16 +154,28 @@ describe('option-intervention misroute guard via runTurnExecutor', () => {
     }
   });
 
-  it('covers the DETERMINISTIC pre-route producer too: a synthesized set_factor_value with an option-referencing message is refused without calling the LLM', async () => {
-    // "set <factor> to 5%" is a deterministic value-update phrasing, so the
-    // pre-route synthesizes the set_factor_value proposal itself and the LLM
-    // must NOT be consulted. The same execute chokepoint guards it. A
-    // throwing adapter proves the LLM path is never taken.
-    const throwingRoutingAdapter = {
-      chatWithTools: vi.fn(async () => {
-        throw new Error('routing LLM must not be called on the deterministic path');
-      }),
-    };
+  it('covers the DETERMINISTIC pre-route producer too: an option-referencing message is now routed to the LLM with a clean slate, and the downstream guard still contains any misroute', async () => {
+    // Tier A #1 (edit-reliability, 2026-07-09) — FIX 2 changed this
+    // scenario's own routing on purpose (see deterministic-value-update.ts
+    // SkipReason 'option_intervention_edit'): "set <factor> to 5%" is a
+    // deterministic value-update phrasing, but the message ALSO implies an
+    // option-intervention edit, so the pre-route now deliberately declines
+    // to synthesize a proposal itself (the old behaviour silently
+    // misrouted onto the shared factor and, on refusal, re-entered this
+    // SAME pre-route on the clarify replay — an unescapable loop). Instead
+    // the message reaches the LLM's edit_graph `option_configuration`
+    // routing with a clean slate — so the LLM IS now consulted
+    // (llm_calls_used: 1), unlike before this fix.
+    //
+    // This test keeps proving the CORE safety property from task_99f83f0d:
+    // even if the (here mocked) LLM still proposes the naive
+    // set_factor_value-on-the-shared-factor shape, the downstream
+    // option-intervention-guard.ts at STEP 2 validate remains the
+    // backstop — no handler runs, the graph is unchanged, and the turn
+    // recovers as a clarify direct_answer. What's no longer true is that
+    // the LLM is bypassed entirely; see the CONTROL test below for the
+    // legitimate LLM path being unaffected.
+    const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(SET_FACTOR_VALUE_TOOL_CALL));
     const ingressGraph = buildD1Fixture();
 
     const payload = makeMessagePayload({
@@ -173,15 +185,19 @@ describe('option-intervention misroute guard via runTurnExecutor', () => {
     });
 
     const { response, telemetry } = await runTurnExecutor(payload, 'req-misroute-det', {
-      routingAdapter: throwingRoutingAdapter,
+      routingAdapter,
       graphState: ingressGraph,
     });
 
-    // Deterministic path — the LLM was never called.
-    expect(telemetry.llm_calls_used).toBe(0);
-    expect(throwingRoutingAdapter.chatWithTools).not.toHaveBeenCalled();
+    // FIX 2 (Tier A #1): the pre-route now skips deliberately, so the LLM
+    // IS consulted — this is the intentional behaviour change, not a
+    // regression. (Pre-fix this asserted llm_calls_used === 0.)
+    expect(telemetry.llm_calls_used).toBe(1);
+    expect(routingAdapter.chatWithTools).toHaveBeenCalledTimes(1);
 
-    // Still refused: no handler ran, graph unchanged, clarify direct_answer.
+    // Still refused: no handler ran, graph unchanged, clarify direct_answer —
+    // the downstream guard is the backstop regardless of which path
+    // (deterministic pre-route or LLM) produced the misrouted proposal.
     expect(telemetry.turn_class).toBe('direct_answer');
     expect(telemetry.stages_completed).not.toContain('execute');
     expect(response.blocks.find((b) => b.type === 'graph_patch')).toBeUndefined();
