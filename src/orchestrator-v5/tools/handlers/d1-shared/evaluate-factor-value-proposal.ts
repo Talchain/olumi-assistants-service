@@ -391,9 +391,26 @@ function evaluateFactorValueProposalImpl(
   //     legitimate honest product that lands in (0,1) — e.g. `4% × 0.1 =
   //     0.4%`, or `decrease £5.30 by £5 = £0.30` — is not falsely rejected
   //     at execute (the stated-value check already happened upstream).
+  //
+  //     Tier A #1 (edit-reliability, 2026-07-09) — FIX 3 (1.45-F6):
+  //     EXEMPT a factor whose cap is exactly 1 (`isProportionScaledFactor`).
+  //     When a factor's own native range IS [0,1] (e.g. a churn-rate-style
+  //     factor stored as a 0-1 proportion, whatever unit string happens to
+  //     be attached), a bare "0.8" is UNAMBIGUOUSLY a value in that scale —
+  //     there is no proportion-vs-unit interpretation gap to warn about,
+  //     unlike a £/people/count factor where a sub-1 number is almost
+  //     certainly a mis-stated ratio. This is deliberately narrow: it does
+  //     NOT touch the doctrine-open case of a %-unit factor on a 0-100
+  //     scale (`factorCap: 100`), where "0.8" could mean 0.8% or a typo for
+  //     80% (Paul's open pp-vs-relative decision, D-D) — that case keeps
+  //     the existing clarify unchanged (cap !== 1 there, so this exemption
+  //     does not apply). The cap-range guard below still runs normally, so
+  //     an out-of-[0,1] value on a cap-1 factor is still rejected.
+  const isProportionScaledFactor = cap === 1;
   if (
     !suppressBareRatioGate &&
     operator !== 'multiply' &&
+    !isProportionScaledFactor &&
     !inputHasUnit &&
     effectiveUnit !== undefined &&
     rawInput !== 0 &&
