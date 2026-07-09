@@ -1,0 +1,12 @@
+{
+  "brief": "Acquire surgical robotics for our OR: buy new ($2.2M), lease at $35k/month, buy refurbished ($1.3M), or keep doing manual laparoscopic surgery. We perform ~600 eligible procedures/year; decide over a 5-year capital horizon.",
+  "metadata": {
+    "id": "surgical-robot-buy-lease-refurb-vs-manual",
+    "source": "gold-set-v1",
+    "domain": "healthcare / hospital capital",
+    "decision_type": "investment",
+    "option_count": 4,
+    "numeric_density": "high",
+    "added": "2026-07-09"
+  }
+}

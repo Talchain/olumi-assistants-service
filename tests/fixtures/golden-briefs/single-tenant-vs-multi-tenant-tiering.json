@@ -1,0 +1,12 @@
+{
+  "brief": "40 enterprise customers each run an isolated single-tenant stack, ~$18k/mo in idle infra. Keep single-tenant, migrate to pooled multi-tenant, adopt hybrid pool-plus-silo tiering, or defer two quarters \u2014 decide in 8 weeks, weighing infra spend against isolation guarantees.",
+  "metadata": {
+    "id": "single-tenant-vs-multi-tenant-tiering",
+    "source": "gold-set-v1",
+    "domain": "Platform architecture",
+    "decision_type": "capacity",
+    "option_count": 4,
+    "numeric_density": "medium",
+    "added": "2026-07-09"
+  }
+}

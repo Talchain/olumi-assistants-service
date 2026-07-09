@@ -1,0 +1,12 @@
+{
+  "brief": "Our B2B analytics tool converts 4% of 14-day free trials to paid at $80/mo. Switch to freemium (est. 1.5% upgrade on ~5x the signups), keep the trial as-is, or go paid-only behind a demo gate \u2014 maximise net-new MRR over 4 quarters at a $60 CAC.",
+  "metadata": {
+    "id": "freemium-vs-trial-vs-paid",
+    "source": "gold-set-v1",
+    "domain": "SaaS pricing",
+    "decision_type": "pricing",
+    "option_count": 3,
+    "numeric_density": "high",
+    "added": "2026-07-09"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "brief": "Home-goods e-tailer ($40M revenue, 34% gross margin) resetting its discount strategy across four options: a sitewide 20% seasonal promo, targeted loyalty-member discounts, everyday-low-price repricing, or a flash-sale clearance cadence. Goal: grow contribution margin without training shoppers to wait for markdowns. Horizon: 4 quarters.",
+  "metadata": {
+    "id": "discount-strategy-reset",
+    "source": "gold-set-v1",
+    "domain": "retail / e-commerce",
+    "decision_type": "pricing",
+    "option_count": 4,
+    "numeric_density": "medium",
+    "added": "2026-07-09"
+  }
+}

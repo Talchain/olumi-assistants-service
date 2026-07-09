@@ -1,0 +1,12 @@
+{
+  "brief": "Source our key subassembly from the single incumbent supplier in China (unit cost $18, 6-week lead time), qualify a second dual source in Vietnam (+8% unit cost, cuts single-point-of-failure risk), or reshore to a regional supplier (+35% unit cost, 1-week lead time). Choose over a 3-year horizon to balance landed cost against supply resilience.",
+  "metadata": {
+    "id": "single-vs-dual-vs-regional-supplier",
+    "source": "gold-set-v1",
+    "domain": "manufacturing / operations / supply-chain",
+    "decision_type": "vendor-selection",
+    "option_count": 3,
+    "numeric_density": "medium",
+    "added": "2026-07-09"
+  }
+}

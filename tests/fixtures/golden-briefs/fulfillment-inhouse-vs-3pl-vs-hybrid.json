@@ -1,0 +1,12 @@
+{
+  "brief": "DTC brand ships 15,000 orders/month through a 3PL at $7.20/parcel. Options: bring last-mile in-house ($550k fleet + micro-warehouse capex, ~$4.10/parcel at volume), stay with the 3PL, or run a hybrid \u2014 own fleet in 3 metros, 3PL for the long tail. Goal: cut cost per order without dropping below 95% 2-day delivery. Horizon: 18 months.",
+  "metadata": {
+    "id": "fulfillment-inhouse-vs-3pl-vs-hybrid",
+    "source": "gold-set-v1",
+    "domain": "retail / e-commerce",
+    "decision_type": "make-vs-buy",
+    "option_count": 3,
+    "numeric_density": "high",
+    "added": "2026-07-09"
+  }
+}

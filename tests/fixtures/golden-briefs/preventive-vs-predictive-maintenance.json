@@ -1,0 +1,12 @@
+{
+  "brief": "Our packaging line suffers unplanned downtime costing roughly $15k/hour. Stay on the current time-based preventive maintenance schedule, or roll out a predictive-maintenance IoT program ($400k upfront plus $90k/yr) projected to cut unplanned downtime by 30%. Decide over a 5-year horizon to maximise overall equipment effectiveness.",
+  "metadata": {
+    "id": "preventive-vs-predictive-maintenance",
+    "source": "gold-set-v1",
+    "domain": "manufacturing / operations / supply-chain",
+    "decision_type": "investment",
+    "option_count": 2,
+    "numeric_density": "medium",
+    "added": "2026-07-09"
+  }
+}

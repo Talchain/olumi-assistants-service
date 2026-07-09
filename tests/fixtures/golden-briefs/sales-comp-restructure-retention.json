@@ -1,0 +1,12 @@
+{
+  "brief": "Rep attrition hit 28% last year and reps say the comp plan feels unpredictable; do we shift from the current 50/50 base-to-variable split toward a more stable 70/30 plan, or leave it as-is and invest in coaching instead? Goal is to cut regretted attrition below 15% this year without hurting quota attainment.",
+  "metadata": {
+    "id": "sales-comp-restructure-retention",
+    "source": "gold-set-v1",
+    "domain": "people / org / GTM",
+    "decision_type": "resource-allocation",
+    "option_count": 2,
+    "numeric_density": "low",
+    "added": "2026-07-09"
+  }
+}

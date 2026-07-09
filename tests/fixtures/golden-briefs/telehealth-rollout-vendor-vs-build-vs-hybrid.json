@@ -1,0 +1,12 @@
+{
+  "brief": "Roll out telehealth across our 8-clinic group by licensing a turnkey vendor at $40/visit, building our own platform, or piloting a hybrid at 2 sites first. Target 15,000 virtual visits in year one; choose within a 3-month planning window.",
+  "metadata": {
+    "id": "telehealth-rollout-vendor-vs-build-vs-hybrid",
+    "source": "gold-set-v1",
+    "domain": "healthcare / care delivery",
+    "decision_type": "market-entry",
+    "option_count": 3,
+    "numeric_density": "medium",
+    "added": "2026-07-09"
+  }
+}

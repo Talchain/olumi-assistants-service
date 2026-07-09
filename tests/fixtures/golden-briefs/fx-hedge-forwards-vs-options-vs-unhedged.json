@@ -1,0 +1,12 @@
+{
+  "brief": "We book \u20ac12M in euro receivables a year. Lock the rate with 12-month forwards, buy euro put options at a ~2% premium, or stay unhedged. Protect margin against euro weakness over the coming year.",
+  "metadata": {
+    "id": "fx-hedge-forwards-vs-options-vs-unhedged",
+    "source": "gold-set-v1",
+    "domain": "treasury / risk management",
+    "decision_type": "hedging",
+    "option_count": 3,
+    "numeric_density": "medium",
+    "added": "2026-07-09"
+  }
+}

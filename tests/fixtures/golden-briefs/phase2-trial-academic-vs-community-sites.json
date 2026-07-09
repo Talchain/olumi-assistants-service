@@ -1,0 +1,12 @@
+{
+  "brief": "Run our Phase II trial by concentrating enrollment at 5 academic centers or spreading across 20 community sites. Prioritise recruitment speed and patient retention to hit 180 enrolled within a 12-month window.",
+  "metadata": {
+    "id": "phase2-trial-academic-vs-community-sites",
+    "source": "gold-set-v1",
+    "domain": "life-sciences / clinical trials",
+    "decision_type": "site-selection",
+    "option_count": 2,
+    "numeric_density": "low",
+    "added": "2026-07-09"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "brief": "We carry an $8M term loan at 9% fixed. Refinance to floating at SOFR+300 (~7.8% today), or replace it with $8M of 5% convertible notes. Goal: cut interest cost over the next 3 years without over-exposing us to rate hikes.",
+  "metadata": {
+    "id": "refinance-fixed-vs-floating-vs-convertible",
+    "source": "gold-set-v1",
+    "domain": "corporate finance / capital structure",
+    "decision_type": "refinancing",
+    "option_count": 3,
+    "numeric_density": "high",
+    "added": "2026-07-09"
+  }
+}

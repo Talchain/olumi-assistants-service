@@ -1,0 +1,12 @@
+{
+  "brief": "The board has $5M of excess cash to deploy: pay down the 8% revolver, buy back ~4% of shares, pay a special dividend, or fund a $5M capacity expansion. Maximise per-share value over a 2-year horizon.",
+  "metadata": {
+    "id": "excess-cash-allocation-4way",
+    "source": "gold-set-v1",
+    "domain": "capital allocation",
+    "decision_type": "capital-allocation",
+    "option_count": 4,
+    "numeric_density": "medium",
+    "added": "2026-07-09"
+  }
+}

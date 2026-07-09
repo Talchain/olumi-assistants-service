@@ -1,0 +1,12 @@
+{
+  "brief": "Automate our main distribution centre with an AS/RS goods-to-person system ($4.5M capex, 18mo install) or keep scaling the current manual pick operation (adding ~40 associates/year at $2.8M/yr fully loaded). Volume is growing 22%/yr; goal is lowest cost-per-order over a 7-year horizon.",
+  "metadata": {
+    "id": "warehouse-automation-vs-labour",
+    "source": "gold-set-v1",
+    "domain": "manufacturing / operations / supply-chain",
+    "decision_type": "make-vs-buy",
+    "option_count": 2,
+    "numeric_density": "high",
+    "added": "2026-07-09"
+  }
+}
