@@ -50,6 +50,10 @@ vi.mock('../../build-turn-context.js', () => ({
   // the gate emits no telemetry, and control falls through to
   // handleEditGraph exactly as the test expects.
   loadMostRecentPendingActions: vi.fn().mockResolvedValue([]),
+  // ROADMAP 1.33: dispatchEditGraph reads this for the conversation-slice
+  // feed. Empty — this suite exercises preflight behaviour, not
+  // conversation history.
+  loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
 }));
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';

@@ -1269,7 +1269,17 @@ function isFiniteSensitivity(value: unknown): value is number {
   return typeof value === 'number' && !Number.isNaN(value) && value !== Infinity && value !== -Infinity;
 }
 
-function projectConversation(
+/**
+ * Exported so `dispatchEditGraph` (ROADMAP 1.33 — edit-lane conversation
+ * starvation) can reuse the exact same 5-turn conversation-slice projection
+ * the coaching/draft LLM path uses, rather than assembling a second,
+ * divergent slice. The V4 edit-graph dispatch runs entirely outside
+ * `assembleContextPackWithSummary`'s call site (see `turn-executor.ts`), so
+ * it calls this directly against its own `loadRecentConversationTurns`
+ * read; `pendingConfirmation` is irrelevant to that caller and is passed as
+ * `false`.
+ */
+export function projectConversation(
   priorTurns: readonly SessionTurnWithContent[],
   pendingConfirmation: boolean,
 ): ContextPackConversation {

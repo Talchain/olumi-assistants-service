@@ -627,6 +627,33 @@ export async function loadMostRecentPendingActions(
 }
 
 /**
+ * ROADMAP 1.33 — public load helper for the prior-conversation-turns read.
+ *
+ * Standalone variant of `fetchPriorTurns` for callers that need just the
+ * recent turns (for the same 5-turn conversation-slice projection
+ * `context-pack-assembler.ts`'s `projectConversation` already builds for
+ * the coaching/draft LLM path) without paying the cost of a full
+ * `buildTurnContext` load. Used by `dispatchEditGraph` — the V4 edit-graph
+ * dispatch runs entirely outside `buildTurnContext`/`turn-executor.ts`'s
+ * ORIENT step (see route-v2.ts), so it has no other route to this read.
+ *
+ * Resolves the session store inline via `tryGetSessionStore` so the
+ * state-write-invariant pre-push guard stays satisfied (SessionStore
+ * imports are restricted to session/, commit.ts, and this module).
+ *
+ * Graceful degradation: store-factory failure or read failure both
+ * resolve to an empty array — never throws. Telemetry on
+ * read-degradation is emitted at the store layer (via `fetchPriorTurns`).
+ */
+export async function loadRecentConversationTurns(
+  scenarioId: string,
+  requestId: string,
+): Promise<readonly SessionTurnWithContent[]> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  return fetchPriorTurns(scenarioId, requestId, store);
+}
+
+/**
  * V5 Signature Loop — STRICT variant of {@link loadMostRecentPendingActions}.
  *
  * Unlike the swallowing variant (which returns `[]` on any failure and so
