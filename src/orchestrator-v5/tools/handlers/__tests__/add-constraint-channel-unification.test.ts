@@ -103,6 +103,10 @@ describe('F8: unchanged-value detection compares BOTH channels (goal_constraints
     (goalNode as Record<string, unknown>).goal_threshold = 0.15;
     expect(graph.goal_constraints).toBeUndefined();
 
+    const hashBefore = computeAnalysisAffectingGraphHash(
+      graph as unknown as GraphStateIngress,
+    );
+
     const handler = createAddConstraintHandler();
     const outcome = await handler(
       buildInvocation(graph, goalProposal({ value: 15, unit: '%' })),
@@ -113,6 +117,18 @@ describe('F8: unchanged-value detection compares BOTH channels (goal_constraints
     expect(outcome.assistant_text).not.toContain('Success target set');
     expect(outcome.assistant_text).toMatch(/already/i);
     expect(outcome.handler_facts[0]?.result).toMatchObject({ status: 'noop' });
+
+    // Self-review hardening: the SAME class of defect F9 closed for the
+    // node stamp can also occur via row-CREATION — appending a brand-new
+    // goal_constraints row (there was none before, in this draft-only
+    // scenario) moves the analysis-affecting hash exactly as re-stamping
+    // the node would, on a turn whose own receipt says nothing changed.
+    expect(
+      computeAnalysisAffectingGraphHash(outcome.mutated_graph as GraphStateIngress),
+    ).toBe(hashBefore);
+    expect(
+      (outcome.mutated_graph as { goal_constraints?: unknown[] }).goal_constraints ?? [],
+    ).toEqual([]);
   });
 });
 

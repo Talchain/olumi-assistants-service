@@ -381,11 +381,24 @@ export function createAddConstraintHandler(): HandlerFn {
 
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
+        // F8 backfill residual (self-review hardening): when there is no
+        // existing row (`existing === undefined`) AND the value is
+        // unchanged (necessarily via the NODE channel in that case — see
+        // `nodeChannelUnchanged` above), appending a brand-new
+        // goal_constraints row would move the analysis-affecting hash
+        // (goal_constraints is part of that hash) on a turn whose own
+        // receipt says nothing changed — the same defect class F9 closed
+        // for the node stamp, manifesting via row-creation instead. Skip
+        // the append in exactly that case; a genuinely NEW constraint
+        // (existing undefined, valueUnchanged false) still appends as
+        // before.
         const next = existing
           ? list.map((c) =>
               c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
             )
-          : [...list, constraintParse.data];
+          : valueUnchanged
+            ? list
+            : [...list, constraintParse.data];
         clone.goal_constraints = next;
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
