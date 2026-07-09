@@ -1,0 +1,16 @@
+{
+  "name": "edge-stability",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Edge-Stability Harness (Sci-1A) — permanent regression harness for the draft-path parameter lottery. Benchmark tooling ONLY; never product, never PMS, never production. Consumes bakeoff-v6 candidate records; uses only Node builtins (run via bakeoff-v6's tsx).",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "report": "tsx src/run.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.5"
+  }
+}
