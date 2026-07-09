@@ -722,6 +722,13 @@ export async function commitDirectAnswer(
       handlerId: metadata.handler_id,
       graph: graphForStore,
       persistedRowId,
+      // MM P1 (ROADMAP 1.25, item 4 — racing-pointer fix): thread the SAME
+      // server-read expected-base hash the A3 graph-CAS observe hook uses,
+      // verbatim (null/undefined both collapse to "no expectation" —
+      // service.saveVersion only accepts a string). See
+      // recordModelVersionForCommit's doc comment for the bootstrap caveat.
+      expectedGraphIdentityHash: metadata.expectedGraphIdentityHash ?? undefined,
+      sessionStore: store,
     });
   }
 
@@ -768,6 +775,34 @@ export function isExpectedGuestVersionRefusal(
  * retried turn (same scenario_id + turn_id) re-drives the same journey
  * event, which the RPC dedupes by event_id; an identical graph additionally
  * no-op-dedupes against the current head inside the RPC.
+ *
+ * MM P1 (ROADMAP 1.25, item 2 completion — Brief H guest pre-check): before
+ * spending the `saveVersion` RPC, do a plain read of `scenarios.user_id`
+ * (`SessionStore.getScenarioOwner`, when the store implements it) and skip
+ * the RPC entirely when the scenario is unowned (guest). `saveVersion`
+ * ALWAYS fails `sign_in_required` (MV001) for a guest scenario — this was
+ * previously a wasted RPC round trip on every guest commit. The pre-check
+ * is best-effort: a missing implementation, a read failure, or a scenario
+ * row that no longer exists all fail OPEN to the pre-fix behaviour (attempt
+ * the write; let the RPC answer MV001 authoritatively) rather than silently
+ * skip a version write that might actually be owned.
+ *
+ * MM P1 (ROADMAP 1.25, item 4 — racing-pointer fix): when the caller
+ * threaded an `expectedGraphIdentityHash` (the SAME server-read pre-turn
+ * base the A3 graph-CAS observe hook uses), pass it through to
+ * `saveVersion`'s optional write-time CAS. The RPC then rejects the write
+ * with a `cas_conflict` (MV409) if the scenario's current MM version head
+ * no longer matches that base — catching two concurrent commits racing the
+ * `current_model_version_id` pointer forward from the same starting point.
+ * KNOWN BOOTSTRAP CAVEAT (documented, not fixed here — a DB-migration-class
+ * change, out of scope for this hygiene batch): the RPC's CAS compares
+ * against the scenario's MM version HEAD, not `scenarios.graph` itself; for
+ * a scenario with pre-existing graph history whose FIRST MM-tracked commit
+ * carries a non-empty expected hash, the RPC sees no head yet (`v_head IS
+ * NULL`) and raises the same MV409 — a false conflict, not a real race.
+ * This degrades exactly like any other non-ok status here: logged at warn,
+ * turn result unaffected, no version row written for that turn. Filed as a
+ * residual for a future MM-hardening lane (mirrors ROADMAP 2.17).
  */
 async function recordModelVersionForCommit(args: {
   readonly scenarioId: string;
@@ -776,8 +811,33 @@ async function recordModelVersionForCommit(args: {
   readonly handlerId: V5ActionType | null;
   readonly graph: unknown;
   readonly persistedRowId: string;
+  readonly expectedGraphIdentityHash?: string;
+  readonly sessionStore: SessionStore;
 }): Promise<void> {
   try {
+    if (typeof args.sessionStore.getScenarioOwner === 'function') {
+      try {
+        const owner = await args.sessionStore.getScenarioOwner(args.scenarioId);
+        if (owner === null) {
+          log.debug(
+            { scenario_id: args.scenarioId, turn_id: args.turnId },
+            'ModelManagement — commit-seam saveVersion skipped pre-emptively (guest scenario, sign-in required; expected, not a fault)',
+          );
+          return;
+        }
+      } catch (precheckErr) {
+        // Fail OPEN: an unreadable owner is not evidence of guest status —
+        // fall through to the real RPC, which answers authoritatively.
+        log.debug(
+          {
+            scenario_id: args.scenarioId,
+            turn_id: args.turnId,
+            err: precheckErr instanceof Error ? precheckErr.message : String(precheckErr),
+          },
+          'ModelManagement — guest pre-check read failed; proceeding to saveVersion (fail-open)',
+        );
+      }
+    }
     const service = getModelManagementService();
     const result = await service.saveVersion({
       scenario_id: args.scenarioId,
@@ -786,6 +846,9 @@ async function recordModelVersionForCommit(args: {
       label: `commit:${args.handlerId ?? args.turnClass}`,
       provenance: 'commit',
       event_id: `model_version_created_turn_${args.turnId}`,
+      ...(args.expectedGraphIdentityHash !== undefined
+        ? { expected_graph_identity_hash: args.expectedGraphIdentityHash }
+        : {}),
     });
     emit(TelemetryEvents.V5ModelVersionCreated, {
       scenario_id: args.scenarioId,

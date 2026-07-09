@@ -957,22 +957,33 @@ function selectTemplate(
 }
 
 /**
- * Pull the array of per-option result records from the envelope. PLoT
- * returns `results[]` in canonical shape, but some older/alt endpoints emit
- * `option_comparison[]` (see `V2RunResponseMinimal` in plot-client.ts).
- * We accept either; preference is `results` when both are populated
- * (canonical name). Returns an empty array when neither is populated —
- * that's the NO_RESULTS template branch.
+ * Pull the array of per-option result records from the envelope.
+ *
+ * MM P1 (ROADMAP 1.25 hygiene batch, item 7 — read-order cleanup): PLoT's
+ * actual `/v2/run` wire response emits `option_comparison[]`, NOT
+ * `results[]` — verified against `plot-lite-service` `origin/staging`
+ * (`3cf5433`) `src/routes/v2/run.ts`, which never sets a top-level
+ * `results` key, and against CEE's own `V2RunResponseMinimal` Zod schema
+ * (`src/orchestrator/plot-client.ts`), whose comment states this plainly:
+ * "PLoT returns option data in `option_comparison` (not `results`)".
+ * `results` is accepted there only for defensive tolerance against a
+ * hypothetical future/alt shape — it has never actually been observed on
+ * the wire. The previous read order checked `results` FIRST (documented
+ * here as "canonical", which was the inverse of reality), so in production
+ * this always fell through to `option_comparison` anyway; this reorders to
+ * match what PLoT actually emits and corrects the stale doc comment.
+ * Returns an empty array when neither is populated — that's the
+ * NO_RESULTS template branch.
  */
-function readResultRecords(response: V2RunResponseEnvelope): ReadonlyArray<Record<string, unknown>> {
+export function readResultRecords(response: V2RunResponseEnvelope): ReadonlyArray<Record<string, unknown>> {
   const envelope = response as Record<string, unknown>;
-  const rawResults = envelope.results;
-  if (Array.isArray(rawResults) && rawResults.length > 0) {
-    return rawResults.filter(isRecord) as ReadonlyArray<Record<string, unknown>>;
-  }
   const rawComparison = envelope.option_comparison;
   if (Array.isArray(rawComparison) && rawComparison.length > 0) {
     return rawComparison.filter(isRecord) as ReadonlyArray<Record<string, unknown>>;
+  }
+  const rawResults = envelope.results;
+  if (Array.isArray(rawResults) && rawResults.length > 0) {
+    return rawResults.filter(isRecord) as ReadonlyArray<Record<string, unknown>>;
   }
   return [];
 }
