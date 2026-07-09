@@ -523,6 +523,82 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
       expect(r.ok).toBe(true);
     });
 
+    // Tier A #1 (edit-reliability, 2026-07-09) — FIX 3 (1.45-F6): "set X to
+    // 0.8" was refused as an ambiguous bare ratio even when the factor's OWN
+    // native scale IS [0,1] (factorCap === 1) — e.g. a churn-rate-style
+    // factor stored as a 0-1 proportion but ALSO carrying a unit string
+    // (e.g. '%'). There the "0.8 looks like a proportion" warning is false:
+    // 0.8 IS a value in that scale, not an ambiguous overlay. This is the
+    // ONE unambiguous case — a cap of exactly 1 means the factor's range
+    // literally IS [0,1], so no other interpretation is possible. The doctrine-
+    // open case (a %-unit factor on a 0-100 scale, e.g. factorCap: 100, where
+    // "0.8" could mean 0.8% or a typo for 80%) is DELIBERATELY left alone —
+    // see the pinned cap:100 tests above ("rejects a bare sub-1 number on a
+    // percentage factor" etc.), which must keep failing after this fix.
+    describe('cap===1 proportion-scaled factor exemption (FIX 3)', () => {
+      it('ACCEPTS a bare sub-1 SET on a %-unit factor whose cap is exactly 1 (factor IS proportion-scaled)', () => {
+        const r = evaluateFactorValueProposal({
+          rawInput: 0.8,
+          operator: 'set',
+          factorUnit: '%',
+          factorCap: 1,
+          inputHasUnit: false,
+        });
+        expect(r.ok).toBe(true);
+      });
+
+      it('ACCEPTS a bare sub-1 INCREASE on a cap-1 factor (same clear case, delta operator)', () => {
+        const r = evaluateFactorValueProposal({
+          rawInput: 0.1,
+          operator: 'increase',
+          factorUnit: '%',
+          factorCap: 1,
+          factorExistingRaw: 0.5,
+          inputHasUnit: false,
+        });
+        expect(r.ok).toBe(true);
+      });
+
+      it('does NOT bypass the cap-range guard — an out-of-range value on a cap-1 factor is still rejected', () => {
+        const r = evaluateFactorValueProposal({
+          rawInput: 1.5,
+          operator: 'set',
+          factorUnit: '%',
+          factorCap: 1,
+          inputHasUnit: false,
+        });
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
+      });
+
+      it('DOCTRINE BOUNDARY (unchanged): a %-unit factor on a 0-100 scale (cap: 100) STILL refuses a bare sub-1 value — the pp-vs-relative ambiguity is NOT settled by this fix', () => {
+        const r = evaluateFactorValueProposal({
+          rawInput: 0.8,
+          operator: 'set',
+          factorUnit: '%',
+          factorCap: 100,
+          inputHasUnit: false,
+        });
+        expect(r.ok).toBe(false);
+        if (!r.ok)
+          expect(r.reason).toBe<ProposalRejectionReason>('bare_ratio_on_unit_factor');
+      });
+
+      it('ACCEPTS a bare sub-1 value on a cap-1 currency-labelled factor too (cap is the signal, not the unit string)', () => {
+        // Deliberately an odd unit/cap combination to prove the gate keys
+        // off `cap === 1`, not the unit string — the exemption is scale-
+        // based, not unit-based.
+        const r = evaluateFactorValueProposal({
+          rawInput: 0.25,
+          operator: 'set',
+          factorUnit: '£',
+          factorCap: 1,
+          inputHasUnit: false,
+        });
+        expect(r.ok).toBe(true);
+      });
+    });
+
     it('ACCEPTS an explicit sub-1 currency value (the unit asserts the scale)', () => {
       const r = evaluateFactorValueProposal({
         rawInput: 0.3,

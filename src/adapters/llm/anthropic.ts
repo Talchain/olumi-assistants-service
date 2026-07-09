@@ -2353,6 +2353,12 @@ interface ChatWithAnthropicArgs {
    * Incompatible with extended thinking — automatically skipped when thinking is enabled.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * Appended to `userMessage` only when structured outputs actually engage
+   * for this call (schema present + model allowlisted + thinking off).
+   * See `ChatArgs.structuredOutputsUserReminder`.
+   */
+  structuredOutputsUserReminder?: string;
 }
 
 /**
@@ -2434,7 +2440,12 @@ export async function chatWithAnthropic(
         max_tokens: maxTokens,
         temperature,
         system: args.system,
-        messages: [{ role: "user", content: args.userMessage }],
+        messages: [{
+          role: "user",
+          content: withStructuredOutputs && args.structuredOutputsUserReminder
+            ? args.userMessage + args.structuredOutputsUserReminder
+            : args.userMessage,
+        }],
         ...(withStructuredOutputs && normalisedOutputSchema
           ? {
               output_config: {
@@ -3335,6 +3346,7 @@ export class AnthropicAdapter implements LLMAdapter {
       timeoutMs: opts.timeoutMs,
       thinking: args.thinking,
       outputSchema: args.outputSchema,
+      structuredOutputsUserReminder: args.structuredOutputsUserReminder,
     });
   }
 

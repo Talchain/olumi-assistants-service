@@ -62,6 +62,7 @@ import {
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
+import { impliesOptionInterventionEdit } from './option-intervention-guard.js';
 
 const EDIT_VERB_PATTERN =
   /\b(increase|decrease|reduce|raise|lower|set|change|update|make|adjust)\b/i;
@@ -255,7 +256,28 @@ export type SkipReason =
    * exposed as unsafe). Caller falls through to LLM routing, which
    * produces a clarification chip.
    */
-  | 'ambiguous_quantity';
+  | 'ambiguous_quantity'
+  /**
+   * Tier A #1 (edit-reliability, 2026-07-09) — FIX 2: the message implies
+   * an OPTION's intervention edit (`impliesOptionInterventionEdit`, the
+   * same detector `option-intervention-guard.ts` uses at STEP 2 validate)
+   * rather than a genuine factor-value change. Without this gate, this
+   * pre-route substring-matches the SHARED factor named in the message
+   * (e.g. "Set the Outsource option's Annual Support Cost to £135,000"
+   * matches "Annual Support Cost") and confidently auto-dispatches
+   * `set_factor_value` on it — the exact silent misroute the downstream
+   * guard exists to catch. That guard refuses the proposal and produces a
+   * clarify, but the clarify's replay text re-enters THIS SAME pre-route,
+   * which — still unaware of the option framing — synthesises the
+   * identical misrouted proposal again: a disambiguator loop the user can
+   * never escape, making the option-intervention edit unreachable.
+   *
+   * Skipping here (rather than only refusing downstream) breaks the loop
+   * at its source: the message reaches the LLM's edit_graph
+   * `option_configuration` routing with a clean slate, which is the path
+   * actually built to handle option interventions.
+   */
+  | 'option_intervention_edit';
 
 // (Earlier draft of this file declared a `QUANTITY_PROXIMITY_WINDOW`
 // constant for span-based attribution; that approach was abandoned at
@@ -352,6 +374,20 @@ export function tryDeterministicValueUpdate(
     if (pat.test(message)) {
       return { matched: false, skip_reason: 'hypothetical_gate' };
     }
+  }
+
+  // FIX 2 (Tier A #1, 2026-07-09) — negative gate: option-intervention
+  // framing should reach the LLM's option_configuration routing, not this
+  // factor-only pre-route. Must run BEFORE the candidate pool is built —
+  // see the SkipReason doc for why (this pre-route would otherwise
+  // substring-match the shared factor named alongside the option and
+  // confidently misroute onto it).
+  const optionLabelsForGate = graphLookup
+    .listEntitiesByKind('option')
+    .map((entity) => entity.label)
+    .filter((label): label is string => typeof label === 'string' && label.trim().length > 0);
+  if (impliesOptionInterventionEdit(message, optionLabelsForGate)) {
+    return { matched: false, skip_reason: 'option_intervention_edit' };
   }
 
   // Candidate pool: GraphLookup buckets factor / outcome / decision / risk
@@ -595,6 +631,8 @@ export type DeicticDispatch =
   | { readonly matched: false; readonly skip_reason: 'no_graph' }
   | { readonly matched: false; readonly skip_reason: 'hypothetical_gate' }
   | { readonly matched: false; readonly skip_reason: 'ambiguous_quantity' }
+  // FIX 2 (Tier A #1, 2026-07-09) — see the SkipReason doc above.
+  | { readonly matched: false; readonly skip_reason: 'option_intervention_edit' }
   | {
       readonly matched: true;
       readonly dispatch: 'clarify_deictic';
@@ -671,6 +709,18 @@ export function tryDeicticValueUpdate(
   }
   if (graphLookup === undefined) {
     return { matched: false, skip_reason: 'no_graph' };
+  }
+  // FIX 2 (Tier A #1, 2026-07-09) — same negative gate as
+  // `tryDeterministicValueUpdate`: a deictic factor reference combined
+  // with option-intervention framing ("Increase that factor within the
+  // Outsource option to £50k") must reach the LLM's option_configuration
+  // routing, not resolve deterministically onto the selected factor.
+  const optionLabelsForGate = graphLookup
+    .listEntitiesByKind('option')
+    .map((entity) => entity.label)
+    .filter((label): label is string => typeof label === 'string' && label.trim().length > 0);
+  if (impliesOptionInterventionEdit(message, optionLabelsForGate)) {
+    return { matched: false, skip_reason: 'option_intervention_edit' };
   }
   if (selectedFactorIds.length === 0) {
     return {

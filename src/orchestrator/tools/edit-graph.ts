@@ -29,8 +29,10 @@ import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
-// ANTHROPIC_EDIT_GRAPH_SCHEMA import removed — structured outputs disabled for edit_graph
-// (operations[].value carries arbitrary patch payloads incompatible with closed schemas)
+// Tier A #1 (edit-reliability, 2026-07-09): re-enabled with the v2
+// stringified-payload schema (Lane 26 v8-aux-field trick applied to
+// value/old_value) — see GRAMMAR BUDGET (v2) in anthropic-edit-graph-schema.ts.
+import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import { GraphV3 } from "../../schemas/cee-v3.js";
@@ -260,6 +262,28 @@ export interface EditGraphTraceDiagnostics {
 function getMaxPatchOperations(): number {
   return config.cee.maxPatchOperations;
 }
+
+// Tier A #1 (edit-reliability, 2026-07-09): appended to the edit_graph user
+// message ONLY when structured outputs actually engage for this call (the
+// adapter appends it only when its own flag+allowlist+thinking gate passes —
+// see ChatArgs.structuredOutputsUserReminder). The v2 schema forces
+// operations[].value / .old_value to be strings — this reminder tells the
+// model to put the JSON-ENCODED payload inside those strings rather than
+// prose or a raw (ungrammatical, schema-rejected) object. Mirrors
+// STRUCTURED_OUTPUTS_AUX_STRING_REMINDER in adapters/llm/anthropic.ts
+// (Lane 26, draft_graph). Omitted on the prompt-only fallback path, where
+// the system prompt's existing object-shaped examples apply unchanged —
+// parseStringifiedOperationPayload() accepts both shapes at ingress.
+const EDIT_GRAPH_STRUCTURED_OUTPUTS_VALUE_REMINDER = `
+
+OUTPUT FORMAT OVERRIDE (structured mode):
+Emit "value" and "old_value" as JSON-encoded STRINGS, not objects — the
+schema only allows strings there. Each string must contain exactly the JSON
+the operation needs, with correctly escaped quotes. Examples:
+"value": "{\\"id\\":\\"fac_x\\",\\"kind\\":\\"factor\\",\\"label\\":\\"X\\"}"
+for add_node; "value": "0.8" (a bare JSON scalar string) for a single-field
+update where the path already names the field. Omit "value"/"old_value"
+entirely for remove_node/remove_edge — no payload is needed.`;
 
 // Promise-aware copy for the propose-and-confirm path. The V5 dispatcher
 // does not persist `pendingProposal` across turns and does not render
@@ -1810,12 +1834,18 @@ export async function handleEditGraph(
       const editGraphThinking = config.cee.thinking?.editGraphEnabled
         ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.editGraphBudget }
         : undefined;
-      // Structured Outputs DISABLED for edit_graph: the operations[].value field
-      // carries arbitrary patch payloads (node/edge objects) that cannot be represented
-      // as a closed Anthropic schema. With additionalProperties:false on operations items,
-      // the LLM cannot produce value/old_value, making add/update operations non-functional.
-      // edit_graph relies on prompt-driven JSON output instead.
-      const editGraphOutputSchema = undefined;
+      // Structured Outputs (Tier A #1, 2026-07-09): re-enabled via the v2
+      // stringified-payload schema — value/old_value are `{ type: "string" }`
+      // (Lane 26's v8-aux-field trick) so the closed-schema grammar no longer
+      // forbids them. Skipped only when extended thinking is enabled
+      // (incompatible with structured outputs, same as draft_graph). Applies
+      // to BOTH the first attempt and repair attempts (same call site), so
+      // the repair loop gets grammar enforcement too. The adapter itself
+      // decides (flag + model allowlist) whether structured mode actually
+      // engages; the reminder is only appended to the prompt when it does.
+      const editGraphOutputSchema = !editGraphThinking
+        ? ANTHROPIC_EDIT_GRAPH_SCHEMA as Record<string, unknown>
+        : undefined;
       chatResult = await adapter.chat(
         {
           system: effectiveInstruction,
@@ -1823,6 +1853,7 @@ export async function handleEditGraph(
           maxTokens: getMaxTokensFromConfig('edit_graph') ?? 4000,
           ...(editGraphThinking ? { thinking: editGraphThinking } : {}),
           ...(editGraphOutputSchema ? { outputSchema: editGraphOutputSchema } : {}),
+          ...(editGraphOutputSchema ? { structuredOutputsUserReminder: EDIT_GRAPH_STRUCTURED_OUTPUTS_VALUE_REMINDER } : {}),
         },
         callOpts,
       );
@@ -3616,14 +3647,94 @@ function liftAlternateValuePayload(raw: Record<string, unknown>): Record<string,
 }
 
 /**
+ * Tier A #1 (edit-reliability, 2026-07-09): unwrap the v2 structured-outputs
+ * stringified `value` / `old_value` fields (see GRAMMAR BUDGET (v2) in
+ * anthropic-edit-graph-schema.ts) back into their real shape — object,
+ * scalar, or array — before any downstream consumer (alternate-key lifting,
+ * dotted-key restructuring, Zod) sees the field.
+ *
+ * Only touches a field that IS a string. `parseEditGraphResponse` has no
+ * reliable signal telling it whether THIS particular response came from a
+ * structured-outputs call or the prompt-only fallback (the adapter can fall
+ * back mid-call on a 400), so this function must not assume either mode —
+ * it treats a successful `JSON.parse` as proof-positive of the v2
+ * stringified-payload shape and leaves anything else untouched:
+ *
+ * - Structured mode: `value: "\"New\""` (JSON-encoded string) parses to the
+ *   scalar `"New"`. `value: "{\"id\":...}"` parses to the node/edge object.
+ * - Prompt-only mode (existing, pre-Tier-A#1 convention): `value: "New"` is
+ *   already the real scalar — `JSON.parse("New")` THROWS (bare text is not
+ *   valid JSON), so the catch branch below leaves it as the string "New",
+ *   IDENTICAL to today's behaviour. This is what makes the function safe to
+ *   run unconditionally on every response, not just structured-mode ones.
+ *
+ * On parse failure the field is left EXACTLY as received (never deleted) —
+ * deleting would silently break the prompt-only path's long-standing
+ * bare-scalar convention (e.g. a plain label rename), which is the dominant
+ * case today. A field that was genuinely meant as a stringified object/array
+ * (starts with `{`/`[`) but fails to parse still surfaces a warning for
+ * observability; Zod naturally rejects the wrong-shaped string downstream
+ * and drives the repair loop exactly as an omitted field would — enforcement
+ * is never worse than the status-quo prompt-only path.
+ *
+ * Deliberately does NOT apply the "unwrap one extra layer" double-encoding
+ * heuristic that `parseStringifiedAuxFields()` (adapters/llm/normalisation.ts,
+ * Lane 26) uses for coaching/causal_claims/topology_plan — those aux fields
+ * are ALWAYS objects/arrays, so a first-pass string result unambiguously
+ * means double-encoding. `value`/`old_value` can legitimately END in a bare
+ * string scalar (e.g. renaming a label to "Unit Price"), so a second parse
+ * pass would wrongly shred a valid string payload.
+ *
+ * @internal Exported for testing.
+ */
+export function parseStringifiedOperationPayload(rawInput: Record<string, unknown>): Record<string, unknown> {
+  if (typeof rawInput.value !== 'string' && typeof rawInput.old_value !== 'string') {
+    return rawInput;
+  }
+  const result = { ...rawInput };
+  for (const key of ['value', 'old_value'] as const) {
+    const raw = result[key];
+    if (typeof raw !== 'string') continue;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      result[key] = parsed;
+      log.info(
+        { event: 'edit_graph.stringified_payload_parsed', field: key, op: result.op },
+        `edit_graph parsed stringified JSON "${key}" field`,
+      );
+    } catch (err) {
+      // Leave the field UNTOUCHED — this is either the prompt-only path's
+      // ordinary bare-scalar convention (the common case; no signal here),
+      // or a genuinely malformed structured-mode encoding (Zod will reject
+      // it downstream and drive the repair loop either way).
+      const looksLikeIntendedPayload = raw.length > 0 && (raw[0] === '{' || raw[0] === '[');
+      if (looksLikeIntendedPayload) {
+        log.warn(
+          {
+            event: 'edit_graph.stringified_payload_parse_failed',
+            field: key,
+            op: result.op,
+            error: err instanceof Error ? err.message : String(err),
+            raw_preview: raw.slice(0, 120),
+          },
+          `edit_graph "${key}" field looked like a stringified object/array but was not valid JSON — left as-is; Zod will reject it and the repair loop takes over`,
+        );
+      }
+    }
+  }
+  return result;
+}
+
+/**
  * Normalise a single raw operation from the LLM:
+ * - Unwrap v2 structured-outputs stringified value/old_value fields
  * - Lift inline / alternate-key payloads into `value` (value-requiring ops)
  * - Convert v2 paths to pipeline format
  * - Restructure dotted keys (strength.mean → nested) for canonical format
  * - Preserve impact/rationale as extra fields (stripped later)
  */
 function normaliseOperation(rawInput: Record<string, unknown>): PatchOperation & { impact?: string; rationale?: string } {
-  const raw = liftAlternateValuePayload(rawInput);
+  const raw = liftAlternateValuePayload(parseStringifiedOperationPayload(rawInput));
   const { path: normalisedPath, field } = normalisePath(String(raw.path ?? ''));
 
   let value = raw.value as unknown;
