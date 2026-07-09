@@ -62,6 +62,10 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
   // applied-mutation test cannot hit an undefined import (review fix).
   loadMostRecentPendingActions: vi.fn(async () => []),
   loadPersistedGraphStrict: vi.fn(async () => null),
+  // ROADMAP 1.33: dispatchEditGraph reads this for the conversation-slice
+  // feed. Empty — this suite exercises the add-risk flag seam, not
+  // conversation history.
+  loadRecentConversationTurns: vi.fn(async () => []),
   buildTurnContext: vi.fn(async () => ({
     goal_node_id: 'goal_growth',
     prior_facts: [],

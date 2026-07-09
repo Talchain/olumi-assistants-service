@@ -60,6 +60,10 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
     handler_id: null,
     received_at: new Date().toISOString(),
   })),
+  // ROADMAP 1.33: dispatchEditGraph reads this unconditionally for the
+  // conversation-slice feed. Empty — this suite exercises no-op recovery,
+  // not conversation history.
+  loadRecentConversationTurns: vi.fn(async () => []),
 }));
 
 // Stub handleEditGraph: returns a legitimate no-op (zero operations,
