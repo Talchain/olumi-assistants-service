@@ -24,6 +24,16 @@
  * schemas, zero new unions/enums. The budgets below are pinned to the
  * measured v2 shape.
  *
+ * v2 → v2.1 (ROADMAP 1.46 residual, task_97fbcb00, same day): a `category`
+ * enum (3 values: controllable/observable/external) was added directly to
+ * operations.items as a REAL grammar-enforced enum (not stringified), so
+ * the edit LLM can no longer emit an out-of-enum node category (was
+ * previously reaching GraphV3.safeParse unchecked and failing the whole
+ * edit with SYNTHESIZED_GRAPH_INVALID). Measured: 995 bytes / 4 objects / 9
+ * enum values (was ~918B / 4 objects / 6 enum values pre-change) —
+ * comfortably inside the existing budgets below, no bump needed. STILL
+ * verify live per "HOW TO VERIFY LIVE" before merging.
+ *
  * HOW TO VERIFY LIVE
  * -------------------
  * Run `ANTHROPIC_API_KEY=<key> pnpm exec tsx scripts/probe-grammar-compile-edit-graph.mjs`

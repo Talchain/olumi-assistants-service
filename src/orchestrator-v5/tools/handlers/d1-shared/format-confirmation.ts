@@ -133,6 +133,22 @@ export function formatConstraintUnchanged(input: ConstraintAddedInput): string {
 }
 
 /**
+ * Overnight review F8(b) — distinct receipt for a restatement whose VALUE
+ * is unchanged but whose LABEL differs from what is persisted. Neither
+ * `formatConstraintUpdated` ("Updated constraint: …") — which implies a
+ * value change that did not happen — nor `formatConstraintUnchanged`
+ * ("… is already constrained …") — which implies nothing changed at all,
+ * when the label in fact did — is honest here. `label` is excluded from
+ * the add_constraint value-sameness predicate precisely so this case can
+ * be named on its own terms.
+ */
+export function formatConstraintLabelUpdated(input: ConstraintAddedInput): string {
+  const phrase = OPERATOR_PHRASE[input.operator];
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Updated the label to ${input.targetLabel} — the constraint (must be ${phrase} ${value}) is unchanged.`;
+}
+
+/**
  * Receipt for a goal-target set through the add_constraint goal-threshold
  * join (lane CEE-W5 Mission B). Names the target honestly and states only
  * what durably happened (the threshold is stamped on the goal node in the
@@ -165,6 +181,11 @@ export function formatGoalTargetSet(input: {
  * unconditionally reads as a fresh registration event; shipping it when
  * the target did not actually change borrows the pre-existing threshold
  * to narrate a commit that did not happen this turn.
+ *
+ * Overnight review N1: carries the same "at least" operator qualifier as
+ * `formatGoalTargetSet` — the registered contract is `>=`, and the bare
+ * value alone ("already 15%") under-specifies it, reading as an exact
+ * target rather than a floor.
  */
 export function formatGoalTargetUnchanged(input: {
   readonly goalLabel: string;
@@ -172,7 +193,7 @@ export function formatGoalTargetUnchanged(input: {
   readonly unit?: string;
 }): string {
   const value = formatValueWithUnit(input.value, input.unit);
-  return `${input.goalLabel}'s success target is already ${value} — no need to change it.`;
+  return `${input.goalLabel}'s success target is already at least ${value} — no need to change it.`;
 }
 
 export interface EdgeAdjustmentInput {

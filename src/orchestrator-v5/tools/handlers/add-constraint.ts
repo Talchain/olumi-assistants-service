@@ -38,6 +38,7 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
   formatConstraintAdded,
+  formatConstraintLabelUpdated,
   formatConstraintUnchanged,
   formatConstraintUpdated,
   formatGoalTargetSet,
@@ -335,15 +336,71 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
+      // Overnight review F8+F9 — ONE add-constraint channel-unification fix
+      // (ORCHESTRATOR-DEFAULT doctrine, pending Paul ratification — see
+      // acceptance-evidence/receipt-honesty/README.md). A success
+      // target can be registered through TWO channels, and unchanged-value
+      // detection must compare against BOTH before the mutation runs:
+      //   (a) the goal_constraints row (`existing`, above) — this
+      //       handler's own canonical representation.
+      //   (b) the goal node's OWN goal_threshold_raw/_unit fields — the
+      //       draft path (cee/factor-extraction/enricher.ts) stamps ONLY
+      //       these, by design, and never writes a goal_constraints row.
+      //       A restatement of an already-draft-registered value must not
+      //       read the row's absence as "nothing registered yet" (F8).
+      // `label` is EXCLUDED from the value-sameness predicate (F8
+      // secondary): an LLM-supplied label paraphrase must not flip an
+      // identical-value restatement into a false "fresh update" claim. A
+      // label-only change gets its own distinct receipt below — never a
+      // value-change claim, never a total no-op either (the label DID
+      // change and is persisted).
+      const rowValueUnchanged =
+        existing !== undefined &&
+        existing.value === newConstraint.value &&
+        existing.unit === newConstraint.unit;
+      const nodeChannelUnchanged =
+        isGoalTargetSet &&
+        typeof targetNode.goal_threshold_raw === 'number' &&
+        targetNode.goal_threshold_raw === params.value &&
+        targetNode.goal_threshold_unit === newConstraint.unit;
+      const valueUnchanged = rowValueUnchanged || nodeChannelUnchanged;
+      const labelChanged = existing !== undefined && existing.label !== newConstraint.label;
+      // F9 — the node's goal_threshold_raw/_unit/_cap fields are the exact
+      // fields `computeAnalysisAffectingGraphHash` reads; re-stamping them
+      // on a turn whose OWN receipt says "nothing changed" moves the
+      // analysis-affecting hash out from under an honest noop claim. Only
+      // stamp when the value genuinely changed this turn. The
+      // goal_constraints row upsert below still runs unconditionally
+      // (matching every other D1 handler's noop contract — see
+      // d1-cross-handler.test.ts: a noop turn still returns a
+      // `mutated_graph`, just one whose hash is unchanged because its
+      // content is byte-identical to what was already persisted); it is
+      // ONLY the node-threshold stamp that is gated, since that is the
+      // field the F9 defect actually moved.
+      const stampGoalThreshold = isGoalTargetSet && !valueUnchanged;
+
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
+        // F8 backfill residual (self-review hardening): when there is no
+        // existing row (`existing === undefined`) AND the value is
+        // unchanged (necessarily via the NODE channel in that case — see
+        // `nodeChannelUnchanged` above), appending a brand-new
+        // goal_constraints row would move the analysis-affecting hash
+        // (goal_constraints is part of that hash) on a turn whose own
+        // receipt says nothing changed — the same defect class F9 closed
+        // for the node stamp, manifesting via row-creation instead. Skip
+        // the append in exactly that case; a genuinely NEW constraint
+        // (existing undefined, valueUnchanged false) still appends as
+        // before.
         const next = existing
           ? list.map((c) =>
               c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
             )
-          : [...list, constraintParse.data];
+          : valueUnchanged
+            ? list
+            : [...list, constraintParse.data];
         clone.goal_constraints = next;
-        if (isGoalTargetSet) {
+        if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode) {
             const cap = resolveGoalThresholdCap(
@@ -373,21 +430,15 @@ export function createAddConstraintHandler(): HandlerFn {
         };
       });
 
-      const valueUnchanged =
-        existing !== undefined &&
-        existing.value === newConstraint.value &&
-        existing.unit === newConstraint.unit &&
-        existing.label === newConstraint.label;
-
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
         fact_version: 1,
-        noop: valueUnchanged,
+        noop: valueUnchanged && !labelChanged,
         result: {
           target_id: newConstraint.constraint_id,
-          status: valueUnchanged ? 'noop' : 'applied',
-          before: result.before as Record<string, unknown> | null,
-          after: result.after as Record<string, unknown> | null,
+          status: valueUnchanged && !labelChanged ? 'noop' : 'applied',
+          before: result.before,
+          after: result.after,
         },
       };
 
@@ -409,11 +460,14 @@ export function createAddConstraintHandler(): HandlerFn {
       // threshold IS stamped in the committed write above); everything
       // else keeps the existing constraint copy byte-for-byte. ROADMAP
       // 1.19(a): a re-registration whose value is IDENTICAL to what is
-      // already persisted (`valueUnchanged`, computed above from a real
-      // diff against `existing`) must not claim "Updated"/"set" — that
+      // already persisted (`valueUnchanged`, computed above across BOTH
+      // channels per F8/F9) must not claim "Updated"/"set" — that
       // borrows the pre-existing threshold/constraint to narrate a
       // commit that did not happen this turn. The fact channel already
-      // marks this `noop`; the text channel now agrees.
+      // marks this `noop`; the text channel now agrees. F8(b): a
+      // label-only change (value unchanged, label differs) gets its own
+      // distinct receipt — never the fresh-update claim, never the
+      // total-noop claim either.
       const assistantText = isGoalTargetSet
         ? valueUnchanged
           ? formatGoalTargetUnchanged({
@@ -427,7 +481,9 @@ export function createAddConstraintHandler(): HandlerFn {
               ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
             })
         : valueUnchanged
-          ? formatConstraintUnchanged(formatInput)
+          ? labelChanged
+            ? formatConstraintLabelUpdated(formatInput)
+            : formatConstraintUnchanged(formatInput)
           : existing !== undefined
             ? formatConstraintUpdated(formatInput)
             : formatConstraintAdded(formatInput);
