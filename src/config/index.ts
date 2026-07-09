@@ -489,6 +489,29 @@ const ConfigSchema = z.object({
     // containment argument (VERBATIM reasoning bypasses the egress
     // claim-safety/forbidden-phrase cage by ruling).
     reasoningCaptureEnabled: booleanString.default(false),
+    // CEE_ANSWER_TEXT_REQUIRED — belt-and-braces hardening for the
+    // coach/converse `answer_text` channel (PR #380 / ROADMAP 1.38). Default
+    // OFF; sequenced BEHIND the prompt track's prompt-only fix for the same
+    // Sonnet-5 empty-orientation defect so the two fixes' effects on the
+    // live metric can be measured independently — see
+    // Docs/lanes/LANE-ANSWER-TEXT-HARDENING.md. When true, gates two layers:
+    //   (A) SCHEMA PRESSURE — tool-schema.ts's RawToolCallSchema requires a
+    //       non-blank top-level `answer_text` on coach/converse tool calls.
+    //       An omission is a Zod validation failure, which the EXISTING
+    //       REPAIR_ONCE mechanism (route-with-tool-use.ts) already retries
+    //       exactly once, citing the omission in the repair message — no
+    //       new retry plumbing. execute/clarify are unaffected (they already
+    //       carry their answer via action.explanation.answer_text /
+    //       clarification.question and remain forbidden from answer_text).
+    //   (B) COMPOSE GUARD — turn-executor.ts's coach/converse compose
+    //       branches degrade to the existing bounded-recovery copy/chips
+    //       (the same builder commitBoundedRoutingFallback uses for the
+    //       routing schema-repair-failure path) instead of shipping an
+    //       empty assistant_text, for the residual case where BOTH
+    //       answer_text and orientationText land empty/whitespace even
+    //       after REPAIR_ONCE.
+    // Flag OFF is byte-identical to pre-hardening behaviour on both layers.
+    answerTextRequired: booleanString.default(false),
   }),
 
   // Prompt Cache Configuration
@@ -1070,6 +1093,7 @@ function parseConfig(): Config {
       graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
       graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
+      answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

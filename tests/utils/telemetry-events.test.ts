@@ -470,6 +470,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5CoachingStateLifecycleDerived: "v5.coaching_state.lifecycle_derived",
         V5CoachingSignalFired: "v5.coaching.signal_fired",
         V5CoachingOutputPostcheck: "v5.coaching.output_postcheck",
+        V5CoachingEmptyAnswerRecovered: "v5.coaching.empty_answer_recovered",
+        V5CoachingAnswerSource: "v5.coaching.answer_source",
         V5DecisionReviewDegraded: "v5.decision_review_degraded",
         V5DecisionReviewFailed: "v5.decision_review.failed",
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
@@ -1295,6 +1297,16 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // (diagnostic-only; redacted closed-enum violation + state booleans; no
         // Datadog metric in emit()).
         TelemetryEvents.V5CoachingOutputPostcheck,
+        // CEE_ANSWER_TEXT_REQUIRED (flag default OFF) — diagnostic-only
+        // compose-guard recovery signal; structured logs + the deterministic
+        // recovery response are the operational signal, no Datadog metric
+        // mapping until the flag is activated.
+        TelemetryEvents.V5CoachingEmptyAnswerRecovered,
+        // ROADMAP 1.38 — answer_text/orientationText channel-pick measurement
+        // instrument (NOT flag-gated — see telemetry.ts). Diagnostic-only for
+        // now: structured logs are the operational signal used to quantify
+        // v42.2g's population lift; no Datadog metric mapping yet.
+        TelemetryEvents.V5CoachingAnswerSource,
         // V6 dual-draft (flag default OFF) — diagnostic-only: m2 outcome,
         // merge accounting histogram, and degrade reasons; no Datadog metric
         // until activation dashboards exist.
@@ -1719,6 +1731,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching_state.lifecycle_derived",
         "v5.coaching.signal_fired",
         "v5.coaching.output_postcheck",
+        "v5.coaching.empty_answer_recovered",
+        "v5.coaching.answer_source",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",

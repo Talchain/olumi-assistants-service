@@ -666,6 +666,37 @@ export const TelemetryEvents = {
   // model prose or any decision content.
   V5CoachingOutputPostcheck: "v5.coaching.output_postcheck",
 
+  // CEE_ANSWER_TEXT_REQUIRED (belt-and-braces hardening, default OFF).
+  // Emitted when the compose-layer guard (layer B) catches a coach/converse
+  // turn where BOTH `answer_text` and `orientationText` landed empty or
+  // whitespace-only (even after the schema-pressure REPAIR_ONCE retry —
+  // layer A) and degrades to the bounded-recovery response instead of
+  // shipping an empty assistant_text. Privacy: correlation IDs + the
+  // closed-enum `intent_class` + LENGTHS only — never the model's prose.
+  // Fields:
+  //   request_id, scenario_id: string  (correlation only)
+  //   intent_class: 'coach' | 'converse'
+  //   answer_text_length: number  (0 when absent)
+  //   orientation_length: number
+  V5CoachingEmptyAnswerRecovered: "v5.coaching.empty_answer_recovered",
+
+  // ROADMAP 1.38 — the measurement instrument for the answer_text channel
+  // itself. Emitted at the compose pick site for EVERY coach/converse
+  // (tool_call) turn — NOT flag-gated behind CEE_ANSWER_TEXT_REQUIRED,
+  // because the whole point is to quantify the prompt-only world as it
+  // exists today (v42.2g), i.e. how often `answer_text` ships vs the
+  // `orientationText` fallback, BEFORE any of the belt-and-braces hardening
+  // above ever engages. One event per pick, right after the ternary decides
+  // which channel wins. Privacy: correlation IDs + the closed-enum
+  // `intent_class` + closed-enum `source` + LENGTHS only — never the
+  // model's prose. Fields:
+  //   request_id, scenario_id: string  (correlation only)
+  //   intent_class: 'coach' | 'converse'
+  //   source: 'answer_text' | 'orientation_fallback'
+  //   answer_text_length: number  (0 when absent)
+  //   orientation_length: number
+  V5CoachingAnswerSource: "v5.coaching.answer_source",
+
   // V5 Coaching State Spine — Stage 2B-1b. Emitted once per turn AFTER the turn's
   // state is successfully persisted (post-append_turn_atomic). Same privacy
   // contract as V5CoachingStateDerived: correlation IDs + counts / closed-enum

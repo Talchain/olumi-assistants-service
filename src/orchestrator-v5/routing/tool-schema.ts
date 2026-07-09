@@ -16,6 +16,7 @@
 
 import { z } from 'zod';
 
+import { config } from '../../config/index.js';
 import {
   IntentClassSchema,
   CoachingModeSchema,
@@ -505,6 +506,32 @@ const RawToolCallSchema = z
           message: 'clarification is forbidden when intent_class === "coach"',
         });
       }
+    }
+    // CEE_ANSWER_TEXT_REQUIRED (belt-and-braces hardening, default OFF —
+    // see config/index.ts). Layer A / schema pressure: when enabled, a
+    // coach or converse tool call MUST carry a non-blank top-level
+    // `answer_text`. This is a plain Zod validation failure like every
+    // other rule in this refinement, so it flows through the EXISTING
+    // REPAIR_ONCE mechanism in route-with-tool-use.ts unchanged — one
+    // retry, with this issue's message surfaced to the model verbatim in
+    // the repair's tool_result content, then a typed schema_repair_failed
+    // error if the retry also omits it. execute/clarify are untouched
+    // (unaffected by this flag; they forbid answer_text outright above).
+    // Flag OFF: this block never runs — byte-identical to pre-hardening
+    // behaviour.
+    if (
+      (intent_class === 'coach' || intent_class === 'converse') &&
+      config.features.answerTextRequired &&
+      !answer_text?.trim()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['answer_text'],
+        message:
+          `answer_text is required when intent_class === "${intent_class}" ` +
+          '(CEE_ANSWER_TEXT_REQUIRED is enabled) — populate it with your ' +
+          'complete user-facing answer, not just a brief lead-in.',
+      });
     }
   });
 
