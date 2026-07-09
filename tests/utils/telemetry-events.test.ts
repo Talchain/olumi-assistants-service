@@ -525,6 +525,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5HeadlineFellBack: "v5.headline.fell_back",
         V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
         V5ChipsFloorApplied: "v5.chips.floor_applied",
+        // ROADMAP 1.20(b) — chip-sameness guard (immediately-prior-turn
+        // chip-offer suppression at the generateChips egress).
+        V5ChipsRecentlyOfferedSuppressed: "v5.chips.recently_offered_suppressed",
         V5ChipsFinalized: "v5.chips.finalized",
         // V6 dual-model draft enrichment (CEE_V6_DUAL_DRAFT_ENABLED, default OFF)
         // — content-free counts/coded-reasons/models only.
@@ -1285,6 +1288,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5HeadlineFellBack,
         TelemetryEvents.V5ChipsEmptyIntentional,
         TelemetryEvents.V5ChipsFloorApplied,
+        // ROADMAP 1.20(b) — chip-sameness guard (diagnostic-only, no Datadog
+        // metric; suppressed chip ids + survivor count only). Live emit site:
+        // chip-generator.ts excludeRecentlyOfferedChips.
+        TelemetryEvents.V5ChipsRecentlyOfferedSuppressed,
         // V5 Lane 2 — egress chip-quality finalizer aggregate (diagnostic-only).
         TelemetryEvents.V5ChipsFinalized,
         // Track S 0.13c-1 — run_analysis intercept guard summary (diagnostic-only,
@@ -1800,6 +1807,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.headline.fell_back",
         "v5.chips.empty_intentional",
         "v5.chips.floor_applied",
+        // ROADMAP 1.20(b) — chip-sameness guard
+        "v5.chips.recently_offered_suppressed",
         "v5.chips.finalized",
         // V6 dual-draft enrichment (flag default OFF)
         "v6.dual_draft.m2_outcome",
