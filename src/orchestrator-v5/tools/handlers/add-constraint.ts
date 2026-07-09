@@ -31,6 +31,7 @@ import type { AddConstraintHandlerFact } from '@talchain/schemas/orchestrator';
 import { GoalConstraintSchema, type GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { resolveGoalThresholdCap } from '../../../utils/goal-threshold-cap.js';
+import { hasReductionByFraming } from '../../../utils/reduction-framing.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -259,6 +260,35 @@ export function createAddConstraintHandler(): HandlerFn {
 
       const params = resolveParams(invocation);
       const operator = TYPE_TO_OPERATOR[params.constraint_type];
+
+      // ROADMAP 1.52 — goal-fit sign-inversion backstop. "reduce/decrease/
+      // cut/lower/shrink X BY N%" states a CHANGE amount: X moves DOWN on
+      // success. The tool-schema guidance (above this handler in the call
+      // chain) tells Sonnet to encode that as `at_most`/negative — but if
+      // Sonnet ignores the guidance and still emits the naive positive
+      // "at_least +N" reading against a message that used exactly this
+      // reduction framing, that is the precise fingerprint of the traced
+      // bug (6B capture: displayed ~0%, honest ~97-99%). Block and ask for
+      // confirmation rather than silently persisting an inverted claim —
+      // never guess a fix, per the fix doctrine. Deliberately coarse
+      // (whole-message scan): a false positive here only ever costs a
+      // clarifying round-trip, never a silent wrong-sign persist.
+      if (
+        operator === '>=' &&
+        params.value > 0 &&
+        hasReductionByFraming(invocation.payload.message)
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'add_constraint: reduction-framed message ("reduce/decrease/cut/' +
+            'lower/shrink ... by ...") but the resolved constraint is ' +
+            '">= positive" — this is the sign-inversion fingerprint ' +
+            '(ROADMAP 1.52). Refusing to persist; ask the user to confirm ' +
+            'the target instead of guessing the flip.',
+          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+        );
+      }
+
       // Default the constraint label from the target node's label so the
       // confirmation text and the persisted shape are coherent.
       const constraintLabel = params.label ?? targetNode.label;

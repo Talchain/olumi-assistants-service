@@ -246,6 +246,30 @@ describe('OLUMI_ACTION_TOOL definition', () => {
     expect(desc).toContain('Requires a prior analysis run');
   });
 
+  // ROADMAP 1.52 — goal-fit sign inversion. "reduce/decrease X by N%"
+  // states a CHANGE, not a level; the naive positive "at_least +N%"
+  // reading structurally inverts the claim whenever the constrained
+  // node's own distribution is the signed delta (6B capture: displayed
+  // ~0%, honest ~97-99%). This guidance must survive future edits.
+  it('add_constraint guidance covers REDUCTION-FRAMED targets with the flipped encoding + clarify-on-ambiguity', () => {
+    const action = OLUMI_ACTION_TOOL.input_schema.properties.action as {
+      properties: { handler_id: { description: string } };
+    };
+    const desc = action.properties.handler_id.description;
+
+    expect(desc).toContain('REDUCTION-FRAMED');
+    // The worked example must use the real field shapes the handler
+    // actually accepts (constraint_type: at_most, negative value) — not
+    // an invented parameter name.
+    expect(desc).toContain('"at_most"');
+    expect(desc).toContain('value: -15');
+    // Explicitly rules out the buggy reading.
+    expect(desc).toMatch(/do not emit `at_least` with a positive value/i);
+    // Ambiguous cases must route to clarify, never a silent guess.
+    expect(desc).toMatch(/do not guess/i);
+    expect(desc).toContain('"clarify"');
+  });
+
   it('parser remains permissive on unknown handler_ids (validator handles it)', () => {
     // Sonnet could still emit a non-enum value despite the schema constraint;
     // the Zod parser must not reject it, because the TurnExecutor relies on
