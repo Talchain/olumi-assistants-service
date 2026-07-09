@@ -80,11 +80,10 @@ const STANDALONE_TOOL_EXCLUSIONS = ["tools/graph-evaluator/**"];
 // green again" rule above: d1-followup-fixes,
 // turn-executor-explain-precondition-chip, turn-executor-recoverable-handler,
 // chip-click-dispatch, chip-click-dispatch-analysis-ready.
-// 2026-07-09 (ROADMAP 1.13 test-baseline-hygiene lane): all 16 remaining
-// entries fixed/verified green and removed —
-//   - 4 already green (verified stale exclusions, no code change needed):
-//     turn-executor-failure-responses, turn-executor-handler,
-//     artefact-detector, request-timing.
+// 2026-07-09 (ROADMAP 1.13 test-baseline-hygiene lane): 15 of 16 entries
+// fixed/verified green and removed —
+//   - 3 already green (verified stale exclusions, no code change needed):
+//     turn-executor-failure-responses, turn-executor-handler, request-timing.
 //   - 12 fixed (RED→GREEN, test-only):
 //     endpoint-feature-matrix + phase2-numeric-format (stale copy/fixture
 //     vs the now-canonical STALENESS_PREFIX and the deliberate near-tie
@@ -101,10 +100,26 @@ const STANDALONE_TOOL_EXCLUSIONS = ["tools/graph-evaluator/**"];
 //     wording now collides with the canonical FORBIDDEN_USER_FACING_PHRASES
 //     list, which the replay harness's coreAssertions() checks before the
 //     specific detector under test — reworded/re-asserted, not weakened).
-// This list is empty. Keep the array (not the whole file) so the next red
-// file has an obvious place to land — see the file-level comment above for
-// the "remove only once genuinely green" rule.
-const REQUIRED_GATE_RED_EXCLUSIONS: string[] = [
+//   - 1 stays excluded: artefact-detector — passes on macOS (case-insensitive
+//     filesystem) but is a GENUINE product bug on Linux (CI/Render):
+//     loadArtefactAppendix() (src/orchestrator/pipeline/phase3-llm/
+//     prompt-assembler.ts) resolves `prompts/artefact_appendix.txt`
+//     (lowercase) but the file lives at `Prompts/artefact_appendix.txt`
+//     (capital P — matches the sibling `Prompts/v40.txt` convention). On a
+//     case-sensitive filesystem this ENOENTs and loadArtefactAppendix()
+//     silently returns null (its own catch-and-warn design), so
+//     injectArtefactAppendix:true is a silent no-op in production on
+//     Render. Confirmed by re-running this exact file on GitHub Actions
+//     (ubuntu-latest, case-sensitive ext4) after removing it from this list
+//     — reproduces every time; does NOT reproduce locally on macOS at any
+//     worker/concurrency setting (ruled out as an ordering flake). This is a
+//     genuine product defect, not test staleness — left excluded and NOT
+//     fixed here per this lane's no-product-code-changes mandate; filed for
+//     its own product lane (one-line severity/effort: fix is a single
+//     literal-casing correction in prompt-assembler.ts, but it's still a
+//     product-code change this test-only lane must not make).
+const REQUIRED_GATE_RED_EXCLUSIONS = [
+  "tests/unit/orchestrator/artefact-detector.test.ts",
   // NOTE: tool tests (incl. the former exact-path `tools/graph-evaluator/tests/
   // adapters.test.ts` collection error) are handled by the package-level
   // STANDALONE_TOOL_EXCLUSIONS above, not enumerated here.
