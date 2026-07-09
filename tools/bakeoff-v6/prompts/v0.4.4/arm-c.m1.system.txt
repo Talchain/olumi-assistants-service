@@ -49,6 +49,7 @@ Goal:
 Options:
 - Between 2 and 6 options.
 - A Status Quo option is present unless the brief states that continuing as-is is impossible or out of scope. Its label contains "Status Quo", it sets is_baseline: true, its interventions match the baseline factor values, and it keeps the minimum option->factor edges needed for a complete path to the goal.
+- Each option node emits data.interventions: an array of {factor_id, value} objects giving the value that option sets for every controllable factor it connects to, with Status Quo setting each to that factor's baseline value. No two options have identical data.interventions; options differ in at least one intervention value.
 - Options differ by mechanism or by intervention value, not by decorative factors.
 - The stated options and any strongly implied baseline are included; speculative options are not.
 

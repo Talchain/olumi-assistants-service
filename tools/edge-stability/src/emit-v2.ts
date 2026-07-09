@@ -40,22 +40,26 @@ async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true });
 
   const dir = join(runDir, "candidates");
-  const byBrief: Record<string, { ok: number; total: number; issues: string[] }> = {};
+  const byBrief: Record<string, { ok: number; total: number; draftSrc: number; differentiated: number; badRegime: number; issues: string[] }> = {};
   let totalOk = 0, totalReq = 0;
   for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
     const c = JSON.parse(readFileSync(join(dir, f), "utf-8")) as { brief_id: string; seed: number; arm?: string; candidate: { nodes: []; edges: [] } | null };
     if (c.arm && c.arm !== "A") continue;
-    const b = (byBrief[c.brief_id] ??= { ok: 0, total: 0, issues: [] });
+    const b = (byBrief[c.brief_id] ??= { ok: 0, total: 0, draftSrc: 0, differentiated: 0, badRegime: 0, issues: [] });
     b.total++; totalReq++;
-    const { request, skipReason, synthNotes } = adaptDraftToV2(c.candidate as any, seed, rule);
-    const errs = validate(request, skipReason);
-    if (errs.length === 0) { b.ok++; totalOk++; writeFileSync(join(outDir, `${c.brief_id}_s${c.seed}.json`), JSON.stringify(request, null, 2)); }
+    const r = adaptDraftToV2(c.candidate as any, seed, rule);
+    const errs = validate(r.request, r.skipReason);
+    if (r.interventionSource === "draft") b.draftSrc++;
+    if (r.optionsDifferentiated) b.differentiated++;
+    if (!r.allValuesIn01) b.badRegime++;
+    if (errs.length === 0) { b.ok++; totalOk++; writeFileSync(join(outDir, `${c.brief_id}_s${c.seed}.json`), JSON.stringify(r.request, null, 2)); }
     else b.issues.push(`s${c.seed}: ${errs.join("; ")}`);
-    for (const n of synthNotes) b.issues.push(`s${c.seed} note: ${n}`);
+    for (const n of r.synthNotes) b.issues.push(`s${c.seed} note: ${n}`);
   }
-  console.log(`V2 requests: ${totalOk}/${totalReq} valid, written to ${outDir} (seed pinned = ${seed}, rule=${rule})`);
+  console.log(`V2 requests: ${totalOk}/${totalReq} valid, written to ${outDir} (seed pinned = ${seed})`);
+  console.log(`intervention source: draft ${Object.values(byBrief).reduce((a, s) => a + s.draftSrc, 0)}/${totalReq} | option-differentiation rate: ${Object.values(byBrief).reduce((a, s) => a + s.differentiated, 0)}/${totalReq} | [0,1] regime: ${totalReq - Object.values(byBrief).reduce((a, s) => a + s.badRegime, 0)}/${totalReq}`);
   for (const [b, s] of Object.entries(byBrief).sort()) {
-    console.log(`  ${b}: ${s.ok}/${s.total} valid${s.issues.length ? " | " + s.issues.slice(0, 6).join(" | ") : ""}`);
+    console.log(`  ${b}: ${s.ok}/${s.total} valid | draft-src ${s.draftSrc}/${s.total} | differentiated ${s.differentiated}/${s.total}${s.badRegime ? ` | ⚠${s.badRegime} bad-regime` : ""}${s.issues.length ? " | " + s.issues.slice(0, 4).join(" | ") : ""}`);
   }
 }
 
