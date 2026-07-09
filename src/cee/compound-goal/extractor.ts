@@ -20,6 +20,7 @@ import type { GoalConstraintT } from "../../schemas/assist.js";
 import { extractDeadline } from "./deadline-extractor.js";
 import { mapQualitativeToProxy } from "./qualitative-proxy.js";
 import { fuzzyMatchNodeId } from "../../validators/structural-reconciliation.js";
+import { REDUCTION_VERB_PATTERN } from "../../utils/reduction-framing.js";
 
 // ============================================================================
 // Types
@@ -123,6 +124,25 @@ const LOWER_BOUND_PATTERNS = [
 
 /** "Between X and Y" pattern (generates two constraints) */
 const BETWEEN_PATTERN = /(\w+(?:\s+\w+){0,3})\s+between\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s+and\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi;
+
+/**
+ * Reduction ("by") constraint patterns — CHANGE framing, flipped to
+ * operator `<=` with a NEGATIVE value (ROADMAP 1.52, goal-fit sign
+ * inversion). "reduce/decrease/cut/lower/shrink X by N%" states that X
+ * moves DOWN by N — the naive positive "at_least +N" reading inverts the
+ * claim structurally (see `utils/reduction-framing.ts` for the full
+ * doctrine + "by" vs "to"/"under" rationale). An absolute-level
+ * restatement ("reduce cost TO £40k") is a DIFFERENT, already-unambiguous
+ * ceiling case — deliberately left unmatched here (no verb+"by", no
+ * guess) rather than folded in, per the file's conservative-extraction
+ * doctrine.
+ */
+const REDUCTION_PATTERNS = [
+  // "reduce/reducing/decrease/decreasing/... X by Y"
+  new RegExp(`\\b${REDUCTION_VERB_PATTERN}\\s+(\\w+(?:\\s+\\w+){0,3})\\s+by\\s+(${_VAL})`, "gi"),
+  // Subject-optional bare form: "reduce/decrease/... by Y [unit]"
+  new RegExp(`\\b${REDUCTION_VERB_PATTERN}\\s+by\\s+(${_VAL})`, "gi"),
+];
 
 // ============================================================================
 // Value Parsing
@@ -329,6 +349,47 @@ function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         value,
         unit,
         label: `${targetName.trim()} floor`,
+        sourceQuote: match[0].slice(0, 200),
+        confidence: targetName === "unspecified" ? 0.6 : 0.85,
+        provenance: "explicit",
+      });
+    }
+  }
+
+  return constraints;
+}
+
+/**
+ * Extract reduction ("by") constraints (operator: <=, value flipped
+ * negative). ROADMAP 1.52 — see `REDUCTION_PATTERNS` doc comment above
+ * and `utils/reduction-framing.ts` for the full sign-inversion doctrine.
+ */
+function extractReductionConstraints(brief: string): ExtractedGoalConstraint[] {
+  const constraints: ExtractedGoalConstraint[] = [];
+
+  for (const pattern of REDUCTION_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(brief)) !== null) {
+      // Subject-optional pattern: only 1 capture group (value only)
+      const targetName = match[2] ? match[1] : "unspecified";
+      const valueStr = match[2] ?? match[1];
+
+      if (!valueStr) continue;
+
+      const { value, unit } = parseValue(valueStr);
+      const targetNodeId = generateNodeId(targetName.trim());
+
+      constraints.push({
+        targetName: targetName.trim(),
+        targetNodeId,
+        operator: "<=",
+        // The metric must fall BY at least `value` — i.e. the samples
+        // must reach `-value` or lower. Flipping the naive "+value"
+        // reading here is the fix for the traced sign-inversion bug.
+        value: -value,
+        unit,
+        label: `${targetName.trim()} reduction target`,
         sourceQuote: match[0].slice(0, 200),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
@@ -877,6 +938,7 @@ export function extractCompoundGoals(
   // Extract all constraint types
   const upperBound = extractUpperBoundConstraints(brief);
   const lowerBound = extractLowerBoundConstraints(brief);
+  const reduction = extractReductionConstraints(brief);
   const between = extractBetweenConstraints(brief);
   const temporal = extractTemporalConstraints(brief);
 
@@ -884,6 +946,7 @@ export function extractCompoundGoals(
   let constraints = deduplicateConstraints([
     ...upperBound,
     ...lowerBound,
+    ...reduction,
     ...between,
     ...temporal,
   ]);
@@ -909,6 +972,7 @@ export function extractCompoundGoals(
     constraint_types: {
       upper_bound: upperBound.length,
       lower_bound: lowerBound.length,
+      reduction: reduction.length,
       between: between.length / 2, // Each "between" generates 2 constraints
       temporal: temporal.length,
     },
@@ -930,13 +994,19 @@ export function extractCompoundGoals(
  * 0.04% ≠ 4%.  This normaliser detects the fractional case and relabels
  * the unit to "fraction" so the convention is unambiguous.
  *
- * Rule: if unit === "%" and 0 < value < 1 → already fractional → unit = "fraction".
+ * Rule: if unit === "%" and 0 < |value| < 1 → already fractional → unit = "fraction".
+ *
+ * ROADMAP 1.52: sign-agnostic on purpose — a reduction constraint's value
+ * is negative by design (e.g. -0.15 for "reduce cost by 15%"); the
+ * original `value > 0` guard silently skipped negative fractions, which
+ * would have left them mislabelled unit "%" (double-encoding risk in the
+ * exact way this fix is closing) instead of "fraction".
  */
 export function normaliseConstraintUnits(
   constraints: ExtractedGoalConstraint[],
 ): ExtractedGoalConstraint[] {
   return constraints.map((c) => {
-    if (c.unit === "%" && c.value > 0 && c.value < 1) {
+    if (c.unit === "%" && Math.abs(c.value) > 0 && Math.abs(c.value) < 1) {
       return {
         ...c,
         unit: "fraction",

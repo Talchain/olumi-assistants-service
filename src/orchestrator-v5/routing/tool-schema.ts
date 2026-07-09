@@ -150,6 +150,23 @@ export const OLUMI_ACTION_TOOL = {
               'restating the same threshold updates the existing entry. Do ' +
               'NOT include an `explanation` payload.\n' +
               '\n' +
+              'REDUCTION-FRAMED targets ("reduce/decrease/cut/lower/shrink ' +
+              'X BY N%") state a CHANGE amount, not an absolute level — X ' +
+              'moves DOWN when the goal succeeds. Encode the change: ' +
+              '`constraint_type: "at_most"` with a NEGATIVE `value` (e.g. ' +
+              '"reduce cost by 15%" → `constraint_type: "at_most"`, ' +
+              '`value: -15`, `unit: "%"`). Do NOT emit `at_least` with a ' +
+              'positive value for this phrasing — that asserts the ' +
+              'opposite of what the user asked for. Contrast with an ' +
+              'absolute-level restatement using "TO"/"under"/"below" ' +
+              '("reduce cost TO £40k", "keep cost under £40k" — a ' +
+              'ceiling, not a change): those stay `constraint_type: ' +
+              '"at_most"` with a POSITIVE `value` (£40000, no sign flip — ' +
+              '"to"/"under" state a level, "by" states a change). If you ' +
+              'cannot tell whether the user means a change amount or an ' +
+              'absolute level, do not guess — emit `intent_class: ' +
+              '"clarify"` instead of proposing add_constraint.\n' +
+              '\n' +
               '• set_factor_value — change a factor node\'s observed value ' +
               '("set churn to 5%", "increase budget by £10k", "double the ' +
               'team size"). Mutates the graph deterministically; the ' +
