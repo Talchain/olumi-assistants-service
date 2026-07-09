@@ -1,0 +1,5 @@
+OK:   warnOnInvalid (zero-tolerance): 0 (== baseline)
+OK:   as unknown as (double-cast): 95 (== baseline)
+OK:   science-field constant fallback (?? null|0|0.x): 17 (== baseline)
+
+Forbidden-boundary-pattern gate passed (every pattern == baseline).
