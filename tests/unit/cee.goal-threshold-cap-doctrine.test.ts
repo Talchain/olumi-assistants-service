@@ -100,7 +100,7 @@ describe('cap-doctrine unification: draft path (enricher) matches chat-path doct
     expect(goalNode?.goal_threshold).toBeCloseTo(0.8, 10);
   });
 
-  it('leaves percentage goal-threshold redirection unaffected (fraction pre-applied, no cap)', async () => {
+  it('routes percentage goal-threshold redirection through the doctrine (raw percent, cap 100)', async () => {
     const graph: GraphT = {
       version: '1',
       default_seed: 42,
@@ -112,9 +112,13 @@ describe('cap-doctrine unification: draft path (enricher) matches chat-path doct
     const result = await enrichGraphWithFactorsAsync(graph, 'Target 15% conversion rate.');
     const goalNode = result.graph.nodes.find((n) => n.id === 'goal_1');
 
+    // ROADMAP 1.18 completion: the enricher reconstructs the raw percent
+    // number (0.15 fraction -> 15) before delegating, so BOTH paths persist
+    // the same raw/cap contract. The scored threshold (0.15) is unchanged.
     if (goalNode?.goal_threshold !== undefined) {
       expect(goalNode.goal_threshold).toBe(0.15);
-      expect(goalNode.goal_threshold_cap).toBeUndefined();
+      expect(goalNode.goal_threshold_raw).toBe(15);
+      expect(goalNode.goal_threshold_cap).toBe(100);
     }
   });
 });

@@ -116,6 +116,23 @@ export function formatConstraintUpdated(input: ConstraintAddedInput): string {
 }
 
 /**
+ * Honest re-registration receipt for when a restated constraint value is
+ * IDENTICAL to what is already persisted (ROADMAP 1.19(a) — receipt
+ * claim-integrity). `formatConstraintUpdated` implies a fresh commit;
+ * shipping it for a value that did not actually change is a false
+ * "updated" claim — the fact channel already knows it is a no-op
+ * (`AddConstraintHandlerFact.noop === true`) but the text channel
+ * previously ignored that and always claimed "Updated" whenever a prior
+ * constraint existed, regardless of whether the value differed.
+ * Deliberately avoids a sentence-leading commit verb ("Updated"/"Set").
+ */
+export function formatConstraintUnchanged(input: ConstraintAddedInput): string {
+  const phrase = OPERATOR_PHRASE[input.operator];
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `${input.targetLabel} is already constrained to be ${phrase} ${value}.`;
+}
+
+/**
  * Receipt for a goal-target set through the add_constraint goal-threshold
  * join (lane CEE-W5 Mission B). Names the target honestly and states only
  * what durably happened (the threshold is stamped on the goal node in the
@@ -139,6 +156,23 @@ export function formatGoalTargetSet(input: {
 }): string {
   const value = formatValueWithUnit(input.value, input.unit);
   return `Success target set: ${input.goalLabel} at least ${value}. I'll flag how your options score against it once the analysis can measure this goal.`;
+}
+
+/**
+ * Honest re-registration receipt for when a restated success target is
+ * IDENTICAL to what is already persisted (ROADMAP 1.19(a) — receipt
+ * claim-integrity, single-goal re-registration). `formatGoalTargetSet`
+ * unconditionally reads as a fresh registration event; shipping it when
+ * the target did not actually change borrows the pre-existing threshold
+ * to narrate a commit that did not happen this turn.
+ */
+export function formatGoalTargetUnchanged(input: {
+  readonly goalLabel: string;
+  readonly value: number;
+  readonly unit?: string;
+}): string {
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `${input.goalLabel}'s success target is already ${value} — no need to change it.`;
 }
 
 export interface EdgeAdjustmentInput {

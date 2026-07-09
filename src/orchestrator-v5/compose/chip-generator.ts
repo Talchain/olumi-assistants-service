@@ -126,6 +126,20 @@ export interface ChipGeneratorInput {
    * M2 ships the mechanism + the unit-level convergence proof.
    */
   readonly canonicalState?: import('../context/canonical-analysis-state.js').CanonicalAnalysisState;
+  /**
+   * ROADMAP 1.20(b) — chip-sameness guard. Chip ids offered on the
+   * IMMEDIATELY PRIOR turn (call site derives this from
+   * `context.most_recent_pending_actions`, the same single-prior-turn
+   * authority every other pending-action consumer in turn-executor
+   * reads — see that field's doc comment). When every candidate chip
+   * this turn computes is already in this set, `generateChips` ships an
+   * empty array instead of repeating the identical offer — closing the
+   * live defect where 5/5 consecutive turns offered IDENTICAL chips
+   * regardless of what the turns were actually about. Optional +
+   * additive: omitted → zero behaviour change (every existing call site
+   * and test is byte-identical).
+   */
+  readonly recentlyOfferedChipIds?: ReadonlySet<string>;
 }
 
 const MAX_CHIPS = 3;
@@ -208,8 +222,34 @@ export function validateAndFilterChips(
  */
 export function generateChips(input: ChipGeneratorInput): readonly SuggestedAction[] {
   const filtered = validateAndFilterChips(generateChipsRaw(input), input.validationRegistry);
-  if (filtered.length > 0) return filtered;
-  return applyChipFloor(input);
+  const primary = filtered.length > 0 ? filtered : applyChipFloor(input);
+  return excludeRecentlyOfferedChips(primary, input.recentlyOfferedChipIds);
+}
+
+/**
+ * ROADMAP 1.20(b) — chip-sameness guard. See `ChipGeneratorInput.recentlyOfferedChipIds`.
+ * Only suppresses a chip whose id was offered on the immediately prior
+ * turn; when that removes EVERY candidate, ships `[]` rather than a
+ * partially-filtered set that could look arbitrary — an honest empty
+ * turn, same philosophy as `applyChipFloor`'s `no_safe_floor` branch.
+ * When nothing is filtered, returns the input array unchanged (no new
+ * allocation) so byte-identical output is preserved for every call site
+ * that doesn't thread `recentlyOfferedChipIds`.
+ */
+function excludeRecentlyOfferedChips(
+  chips: readonly SuggestedAction[],
+  recentlyOfferedChipIds: ReadonlySet<string> | undefined,
+): readonly SuggestedAction[] {
+  if (!recentlyOfferedChipIds || recentlyOfferedChipIds.size === 0 || chips.length === 0) {
+    return chips;
+  }
+  const next = chips.filter((c) => !recentlyOfferedChipIds.has(c.id));
+  if (next.length === chips.length) return chips;
+  emit(TelemetryEvents.V5ChipsRecentlyOfferedSuppressed, {
+    suppressed_ids: chips.filter((c) => recentlyOfferedChipIds.has(c.id)).map((c) => c.id),
+    survived_count: next.length,
+  });
+  return next;
 }
 
 /**

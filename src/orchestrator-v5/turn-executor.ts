@@ -882,6 +882,26 @@ export async function runTurnExecutor(
     return nonExecuteCanonicalMemo ?? undefined;
   };
 
+  // ROADMAP 1.20(b) — chip-sameness guard. Chip ids offered on the
+  // IMMEDIATELY PRIOR turn, derived from `context.most_recent_pending_actions`
+  // — the same single-prior-turn authority every other pending-action
+  // consumer in this file reads (see that field's doc comment in
+  // build-turn-context.ts: "only the LAST prior turn's pending_actions
+  // appear here"). Threaded into the coach/converse chip-generation call
+  // sites so a chip that was JUST offered is not mechanically repeated —
+  // closes the live defect where 5 consecutive turns offered IDENTICAL
+  // chips regardless of what the turns were about. Memoised (cheap, but
+  // avoids rebuilding the Set if read more than once per turn).
+  let recentlyOfferedChipIdsMemo: ReadonlySet<string> | undefined;
+  const recentlyOfferedChipIds = (): ReadonlySet<string> => {
+    if (recentlyOfferedChipIdsMemo === undefined) {
+      recentlyOfferedChipIdsMemo = new Set(
+        (context.most_recent_pending_actions ?? []).map((a) => a.chip_id),
+      );
+    }
+    return recentlyOfferedChipIdsMemo;
+  };
+
   // Routing log fields — closured so the finally block can emit one record
   // per turn regardless of which terminal path fires (success / typed
   // failure / unexpected error).
@@ -5914,6 +5934,8 @@ export async function runTurnExecutor(
         ...(canonicalStateForNonExecute()
           ? { canonicalState: canonicalStateForNonExecute()! }
           : {}),
+        // ROADMAP 1.20(b) — chip-sameness guard (see helper doc comment).
+        recentlyOfferedChipIds: recentlyOfferedChipIds(),
       });
       // Phase 2 workstream A: post-analysis coaching wrapper for the
       // `analyse` stage direct_answer path. Mines the latest fresh
@@ -6042,6 +6064,8 @@ export async function runTurnExecutor(
         ...(canonicalStateForNonExecute()
           ? { canonicalState: canonicalStateForNonExecute()! }
           : {}),
+        // ROADMAP 1.20(b) — chip-sameness guard (see helper doc comment).
+        recentlyOfferedChipIds: recentlyOfferedChipIds(),
       });
       // Phase 2 workstream A: same wrapper as the coach path. Catches
       // the LLM's text-only direct_answer in `analyse` stage and
@@ -6297,7 +6321,7 @@ export async function runTurnExecutor(
       // add_constraint, adjust_edge_strength — enumeration pinned by
       // d1-mutated-graph-emitters invariant test); the flip-proposal
       // apply path resolves through the same set_factor_value handler.
-      const graphForCommit = await (async (): Promise<unknown> => {
+      let graphForCommit = await (async (): Promise<unknown> => {
         const mutated = handlerOutcome?.mutated_graph;
         if (mutated === undefined || mutated === null) return mutated;
         let persistedBase: unknown;
@@ -6339,6 +6363,8 @@ export async function runTurnExecutor(
           persistedGraph: context.persistedGraph ?? null,
         });
         if (goalReceiptDecision.verdict === 'swap') {
+          const graphWasWrittenThisTurn =
+            graphForCommit !== null && graphForCommit !== undefined;
           log.warn(
             {
               event: 'v5.turn_executor.goal_target_receipt_swapped',
@@ -6346,12 +6372,70 @@ export async function runTurnExecutor(
               scenario_id: context.session_id,
               handler_id: handlerIdForCommit ?? null,
               reason: goalReceiptDecision.reason,
-              graph_committed: graphForCommit !== null && graphForCommit !== undefined,
+              graph_committed: graphWasWrittenThisTurn,
+              graph_write_withheld: graphWasWrittenThisTurn,
             },
             'V5 TurnExecutor — success-target receipt claimed a registration the commit graph does not carry (no goal_threshold_raw on a goal node); swapped for the honest fallback before commit',
           );
           composedOk = { ...composedOk, assistant_text: GOAL_TARGET_NOT_SAVED_TEXT };
+          // ROADMAP 1.19(b) — swap-vs-commit: swapping the TEXT for the
+          // honest fallback while still persisting the graph this turn's
+          // (unbacked) mutation produced would commit junk — the exact
+          // live shape that opened this guard (LLM stamped non-contract
+          // fields onto the goal node). A turn whose registration claim
+          // was swapped for dishonesty must not durably write the graph
+          // that failed to back it; withhold the write entirely so the
+          // stored/committed state matches the honest "I couldn't
+          // register that" text (a non-mutating turn, same as any other
+          // turn that writes no graph). Only applies when a graph WAS
+          // produced this turn — a swap driven by `persistedGraph` not
+          // backing a DESCRIBE-only claim has no graph to withhold.
+          if (graphWasWrittenThisTurn) {
+            graphForCommit = undefined;
+          }
         }
+      }
+      // ROADMAP 1.20(a) — empty-direct-answer papering, STEP 7 backstop.
+      // UNCONDITIONAL (not gated by CEE_ANSWER_TEXT_REQUIRED). Live
+      // evidence: a direct_answer turn shipped a sha256('')-empty
+      // assistant_text papered over by a recycled chip — the deterministic
+      // chip generators (coachChips/converseChips) build from
+      // stage/analysis context independent of the text, so an empty
+      // answer still carries a chip and reads as a valid turn. The
+      // compose-guard above (STEP 6.7, coach/converse branches) already
+      // closes this when CEE_ANSWER_TEXT_REQUIRED is on — but that flag
+      // defaults OFF (config/index.ts `features.answerTextRequired`),
+      // which is the exact regression the flag-OFF pins in
+      // turn-executor-answer-text-compose-guard.test.ts documented as a
+      // KNOWN LIVE DEFECT rather than a passing invariant. This backstop
+      // makes the honest-recovery behaviour unconditional by running at
+      // the shared STEP 7 commit chokepoint every direct_answer-class
+      // turn passes through, regardless of which branch composed it.
+      // Reuses the SAME buildBoundedFallbackCopyAndChips() helper (#388)
+      // so there is one copy/chip source, not a second one drifting
+      // apart. Scoped to `direct_answer` only — handler-class turns (D1
+      // execute) carry their own claim-integrity-checked receipt
+      // formatters (never blank by construction, see
+      // d1-shared/format-confirmation.ts) and their own guard above; this
+      // must not fire for them.
+      if (
+        (resolvedTurnClass ?? 'direct_answer') === 'direct_answer' &&
+        !composedOk.assistant_text.trim()
+      ) {
+        const { assistantText: recoveryText, chips: recoveryChips } =
+          buildBoundedFallbackCopyAndChips();
+        emit(TelemetryEvents.V5CoachingEmptyAnswerRecovered, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          intent_class: 'direct_answer_backstop',
+          answer_text_length: 0,
+          orientation_length: 0,
+        });
+        composedOk = composeDirectAnswerResponse({
+          assistant_text: recoveryText,
+          stage: context.stage,
+          suggested_actions: recoveryChips,
+        });
       }
       // Proposal-capture hash — the graph this turn reasoned over
       // (mutated graph when present, else the resolved turn graph).

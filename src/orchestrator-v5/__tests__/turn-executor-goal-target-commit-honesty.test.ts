@@ -246,7 +246,7 @@ describe('goal-target set via REAL add_constraint through the REAL STEP 7 merge/
 // ---------------------------------------------------------------------------
 
 describe('goal-target receipt honesty guard at the STEP 7 commit chokepoint', () => {
-  it('RED→GREEN: a formatGoalTargetSet receipt whose committed graph lacks goal_threshold_raw is swapped for the honest fallback', async () => {
+  it('RED→GREEN: a formatGoalTargetSet receipt whose committed graph lacks goal_threshold_raw is swapped for the honest fallback AND the unbacked graph write is withheld (ROADMAP 1.19(b))', async () => {
     currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
 
     // Registry-injected add_constraint double: emits the REAL receipt copy
@@ -291,10 +291,14 @@ describe('goal-target receipt honesty guard at the STEP 7 commit chokepoint', ()
       },
     );
 
-    // The commit graph genuinely lacks the contract…
+    // ROADMAP 1.19(b) swap-vs-commit: the unbacked graph the handler
+    // produced this turn must NOT be persisted alongside the swapped
+    // honest text — a swap turn commits no graph at all, same as any
+    // other non-mutating turn. (Previously this asserted the OPPOSITE —
+    // `write.graph` was defined and genuinely lacked the contract, i.e.
+    // junk WAS committed; that was the bug, not a passing invariant.)
     const write = appendCalls.at(-1)!;
-    expect(write.graph).toBeDefined();
-    expect(graphRegistersGoalTarget(write.graph)).toBe(false);
+    expect(write.graph).toBeUndefined();
 
     // …so the receipt must NOT ship; the honest fallback replaces it on
     // BOTH the wire and the stored assistant_message (pre-commit swap).

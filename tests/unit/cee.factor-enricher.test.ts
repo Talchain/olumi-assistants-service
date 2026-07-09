@@ -72,7 +72,7 @@ describe('enrichGraphWithFactorsAsync', () => {
       expect(goalNode?.goal_threshold).toBeUndefined();
     });
 
-    it('skips cap normalization for percentage goal thresholds', async () => {
+    it('normalises percentage goal thresholds through the shared cap doctrine (raw percent, cap 100)', async () => {
       const graph: GraphT = {
         version: '1',
         default_seed: 42,
@@ -87,17 +87,20 @@ describe('enrichGraphWithFactorsAsync', () => {
         meta: { roots: [], leaves: [], suggested_positions: {}, source: 'assistant' },
       };
 
-      // Percentage target should not be cap-normalized
       const brief = 'Target 15% conversion rate.';
 
       const result = await enrichGraphWithFactorsAsync(graph, brief);
 
       const goalNode = result.graph.nodes.find((n) => n.id === 'goal_1');
-      // For percentages, goal_threshold should equal raw value (0.15) without cap normalization
+      // ROADMAP 1.18 cap-doctrine unification: the draft path now registers
+      // the SAME contract as the chat path (add_constraint) — raw percent
+      // number in user units (15, not the pre-divided 0.15 fraction) with
+      // cap 100. The scored goal_threshold (0.15 = 15/100) is unchanged
+      // from the pre-unification value.
       if (goalNode?.goal_threshold !== undefined) {
         expect(goalNode.goal_threshold).toBe(0.15);
-        expect(goalNode.goal_threshold_raw).toBe(0.15);
-        expect(goalNode.goal_threshold_cap).toBeUndefined(); // No cap for percentages
+        expect(goalNode.goal_threshold_raw).toBe(15);
+        expect(goalNode.goal_threshold_cap).toBe(100);
       }
     });
 

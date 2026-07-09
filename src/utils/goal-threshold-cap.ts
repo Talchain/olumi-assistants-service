@@ -40,10 +40,13 @@
  * `5` for "5%"), matching add-constraint.ts's "value stored in USER
  * UNITS" convention. The enricher's regex extraction pre-divides
  * percentages into a 0–1 fraction (`cee/factor-extraction/index.ts`)
- * BEFORE this function would ever see them — its percentage branch must
- * stay a short-circuit (raw fraction, no cap) rather than route through
- * this function with an already-divided value, or the '%'→/100 step
- * would double-divide (0.15 → cap 100 → 0.0015, a 100x regression).
+ * BEFORE the enricher's goal-threshold branch runs, so that caller
+ * RECONSTRUCTS the raw percent number (`factor.value * 100`) before
+ * delegating here (ROADMAP 1.18 completion — full delegation, both paths
+ * persist the same raw/unit/cap/threshold contract). Passing the
+ * already-divided fraction directly would double-divide (0.15 → cap 100
+ * → 0.0015, a 100x regression) — never route a pre-divided '%' value
+ * through this function without reconstructing the percent number first.
  */
 export function resolveGoalThresholdCap(
   existingCap: unknown,

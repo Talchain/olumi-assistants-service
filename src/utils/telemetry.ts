@@ -1588,6 +1588,15 @@ export const TelemetryEvents = {
   // events carry only reason classes + booleans/counts — no user text.
   V5ChipsEmptyIntentional: "v5.chips.empty_intentional",
   V5ChipsFloorApplied: "v5.chips.floor_applied",
+  // ROADMAP 1.20(b) — chip-sameness guard. Fires when ANY candidate chip
+  // this turn computed (raw rules + floor) exactly matches a chip offered
+  // on the immediately-prior turn (`most_recent_pending_actions` chip_id
+  // set) — the generator drops the repeated chips and ships only the
+  // survivors (an honest empty set when EVERY candidate was a repeat), so
+  // chip selection varies turn to turn instead of looping the same
+  // suggestion regardless of content. Payload: suppressed chip ids +
+  // survivor count only (no user text).
+  V5ChipsRecentlyOfferedSuppressed: "v5.chips.recently_offered_suppressed",
 
   // V5 Lane 2 — egress chip-quality finalizer aggregate. Fires from
   // src/orchestrator-v5/compose/output-safety.ts (the egress chokepoint)
