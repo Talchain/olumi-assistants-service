@@ -7039,13 +7039,26 @@ export async function runTurnExecutor(
 
   /**
    * Deterministic bounded-recovery copy + chips — freshness-conditional
-   * three-way (fresh / stale-but-present / none), documented in full on
-   * `commitBoundedRoutingFallback` below. Extracted (CEE_ANSWER_TEXT_REQUIRED
-   * lane) so the routing schema-repair-failure fallback AND the compose-layer
-   * empty-answer guard on coach/converse turns (STEP 6.7, coach/converse
-   * branches) share ONE copy/chip source instead of two copies drifting
-   * apart. Pure function of the closured `contextPackForLog` / `freshness`
-   * turn state — no side effects.
+   * four-way (fresh / stale-but-present / unknown-but-present / none),
+   * documented in full on `commitBoundedRoutingFallback` below. Extracted
+   * (CEE_ANSWER_TEXT_REQUIRED lane) so the routing schema-repair-failure
+   * fallback AND the compose-layer empty-answer guard on coach/converse
+   * turns (STEP 6.7, coach/converse branches) share ONE copy/chip source
+   * instead of two copies drifting apart. Pure function of the closured
+   * `contextPackForLog` / `freshness` turn state — no side effects.
+   *
+   * Overnight-review F7 (PR #397 left this split incomplete): freshness
+   * `'unknown'` — hash derivation genuinely FAILED this turn (e.g. the
+   * persisted graph could not be hashed; `freshness.ts`'s
+   * `current_graph_hash_unavailable` / `legacy_fact_missing_hash` paths) —
+   * is authority-parity DISTINCT from `'stale'` (hashes compared and
+   * differ; the model is KNOWN to have changed). Lumping them let this
+   * helper assert "the model has changed" on an `unknown` turn, a claim
+   * this code cannot actually support. Split below mirrors the doctrine
+   * already codified for the explain/no-op surfaces (`no-op-helpers.ts`'s
+   * `buildAnalysisUnconfirmedTemplate`, threaded through
+   * `stale-rerun-guard.ts`): `unknown` gets an honest
+   * can't-confirm-currency framing, never a change assertion.
    */
   function buildBoundedFallbackCopyAndChips(): {
     assistantText: string;
@@ -7055,13 +7068,23 @@ export async function runTurnExecutor(
     const hasAnalysisProjection =
       !!contextPackForLog?.analysis &&
       !!contextPackForLog.analysis.leading_option;
-    const isFresh = freshness?.freshness === 'fresh';
+    const freshnessVerdict = freshness?.freshness;
+    const isFresh = freshnessVerdict === 'fresh';
+    const isUnknown = freshnessVerdict === 'unknown';
     const analysisFreshAndAvailable = hasAnalysisProjection && isFresh;
-    const analysisStaleButPresent = hasAnalysisProjection && !isFresh;
-    // Copy contract (review P1 follow-up):
-    //   - fresh prior analysis → reassure that it is still usable
-    //   - stale prior analysis → name the staleness, invite a rerun
-    //   - no prior analysis → invite a retry without implying state
+    const analysisUnknownButPresent = hasAnalysisProjection && isUnknown;
+    // Freshness null/undefined (never computed this turn) stays bucketed
+    // here alongside confirmed `stale`, matching pre-existing behaviour —
+    // this fix only carves the confirmed-`unknown` verdict out of that
+    // bucket, per the F7 finding's scope.
+    const analysisStaleButPresent =
+      hasAnalysisProjection && !isFresh && !isUnknown;
+    // Copy contract (review P1 follow-up; F7 adds the unknown row):
+    //   - fresh prior analysis   → reassure that it is still usable
+    //   - stale prior analysis   → hashes differ: name the change, invite a rerun
+    //   - unknown prior analysis → currency unconfirmed: do NOT assert a
+    //                              change, invite a rerun to be sure
+    //   - no prior analysis      → invite a retry without implying state
     // No "recommendation", no raw IDs, no decimals (forbidden-phrase
     // guard still backstops at the finaliser).
     let assistantText: string;
@@ -7071,6 +7094,9 @@ export async function runTurnExecutor(
     } else if (analysisStaleButPresent) {
       assistantText =
         "I couldn't complete that turn cleanly. The model has changed since the last analysis, so the cached results may be out of date — re-run analysis to see the current picture.";
+    } else if (analysisUnknownButPresent) {
+      assistantText =
+        "I couldn't complete that turn cleanly, and I can't confirm whether your current analysis is up to date — re-run analysis to be sure.";
     } else {
       assistantText =
         "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.";
@@ -7090,11 +7116,14 @@ export async function runTurnExecutor(
     // Chip rule:
     //   fresh   → Explain results + Re-run analysis (both safe)
     //   stale   → Re-run analysis only (Explain would surface stale results)
+    //   unknown → Re-run analysis only (same conservative choice as stale —
+    //             Explain would surface possibly-stale results, and
+    //             currency cannot be confirmed)
     //   none    → no action chips
     let chips: SuggestedAction[];
     if (analysisFreshAndAvailable) {
       chips = [explainResultsChip, runAnalysisChip];
-    } else if (analysisStaleButPresent) {
+    } else if (analysisStaleButPresent || analysisUnknownButPresent) {
       chips = [runAnalysisChip];
     } else {
       chips = [];
