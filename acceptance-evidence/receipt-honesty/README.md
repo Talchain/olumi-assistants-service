@@ -19,6 +19,17 @@ F9 ~249, F10 ~270, N1 ~310) and `ROADMAP.md` row 1.46.
    here per the "verify readiness" doctrine.
 3. `2cca33209` — FIX 4 (ROADMAP 1.46 residual, task_97fbcb00): constrain
    `edit_graph`'s node `category` to GraphV3's enum at the tool schema.
+4. `a190650ad` — evidence pack + comment path fixups (this pack).
+5. `2bb172c46` — a second, self-found residual on the SAME F8/F9 fix: the
+   "no existing row + value unchanged via the node channel" (F8 draft
+   scenario) case still appended a brand-new `goal_constraints` row,
+   which moves `computeAnalysisAffectingGraphHash` (the field is part of
+   that hash) on a turn whose own receipt says nothing changed — the
+   identical defect class F9 closed for the node stamp, manifesting via
+   row-creation instead. Found during self-adversarial diff review AFTER
+   the PR was already open (#401); fixed by skipping the append in
+   exactly that case. Empirically verified (hash before/after identical)
+   and via the full `test:required` suite (19472 passed, 0 failed).
 
 ## FIX 1 — add-constraint channel-unification doctrine (F8+F9)
 

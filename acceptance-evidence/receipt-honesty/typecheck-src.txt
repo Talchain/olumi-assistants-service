@@ -11,7 +11,7 @@
 > openapi-typescript openapi.yaml -o src/generated/openapi.d.ts
 
 ✨ openapi-typescript 7.10.1
-🚀 openapi.yaml → src/generated/openapi.d.ts [69.8ms]
+🚀 openapi.yaml → src/generated/openapi.d.ts [71.5ms]
 
 > olumi-assistants-service@1.12.0 typecheck:src /Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty
 > tsc -p tsconfig.build.json --noEmit
