@@ -37,6 +37,15 @@ vi.mock("../../src/config/index.js", () => ({
     cee: {
       pipelineCheckpointsEnabled: false,
     },
+    // features.diagnosticTraceEnabled is read unconditionally by
+    // runUnifiedPipeline (src/cee/unified-pipeline/index.ts) to gate stage
+    // timing capture. Missing here throws "Cannot read properties of
+    // undefined (reading 'diagnosticTraceEnabled')" — a stale mock shape
+    // that predates that field (default false in real config, see
+    // src/config/index.ts CEE_DIAGNOSTIC_TRACE_ENABLED).
+    features: {
+      diagnosticTraceEnabled: false,
+    },
   },
 }));
 

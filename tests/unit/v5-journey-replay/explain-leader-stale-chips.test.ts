@@ -55,10 +55,15 @@ describe('assertExplainLeaderStale — chip-label staleness detection', () => {
     { label: 'Refresh analysis', message: 'Refresh analysis to pick up your latest edit.' },
     { label: 'Update analysis', message: 'Update analysis with the new graph state.' },
     { label: 'Stale analysis — rerun?', message: 'The analysis is stale; want to refresh?' },
-    // Mixed case + chip-text-only (label is something else, message carries the signal).
+    // Mixed case + chip-text-only (label is something else, message carries
+    // the signal). Deliberately avoids "previous analysis" — that phrase is
+    // now on the canonical FORBIDDEN_USER_FACING_PHRASES list (src/
+    // orchestrator-v5/compose/forbidden-user-facing-phrases.ts) and would be
+    // caught by coreAssertions()'s noForbiddenTerms() before ever reaching
+    // the staleness-chip detector this fixture is meant to exercise.
     {
       label: 'Refresh',
-      message: 'Your previous analysis is now stale relative to the current graph.',
+      message: 'This analysis is now stale relative to the current graph.',
     },
   ])('passes when chip surfaces staleness: %j', ({ label, message }) => {
     const r = assertExplainLeaderStale(chipFixture(label, message));
