@@ -4953,6 +4953,12 @@ export async function runTurnExecutor(
             answer_text_length: verdict.payload.answer_text.length,
             evidence_used_count: verdict.payload.evidence_used?.length ?? 0,
             cited_fields_count: verdict.payload.cited_fields?.length ?? 0,
+            // FIX 1 (CEE hygiene batch): auditability for
+            // forbidden_internal_term verdicts — WHAT was flagged, not
+            // just length + error code. Term-only, never an excerpt (see
+            // `forbidden_term_matched` docstring on the verdict payload
+            // for the PII-safety reasoning); null for every other reason.
+            forbidden_term_matched: verdict.payload.forbidden_term_matched ?? null,
           });
           if (
             (verdict.payload.evidence_used && verdict.payload.evidence_used.length > 0) ||

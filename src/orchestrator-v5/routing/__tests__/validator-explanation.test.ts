@@ -102,6 +102,37 @@ describe('validateExplanationAnswer', () => {
     }
   });
 
+  it('forbidden_internal_term verdict carries the matched term for auditability, WITHOUT a surrounding excerpt', () => {
+    // FIX 1 (CEE hygiene batch): forbidden_internal_term telemetry was
+    // previously unauditable — length + error code only, never WHAT was
+    // flagged. The payload must now carry the single matched internal
+    // term. It must NOT carry a surrounding excerpt: answer_text is
+    // Sonnet-generated, but its prose routinely echoes the user's own
+    // decision-graph entity labels verbatim ("Engineering Capacity"
+    // below stands in for real user-authored graph content) — an
+    // excerpt window could capture that adjacent user text, which the
+    // no-user-decision-text-in-logs principle forbids.
+    const verdict = validateExplanationAnswer(
+      'explain_from_structure',
+      {
+        answer_text:
+          'Looking at the strongest edge in the graph, Engineering Capacity drives Throughput at 0.65 strength.',
+      },
+      [],
+    );
+    expect(verdict.payload?.answer_validation_error).toBe('forbidden_internal_term');
+    // Term-only: the matched substring itself, not a window of
+    // surrounding characters. `answer_text` (the full raw text) is
+    // threaded through separately for the handler's own use — that field
+    // is untouched by this fix — but `forbidden_term_matched` must be
+    // exactly the closed-vocabulary word that matched, nothing either
+    // side of it.
+    expect(verdict.payload?.forbidden_term_matched).toBe('edge');
+    expect(verdict.payload?.forbidden_term_matched).not.toContain('Engineering Capacity');
+    expect(verdict.payload?.forbidden_term_matched).not.toContain('Throughput');
+    expect(verdict.payload?.forbidden_term_matched?.length).toBeLessThanOrEqual(12);
+  });
+
   it('Wave 5d: marks invalid for raw decimal coefficients (3+ fractional digits without a unit marker)', () => {
     // The brief's evidence #4 value: an LLM-generated answer containing
     // "-0.7346938775510203" must be rejected. Wave 4 fixed the

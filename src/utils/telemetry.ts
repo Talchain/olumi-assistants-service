@@ -1042,7 +1042,13 @@ export const TelemetryEvents = {
   // V5ExplanationAnswerVerdict — once per explanation-handler turn after
   // the side-band check. Payload: { handler_id, answer_text_valid,
   // answer_validation_error?, answer_text_length, evidence_used_count,
-  // cited_fields_count }.
+  // cited_fields_count, forbidden_term_matched }. `forbidden_term_matched`
+  // is non-null only when answer_validation_error === 'forbidden_internal_term'
+  // — the single matched internal-vocabulary term (e.g. "node", "handler"),
+  // deliberately never a surrounding excerpt (see
+  // validator-explanation.ts's `forbidden_term_matched` docstring: the
+  // matched term is always closed-vocabulary and PII-safe, but an excerpt
+  // could capture adjacent user-authored decision-graph labels).
   V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
   // V5ExplanationEvidence — observability-only mirror of Sonnet's
   // evidence_used / cited_fields. Emitted when at least one entry is
