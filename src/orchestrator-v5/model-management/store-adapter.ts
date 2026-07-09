@@ -7,9 +7,12 @@
  *
  * Writes: `create_model_version` / `restore_model_version` — SECURITY
  * DEFINER, service-role-only RPCs (migration
- * 20260705120000_v5_model_versions.sql — AUTHORED, NOT EXECUTED; running
- * this adapter against a database without that migration surfaces as
- * ModelVersionStoreError, never silent data loss).
+ * 20260705120000_v5_model_versions.sql — EXECUTED on staging 2026-07-08,
+ * build e122f16, see acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md
+ * (STALE-COMMENT FIX, CEE hygiene batch FIX 2: previously said "AUTHORED,
+ * NOT EXECUTED"); running this adapter against a database WITHOUT that
+ * migration still surfaces as ModelVersionStoreError, never silent data
+ * loss).
  *
  * Error mapping (distinct SQLSTATEs raised by the RPCs):
  *   MV001 → ModelVersionSignInRequiredError (guest refusal, recoverable)

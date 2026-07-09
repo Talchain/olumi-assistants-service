@@ -10,8 +10,11 @@
  * Docs/v5/layer-1-architecture-decisions-memo-v0.md on the layer-1 lane):
  *   D1 — substrate is the new `model_versions` table +
  *        `scenarios.current_model_version_id` pointer
- *        (migration 20260705120000_v5_model_versions.sql — AUTHORED, NOT
- *        EXECUTED; execution is separately Paul-gated).
+ *        (migration 20260705120000_v5_model_versions.sql — EXECUTED on
+ *        staging 2026-07-08, build e122f16, under Paul-gated approval; see
+ *        acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md.
+ *        STALE-COMMENT FIX, CEE hygiene batch FIX 2: previously said
+ *        "AUTHORED, NOT EXECUTED").
  *   D3 — Branch A (login first): owner_user_id NOT NULL; guest scenarios
  *        are refused with a typed, recoverable sign-in-required error.
  */

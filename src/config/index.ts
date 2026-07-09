@@ -934,10 +934,14 @@ const ConfigSchema = z.object({
     // `recordModelVersionForCommit`). Routes/turn-executor/restore-compare
     // surfaces remain unwired; isolation-guards.test.ts enforces the exact
     // call-site set. Env-enforced: locked false in prod; staging requires an
-    // explicit opt-in (audit-logged). The backing migration
-    // (20260705120000_v5_model_versions.sql) is AUTHORED-NOT-EXECUTED and
-    // separately Paul-gated — do not enable this flag anywhere before that
-    // migration is live, or every call degrades to a typed store error.
+    // explicit opt-in (audit-logged). STALE-COMMENT FIX (CEE hygiene batch
+    // FIX 2, 2026-07-08): this previously said the backing migration
+    // (20260705120000_v5_model_versions.sql) "is AUTHORED-NOT-EXECUTED" —
+    // it has since been EXECUTED on staging under Paul-gated approval
+    // (2026-07-08, build e122f16 — see
+    // acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md). This flag's
+    // own default stays `false` regardless (its Env-enforced posture above
+    // is independent of migration execution status).
     modelVersionsEnabled: createEnvEnforcedBoolean(false, "CEE_MODEL_VERSIONS_ENABLED"),
   }),
 
