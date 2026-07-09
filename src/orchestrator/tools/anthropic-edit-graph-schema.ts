@@ -59,6 +59,23 @@ export const ANTHROPIC_EDIT_GRAPH_SCHEMA = {
           // (no payload needed).
           value: { type: "string" },
           old_value: { type: "string" },
+          // ROADMAP 1.46 residual (task_97fbcb00) — a small, structurally
+          // typed side-channel for a factor node's `category`, mirroring
+          // the draft schema's load-bearing-enum doctrine (node kind /
+          // factor category / edge type stay REAL schema enums even where
+          // other subtrees are stringified — see
+          // src/cee/draft/anthropic-graph-schema.ts). The `value` field
+          // above is an opaque JSON string the grammar cannot look inside,
+          // so it cannot stop the model emitting an invalid category
+          // (e.g. "strategic") INSIDE that blob — this field can: it is a
+          // real enum slot the grammar enforces, closed to GraphV3's three
+          // valid values. Optional — most ops never touch category.
+          // edit-graph.ts's `normaliseOperation` prefers this field over
+          // any `category` embedded in the stringified `value` payload.
+          category: {
+            type: "string",
+            enum: ["controllable", "observable", "external"],
+          },
           impact: { type: "string" },
           rationale: { type: "string" },
         },

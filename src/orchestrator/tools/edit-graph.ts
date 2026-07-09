@@ -35,7 +35,7 @@ import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
 import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
-import { GraphV3 } from "../../schemas/cee-v3.js";
+import { GraphV3, FactorCategoryV3 } from "../../schemas/cee-v3.js";
 import type {
   TypedConversationBlock,
   ConversationContext,
@@ -3725,6 +3725,55 @@ export function parseStringifiedOperationPayload(rawInput: Record<string, unknow
   return result;
 }
 
+const VALID_FACTOR_CATEGORIES: ReadonlySet<string> = new Set(FactorCategoryV3.options);
+
+/**
+ * ROADMAP 1.46 residual (task_97fbcb00) — the edit LLM can synthesise a
+ * node `category` value outside GraphV3's enum (e.g. "strategic"), which
+ * previously survived normalisation unchanged and failed the WHOLE edit
+ * at the final `GraphV3.safeParse` gate with SYNTHESIZED_GRAPH_INVALID —
+ * despite an otherwise well-formed op.
+ *
+ * Two-layer defence:
+ *   1. Constrained-at-source: `anthropic-edit-graph-schema.ts` declares a
+ *      real, grammar-enforced `category` enum directly on the operation
+ *      (a small side-channel next to the opaque stringified `value`
+ *      blob the grammar cannot look inside). When the model uses it, the
+ *      model literally cannot emit an invalid value — this wins over
+ *      whatever `value` may separately carry.
+ *   2. Coerced-with-disclosure: for the residual case where the model
+ *      still writes an out-of-enum `category` INSIDE the un-grammar-
+ *      checked `value` string, drop it rather than fail the entire edit
+ *      over one bad enum value — `category` is optional on GraphV3's
+ *      factor-node schema, so a node without it is still valid. Logged
+ *      at WARN so the drop is never silent.
+ *
+ * @internal Exported for testing.
+ */
+export function resolveNodeCategoryForOp(
+  raw: Record<string, unknown>,
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const structuredCategory = raw.category;
+  if (typeof structuredCategory === 'string' && VALID_FACTOR_CATEGORIES.has(structuredCategory)) {
+    return { ...value, category: structuredCategory };
+  }
+  if (typeof value.category === 'string' && !VALID_FACTOR_CATEGORIES.has(value.category)) {
+    const { category: invalidCategory, ...rest } = value;
+    log.warn(
+      {
+        event: 'edit_graph.invalid_category_coerced',
+        op: raw.op,
+        path: raw.path,
+        invalid_category: invalidCategory,
+      },
+      'edit_graph dropped an out-of-enum node category from the stringified value payload rather than failing the whole edit',
+    );
+    return rest;
+  }
+  return value;
+}
+
 /**
  * Normalise a single raw operation from the LLM:
  * - Unwrap v2 structured-outputs stringified value/old_value fields
@@ -3758,6 +3807,16 @@ function normaliseOperation(rawInput: Record<string, unknown>): PatchOperation &
   }
   if (oldValue && typeof oldValue === 'object' && oldValue !== null) {
     oldValue = nestDottedKeys(oldValue as Record<string, unknown>);
+  }
+
+  // ROADMAP 1.46 residual (task_97fbcb00) — see resolveNodeCategoryForOp doc.
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    (raw.op === 'add_node' || raw.op === 'update_node')
+  ) {
+    value = resolveNodeCategoryForOp(raw, value as Record<string, unknown>);
   }
 
   return {
