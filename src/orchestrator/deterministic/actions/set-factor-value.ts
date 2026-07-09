@@ -298,10 +298,22 @@ export const setFactorValueAction: ActionDefinition = {
     return rec.target_id ? `Set ${rec.target_id}` : 'Set factor value';
   },
   chipPrompt(rec) {
+    if (!rec.target_id) return 'Set a factor value';
     const val = rec.parameters?.value;
-    return rec.target_id
-      ? `Set ${rec.target_id} to ${val ?? '...'}`
-      : 'Set a factor value';
+    // Tier A #1 (edit-reliability, 2026-07-09) — FIX 4 (1.45-F5): guard
+    // against a double-wrapped clarify chip ("Set X to Set X to 0.6.").
+    // `val` is documented (input_schema) as a bare number, but a caller
+    // upstream of this template can — accidentally — pass an already
+    // fully-formed instruction string (e.g. it re-used THIS SAME
+    // template's own prior output, or a pre-rendered display prompt,
+    // as the "value"). Re-wrapping that in another `Set … to …` layer
+    // nests the instruction. Detect that shape defensively and pass it
+    // through unchanged rather than re-wrapping — the instruction must
+    // appear exactly once in the chip message.
+    if (typeof val === 'string' && /^set\s+.+\s+to\s+.+/i.test(val.trim())) {
+      return val.trim();
+    }
+    return `Set ${rec.target_id} to ${val ?? '...'}`;
   },
 };
 
