@@ -6,9 +6,56 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { isArtefactLikely } from "../../../src/orchestrator/intent-gate.js";
 import { assembleV2SystemPrompt, _resetArtefactAppendixCache } from "../../../src/orchestrator/pipeline/phase3-llm/prompt-assembler.js";
 import type { EnrichedContext } from "../../../src/orchestrator/pipeline/types.js";
+
+// ============================================================================
+// Path casing — case-sensitive regression guard
+// ============================================================================
+
+/**
+ * Regression guard for the artefact-appendix path-casing bug.
+ *
+ * loadArtefactAppendix() (prompt-assembler.ts) resolves the appendix file
+ * against a literal directory name. `fs.readdirSync` always returns the
+ * *true* on-disk entry name, even on a case-insensitive filesystem like
+ * macOS HFS+/APFS — so this assertion catches a mismatch on every
+ * filesystem, not just case-sensitive ones (Linux/Render). A macOS run of
+ * the *behavioural* tests below cannot mask this the way it masked the
+ * original bug, because we never ask the OS to resolve the path — we
+ * compare literal strings.
+ */
+describe("loadArtefactAppendix — path casing (filesystem-independent)", () => {
+  it("resolves the appendix directory using the exact on-disk casing", () => {
+    const cwdEntries = readdirSync(process.cwd());
+    const trueDirName = cwdEntries.find((e) => e.toLowerCase() === "prompts");
+    expect(trueDirName).toBeDefined();
+
+    const assemblerSrc = readFileSync(
+      resolve(process.cwd(), "src/orchestrator/pipeline/phase3-llm/prompt-assembler.ts"),
+      "utf-8",
+    );
+    const match = assemblerSrc.match(
+      /resolve\(process\.cwd\(\),\s*'([^']+)',\s*'artefact_appendix\.txt'\)/,
+    );
+    expect(match, "expected loadArtefactAppendix() to resolve() a literal path").not.toBeNull();
+    const resolvedDirLiteral = match![1];
+
+    // Case-sensitive comparison: this must match the true on-disk casing
+    // exactly, not just case-insensitively.
+    expect(resolvedDirLiteral).toBe(trueDirName);
+  });
+
+  it("the resolved appendix file actually exists at the literal path used", () => {
+    const dirEntries = readdirSync(process.cwd());
+    const trueDirName = dirEntries.find((e) => e.toLowerCase() === "prompts")!;
+    const fileEntries = readdirSync(resolve(process.cwd(), trueDirName));
+    expect(fileEntries).toContain("artefact_appendix.txt");
+  });
+});
 
 // ============================================================================
 // Chip message patterns — must return true
