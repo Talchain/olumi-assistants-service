@@ -1,0 +1,4 @@
+✅ Typecheck drift within baseline — 136 files / 462 errors (baseline: 137 files / 462 errors).
+::notice::Drift shrank — consider tightening scripts/ci/typecheck-baseline.txt (lower count / remove fixed files).
+Files no longer erroring (safe to remove from baseline):
+  - src/orchestrator-v5/tools/handlers/__tests__/integration-precondition-fail-chip.test.ts
