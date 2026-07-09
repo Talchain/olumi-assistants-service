@@ -105,7 +105,17 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // R2 stale gate; see edit-graph-referee-gate.ts + lane-8 evidence report).
     // Deliberate, reviewed; still ad-hoc debt — migrate with the frame-consumer
     // audit, do not add more.
-    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 4,
+    // 2026-07-09 overnight-review F5+F6: +1 — the goal-target receipt
+    // guard's swap-withheld branch re-derives freshness against
+    // `gmFrameBase` (the PRE-edit persisted base — what actually still
+    // persists when the write is withheld), mirroring the existing
+    // GM-blocked branch's own re-derivation a few lines above for the
+    // identical reason (freshness must never reflect a graph that never
+    // persisted; wire previously carried `graph: null` alongside a phantom
+    // post-edit hash the client could never observe). Deliberate, reviewed;
+    // still ad-hoc debt — migrate with the frame-consumer audit, do not add
+    // more.
+    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 5,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
@@ -130,7 +140,7 @@ Do NOT re-derive freshness / canonical state / recent changes at your call site:
   - thread it from build-turn-context / the context-pack assembler.
 
 The pre-existing ad-hoc sites (chip-click-dispatch.ts x2 call sites,
-edit-graph-dispatch.ts x1 call site) are FROZEN as tolerated debt pending the
+edit-graph-dispatch.ts x2 call sites) are FROZEN as tolerated debt pending the
 turn-executor frame-threading migration (see
 Docs/t4/context-frame-consumer-migration-audit.md). They are not precedent.
 

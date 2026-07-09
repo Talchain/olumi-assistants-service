@@ -203,6 +203,20 @@ function readSortNum(value: unknown): number {
 }
 
 /**
+ * Absolute-magnitude sort key for a rank field where "highest |value|" is
+ * the keep-doctrine (e.g. elasticity). A missing/non-numeric value must
+ * sort LAST (least relevant), never first — computing `Math.abs` on top of
+ * `readSortNum`'s `NEGATIVE_INFINITY` sentinel would invert that
+ * (`Math.abs(-Infinity) === Infinity`, so a malformed entry would sort as
+ * the highest-magnitude entry and displace well-formed ones). This mirrors
+ * the `flipDistance` sentinel doctrine below (missing data => least
+ * relevant, via a value that always loses the comparison).
+ */
+function readAbsSortNum(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.abs(value) : Number.NEGATIVE_INFINITY;
+}
+
+/**
  * Cap an array to `max` entries. Under the cap: no-op (preserves original
  * order/content exactly — no behaviour change for typical/small payloads).
  * Over the cap: sorts by `rank` (descending relevance) before truncating,
@@ -307,7 +321,7 @@ export function buildDecisionReviewUserMessage(
   const factorCap = capArray<Record<string, unknown>>(
     factorSensitivityRaw,
     DECISION_REVIEW_MAX_FACTOR_SENSITIVITY,
-    (a, b) => Math.abs(readSortNum(b.elasticity)) - Math.abs(readSortNum(a.elasticity)),
+    (a, b) => readAbsSortNum(b.elasticity) - readAbsSortNum(a.elasticity),
   );
   const edgeCap = capArray<Record<string, unknown>>(
     fragileEdgesRaw,

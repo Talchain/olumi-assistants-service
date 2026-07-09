@@ -2266,7 +2266,11 @@ export async function dispatchEditGraph(
   // stamp analysis_ready from an unpersisted graph.
   // Lane 8: gated on the EFFECTIVE predicate — a GM-live-blocked mutation
   // must not stamp analysis_ready from a graph that was never persisted.
-  const analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
+  // `let` — overnight review F6: the goal-target receipt guard below can
+  // withhold this turn's graph write AFTER this initial computation; when
+  // it does, `analysisReady` is re-set to `undefined` alongside it so the
+  // wire never stamps readiness derived from a graph that never persisted.
+  let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? computeStructuralReadiness(editResult.appliedGraph!)
     : undefined;
 
@@ -2493,6 +2497,53 @@ export async function dispatchEditGraph(
       if (graphWasWrittenThisTurn) {
         graphForCommit = undefined;
         goalTargetSwapWithheldGraph = true;
+        // Overnight review F5+F6 — a withheld write must be coherent
+        // across EVERY downstream signal, not just the graph itself:
+        //
+        //  (F5) The "applied" edit receipt FACT was already built (above,
+        //       from `editResult`/`factBuilderInput`) before this guard
+        //       ran, so it still narrates a registration this graph never
+        //       carries. Committing it unchanged grounds the NEXT turn's
+        //       LLM on a phantom edit (DL-7 violation) — `recent_changes`
+        //       / prior_facts readers have no persisted graph to
+        //       cross-check it against. Null it: a withheld-write turn is
+        //       a non-mutating turn, same as any other turn that writes
+        //       no graph and emits no facts.
+        //
+        //  (F6) `analysisReady` was computed from `editResult.appliedGraph`
+        //       — the same unpersisted graph — before this guard ran.
+        //       Re-set to undefined so the wire never stamps readiness
+        //       derived from a graph that never persisted.
+        //
+        //  (F6) `freshness.current_graph_hash` was derived from
+        //       `persistedPostEditGraph` — again the unpersisted graph —
+        //       so it is a phantom hash the next turn's client can never
+        //       actually observe. Re-derive against `gmFrameBase`, the
+        //       PRE-edit persisted base that is what will actually still
+        //       be in `scenarios.graph` after this turn — mirroring the
+        //       GM-blocked branch above (line ~1958), which re-derives
+        //       freshness the same way when IT withholds a write. A
+        //       `derivation_failed` verdict is left as-is (honest
+        //       degradation beats a fabricated re-derivation).
+        editGraphFact = null;
+        analysisReady = undefined;
+        if (freshness.reason !== 'derivation_failed') {
+          let withheldCurrentHash: string | null = null;
+          try {
+            withheldCurrentHash = computeAnalysisAffectingGraphHash(
+              gmFrameBase as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            withheldCurrentHash = null;
+          }
+          freshness = deriveAnalysisFreshness(
+            priorFactsForRecovery,
+            withheldCurrentHash,
+            config.cee.optionIdentityFreshnessGuard
+              ? extractGraphOptionIds(gmFrameBase)
+              : undefined,
+          );
+        }
       }
     }
     // V5 P0 — when the early-emit intercept or the no-op recovery

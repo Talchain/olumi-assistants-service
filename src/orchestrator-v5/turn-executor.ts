@@ -6392,6 +6392,18 @@ export async function runTurnExecutor(
           // backing a DESCRIBE-only claim has no graph to withhold.
           if (graphWasWrittenThisTurn) {
             graphForCommit = undefined;
+            // Overnight review F5 — the withheld write must also withhold
+            // the "applied" edit receipt FACT built from the same unbacked
+            // mutation. Committing `handlerFactsForCommit` unchanged here
+            // (status: 'applied', noop: false) while the graph write is
+            // withheld grounds the NEXT turn's LLM on a phantom edit —
+            // `recent_changes` / prior_facts readers have no persisted
+            // graph to cross-check the fact against, so they take it at
+            // face value (DL-7 violation: a receipt narrating an applied
+            // mutation with no persistable graph state behind it). A
+            // withheld-write turn is a non-mutating turn, same as any
+            // other turn that writes no graph and emits no facts.
+            handlerFactsForCommit = [];
           }
         }
       }
@@ -7087,6 +7099,17 @@ export async function runTurnExecutor(
     } else {
       chips = [];
     }
+    // ROADMAP 1.20(b) chip-sameness guard (overnight review F2). This
+    // builder is reached by the STEP 7 unconditional empty-answer backstop
+    // and the CEE_ANSWER_TEXT_REQUIRED compose guard, independently of the
+    // coach/converse `generateChips` call sites that already thread
+    // `recentlyOfferedChipIds()` — without this, a chip offered on the
+    // immediately-prior turn (e.g. `chip_action_explain_results`) is
+    // mechanically re-offered here on the very next turn if it blanks its
+    // answer, the exact defect class the guard closed elsewhere. An honest
+    // empty set beats an identical repeat.
+    const recentlyOffered = recentlyOfferedChipIds();
+    chips = chips.filter((chip) => !recentlyOffered.has(chip.id));
     return { assistantText, chips, analysisFreshAndAvailable };
   }
 

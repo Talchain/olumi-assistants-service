@@ -295,6 +295,55 @@ describe('buildDecisionReviewUserMessage — prompt size budgets (FIX 2, 1.41)',
     expect(message).not.toContain('[TRUNCATED:');
   });
 
+  // ==========================================================================
+  // P1 fix (overnight review F3) — factor_sensitivity cap comparator wrapped
+  // the NEGATIVE_INFINITY missing-elasticity sentinel in Math.abs(), so
+  // Math.abs(-Infinity) === Infinity made a malformed entry sort as the
+  // HIGHEST-magnitude entry — kept ahead of every well-formed high-elasticity
+  // entry, the inverse of the documented "keep highest |elasticity|"
+  // doctrine. A missing/non-numeric elasticity must sort LAST (least
+  // relevant), matching the `flipDistance` sentinel pattern already used for
+  // flip_threshold_data in this same file.
+  // ==========================================================================
+
+  it('a malformed (missing-elasticity) factor_sensitivity entry sorts LAST and is dropped ahead of well-formed high-elasticity entries when the cap overflows', () => {
+    // 16 entries: 15 well-formed with ascending elasticity (fac_1..fac_15,
+    // elasticity 1..15) plus 1 malformed entry with no numeric elasticity at
+    // all. Cap is 15, so exactly one entry must be dropped.
+    const wellFormed = Array.from({ length: 15 }, (_, i) => ({
+      factor_id: `fac_${i + 1}`,
+      factor_label: `Factor ${i + 1}`,
+      elasticity: i + 1, // fac_1 has the LOWEST elasticity (least relevant), fac_15 the HIGHEST
+      confidence: 0.5,
+    }));
+    const malformed = {
+      factor_id: 'fac_malformed',
+      factor_label: 'Malformed Factor',
+      // elasticity intentionally absent/non-numeric — triggers the
+      // NEGATIVE_INFINITY sentinel in readSortNum.
+      elasticity: null,
+      confidence: 0.5,
+    };
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ isl_results: { factor_sensitivity: [...wellFormed, malformed] } }),
+      0.4,
+    );
+
+    // The malformed entry must NOT survive the cap — it is the least
+    // relevant entry (no elasticity signal at all), not the most.
+    expect(message).not.toContain('"factor_id": "fac_malformed"');
+    // The lowest well-formed elasticity entry (fac_1) is the next-least
+    // relevant of the well-formed set — it IS the one that should be
+    // dropped in its place... no: with 15 well-formed + 1 malformed = 16
+    // entries and a cap of 15, exactly one entry drops. The malformed entry
+    // must be that one, so ALL 15 well-formed entries (including the lowest,
+    // fac_1) must survive.
+    expect(message).toContain('"factor_id": "fac_1"');
+    expect(message).toContain('"factor_id": "fac_15"');
+    // Exactly one entry (the malformed one) drops out of 16 total.
+    expect(message).toContain('1 lower-sensitivity factor_sensitivity entries omitted');
+  });
+
   it('an oversized graph THAT ALSO carries an oversized brief and flip_threshold_data hits BOTH new caps simultaneously and the total prompt stays under the hard per-section ceiling for each capped section', () => {
     const hugeBrief = 'x'.repeat(DECISION_REVIEW_MAX_BRIEF_CHARS * 5);
     const n = DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES + 50;
