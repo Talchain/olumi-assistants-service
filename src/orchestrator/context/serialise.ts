@@ -129,18 +129,69 @@ export function truncateGraphJson(graph: EditCompactGraph, maxBytes: number): st
 }
 
 // ============================================================================
+// Recent Conversation Rendering (for edit_graph LLM prompt)
+// ============================================================================
+
+/**
+ * Render `context.messages` (the prior-turns conversation slice — see
+ * `dispatchEditGraph`, which populates it from the same 5-turn/2,000-char-
+ * per-message slice `context-pack-assembler.ts`'s `projectConversation`
+ * already builds for the coaching/draft LLM path) into a bounded prompt
+ * section.
+ *
+ * `context.messages` carries prior turns ONLY — the current turn's message
+ * is sent separately as the edit LLM's `userMessage` (see `edit-graph.ts`),
+ * so it is not duplicated here.
+ *
+ * Bounded to `maxChars`: each message is already capped at persist time
+ * (`CONVERSATION_TEXT_CAP` in `commit.ts`), but five turns of user+assistant
+ * text can still exceed a sane prompt budget. If the joined text overflows,
+ * the OLDEST messages are dropped first (most recent context matters most
+ * for resolving "that", "it", "the one we discussed") and the drop is
+ * disclosed with a leading marker so the LLM knows the history is partial
+ * rather than silently truncated mid-sentence.
+ */
+export function renderRecentConversationForEdit(
+  messages: readonly { role: 'user' | 'assistant'; content: string }[],
+  maxChars: number = 4000,
+): string {
+  if (messages.length === 0) return '';
+
+  const lines = messages.map((m) => `${m.role}: ${m.content}`);
+
+  let dropped = 0;
+  while (lines.join('\n').length > maxChars && lines.length > 1) {
+    lines.shift();
+    dropped += 1;
+  }
+
+  const body = lines.join('\n');
+  return dropped > 0
+    ? `(${dropped} earlier turn${dropped === 1 ? '' : 's'} omitted for length)\n${body}`
+    : body;
+}
+
+// ============================================================================
 // Edit Context Serialisation (for edit_graph LLM prompt)
 // ============================================================================
 
 /**
  * Build the full context string for the edit_graph LLM prompt.
  *
- * Includes: edit compact graph, framing metadata, analysis summary, selected elements.
- * Does NOT include conversation turns — the orchestrator distils intent into editDescription.
+ * Includes: edit compact graph, framing metadata, recent conversation,
+ * analysis summary, selected elements.
+ *
+ * ROADMAP 1.33: prior to this fix, `context.messages` was populated but
+ * never rendered here — a stale V4-era assumption ("the orchestrator
+ * distils intent into editDescription") that does not hold in V5. The edit
+ * LLM saw only the verbatim current message, dropping facts the user
+ * established over earlier turns in the same request. `context.messages`
+ * (prior turns, oldest-first) is now rendered as `## Recent Conversation`.
  */
 export function serialiseEditContextForLLM(
   context: ConversationContext,
   maxGraphBytes: number = 8000,
+  maxConversationChars: number = 4000,
 ): string {
   const sections: string[] = [];
 
@@ -152,6 +203,18 @@ export function serialiseEditContextForLLM(
     sections.push('```json');
     sections.push(graphJson);
     sections.push('```');
+  }
+
+  // Recent conversation (prior turns only — current message is sent
+  // separately as the LLM's userMessage). Placed early, alongside the
+  // graph, so facts the user already established are not pushed out by
+  // later sections when the prompt is trimmed upstream.
+  if (context.messages && context.messages.length > 0) {
+    const rendered = renderRecentConversationForEdit(context.messages, maxConversationChars);
+    if (rendered.length > 0) {
+      sections.push('## Recent Conversation');
+      sections.push(rendered);
+    }
   }
 
   // Framing metadata

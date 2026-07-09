@@ -50,6 +50,7 @@ import {
 } from './edit-graph-turn-event.js';
 import type {
   ConversationContext,
+  ConversationMessage,
   DecisionStage,
   GraphPatchBlockData,
   GraphV3T,
@@ -65,8 +66,10 @@ import {
   buildTurnContext,
   loadMostRecentPendingActions,
   loadPersistedGraphStrict,
+  loadRecentConversationTurns,
 } from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { projectConversation } from '../context/context-pack-assembler.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import { config } from '../../config/index.js';
@@ -1164,6 +1167,36 @@ export function mergeAppliedGraphForPersistence(args: {
   return merged;
 }
 
+/**
+ * ROADMAP 1.33 — edit-lane conversation starvation.
+ *
+ * Convert the same 5-turn conversation-slice projection
+ * `context-pack-assembler.ts`'s `projectConversation` builds for the
+ * coaching/draft LLM path into `ConversationContext.messages` (prior turns
+ * ONLY — the current turn's `payload.message` is sent separately as the
+ * edit LLM's `userMessage`, see `edit-graph.ts`, so it is deliberately not
+ * appended here).
+ *
+ * `recentTurns` arrives most-recent-first (context-pack-assembler
+ * convention); reversed to chronological order so the rendered section
+ * reads as a narrative. Per-turn `user_message`/`assistant_message` are
+ * already length-capped at persist time (`CONVERSATION_TEXT_CAP` in
+ * commit.ts) — this function does no further per-message bounding, only
+ * ordering. Overall-section bounding + disclosed truncation happens at
+ * render time in `serialiseEditContextForLLM`.
+ */
+function conversationSliceToMessages(
+  recentTurns: readonly { user_message: string | null; assistant_message: string | null }[],
+): ConversationMessage[] {
+  const chronological = [...recentTurns].reverse();
+  const messages: ConversationMessage[] = [];
+  for (const turn of chronological) {
+    if (turn.user_message) messages.push({ role: 'user', content: turn.user_message });
+    if (turn.assistant_message) messages.push({ role: 'assistant', content: turn.assistant_message });
+  }
+  return messages;
+}
+
 export async function dispatchEditGraph(
   params: DispatchEditGraphParams,
 ): Promise<DispatchEditGraphResult> {
@@ -1172,11 +1205,20 @@ export async function dispatchEditGraph(
 
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
     graphStateToGraphV3WithParseResult(graphState, requestId);
+  // ROADMAP 1.33: feed the same 5-turn conversation slice the
+  // coaching/draft LLM path already builds into the edit-LLM request, so a
+  // user who clarified details over several turns then asks for an edit
+  // gets an edit that sees what they already established (Brief G).
+  // Read failures degrade to an empty slice (see
+  // `loadRecentConversationTurns`) — never fail the turn over a
+  // conversation-history read.
+  const priorConversationTurns = await loadRecentConversationTurns(payload.scenario_id, requestId);
+  const { recent_turns: recentConversationSlice } = projectConversation(priorConversationTurns, false);
   const context: ConversationContext = {
     graph: parsedGraph,
     analysis_response: analysisState ? analysisIngressToV2Envelope(analysisState) : null,
     framing: { stage: mapStageToDecisionStage(payload.stage) },
-    messages: [{ role: 'user', content: payload.message }],
+    messages: conversationSliceToMessages(recentConversationSlice),
     scenario_id: payload.scenario_id,
   };
 
