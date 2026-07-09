@@ -623,10 +623,17 @@ describe("envelope and coaching wiring", () => {
     );
 
     expect(result.assistantText).not.toBeNull();
-    // The proposal-language guard rewrites sentence-start "Added X" to
-    // "Proposing to add X" on proposal turns (auto_apply: false) so the user
-    // reads a coherent proposal frame instead of completion language.
-    expect(result.assistantText).toContain("Proposing to add a competitor response factor");
+    // F3 fix (GM go-live acceptance evidence, Brief H deliverable 5): the
+    // edit_graph success branch always has a committed `appliedGraph` (the
+    // function refuses to reach this branch without one) — the change IS
+    // already applied here, regardless of the block's auto_apply: false
+    // shape contract. The proposal-language guard must NOT rewrite
+    // truthful completion language ("Added X…") into "Proposing to add X…"
+    // on this branch; doing so violated the four-state copy rule
+    // (proposed/applied/blocked/stale) by narrating an applied turn as a
+    // pending proposal.
+    expect(result.assistantText).toContain("Added a competitor response factor");
+    expect(result.assistantText).not.toContain("Proposing to add");
     expect(result.assistantText).toContain("Note:");
     // V5 H5 follow-up: the warning-scrubber now resolves `fac_competitor`
     // to its actual label "Competitor Response" because `candidateGraph`
