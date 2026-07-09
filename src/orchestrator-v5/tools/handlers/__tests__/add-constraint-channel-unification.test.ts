@@ -2,7 +2,7 @@
  * Overnight review F8 + F9 (+ N1's label-sensitivity secondary) — ONE
  * add-constraint channel-unification fix, per the mega-review's
  * ORCHESTRATOR-DEFAULT doctrine (pending Paul ratification, see
- * acceptance-evidence/receipt-honesty/LANE-DOCTRINE.md).
+ * acceptance-evidence/receipt-honesty/README.md).
  *
  * F8 — the draft path (cee/factor-extraction/enricher.ts) registers a
  * success target by stamping `goal_threshold_raw`/`_unit` on the goal node
@@ -26,9 +26,14 @@
  * Fix: compare BOTH channels (the `goal_constraints` row AND the node's
  * own `goal_threshold_raw`/`_unit`) for value-sameness, with `label`
  * excluded from the predicate (a label-only change gets its own distinct
- * receipt, not a value-change claim) — and skip the mutation entirely
- * when unchanged so a true noop turn cannot move the analysis-affecting
- * graph hash.
+ * receipt, not a value-change claim) — and gate ONLY the node
+ * goal_threshold_raw/_unit/_cap stamp on that sameness check, so a true
+ * noop turn cannot move the analysis-affecting graph hash. The
+ * goal_constraints row upsert itself still runs unconditionally
+ * (idempotent on a real no-op — same content in, same content out),
+ * preserving the pre-existing D1 cross-handler contract that every
+ * handler returns a `mutated_graph` on every outcome, noop included (see
+ * d1-cross-handler.test.ts).
  */
 import { describe, expect, it } from 'vitest';
 

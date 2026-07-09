@@ -338,7 +338,7 @@ export function createAddConstraintHandler(): HandlerFn {
 
       // Overnight review F8+F9 — ONE add-constraint channel-unification fix
       // (ORCHESTRATOR-DEFAULT doctrine, pending Paul ratification — see
-      // acceptance-evidence/receipt-honesty/LANE-DOCTRINE.md). A success
+      // acceptance-evidence/receipt-honesty/README.md). A success
       // target can be registered through TWO channels, and unchanged-value
       // detection must compare against BOTH before the mutation runs:
       //   (a) the goal_constraints row (`existing`, above) — this

@@ -1,0 +1,24 @@
+ WARN  Issue while reading "/Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+[1m[46m RUN [49m[22m [36mv4.0.13 [39m[90m/Users/paulslee/Documents/GitHub/olumi-assistants-service/.worktrees/receipt-honesty[39m
+
+ [32m✓[39m src/orchestrator-v5/tools/handlers/d1-shared/__tests__/format-confirmation.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/tools/handlers/__tests__/add-constraint-noop-receipt-honesty.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/tools/handlers/__tests__/add-constraint-channel-unification.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/tools/handlers/__tests__/add-constraint.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/tools/handlers/__tests__/add-constraint-goal-target-join.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/tools/handlers/__tests__/d1-cross-handler.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/unit/anthropic-edit-graph-schema-grammar-budget.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/compose/__tests__/goal-target-receipt-guard.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/compose/__tests__/goal-target-receipt-guard-persisted-target.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/unit/orchestrator/tools/edit-graph-category-enum-constraint.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch-goal-target-receipt.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/tools/handlers/__tests__/add-constraint.integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 51[2mms[22m[39m
+ [32m✓[39m src/orchestrator-v5/__tests__/turn-executor-goal-target-commit-honesty.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 74[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m13 passed[39m[22m[90m (13)[39m
+[2m      Tests [22m [1m[32m79 passed[39m[22m[90m (79)[39m
+[2m   Start at [22m 16:40:53
+[2m   Duration [22m 1.22s[2m (transform 2.76s, setup 629ms, collect 4.40s, tests 239ms, environment 1ms, prepare 44ms)[22m
+
