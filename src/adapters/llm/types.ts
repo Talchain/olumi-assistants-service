@@ -320,6 +320,16 @@ export interface ChatArgs {
    * Non-Anthropic adapters ignore this field.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * Text appended to `userMessage` ONLY when `outputSchema` is actually
+   * active (flag on + model in the structured-outputs allowlist + thinking
+   * disabled) — the caller decides whether structured mode needs extra
+   * instruction (e.g. "emit these fields as JSON-encoded strings") without
+   * the adapter needing to know per-call-site schema semantics. Mirrors
+   * the `STRUCTURED_OUTPUTS_AUX_STRING_REMINDER` pattern already used by
+   * the draft_graph path (Lane 26). Non-Anthropic adapters ignore this field.
+   */
+  structuredOutputsUserReminder?: string;
 }
 
 /**
