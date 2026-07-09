@@ -19,10 +19,18 @@
  * `<...>` markers but keeps inner text; content that is ONLY markers
  * sanitises to `''`). Layer B checks the FINAL composed text, so it also
  * backstops layer A being bypassed entirely (flag off, or a future/rolled
- * code path) — that scenario is covered by the flag-OFF regression pins
- * below, which document the known live defect this lane hardens against.
+ * code path).
  *
  * Flag default OFF — see config/index.ts `features.answerTextRequired`.
+ *
+ * ROADMAP 1.20(a) update: the flag-OFF cases below previously pinned a
+ * KNOWN LIVE DEFECT (blank assistant_text shipped, papered over by a
+ * recycled chip) as the asserted-correct behaviour. A separate,
+ * UNCONDITIONAL backstop now runs at turn-executor's STEP 7 commit
+ * chokepoint (reusing the SAME `buildBoundedFallbackCopyAndChips`
+ * helper this layer-B guard uses) regardless of the flag, so those cases
+ * now assert the honest bounded-recovery text instead. Layer B itself
+ * (this file's flag-ON describe blocks) is unchanged.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -116,12 +124,12 @@ afterEach(async () => {
   await restoreFlag();
 });
 
-describe('coach — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — regression pin for the known live defect', () => {
+describe('coach — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — ROADMAP 1.20(a) unconditional STEP 7 backstop', () => {
   beforeEach(async () => {
     await setFlag(undefined);
   });
 
-  it('absent answer_text + empty orientationText ships a BLANK assistant_text (the live 1/6 defect, unguarded)', async () => {
+  it('absent answer_text + empty orientationText no longer ships a BLANK assistant_text — the STEP 7 backstop degrades to bounded-recovery regardless of the flag', async () => {
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
         toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }),
@@ -134,8 +142,19 @@ describe('coach — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — regression p
 
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
     expect(telemetry.intent_class).toBe('coach');
-    expect(response.assistant_text).toBe('');
-    expect(events.some((e) => e.event === 'v5.coaching.empty_answer_recovered')).toBe(false);
+    // Previously this asserted the OPPOSITE (a blank assistant_text) —
+    // that was the live defect this lane closes (ROADMAP 1.20(a)): an
+    // empty direct_answer turn must never ship blank, papered over by a
+    // recycled chip, regardless of the flag-gated layer-B guard's state.
+    expect(response.assistant_text.trim()).not.toBe('');
+    expect(response.assistant_text).toBe(
+      "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.",
+    );
+    // The flag-gated layer-B event does NOT fire (flag off) — this is
+    // the SEPARATE, unconditional STEP 7 backstop, not layer B.
+    expect(events.some((e) => e.event === 'v5.coaching.empty_answer_recovered')).toBe(true);
+    const recoveryEvent = events.find((e) => e.event === 'v5.coaching.empty_answer_recovered');
+    expect(recoveryEvent?.data.intent_class).toBe('direct_answer_backstop');
   });
 });
 
@@ -225,12 +244,12 @@ describe('coach — CEE_ANSWER_TEXT_REQUIRED flag ON — compose guard (layer B)
   });
 });
 
-describe('converse — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — regression pin', () => {
+describe('converse — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — ROADMAP 1.20(a) unconditional STEP 7 backstop', () => {
   beforeEach(async () => {
     await setFlag(undefined);
   });
 
-  it('tool-call converse with no answer_text + empty orientationText ships a BLANK assistant_text', async () => {
+  it('tool-call converse with no answer_text + empty orientationText no longer ships a BLANK assistant_text', async () => {
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(toolResult({ intent_class: 'converse' })),
     };
@@ -241,7 +260,12 @@ describe('converse — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — regressio
 
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
     expect(telemetry.intent_class).toBe('converse');
-    expect(response.assistant_text).toBe('');
+    // Previously this asserted the OPPOSITE (a blank assistant_text) —
+    // see the coach describe block above for the ROADMAP 1.20(a) rationale.
+    expect(response.assistant_text.trim()).not.toBe('');
+    expect(response.assistant_text).toBe(
+      "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.",
+    );
   });
 });
 
