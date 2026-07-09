@@ -7,9 +7,10 @@ import { describe, expect, it } from "vitest";
 import { anyPlaceholder, fillSlots, loadPromptSet, parsePrompt } from "../src/prompts/loader.ts";
 
 describe("prompt slots", () => {
-  it("loads the default set; the graded v0.4.4 M1/M2 slots are REAL, non-benchmark arms stay PLACEHOLDER", async () => {
-    // The default PROMPTS_DIR holds the canonical v0.4.4 set. The three slots the
-    // dual-model benchmark actually grades are real, authored copy: armA (M1),
+  it("loads the default set; the graded M1/M2 slots are REAL, non-benchmark arms stay PLACEHOLDER", async () => {
+    // The default PROMPTS_DIR holds the canonical benchmark set (currently a hybrid:
+    // v0.4.3 M1, reverted after v0.4.4 M1 failed Paul's grade, + m2-improved M2). The
+    // three slots the dual-model benchmark actually grades are real, authored copy: armA (M1),
     // armCM1 (M1 for arm C), armCM2 (M2 reviewer). The arms outside the M1/M2
     // scope — armB (opus counterfactual), armDExecutor (advisor), holisticJudge —
     // are not authored, so they stay PLACEHOLDER and anyPlaceholder stays true
