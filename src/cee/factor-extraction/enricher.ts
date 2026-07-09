@@ -647,41 +647,45 @@ export async function enrichGraphWithFactorsAsync(
       // Only set goal_threshold if not already set
       const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
       if (currentGoalNode.goal_threshold === undefined) {
-        // Apply same normalization guard as factor injection:
-        // Only normalize if non-percentage and value > 1
+        // Full delegation to the SAME cap doctrine as the chat-path
+        // add_constraint handler (cap-doctrine unification, ROADMAP 1.18):
+        // an existing compatible cap wins, '%' always normalises against
+        // 100, else 25% headroom above the raw target. Deliberately NOT
+        // computeNormalisationCap (order-of-magnitude) — that diverged
+        // from the chat path and scored the same target up to ~5x
+        // differently depending on registration path.
+        //
+        // Regex extraction (cee/factor-extraction/index.ts) pre-divides
+        // percentages into a 0-1 fraction before this code runs, whereas
+        // resolveGoalThresholdCap's '%' branch — and the chat path's own
+        // convention — expects the RAW PERCENT NUMBER (15 for "15%"), the
+        // same "value stored in USER UNITS" convention add-constraint.ts
+        // uses for goal_threshold_raw. Reconstruct it here so BOTH paths
+        // register an IDENTICAL contract (raw/unit/cap/threshold), not
+        // just a coincidentally-equal goal_threshold: without this a 15%
+        // target registered via the draft path persisted
+        // goal_threshold_raw=0.15 (fraction, wrong display units) and no
+        // cap, while the chat path persisted raw=15/cap=100 — a
+        // draft-vs-chat parity break in the DISPLAY contract even though
+        // the scored 0.15 threshold happened to coincide.
+        const rawForResolver = factor.unit === "%" ? factor.value * 100 : factor.value;
+
         let normalizedValue = factor.value;
         let rawValue: number | undefined;
         let cap: number | undefined;
 
-        if (factor.unit !== "%" && factor.value > 1) {
-          // Large absolute value - normalise using the SAME cap doctrine as
-          // the chat-path add_constraint handler (cap-doctrine unification,
-          // ROADMAP 1.18): an existing compatible cap wins, else 25%
-          // headroom above the raw target. Deliberately NOT
-          // computeNormalisationCap (order-of-magnitude) — that diverged
-          // from the chat path and scored the same target up to ~5x
-          // differently depending on registration path.
-          const resolvedCap = resolveGoalThresholdCap(
-            currentGoalNode.goal_threshold_cap,
-            factor.value,
-            factor.unit,
-            currentGoalNode.goal_threshold_unit,
-          );
-          if (resolvedCap !== null) {
-            cap = resolvedCap;
-            rawValue = factor.value;
-            normalizedValue = factor.value / resolvedCap;
-          } else {
-            rawValue = factor.value;
-          }
+        const resolvedCap = resolveGoalThresholdCap(
+          currentGoalNode.goal_threshold_cap,
+          rawForResolver,
+          factor.unit,
+          currentGoalNode.goal_threshold_unit,
+        );
+        if (resolvedCap !== null) {
+          cap = resolvedCap;
+          rawValue = rawForResolver;
+          normalizedValue = rawForResolver / resolvedCap;
         } else {
-          // Already normalized (percentage or <= 1) - no cap needed.
-          // NOTE: regex extraction (cee/factor-extraction/index.ts)
-          // pre-divides percentages into a 0-1 fraction before this code
-          // runs, so this branch is already doctrine-equivalent to the
-          // shared '%'→/100 step (just pre-applied) — routing it through
-          // resolveGoalThresholdCap here would double-divide.
-          rawValue = factor.value;
+          rawValue = rawForResolver;
         }
 
         // Update goal node with threshold fields
