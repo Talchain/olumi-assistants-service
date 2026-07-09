@@ -53,6 +53,10 @@ vi.mock('../../build-turn-context.js', () => ({
   buildTurnContext: vi.fn(),
   loadMostRecentPendingActions: vi.fn().mockResolvedValue([]),
   loadPersistedGraphStrict: vi.fn(),
+  // ROADMAP 1.33: dispatchEditGraph reads this for the conversation-slice
+  // feed. Empty — this suite exercises persist/merge semantics, not
+  // conversation history.
+  loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
 }));
 
 // ── imports after mocks ───────────────────────────────────────────────────────

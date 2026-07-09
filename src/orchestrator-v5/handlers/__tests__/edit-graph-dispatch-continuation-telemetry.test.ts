@@ -81,6 +81,10 @@ vi.mock('../../build-turn-context.js', () => ({
     most_recent_pending_actions: [validPending],
   }),
   loadMostRecentPendingActions: vi.fn().mockResolvedValue([validPending]),
+  // ROADMAP 1.33: dispatchEditGraph reads this for the conversation-slice
+  // feed. Empty — this suite exercises continuation telemetry, not
+  // conversation history.
+  loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
 }));
 
 const emitMock = vi.fn();
