@@ -34,10 +34,12 @@ import { resolveGoalThresholdCap } from '../../../utils/goal-threshold-cap.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
+import type { PersistedGraphV3T } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
   formatConstraintAdded,
+  formatConstraintLabelUpdated,
   formatConstraintUnchanged,
   formatConstraintUpdated,
   formatGoalTargetSet,
@@ -335,59 +337,109 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
-      const result = applyAndValidateMutation(rawGraph, (clone) => {
-        const list = clone.goal_constraints ?? [];
-        const next = existing
-          ? list.map((c) =>
-              c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
-            )
-          : [...list, constraintParse.data];
-        clone.goal_constraints = next;
-        if (isGoalTargetSet) {
-          const goalNode = clone.nodes.find((n) => n.id === targetId);
-          if (goalNode) {
-            const cap = resolveGoalThresholdCap(
-              goalNode.goal_threshold_cap,
-              params.value,
-              newConstraint.unit,
-              goalNode.goal_threshold_unit,
-            );
-            goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
-            // Unit is ALWAYS reconciled (review hardening): keeping a stale
-            // '%' unit when a unitless absolute target re-registers would
-            // display "900%" — a unitless registration clears the old unit.
-            if (newConstraint.unit !== undefined) {
-              goalNode.goal_threshold_unit = newConstraint.unit;
-            } else {
-              delete goalNode.goal_threshold_unit;
-            }
-            if (cap !== null) {
-              goalNode.goal_threshold_cap = cap;
-              goalNode.goal_threshold = params.value / cap; // model units (0–1)
-            }
-          }
-        }
-        return {
-          before: existing ? (existing as Record<string, unknown>) : null,
-          after: constraintParse.data as unknown as Record<string, unknown>,
-        };
-      });
-
-      const valueUnchanged =
+      // Overnight review F8+F9 — ONE add-constraint channel-unification fix
+      // (ORCHESTRATOR-DEFAULT doctrine, pending Paul ratification — see
+      // acceptance-evidence/receipt-honesty/LANE-DOCTRINE.md). A success
+      // target can be registered through TWO channels, and unchanged-value
+      // detection must compare against BOTH before the mutation runs:
+      //   (a) the goal_constraints row (`existing`, above) — this
+      //       handler's own canonical representation.
+      //   (b) the goal node's OWN goal_threshold_raw/_unit fields — the
+      //       draft path (cee/factor-extraction/enricher.ts) stamps ONLY
+      //       these, by design, and never writes a goal_constraints row.
+      //       A restatement of an already-draft-registered value must not
+      //       read the row's absence as "nothing registered yet" (F8).
+      // `label` is EXCLUDED from the value-sameness predicate (F8
+      // secondary): an LLM-supplied label paraphrase must not flip an
+      // identical-value restatement into a false "fresh update" claim. A
+      // label-only change gets its own distinct receipt below — never a
+      // value-change claim, never a total no-op either (the label DID
+      // change and is persisted).
+      const rowValueUnchanged =
         existing !== undefined &&
         existing.value === newConstraint.value &&
-        existing.unit === newConstraint.unit &&
-        existing.label === newConstraint.label;
+        existing.unit === newConstraint.unit;
+      const nodeChannelUnchanged =
+        isGoalTargetSet &&
+        typeof targetNode.goal_threshold_raw === 'number' &&
+        targetNode.goal_threshold_raw === params.value &&
+        targetNode.goal_threshold_unit === newConstraint.unit;
+      const valueUnchanged = rowValueUnchanged || nodeChannelUnchanged;
+      const labelChanged = existing !== undefined && existing.label !== newConstraint.label;
+      // F9 — the node's goal_threshold_raw/_unit/_cap fields are the exact
+      // fields `computeAnalysisAffectingGraphHash` reads; re-stamping them
+      // on a turn whose OWN receipt says "nothing changed" moves the
+      // analysis-affecting hash out from under an honest noop claim. Only
+      // stamp when the value genuinely changed this turn.
+      const stampGoalThreshold = isGoalTargetSet && !valueUnchanged;
+
+      let mutatedGraph: PersistedGraphV3T | undefined;
+      let before: Record<string, unknown> | null;
+      let after: Record<string, unknown> | null;
+
+      if (valueUnchanged && !labelChanged) {
+        // True no-op: neither the value nor the label changed. Skip the
+        // mutation closure ENTIRELY — no goal_constraints row rewrite, no
+        // node stamp — so there is nothing for the commit layer to
+        // persist and the analysis-affecting hash cannot move.
+        const beforePayload = existing ? (existing as Record<string, unknown>) : null;
+        mutatedGraph = undefined;
+        before = beforePayload;
+        after = beforePayload;
+      } else {
+        const mutationResult = applyAndValidateMutation(rawGraph, (clone) => {
+          const list = clone.goal_constraints ?? [];
+          const next = existing
+            ? list.map((c) =>
+                c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
+              )
+            : [...list, constraintParse.data];
+          clone.goal_constraints = next;
+          if (stampGoalThreshold) {
+            const goalNode = clone.nodes.find((n) => n.id === targetId);
+            if (goalNode) {
+              const cap = resolveGoalThresholdCap(
+                goalNode.goal_threshold_cap,
+                params.value,
+                newConstraint.unit,
+                goalNode.goal_threshold_unit,
+              );
+              goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
+              // Unit is ALWAYS reconciled (review hardening): keeping a stale
+              // '%' unit when a unitless absolute target re-registers would
+              // display "900%" — a unitless registration clears the old unit.
+              if (newConstraint.unit !== undefined) {
+                goalNode.goal_threshold_unit = newConstraint.unit;
+              } else {
+                delete goalNode.goal_threshold_unit;
+              }
+              if (cap !== null) {
+                goalNode.goal_threshold_cap = cap;
+                goalNode.goal_threshold = params.value / cap; // model units (0–1)
+              }
+            }
+          }
+          return {
+            before: existing ? (existing as Record<string, unknown>) : null,
+            after: constraintParse.data as unknown as Record<string, unknown>,
+          };
+        });
+        mutatedGraph = mutationResult.mutatedGraph;
+        before = mutationResult.before;
+        after = mutationResult.after;
+      }
+
+      const result = { mutatedGraph, before, after };
 
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
         fact_version: 1,
-        noop: valueUnchanged,
+        noop: valueUnchanged && !labelChanged,
         result: {
           target_id: newConstraint.constraint_id,
-          status: valueUnchanged ? 'noop' : 'applied',
-          before: result.before as Record<string, unknown> | null,
-          after: result.after as Record<string, unknown> | null,
+          status: valueUnchanged && !labelChanged ? 'noop' : 'applied',
+          before: result.before,
+          after: result.after,
         },
       };
 
@@ -409,11 +461,14 @@ export function createAddConstraintHandler(): HandlerFn {
       // threshold IS stamped in the committed write above); everything
       // else keeps the existing constraint copy byte-for-byte. ROADMAP
       // 1.19(a): a re-registration whose value is IDENTICAL to what is
-      // already persisted (`valueUnchanged`, computed above from a real
-      // diff against `existing`) must not claim "Updated"/"set" — that
+      // already persisted (`valueUnchanged`, computed above across BOTH
+      // channels per F8/F9) must not claim "Updated"/"set" — that
       // borrows the pre-existing threshold/constraint to narrate a
       // commit that did not happen this turn. The fact channel already
-      // marks this `noop`; the text channel now agrees.
+      // marks this `noop`; the text channel now agrees. F8(b): a
+      // label-only change (value unchanged, label differs) gets its own
+      // distinct receipt — never the fresh-update claim, never the
+      // total-noop claim either.
       const assistantText = isGoalTargetSet
         ? valueUnchanged
           ? formatGoalTargetUnchanged({
@@ -427,7 +482,9 @@ export function createAddConstraintHandler(): HandlerFn {
               ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
             })
         : valueUnchanged
-          ? formatConstraintUnchanged(formatInput)
+          ? labelChanged
+            ? formatConstraintLabelUpdated(formatInput)
+            : formatConstraintUnchanged(formatInput)
           : existing !== undefined
             ? formatConstraintUpdated(formatInput)
             : formatConstraintAdded(formatInput);
@@ -436,7 +493,7 @@ export function createAddConstraintHandler(): HandlerFn {
         assistant_text: assistantText,
         handler_facts: [factCheck.data],
         llm_calls_used: 0,
-        mutated_graph: result.mutatedGraph,
+        ...(result.mutatedGraph !== undefined ? { mutated_graph: result.mutatedGraph } : {}),
       };
     });
   };

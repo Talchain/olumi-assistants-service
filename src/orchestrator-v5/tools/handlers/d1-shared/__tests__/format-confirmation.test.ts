@@ -4,6 +4,7 @@ import {
   formatConstraintAdded,
   formatEdgeAdjustment,
   formatFactorChange,
+  formatGoalTargetUnchanged,
   formatValueWithUnit,
 } from '../format-confirmation.js';
 
@@ -160,5 +161,21 @@ describe('formatEdgeAdjustment', () => {
     expect(text).toContain('moderate (negative)');
     expect(text).toContain('strong (negative)');
     expect(text).not.toMatch(RAW_DECIMAL);
+  });
+});
+
+describe('formatGoalTargetUnchanged', () => {
+  // Overnight review N1: the set-pair (formatGoalTargetSet) reads "at
+  // least 15%" — the registered `>=` contract — but the unchanged-restate
+  // sibling dropped the operator qualifier and read as an exact-value
+  // target ("already 15%"), under-specifying the >= contract.
+  it('carries the operator qualifier, matching formatGoalTargetSet\'s phrasing', () => {
+    const text = formatGoalTargetUnchanged({
+      goalLabel: 'Revenue',
+      value: 15,
+      unit: '%',
+    });
+    expect(text).toMatch(/\bat least 15%/);
+    expect(text).not.toMatch(/is already 15%/);
   });
 });

@@ -90,7 +90,7 @@ import {
 import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
 import {
   decideGoalTargetReceipt,
-  GOAL_TARGET_NOT_SAVED_TEXT,
+  formatGoalTargetNotSavedText,
 } from './compose/goal-target-receipt-guard.js';
 import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
@@ -6377,7 +6377,13 @@ export async function runTurnExecutor(
             },
             'V5 TurnExecutor — success-target receipt claimed a registration the commit graph does not carry (no goal_threshold_raw on a goal node); swapped for the honest fallback before commit',
           );
-          composedOk = { ...composedOk, assistant_text: GOAL_TARGET_NOT_SAVED_TEXT };
+          // Overnight review F10 — name any surviving previously-registered
+          // target instead of falsely claiming none exists (see
+          // formatGoalTargetNotSavedText doc).
+          composedOk = {
+            ...composedOk,
+            assistant_text: formatGoalTargetNotSavedText(context.persistedGraph ?? null),
+          };
           // ROADMAP 1.19(b) — swap-vs-commit: swapping the TEXT for the
           // honest fallback while still persisting the graph this turn's
           // (unbacked) mutation produced would commit junk — the exact

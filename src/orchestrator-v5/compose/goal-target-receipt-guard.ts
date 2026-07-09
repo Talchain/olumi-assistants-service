@@ -56,6 +56,67 @@ export const GOAL_TARGET_NOT_SAVED_TEXT =
   '"set a success target of 15%".';
 
 /**
+ * Overnight review F10 — the withheld-write turn's swap path leaves any
+ * PREVIOUSLY-registered target intact (the append RPC skips the graph
+ * UPDATE on a null graph), so a bare "the model still has no target" is
+ * false whenever a persisted target survives the failed re-registration:
+ * the analysis WILL still score against the old target, just not the new
+ * value the user asked for.
+ *
+ * Branches on whether the pre-turn PERSISTED graph (the frame base the
+ * swap is decided against, NOT the withheld commit graph) already
+ * registers a target: names the surviving target when one exists, falls
+ * back to the generic `GOAL_TARGET_NOT_SAVED_TEXT` otherwise. Tolerant
+ * reader: any non-graph shape → the generic fallback (never throws).
+ */
+export function formatGoalTargetNotSavedText(persistedGraph: unknown): string {
+  const surviving = extractPersistedGoalTarget(persistedGraph);
+  if (surviving === null) return GOAL_TARGET_NOT_SAVED_TEXT;
+  const valueText =
+    surviving.unit !== undefined ? `${surviving.value}${surviving.unit}` : `${surviving.value}`;
+  return (
+    `I couldn't apply that change — your previous target of ${valueText} is ` +
+    'still registered and the analysis will score against it. Restate the ' +
+    'new target in one message, including the value and the goal it ' +
+    'applies to — for example: "set a success target of 15%".'
+  );
+}
+
+/**
+ * Extract the surviving persisted goal target (raw value + optional unit)
+ * from a goal-kind node carrying a finite `goal_threshold_raw` — the same
+ * registration marker `graphRegistersGoalTarget` checks. Returns null for
+ * any non-graph shape or a graph that does not register a target (never
+ * throws).
+ */
+function extractPersistedGoalTarget(
+  graph: unknown,
+): { readonly value: number; readonly unit?: string } | null {
+  if (graph === null || graph === undefined || typeof graph !== 'object') {
+    return null;
+  }
+  const nodes = (graph as Record<string, unknown>).nodes;
+  if (!Array.isArray(nodes)) return null;
+  for (const n of nodes) {
+    if (n === null || typeof n !== 'object') continue;
+    const node = n as Record<string, unknown>;
+    if (
+      node.kind === 'goal' &&
+      typeof node.goal_threshold_raw === 'number' &&
+      Number.isFinite(node.goal_threshold_raw)
+    ) {
+      return {
+        value: node.goal_threshold_raw,
+        ...(typeof node.goal_threshold_unit === 'string'
+          ? { unit: node.goal_threshold_unit }
+          : {}),
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Conservative detector for success-target registration/description claims.
  * Both live emitters are covered:
  *   - formatGoalTargetSet (add_constraint receipt): "Success target set:

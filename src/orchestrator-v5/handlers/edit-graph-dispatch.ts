@@ -38,7 +38,7 @@ import {
 } from '../compose/forbidden-user-facing-phrases.js';
 import {
   decideGoalTargetReceipt,
-  GOAL_TARGET_NOT_SAVED_TEXT,
+  formatGoalTargetNotSavedText,
 } from '../compose/goal-target-receipt-guard.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import { getSystemPromptMeta } from '../../adapters/llm/prompt-loader.js';
@@ -2486,7 +2486,14 @@ export async function dispatchEditGraph(
         },
         'V5 edit_graph — success-target receipt claimed a registration the committed graph does not carry (no goal_threshold_raw on a goal node); swapped for the honest fallback before commit',
       );
-      response = { ...response, assistant_text: GOAL_TARGET_NOT_SAVED_TEXT };
+      // Overnight review F10 — the withheld write leaves any PREVIOUSLY
+      // registered target intact, so the fallback must name it when one
+      // survives rather than falsely claiming "no target" (see the
+      // function doc on formatGoalTargetNotSavedText).
+      response = {
+        ...response,
+        assistant_text: formatGoalTargetNotSavedText(gmFrameBase),
+      };
       // Swapping the TEXT for the honest fallback while still persisting
       // (and returning to the client) the unbacked mutation would commit
       // junk — the exact live shape that opened this guard (the LLM's
