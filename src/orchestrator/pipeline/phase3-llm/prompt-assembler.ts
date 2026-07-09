@@ -360,17 +360,27 @@ function buildPendingChangesBlock(enrichedContext: EnrichedContext): string | nu
 let _artefactAppendixCache: string | null | undefined;
 
 /**
- * Load the artefact design appendix from prompts/artefact_appendix.txt.
+ * Load the artefact design appendix from Prompts/artefact_appendix.txt.
+ *
+ * NOTE: the directory is `Prompts` (capital P — matches the sibling
+ * `Prompts/v40.txt` convention), NOT `prompts`. On case-insensitive
+ * filesystems (macOS HFS+/APFS) a lowercase `prompts` path resolves fine and
+ * masks the mismatch; on case-sensitive filesystems (Linux/Render, ext4)
+ * it silently ENOENTs and this function falls into the catch below,
+ * returning null. That made `injectArtefactAppendix: true` a silent
+ * production no-op on Render — see tests/unit/orchestrator/
+ * artefact-detector.test.ts for the case-sensitive regression guard.
+ *
  * Returns null on ENOENT or read error (non-fatal). Cached after first load.
  */
 function loadArtefactAppendix(): string | null {
   if (_artefactAppendixCache !== undefined) return _artefactAppendixCache;
   try {
-    const filePath = resolve(process.cwd(), 'prompts', 'artefact_appendix.txt');
+    const filePath = resolve(process.cwd(), 'Prompts', 'artefact_appendix.txt');
     _artefactAppendixCache = readFileSync(filePath, 'utf-8');
     return _artefactAppendixCache;
   } catch {
-    log.warn('artefact appendix not found at prompts/artefact_appendix.txt — skipping');
+    log.warn('artefact appendix not found at Prompts/artefact_appendix.txt — skipping');
     _artefactAppendixCache = null;
     return null;
   }
