@@ -265,6 +265,29 @@ export interface SessionStore {
    */
   ensureScenarioExists(scenarioId: string, userId: string | null): Promise<{ user_id: string | null }>;
   /**
+   * MM P1 (ROADMAP 1.25 hygiene batch, item 2 completion — Brief H guest
+   * pre-check): plain read-only lookup of `scenarios.user_id`, WITHOUT the
+   * upsert/ownership-comparison side effects of `ensureScenarioExists`.
+   * Used by the commit-seam Model Management version hook
+   * (`commit.ts::recordModelVersionForCommit`) to skip the `saveVersion`
+   * RPC entirely for a guest (unowned) scenario — that RPC always fails
+   * `sign_in_required` (MV001) for `user_id IS NULL`, so calling it is a
+   * wasted round trip on every guest commit.
+   *
+   * Returns the scenario's `user_id` (null for guest / unowned rows, or
+   * when the scenario row does not exist — both read as "cannot version,
+   * skip the write"). Optional on the interface (added after the original
+   * ship) so pre-existing test doubles that don't implement it keep
+   * compiling; callers MUST treat a missing implementation the same as a
+   * read failure — fail-open to the pre-fix behaviour (attempt the RPC,
+   * let it answer MV001 authoritatively) rather than block the write.
+   *
+   * Read failures throw `SessionReadError`, mirroring the other plain
+   * reads on this interface; the commit-seam caller catches and fails
+   * open (same non-blocking contract as every other step in that hook).
+   */
+  getScenarioOwner?(scenarioId: string): Promise<string | null>;
+  /**
    * Load the pending actions emitted by the most recent prior turn for a
    * scenario. Returns `[]` when no prior turn exists, when the most
    * recent turn carried no pending actions, or when a row's

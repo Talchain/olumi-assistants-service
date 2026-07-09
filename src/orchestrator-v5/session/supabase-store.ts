@@ -585,6 +585,27 @@ export class SupabaseSessionStore implements SessionStore {
     };
   }
 
+  async getScenarioOwner(scenarioId: string): Promise<string | null> {
+    // Plain read, no upsert — see store.ts JSDoc. SELECT only user_id;
+    // `id` is already known to the caller (the scenarioId parameter).
+    const { data, error } = await this.client
+      .from('scenarios')
+      .select('user_id')
+      .eq('id', scenarioId)
+      .maybeSingle();
+
+    if (error) {
+      throw new SessionReadError(
+        `getScenarioOwner failed for scenario ${scenarioId}: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+
+    if (data == null) return null;
+    const userId = (data as { user_id?: unknown }).user_id;
+    return typeof userId === 'string' && userId.length > 0 ? userId : null;
+  }
+
   async readMostRecentPendingActions(scenarioId: string): Promise<readonly PendingAction[]> {
     // Narrow read: only the most recent prior turn. Older orphan pending
     // actions are ignored by design — "yes" resolves against the last

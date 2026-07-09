@@ -71,6 +71,21 @@ export interface NoopSessionStoreOptions {
    * available to resume).
    */
   readonly mostRecentPendingActions?: readonly PendingAction[];
+  /**
+   * MM P1 (ROADMAP 1.25 hygiene batch, item 2 completion): controls whether
+   * this fixture implements the OPTIONAL `getScenarioOwner` member at all,
+   * and what it returns/throws.
+   *
+   *  - `undefined` (default) — the member is OMITTED from the returned
+   *    object, exercising the "older store, no pre-check available"
+   *    fail-open path callers must support.
+   *  - `{ value }` — implements the member, resolving to `value` (a
+   *    `user_id` string, or `null` for a guest/unowned/absent scenario).
+   *  - `{ throws }` — implements the member, rejecting with `throws`.
+   */
+  readonly getScenarioOwnerBehaviour?:
+    | { readonly value: string | null }
+    | { readonly throws: Error };
 }
 
 export function createNoopSessionStore(
@@ -78,8 +93,10 @@ export function createNoopSessionStore(
 ): SessionStore {
   // Double-conformance guard: see file header for rationale. The declared
   // return type above catches missing members; `satisfies` below catches
-  // excess members on the inline literal.
-  return {
+  // excess members on the inline literal. `getScenarioOwner` is OPTIONAL
+  // on `SessionStore` (added after this fixture shipped) and is attached
+  // conditionally below the literal — see `getScenarioOwnerBehaviour`.
+  const store = {
     async append(_: SessionTurnWrite): Promise<{ id: string }> {
       if (opts.throwOnAppend) throw opts.throwOnAppend;
       return { id: opts.appendId ?? 'noop-row-id' };
@@ -139,4 +156,16 @@ export function createNoopSessionStore(
       return opts.mostRecentPendingActions ?? [];
     },
   } satisfies SessionStore;
+
+  if (opts.getScenarioOwnerBehaviour !== undefined) {
+    const behaviour = opts.getScenarioOwnerBehaviour;
+    (store as SessionStore).getScenarioOwner = async (
+      _scenarioId: string,
+    ): Promise<string | null> => {
+      if ('throws' in behaviour) throw behaviour.throws;
+      return behaviour.value;
+    };
+  }
+
+  return store;
 }

@@ -221,3 +221,105 @@ describe('flag ON', () => {
     expect(mmEvents[0]![1]).toMatchObject({ status: 'deduped' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// MM P1 (ROADMAP 1.25, item 2 completion) — Brief H guest pre-check: skip
+// the doomed saveVersion RPC entirely for a guest (unowned) scenario.
+// ---------------------------------------------------------------------------
+describe('guest pre-check (ROADMAP 1.25 item 2)', () => {
+  it('owner unresolvable (guest, getScenarioOwner → null) → saveVersion is NEVER called', async () => {
+    setFlag(true);
+    const result = await commitDirectAnswer(
+      composed(),
+      { ...META, graph: GRAPH },
+      createNoopSessionStore({
+        appendId: 'row-guest',
+        getScenarioOwnerBehaviour: { value: null },
+      }),
+    );
+    await drainMicrotasks();
+    expect(result.performed).toBe(true);
+    expect(serviceMock.saveVersion).not.toHaveBeenCalled();
+    // The service itself is never even constructed for the guest path —
+    // no env reads, no client construction, matching the flag-OFF pin.
+    expect(serviceMock.getServiceCalls).toBe(0);
+  });
+
+  it('owner resolves (owned scenario) → saveVersion IS called as before (no regression)', async () => {
+    setFlag(true);
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: GRAPH },
+      createNoopSessionStore({
+        getScenarioOwnerBehaviour: { value: 'owner-user-id' },
+      }),
+    );
+    await drainMicrotasks();
+    expect(serviceMock.saveVersion).toHaveBeenCalledTimes(1);
+  });
+
+  it('store does not implement getScenarioOwner (older/other store) → fails open, saveVersion IS called', async () => {
+    setFlag(true);
+    // createNoopSessionStore's default omits getScenarioOwner entirely.
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: GRAPH },
+      createNoopSessionStore({ appendId: 'row-no-precheck' }),
+    );
+    await drainMicrotasks();
+    expect(serviceMock.saveVersion).toHaveBeenCalledTimes(1);
+  });
+
+  it('getScenarioOwner throws → fails open, saveVersion IS still called (pre-check is best-effort)', async () => {
+    setFlag(true);
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: GRAPH },
+      createNoopSessionStore({
+        getScenarioOwnerBehaviour: { throws: new Error('read failed') },
+      }),
+    );
+    await drainMicrotasks();
+    expect(serviceMock.saveVersion).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MM P1 (ROADMAP 1.25, item 4) — racing-pointer fix: thread the commit
+// hook's expected-base identity hash into saveVersion's write-time CAS.
+// ---------------------------------------------------------------------------
+describe('racing-pointer CAS threading (ROADMAP 1.25 item 4)', () => {
+  const EXPECTED_HASH = 'e'.repeat(64);
+
+  it('metadata.expectedGraphIdentityHash (string) is threaded verbatim to saveVersion', async () => {
+    setFlag(true);
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: GRAPH, expectedGraphIdentityHash: EXPECTED_HASH },
+      createNoopSessionStore(),
+    );
+    await drainMicrotasks();
+    const req = serviceMock.saveVersion.mock.calls[0]![0] as Record<string, unknown>;
+    expect(req.expected_graph_identity_hash).toBe(EXPECTED_HASH);
+  });
+
+  it('metadata.expectedGraphIdentityHash undefined (uninstrumented path) → key omitted, byte-identical to pre-fix', async () => {
+    setFlag(true);
+    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, createNoopSessionStore());
+    await drainMicrotasks();
+    const req = serviceMock.saveVersion.mock.calls[0]![0] as Record<string, unknown>;
+    expect('expected_graph_identity_hash' in req).toBe(false);
+  });
+
+  it('metadata.expectedGraphIdentityHash null (server read, empty/unparseable base) → collapses to omitted, not literal null', async () => {
+    setFlag(true);
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: GRAPH, expectedGraphIdentityHash: null },
+      createNoopSessionStore(),
+    );
+    await drainMicrotasks();
+    const req = serviceMock.saveVersion.mock.calls[0]![0] as Record<string, unknown>;
+    expect('expected_graph_identity_hash' in req).toBe(false);
+  });
+});
