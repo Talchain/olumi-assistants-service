@@ -451,6 +451,27 @@ const ConfigSchema = z.object({
     // V4_DISABLED on the /v1 routes; =true is what lets V4 execute
     // normally. The name itself is fine (plain "enabled" semantics) — only
     // this comment had it backwards.
+    // V4-TOMBSTONE DEFAULT — INVESTIGATED, NOT FLIPPED (ROADMAP 1.25 hygiene
+    // batch, item 5, Brief G addition, 9 Jul): confirmed the real risk —
+    // neither render.yaml nor render-staging.yaml declares
+    // CEE_PIPELINE_V4_ENABLED, so the live 410 depends entirely on an
+    // out-of-band Render dashboard env var; a fresh deploy or a reset env
+    // var would silently fall back to this `true` default and RE-ENABLE the
+    // tombstoned /v1 pipeline. Flipping the default to `false` (the
+    // "obvious" fix) was attempted and REVERTED: `tests/integration/
+    // orchestrator/route.test.ts` has ~30 cases across its "multi-turn
+    // conversation lifecycle" suite that call `/orchestrate/v1/turn`
+    // WITHOUT mocking this flag, relying on today's `true` default to reach
+    // the V4 pipeline and assert 200 — flipping the default turned every
+    // one of them into a 410, a real regression far outside a hygiene
+    // batch's blast radius (verified: reverting just this one line restores
+    // route.test.ts to green; the failures are not pre-existing flake).
+    // Fixing it properly means auditing and updating every test that
+    // depends on the implicit default, which is a dedicated lane, not a
+    // one-line default flip. Filed as ROADMAP residual: default-flip
+    // CEE_PIPELINE_V4_ENABLED to `false` once route.test.ts's V1 suite is
+    // migrated to explicit flag mocking (mirrors route-v4-disabled-guard.
+    // test.ts's `vi.mock` proxy pattern).
     pipelineV4Enabled: booleanString.default(true),
     orchestratorV5: booleanString.default(false), // ENABLE_V5_ORCHESTRATOR — V5 slice A0 scaffold (contracts + ingress/egress B1 validation only, no TurnExecutor). Route returns 404 when false.
     // CEE_V5_GRAPH_CAS_MODE — A3 graph CAS observe-mode ('off' | 'observe' | 'enforce').
