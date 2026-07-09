@@ -118,7 +118,12 @@ describe('decideNoOpRecovery', () => {
         });
         expect(result.branch).toBe('vague_edit');
         expect(result.intent_class).toBeNull();
-        expect(result.assistantText).toContain('Tell me which factor');
+        // PR #218 smoke follow-up (Fix B) reworded this copy to drop
+        // "factor or edge" — a schema-vocabulary leak the copy contract
+        // forbids (see edit-graph-dispatch.ts NO_OP_VAGUE_EDIT_TEXT). This
+        // assertion was pinned to the pre-#218 string; updated to match the
+        // current, intentional copy.
+        expect(result.assistantText).toContain('Tell me what you want to change');
         expect(result.suggestedActions).toHaveLength(0);
       });
     }

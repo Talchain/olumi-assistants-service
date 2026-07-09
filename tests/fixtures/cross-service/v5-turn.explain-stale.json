@@ -1,10 +1,10 @@
 {
   "response_version": 2,
-  "assistant_text": "These results are from a prior run and may not reflect recent changes to the decision model. Treat any figures below as directional rather than definitive. The London hire option leads in roughly 62% of simulations, driven primarily by deeper domain expertise (~\u00a312K/month higher revenue capture) offset by a longer onboarding ramp.",
+  "assistant_text": "These results may be out of date because the model has changed since the last analysis. Treat any figures below as directional rather than definitive. The London hire option leads in roughly 62% of simulations, driven primarily by deeper domain expertise (~\u00a312K/month higher revenue capture) offset by a longer onboarding ramp.",
   "blocks": [
     {
       "type": "explanation",
-      "narrative": "These results are from a prior run and may not reflect recent changes to the decision model. Treat any figures below as directional rather than definitive. The London hire option leads in roughly 62% of simulations, driven primarily by deeper domain expertise (~\u00a312K/month higher revenue capture) offset by a longer onboarding ramp.",
+      "narrative": "These results may be out of date because the model has changed since the last analysis. Treat any figures below as directional rather than definitive. The London hire option leads in roughly 62% of simulations, driven primarily by deeper domain expertise (~\u00a312K/month higher revenue capture) offset by a longer onboarding ramp.",
       "referenced_option_ids": [
         "opt_london_hire",
         "opt_offshore_bangalore"

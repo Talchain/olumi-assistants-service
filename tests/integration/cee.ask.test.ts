@@ -9,8 +9,12 @@ describe("POST /assist/v1/ask", () => {
   const authHeaders = { "X-Olumi-Assist-Key": "cee-ask-test-key" } as const;
 
   beforeAll(async () => {
-    // Configure API key for tests
+    // Configure API key for tests. LLM_PROVIDER must be stubbed too — the
+    // config default is "openai" (src/config/index.ts), and no OPENAI_API_KEY
+    // is present in this environment; without this, build() throws FATAL
+    // before ever reaching the routes under test (ROADMAP 1.30f investigation).
     vi.stubEnv("ASSIST_API_KEYS", "cee-ask-test-key");
+    vi.stubEnv("LLM_PROVIDER", "fixtures");
     app = await build();
   });
 

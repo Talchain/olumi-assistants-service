@@ -20,14 +20,19 @@ describe("v1 SSE Stream Integration", () => {
   let redisAvailable = false;
 
   beforeAll(async () => {
-    const redis = await getRedis();
-    redisAvailable = redis !== null;
-
+    // Env vars MUST be set before any config.* access (config is cached on
+    // first Proxy property read — see src/config/index.ts). getRedis() reads
+    // config.redis.url internally, so calling it first would freeze the
+    // config with the default LLM_PROVIDER (openai) baked in, before this
+    // block's override ever took effect (ROADMAP 1.30f investigation).
     process.env.LLM_PROVIDER = "fixtures";
     delete process.env.ASSIST_API_KEY;
     delete process.env.ASSIST_API_KEYS;
-
     cleanBaseUrl();
+
+    const redis = await getRedis();
+    redisAvailable = redis !== null;
+
     app = await build();
     await app.ready();
   });

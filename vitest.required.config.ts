@@ -80,25 +80,33 @@ const STANDALONE_TOOL_EXCLUSIONS = ["tools/graph-evaluator/**"];
 // green again" rule above: d1-followup-fixes,
 // turn-executor-explain-precondition-chip, turn-executor-recoverable-handler,
 // chip-click-dispatch, chip-click-dispatch-analysis-ready.
-const REQUIRED_GATE_RED_EXCLUSIONS = [
-  "src/orchestrator-v5/__tests__/turn-executor-failure-responses.test.ts",
-  "src/orchestrator-v5/__tests__/turn-executor-handler.test.ts",
-  "tests/contract/endpoint-feature-matrix.test.ts",
-  "tests/contract/phase2-numeric-format.test.ts",
-  "tests/unit/cee.progressive-degradation.test.ts",
-  "tests/unit/cee.unified-pipeline.checkpoint.test.ts",
-  "tests/unit/cee.unified-pipeline.graceful-degradation.test.ts",
-  "tests/unit/cee.unified-pipeline.orchestrator.test.ts",
-  "tests/unit/orchestrator-v5/handlers/edit-graph-no-op-recovery.test.ts",
-  "tests/unit/orchestrator/artefact-detector.test.ts",
-  "tests/unit/pipeline-shape.test.ts",
-  "tests/unit/request-timing.test.ts",
-  "tests/unit/threshold-sweep-orchestrator-resilience.test.ts",
-  "tests/unit/unified-pipeline.signal-fix.test.ts",
-  "tests/unit/v5-journey-replay/explain-leader-stale-chips.test.ts",
-  "tests/unit/v5-journey-replay/what-changed-denial.test.ts",
+// 2026-07-09 (ROADMAP 1.13 test-baseline-hygiene lane): all 16 remaining
+// entries fixed/verified green and removed —
+//   - 4 already green (verified stale exclusions, no code change needed):
+//     turn-executor-failure-responses, turn-executor-handler,
+//     artefact-detector, request-timing.
+//   - 12 fixed (RED→GREEN, test-only):
+//     endpoint-feature-matrix + phase2-numeric-format (stale copy/fixture
+//     vs the now-canonical STALENESS_PREFIX and the deliberate near-tie
+//     qualitative-margin carve-out in composeWhatWouldFlipFallback);
+//     cee.progressive-degradation, cee.unified-pipeline.checkpoint,
+//     cee.unified-pipeline.graceful-degradation,
+//     cee.unified-pipeline.orchestrator, pipeline-shape,
+//     threshold-sweep-orchestrator-resilience, unified-pipeline.signal-fix
+//     (stale config mock missing `features.diagnosticTraceEnabled`, added
+//     to runUnifiedPipeline after these mocks were written);
+//     edit-graph-no-op-recovery (stale expected copy — PR #218 reworded
+//     the vague-edit text to drop a schema-vocabulary leak, test wasn't
+//     updated); explain-leader-stale-chips + what-changed-denial (fixture
+//     wording now collides with the canonical FORBIDDEN_USER_FACING_PHRASES
+//     list, which the replay harness's coreAssertions() checks before the
+//     specific detector under test — reworded/re-asserted, not weakened).
+// This list is empty. Keep the array (not the whole file) so the next red
+// file has an obvious place to land — see the file-level comment above for
+// the "remove only once genuinely green" rule.
+const REQUIRED_GATE_RED_EXCLUSIONS: string[] = [
   // NOTE: tool tests (incl. the former exact-path `tools/graph-evaluator/tests/
-  // adapters.test.ts` collection error) are now handled by the package-level
+  // adapters.test.ts` collection error) are handled by the package-level
   // STANDALONE_TOOL_EXCLUSIONS above, not enumerated here.
 ];
 
