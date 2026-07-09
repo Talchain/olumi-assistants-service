@@ -196,7 +196,7 @@ describe('dispatchEditGraph — lane 20 goal-target receipt honesty (live 313e7b
     );
   });
 
-  it('persisted-graph proof: the committed graph does NOT register a success target (goal node has no goal_threshold_raw)', async () => {
+  it('ROADMAP 1.19(b) swap-vs-commit: an unbacked goal-target graph write is withheld entirely, not committed lacking the contract', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
       makeLiveGoalValueEditResult(),
     );
@@ -212,15 +212,13 @@ describe('dispatchEditGraph — lane 20 goal-target receipt honesty (live 313e7b
     const commitMock = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
     expect(commitMock).toHaveBeenCalledTimes(1);
     const metadata = commitMock.mock.calls[0]![1];
-    // The graph write DID happen (the live turn's updated_at moved) …
-    expect(metadata.graph).toBeDefined();
-    // … but it does not register a target: the goal node carries the
-    // non-contract `value`, never `goal_threshold_raw`.
+    // Previously this asserted the OPPOSITE (`metadata.graph` defined,
+    // carrying the LLM's non-contract fields) — that was the bug: the
+    // text got swapped for the honest fallback while the unbacked
+    // mutation still persisted. A swap turn must commit NO graph at
+    // all, same as any other non-mutating turn.
+    expect(metadata.graph).toBeUndefined();
     expect(graphRegistersGoalTarget(metadata.graph)).toBe(false);
-    const nodes = (metadata.graph as { nodes: Array<Record<string, unknown>> }).nodes;
-    const goal = nodes.find((n) => n.kind === 'goal')!;
-    expect(goal.goal_threshold_raw).toBeUndefined();
-    expect(goal.goal_threshold).toBeUndefined();
   });
 
   it('RED→GREEN: the false "Success target … set" receipt is swapped for the honest fallback BEFORE commit (wire AND stored copy)', async () => {
@@ -245,6 +243,14 @@ describe('dispatchEditGraph — lane 20 goal-target receipt honesty (live 313e7b
     const commitMock = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
     const committedResponse = commitMock.mock.calls[0]![0];
     expect(committedResponse.assistant_text).toBe(GOAL_TARGET_NOT_SAVED_TEXT);
+
+    // ROADMAP 1.19(b): the function's OWN returned `graph` (threaded by
+    // route-v2 straight into `sendFinalised200`'s `graph` ctx — used for
+    // egress label-resolution AND the diagnostic-trace graph counts) must
+    // also be withheld, not just the persisted write — otherwise the wire
+    // envelope's diagnostics could surface the unbacked mutation even
+    // though nothing was actually saved.
+    expect(out.graph).toBeNull();
   });
 
   it('control: a receipt on an edit that DOES register the target ships untouched', async () => {

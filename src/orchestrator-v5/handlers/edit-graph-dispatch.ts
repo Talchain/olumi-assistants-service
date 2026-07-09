@@ -2398,9 +2398,16 @@ export async function dispatchEditGraph(
     // same object every hash in this dispatch derived from keeps
     // wire freshness, pending-action hashes and the next turn's
     // persisted-graph hash in lockstep.
-    const graphForCommit = effectiveAppliedMutation
+    let graphForCommit = effectiveAppliedMutation
       ? persistedPostEditGraph ?? undefined
       : undefined;
+    // ROADMAP 1.19(b) — swap-vs-commit: set when the goal-target receipt
+    // guard below withholds a graph WRITTEN this turn because it doesn't
+    // back the claim. Also gates the function's RETURNED `graph` (wired
+    // straight to the client by route-v2's `sendFinalised200`, NOT merely
+    // used for internal label-resolution) so the wire never ships the
+    // unbacked mutation alongside the honest "I couldn't register" text.
+    let goalTargetSwapWithheldGraph = false;
     // Lane 20 — goal-target receipt honesty guard (STEP 6.6-class swap
     // discipline for success-target claims). The live 313e7b61 leak: the
     // edit LLM stamped non-contract fields onto the goal node and shipped
@@ -2420,6 +2427,7 @@ export async function dispatchEditGraph(
       persistedGraph: gmFrameBase,
     });
     if (goalReceiptDecision.verdict === 'swap') {
+      const graphWasWrittenThisTurn = graphForCommit !== undefined;
       log.warn(
         {
           event: 'v5.edit_graph.goal_target_receipt_swapped',
@@ -2427,11 +2435,23 @@ export async function dispatchEditGraph(
           scenario_id: payload.scenario_id,
           reason: goalReceiptDecision.reason,
           applied_mutation: effectiveAppliedMutation,
-          graph_committed: graphForCommit !== undefined,
+          graph_committed: graphWasWrittenThisTurn,
+          graph_write_withheld: graphWasWrittenThisTurn,
         },
         'V5 edit_graph — success-target receipt claimed a registration the committed graph does not carry (no goal_threshold_raw on a goal node); swapped for the honest fallback before commit',
       );
       response = { ...response, assistant_text: GOAL_TARGET_NOT_SAVED_TEXT };
+      // Swapping the TEXT for the honest fallback while still persisting
+      // (and returning to the client) the unbacked mutation would commit
+      // junk — the exact live shape that opened this guard (the LLM's
+      // non-contract fields on the goal node). Withhold the write AND the
+      // wire graph entirely so stored/returned state matches the honest
+      // "I couldn't register that" text, same as any other turn that
+      // writes no graph.
+      if (graphWasWrittenThisTurn) {
+        graphForCommit = undefined;
+        goalTargetSwapWithheldGraph = true;
+      }
     }
     // V5 P0 — when the early-emit intercept or the no-op recovery
     // produced a refreshed `proposed_concept` pending action, persist
@@ -2547,8 +2567,15 @@ export async function dispatchEditGraph(
       // the raw merged object. Null when no successful applied
       // mutation, so route-v2 doesn't stamp a non-persisted graph
       // onto the wire envelope. Lane 8: EFFECTIVE predicate — a GM-live
-      // blocked mutation never surfaces its unpersisted graph.
-      graph: effectiveAppliedMutation ? editResult.appliedGraph ?? null : null,
+      // blocked mutation never surfaces its unpersisted graph. ROADMAP
+      // 1.19(b): also null when the goal-target receipt guard withheld
+      // this turn's graph write (`goalTargetSwapWithheldGraph`) — the
+      // SAME predicate that gates the actual commit above, so a swapped
+      // turn never surfaces its unpersisted mutation here either.
+      graph:
+        effectiveAppliedMutation && !goalTargetSwapWithheldGraph
+          ? editResult.appliedGraph ?? null
+          : null,
       freshness,
     };
   } catch (err) {

@@ -38,8 +38,10 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
   formatConstraintAdded,
+  formatConstraintUnchanged,
   formatConstraintUpdated,
   formatGoalTargetSet,
+  formatGoalTargetUnchanged,
 } from './d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
@@ -405,16 +407,30 @@ export function createAddConstraintHandler(): HandlerFn {
       };
       // Goal-target sets get the honest target-naming receipt (the
       // threshold IS stamped in the committed write above); everything
-      // else keeps the existing constraint copy byte-for-byte.
+      // else keeps the existing constraint copy byte-for-byte. ROADMAP
+      // 1.19(a): a re-registration whose value is IDENTICAL to what is
+      // already persisted (`valueUnchanged`, computed above from a real
+      // diff against `existing`) must not claim "Updated"/"set" — that
+      // borrows the pre-existing threshold/constraint to narrate a
+      // commit that did not happen this turn. The fact channel already
+      // marks this `noop`; the text channel now agrees.
       const assistantText = isGoalTargetSet
-        ? formatGoalTargetSet({
-            goalLabel: targetNode.label,
-            value: params.value,
-            ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
-          })
-        : existing !== undefined
-          ? formatConstraintUpdated(formatInput)
-          : formatConstraintAdded(formatInput);
+        ? valueUnchanged
+          ? formatGoalTargetUnchanged({
+              goalLabel: targetNode.label,
+              value: params.value,
+              ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
+            })
+          : formatGoalTargetSet({
+              goalLabel: targetNode.label,
+              value: params.value,
+              ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
+            })
+        : valueUnchanged
+          ? formatConstraintUnchanged(formatInput)
+          : existing !== undefined
+            ? formatConstraintUpdated(formatInput)
+            : formatConstraintAdded(formatInput);
 
       return {
         assistant_text: assistantText,

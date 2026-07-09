@@ -6297,7 +6297,7 @@ export async function runTurnExecutor(
       // add_constraint, adjust_edge_strength — enumeration pinned by
       // d1-mutated-graph-emitters invariant test); the flip-proposal
       // apply path resolves through the same set_factor_value handler.
-      const graphForCommit = await (async (): Promise<unknown> => {
+      let graphForCommit = await (async (): Promise<unknown> => {
         const mutated = handlerOutcome?.mutated_graph;
         if (mutated === undefined || mutated === null) return mutated;
         let persistedBase: unknown;
@@ -6339,6 +6339,8 @@ export async function runTurnExecutor(
           persistedGraph: context.persistedGraph ?? null,
         });
         if (goalReceiptDecision.verdict === 'swap') {
+          const graphWasWrittenThisTurn =
+            graphForCommit !== null && graphForCommit !== undefined;
           log.warn(
             {
               event: 'v5.turn_executor.goal_target_receipt_swapped',
@@ -6346,11 +6348,27 @@ export async function runTurnExecutor(
               scenario_id: context.session_id,
               handler_id: handlerIdForCommit ?? null,
               reason: goalReceiptDecision.reason,
-              graph_committed: graphForCommit !== null && graphForCommit !== undefined,
+              graph_committed: graphWasWrittenThisTurn,
+              graph_write_withheld: graphWasWrittenThisTurn,
             },
             'V5 TurnExecutor — success-target receipt claimed a registration the commit graph does not carry (no goal_threshold_raw on a goal node); swapped for the honest fallback before commit',
           );
           composedOk = { ...composedOk, assistant_text: GOAL_TARGET_NOT_SAVED_TEXT };
+          // ROADMAP 1.19(b) — swap-vs-commit: swapping the TEXT for the
+          // honest fallback while still persisting the graph this turn's
+          // (unbacked) mutation produced would commit junk — the exact
+          // live shape that opened this guard (LLM stamped non-contract
+          // fields onto the goal node). A turn whose registration claim
+          // was swapped for dishonesty must not durably write the graph
+          // that failed to back it; withhold the write entirely so the
+          // stored/committed state matches the honest "I couldn't
+          // register that" text (a non-mutating turn, same as any other
+          // turn that writes no graph). Only applies when a graph WAS
+          // produced this turn — a swap driven by `persistedGraph` not
+          // backing a DESCRIBE-only claim has no graph to withhold.
+          if (graphWasWrittenThisTurn) {
+            graphForCommit = undefined;
+          }
         }
       }
       // Proposal-capture hash — the graph this turn reasoned over
