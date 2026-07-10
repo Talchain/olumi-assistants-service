@@ -43,6 +43,7 @@ describe('bucketFor — bucket classification', () => {
       'NO_EFFECTIVE_PATH_TO_GOAL', 'IDENTICAL_OPTIONS', 'GRAPH_DISCONNECTED',
       'OPTION_NO_INTERVENTIONS', 'LOW_EFFECTIVE_SAMPLES',
       'DEGENERATE_OPTION_ZERO_VARIANCE', 'HIGH_TIE_RATE',
+      'SAMPLES_REDUCED_FOR_COMPLEXITY',
     ];
     for (const code of expectedS) {
       expect(bucketFor(code)).toBe('S');
@@ -64,11 +65,14 @@ describe('bucketFor — bucket classification', () => {
     }
   });
 
-  it('classification totals match the plan: D=20, U=3, S=9 (across 31 ISL codes — uncoded is treated D by default)', () => {
+  it('classification totals match the plan: D=19 explicit, U=3, S=10 (seam item 3 added SAMPLES_REDUCED_FOR_COMPLEXITY to S)', () => {
     const counts = { D: 0, U: 0, S: 0 };
     for (const b of Object.values(CRITIQUE_BUCKETS)) counts[b]++;
     expect(counts.U).toBe(3);
-    expect(counts.S).toBe(9);
+    // Was 9 in the original 31-ISL-code plan; SAMPLES_REDUCED_FOR_COMPLEXITY
+    // (PLoT-authored degraded-success disclosure, #212/#209) was consciously
+    // promoted to S per the CRITIQUE_BUCKETS honest-surfacing ruling.
+    expect(counts.S).toBe(10);
     // 19 explicit D entries; the captured uncoded leak hits the
     // fail-safe default (no entry in the map → bucketFor returns 'D').
     expect(counts.D).toBe(19);
@@ -144,6 +148,13 @@ describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', ()
     const out = S_BUCKET_REPLACEMENTS.LOW_EFFECTIVE_SAMPLES!(CTX, {});
     expect(out).toBe(
       'This analysis is less reliable than usual, so treat the result as a signal to check rather than a settled answer.',
+    );
+  });
+
+  it('SAMPLES_REDUCED_FOR_COMPLEXITY (seam item 3 — PLoT degraded-success disclosure)', () => {
+    const out = S_BUCKET_REPLACEMENTS.SAMPLES_REDUCED_FOR_COMPLEXITY!(CTX, {});
+    expect(out).toBe(
+      'Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.',
     );
   });
 

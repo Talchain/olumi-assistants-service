@@ -190,7 +190,35 @@ export class PLoTTimeoutError extends Error {
 export interface V2RunError {
   analysis_status: string;
   status_reason?: string;
-  critiques?: Array<{ message?: string; [k: string]: unknown }>;
+  // `code` / `user_message` are PLoT's typed-failure discriminators (PLoT #212
+  // envelope: GRAPH_TOO_COMPLEX, ISL_TIMEOUT, PLOT_INTERNAL_ERROR, …). Typed
+  // here so consumers can key honest copy off them; runtime was already
+  // passthrough via the index signature.
+  critiques?: Array<{ message?: string; code?: string; user_message?: string; [k: string]: unknown }>;
+}
+
+/**
+ * A 200 body that fails the minimal response shape because PLoT deliberately
+ * sent its typed failure envelope (analysis_status 'failed'/'blocked', usually
+ * without results) is NOT malformed. Extract the envelope so callers can
+ * surface honest, code-keyed copy. Returns null for anything else — bodies
+ * with no analysis_status keep the PLOT_RESPONSE_MALFORMED classification.
+ */
+function extractTypedFailureEnvelope(raw: unknown): V2RunError | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const rec = raw as Record<string, unknown>;
+  const status = rec.analysis_status;
+  if (status !== 'failed' && status !== 'blocked') return null;
+  const critiques = Array.isArray(rec.critiques)
+    ? (rec.critiques.filter(
+        (c): c is Record<string, unknown> => c !== null && typeof c === 'object',
+      ) as V2RunError['critiques'])
+    : undefined;
+  return {
+    analysis_status: status,
+    status_reason: typeof rec.status_reason === 'string' ? rec.status_reason : undefined,
+    critiques,
+  };
 }
 
 // ============================================================================
@@ -552,6 +580,45 @@ class PLoTClientImpl implements PLoTClient {
         // P0-2: Validate response structure before accepting
         const parsed = V2RunResponseMinimal.safeParse(raw);
         if (!parsed.success) {
+          // Typed-failure carve-out (seam item 3): a failed/blocked envelope
+          // with no usable results is PLoT's deliberate typed failure shape,
+          // not a malformed response. Carry it on the error so run-analysis
+          // can dual-carry the critique codes into user-facing copy. Bodies
+          // WITHOUT analysis_status stay classified PLOT_RESPONSE_MALFORMED
+          // below — never loosen that pin for genuinely malformed bodies.
+          const typedFailure = extractTypedFailureEnvelope(raw);
+          if (typedFailure) {
+            log.warn(
+              {
+                request_id: requestId,
+                elapsed_ms: elapsedMs,
+                analysis_status: typedFailure.analysis_status,
+                status_reason: typedFailure.status_reason,
+                critique_codes: typedFailure.critiques?.map((c) => c.code).filter(Boolean),
+              },
+              'PLoT /v2/run returned typed failure envelope (no results)',
+            );
+            const reason =
+              typedFailure.status_reason ??
+              typedFailure.critiques?.[0]?.message ??
+              'no reason given';
+            const failErr = new PLoTError(
+              `PLoT run analysis ${typedFailure.analysis_status}: ${reason}`,
+              200,
+              'run',
+              elapsedMs,
+              requestId,
+            );
+            failErr.v2RunError = typedFailure;
+            failErr.orchestratorErrorOverride = {
+              code: 'TOOL_EXECUTION_FAILED',
+              message: 'Analysis did not complete. Try running the analysis again.',
+              tool: 'run_analysis',
+              recoverable: true,
+              suggested_retry: 'Try running the analysis again.',
+            };
+            throw failErr;
+          }
           log.warn(
             {
               request_id: requestId,

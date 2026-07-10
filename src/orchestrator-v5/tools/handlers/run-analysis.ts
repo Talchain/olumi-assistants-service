@@ -576,12 +576,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             );
           }
         }
+        // Dual-carry (seam item 3): when the PLoTError carries the typed
+        // failure envelope, lift the critique codes into details so the
+        // composer can key honest copy off them. A failed(200) envelope
+        // (plot-client typed-failure carve-out) routes to `analysis_failed`,
+        // unifying "PLoT said failed" with the parsed-envelope path — both
+        // are fatal, so this is not a recoverability change. 422s keep
+        // `plot_error` (the 422→recoverable reroute is War-Room-gated).
+        const isTypedFailedEnvelope =
+          runError.status !== 422 && v2Err?.analysis_status === 'failed';
         throw new HandlerInvocationFailedError(
           `PLoT returned error: ${runError.message}`,
           {
-            cause_kind: 'plot_error',
+            cause_kind: isTypedFailedEnvelope ? 'analysis_failed' : 'plot_error',
             retryable: true,
-            details: { ...errorDetailsBase },
+            details: { ...errorDetailsBase, ...extractPlotFailureDetails(v2Err) },
             cause: runError,
           },
         );
@@ -674,6 +683,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         retryable: statusOutcome.retryable,
         details: {
           handler_id: 'run_analysis',
+          // Dual-carry (seam item 3): parsed failed/blocked envelopes keep
+          // their critique codes so the composer can surface honest copy.
+          ...extractPlotFailureDetails(response),
           ...(analysisStatus !== null ? { analysis_status: analysisStatus } : {}),
           ...(timingsEnabled && fatalTimings.plot_request_ms !== undefined
             ? { plot_request_ms: fatalTimings.plot_request_ms }
@@ -815,6 +827,47 @@ function readAnalysisStatus(response: V2RunResponseEnvelope): string | null {
   const raw = (response as Record<string, unknown>).analysis_status;
   if (typeof raw === 'string' && raw.length > 0) return raw;
   return null;
+}
+
+/**
+ * Dual-carry of PLoT's typed failure codes (seam item 3): safely extract the
+ * critique codes / status fields from a V2RunError or a raw PLoT envelope
+ * into `plot_*`-prefixed HandlerFailureDetails keys. The composer keys
+ * honest, CEE-authored copy off `plot_primary_code`; `plot_user_message` is
+ * PLoT-authored prose carried for DIAGNOSTICS ONLY — it must never be
+ * rendered (no prose-safety gate exists on this path). Returns {} for
+ * shapes with nothing to carry, so unknown-error fallbacks stay unchanged.
+ */
+function extractPlotFailureDetails(source: unknown): Record<string, unknown> {
+  if (source === null || typeof source !== 'object') return {};
+  const rec = source as Record<string, unknown>;
+  const critiques = Array.isArray(rec.critiques) ? rec.critiques : [];
+  const codes = critiques
+    .map((c) =>
+      c !== null && typeof c === 'object' && typeof (c as Record<string, unknown>).code === 'string'
+        ? ((c as Record<string, unknown>).code as string)
+        : null,
+    )
+    .filter((c): c is string => c !== null && c.length > 0);
+  const userMessage = critiques
+    .map((c) =>
+      c !== null && typeof c === 'object' && typeof (c as Record<string, unknown>).user_message === 'string'
+        ? ((c as Record<string, unknown>).user_message as string)
+        : null,
+    )
+    .find((m): m is string => m !== null && m.length > 0);
+  const statusReason = typeof rec.status_reason === 'string' && rec.status_reason.length > 0
+    ? rec.status_reason
+    : undefined;
+  const analysisStatus = typeof rec.analysis_status === 'string' && rec.analysis_status.length > 0
+    ? rec.analysis_status
+    : undefined;
+  return {
+    ...(codes.length > 0 ? { plot_critique_codes: codes, plot_primary_code: codes[0] } : {}),
+    ...(userMessage !== undefined ? { plot_user_message: userMessage } : {}),
+    ...(statusReason !== undefined ? { plot_status_reason: statusReason } : {}),
+    ...(analysisStatus !== undefined ? { plot_analysis_status: analysisStatus } : {}),
+  };
 }
 
 // ============================================================================
