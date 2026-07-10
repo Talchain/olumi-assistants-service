@@ -149,28 +149,67 @@ export type GraphNodeLookup = ReadonlyMap<string, GraphNodeRef>;
 
 /**
  * Build a lookup table from `fact.result.enrichment.graph.{nodes,edges}[]`
- * for ID-to-label-and-kind resolution. Defensive: skips nodes/edges missing
- * required fields and skips nodes whose `kind` is outside the v1.3
- * `TargetRefKind` union.
+ * for ID-to-label-and-kind resolution, falling back to the persisted
+ * scenario snapshot graph when the enrichment source is absent or empty.
+ * Defensive: skips nodes/edges missing required fields and skips nodes
+ * whose `kind` is outside the v1.3 `TargetRefKind` union.
+ *
+ * R4 lookup fix (live-verified at deployed build 441dc0d): the PLoT
+ * /v2/run envelope stored byte-for-byte as `fact.result.enrichment`
+ * (run-analysis.ts) has NO top-level `graph` key, so the enrichment
+ * source yields ZERO entries on every production run — every Phase 3
+ * block shipped `target_refs: []` (or dropped at its fail-closed lookup
+ * gate) and the flag-gated ui_directive emitter could never resolve its
+ * option target. `fallbackGraph` is the persisted graph CEE already
+ * holds for the turn (`EnrichedTurnContext.persistedGraph` /
+ * `RunAnalysisScenarioSnapshot.rawPersistedGraph` — the canvas/CEE shape:
+ * nodes with id/kind/label, edges with `from`/`to`). It is consulted
+ * ONLY when the enrichment graph produced no entries; a present,
+ * non-empty enrichment graph stays authoritative. Non-TargetRefKind
+ * node kinds in the persisted shape (`action`, `decision`) are skipped
+ * by the same `isTargetRefKind` gate. With neither source the lookup is
+ * empty and every consumer fails closed exactly as before.
  *
  * Edge handling (round-4 review non-blocking follow-up): edges live under
- * `graph.edges[]` with `id`, `from_node_id`, `to_node_id`, and optionally
- * `label`. When `label` is missing, derive a human-readable label from
- * the endpoint node labels as `"<from> → <to>"`. When endpoints can't be
- * resolved (graph drift), skip the edge — the resulting scenario_context
- * card will drop downstream rather than emit an unresolved edge reference.
+ * `graph.edges[]` with `id`, endpoint ids (`from_node_id`/`to_node_id` in
+ * the enrichment shape, `from`/`to` in the persisted shape), and
+ * optionally `label`. When `label` is missing, derive a human-readable
+ * label from the endpoint node labels as `"<from> → <to>"`. When
+ * endpoints can't be resolved (graph drift), skip the edge — the
+ * resulting scenario_context card will drop downstream rather than emit
+ * an unresolved edge reference.
  */
 export function buildGraphNodeLookup(
   fact: RunAnalysisHandlerFact,
+  fallbackGraph?: unknown,
 ): GraphNodeLookup {
   const lookup = new Map<string, GraphNodeRef>();
   const enrichment = readRecord(
     (fact.result as Record<string, unknown>).enrichment,
   );
-  if (enrichment === null) return lookup;
-  const graph = readRecord(enrichment.graph);
-  if (graph === null) return lookup;
+  const enrichmentGraph = enrichment === null ? null : readRecord(enrichment.graph);
+  if (enrichmentGraph !== null) {
+    populateGraphNodeLookup(lookup, enrichmentGraph);
+  }
+  if (lookup.size > 0) return lookup;
 
+  const fallback = readRecord(fallbackGraph);
+  if (fallback !== null) {
+    populateGraphNodeLookup(lookup, fallback);
+  }
+  return lookup;
+}
+
+/**
+ * Populate `lookup` from a `{nodes[], edges[]}` graph record. Shared by
+ * the enrichment source and the persisted-snapshot fallback — the two
+ * shapes differ only in the edge endpoint field names, which are read
+ * permissively here (`from_node_id`/`to_node_id` first, then `from`/`to`).
+ */
+function populateGraphNodeLookup(
+  lookup: Map<string, GraphNodeRef>,
+  graph: Record<string, unknown>,
+): void {
   // Pass 1: nodes. Required for both node lookups AND edge label
   // derivation.
   const nodes = graph.nodes;
@@ -187,11 +226,11 @@ export function buildGraphNodeLookup(
     }
   }
 
-  // Pass 2: edges. Round-4 non-blocking follow-up — in production
-  // `enrichment.graph` carries edges under `graph.edges[]`, not as
-  // `kind: 'edge'` entries in `graph.nodes[]`. Without this pass, every
-  // scenario_context card would drop in production (the round-3
-  // fail-closed gate is correct; the lookup just needed to be wider).
+  // Pass 2: edges. Round-4 non-blocking follow-up — edges live under
+  // `graph.edges[]`, not as `kind: 'edge'` entries in `graph.nodes[]`.
+  // Without this pass, every scenario_context card would drop (the
+  // round-3 fail-closed gate is correct; the lookup just needed to be
+  // wider).
   const edges = graph.edges;
   if (Array.isArray(edges)) {
     for (const raw of edges) {
@@ -207,9 +246,15 @@ export function buildGraphNodeLookup(
         continue;
       }
       // Derive `from → to` from canonical endpoint node labels. Skip if
-      // either endpoint isn't in the node lookup (graph drift).
-      const fromId = typeof e.from_node_id === 'string' ? e.from_node_id : null;
-      const toId = typeof e.to_node_id === 'string' ? e.to_node_id : null;
+      // either endpoint isn't in the node lookup (graph drift). Endpoint
+      // ids: `from_node_id`/`to_node_id` (enrichment shape) or `from`/`to`
+      // (persisted GraphStateIngress shape).
+      const fromId = typeof e.from_node_id === 'string' ? e.from_node_id
+        : typeof e.from === 'string' ? e.from
+        : null;
+      const toId = typeof e.to_node_id === 'string' ? e.to_node_id
+        : typeof e.to === 'string' ? e.to
+        : null;
       if (fromId === null || toId === null) continue;
       const fromRef = lookup.get(fromId);
       const toRef = lookup.get(toId);
@@ -221,8 +266,6 @@ export function buildGraphNodeLookup(
       });
     }
   }
-
-  return lookup;
 }
 
 /**

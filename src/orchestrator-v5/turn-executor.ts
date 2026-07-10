@@ -5784,6 +5784,23 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         suggested_actions: executeChips,
+        // R4 lookup fix — persisted-snapshot fallback for graph-node
+        // ID→{label,kind} resolution. The PLoT envelope on the fact has no
+        // `graph` key, so without this the Phase 3 target_refs are always
+        // empty and the flag-gated ui_directive can never resolve its
+        // option target. Already loaded for the turn by buildTurnContext;
+        // no extra DB read.
+        persistedGraph: context.persistedGraph,
+        // Review F1 — hash gate for the current-turn fallback: the
+        // canonical analysis-affecting hash of context.persistedGraph,
+        // already computed above for the freshness derivation. The
+        // run_analysis handler does its OWN persisted read at execution
+        // time; compose only consults the turn-start snapshot when this
+        // hash equals the fact's `graph_hash_at_run` — a concurrent
+        // writer between the two reads makes them diverge → compose
+        // fails closed to pre-fix behaviour instead of resolving stale
+        // labels. No new hashing here.
+        persistedGraphHash: currentAnalysisGraphHashForTurn,
         // PR 3 — thread lifecycle context so the composer can serve
         // Phase 3 blocks from prior_facts when the current turn produced
         // no run_analysis fact, or emit the stale-safe rerun coaching

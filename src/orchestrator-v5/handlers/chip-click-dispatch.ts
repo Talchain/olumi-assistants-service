@@ -659,6 +659,21 @@ export async function dispatchChipClickRunAnalysis(
     const confirmationText = typeof decl?.confirmation_template === 'function'
       ? decl.confirmation_template(outcome)
       : (decl?.confirmation_template ?? outcome.assistant_text);
+    // Review F1 — hash gate for the compose fallback. On this path the
+    // snapshot passed below is the EXACT object the handler hashed into
+    // `graph_hash_at_run` (one-shot reader, no second DB read), so the
+    // fact's own hash gates the fallback open by construction; passing it
+    // keeps the compose-side gate uniform with the routed path (where the
+    // handler and the turn context read the graph separately).
+    const composedRunFact = enrichedFacts.find(
+      (f) => f.fact_type === 'run_analysis',
+    );
+    const composedRunFactGraphHash =
+      composedRunFact !== undefined &&
+      composedRunFact.fact_type === 'run_analysis' &&
+      typeof composedRunFact.result.graph_hash_at_run === 'string'
+        ? composedRunFact.result.graph_hash_at_run
+        : null;
     let response = composeToolCallResponse({
       orientation: '',  // no Sonnet orientation on chip clicks.
       confirmation: confirmationText,
@@ -666,6 +681,13 @@ export async function dispatchChipClickRunAnalysis(
       stage: payload.stage,
       handlerFacts: enrichedFacts,
       suggested_actions: chipClickSuggestedActions,
+      // R4 lookup fix — persisted-snapshot fallback for graph-node
+      // ID→{label,kind} resolution (Phase 3 target_refs + the flag-gated
+      // ui_directive). The snapshot is the SAME reference the handler ran
+      // against (single-source-of-truth pre-load above); on the injected-
+      // registry test path fall back to the turn context's persisted graph.
+      persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+      persistedGraphHash: composedRunFactGraphHash,
     });
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.
@@ -1048,6 +1070,11 @@ async function dispatchChipClickNoopExplanation(
       stage: payload.stage,
       handlerFacts: outcome.handler_facts,
       suggested_actions: noopSuggestedActions,
+      // R4 lookup fix — persisted-snapshot fallback so the FRESH lifecycle
+      // rebuild below resolves non-empty Phase 3 target_refs (the PLoT
+      // envelope on the prior fact carries no `graph` key). Loaded by
+      // buildTurnContext for this turn; no extra DB read.
+      persistedGraph: context.persistedGraph,
       // PR 3 — explain/flip handlers do NOT produce a run_analysis fact,
       // so the composer's lifecycle branch 2 fires: it walks prior_facts
       // for the canonical run_analysis fact (selected by the
