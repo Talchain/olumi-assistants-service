@@ -16,6 +16,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 
 import { selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
 import { TelemetryEvents, emit } from '../utils/telemetry.js';
+import { config } from '../config/index.js';
 import type { SuggestedAction } from './compose/types.js';
 import {
   buildCoachingBlocks,
@@ -26,6 +27,7 @@ import {
   buildStaleRerunCoachingBlock,
   type BlockBuildCtx,
 } from './compose/phase3-blocks.js';
+import { buildRecommendedOptionUiDirective } from './compose/ui-directive.js';
 
 export interface ComposeInput {
   assistant_text: string;
@@ -197,6 +199,7 @@ function buildBlocksFromFacts(
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
+  let uiDirectiveEmitted = false;
 
   for (const fact of facts) {
     if (fact.fact_type === 'run_analysis') {
@@ -208,6 +211,22 @@ function buildBlocksFromFacts(
       if (typeof graphHash === 'string' && graphHash.length > 0) {
         const freshBlocks = rebuildPhase3BlocksFresh(fact, graphHash);
         blocks.push(...freshBlocks);
+
+        // R4 CEE-half slice 1 — flag-gated deterministic ui_directive
+        // (CEE_UI_DIRECTIVE_EMIT, default OFF; flag-off skips this block
+        // entirely = byte-identical base behaviour). CURRENT-TURN fact
+        // with a verified graph_hash_at_run ONLY — the prior-fact
+        // lifecycle branch below never emits a directive, and the
+        // fail-closed conditions (no recommendation / unresolvable or
+        // non-option target / noop) live in the builder. At most ONE
+        // directive per turn in this slice.
+        if (!uiDirectiveEmitted && config.features.uiDirectiveEmit) {
+          const directive = buildRecommendedOptionUiDirective(fact);
+          if (directive !== null) {
+            blocks.push(directive);
+            uiDirectiveEmitted = true;
+          }
+        }
         if (lifecycle !== undefined) {
           emitLifecycle(lifecycle, {
             lifecycle_state: 'emitted_fresh',

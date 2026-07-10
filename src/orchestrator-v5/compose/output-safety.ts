@@ -319,8 +319,10 @@ function sanitiseBlock(block: Block, collect: (s: string) => string): Block {
       // 0.15.0 (seamlessness R4). User-facing copy field: optional note.
       // verb (enum), targets (TargetRef[] — ids are intentional targeting,
       // same treatment as target_refs on Phase-3 blocks), duration_ms
-      // (number) — typed machine fields, untouched. NOT emitted by CEE yet —
-      // dormant-but-armed for the emitter lane.
+      // (number) — typed machine fields, untouched. Emitted by the R4
+      // slice-1 emitter (compose/ui-directive.ts, flag-gated by
+      // CEE_UI_DIRECTIVE_EMIT, default OFF); that slice never populates
+      // `note`, so this scrub stays fail-closed for future slices that do.
       return {
         ...block,
         ...(block.note !== undefined ? { note: collect(block.note) } : {}),

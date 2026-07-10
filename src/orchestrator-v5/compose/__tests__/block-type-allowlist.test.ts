@@ -37,10 +37,12 @@
  *     builders and asserts their emitted types ⊆ {review_card, coaching,
  *     evidence} ⊆ allowlist. Behaviourally-exercised emission sites are the
  *     Phase-3 builders; the other emitters (analysis_result/graph_patch via
- *     compose.ts, draft_graph via draft dispatch, text/explanation/comparison/
- *     flip_analysis via the direct-answer composers, error via failure paths)
- *     are covered GLOBALLY by GUARD 1 (type system) + GUARD 2 (egress walker),
- *     not behaviourally driven here.
+ *     compose.ts, ui_directive via compose.ts behind CEE_UI_DIRECTIVE_EMIT —
+ *     behaviourally driven in ui-directive-emit.test.ts — draft_graph via
+ *     draft dispatch, text/explanation/comparison/flip_analysis via the
+ *     direct-answer composers, error via failure paths) are covered GLOBALLY
+ *     by GUARD 1 (type system) + GUARD 2 (egress walker), not behaviourally
+ *     driven here.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -79,19 +81,43 @@ const FROZEN_V5_BLOCK_TYPES = [
   'graph_patch',
   'review_card',
   'text',
+  // 0.15.0 / seamlessness R4 (CEE half, slice 1) — MOVED here from
+  // CONTRACT_PRESENT_NOT_YET_SURFACED per this file's surfacing protocol.
+  // §2 gate status at the move (v5-dgai-boundary-and-surfacing-gates.md §2,
+  // historical — file exists only in git history at bb52d7545):
+  //   1. contract          — SATISFIED (0.15.0 wave, olumi-schemas PR #7;
+  //                          adopted by CEE PR #405).
+  //   2. DGAI parser        — NOT YET (R4 UI-half lane).
+  //   3. DGAI mapper        — NOT YET (R4 UI-half lane).
+  //   4. renderer/consumer  — NOT YET (R4 UI-half lane).
+  //   5. visibility tests   — NOT YET (R4 UI-half lane).
+  //   6. degrade behaviour  — CEE-side specified+tested (fail-closed emitter
+  //                          + egress scrub case + strict-schema
+  //                          validate-before-emit, see ui-directive-emit
+  //                          .test.ts); DGAI-side = #187 unknown-block
+  //                          tolerance (tolerated-and-dropped, safe).
+  // The §2 rule guards against CEE *emitting* an unrenderable type. This
+  // entry is therefore DOUBLE-GATED: the only emission site
+  // (compose.ts::buildBlocksFromFacts → compose/ui-directive.ts) is behind
+  // CEE_UI_DIRECTIVE_EMIT (default OFF, absent from all deploy configs —
+  // ships dark), so deployed behaviour is unchanged until the flag is
+  // deliberately set AFTER gates 2–5 land in DGAI.
+  'ui_directive',
 ] as const;
 
 type FrozenBlockType = (typeof FROZEN_V5_BLOCK_TYPES)[number];
 
 // Contract-present but NOT yet cleared for CEE emission. The 0.15.0 schema
-// wave (olumi-schemas PR #7, b02ba489c) added these two variants to the
-// boundary `Block` union; the §2 surfacing gate (contract + DGAI parser +
+// wave (olumi-schemas PR #7, b02ba489c) added held_proposal and ui_directive
+// to the boundary `Block` union; ui_directive moved onto the emission
+// allowlist with the flag-gated R4 emitter (see its entry above).
+// held_proposal remains here: its §2 surfacing gate (contract + DGAI parser +
 // mapper + renderer + visibility tests + degrade behaviour) is NOT yet
-// satisfied for either, so they stay OFF the emission allowlist. The egress
-// scrubber (`output-safety.ts::sanitiseBlock`) already covers both
-// (dormant-but-armed). TO SURFACE ONE: satisfy the §2 gate, then MOVE the
-// entry from this list into `FROZEN_V5_BLOCK_TYPES` — do not duplicate it.
-const CONTRACT_PRESENT_NOT_YET_SURFACED = ['held_proposal', 'ui_directive'] as const;
+// satisfied and CEE has no emitter for it. The egress scrubber
+// (`output-safety.ts::sanitiseBlock`) covers it (dormant-but-armed).
+// TO SURFACE IT: satisfy the §2 gate, then MOVE the entry from this list
+// into `FROZEN_V5_BLOCK_TYPES` — do not duplicate it.
+const CONTRACT_PRESENT_NOT_YET_SURFACED = ['held_proposal'] as const;
 
 type NotYetSurfacedBlockType = (typeof CONTRACT_PRESENT_NOT_YET_SURFACED)[number];
 
@@ -296,6 +322,14 @@ function oneBlockOfEachType(): Block[] {
       exercise_kind: 'pre_mortem',
       target_refs: [],
     },
+    {
+      // R4 slice-1 emitter shape: schema-required fields + the option
+      // target only — no `note` (nothing for the egress scrub to rewrite),
+      // no `duration_ms`.
+      type: 'ui_directive',
+      verb: 'highlight',
+      targets: [{ id: 'opt_premium', label: 'Premium Tier', kind: 'option' }],
+    },
   ] as Block[];
 }
 
@@ -304,7 +338,7 @@ function oneBlockOfEachType(): Block[] {
 // ============================================================================
 
 describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
-  it('freezes the emission allowlist to exactly 12 block types (boundary union minus the not-yet-surfaced 0.15.0 pair)', () => {
+  it('freezes the emission allowlist to exactly 13 block types (boundary union minus not-yet-surfaced held_proposal)', () => {
     // Snapshot-style pin (sorted) so the readable list cannot drift silently.
     expect([...FROZEN_V5_BLOCK_TYPES].sort()).toEqual(
       [
@@ -320,13 +354,17 @@ describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
         'graph_patch',
         'review_card',
         'text',
+        // R4 CEE-half slice 1 — flag-gated emitter (CEE_UI_DIRECTIVE_EMIT,
+        // default OFF). See the FROZEN_V5_BLOCK_TYPES entry comment for the
+        // §2 gate status at the move.
+        'ui_directive',
       ].sort(),
     );
   });
 
   it('has no duplicate entries', () => {
     expect(new Set(FROZEN_V5_BLOCK_TYPES).size).toBe(FROZEN_V5_BLOCK_TYPES.length);
-    expect(FROZEN_V5_BLOCK_TYPES.length).toBe(12);
+    expect(FROZEN_V5_BLOCK_TYPES.length).toBe(13);
   });
 
   it('the compile-time union-equality assertion is in force', () => {
@@ -342,15 +380,14 @@ describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
     expect(disjoint).toBe(true);
   });
 
-  it('pins the contract-present-but-not-yet-surfaced set to exactly the 0.15.0 additions', () => {
-    // These two are in the boundary union (0.15.0 wave) but NOT cleared for
-    // CEE emission — the §2 surfacing gate is unsatisfied for both. This pin
-    // makes any silent growth of the "in contract, not surfaced" set a
-    // deliberate decision, mirroring the frozen-allowlist pin above.
-    expect([...CONTRACT_PRESENT_NOT_YET_SURFACED].sort()).toEqual([
-      'held_proposal',
-      'ui_directive',
-    ]);
+  it('pins the contract-present-but-not-yet-surfaced set to exactly held_proposal', () => {
+    // held_proposal is in the boundary union (0.15.0 wave) but NOT cleared
+    // for CEE emission — its §2 surfacing gate is unsatisfied and CEE has no
+    // emitter. ui_directive moved to the frozen allowlist with the R4
+    // flag-gated emitter lane. This pin makes any silent growth of the
+    // "in contract, not surfaced" set a deliberate decision, mirroring the
+    // frozen-allowlist pin above.
+    expect([...CONTRACT_PRESENT_NOT_YET_SURFACED].sort()).toEqual(['held_proposal']);
   });
 });
 

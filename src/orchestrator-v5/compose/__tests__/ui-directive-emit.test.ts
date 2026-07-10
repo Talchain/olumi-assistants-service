@@ -205,7 +205,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, recommended option 
       verb: 'highlight',
       targets: [{ id: 'opt_hire_locally', label: 'Hire locally', kind: 'option' }],
     });
-    expect((block as { targets: unknown[] }).targets).toHaveLength(1);
+    expect((block as unknown as { targets: unknown[] }).targets).toHaveLength(1);
   });
 
   it('carries NO free-text note and NO duration_ms (schema-required fields + target only)', () => {
@@ -313,7 +313,8 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
           selected_fact_index: 0,
           graph_hash_at_run: GRAPH_HASH,
           current_graph_hash: GRAPH_HASH,
-          reason: 'hash_match',
+          reason: 'graph_hash_match',
+          computed_at: '2026-07-10T09:00:00.000Z',
         },
         requestId: 'req-prior-fresh',
         scenarioId: 'scen-uidirective',
@@ -336,7 +337,8 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
           selected_fact_index: 0,
           graph_hash_at_run: GRAPH_HASH,
           current_graph_hash: 'gh_diverged_0002',
-          reason: 'hash_mismatch',
+          reason: 'graph_hash_diverged',
+          computed_at: '2026-07-10T09:00:00.000Z',
         },
         requestId: 'req-prior-stale',
         scenarioId: 'scen-uidirective',

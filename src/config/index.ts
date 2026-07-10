@@ -533,6 +533,22 @@ const ConfigSchema = z.object({
     //       after REPAIR_ONCE.
     // Flag OFF is byte-identical to pre-hardening behaviour on both layers.
     answerTextRequired: booleanString.default(false),
+    // CEE_UI_DIRECTIVE_EMIT — ROADMAP 2.27 / seamlessness R4 (CEE half,
+    // slice 1): flag-gated deterministic `ui_directive` block emitter.
+    // Default OFF; flag-off is byte-identical to pre-slice behaviour (the
+    // emitter call site in compose.ts::buildBlocksFromFacts is skipped
+    // entirely). When true, a successful CURRENT-TURN run_analysis fact
+    // whose recommended option (`leading_option_id`) resolves to an option
+    // node in `enrichment.graph.nodes[]` emits exactly ONE ui_directive
+    // block (verb `highlight`, one option TargetRef, NO free-text `note` —
+    // zero LLM authorship in this slice). Fail-closed: no recommendation /
+    // unresolvable or non-option target / noop fact / missing
+    // graph_hash_at_run / prior-fact lifecycle rebuilds emit nothing.
+    // Ships DARK: the env var is not declared in render*.yaml or the
+    // deployed service config; enablement is deliberate and sequenced
+    // behind the DGAI half of R4 (parser/mapper/renderer — the §2
+    // surfacing gate, see compose/__tests__/block-type-allowlist.test.ts).
+    uiDirectiveEmit: booleanString.default(false),
   }),
 
   // Prompt Cache Configuration
@@ -1119,6 +1135,7 @@ function parseConfig(): Config {
       graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
       answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
+      uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
