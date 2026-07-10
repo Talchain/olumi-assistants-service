@@ -62,6 +62,7 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
 import {
   buildTurnContext,
   loadMostRecentPendingActions,
@@ -793,8 +794,14 @@ function buildBoundarySuggestedActions(
  *
  * Successful (non-rejected) edits return `[]` — the V4 GraphPatchBlock
  * with `operations: PatchOperation[]` does not fit the narrow boundary
- * `graph_patch` operation enum, and the applied graph reaches the UI via
- * `analysis_ready` + the persisted scenarios.graph row.
+ * `graph_patch` operation enum. The applied graph instead reaches the UI
+ * via the top-level `draft_graph` wire field (attached AFTER the commit
+ * succeeds, at the dispatch success return — see applied-graph-emit.ts)
+ * plus the recomputed `analysis_ready` readiness the finaliser stamps.
+ * NOTE (F2-CEE, 1.16 run-3 diagnosis): the previous wording claimed the
+ * graph reached the UI via "the persisted scenarios.graph row" — a
+ * phantom contract. The UI never re-reads scenarios.graph on an edit
+ * turn; its only inline-graph ingestion path is `draft_graph`.
  *
  * COMPATIBILITY NOTE on `error_code: 'INTERNAL_ERROR'` (P0 fix, 2026-05):
  * `BoundaryErrorCode` is a closed enum (olumi-schemas/src/boundary/
@@ -2652,30 +2659,43 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch committed',
     );
+    // V5 H5 (Codex round-2 P1, amended by V5-PERSIST-FIX-01): the
+    // applied graph surfaced downstream is the typed applied graph whose
+    // nodes/edges are IDENTICAL to what was persisted; the persisted
+    // object is the merged superset that additionally preserves
+    // server-authoritative top-level fields (goal_node_id,
+    // options[], …). Route-v2 consumes `graph` only for egress
+    // label-resolution and the diagnostic-trace hash — both read
+    // nodes/edges — so the typed value is kept rather than casting
+    // the raw merged object. Null when no successful applied
+    // mutation, so route-v2 doesn't stamp a non-persisted graph
+    // onto the wire envelope. Lane 8: EFFECTIVE predicate — a GM-live
+    // blocked mutation never surfaces its unpersisted graph. ROADMAP
+    // 1.19(b): also null when the goal-target receipt guard withheld
+    // this turn's graph write (`goalTargetSwapWithheldGraph`) — the
+    // SAME predicate that gates the actual commit above, so a swapped
+    // turn never surfaces its unpersisted mutation here either.
+    const appliedGraphForWire =
+      effectiveAppliedMutation && !goalTargetSwapWithheldGraph
+        ? editResult.appliedGraph ?? null
+        : null;
     return {
-      response,
+      // F2-CEE (1.16 run-3 diagnosis): a successful apply previously
+      // returned `blocks: []` with NO graph payload, assuming the UI reads
+      // `scenarios.graph` — it never does (its only inline-graph ingestion
+      // path is the top-level `draft_graph` field). Attach the applied
+      // post-mutation graph via that EXISTING wire field, same shape as
+      // the draft dispatch emits (see applied-graph-emit.ts), gated by the
+      // SAME predicate as `graph` below so the wire never carries an
+      // unpersisted mutation. Post-commit only — this branch runs after
+      // `commitDirectAnswer` resolved; the commit-failure catch below
+      // returns the response without a graph payload.
+      response: appliedGraphForWire
+        ? { ...response, draft_graph: buildAppliedGraphWireField(appliedGraphForWire) }
+        : response,
       commitPerformed: true,
       analysisReady,
-      // V5 H5 (Codex round-2 P1, amended by V5-PERSIST-FIX-01): the
-      // returned `graph` is the typed applied graph whose nodes/edges
-      // are IDENTICAL to what was persisted; the persisted object is
-      // the merged superset that additionally preserves
-      // server-authoritative top-level fields (goal_node_id,
-      // options[], …). Route-v2 consumes this only for egress
-      // label-resolution and the diagnostic-trace hash — both read
-      // nodes/edges — so the typed value is kept rather than casting
-      // the raw merged object. Null when no successful applied
-      // mutation, so route-v2 doesn't stamp a non-persisted graph
-      // onto the wire envelope. Lane 8: EFFECTIVE predicate — a GM-live
-      // blocked mutation never surfaces its unpersisted graph. ROADMAP
-      // 1.19(b): also null when the goal-target receipt guard withheld
-      // this turn's graph write (`goalTargetSwapWithheldGraph`) — the
-      // SAME predicate that gates the actual commit above, so a swapped
-      // turn never surfaces its unpersisted mutation here either.
-      graph:
-        effectiveAppliedMutation && !goalTargetSwapWithheldGraph
-          ? editResult.appliedGraph ?? null
-          : null,
+      graph: appliedGraphForWire,
       freshness,
     };
   } catch (err) {

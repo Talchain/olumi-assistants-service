@@ -227,6 +227,35 @@ describe('GM held-execute — live mode applies the confirmed hold (RED on base)
     expect(persistedPendings.some((p) => p.chip_id === GM_PROPOSAL_REF)).toBe(false);
   });
 
+  it('F2-CEE: the applied-receipt response carries draft_graph with the post-mutation node (wire projection of the applied graph)', async () => {
+    setGmMode('live');
+    const result = await runTurnExecutor(payload('yes'), 'req-gm-held-draft-graph', {
+      routingAdapter: throwingRoutingAdapter(),
+    });
+    // The commit persisted the mutation (pinned by the sibling test); the
+    // WIRE response must carry the same applied graph via the existing
+    // `draft_graph` field — the UI's only inline-graph ingestion path
+    // (it never re-reads scenarios.graph on an edit turn).
+    const dg = result.response.draft_graph;
+    expect(dg).toBeDefined();
+    const factor = (dg!.nodes as Array<Record<string, unknown>>).find(
+      (n) => n.id === 'fac-marketing',
+    );
+    expect(factor).toBeDefined();
+    expect(factor!.description).toBe('Quarterly ad budget');
+    expect(dg!.node_count).toBe(dg!.nodes.length);
+    expect(dg!.edge_count).toBe(dg!.edges.length);
+  });
+
+  it('F2-CEE negative: a declined resume (hash divergence) ships NO draft_graph — nothing was applied', async () => {
+    setGmMode('live');
+    pendingActionsForRead = [gmHeldPending({ graphHash: 'h_divergent_9999' })];
+    const result = await runTurnExecutor(payload('yes'), 'req-gm-held-superseded-wire', {
+      routingAdapter: throwingRoutingAdapter(),
+    });
+    expect('draft_graph' in result.response).toBe(false);
+  });
+
   it('hash divergence at resume → superseded recovery, NO graph commit', async () => {
     setGmMode('live');
     pendingActionsForRead = [gmHeldPending({ graphHash: 'h_divergent_9999' })];

@@ -63,6 +63,7 @@ import { composeRecoverableValidationResponse } from './compose/recoverable-vali
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
 import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
+import { buildAppliedGraphWireField } from './compose/applied-graph-emit.js';
 import {
   collectValidEntityLabels,
   neutraliseUnvalidatedBoldEntities,
@@ -836,7 +837,9 @@ export async function runTurnExecutor(
   // the diagnostic internally consistent instead of pairing the persisted-graph
   // hash with the request-derived `analysisReadyForTurn`. Null when there is no
   // parseable authority (→ canonical readiness undefined). NOT used for any
-  // wire / chip behaviour — `analysisReadyForTurn` is left unchanged for that.
+  // wire / chip behaviour — `analysisReadyForTurn` carries that, and on a
+  // committed D1 mutation it is re-projected onto the committed graph at the
+  // STEP 7 post-commit block (F3), not from this diagnostic capture.
   let canonicalReadinessGraphForRun: unknown = null;
   // P0 V5 golden-path repair (follow-up): hoisted into the function
   // scope so `buildTurnOutcome` (nested below) can read it. Set when a
@@ -1811,7 +1814,18 @@ export async function runTurnExecutor(
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
-          response = committed.response;
+          // F2-CEE (1.16 run-3 diagnosis): a consented held-apply previously
+          // shipped `blocks: []` with NO graph payload, assuming the UI
+          // re-reads `scenarios.graph` — it never does. Attach the applied
+          // post-mutation graph via the EXISTING `draft_graph` wire field
+          // (the UI's only inline-graph ingestion path), same shape as the
+          // draft dispatch emits (see applied-graph-emit.ts). Post-commit
+          // only: a failed commit (catch below) never advertises
+          // unpersisted state.
+          response = {
+            ...committed.response,
+            draft_graph: buildAppliedGraphWireField(outcome.appliedGraph),
+          };
           // Post-commit honesty plumbing: the mutation is durable, so the
           // turn outcome reports graph_mutated, the structural-claim guard
           // accepts the receipt, readiness reflects the applied graph, and
@@ -5723,8 +5737,11 @@ export async function runTurnExecutor(
       // from the same authority keeps the diagnostic internally consistent.
       // `undefined` when there is no parseable authority (persisted graph
       // unrecoverable / unparseable, or no graph) → canonical status null, never
-      // a false `ready`. `analysisReadyForTurn` is left UNCHANGED for the wire /
-      // chip behaviour.
+      // a false `ready`. `analysisReadyForTurn` is left unchanged HERE — the
+      // pre-mutation value still drives this turn's chips — but on a committed
+      // D1 mutation the WIRE value is re-projected onto the committed graph at
+      // the STEP 7 post-commit block (F3), so `analysis_ready` never pairs a
+      // post-mutation `current_graph_hash` with pre-mutation interventions.
       // Readiness from the same authority as the freshness hash (see
       // deriveCanonicalReadiness). On cold-start the authority IS the request
       // graph, so `analysisReadyForTurn` (the identical parse) is reused;
@@ -6630,6 +6647,46 @@ export async function runTurnExecutor(
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
       response = committed.response;
+      // F3 (response projection, 1.16 run-3 diagnosis) — post-commit honesty
+      // plumbing for the routed D1 execute path, parity with
+      // `commitGmHeldResume` above. The commit just durably persisted
+      // `graphForCommit` (the merged POST-mutation graph), and `freshness`
+      // was already re-derived from the post-mutation hash at the
+      // post-handler block — so the wire's
+      // `analysis_ready.current_graph_hash` reflects the committed graph.
+      // But `analysisReadyForTurn` (the readiness payload the finaliser
+      // stamps as `analysis_ready`, carrying the option interventions) and
+      // `effectiveTurnGraph` (the egress label graph + the diagnostic
+      // trace's `correlation_ids.graph_hash`) still held their PRE-mutation
+      // values from the per-turn parse at STEP 0. Proven live consequence:
+      // the wire paired a post-mutation `current_graph_hash` with
+      // pre-mutation option interventions, so the canvas showed stale
+      // absolutes (£320k/£80k) while the DB held the correct renormalised
+      // values. Re-project both onto the committed graph AFTER the commit
+      // succeeds — a failed commit (the catch below) never advertises
+      // unpersisted state, same rule as the GM-held path.
+      if (graphForCommit !== null && graphForCommit !== undefined) {
+        const committedGraphParse = GraphV3.safeParse(graphForCommit);
+        if (committedGraphParse.success) {
+          effectiveTurnGraph = committedGraphParse.data;
+          analysisReadyForTurn = computeStructuralReadiness(
+            committedGraphParse.data,
+          );
+        } else {
+          // Should be unreachable: D1 handlers GraphV3-validate the mutated
+          // graph and the persistence merge only restores top-level fields.
+          // Fail open to the pre-mutation projection (the pre-fix behaviour)
+          // rather than dropping readiness from the wire, but say so loudly.
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              handler_id: handlerIdForCommit ?? null,
+            },
+            'V5 TurnExecutor — committed D1 graph failed GraphV3 parse; wire analysis_ready left at its pre-mutation value',
+          );
+        }
+      }
       // Pending-action consumed telemetry fires only after the commit
       // succeeds — never for a pending action whose handler failed,
       // whose validation rejected the dispatch, or whose commit
