@@ -54,12 +54,10 @@ describe("pipeline determinism (mock mode)", () => {
     expect(run1.watermark).toBe(true);
 
     const hashes1 = candidateHashes(run1.runDir);
-    const hashes2 = candidateHashes(run2.runDir);
     expect(Object.keys(hashes1)).toHaveLength(5);
-    // run_id differs between the two runs, so exclude it from the comparison
-    // by comparing per-file hashes computed on records whose run_id differs —
-    // the canonical hash INCLUDES run_id, so instead compare full canonical
-    // forms minus run_id:
+    // The canonical hash INCLUDES run_id (which differs between the two runs), so the raw per-file
+    // hashes are deliberately NOT compared; determinism is proven by comparing the full canonical
+    // forms minus run_id/timing/hash below:
     const canon = (runDir: string) => {
       const dir = join(runDir, "candidates");
       return readdirSync(dir)
