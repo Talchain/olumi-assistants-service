@@ -224,6 +224,10 @@ export function buildReport(input: ReportInput): string {
     );
   }
   lines.push("");
+  lines.push(
+    "_Arm-C is an **M1 draft + M2 suggestion overlay**: M2's delta.node is a {label, description} suggestion (\"never an applied change\"), so **`C applied` ~ 0 is BY DESIGN** and proposals correctly land in artifacts/failures. Arm-C is evaluated on suggestion quality, not merge deltas — do not read `C applied` as arm strength or compare arm-C to A/B on graph structure._",
+    ""
+  );
   const failures = input.rows.filter((r) => r.failure_stage !== null);
   if (failures.length > 0) {
     lines.push("Recorded failures:", "");
