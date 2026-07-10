@@ -1566,6 +1566,22 @@ export const TelemetryEvents = {
   //     deliberately consumed by the resolution, not silently dropped.
   V5RelativeDeltaResolved: "v5.turn_executor.relative_delta_resolved",
 
+  // PR #414 review — F3 fail-open fallback visibility. The STEP 7 commit
+  // chokepoint re-projects the committed D1 graph (wire `analysis_ready` +
+  // the egress label graph) through GraphV3; when that parse FAILS the turn
+  // fails open to the pre-mutation wire projection (the pre-#414 behaviour)
+  // instead of dropping readiness from the wire. Should be unreachable — D1
+  // handlers GraphV3-validate the mutated graph and the persistence merge
+  // only restores top-level fields — so any hit is a merge-seam / schema
+  // drift signal that must be dashboard-visible, not warn-log-only.
+  // Content-free payload:
+  //   request_id, scenario_id: string  (correlation only)
+  //   handler_id: string | null        (closed handler enum)
+  //   first_issue_path: string         (first zod issue path, dot-joined —
+  //                                     schema keys/indices only, never values)
+  V5CommittedGraphReprojectionFailed:
+    "v5.turn_executor.committed_graph_reprojection_failed",
+
   // V5 post-analysis exploration intercept — fires when route-v2's
   // `tryPostAnalysisLabelIntercept` short-circuits a chip-click /
   // free-text submission that would otherwise dispatch into V4

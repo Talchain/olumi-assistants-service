@@ -6359,6 +6359,13 @@ export async function runTurnExecutor(
     // ==================================================================
     // STEP 7 — COMMIT (unchanged contract)
     // ==================================================================
+    // F3 ordering parity (PR #414 review) — hoisted OUTSIDE the try so the
+    // catch below can revert the pre-commit `effectiveTurnGraph` assignment
+    // when the commit fails (mirror of commitGmHeldResume's
+    // `preApplyEffectiveTurnGraph` revert): a failed commit must never
+    // advertise the unpersisted committed-graph projection.
+    let preCommitEffectiveTurnGraph: GraphV3T | null = null;
+    let effectiveTurnGraphSetPreCommit = false;
     try {
       // V5 D1 mutation handlers (set_factor_value, add_constraint,
       // adjust_edge_strength) emit a post-mutation graph on
@@ -6617,6 +6624,28 @@ export async function runTurnExecutor(
       const pendingForCommit = flipProposalPending
         ? [flipProposalPending, ...(proposalPendingForCommit ?? [])].slice(0, 3)
         : proposalPendingForCommit;
+      // F3 (response projection, 1.16 run-3 diagnosis) — parse the graph
+      // this commit is about to persist ONCE, ahead of the commit, so the
+      // committed-graph projection can be applied in the right order at
+      // both seams it feeds (see the pre-commit assignment below and the
+      // post-commit readiness re-projection after `commitTurn`).
+      const committedGraphParse =
+        graphForCommit !== null && graphForCommit !== undefined
+          ? GraphV3.safeParse(graphForCommit)
+          : null;
+      if (committedGraphParse?.success) {
+        // Ordering parity with `commitGmHeldResume` (PR #414 review):
+        // `commitTurn` snapshots `contentGraph = effectiveTurnGraph` for the
+        // durable-text scrub, so the egress/label graph must be set to the
+        // committed graph BEFORE the commit — otherwise the STORED assistant
+        // text on a committed D1 turn resolves entity-id labels against the
+        // pre-mutation graph while the WIRE uses the committed graph.
+        // Reverted in the catch below so a failed commit never advertises
+        // unpersisted state (same rule as the GM-held path).
+        preCommitEffectiveTurnGraph = effectiveTurnGraph;
+        effectiveTurnGraphSetPreCommit = true;
+        effectiveTurnGraph = committedGraphParse.data;
+      }
       const committed = await commitTurn(composedOk, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
@@ -6655,20 +6684,18 @@ export async function runTurnExecutor(
       // post-handler block — so the wire's
       // `analysis_ready.current_graph_hash` reflects the committed graph.
       // But `analysisReadyForTurn` (the readiness payload the finaliser
-      // stamps as `analysis_ready`, carrying the option interventions) and
-      // `effectiveTurnGraph` (the egress label graph + the diagnostic
-      // trace's `correlation_ids.graph_hash`) still held their PRE-mutation
-      // values from the per-turn parse at STEP 0. Proven live consequence:
-      // the wire paired a post-mutation `current_graph_hash` with
-      // pre-mutation option interventions, so the canvas showed stale
-      // absolutes (£320k/£80k) while the DB held the correct renormalised
-      // values. Re-project both onto the committed graph AFTER the commit
+      // stamps as `analysis_ready`, carrying the option interventions)
+      // still held its PRE-mutation value from the per-turn parse at STEP 0
+      // (`effectiveTurnGraph` was re-projected pre-commit above, so the
+      // durable-text scrub and the wire egress already share the committed
+      // graph). Proven live consequence: the wire paired a post-mutation
+      // `current_graph_hash` with pre-mutation option interventions, so the
+      // canvas showed stale absolutes (£320k/£80k) while the DB held the
+      // correct renormalised values. Re-derive readiness AFTER the commit
       // succeeds — a failed commit (the catch below) never advertises
       // unpersisted state, same rule as the GM-held path.
-      if (graphForCommit !== null && graphForCommit !== undefined) {
-        const committedGraphParse = GraphV3.safeParse(graphForCommit);
+      if (committedGraphParse !== null) {
         if (committedGraphParse.success) {
-          effectiveTurnGraph = committedGraphParse.data;
           analysisReadyForTurn = computeStructuralReadiness(
             committedGraphParse.data,
           );
@@ -6676,7 +6703,18 @@ export async function runTurnExecutor(
           // Should be unreachable: D1 handlers GraphV3-validate the mutated
           // graph and the persistence merge only restores top-level fields.
           // Fail open to the pre-mutation projection (the pre-fix behaviour)
-          // rather than dropping readiness from the wire, but say so loudly.
+          // rather than dropping readiness from the wire, but say so loudly:
+          // structured warn + frozen-registry event (PR #414 review) so the
+          // merge-seam/schema-drift signal is dashboard-visible. Payload is
+          // content-free — correlation ids, the closed handler enum, and the
+          // first zod issue path (schema keys/indices only, never values).
+          emit(TelemetryEvents.V5CommittedGraphReprojectionFailed, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: handlerIdForCommit ?? null,
+            first_issue_path:
+              committedGraphParse.error.issues[0]?.path.join('.') ?? '',
+          });
           log.warn(
             {
               request_id: requestId,
@@ -6705,6 +6743,13 @@ export async function runTurnExecutor(
       }
       return finalizeRun();
     } catch (error) {
+      // F3 ordering parity (PR #414 review) — the commit failed, so the
+      // pre-commit committed-graph projection must not survive onto the
+      // egress/label seam: revert to the STEP-0 view (mirror of
+      // `commitGmHeldResume`'s catch).
+      if (effectiveTurnGraphSetPreCommit) {
+        effectiveTurnGraph = preCommitEffectiveTurnGraph;
+      }
       log.error(
         { request_id: requestId, err: serialiseError(error) },
         'V5 TurnExecutor commit failure',
