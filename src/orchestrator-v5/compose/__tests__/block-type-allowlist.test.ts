@@ -83,11 +83,24 @@ const FROZEN_V5_BLOCK_TYPES = [
 
 type FrozenBlockType = (typeof FROZEN_V5_BLOCK_TYPES)[number];
 
+// Contract-present but NOT yet cleared for CEE emission. The 0.15.0 schema
+// wave (olumi-schemas PR #7, b02ba489c) added these two variants to the
+// boundary `Block` union; the §2 surfacing gate (contract + DGAI parser +
+// mapper + renderer + visibility tests + degrade behaviour) is NOT yet
+// satisfied for either, so they stay OFF the emission allowlist. The egress
+// scrubber (`output-safety.ts::sanitiseBlock`) already covers both
+// (dormant-but-armed). TO SURFACE ONE: satisfy the §2 gate, then MOVE the
+// entry from this list into `FROZEN_V5_BLOCK_TYPES` — do not duplicate it.
+const CONTRACT_PRESENT_NOT_YET_SURFACED = ['held_proposal', 'ui_directive'] as const;
+
+type NotYetSurfacedBlockType = (typeof CONTRACT_PRESENT_NOT_YET_SURFACED)[number];
+
 // ----------------------------------------------------------------------------
 // GUARD 1 (compile-time): exact mutual equality between the boundary `Block`
-// union discriminant and the frozen allowlist. tsd-style exact check — a
-// drift in EITHER direction makes `_AllowlistMatchesUnion` resolve to `false`,
-// and `Expect<false>` fails to compile.
+// union discriminant and (frozen allowlist ∪ known-not-yet-surfaced). tsd-style
+// exact check — a drift in EITHER direction makes `_AllowlistMatchesUnion`
+// resolve to `false`, and `Expect<false>` fails to compile. The two lists must
+// also stay disjoint (`_ListsAreDisjoint`).
 // ----------------------------------------------------------------------------
 
 type Equals<A, B> =
@@ -95,8 +108,15 @@ type Equals<A, B> =
 type Expect<T extends true> = T;
 
 // If this line errors, the boundary `Block` union changed. Update the contract
-// + §2 gate, then `FROZEN_V5_BLOCK_TYPES`. Do not "fix" by editing only here.
-type _AllowlistMatchesUnion = Expect<Equals<Block['type'], FrozenBlockType>>;
+// + §2 gate, then `FROZEN_V5_BLOCK_TYPES` (or, for a contract-only addition
+// that is not yet surfaced, `CONTRACT_PRESENT_NOT_YET_SURFACED`). Do not "fix"
+// by editing only here.
+type _AllowlistMatchesUnion = Expect<
+  Equals<Block['type'], FrozenBlockType | NotYetSurfacedBlockType>
+>;
+type _ListsAreDisjoint = Expect<
+  Equals<Extract<FrozenBlockType, NotYetSurfacedBlockType>, never>
+>;
 
 // ============================================================================
 // Fixtures (kept local + minimal; mirrors output-safety.test.ts / phase3-blocks.test.ts)
@@ -311,11 +331,26 @@ describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
 
   it('the compile-time union-equality assertion is in force', () => {
     // `_AllowlistMatchesUnion` (above) only compiles when the boundary
-    // `Block['type']` union equals `FROZEN_V5_BLOCK_TYPES` exactly. This
-    // runtime line documents that the type-level guard exists; the real
-    // enforcement is at `tsc` time.
+    // `Block['type']` union equals `FROZEN_V5_BLOCK_TYPES` ∪
+    // `CONTRACT_PRESENT_NOT_YET_SURFACED` exactly, and `_ListsAreDisjoint`
+    // only compiles when the two lists share no member. These runtime lines
+    // document that the type-level guards exist; the real enforcement is at
+    // `tsc` time.
     const witness: _AllowlistMatchesUnion = true;
+    const disjoint: _ListsAreDisjoint = true;
     expect(witness).toBe(true);
+    expect(disjoint).toBe(true);
+  });
+
+  it('pins the contract-present-but-not-yet-surfaced set to exactly the 0.15.0 additions', () => {
+    // These two are in the boundary union (0.15.0 wave) but NOT cleared for
+    // CEE emission — the §2 surfacing gate is unsatisfied for both. This pin
+    // makes any silent growth of the "in contract, not surfaced" set a
+    // deliberate decision, mirroring the frozen-allowlist pin above.
+    expect([...CONTRACT_PRESENT_NOT_YET_SURFACED].sort()).toEqual([
+      'held_proposal',
+      'ui_directive',
+    ]);
   });
 });
 

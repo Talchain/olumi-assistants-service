@@ -84,6 +84,9 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       'blocks',
       'draft_graph',
       'insights',
+      // 0.15.0-new: optional top-level reasoning (formalises the _reasoning
+      // wire sidecar). Approved surface change — 0.15.0 contract wave.
+      'reasoning',
       'response_version',
       'stage_indicator',
       'suggested_actions',
@@ -94,6 +97,7 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       (top.shape[key] as { isOptional(): boolean }).isOptional()
     expect(optionality('draft_graph')).toBe(true)
     expect(optionality('analysis_ready')).toBe(true)
+    expect(optionality('reasoning')).toBe(true)
     expect(optionality('assistant_text')).toBe(false)
     expect(optionality('blocks')).toBe(false)
   })
@@ -122,7 +126,7 @@ describe('block-type registry (@talchain/schemas 0.13.0)', () => {
     .map((option) => (unwrapToObject(option).shape.type as { value: string }).value)
     .sort()
 
-  it('pins the 12 block-type discriminators', () => {
+  it('pins the 14 block-type discriminators', () => {
     expect(discriminators).toEqual([
       'analysis_result',
       'coaching',
@@ -134,8 +138,13 @@ describe('block-type registry (@talchain/schemas 0.13.0)', () => {
       'explanation',
       'flip_analysis',
       'graph_patch',
+      // 0.15.0-new: held_proposal (ROADMAP 1.43 durable held-mutation shape)
+      // + ui_directive (seamlessness R4). Approved surface change — 0.15.0
+      // contract wave. Neither is emitted by CEE yet (dormant-but-armed).
+      'held_proposal',
       'review_card',
       'text',
+      'ui_directive',
     ])
   })
 
