@@ -42,10 +42,16 @@ import {
   evaluateFactorValueProposal,
   resolveExistingRawValue,
 } from './d1-shared/evaluate-factor-value-proposal.js';
-import { formatFactorChange, formatFactorValueSet } from './d1-shared/format-confirmation.js';
+import {
+  formatFactorChange,
+  formatFactorValueSet,
+  formatValueWithUnit,
+} from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
+import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
+import { log } from '../../../utils/telemetry.js';
 
 /**
  * P0 V5 golden-path repair (Wave 2): staleness narrative appended to a
@@ -328,6 +334,18 @@ export function createSetFactorValueHandler(): HandlerFn {
           : {}),
     };
 
+    // 1.16 item A2 — consented cap change detection. An explicit proposal
+    // cap that differs from the stored cap rescales the factor's SCALE:
+    // option interventions on this factor are stored as normalised
+    // multiples of the cap (value = raw / cap — see
+    // d1-shared/renormalise-interventions-for-cap-change.ts for the
+    // verified convention), so leaving them untouched would silently
+    // change every option's ABSOLUTE configuration. Renormalise them by
+    // old_cap/new_cap inside the same mutation.
+    const capChanged =
+      before.cap !== undefined && after.cap !== undefined && after.cap !== before.cap;
+    let rescaledInterventionCount = 0;
+
     // Apply the mutation to a clone and Zod-parse the result.
     const result = applyAndValidateMutation(rawGraph, (clone) => {
       const node = clone.nodes.find((n) => n.id === targetId);
@@ -373,6 +391,19 @@ export function createSetFactorValueHandler(): HandlerFn {
       // Stamp provenance so downstream consumers know the value was
       // user-set (NodeV3.provenance enum supports 'user_set' directly).
       node.provenance = 'user_set';
+
+      // 1.16 item A2 — preserve option-intervention absolutes across the
+      // cap change. Runs inside the mutation clone so the rewritten
+      // option NODES flow through the same nodes-stamping persistence
+      // merges as the factor mutation itself.
+      if (capChanged) {
+        rescaledInterventionCount = renormaliseOptionInterventionsForCapChange(
+          clone,
+          targetId,
+          before.cap,
+          after.cap,
+        );
+      }
 
       return { before, after };
     });
@@ -421,10 +452,31 @@ export function createSetFactorValueHandler(): HandlerFn {
       return snap.unit !== undefined ? { raw_value: raw, unit: snap.unit } : { raw_value: raw };
     };
     const beforeResolution = resolveExistingRawValue(before);
-    const baseText =
+    const changeText =
       beforeResolution.kind === 'resolved'
         ? formatFactorChange({ label, before: narrationSide(before), after: narrationSide(after) })
         : formatFactorValueSet({ label, after: narrationSide(after) });
+
+    // 1.16 item A2 — honest receipt for a consented scale change: the user
+    // agreed to extend (or otherwise move) the factor's scale, so the
+    // receipt says so explicitly. Redacted telemetry (counts + ids only,
+    // never magnitudes) records how many option interventions were
+    // renormalised to preserve their absolute values.
+    if (capChanged) {
+      log.info(
+        {
+          event: 'v5.d1.set_factor_value.cap_changed',
+          target_id: targetId,
+          rescaled_intervention_count: rescaledInterventionCount,
+        },
+        'set_factor_value applied an explicit cap change; option interventions renormalised to preserve absolutes',
+      );
+    }
+    const scaleNote =
+      capChanged && after.cap !== undefined
+        ? ` The scale for this factor now allows values up to ${formatValueWithUnit(after.cap, after.unit)}.`
+        : '';
+    const baseText = `${changeText}${scaleNote}`;
 
     // P0 V5 golden-path repair (Wave 2): when a prior successful analysis
     // exists and this turn actually mutated the factor (non-noop), append

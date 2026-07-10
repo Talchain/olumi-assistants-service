@@ -56,6 +56,16 @@ export type PendingActionAction =
       readonly value: number;
       readonly unit?: string;
       readonly operator: 'set' | 'increase' | 'decrease' | 'multiply';
+      /**
+       * 1.16 item A2 — OPTIONAL explicit cap carried by the user-consented
+       * "extend the scale" chip (value_exceeds_cap recovery). When present,
+       * the clarification-resume synthesis threads it into the proposal's
+       * structured value `{ value, unit, cap }`; `proposalCap` takes
+       * precedence over the factor's stored cap in the shared predicate
+       * and the handler, so the consented cap change applies atomically
+       * with the value. Absent on all other emits.
+       */
+      readonly cap?: number;
     }
   | { readonly kind: 'run_analysis' }
   | { readonly kind: 'what_would_flip' }
@@ -461,6 +471,12 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (typeof a.value !== 'number') return null;
     if (typeof a.operator !== 'string') return null;
     if (!['set', 'increase', 'decrease', 'multiply'].includes(a.operator)) return null;
+    // 1.16 item A2 — optional explicit cap (rescale chip). Absent on all
+    // other emits; when present it must be a finite positive number, or
+    // the entry is unresumable and refused at parse time.
+    if (a.cap !== undefined && (typeof a.cap !== 'number' || !Number.isFinite(a.cap) || a.cap <= 0)) {
+      return null;
+    }
   }
   if (a.kind === 'edit_graph_add_risk') {
     if (typeof a.label !== 'string' || a.label.length === 0) return null;

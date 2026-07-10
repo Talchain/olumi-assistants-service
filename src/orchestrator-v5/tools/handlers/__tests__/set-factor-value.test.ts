@@ -369,7 +369,14 @@ describe('set_factor_value handler', () => {
         }),
       ),
     );
-    expect(outcome.assistant_text).toBe('Updated Legacy churn to 5%.');
+    // 1.16 item A2 — deliberate expectation change: this proposal carries an
+    // EXPLICIT cap (100) that differs from the stored cap (50). The handler
+    // previously applied that cap change silently; the receipt now names the
+    // new scale honestly. The one-sided "to 5%" (no fabricated "from 0")
+    // behaviour under test is unchanged.
+    expect(outcome.assistant_text).toBe(
+      'Updated Legacy churn to 5%. The scale for this factor now allows values up to 100%.',
+    );
     expect(outcome.assistant_text).not.toMatch(/from 0\b/);
   });
 

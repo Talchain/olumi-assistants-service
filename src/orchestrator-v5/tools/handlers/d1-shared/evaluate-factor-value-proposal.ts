@@ -481,6 +481,22 @@ function evaluateFactorValueProposalImpl(
 }
 
 /**
+ * 1.16 item A2 — suggested extended cap for the user-consented "extend the
+ * scale" chip on `value_exceeds_cap` rejections. Policy: value * 1.25
+ * headroom, rounded UP to a clean two-significant-figure number (250,000 →
+ * 312,500 → 320,000), and never below the value itself. Pure and shared so
+ * the validator (which threads it into PARAMETER_INVALID details), the
+ * composer (which renders the chip), and tests all agree on one number.
+ */
+export function suggestExtendedCap(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return value;
+  const raw = value * 1.25;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)) - 1);
+  const rounded = Math.ceil(raw / magnitude) * magnitude;
+  return Math.max(rounded, value);
+}
+
+/**
  * Dedicated post-operator validation API. The handler has already applied
  * the operator into `computedRaw` and enforced the STATED-value guards
  * (bare_ratio, unit_mismatch, delta guards) at `preEvaluation` against the

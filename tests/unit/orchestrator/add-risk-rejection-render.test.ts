@@ -72,7 +72,12 @@ function renderRejection(graph: GraphV3T, flagOn: boolean) {
 }
 
 const RISK = n('risk_resent', 'risk', 'Team resents new tech lead');
-const TARGETED = g([...BASE_NODES, RISK], [...BASE_EDGES, e('risk_resent', 'opt_hire')]); // risk→option → NO_PATH_TO_GOAL
+// 1.16 item C — deliberate fixture change: `risk → option` is a legitimate
+// exogenous influence under the corrected reachability predicate (the risk
+// reaches the goal via option → factor → goal) and is now ACCEPTED. The
+// Cap-2A rejection shape is the TRUE dead-end: an inbound-only risk
+// (option → risk, nothing flows out) that cannot reach the goal.
+const TARGETED = g([...BASE_NODES, RISK], [...BASE_EDGES, e('opt_hire', 'risk_resent')]); // option→risk sink → NO_PATH_TO_GOAL
 const CYCLE = g([...BASE_NODES], [...BASE_EDGES, e('goal_q3', 'fac_capacity')]); // CYCLE_DETECTED
 const ORPHAN_FACTOR = g([...BASE_NODES, n('fac_orphan', 'factor', 'Unconnected factor')], [...BASE_EDGES]); // ORPHAN on a factor
 

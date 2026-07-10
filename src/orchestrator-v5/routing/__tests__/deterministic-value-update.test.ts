@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 
 import type { QuantityExtractionResult } from '../../context/cqe/schema-types.js';
+import { extractQuantities } from '../../context/cqe/extract-quantities.js';
 import type { GraphLookup } from '../validator.js';
 import {
   tryDeterministicValueUpdate,
@@ -317,13 +318,135 @@ describe('buildClarifyAssistantText / buildClarifyChipMessage', () => {
     expect(text).toContain('one of these');
   });
 
-  it('chip message preserves the user verb and surfaces the raw quantity text', () => {
+  it('chip message preserves the user verb and renders the parsed quantity', () => {
+    // 1.16 item E — deliberate expectation change: the chip previously
+    // embedded `raw_text` verbatim ('£300k'). The value slot now renders
+    // from the PARSED quantity (mapCqeQuantityToProposalValue +
+    // formatValueWithUnit), because CQE `raw_text` can span the whole
+    // sentence (see the real-CQE fixtures below). A GBP quantity therefore
+    // renders as the canonical '£300,000'.
     const msg = buildClarifyChipMessage(
       'Increase the budget to £300k',
       { id: 'f1', label: 'Hiring and Staffing Cost', score: 0.5, source: 'dice' },
-      quantity(300000, '£300k'),
+      { ...quantity(300000, '£300k'), unit: 'GBP' },
     );
-    expect(msg).toBe('Increase Hiring and Staffing Cost to £300k.');
+    expect(msg).toBe('Increase Hiring and Staffing Cost to £300,000.');
+  });
+
+  // -------------------------------------------------------------------------
+  // 1.16 item E — clarify chip raw-text embed. CQE's `raw_text` is the FULL
+  // pattern match (context/cqe/rules.ts `emit`: raw = match[0]), and the
+  // sentence-level patterns capture the whole leading phrase. Embedding it in
+  // the chip template produced "Set X to Set migration cost to £250k." —
+  // garbled copy whose replay also re-parses unreliably. These fixtures run
+  // REAL CQE over the exact diagnosed sentence.
+  // -------------------------------------------------------------------------
+
+  describe('buildClarifyChipMessage — real-CQE raw_text spans the sentence (item E, 1.16)', () => {
+    it('"Set migration cost to £250k." → chip renders the parsed value, not the sentence', () => {
+      const parsed = extractQuantities('Set migration cost to £250k.');
+      expect(parsed.length).toBe(1);
+      // Proves the hazard: raw_text covers the whole sentence.
+      expect(parsed[0]!.raw_text.toLowerCase()).toContain('set migration cost');
+      const msg = buildClarifyChipMessage(
+        'Set migration cost to £250k.',
+        { id: 'f1', label: 'Migration Cost', score: 1, source: 'substring' },
+        parsed[0]!,
+      );
+      expect(msg).toBe('Set Migration Cost to £250,000.');
+    });
+
+    it('delta phrasing keeps its "by" semantics so the replay stays a delta', () => {
+      const parsed = extractQuantities('Increase the budget by £20k.');
+      expect(parsed.length).toBe(1);
+      expect(parsed[0]!.operator).toBe('increment');
+      const msg = buildClarifyChipMessage(
+        'Increase the budget by £20k.',
+        { id: 'f1', label: 'Budget', score: 1, source: 'substring' },
+        parsed[0]!,
+      );
+      // "to £20,000" would silently flip the delta into an absolute set on
+      // replay; the preposition must follow the parsed operator.
+      expect(msg).toBe('Increase Budget by £20,000.');
+    });
+
+    it('raw_text is only a fallback when the quantity has no parsed value', () => {
+      const msg = buildClarifyChipMessage(
+        'Set the cost to a lot',
+        { id: 'f1', label: 'Cost', score: 1, source: 'substring' },
+        { ...quantity(0, 'a lot'), value: null },
+      );
+      expect(msg).toBe('Set Cost to a lot.');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1.16 item B — kind-gate clarify restore. PR #383's type filter narrows the
+// candidate pool to factor-kind nodes, which is right for ranking — but when
+// the user names a NON-factor node ("Set Customer Churn Risk to 20%") the
+// filtered pool yields no match and the turn fell through to the LLM as
+// `no_candidate_match`, losing the cheap pre-LLM recovery that existed
+// before the filter: dispatch the single substring match and let the
+// caller's kind check downgrade it to the kind-gate clarify
+// (`downgrade_reason: 'non_factor_kind'`).
+// ---------------------------------------------------------------------------
+
+describe('tryDeterministicValueUpdate — non-factor single substring match (item B, 1.16)', () => {
+  const MIXED_KINDS = makeGraph([
+    { id: 'fac_mkt', label: 'Marketing Cost' },
+    { id: 'risk_churn', label: 'Customer Churn Risk' },
+  ]);
+  const FACTOR_IDS = new Set(['fac_mkt']);
+  const PARSED_20: QuantityExtractionResult[] = [quantity(20, '20%')];
+
+  it('only substring match in the unfiltered pool is a non-factor → dispatches it for the caller kind gate (was: no_candidate_match)', () => {
+    const result = tryDeterministicValueUpdate(
+      'Set Customer Churn Risk to 20%',
+      PARSED_20,
+      MIXED_KINDS,
+      [],
+      FACTOR_IDS,
+    );
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('risk_churn');
+    expect(result.candidate.source).toBe('substring');
+  });
+
+  it('multiple non-factor substring matches → still no_candidate_match (narrow by design)', () => {
+    const graph = makeGraph([
+      { id: 'fac_mkt', label: 'Marketing Cost' },
+      { id: 'risk_churn', label: 'Churn Risk' },
+      { id: 'out_churn', label: 'Churn Outcome' },
+    ]);
+    const result = tryDeterministicValueUpdate(
+      'Set Churn Risk and Churn Outcome to 20%',
+      PARSED_20,
+      graph,
+      [],
+      new Set(['fac_mkt']),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('no_candidate_match');
+  });
+
+  it('factor match present → non-factor pool is never consulted (type filter unchanged)', () => {
+    const result = tryDeterministicValueUpdate(
+      'Set Marketing Cost to 20%',
+      PARSED_20,
+      MIXED_KINDS,
+      [],
+      FACTOR_IDS,
+    );
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('fac_mkt');
   });
 });
 

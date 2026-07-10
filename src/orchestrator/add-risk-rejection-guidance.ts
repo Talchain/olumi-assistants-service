@@ -4,12 +4,13 @@
  * Pure helper. NO LLM, NO I/O, NO schema/validator changes.
  *
  * When an `edit_graph` add-risk attempt fails structural validation with a
- * *reachability-class* violation (the new risk node is not reachable from the
- * decision — e.g. it was wired only to an option, or left orphaned), the bare
- * rejection currently renders the generic "inconsistency in the model
- * structure" suppression (see patch-rejection-helper.ts). This classifier lets
- * the caller (flag-gated) replace that with a deterministic, structural-only
- * next step grounded ONLY in graph reachability — never in an invented rule.
+ * *reachability-class* violation (1.16 item C: the new risk node cannot
+ * REACH the goal via forward directed edges — e.g. it was added as a
+ * dead-end sink, or left orphaned), the bare rejection currently renders
+ * the generic "inconsistency in the model structure" suppression (see
+ * patch-rejection-helper.ts). This classifier lets the caller (flag-gated)
+ * replace that with a deterministic, structural-only next step grounded
+ * ONLY in graph reachability — never in an invented rule.
  *
  * Conservative by design: returns `null` (→ caller keeps the generic copy)
  * unless ALL of the following hold, so it can never broaden a generic rejection:
@@ -17,9 +18,11 @@
  *     ORPHAN_NODE); a mixed/compound failure falls through;
  *   - a violated node is `kind: 'risk'`;
  *   - that risk has NO inbound directed edge from a `factor` (the defining
- *     "not connected through a factor / wired only to an option / orphan"
- *     shape — a properly-hosted `factor → risk` is excluded, and an
- *     `option → risk` risk is reachable so never reaches this branch).
+ *     "not connected through a factor / dead-end / orphan" shape — a
+ *     properly-hosted `factor → risk` is excluded. Note under the corrected
+ *     reachability predicate a `risk → option` outbound wiring reaches the
+ *     goal and is simply ACCEPTED, so it never produces a violation for
+ *     this classifier to see).
  *
  * The guidance the caller renders states the structural fact only: the risk is
  * not yet connected so it has no path through the model to the goal. A factor

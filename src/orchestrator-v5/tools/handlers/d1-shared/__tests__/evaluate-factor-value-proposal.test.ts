@@ -20,6 +20,7 @@ import {
   evaluatePostOperatorFactorValue,
   applyFactorValueOperator,
   resolveExistingRawValue,
+  suggestExtendedCap,
   type ProposalRejectionReason,
 } from '../evaluate-factor-value-proposal.js';
 import { normaliseFactorValue } from '../normalise-factor-value.js';
@@ -791,5 +792,30 @@ describe('applyFactorValueOperator — pure helper', () => {
   });
   it('undefined operator behaves as set', () => {
     expect(applyFactorValueOperator(10, undefined, 7)).toBe(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1.16 item A2 — suggestExtendedCap. The user-consented "extend the scale"
+// chip needs a suggested new cap: value * 1.25 rounded UP to a clean
+// two-significant-figure number, never below the value itself.
+// ---------------------------------------------------------------------------
+
+describe('suggestExtendedCap (item A2, 1.16)', () => {
+  it('rounds value * 1.25 up to a clean number', () => {
+    expect(suggestExtendedCap(250000)).toBe(320000); // 312500 → 320000
+    expect(suggestExtendedCap(150)).toBe(190); // 187.5 → 190
+    expect(suggestExtendedCap(100000)).toBe(130000); // 125000 → 130000
+  });
+
+  it('never returns less than the value', () => {
+    for (const v of [1, 7, 99, 101, 250000, 1e9]) {
+      expect(suggestExtendedCap(v)).toBeGreaterThanOrEqual(v);
+    }
+  });
+
+  it('handles small positive values without collapsing to zero', () => {
+    expect(suggestExtendedCap(0.5)).toBeGreaterThanOrEqual(0.5);
+    expect(suggestExtendedCap(1)).toBeGreaterThanOrEqual(1);
   });
 });

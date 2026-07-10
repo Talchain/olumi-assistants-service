@@ -48,6 +48,7 @@ import { describeSchema } from '../compose/helpers.js';
 import {
   evaluateFactorValueProposal,
   resolveExistingRawValue,
+  suggestExtendedCap,
   type FactorValueOperator,
 } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { EntityKind, ProposalAction, ProposalEntity, ProposalParameter } from './types.js';
@@ -638,6 +639,24 @@ function preexecuteSetFactorValue(
   // (e.g. the `bare_ratio_on_unit_factor` branch). A short symbol like
   // '£' / '%' / 'people' — never user prose.
   const effectiveUnit = parsed.unit ?? obs?.unit;
+  // 1.16 items A1/A2/B — thread the full user-facing context the composer
+  // branches need: the proposed value + operator, the factor's id + live
+  // label (entity-named copy for delta_no_existing_value; the rescale
+  // chip's replay message must name the factor), and — for a 'set' with an
+  // explicit unit whose value genuinely exceeds the cap — a suggested
+  // extended cap for the user-consented rescale chip. Details never reach
+  // logs unfiltered (buildSafeValidatorLogDetails whitelists).
+  const liveEntity = graph.findEntityById(proposal.entity.id);
+  const factorLabel = liveEntity?.label ?? undefined;
+  const effectiveCap = parsed.cap ?? obs?.cap;
+  const suggestedCap =
+    evaluation.reason === 'value_exceeds_cap' &&
+    operator === 'set' &&
+    parsed.inputHasUnit &&
+    effectiveCap !== undefined &&
+    parsed.numeric > effectiveCap
+      ? suggestExtendedCap(parsed.numeric)
+      : undefined;
   return {
     code: 'PARAMETER_INVALID',
     message: evaluation.specific_issue,
@@ -646,7 +665,12 @@ function preexecuteSetFactorValue(
       rejection_reason: evaluation.reason,
       issue: evaluation.specific_issue,
       handler_id: 'set_factor_value',
+      value: parsed.numeric,
+      operator,
+      factor_id: proposal.entity.id,
+      ...(factorLabel !== undefined && factorLabel !== null ? { factor_label: factorLabel } : {}),
       ...(effectiveUnit !== undefined ? { unit: effectiveUnit } : {}),
+      ...(suggestedCap !== undefined ? { suggested_cap: suggestedCap } : {}),
     },
   };
 }
