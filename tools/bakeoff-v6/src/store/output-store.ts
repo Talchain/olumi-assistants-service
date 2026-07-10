@@ -8,7 +8,7 @@
  * No API keys or user data ever enter a record (keys never leave env; the
  * only user-adjacent text is the fixture brief).
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256Hex, stableStringify } from "../util/stable.ts";
 import type { CandidateRecord } from "../types.ts";
@@ -36,6 +36,28 @@ export class RunStore {
     this.runDir = join(resultsDir, runId);
     this.candidatesDir = join(this.runDir, "candidates");
     mkdirSync(this.candidatesDir, { recursive: true });
+    this.clearStaleCandidates();
+  }
+
+  /**
+   * A rerun that reuses a run id (explicit --run-id) must not INHERIT the prior attempt's
+   * candidate files. writeCandidate overwrites by exact {arm}{variant}_{brief}_s{seed}.json, so a
+   * brief/seed that drops out of the new run (fewer briefs, a failed draw, a changed seed set) would
+   * otherwise leave a STALE .json behind — and freeze-m1.mjs readdir's this dir and would freeze that
+   * stale graph. The store is constructed once, before any candidate of THIS run is written, so
+   * clearing here only removes prior-attempt debris, never a live result. Only *.json is touched.
+   */
+  private clearStaleCandidates(): void {
+    let cleared = 0;
+    for (const f of readdirSync(this.candidatesDir)) {
+      if (f.endsWith(".json")) {
+        rmSync(join(this.candidatesDir, f));
+        cleared++;
+      }
+    }
+    if (cleared > 0) {
+      console.warn(`RunStore: cleared ${cleared} stale candidate file(s) from a prior run reusing this run id`);
+    }
   }
 
   writeJson(name: string, value: unknown): string {

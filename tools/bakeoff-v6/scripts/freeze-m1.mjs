@@ -8,7 +8,7 @@
  * Usage: node scripts/freeze-m1.mjs <results/run-dir> <out-dir> [prefix=A]
  * Writes <out-dir>/{brief_id}.json = { brief_id, source, candidate: <graph> }.
  */
-import { readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const [runDir, outDir, prefix = "A"] = process.argv.slice(2);
@@ -17,6 +17,14 @@ if (!runDir || !outDir) {
   process.exit(1);
 }
 mkdirSync(outDir, { recursive: true });
+// A re-freeze must produce a COMPLETE, self-consistent frozen set. Clear any {brief}.json left by a
+// prior freeze first: if the draft set changed (a brief dropped, or its graph was re-drafted), a
+// stale leftover would be silently reused by a later `--frozen-m1-dir` run and critiqued as if fresh.
+let clearedStale = 0;
+for (const f of readdirSync(outDir)) {
+  if (f.endsWith(".json")) { rmSync(join(outDir, f)); clearedStale++; }
+}
+if (clearedStale > 0) console.warn(`cleared ${clearedStale} stale frozen graph(s) from ${outDir} before re-freezing`);
 const candDir = join(runDir, "candidates");
 // Deterministic order: sort candidate files so freezing is reproducible regardless of the
 // filesystem's readdir order (the frozen graph is the "identical M1" every M2 variant critiques).
