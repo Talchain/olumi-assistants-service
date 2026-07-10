@@ -1,0 +1,322 @@
+/**
+ * Decision Records (ROADMAP 3.1, CEE half) — pure payload builder + id
+ * derivation unit tests.
+ *
+ * Pins (RED-first for the capture lane):
+ *  - decision.graph_hash = 'aag_v1:sha256:' + the fact's OWN
+ *    `graph_hash_at_run` (the value the run_analysis handler computed from
+ *    the exact snapshot the analysis ran against — PR #411 object-identity
+ *    discipline: never re-read, never re-hash);
+ *  - chosen_option_id = the fact's leading_option_id; chosen_option_label
+ *    resolved from the PLoT `option_comparison` records (never id-as-label);
+ *  - prediction.statement = the fact's deterministic summary;
+ *    prediction.confidence = the leader's win_probability when usable;
+ *  - analysis_summary copied from PLoT `decision_brief.analysis_summary`
+ *    OPTIONAL-FORWARD (absent → record still valid; malformed → dropped,
+ *    disclosed via the build result — never a hard failure);
+ *  - review_date = computed_at + 90 days (BRIEF-C derivation rules: no
+ *    explicit user date / horizon heuristic exists in this slice → the
+ *    labelled 90-day default);
+ *  - record_id deterministic on (scenario_id, decision.graph_hash,
+ *    computed_at) so a retried turn replays as the RPC's dedupe branch;
+ *    event_id = 'decision_recorded_' + record_id (matches the RPC default).
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+
+import {
+  AAG_V1_GRAPH_HASH_PREFIX,
+  DECISION_RECORD_REVIEW_HORIZON_DAYS,
+  buildDecisionRecordWrite,
+  deriveDecisionRecordId,
+} from '../capture.js';
+
+const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const HASH_AT_RUN = 'abcdef0123456789';
+const COMPUTED_AT = '2026-07-10T12:00:00.000Z';
+const SUMMARY = 'Option A currently leads.';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function makeFact(overrides?: {
+  noop?: boolean;
+  result?: Partial<RunAnalysisHandlerFact['result']>;
+}): RunAnalysisHandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: overrides?.noop ?? false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_a',
+      win_probabilities: { 'Option A': 0.62, 'Option B': 0.38 },
+      summary: SUMMARY,
+      enrichment: {
+        option_comparison: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.38 },
+        ],
+      },
+      graph_hash_at_run: HASH_AT_RUN,
+      computed_at: COMPUTED_AT,
+      ...(overrides?.result ?? {}),
+    },
+  };
+}
+
+describe('deriveDecisionRecordId', () => {
+  it('produces an RFC-4122-shaped UUID, stable across calls (retry ⇒ dedupe, not duplicate)', () => {
+    const a = deriveDecisionRecordId(SCENARIO_ID, `${AAG_V1_GRAPH_HASH_PREFIX}${HASH_AT_RUN}`, COMPUTED_AT);
+    const b = deriveDecisionRecordId(SCENARIO_ID, `${AAG_V1_GRAPH_HASH_PREFIX}${HASH_AT_RUN}`, COMPUTED_AT);
+    expect(a).toMatch(UUID_RE);
+    expect(a).toBe(b);
+  });
+
+  it('changes when any tuple member changes', () => {
+    const base = deriveDecisionRecordId(SCENARIO_ID, 'h1', COMPUTED_AT);
+    expect(deriveDecisionRecordId('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'h1', COMPUTED_AT)).not.toBe(base);
+    expect(deriveDecisionRecordId(SCENARIO_ID, 'h2', COMPUTED_AT)).not.toBe(base);
+    expect(deriveDecisionRecordId(SCENARIO_ID, 'h1', '2026-07-11T12:00:00.000Z')).not.toBe(base);
+  });
+
+  it('is delimiter-safe: shifting a boundary character between tuple members changes the id', () => {
+    expect(deriveDecisionRecordId('ab', 'c', COMPUTED_AT)).not.toBe(
+      deriveDecisionRecordId('a', 'bc', COMPUTED_AT),
+    );
+  });
+});
+
+describe('buildDecisionRecordWrite — happy path', () => {
+  it('builds the exact create_decision_record payload from the fact alone', () => {
+    const built = buildDecisionRecordWrite(makeFact(), SCENARIO_ID);
+    expect(built.kind).toBe('write');
+    if (built.kind !== 'write') return;
+    const expectedGraphHash = `${AAG_V1_GRAPH_HASH_PREFIX}${HASH_AT_RUN}`;
+    const expectedRecordId = deriveDecisionRecordId(SCENARIO_ID, expectedGraphHash, COMPUTED_AT);
+    expect(built.write).toEqual({
+      scenario_id: SCENARIO_ID,
+      decision: {
+        chosen_option_id: 'opt_a',
+        chosen_option_label: 'Option A',
+        graph_hash: expectedGraphHash,
+      },
+      prediction: { statement: SUMMARY, confidence: 0.62 },
+      review_date: '2026-10-08T12:00:00.000Z', // computed_at + 90 days
+      record_id: expectedRecordId,
+      event_id: `decision_recorded_${expectedRecordId}`,
+    });
+    expect(built.analysisSummaryDropped).toBe(false);
+  });
+
+  it(`review_date is computed_at + ${DECISION_RECORD_REVIEW_HORIZON_DAYS} days exactly`, () => {
+    const built = buildDecisionRecordWrite(makeFact(), SCENARIO_ID);
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(Date.parse(built.write.review_date) - Date.parse(COMPUTED_AT)).toBe(
+      DECISION_RECORD_REVIEW_HORIZON_DAYS * 24 * 60 * 60 * 1000,
+    );
+  });
+
+  it('graph_hash carries the aag_v1 regime prefix over the fact-carried hash (no recompute)', () => {
+    const built = buildDecisionRecordWrite(makeFact(), SCENARIO_ID);
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(built.write.decision.graph_hash).toBe(`aag_v1:sha256:${HASH_AT_RUN}`);
+  });
+
+  it('omits confidence when the leader has no usable win_probability (out of [0,1] range)', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              { option_id: 'opt_a', option_label: 'Option A', win_probability: 1.5 },
+            ],
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(built.write.prediction).toEqual({ statement: SUMMARY });
+  });
+
+  it('resolves the leading record by option_label when option_id is absent (extractOptionId parity)', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          leading_option_id: 'Option A',
+          enrichment: {
+            option_comparison: [{ option_label: 'Option A', win_probability: 0.7 }],
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(built.write.decision.chosen_option_id).toBe('Option A');
+    expect(built.write.decision.chosen_option_label).toBe('Option A');
+    expect(built.write.prediction.confidence).toBe(0.7);
+  });
+});
+
+describe('buildDecisionRecordWrite — analysis_summary optional-forward', () => {
+  it('absent decision_brief → no analysis_summary key (the normal case today: PLoT emits it behind its own flag)', () => {
+    const built = buildDecisionRecordWrite(makeFact(), SCENARIO_ID);
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect('analysis_summary' in built.write.decision).toBe(false);
+    expect(built.analysisSummaryDropped).toBe(false);
+  });
+
+  it('valid decision_brief.analysis_summary is copied verbatim', () => {
+    const summary = {
+      leading_option: 'Option A',
+      win_probability: 0.62,
+      goal_fit: 0.8,
+      robustness_band: 'robust',
+    };
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+            ],
+            decision_brief: { analysis_summary: summary },
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(built.write.decision.analysis_summary).toEqual(summary);
+    expect(built.analysisSummaryDropped).toBe(false);
+  });
+
+  it('partial analysis_summary (all fields optional) is copied as-is', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+            ],
+            decision_brief: { analysis_summary: { leading_option: 'Option A' } },
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(built.write.decision.analysis_summary).toEqual({ leading_option: 'Option A' });
+  });
+
+  it('malformed analysis_summary (off-whitelist key) is DROPPED, disclosed, and the record still builds', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+            ],
+            decision_brief: {
+              analysis_summary: { leading_option: 'Option A', rogue_key: true },
+            },
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect('analysis_summary' in built.write.decision).toBe(false);
+    expect(built.analysisSummaryDropped).toBe(true);
+  });
+
+  it('malformed analysis_summary (win_probability out of range) is dropped, not forwarded to a DB 22023', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
+            ],
+            decision_brief: { analysis_summary: { win_probability: 7 } },
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect('analysis_summary' in built.write.decision).toBe(false);
+    expect(built.analysisSummaryDropped).toBe(true);
+  });
+});
+
+describe('buildDecisionRecordWrite — skip matrix (no RPC-able record)', () => {
+  it('noop fact → skip noop_fact', () => {
+    const built = buildDecisionRecordWrite(makeFact({ noop: true }), SCENARIO_ID);
+    expect(built).toEqual({ kind: 'skip', reason: 'noop_fact' });
+  });
+
+  it('missing graph_hash_at_run → skip missing_graph_hash', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({ result: { graph_hash_at_run: undefined } }),
+      SCENARIO_ID,
+    );
+    expect(built).toEqual({ kind: 'skip', reason: 'missing_graph_hash' });
+  });
+
+  it('missing computed_at → skip missing_computed_at', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({ result: { computed_at: undefined } }),
+      SCENARIO_ID,
+    );
+    expect(built).toEqual({ kind: 'skip', reason: 'missing_computed_at' });
+  });
+
+  it('unparseable computed_at → skip missing_computed_at (review_date must be finite)', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({ result: { computed_at: 'not-a-date' } }),
+      SCENARIO_ID,
+    );
+    expect(built).toEqual({ kind: 'skip', reason: 'missing_computed_at' });
+  });
+
+  it('null leading_option_id (no unambiguous leader) → skip no_leading_option', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({ result: { leading_option_id: null } }),
+      SCENARIO_ID,
+    );
+    expect(built).toEqual({ kind: 'skip', reason: 'no_leading_option' });
+  });
+
+  it('leader unresolvable to a labelled comparison record → skip no_option_label (never id-as-label)', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [{ option_id: 'opt_a', win_probability: 0.62 }],
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    expect(built).toEqual({ kind: 'skip', reason: 'no_option_label' });
+  });
+
+  it('no enrichment at all → skip no_option_label', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({ result: { enrichment: undefined } }),
+      SCENARIO_ID,
+    );
+    expect(built).toEqual({ kind: 'skip', reason: 'no_option_label' });
+  });
+
+  it('blank summary → skip empty_summary (prediction.statement must be non-empty)', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({ result: { summary: '   ' } }),
+      SCENARIO_ID,
+    );
+    expect(built).toEqual({ kind: 'skip', reason: 'empty_summary' });
+  });
+});

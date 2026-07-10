@@ -28,7 +28,12 @@
 import { createHash } from 'node:crypto';
 
 import type { OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
-import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
+import type {
+  ConversationTurnClass,
+  HandlerFact,
+  RunAnalysisHandlerFact,
+  V5ActionType,
+} from '@talchain/schemas/orchestrator';
 
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
@@ -49,6 +54,7 @@ import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { getModelManagementService } from './model-management/index.js';
 import type { ModelManagementResult, VersionWriteOutcome } from './model-management/index.js';
+import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -730,6 +736,36 @@ export async function commitDirectAnswer(
       expectedGraphIdentityHash: metadata.expectedGraphIdentityHash ?? undefined,
       sessionStore: store,
     });
+  }
+
+  // ROADMAP 3.1 (CEE half) — decision-record capture hook
+  // (CEE_DECISION_RECORD_CAPTURE). Fires ONLY after the durable append
+  // succeeded AND this commit carries a successful (non-noop) run_analysis
+  // fact — which covers BOTH producers (the routed turn-executor path and
+  // chip-click run_analysis funnel through this commit seam). Fire-and-
+  // forget under the same non-blocking contract as the MM hook above: any
+  // capture failure logs and NEVER affects the turn result. Flag off ⇒
+  // byte-identical commit path (no store construction, no env reads —
+  // pinned by commit-decision-record-hook.test.ts). The record's
+  // graph_hash is the fact's OWN `graph_hash_at_run` (aag_v1-prefixed) —
+  // the hash the handler computed from the exact snapshot the analysis ran
+  // against (PR #411 object-identity discipline; no re-read, no re-hash).
+  if (config.features.decisionRecordCapture === true) {
+    const decisionRecordFact = metadata.handler_facts.find(
+      (f): f is RunAnalysisHandlerFact => f.fact_type === 'run_analysis' && f.noop === false,
+    );
+    if (decisionRecordFact !== undefined) {
+      void recordDecisionRecordForCommit({
+        scenarioId: metadata.scenario_id,
+        turnId: metadata.turn_id,
+        persistedRowId,
+        fact: decisionRecordFact,
+        // Guest pre-check reads scenarios.user_id via the store's optional
+        // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
+        // the SessionStore import surface at its declared three files).
+        sessionStore: store,
+      });
+    }
   }
 
   const graphPersisted = graphWasProvided(metadata.graph);
