@@ -463,6 +463,35 @@ describe('composeValidationFailure — PARAMETER_INVALID value_exceeds_cap (item
     });
     expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
   });
+
+  // PR #413 review FIXUP 2 — degrade-only label gate. The chip's replay is
+  // only deterministic when the resumer can claim it: a label containing a
+  // digit ("Phase 2 Cost") or an edit verb ("Set-up Cost" — \bset\b matches
+  // across the hyphen) makes the rendered replay message trip the resumer's
+  // EDIT_VERB_OR_QUANTITY_PATTERN negative gate, so the click would fall to
+  // the LLM WITHOUT the cap and loop the same honest failure. Suppress the
+  // chip whenever the rendered message fails the resumer's own predicate;
+  // the honest copy and the retry prompt remain.
+  it('A2 negative (FIXUP 2): label containing a digit ("Phase 2 Cost") suppresses the chip', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...FULL_DETAILS, factor_label: 'Phase 2 Cost' },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+    // Degrade-only: honest copy + a prompt chip still present.
+    expect(response.assistant_text).toContain('£250,000');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('A2 negative (FIXUP 2): label containing an edit verb ("Set-up Cost") suppresses the chip', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...FULL_DETAILS, factor_label: 'Set-up Cost' },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+  });
 });
 
 describe('composeValidationFailure — PARAMETER_INVALID remaining rejection reasons (item A1, 1.16)', () => {

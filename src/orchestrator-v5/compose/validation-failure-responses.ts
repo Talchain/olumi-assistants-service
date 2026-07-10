@@ -32,6 +32,7 @@ import {
   type EntityLike,
 } from './helpers.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
+import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 
 const ENTITY_SIBLING_CAP = 4;
 const AMBIGUOUS_CANDIDATE_CAP = 5;
@@ -388,11 +389,22 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
       operator === 'set'
     ) {
       const label = safeLabel({ label: factorLabel, kind: undefined });
-      chips.push({
-        id: RESCALE_EXTEND_CAP_CHIP_ID,
-        label: `Set to ${formatValueWithUnit(proposedValue, unit)} and extend the scale`,
-        message: `Extend the scale for ${label} and use the new value.`,
-      });
+      const replayMessage = `Extend the scale for ${label} and use the new value.`;
+      // PR #413 review FIXUP 2 — degrade-only label gate. The replay is
+      // only deterministic when tryClarificationResume can claim it; a
+      // label carrying a digit ("Phase 2 Cost") or an edit verb ("Set-up
+      // Cost") trips the resumer's negative gate, the click falls to the
+      // LLM WITHOUT the cap, and the user loops the same honest failure.
+      // Apply the resumer's OWN predicate to the exact rendered message
+      // and suppress the chip when it fails — the honest copy and the
+      // retry prompt below still ship.
+      if (isClaimableByClarificationResume(replayMessage)) {
+        chips.push({
+          id: RESCALE_EXTEND_CAP_CHIP_ID,
+          label: `Set to ${formatValueWithUnit(proposedValue, unit)} and extend the scale`,
+          message: replayMessage,
+        });
+      }
     }
     chips.push({
       id: chipId('prompt', 'param-cap-retry'),

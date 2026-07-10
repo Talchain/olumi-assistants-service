@@ -198,6 +198,45 @@ describe('validateGraphStructure', () => {
       expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(false);
     });
 
+    // PR #413 review FIXUP 3 — the predicate flip opened a gap: a FLOATING
+    // option (outbound option → factor edge, but NO inbound decision →
+    // option edge) reaches the goal, so the new loop 2 passes it — yet the
+    // old loop 2 caught it (not reachable FROM the decision). An option no
+    // decision can select is structurally meaningless; an explicit check
+    // (distinct code + message from NO_PATH_TO_GOAL) closes the gap.
+    it('FIXUP 3: floating option (option→factor edge, no decision→option inbound) → violation', () => {
+      const graph = makeValidGraph();
+      graph.nodes.push({ id: 'opt_float', kind: 'option', label: 'Floating Option' } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'opt_float', to: 'fac_x',
+        strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive',
+      } as GraphV3T['edges'][number]);
+
+      const result = validateGraphStructure(graph);
+      expect(result.valid).toBe(false);
+      expect(hasViolation(result, 'OPTION_NOT_LINKED_TO_DECISION')).toBe(true);
+      const violation = result.violations.find((v) => v.code === 'OPTION_NOT_LINKED_TO_DECISION')!;
+      expect(violation.detail).toContain('opt_float');
+      // Distinct from the reachability code — this option DOES reach the goal.
+      expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(false);
+    });
+
+    it('FIXUP 3: normally-linked options (decision→option inbound) pass', () => {
+      const result = validateGraphStructure(makeValidGraph());
+      expect(hasViolation(result, 'OPTION_NOT_LINKED_TO_DECISION')).toBe(false);
+      expect(result.valid).toBe(true);
+    });
+
+    it('FIXUP 3: no decision node at all → NO_DECISION owns it (no per-option noise)', () => {
+      const graph = makeValidGraph();
+      graph.nodes = graph.nodes.filter((n) => n.kind !== 'decision');
+      graph.edges = graph.edges.filter((e) => e.from !== 'dec_1');
+
+      const result = validateGraphStructure(graph);
+      expect(hasViolation(result, 'NO_DECISION')).toBe(true);
+      expect(hasViolation(result, 'OPTION_NOT_LINKED_TO_DECISION')).toBe(false);
+    });
+
     it('goal unreachable from decision still fails via loop 1 (unchanged)', () => {
       const graph = makeValidGraph();
       // Sever the only path into the goal: fac_x → goal_1.

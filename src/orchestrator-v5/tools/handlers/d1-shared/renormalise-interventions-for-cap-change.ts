@@ -78,6 +78,20 @@ function isEncodedIntervention(obj: Record<string, unknown>): boolean {
  * Renormalise a single intervention entry for the cap change. Returns the
  * replacement entry, or `undefined` when the entry must be left untouched
  * (encoded, raw-looking, inconsistent, or not renormalisable).
+ *
+ * PR #413 review FIXUP 1 — cap-DECREASE safety. (v · oldCap) / newCap is
+ * unbounded: a LOWER new cap (the LLM tool schema exposes `cap`, so this
+ * is reachable without the consent chip) rescales a normalised value past
+ * 1, and the egress net (`resolveRawInterventionValue`) classifies a bare
+ * value > 1 as already-raw passthrough — PLoT would receive £1.60 instead
+ * of £80,000 ({value: 0.8}, cap 100000 → 50000 → 1.6). Therefore:
+ *   - every rewritten OBJECT entry is stamped with the ABSOLUTE
+ *     `raw_value: v · oldCap` — raw_value wins downstream (egress rule 1)
+ *     even when the normalised value exceeds 1;
+ *   - a BARE-number entry whose rescaled result exceeds 1 is converted to
+ *     `{ value: rescaled, raw_value: v · oldCap }` instead of writing a
+ *     bare > 1 number (which would carry no absolute for rule 1 to use).
+ *     A bare result still in (0, 1] keeps the bare shape (byte-minimal).
  */
 function renormaliseEntry(
   entry: unknown,
@@ -86,7 +100,15 @@ function renormaliseEntry(
 ): unknown | undefined {
   // Bare number (legacy flat shape): normalised in (0,1] → rescale.
   if (isFiniteNumber(entry)) {
-    if (entry > 0 && entry <= 1) return (entry * oldCap) / newCap;
+    if (entry > 0 && entry <= 1) {
+      const rescaled = (entry * oldCap) / newCap;
+      if (rescaled > 1) {
+        // FIXUP 1: a bare >1 number reads as raw downstream — carry the
+        // absolute explicitly instead.
+        return { value: rescaled, raw_value: entry * oldCap };
+      }
+      return rescaled;
+    }
     return undefined;
   }
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return undefined;
@@ -108,7 +130,10 @@ function renormaliseEntry(
   }
 
   if (value > 0 && value <= 1) {
-    return { ...obj, value: (value * oldCap) / newCap };
+    // FIXUP 1: stamp the absolute on every rewritten object entry so the
+    // egress rule is raw_value_used regardless of where the rescaled
+    // normalised value lands.
+    return { ...obj, value: (value * oldCap) / newCap, raw_value: value * oldCap };
   }
   return undefined;
 }

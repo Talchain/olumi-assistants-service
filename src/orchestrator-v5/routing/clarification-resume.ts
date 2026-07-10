@@ -55,6 +55,26 @@ const SHORT_CONFIRM_LIKELIHOOD =
   /^\s*(?:yes|yep|yeah|sure|ok(?:ay)?|do(?:\s+(?:it|that))?|go(?:\s+ahead)?|apply(?:\s+it)?|confirm(?:ed)?|please\s+do)\b/i;
 
 /**
+ * PR #413 review FIXUP 2 — the resumer's claimability predicate, exported
+ * for chip EMITTERS. A chip whose replay relies on this pre-route (e.g.
+ * the A2 "extend the scale" rescale chip, whose structured {value, unit,
+ * cap} rides a pending action that ONLY this resumer reconstructs) must
+ * not ship a replay message this module would refuse to claim: a factor
+ * label containing a digit ("Phase 2 Cost") or an edit verb ("Set-up
+ * Cost" — \bset\b matches across the hyphen) trips the negative gates
+ * below, the click falls through to the LLM WITHOUT the structured
+ * payload, and the user loops on the same failure. Emitters call this
+ * with the exact rendered replay message and suppress the chip when it
+ * returns false (degrade-only: honest copy still ships).
+ */
+export function isClaimableByClarificationResume(message: string): boolean {
+  return (
+    !EDIT_VERB_OR_QUANTITY_PATTERN.test(message) &&
+    !SHORT_CONFIRM_LIKELIHOOD.test(message)
+  );
+}
+
+/**
  * Skip reasons where the resumer correctly defers to the LLM. The
  * caller routes the message normally — these are not actionable
  * clarifications and should not produce focused recovery copy.

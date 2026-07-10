@@ -28,7 +28,8 @@ export type StructuralViolationCode =
   | 'NO_GOAL'
   | 'NO_DECISION'
   | 'FEWER_THAN_TWO_OPTIONS'
-  | 'OPTION_NO_FACTOR_EDGES';
+  | 'OPTION_NO_FACTOR_EDGES'
+  | 'OPTION_NOT_LINKED_TO_DECISION';
 
 export interface StructuralViolation {
   code: StructuralViolationCode;
@@ -81,6 +82,9 @@ export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
   NO_DECISION: 'The model would have no decision node.',
   FEWER_THAN_TWO_OPTIONS: 'The model would have fewer than two options.',
   OPTION_NO_FACTOR_EDGES: 'An option has no factor connections and cannot be analysed. Add at least one factor edge.',
+  // PR #413 review FIXUP 3 — distinct from NO_PATH_TO_GOAL: a floating
+  // option can reach the goal, but nothing selects it.
+  OPTION_NOT_LINKED_TO_DECISION: 'This change would leave an option that is not connected from the decision. Link the decision to it.',
 };
 
 // ============================================================================
@@ -146,6 +150,7 @@ export function validateGraphStructure(graph: GraphV3T): StructuralValidationRes
   checkLimits(graph, violations);
   checkOrphanNodes(graph, violations);
   checkOptionFactorEdges(graph, violations);
+  checkOptionDecisionEdges(graph, violations);
   checkPathToGoal(graph, violations);
   checkCycles(graph, violations);
 
@@ -242,6 +247,38 @@ function checkOptionFactorEdges(graph: GraphV3T, violations: StructuralViolation
       violations.push({
         code: 'OPTION_NO_FACTOR_EDGES',
         detail: `Option "${node.id}" (${node.label}) has no outbound edge to a factor — it cannot be analysed. Add at least one option → factor edge.`,
+      });
+    }
+  }
+}
+
+/**
+ * PR #413 review FIXUP 3 — every option node must have at least one INBOUND
+ * directed edge from a decision node. The item-C reachability flip (loop 2
+ * now checks "can the node REACH the goal", not "is it reachable FROM the
+ * decision") opened a gap the old loop 2 happened to cover: a FLOATING
+ * option (outbound option → factor edge, no decision → option inbound)
+ * reaches the goal and would pass every remaining check — but an option no
+ * decision can select is structurally meaningless. Skipped entirely when
+ * the graph has no decision node (NO_DECISION owns that failure; flagging
+ * every option as well would be noise).
+ */
+function checkOptionDecisionEdges(graph: GraphV3T, violations: StructuralViolation[]): void {
+  const decisionIds = new Set<string>();
+  for (const node of graph.nodes) {
+    if (node.kind === 'decision') decisionIds.add(node.id);
+  }
+  if (decisionIds.size === 0) return; // Already caught by NO_DECISION.
+
+  for (const node of graph.nodes) {
+    if (node.kind !== 'option') continue;
+    const hasDecisionInbound = graph.edges.some(
+      (edge) => isDirected(edge) && edge.to === node.id && decisionIds.has(edge.from),
+    );
+    if (!hasDecisionInbound) {
+      violations.push({
+        code: 'OPTION_NOT_LINKED_TO_DECISION',
+        detail: `Option "${node.id}" (${node.label}) has no inbound edge from a decision — nothing selects it. Add a decision → option edge.`,
       });
     }
   }

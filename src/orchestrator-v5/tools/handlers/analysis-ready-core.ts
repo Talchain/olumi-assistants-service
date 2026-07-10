@@ -116,6 +116,8 @@ const STRUCTURAL_NEXT_STEP: Record<StructuralViolationCode, string> = {
   NO_PATH_TO_GOAL: 'Connect the model so every option reaches the goal, then analyse.',
   CYCLE_DETECTED: 'Fix the graph structure — a circular dependency was detected.',
   OPTION_NO_FACTOR_EDGES: 'Give each option at least one factor effect before analysing.',
+  // PR #413 review FIXUP 3 — floating option (no decision → option edge).
+  OPTION_NOT_LINKED_TO_DECISION: 'Connect the decision to each option before analysing.',
   NODE_LIMIT_EXCEEDED: 'Simplify the model — it has too many items to analyse.',
   EDGE_LIMIT_EXCEEDED: 'Simplify the model — it has too many connections to analyse.',
 };
