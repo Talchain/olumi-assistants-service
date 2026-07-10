@@ -752,9 +752,12 @@ export async function draftGraphWithAnthropic(
         "[Anthropic] draft_graph completed in prompt-only mode after Structured Outputs fallback");
     }
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -1195,9 +1198,12 @@ export async function suggestOptionsWithAnthropic(args: {
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -1537,9 +1543,12 @@ export async function repairGraphWithAnthropic(
     }
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type, fallback_reason: "unexpected_response_type", quality_tier: "failed" }, "unexpected Anthropic repair response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type), fallback_reason: "unexpected_response_type", quality_tier: "failed" }, "unexpected Anthropic repair response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -1870,9 +1879,12 @@ export async function clarifyBriefWithAnthropic(
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -2084,9 +2096,12 @@ export async function critiqueGraphWithAnthropic(
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -2249,9 +2264,12 @@ Return ONLY valid JSON in this format:
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
