@@ -89,6 +89,12 @@
 -- {claimed:false, already_owned:true} and appends NO second journey
 -- event (deterministic event_id, keyed on the scenario id — a scenario
 -- can only ever be claimed once, since user_id never returns to NULL).
+-- The replay branch DOES re-run the two denormalisation UPDATEs
+-- (idempotent, claim-pinned): append_turn_atomic reads scenarios with a
+-- plain SELECT (no lock), so a turn streaming while the original claim
+-- committed can strand NULL-stamped turn/fact rows AFTER the claim's
+-- UPDATEs — the replay converts that to self-healing-on-retry (review
+-- fixup 1, 2026-07-10; FOR SHARE on the append read is a separate lane).
 --
 -- Verification (run after the separately-approved execution):
 --   SELECT proname FROM pg_proc WHERE proname = 'claim_guest_scenario';
@@ -160,14 +166,30 @@ BEGIN
   IF v_owner IS NOT NULL THEN
     IF v_owner = p_user_id THEN
       -- Idempotent replay: this user already owns the row (retry after a
-      -- lost response, double-submit, second device). Nothing to write —
-      -- the denormalised copies were stamped by the claim that won, and
-      -- the journey event already exists.
+      -- lost response, double-submit, second device). The journey event
+      -- already exists — but the denormalisation UPDATEs MUST re-run:
+      -- append_turn_atomic reads scenarios with a plain SELECT (no lock),
+      -- so a turn that was streaming while the original claim committed
+      -- can have appended NULL-stamped turn/fact rows AFTER the claim's
+      -- UPDATEs ran — permanently invisible to the new owner's RLS reads
+      -- with no other repair path. Re-running the two idempotent,
+      -- claim-pinned UPDATEs here (still under this claim's row lock)
+      -- makes any retry the repair (review fixup 1, 2026-07-10).
+      UPDATE public.v5_conversation_turns
+        SET user_id = p_user_id
+        WHERE scenario_id = p_scenario_id AND user_id IS NULL;
+      GET DIAGNOSTICS v_turns_updated = ROW_COUNT;
+
+      UPDATE public.v5_handler_facts
+        SET user_id = p_user_id
+        WHERE scenario_id = p_scenario_id AND user_id IS NULL;
+      GET DIAGNOSTICS v_facts_updated = ROW_COUNT;
+
       RETURN jsonb_build_object(
         'claimed',       false,
         'already_owned', true,
-        'turns_updated', 0,
-        'facts_updated', 0,
+        'turns_updated', v_turns_updated,
+        'facts_updated', v_facts_updated,
         'event_id',      NULL
       );
     END IF;
@@ -181,11 +203,14 @@ BEGIN
         updated_at = now()
     WHERE id = p_scenario_id;
 
-  -- Denormalised copies: scenario-scoped, NULL-only. The extra
-  -- `user_id IS NULL` predicate is belt-and-braces — under the row lock
-  -- a guest scenario's turn/fact rows can only carry NULL (they are
-  -- stamped from scenarios.user_id at append time) — but it pins the
-  -- statement to "claim", never "reassign".
+  -- Denormalised copies: scenario-scoped, NULL-only. The `user_id IS NULL`
+  -- predicate pins the statement to "claim", never "reassign". NOTE: the
+  -- row lock does NOT close the append race — append_turn_atomic reads
+  -- scenarios with a plain SELECT (no FOR SHARE), so a turn in flight
+  -- during this claim can still commit NULL-stamped turn/fact rows after
+  -- these UPDATEs run. The same-user replay branch above re-runs both
+  -- UPDATEs, so a claim retry is the repair path (adding FOR SHARE to the
+  -- append read is a separate CEE/PLoT lane, per the 2026-07-10 review).
   UPDATE public.v5_conversation_turns
     SET user_id = p_user_id
     WHERE scenario_id = p_scenario_id AND user_id IS NULL;

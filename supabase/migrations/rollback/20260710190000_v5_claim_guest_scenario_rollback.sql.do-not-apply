@@ -9,6 +9,14 @@
 -- stamped in the same transaction). Executed claims are data,
 -- not schema — reverting them is a separate, per-row decision
 -- that must never ride a schema rollback.
+--
+-- If a per-row manual un-claim IS ever performed (user_id back to
+-- NULL), it MUST also remove that scenario's `guest_claimed_<id>`
+-- journey event from scenarios.events — otherwise a later honest
+-- claim by a DIFFERENT user collides with the stale event's
+-- claimed_user_id and fails 22023 via the default deterministic
+-- event id (the re-claimer would have to pass a fresh p_event_id).
+-- (Review fixup 2, 2026-07-10.)
 -- ============================================================
 
 DROP FUNCTION IF EXISTS public.claim_guest_scenario(UUID, UUID, TEXT);
