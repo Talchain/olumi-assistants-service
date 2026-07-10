@@ -134,6 +134,23 @@ export interface ComposeToolCallInput {
     readonly requestId: string;
     readonly scenarioId: string;
   };
+  /**
+   * R4 lookup fix — the persisted scenario graph for this turn
+   * (`EnrichedTurnContext.persistedGraph` on the routed path,
+   * `RunAnalysisScenarioSnapshot.rawPersistedGraph` on the chip-click
+   * run_analysis path). Fallback source for graph-node ID→{label,kind}
+   * resolution: the PLoT /v2/run envelope stored as
+   * `fact.result.enrichment` carries NO top-level `graph` key, so
+   * without this fallback every Phase 3 block ships `target_refs: []`
+   * and the flag-gated ui_directive emitter can never resolve its
+   * option target (verified live at deployed build 441dc0d). Consulted
+   * ONLY when the enrichment graph yields zero lookup entries — a
+   * present, non-empty enrichment graph stays authoritative. Omitting
+   * it preserves the pre-fix fail-closed behaviour exactly. Never
+   * re-fetched here: callers pass the graph they already hold for the
+   * turn.
+   */
+  readonly persistedGraph?: unknown;
 }
 
 export function composeToolCallResponse(input: ComposeToolCallInput): OlumiResponse {
@@ -144,7 +161,11 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
   if (trimmedConfirmation) pieces.push(trimmedConfirmation);
   if (input.coaching) pieces.push(input.coaching.trim());
 
-  const blocks = buildBlocksFromFacts(input.handlerFacts ?? [], input.lifecycle);
+  const blocks = buildBlocksFromFacts(
+    input.handlerFacts ?? [],
+    input.lifecycle,
+    input.persistedGraph,
+  );
 
   return {
     response_version: 2,
@@ -196,6 +217,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
 function buildBlocksFromFacts(
   facts: readonly HandlerFact[],
   lifecycle?: ComposeToolCallInput['lifecycle'],
+  persistedGraph?: unknown,
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -209,7 +231,7 @@ function buildBlocksFromFacts(
       // PR 3 lifecycle branch 1 — fresh blocks from current-turn fact.
       const graphHash = fact.result.graph_hash_at_run;
       if (typeof graphHash === 'string' && graphHash.length > 0) {
-        const freshBlocks = rebuildPhase3BlocksFresh(fact, graphHash);
+        const freshBlocks = rebuildPhase3BlocksFresh(fact, graphHash, persistedGraph);
         blocks.push(...freshBlocks);
 
         // R4 CEE-half slice 1 — flag-gated deterministic ui_directive
@@ -219,9 +241,11 @@ function buildBlocksFromFacts(
         // lifecycle branch below never emits a directive, and the
         // fail-closed conditions (no recommendation / unresolvable or
         // non-option target / noop) live in the builder. At most ONE
-        // directive per turn in this slice.
+        // directive per turn in this slice. `persistedGraph` is the
+        // lookup fallback — in production it is the ONLY source that
+        // can resolve the option target (see ComposeToolCallInput).
         if (!uiDirectiveEmitted && config.features.uiDirectiveEmit) {
-          const directive = buildRecommendedOptionUiDirective(fact);
+          const directive = buildRecommendedOptionUiDirective(fact, persistedGraph);
           if (directive !== null) {
             blocks.push(directive);
             uiDirectiveEmitted = true;
@@ -280,7 +304,7 @@ function buildBlocksFromFacts(
   // lifecycle context supplied. Walk prior_facts using the freshness
   // verdict to select the canonical source fact and decide emission.
   if (!currentTurnRunAnalysisHandled && lifecycle !== undefined) {
-    blocks.push(...buildLifecycleBlocksFromPrior(lifecycle));
+    blocks.push(...buildLifecycleBlocksFromPrior(lifecycle, persistedGraph));
   }
 
   return blocks;
@@ -496,11 +520,15 @@ function buildAnalysisResultBlock(
  * PR 3 — pure helper: rebuild the three Phase 3 builder outputs from a
  * single run_analysis fact at a known graph hash. Used by both the
  * current-turn fresh path and the prior-fact fresh path so they share
- * deterministic block construction.
+ * deterministic block construction. `persistedGraph` is the graph-node
+ * lookup fallback (see ComposeToolCallInput.persistedGraph) — without it
+ * every production block resolves `target_refs: []` because the PLoT
+ * envelope carries no `graph` key.
  */
 function rebuildPhase3BlocksFresh(
   fact: RunAnalysisHandlerFact,
   graphHash: string,
+  persistedGraph?: unknown,
   freshness: 'fresh' | 'stale' = 'fresh',
 ): OlumiResponse['blocks'] {
   const ctx: BlockBuildCtx = {
@@ -508,7 +536,7 @@ function rebuildPhase3BlocksFresh(
     graph_hash_at_generation: graphHash,
     freshness,
   };
-  const lookup = buildGraphNodeLookup(fact);
+  const lookup = buildGraphNodeLookup(fact, persistedGraph);
   const confidenceLookup = buildFactorConfidenceLookup(fact);
   return [
     ...buildReviewCardBlocks(fact, lookup, ctx),
@@ -533,6 +561,7 @@ function rebuildPhase3BlocksFresh(
  */
 function buildLifecycleBlocksFromPrior(
   lifecycle: NonNullable<ComposeToolCallInput['lifecycle']>,
+  persistedGraph?: unknown,
 ): OlumiResponse['blocks'] {
   const { freshness, priorFacts } = lifecycle;
   const verdict = freshness.freshness;
@@ -627,7 +656,11 @@ function buildLifecycleBlocksFromPrior(
   // stale-safe rerun coaching block). Enrichment is sanitised by the
   // response-finaliser before egress.
   const analysisResultBlock = buildAnalysisResultBlock(priorFact);
-  const phase3Blocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash);
+  // FRESH verdict ⇒ the current persisted graph's hash matches the source
+  // fact's `graph_hash_at_run`, so the persisted graph is a valid lookup
+  // fallback for the rebuilt blocks too (same node ids/labels the analysis
+  // ran against).
+  const phase3Blocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash, persistedGraph);
   const freshBlocks: OlumiResponse['blocks'] = [analysisResultBlock, ...phase3Blocks];
   emitLifecycle(lifecycle, {
     lifecycle_state: 'emitted_fresh',

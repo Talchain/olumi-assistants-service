@@ -666,6 +666,12 @@ export async function dispatchChipClickRunAnalysis(
       stage: payload.stage,
       handlerFacts: enrichedFacts,
       suggested_actions: chipClickSuggestedActions,
+      // R4 lookup fix — persisted-snapshot fallback for graph-node
+      // ID→{label,kind} resolution (Phase 3 target_refs + the flag-gated
+      // ui_directive). The snapshot is the SAME reference the handler ran
+      // against (single-source-of-truth pre-load above); on the injected-
+      // registry test path fall back to the turn context's persisted graph.
+      persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
     });
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.
@@ -1048,6 +1054,11 @@ async function dispatchChipClickNoopExplanation(
       stage: payload.stage,
       handlerFacts: outcome.handler_facts,
       suggested_actions: noopSuggestedActions,
+      // R4 lookup fix — persisted-snapshot fallback so the FRESH lifecycle
+      // rebuild below resolves non-empty Phase 3 target_refs (the PLoT
+      // envelope on the prior fact carries no `graph` key). Loaded by
+      // buildTurnContext for this turn; no extra DB read.
+      persistedGraph: context.persistedGraph,
       // PR 3 — explain/flip handlers do NOT produce a run_analysis fact,
       // so the composer's lifecycle branch 2 fires: it walks prior_facts
       // for the canonical run_analysis fact (selected by the
