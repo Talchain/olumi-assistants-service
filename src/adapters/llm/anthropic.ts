@@ -9,7 +9,7 @@ import { rejectsSamplingParams } from "../../config/models.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ChatWithToolsStreamEvent, ToolResponseBlock, ThinkingConfig } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ChatWithToolsStreamEvent, ToolResponseBlock, ReplayThinkingBlock, ThinkingConfig } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
@@ -752,9 +752,12 @@ export async function draftGraphWithAnthropic(
         "[Anthropic] draft_graph completed in prompt-only mode after Structured Outputs fallback");
     }
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -1195,9 +1198,12 @@ export async function suggestOptionsWithAnthropic(args: {
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -1537,9 +1543,12 @@ export async function repairGraphWithAnthropic(
     }
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type, fallback_reason: "unexpected_response_type", quality_tier: "failed" }, "unexpected Anthropic repair response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type), fallback_reason: "unexpected_response_type", quality_tier: "failed" }, "unexpected Anthropic repair response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -1870,9 +1879,12 @@ export async function clarifyBriefWithAnthropic(
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -2084,9 +2096,12 @@ export async function critiqueGraphWithAnthropic(
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -2249,9 +2264,12 @@ Return ONLY valid JSON in this format:
     clearTimeout(timeoutId);
     const _elapsedMs = Date.now() - startTime;
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      log.error({ content_type: content.type }, "unexpected Anthropic response type");
+    // When thinking is enabled (or on-by-default, e.g. Sonnet 5 adaptive),
+    // Anthropic prepends thinking blocks before the text block.
+    // Find the first text block rather than assuming index 0 (mirrors #385).
+    const content = response.content.find(b => b.type === 'text');
+    if (!content || content.type !== "text") {
+      log.error({ content_types: response.content.map(b => b.type) }, "unexpected Anthropic response type");
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
@@ -2588,7 +2606,7 @@ export async function chatWithAnthropic(
 
 interface ChatWithToolsAnthropicArgs {
   system: string;
-  messages: Array<{ role: 'user' | 'assistant'; content: string | ToolResponseBlock[] }>;
+  messages: Array<{ role: 'user' | 'assistant'; content: string | Array<ToolResponseBlock | ReplayThinkingBlock> }>;
   tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
   tool_choice?: { type: 'auto' | 'any' | 'tool'; name?: string };
   model?: string;
@@ -2770,11 +2788,21 @@ export async function chatWithToolsAnthropic(
     // ROADMAP 1.42 — when CEE_REASONING_CAPTURE_ENABLED is on, VERBATIM
     // `thinking` block text is captured OUT-OF-BAND into reasoningParts
     // (never into `content`, see ChatWithToolsResult.reasoning jsdoc for why).
-    // `block.signature` is NEVER captured — it is Anthropic's opaque replay
-    // token, not reasoning content, and must never reach a client. Any
-    // `redacted_thinking` block is always dropped, flag or no flag — its
-    // `data` field is encrypted/opaque and carries no readable reasoning.
+    // `block.signature` is NEVER captured into `reasoning` — it is
+    // Anthropic's opaque replay token, not reasoning content, and must never
+    // reach a client. `redacted_thinking` `data` is likewise never captured
+    // into `reasoning` — it is encrypted/opaque and carries no readable
+    // reasoning.
     const reasoningParts: string[] = [];
+    // ROADMAP 1.55(b) — thinking / redacted_thinking blocks are ALSO captured
+    // VERBATIM (signature/data intact) into replay_thinking_blocks,
+    // unconditionally, for API-BOUND REPLAY ONLY: Anthropic's tool-use
+    // protocol requires the complete unmodified thinking block(s) on the
+    // assistant echo when tool_results are returned (400 otherwise), so the
+    // REPAIR_ONCE path needs them. This does NOT loosen the user-facing
+    // filter: they never enter `content` and must never be serialised to any
+    // client-facing surface (see ReplayThinkingBlock jsdoc).
+    const replayThinkingBlocks: ReplayThinkingBlock[] = [];
     for (const block of response.content) {
       if (block.type === 'text') {
         content.push({ type: 'text' as const, text: block.text });
@@ -2785,10 +2813,22 @@ export async function chatWithToolsAnthropic(
           name: block.name,
           input: block.input as Record<string, unknown>,
         });
-      } else if (config.features.reasoningCaptureEnabled && block.type === 'thinking') {
-        reasoningParts.push(block.thinking);
+      } else if (block.type === 'thinking') {
+        replayThinkingBlocks.push({
+          type: 'thinking' as const,
+          thinking: block.thinking,
+          signature: block.signature,
+        });
+        if (config.features.reasoningCaptureEnabled) {
+          reasoningParts.push(block.thinking);
+        }
+      } else if (block.type === 'redacted_thinking') {
+        replayThinkingBlocks.push({
+          type: 'redacted_thinking' as const,
+          data: block.data,
+        });
       } else {
-        // Non-text / non-tool_use block — drop it; it must never surface to the user.
+        // Any other block type — drop it; it must never surface to the user.
         log.warn(
           { block_type: (block as any).type },
           "dropping non-text content block from tool response (not surfaced to client)",
@@ -2843,6 +2883,7 @@ export async function chatWithToolsAnthropic(
         cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
       },
       ...(reasoning !== undefined ? { reasoning } : {}),
+      ...(replayThinkingBlocks.length > 0 ? { replay_thinking_blocks: replayThinkingBlocks } : {}),
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);

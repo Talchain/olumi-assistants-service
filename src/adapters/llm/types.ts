@@ -522,6 +522,27 @@ export type ToolResponseBlock =
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
 
 /**
+ * ROADMAP 1.55(b) — a VERBATIM extended-thinking block captured for
+ * API-BOUND REPLAY ONLY.
+ *
+ * Anthropic's extended-thinking + tool-use protocol requires the complete,
+ * unmodified thinking block(s) to be echoed on the assistant message that
+ * carries the tool_use when tool_results are returned (400
+ * invalid_request_error otherwise — "`thinking` or `redacted_thinking`
+ * blocks in the latest assistant message cannot be modified"). The
+ * REPAIR_ONCE path prepends these to the API-bound repair message.
+ *
+ * `signature` / `data` are Anthropic's opaque replay tokens — NOT reasoning
+ * content. These blocks must NEVER be pushed into
+ * {@link ChatWithToolsResult.content}, joined into orientationText /
+ * assistant_text, or serialised onto any client-facing wire. The only legal
+ * destination is the `messages` array of a follow-up Anthropic call.
+ */
+export type ReplayThinkingBlock =
+  | { type: 'thinking'; thinking: string; signature: string }
+  | { type: 'redacted_thinking'; data: string };
+
+/**
  * Arguments for chat with native tool calling.
  */
 /**
@@ -537,8 +558,14 @@ export interface SystemCacheBlock {
 export interface ChatWithToolsArgs {
   /** System prompt for the conversation */
   system: string;
-  /** Full message history (multi-turn) */
-  messages: Array<{ role: 'user' | 'assistant'; content: string | ToolResponseBlock[] }>;
+  /**
+   * Full message history (multi-turn). Assistant-message content may carry
+   * {@link ReplayThinkingBlock}s ONLY when echoing a prior thinking-bearing
+   * Anthropic response (REPAIR_ONCE protocol replay — ROADMAP 1.55b). The
+   * Anthropic adapter passes them through verbatim; non-Anthropic adapters
+   * skip unknown block types.
+   */
+  messages: Array<{ role: 'user' | 'assistant'; content: string | Array<ToolResponseBlock | ReplayThinkingBlock> }>;
   /** Tool definitions available to the model */
   tools: ToolDefinition[];
   /** Tool choice strategy */
@@ -590,6 +617,18 @@ export interface ChatWithToolsResult {
    * signature to be replayed validly).
    */
   reasoning?: string;
+  /**
+   * ROADMAP 1.55(b) — VERBATIM thinking / redacted_thinking blocks from the
+   * response, captured UNCONDITIONALLY (no flag) for API-BOUND REPLAY ONLY.
+   * The REPAIR_ONCE path prepends these to the assistant echo so the repair
+   * call satisfies Anthropic's thinking-with-tool-use protocol.
+   *
+   * Contains `signature` (opaque replay token) — this field must never be
+   * serialised to any client-facing surface (assistant_text, orientation
+   * text, SSE frames, debug wire payloads). See {@link ReplayThinkingBlock}.
+   * Absent when the response carried no thinking blocks.
+   */
+  replay_thinking_blocks?: ReplayThinkingBlock[];
 }
 
 /**

@@ -73,9 +73,46 @@ export const V5_ROUTING_MAX_OUTPUT_TOKENS = 3072;
  * finish rather than re-truncating on the retry.
  */
 export const V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY = 8192;
+
+/**
+ * ROADMAP 1.55(c) — retry-cap / timeout coherence.
+ *
+ * Measured Sonnet 5 output rate on staging (2026-07-08 evidence): ~114
+ * output tokens/second. Under the shared per-call budget
+ * (ORCHESTRATOR_TIMEOUT_MS, 30s default) only ~3,400 output tokens are
+ * servable, so the 8192-token retry cap above was UNREACHABLE — a deep
+ * truncation surfaced as LLM_TIMEOUT on the retry rather than a rescue or
+ * the designed bounded-fallback.
+ *
+ * Fix: the max_tokens retry gets its OWN per-call timeout sized to its cap
+ * (generation time for the full cap at the assumed rate, plus a
+ * time-to-first-token / input-processing allowance). This was chosen over
+ * lowering the retry cap to what 30s can serve (~3,400 ≈ the 3072 first
+ * cap, which would gut #384's rescue intent) because the V5 turn budget
+ * (TURN_BUDGET_MS, 180s default — budgets.ts) comfortably fits a truncated
+ * first attempt (~30s) + a full retry window (~80s) with handler headroom.
+ *
+ * The arithmetic is pinned by route-with-tool-use-retry-budget.test.ts —
+ * any model-speed, cap, or budget change re-fires those assertions.
+ */
+export const V5_ROUTING_ASSUMED_OUTPUT_TOKENS_PER_SEC = 114;
+
+/** Allowance for time-to-first-token + input processing on the retry call. */
+export const V5_ROUTING_RETRY_TTFT_ALLOWANCE_MS = 8_000;
+
+/**
+ * Per-call timeout for the single max_tokens retry: the time to generate the
+ * full escalated cap at the assumed output rate, plus the TTFT allowance.
+ * 8192 tok / 114 tok/s ≈ 71.9s + 8s ≈ 80s.
+ */
+export const V5_ROUTING_RETRY_TIMEOUT_MS =
+  Math.ceil(
+    (V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY / V5_ROUTING_ASSUMED_OUTPUT_TOKENS_PER_SEC) * 1000,
+  ) + V5_ROUTING_RETRY_TTFT_ALLOWANCE_MS;
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
+  ReplayThinkingBlock,
   SystemCacheBlock,
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
@@ -344,10 +381,24 @@ function buildRepairMessages(
   originalMessages: AnthropicMessage[],
   assistantContent: ToolResponseBlock[],
   validationDetail: string,
+  replayThinkingBlocks?: readonly ReplayThinkingBlock[],
 ): AnthropicMessage[] {
   const messages: AnthropicMessage[] = [...originalMessages];
 
-  messages.push({ role: 'assistant', content: assistantContent });
+  // ROADMAP 1.55(b) — Anthropic's extended-thinking + tool-use protocol:
+  // the assistant echo that carries the tool_use must START with the
+  // complete, unmodified thinking block(s) from the original response, or
+  // the repair call is rejected with 400 invalid_request_error. The blocks
+  // are prepended VERBATIM (opaque signature intact) into the API-BOUND
+  // message only — they never enter RoutingResult content, orientationText,
+  // or any client-facing surface (guarded by
+  // route-with-tool-use-thinking-replay.test.ts).
+  const assistantEcho: Array<ToolResponseBlock | ReplayThinkingBlock> =
+    replayThinkingBlocks && replayThinkingBlocks.length > 0
+      ? [...replayThinkingBlocks, ...assistantContent]
+      : assistantContent;
+
+  messages.push({ role: 'assistant', content: assistantEcho });
 
   const toolUseBlocks = assistantContent.filter(
     (b): b is Extract<ToolResponseBlock, { type: 'tool_use' }> => b.type === 'tool_use',
@@ -650,7 +701,11 @@ export async function routeWithToolUse(
         { ...firstCallArgs, maxTokens: V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY },
         {
           requestId: options.requestId,
-          timeoutMs,
+          // ROADMAP 1.55(c): the escalated 8192 cap needs ~72s of generation
+          // at the assumed output rate — an escalated per-call timeout to
+          // match, or the cap is unreachable and deep truncations become
+          // LLM_TIMEOUT. Never shrink a larger caller-supplied budget.
+          timeoutMs: Math.max(timeoutMs, V5_ROUTING_RETRY_TIMEOUT_MS),
           signal: options.signal,
         },
       );
@@ -674,6 +729,7 @@ export async function routeWithToolUse(
     firstCallArgs.messages,
     firstResult.content,
     parsedOrError.detail,
+    firstResult.replay_thinking_blocks,
   );
   assertAnthropicMessageProtocol(repairMessages);
 

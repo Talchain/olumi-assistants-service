@@ -423,7 +423,7 @@ describe('routeWithToolUse — error paths', () => {
 
   it('max_tokens on BOTH attempts → RoutingError{cause:"unexpected_stop_reason"} after ONE retry', async () => {
     // Prompt-workstream fix (2026-07-08): the first max_tokens now triggers
-    // a single escalated-budget retry (4096) before the unchanged error
+    // a single escalated-budget retry (V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY) before the unchanged error
     // path. Both attempts truncating → the pre-existing RoutingError, with
     // llmCallCount reflecting the extra call.
     const adapter = {
