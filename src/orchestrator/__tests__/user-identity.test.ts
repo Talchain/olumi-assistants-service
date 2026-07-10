@@ -98,6 +98,22 @@ describe("resolveUserIdentity — flag OFF (dormancy)", () => {
     expect(result).toEqual({ mode: "off" });
     expect(emitSpy).not.toHaveBeenCalled();
   });
+
+  it("returns mode 'off' when the auth config section is absent entirely (partial config mocks)", async () => {
+    // Regression pin: several route-v2 integration tests stub src/config
+    // with only the sections they exercise (no `auth` at all). The dormant
+    // path must treat a missing section as OFF, not throw a 500.
+    const savedAuth = mockConfig.auth;
+    try {
+      (mockConfig as { auth?: typeof savedAuth }).auth = undefined;
+      const req = makeReq({ authorization: "Bearer garbage.garbage.garbage" });
+      const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
+      expect(result).toEqual({ mode: "off" });
+      expect(emitSpy).not.toHaveBeenCalled();
+    } finally {
+      (mockConfig as { auth?: typeof savedAuth }).auth = savedAuth;
+    }
+  });
 });
 
 describe("resolveUserIdentity — flag ON", () => {

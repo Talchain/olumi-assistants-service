@@ -251,7 +251,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // from the verified `sub`. Direct key-authed service callers hitting
     // /orchestrate/v2/turn are NOT affected by this check — their
     // carve-out is documented in src/orchestrator/user-identity.ts.
-    if (config.auth.requireUserJwt && extractJwtCandidate(request.headers.authorization) === null) {
+    if (config.auth?.requireUserJwt === true && extractJwtCandidate(request.headers.authorization) === null) {
       log.warn({ requestId }, "[proxy-v5] Rejected: sign-in required (no user JWT presented)");
       emit(TelemetryEvents.UserJwtRefused, {
         request_id: requestId,

@@ -96,7 +96,11 @@ export async function resolveUserIdentity(
   req: FastifyRequest,
   requestId: string,
 ): Promise<UserIdentityResolution> {
-  if (!config.auth.requireUserJwt) {
+  // Optional-chained on purpose: the dormant path must stay safe under
+  // PARTIAL config mocks (several route-v2 integration tests stub only the
+  // config sections they exercise). Real config always carries `auth`; a
+  // missing section can only ever mean OFF.
+  if (config.auth?.requireUserJwt !== true) {
     return { mode: "off" };
   }
 
