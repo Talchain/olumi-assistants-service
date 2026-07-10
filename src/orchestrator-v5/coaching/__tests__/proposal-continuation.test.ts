@@ -1382,3 +1382,75 @@ describe('resolveProposalResume — diagnosis D2 fresh capture wins over carried
     expect(r.decision?.assistantText).not.toContain('legacy stale concept');
   });
 });
+
+// ---------------------------------------------------------------------------
+// PR #418 adversarial-review fixups — probe sentences are the reviewer's
+// exact texts. D2a supersession makes a false capture strictly COSTLIER (it
+// evicts a genuine carried concept), so the capture widening gains a screen.
+// ---------------------------------------------------------------------------
+
+describe('extractProposedConcept — review fixup 1a: negation/contrast screen', () => {
+  it('does NOT capture "I wouldn\'t recommend adding price sensitivity as a separate risk"', () => {
+    expect(
+      extractProposedConcept(
+        "I wouldn't recommend adding price sensitivity as a separate risk",
+      ),
+    ).toBeNull();
+  });
+
+  it('does NOT capture "Rather than adding brand equity as a standalone factor…"', () => {
+    expect(
+      extractProposedConcept(
+        'Rather than adding brand equity as a standalone factor…',
+      ),
+    ).toBeNull();
+  });
+
+  it('does NOT capture "We should avoid adding headcount as a direct driver"', () => {
+    expect(
+      extractProposedConcept(
+        'We should avoid adding headcount as a direct driver',
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('extractProposedConcept — review fixup 1b: interrogative anchor on the passive pattern', () => {
+  it('does NOT capture the reported negative "You said you did not want churn added as a factor"', () => {
+    expect(
+      extractProposedConcept(
+        'You said you did not want churn added as a factor',
+      ),
+    ).toBeNull();
+  });
+
+  it('does NOT capture the declarative retrospective "I have already seen churn added as a factor in similar models"', () => {
+    expect(
+      extractProposedConcept(
+        'I have already seen churn added as a factor in similar models',
+      ),
+    ).toBeNull();
+  });
+
+  it('still captures "Would you like churn added as a new factor?"', () => {
+    const r = extractProposedConcept(
+      'Would you like churn added as a new factor?',
+    );
+    expect(r).not.toBeNull();
+    expect(r?.concept).toBe('churn');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+});
+
+describe('extractProposedConcept — review fixup 2: pattern precedence for kind-anchored "to the model"', () => {
+  it('captures "software as a service" from "add a software as a service factor to the model"', () => {
+    // Regression introduced by the D1a adjective slot: pattern 1 consumed
+    // "service" as an adjective and captured the bare "software". The
+    // kind-anchored "add a {concept} factor to the model" shape must win.
+    const r = extractProposedConcept(
+      'add a software as a service factor to the model',
+    );
+    expect(r?.concept).toBe('software as a service');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+});
