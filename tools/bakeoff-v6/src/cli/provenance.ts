@@ -98,18 +98,18 @@ const provenance = {
     note: "Pre-flight records SERVED model ids per response; no silent substitution.",
   },
   arm_a_mirror: {
-    source: "src/adapters/llm/anthropic.ts draft path at the base SHA (PMS untouched)",
+    source: "src/adapters/llm/anthropic.ts draft path (post #382/#385: Sonnet 5 is the served draft model on staging)",
     mirrored: {
-      model: "claude-sonnet-4-6",
-      temperature: 0,
+      model: DEFAULT_MODELS.A.model,
+      temperature: "omitted — Sonnet 5 rejects a non-default temperature with HTTP 400 (arm-a.ts:34)",
       max_tokens: 16384,
       structured_outputs: "output_config.format json_schema with ANTHROPIC_DRAFT_GRAPH_SCHEMA (GA)",
-      thinking: "none",
+      thinking: "disabled — explicit thinking:{type:disabled} (Sonnet 5 defaults to adaptive when omitted); the --m1-thinking axis can switch this to adaptive+effort",
     },
     unverified_vs_live: [
       "CEE_ANTHROPIC_STRUCTURED_OUTPUTS flag state on staging (mirrored as ON)",
       "CEE_MAX_TOKENS_DRAFT unset assumption (mirrored as default 16384)",
-      "served PMS prompt text (slot only — prompts/arm-a.system.txt is a PLACEHOLDER until dropped in)",
+      "prompts/arm-a.system.txt is the authored, real M1 prompt (NOT a placeholder), aligned to the served data.interventions requirement (see PARITY-CHECKLIST.md); it is NOT byte-identical to the served PMS prompt v194, which is a longer production prompt",
     ],
   },
   pricing: PRICING_TABLE,

@@ -2,23 +2,23 @@
   "arm_a_mirror": {
     "mirrored": {
       "max_tokens": 16384,
-      "model": "claude-sonnet-4-6",
+      "model": "claude-sonnet-5",
       "structured_outputs": "output_config.format json_schema with ANTHROPIC_DRAFT_GRAPH_SCHEMA (GA)",
-      "temperature": 0,
-      "thinking": "none"
+      "temperature": "omitted — Sonnet 5 rejects a non-default temperature with HTTP 400 (arm-a.ts:34)",
+      "thinking": "disabled — explicit thinking:{type:disabled} (Sonnet 5 defaults to adaptive when omitted); the --m1-thinking axis can switch this to adaptive+effort"
     },
-    "source": "src/adapters/llm/anthropic.ts draft path at the base SHA (PMS untouched)",
+    "source": "src/adapters/llm/anthropic.ts draft path (post #382/#385: Sonnet 5 is the served draft model on staging)",
     "unverified_vs_live": [
       "CEE_ANTHROPIC_STRUCTURED_OUTPUTS flag state on staging (mirrored as ON)",
       "CEE_MAX_TOKENS_DRAFT unset assumption (mirrored as default 16384)",
-      "served PMS prompt text (slot only — prompts/arm-a.system.txt is a PLACEHOLDER until dropped in)"
+      "prompts/arm-a.system.txt is the authored, real M1 prompt (NOT a placeholder), aligned to the served data.interventions requirement (see PARITY-CHECKLIST.md); it is NOT byte-identical to the served PMS prompt v194, which is a longer production prompt"
     ]
   },
   "arm_d_cost_gate": "Advisor-tool usage.iterations[] shape NOT verified on a real arm-D generation call (pre-flight probed access only, not a full draft). Arm-D USD cost attribution and B@D equal-compute matching are PROVISIONAL; no D comparison is evidential until the first real advisor generation confirms the shape and the cost mapper (src/compute/cost.ts) is checked against it.",
   "base": {
-    "branch": "claude/bakeoff-v6-platform",
+    "branch": "claude/bakeoff-v6-dry-pass",
     "origin_staging_expected": "3e4b861156e08ebb711d4d4d0fd78d05d2b5bab3",
-    "sha": "373479c36baf11df32c6c1c802287f7c65ef10bb"
+    "sha": "6330198870456fcf069be781cd7a68c898101bf4"
   },
   "discipline": "Benchmark tooling ONLY. Additive under tools/bakeoff-v6/. No production wiring, no PMS, no push. Reports fail closed to 'PIPELINE SMOKE TEST — NOT EVIDENCE' unless every evidence attestation exists.",
   "fgq_vendoring": {
@@ -32,11 +32,11 @@
     "source_sha256": "fe11ab28bd9c7d4d9c198df13193cee4b9d6fa638301e7259048b4baf3c22df7"
   },
   "graphv3_seam": {
-    "arm_a_schema_blob_sha": "ff65c7eaa2781e531a0e1aa02cbd29d5366e12ea",
+    "arm_a_schema_blob_sha": "f505d2b4ad968293788d3ce793c17a5c3e528ec0",
     "arm_a_structured_output_schema": "src/cee/draft/anthropic-graph-schema.ts",
     "import_cleanliness": "Verified: importing cee-v3.ts with a fully scrubbed env succeeds (transitively loads zod, @talchain/schemas, sibling schema modules, and utils/telemetry.ts which creates a pino logger at import — no env validation, no config load, no PMS, no network).",
-    "talchain_schemas_integrity": "sha512-M5Emf9Q6/H5/dTo7lx02A+s2i+RNKlBOpEaSkUXafGZoa3Spn69Apcz67LKD4REWBf263ehiEHGP6r53IJg6+w==",
-    "talchain_schemas_pin": "file:./vendor/talchain-schemas-0.13.0.tgz",
+    "talchain_schemas_integrity": "sha512-CUTJk8xfoGwoT0liHEHBr3jgrLKkiuNKQxrVQ4AJkDh7aNETx7WFBEiNJ8EwkAloTJ3XgDFJOS0+Y2I32wGUeg==",
+    "talchain_schemas_pin": "file:./vendor/talchain-schemas-0.14.0.tgz",
     "validator_blob_sha": "e48d82f85dbe645b2508ac6eed09f5de96f28b51",
     "validator_module": "src/schemas/cee-v3.ts",
     "validator_symbols": [
@@ -55,15 +55,15 @@
     },
     "arms": {
       "A": {
-        "model": "claude-sonnet-4-6"
+        "model": "claude-sonnet-5"
       },
       "B": {
         "effort": "high",
         "model": "claude-opus-4-8"
       },
       "C": {
-        "m1": "claude-sonnet-4-6",
-        "m2": "claude-opus-4-8"
+        "m1": "claude-sonnet-5",
+        "m2": "claude-sonnet-5"
       },
       "D": {
         "advisor": "claude-opus-4-8",
@@ -85,6 +85,12 @@
         "output_per_mtok": 25
       },
       "claude-sonnet-4-6": {
+        "cache_read_per_mtok": 0.3,
+        "cache_write_5m_per_mtok": 3.75,
+        "input_per_mtok": 3,
+        "output_per_mtok": 15
+      },
+      "claude-sonnet-5": {
         "cache_read_per_mtok": 0.3,
         "cache_write_5m_per_mtok": 3.75,
         "input_per_mtok": 3,
