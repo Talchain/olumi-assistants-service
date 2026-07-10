@@ -770,6 +770,21 @@ export const TelemetryEvents = {
   // and NEVER affect the turn result.
   V5ModelVersionCreated: "v5.model_versions.version_created",
 
+  // Decision Records (CEE_DECISION_RECORD_CAPTURE) — commit-seam capture
+  // hook (ROADMAP 3.1, CEE half; ships DARK until migration
+  // 20260710113000_v5_decision_records.sql is executed). Emitted AFTER a
+  // durable commit carrying a successful (non-noop) run_analysis fact when
+  // the fire-and-forget create_decision_record call resolves, or when the
+  // builder skips before the RPC. Content-free: scenario/turn/row ids,
+  // outcome status ('ok' | 'deduped' | 'skipped' | 'guest_refused' |
+  // 'error'), deterministic record_id (UUID), closed-enum skip_reason,
+  // error name — never option labels, prediction text, or analysis values.
+  // The known-guest PRE-CHECK skip is deliberately log-only (no event; the
+  // MM WARN-spam lesson) — 'guest_refused' marks only the RPC's
+  // authoritative DR001 on the fail-open path. Non-blocking contract:
+  // capture/emit failures log and NEVER affect the turn result.
+  V5DecisionRecordCaptured: "v5.decision_records.record_captured",
+
   // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching
   // LIFECYCLE is derived (prior pre-dispatch snapshot vs current pre-dispatch coaching_state
   // + per-source evaluability). Same privacy contract as the other coaching events: STANDARD

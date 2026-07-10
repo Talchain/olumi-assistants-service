@@ -565,6 +565,22 @@ const ConfigSchema = z.object({
     // behind the DGAI half of R4 (parser/mapper/renderer — the §2
     // surfacing gate, see compose/__tests__/block-type-allowlist.test.ts).
     uiDirectiveEmit: booleanString.default(false),
+    // CEE_DECISION_RECORD_CAPTURE — ROADMAP 3.1 (CEE half): flag-gated
+    // decision-record capture hook at the commit seam. Default OFF;
+    // flag-off is byte-identical to pre-slice behaviour (the hook call
+    // site in commit.ts is skipped entirely — no store construction, no
+    // env reads; pinned by commit-decision-record-hook.test.ts). When
+    // true, a durable commit carrying a successful (non-noop)
+    // run_analysis fact fires ONE fire-and-forget create_decision_record
+    // RPC (deterministic p_record_id — retries dedupe; guest scenarios
+    // short-circuit pre-RPC; every failure logged and swallowed — the
+    // turn is never blocked or failed). Ships DARK: the env var is not
+    // declared in render*.yaml or the deployed service config, AND the
+    // backing migration (20260710113000_v5_decision_records.sql, #406)
+    // is merged but NOT yet executed — the RPC does not exist until
+    // Paul's execution gate; enablement is sequenced behind it (see
+    // ROADMAP 3.1 and parallel-briefs/PLATFORM-REPORT-2026-07-10-1.md).
+    decisionRecordCapture: booleanString.default(false),
   }),
 
   // Prompt Cache Configuration
@@ -1156,6 +1172,7 @@ function parseConfig(): Config {
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
       answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
       uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,
+      decisionRecordCapture: env.CEE_DECISION_RECORD_CAPTURE,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
