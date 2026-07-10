@@ -947,29 +947,36 @@ describe('findProposedConceptAction', () => {
     expect(findProposedConceptAction(undefined)).toBeNull();
   });
 
-  it('returns the most recent proposed_concept when multiple present', () => {
-    const a1 = buildProposalPendingAction({
-      concept: 'first concept',
-      preferred_kind: 'risk',
-      scenario_id: '11111111-1111-1111-1111-111111111111',
-      emitted_at_iso: '2026-05-28T09:00:00.000Z',
-      graph_hash: 'h1',
-    });
-    const a2 = buildProposalPendingAction({
-      concept: 'second concept',
+  it('D2: the FRESH capture wins over a carried stale one (commit order = fresh first)', () => {
+    // `commitDirectAnswer` persists [...thisTurnPendings, ...carriedSurvivors]
+    // — the fresh capture at the FRONT, the carried stale entry at the tail.
+    // The old end-first scan returned the carried stale concept here (the
+    // live 2026-07-10 stale-resume inversion); the scan must be front-first.
+    const fresh = buildProposalPendingAction({
+      concept: 'fresh concept',
       preferred_kind: 'factor',
       scenario_id: '11111111-1111-1111-1111-111111111111',
       emitted_at_iso: '2026-05-28T10:00:00.000Z',
       graph_hash: 'h2',
     });
-    const found = findProposedConceptAction([a1, a2]);
-    expect(found?.concept).toBe('second concept');
+    const carriedStale = {
+      ...buildProposalPendingAction({
+        concept: 'stale carried concept',
+        preferred_kind: 'risk',
+        scenario_id: '11111111-1111-1111-1111-111111111111',
+        emitted_at_iso: '2026-05-28T09:00:00.000Z',
+        graph_hash: 'h1',
+      }),
+      expires_at_turn_count: 1, // decremented once by carry-forward
+    };
+    const found = findProposedConceptAction([fresh, carriedStale]);
+    expect(found?.concept).toBe('fresh concept');
     expect(found?.preferred_kind).toBe('factor');
   });
 });
 
 describe('findProposedConceptEntry', () => {
-  it('returns the full PendingAction object for the most recent proposed_concept', () => {
+  it('returns the full PendingAction object for the freshest proposed_concept', () => {
     const entry = buildProposalPendingAction({
       concept: 'team morale',
       preferred_kind: 'factor',
@@ -981,6 +988,29 @@ describe('findProposedConceptEntry', () => {
     expect(found).not.toBeNull();
     expect(found?.expires_at_iso).toBe(entry.expires_at_iso);
     expect(found?.preconditions.graph_hash).toBe('h1');
+  });
+
+  it('D2: returns the FRONT (fresh) entry when a carried stale one follows it', () => {
+    const fresh = buildProposalPendingAction({
+      concept: 'fresh concept',
+      preferred_kind: 'factor',
+      scenario_id: '11111111-1111-1111-1111-111111111111',
+      emitted_at_iso: '2026-05-28T10:00:00.000Z',
+      graph_hash: 'h2',
+    });
+    const carriedStale = {
+      ...buildProposalPendingAction({
+        concept: 'stale carried concept',
+        preferred_kind: 'risk',
+        scenario_id: '11111111-1111-1111-1111-111111111111',
+        emitted_at_iso: '2026-05-28T09:00:00.000Z',
+        graph_hash: 'h1',
+      }),
+      expires_at_turn_count: 1,
+    };
+    const found = findProposedConceptEntry([fresh, carriedStale]);
+    expect(found?.id).toBe(fresh.id);
+    expect(found?.preconditions.graph_hash).toBe('h2');
   });
 
   it('returns null on empty / missing input', () => {
@@ -1226,5 +1256,129 @@ describe('resolveProposalResume — wall-clock + graph-hash gate', () => {
     });
     expect(r.rejection).toBeNull();
     expect(r.decision?.stage).toBe('stage_one');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Diagnosis D (2026-07-10, run-1/run-2 wire captures + Render telemetry) —
+// proposal-continuation capture + stale-resume defects. The specimen texts
+// below are the verbatim assistant-turn phrasings from the diagnosis, NOT
+// mirrors of the regexes.
+// ---------------------------------------------------------------------------
+
+describe('extractProposedConcept — diagnosis D1 live capture specimens', () => {
+  it('D1a: adjective before the kind word ("as a new factor") captures a clean concept', () => {
+    // Live run-1 specimen. Before the fix: pattern 1 had no adjective
+    // slot, the generic "would you like me to add X" pattern captured
+    // the whole tail, and the kind-strip left the mangled persisted
+    // concept "marketing budget as a new".
+    const r = extractProposedConcept(
+      'Would you like me to add marketing budget as a new factor?',
+    );
+    expect(r).not.toBeNull();
+    expect(r?.concept).toBe('marketing budget');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('D1a: the mangled live specimen "marketing budget as a new" is never produced', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add marketing budget as a new factor?',
+    );
+    expect(r?.concept).not.toBe('marketing budget as a new');
+  });
+
+  it('D1a: bare active form with adjective ("add X as a significant new risk")', () => {
+    const r = extractProposedConcept(
+      'You could add supplier delays as a significant new risk.',
+    );
+    expect(r?.concept).toBe('supplier delays');
+    expect(r?.preferred_kind).toBe('risk');
+  });
+
+  it('D1a: adjective-free active form still captures identically (no regression)', () => {
+    const r = extractProposedConcept(
+      'The most useful next step would be to add team morale or cultural fit as a factor.',
+    );
+    expect(r?.concept).toBe('team morale or cultural fit');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('D1b: passive form "would you like X added as a new factor?" is captured', () => {
+    // Live run-2 specimen. Before the fix: "added" matched NO pattern
+    // (add(?:ing)? does not cover the passive participle), so nothing
+    // was captured and the continuation never resumed.
+    const r = extractProposedConcept(
+      'Would you like marketing budget added as a new factor?',
+    );
+    expect(r).not.toBeNull();
+    expect(r?.concept).toBe('marketing budget');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('D1b: passive form without an adjective ("would you like X added as a risk?")', () => {
+    const r = extractProposedConcept(
+      'Would you like supplier delays added as a risk?',
+    );
+    expect(r?.concept).toBe('supplier delays');
+    expect(r?.preferred_kind).toBe('risk');
+  });
+
+  it('D1b: passive bridge form "would you like to see X added as a factor?"', () => {
+    const r = extractProposedConcept(
+      'Would you like to see customer churn added as a factor?',
+    );
+    expect(r?.concept).toBe('customer churn');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('D1c: kind-strip residue "as a new" is stripped, so a pronoun capture fails closed', () => {
+    // Pattern 1 captures the bare pronoun "it" (rejected as a concept),
+    // then the generic pattern captures "it as a new factor". Before the
+    // fix the kind-strip left "it as a new", which passed cleanConcept
+    // (not an exact pronoun) and persisted a mangled concept. With the
+    // residue strip the capture reduces to the bare pronoun "it" and is
+    // rejected — extraction fails closed instead of persisting garbage.
+    expect(
+      extractProposedConcept('Would you like me to add it as a new factor?'),
+    ).toBeNull();
+  });
+});
+
+describe('resolveProposalResume — diagnosis D2 fresh capture wins over carried stale', () => {
+  const SCENARIO_D2 = '11111111-1111-1111-1111-111111111111';
+
+  it('a fresh capture and a carried stale one coexist → the FRESH concept resumes', () => {
+    // Persisted row order mirrors commitDirectAnswer:
+    // [...thisTurnPendings (fresh capture first), ...carriedSurvivors].
+    // Live 2026-07-10 specimen: the end-first read resumed the 2-turn-old
+    // carried proposal over the immediately-preceding turn's offer.
+    const fresh = buildProposalPendingAction({
+      concept: 'marketing budget',
+      preferred_kind: 'factor',
+      scenario_id: SCENARIO_D2,
+      emitted_at_iso: '2026-07-10T10:00:00.000Z',
+      graph_hash: 'sha256:live',
+    });
+    const carriedStale = {
+      ...buildProposalPendingAction({
+        concept: 'legacy stale concept',
+        preferred_kind: 'risk',
+        scenario_id: SCENARIO_D2,
+        emitted_at_iso: '2026-07-10T09:00:00.000Z',
+        graph_hash: 'sha256:live',
+      }),
+      expires_at_turn_count: 1, // already carried once
+    };
+    const r = resolveProposalResume({
+      message: 'Yes, add that.',
+      pendingActions: [fresh, carriedStale],
+      nodes: null,
+      currentGraphHash: 'sha256:live',
+      nowMs: Date.parse('2026-07-10T10:00:30.000Z'),
+    });
+    expect(r.rejection).toBeNull();
+    expect(r.decision?.stage).toBe('stage_one');
+    expect(r.decision?.assistantText).toContain('marketing budget');
+    expect(r.decision?.assistantText).not.toContain('legacy stale concept');
   });
 });
