@@ -264,12 +264,13 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
     }
   });
 
-  it('max_tokens on the first routing call — ONE retry at 4096 rescues the turn (prompt-workstream fix)', async () => {
+  it('max_tokens on the first routing call — ONE retry at the escalated budget (V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY) rescues the turn (prompt-workstream fix)', async () => {
     // Live evidence (2026-07-08 staging-parity runs): ~4-5% of routing
-    // calls die with stop_reason === 'max_tokens' at the 2048 cap (a
-    // failed call burned exactly 2048 completion tokens) and each one
-    // shipped the bounded-fallback apology. The fix keeps the 2048 first
-    // attempt and, on max_tokens, retries ONCE with maxTokens 4096 —
+    // calls die with stop_reason === 'max_tokens' at the first-attempt cap
+    // (a failed call burned exactly that many completion tokens) and each
+    // one shipped the bounded-fallback apology. The fix keeps the
+    // V5_ROUTING_MAX_OUTPUT_TOKENS first attempt and, on max_tokens,
+    // retries ONCE with maxTokens V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY —
     // same messages, same tools. Asserts: two adapter calls with the
     // escalated budget, identical messages/tools, turn succeeds as a
     // normal text_only converse (no bounded fallback, no error block),
@@ -330,7 +331,7 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
   });
 
   it('max_tokens on BOTH routing calls — bounded fallback 200, no further retry (V5 P0 review-P2)', async () => {
-    // When the 4096 retry ALSO ends max_tokens, we fall through to the
+    // When the escalated-budget retry ALSO ends max_tokens, we fall through to the
     // pre-existing error path unchanged: `tryInterpret` classifies it as
     // non_repairable `unexpected_stop_reason` → bounded fallback to a
     // 200 direct_answer envelope. Asserts: exactly two adapter calls
