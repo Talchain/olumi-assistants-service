@@ -496,10 +496,19 @@ describe("GET /assist/v1/draft-graph?schema=v2", () => {
         expect(defaultBody.nodes[0]).toHaveProperty("kind");
       }
 
-      // V2 edges should have effect_direction, V1 should not, V3 should
+      // V2/V3 edges should have effect_direction; on V1 it is OPTIONAL
+      // (EffectDirection.optional() in src/schemas/graph.ts) — deterministic
+      // repairs write it into v1 graphs (enforcement bridge edges always;
+      // canonicalStructuralEdge on structural edges since the 422 fix), so
+      // the old `not.toHaveProperty` assertion only held while edges[0]
+      // happened to escape repair. Assert the schema contract instead: if
+      // present it must be a valid direction.
       // V3 has edges at root level, V1/V2 have graph.edges
       if (v1Body.graph.edges.length > 0) {
-        expect(v1Body.graph.edges[0]).not.toHaveProperty("effect_direction");
+        const v1Direction = v1Body.graph.edges[0].effect_direction;
+        if (v1Direction !== undefined) {
+          expect(["positive", "negative"]).toContain(v1Direction);
+        }
         // V1 schema now includes strength_std (added by simpleRepair synthetic edges)
       }
       if (v2Body.graph.edges.length > 0) {
