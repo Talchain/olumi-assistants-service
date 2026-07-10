@@ -1,12 +1,19 @@
 /**
- * Deterministic arm-C merge.
+ * Deterministic arm-C merge — an M1 draft + M2 SUGGESTION OVERLAY.
  *
- * BENCHMARK CODE, NOT A MODEL, merges M2's discrete proposals into the M1
- * draft. Every proposal lands in exactly one bucket — applied, artifact, or
- * a RECORDED failure. Nothing is silently dropped; an invalid merge never
- * crashes the run. Proposals are applied in emission order; output key
- * ordering is stable, so the same inputs always produce byte-identical
- * merged candidates.
+ * BENCHMARK CODE, NOT A MODEL. Every proposal lands in exactly one bucket —
+ * applied, artifact, or a RECORDED failure. Nothing is silently dropped; an
+ * invalid merge never crashes the run. Output key ordering is stable, so the
+ * same inputs always produce byte-identical output.
+ *
+ * BY DESIGN, `applied` is ~0 and the merged graph ≈ the M1 draft: the M2
+ * contract emits delta.node as {label, description} — "a suggestion for the
+ * user, never an applied change" — which cannot satisfy NodeV3's required
+ * id/kind, so node/edge proposals correctly land in the failure bucket and
+ * question-type proposals in the artifact bucket. This is intentional and
+ * ratified: arm-C is evaluated on SUGGESTION QUALITY (the proposals), never on
+ * merge deltas. Do NOT read applied≈0 as a defect, and do NOT compare arm-C to
+ * A/B on graph structure — the overlay leaves the structure ≈ the draft.
  */
 import { NodeV3, EdgeV3, validateCandidate } from "../validate/validator.ts";
 import { ProposalEnvelope, isArtifactType } from "./proposals.ts";
