@@ -11,6 +11,18 @@
 -- Date authored: 2026-07-10
 -- Date executed: (pending)
 --
+-- CHANGELOG (pre-execution amendments — this file is merged but NOT
+--   yet executed, so it is amended in place rather than superseded):
+--   - 2026-07-10 (claim-race-hardening lane): single-read micro-fix.
+--     events/event_seq are folded into the FOR UPDATE row-lock SELECT
+--     and the second, redundant scenarios read before the journey-event
+--     append is dropped. No behaviour change: the row lock is held to
+--     commit and the only intervening write (the claim UPDATE) touches
+--     neither column. Companion migration (same execution batch)
+--     20260711000000_v5_append_turn_atomic_for_share.sql closes the
+--     append-side strand race at its source; the replay branch below
+--     stays as belt-and-braces.
+--
 -- RULING IMPLEMENTED (Paul, 2026-07-10 eve): guest-data option (a) —
 -- claim-on-first-login (PLATFORM-LOGIN-AUDIT-2026-07-10.md §4a). After a
 -- user's FIRST verified sign-in, the server-side guest rows belonging to
@@ -94,7 +106,9 @@
 -- plain SELECT (no lock), so a turn streaming while the original claim
 -- committed can strand NULL-stamped turn/fact rows AFTER the claim's
 -- UPDATEs — the replay converts that to self-healing-on-retry (review
--- fixup 1, 2026-07-10; FOR SHARE on the append read is a separate lane).
+-- fixup 1, 2026-07-10; FOR SHARE on the append read is closed by
+-- 20260711000000_v5_append_turn_atomic_for_share.sql, same batch —
+-- this replay branch remains as belt-and-braces).
 --
 -- Verification (run after the separately-approved execution):
 --   SELECT proname FROM pg_proc WHERE proname = 'claim_guest_scenario';
@@ -152,9 +166,13 @@ BEGIN
   -- Row lock: serialises concurrent claims of the same scenario (second
   -- claimer blocks, then sees the stamped owner and takes the replay or
   -- GC409 branch below). FOUND distinguishes "row absent" from "guest
-  -- row with user_id IS NULL" (the 20260422000000 lesson).
-  SELECT user_id
-    INTO v_owner
+  -- row with user_id IS NULL" (the 20260422000000 lesson). events /
+  -- event_seq are read here too — single read, under the same lock —
+  -- for the journey-event append: the lock is held to commit and the
+  -- claim UPDATE below touches neither column, so the values stay
+  -- authoritative (pre-execution amendment, see header CHANGELOG).
+  SELECT user_id, events, event_seq + 1
+    INTO v_owner, v_events, v_new_seq
     FROM public.scenarios
     WHERE id = p_scenario_id
     FOR UPDATE;
@@ -168,13 +186,15 @@ BEGIN
       -- Idempotent replay: this user already owns the row (retry after a
       -- lost response, double-submit, second device). The journey event
       -- already exists — but the denormalisation UPDATEs MUST re-run:
-      -- append_turn_atomic reads scenarios with a plain SELECT (no lock),
-      -- so a turn that was streaming while the original claim committed
-      -- can have appended NULL-stamped turn/fact rows AFTER the claim's
-      -- UPDATEs ran — permanently invisible to the new owner's RLS reads
-      -- with no other repair path. Re-running the two idempotent,
-      -- claim-pinned UPDATEs here (still under this claim's row lock)
-      -- makes any retry the repair (review fixup 1, 2026-07-10).
+      -- an append_turn_atomic reading scenarios with a plain SELECT (no
+      -- lock) while the original claim committed can have appended
+      -- NULL-stamped turn/fact rows AFTER the claim's UPDATEs ran —
+      -- invisible to the new owner's RLS reads. Re-running the two
+      -- idempotent, claim-pinned UPDATEs here (still under this claim's
+      -- row lock) makes any retry a repair (review fixup 1, 2026-07-10).
+      -- The race itself is closed at source by the same-batch companion
+      -- 20260711000000_v5_append_turn_atomic_for_share.sql; this branch
+      -- stays as belt-and-braces.
       UPDATE public.v5_conversation_turns
         SET user_id = p_user_id
         WHERE scenario_id = p_scenario_id AND user_id IS NULL;
@@ -204,13 +224,15 @@ BEGIN
     WHERE id = p_scenario_id;
 
   -- Denormalised copies: scenario-scoped, NULL-only. The `user_id IS NULL`
-  -- predicate pins the statement to "claim", never "reassign". NOTE: the
-  -- row lock does NOT close the append race — append_turn_atomic reads
-  -- scenarios with a plain SELECT (no FOR SHARE), so a turn in flight
-  -- during this claim can still commit NULL-stamped turn/fact rows after
-  -- these UPDATEs run. The same-user replay branch above re-runs both
-  -- UPDATEs, so a claim retry is the repair path (adding FOR SHARE to the
-  -- append read is a separate CEE/PLoT lane, per the 2026-07-10 review).
+  -- predicate pins the statement to "claim", never "reassign". NOTE: this
+  -- row lock alone does NOT close the append race — an append_turn_atomic
+  -- reading scenarios with a plain SELECT (no FOR SHARE) could commit
+  -- NULL-stamped turn/fact rows after these UPDATEs run. That race is
+  -- closed at its source by the same-batch companion migration
+  -- 20260711000000_v5_append_turn_atomic_for_share.sql (the append read
+  -- becomes FOR SHARE and serialises against this FOR UPDATE); the
+  -- same-user replay branch above re-runs both UPDATEs as belt-and-braces
+  -- (per the 2026-07-10 review).
   UPDATE public.v5_conversation_turns
     SET user_id = p_user_id
     WHERE scenario_id = p_scenario_id AND user_id IS NULL;
@@ -228,8 +250,6 @@ BEGIN
   -- DIFFERENT claim target is a caller bug — 22023, never a silent skip
   -- that returns the colliding id as if it were this claim's.
   v_event_id := COALESCE(p_event_id, 'guest_claimed_' || p_scenario_id::text);
-  SELECT events, event_seq + 1 INTO v_events, v_new_seq
-    FROM public.scenarios WHERE id = p_scenario_id;
   SELECT e INTO v_existing_event
     FROM jsonb_array_elements(COALESCE(v_events, '[]'::jsonb)) AS e
     WHERE e->>'event_id' = v_event_id;
