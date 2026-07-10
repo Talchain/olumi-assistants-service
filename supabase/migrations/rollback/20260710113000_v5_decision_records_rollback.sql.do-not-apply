@@ -2,6 +2,12 @@
 -- Decision Records v1 — break-glass rollback companion
 -- Matches: 20260710113000_v5_decision_records.sql
 -- Status: DO NOT APPLY automatically.
+--
+-- CHANGELOG: 2026-07-10 P1 amendment (workspace/identity design;
+--   pre-execution, in-place) — the forward file gained workspace_id +
+--   visibility columns and create_decision_record gained two trailing
+--   parameters, so the DROP FUNCTION signature and the export SELECT
+--   below were updated to match.
 -- ============================================================
 --
 -- The `.do-not-apply` suffix ensures Supabase migration tooling skips
@@ -16,7 +22,8 @@
 --         'record_id', record_id, 'scenario_id', scenario_id,
 --         'created_at', to_jsonb(created_at), 'decision', decision,
 --         'prediction', prediction, 'review_date', to_jsonb(review_date),
---         'outcome', outcome)
+--         'outcome', outcome,
+--         'workspace_id', workspace_id, 'visibility', visibility)
 --       FROM public.decision_records;
 --
 -- The forward migration touched NO existing table (no scenarios column,
@@ -32,7 +39,7 @@
 
 -- 1. Drop the RPCs (exact signatures — no overloads exist by design).
 DROP FUNCTION IF EXISTS public.create_decision_record(
-  uuid, jsonb, jsonb, timestamptz, uuid, text
+  uuid, jsonb, jsonb, timestamptz, uuid, text, uuid, text
 );
 DROP FUNCTION IF EXISTS public.record_decision_outcome(
   uuid, jsonb, text

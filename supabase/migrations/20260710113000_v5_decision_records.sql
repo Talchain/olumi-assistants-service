@@ -11,6 +11,34 @@
 -- Date authored: 2026-07-10
 -- Date executed: (pending)
 --
+-- CHANGELOG (pre-execution amendments — this file is merged but NOT
+--   yet executed, so it is amended in place rather than superseded;
+--   precedent: PR #415 amending #410's claim RPC file):
+--   - 2026-07-10 (workspace/identity lane, Decision P1 per
+--     parallel-briefs/WORKSPACE-IDENTITY-DESIGN-v1.md §18/§P1 —
+--     authored AHEAD of Paul's ratification of P1; stated honestly:
+--     the ruling is pending, and execution of this file remains
+--     Paul-gated regardless, so nothing goes live without his
+--     approval of the batch): add `workspace_id UUID NULL` (no FK —
+--     the workspaces table does not exist yet; Batch A creates it;
+--     NULL = pre-workspace record; denormalised at write time, same
+--     posture as owner_user_id) and `visibility TEXT NOT NULL DEFAULT
+--     'private'` CHECK IN ('private','workspace'). Stamped AT BIRTH
+--     because records OUTLIVE scenarios by design — a later backfill
+--     via scenario lookup fails for precisely the records whose
+--     scenarios are gone (free this week; permanently lossy after
+--     execution). create_decision_record gains OPTIONAL
+--     p_workspace_id UUID DEFAULT NULL + p_visibility TEXT DEFAULT
+--     'private' (value-guarded per this file's whitelist style);
+--     the signature change is safe pre-execution — no prior version
+--     exists in any database, so no overload is created. Contract
+--     note: @talchain/schemas 0.15.0 DecisionRecordSchema does NOT
+--     carry these fields yet, so the RPCs' `record` envelope
+--     deliberately EXCLUDES them — the .strict() pass-through parse
+--     stays clean; they join the envelope only when the contract
+--     adds them. No RLS policy change here: 'workspace' visibility
+--     is read via a Phase-2 additive policy, not this file.
+--
 -- CONTRACT: @talchain/schemas 0.15.0 `DecisionRecordSchema`
 --   (olumi-schemas src/boundary/decision-record.ts). That schema's own
 --   comment binds this file: FIELD NAMES MUST MATCH THE SCHEMA EXACTLY so
@@ -102,10 +130,10 @@
 --   SELECT proname FROM pg_proc
 --     WHERE proname IN ('create_decision_record','record_decision_outcome');
 --   SELECT has_function_privilege('authenticated',
---     'public.create_decision_record(uuid, jsonb, jsonb, timestamptz, uuid, text)',
+--     'public.create_decision_record(uuid, jsonb, jsonb, timestamptz, uuid, text, uuid, text)',
 --     'EXECUTE');                                         -- false
 --   SELECT has_function_privilege('service_role',
---     'public.create_decision_record(uuid, jsonb, jsonb, timestamptz, uuid, text)',
+--     'public.create_decision_record(uuid, jsonb, jsonb, timestamptz, uuid, text, uuid, text)',
 --     'EXECUTE');                                         -- true
 --   SELECT has_function_privilege('authenticated',
 --     'public.record_decision_outcome(uuid, jsonb, text)', 'EXECUTE');  -- false
@@ -133,6 +161,18 @@ CREATE TABLE IF NOT EXISTS public.decision_records (
   -- time. No FK to auth.users (see header). Unowned durable rows are
   -- impossible by constraint.
   owner_user_id  UUID NOT NULL,
+  -- P1 amendment (see header CHANGELOG): workspace stamped at birth.
+  -- NULL = record created before the workspace substrate exists.
+  -- Deliberately NO foreign key — public.workspaces does not exist yet
+  -- (Batch A of the workspace/identity MVP creates it); same
+  -- denormalise-at-write-time posture as owner_user_id.
+  workspace_id   UUID,
+  -- P1 amendment: per-record visibility. 'private' = owner-only (the
+  -- default — Decision P2: a record is personal calibration data
+  -- first); 'workspace' = per-record opt-in, readable by workspace
+  -- members only via a Phase-2 ADDITIVE RLS policy that this file
+  -- deliberately does not create.
+  visibility     TEXT NOT NULL DEFAULT 'private',
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   -- When the user (or an automated prompt) should compare prediction to
   -- reality. Set at creation, independent of when `outcome` lands.
@@ -176,6 +216,12 @@ CREATE TABLE IF NOT EXISTS public.decision_records (
       AND COALESCE(outcome->>'result', '')
           IN ('better', 'as_expected', 'worse', 'abandoned')
     )
+  ),
+  -- P1 amendment: closed visibility vocabulary (design doc §18 —
+  -- exactly these two values; further tiers are a later, additive
+  -- constraint change).
+  CONSTRAINT dr_visibility_allowed CHECK (
+    visibility IN ('private', 'workspace')
   )
 );
 
@@ -194,6 +240,15 @@ COMMENT ON COLUMN public.decision_records.owner_user_id IS
   'Denormalised from scenarios.user_id at write time by the RPC. NOT NULL '
   'by decision (D3 Branch A): guest scenarios cannot create decision '
   'records.';
+COMMENT ON COLUMN public.decision_records.workspace_id IS
+  'P1 amendment (workspace/identity design): workspace stamped at record '
+  'birth (records outlive scenarios — no later backfill is possible for '
+  'records whose scenarios are gone). NULL = pre-workspace record. NO FK: '
+  'public.workspaces does not exist yet (Batch A creates it).';
+COMMENT ON COLUMN public.decision_records.visibility IS
+  'P1 amendment: ''private'' (default — owner-only; Decision P2) or '
+  '''workspace'' (per-record opt-in; readable by workspace members only '
+  'once the Phase-2 additive RLS policy lands — not created here).';
 COMMENT ON COLUMN public.decision_records.decision IS
   'DecisionRecordDecisionSchema verbatim. decision->>''graph_hash'' regime: '
   '``aag_v1:sha256:<64-hex>`` = CEE computeAnalysisAffectingGraphHash with '
@@ -253,14 +308,22 @@ GRANT ALL ON public.decision_records TO service_role;
 --      }
 --    The RPC-metadata keys live BESIDE `record`, never inside it, so the
 --    strict contract parse of `record` stays clean.
+--
+--    P1 amendment: p_workspace_id + p_visibility are STAMPED onto the row
+--    but NOT projected into `record` — DecisionRecordSchema 0.15.0 is
+--    .strict() and does not carry them yet (see header CHANGELOG).
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_decision_record(
-  p_scenario_id UUID,
-  p_decision    JSONB,
-  p_prediction  JSONB,
-  p_review_date TIMESTAMPTZ,
-  p_record_id   UUID DEFAULT NULL,
-  p_event_id    TEXT DEFAULT NULL
+  p_scenario_id  UUID,
+  p_decision     JSONB,
+  p_prediction   JSONB,
+  p_review_date  TIMESTAMPTZ,
+  p_record_id    UUID DEFAULT NULL,
+  p_event_id     TEXT DEFAULT NULL,
+  -- P1 amendment (appended AFTER the existing defaults so existing
+  -- positional callers are untouched): workspace at birth + visibility.
+  p_workspace_id UUID DEFAULT NULL,
+  p_visibility   TEXT DEFAULT 'private'
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -338,6 +401,21 @@ BEGIN
     RAISE EXCEPTION 'create_decision_record: p_review_date must be a finite timestamptz'
       USING ERRCODE = '22023';
   END IF;
+  -- P1 amendment guards. p_visibility: closed vocabulary, same style as
+  -- the whitelists above (an explicit NULL is rejected — the column is
+  -- NOT NULL; omit the parameter to get the 'private' default).
+  -- p_workspace_id needs no value guard beyond its UUID parameter type:
+  -- NULL is the legitimate pre-workspace value, and existence cannot be
+  -- checked — public.workspaces does not exist yet (Batch A). Honest
+  -- scope: the design's eventual source is scenarios.workspace_id
+  -- (denormalised under the row lock below), but THAT column does not
+  -- exist yet either — until Batch A lands, the caller-supplied
+  -- parameter is the carrier, and the sourcing can be tightened in a
+  -- later pre-execution amendment or in the CEE caller.
+  IF p_visibility IS NULL OR p_visibility NOT IN ('private', 'workspace') THEN
+    RAISE EXCEPTION 'create_decision_record: p_visibility must be ''private'' or ''workspace'''
+      USING ERRCODE = '22023';
+  END IF;
 
   -- Row lock: serialises the guest check, replay check and event append
   -- per scenario. FOUND distinguishes "row absent" from "guest row".
@@ -393,10 +471,12 @@ BEGIN
   -- semantics.
   BEGIN
     INSERT INTO public.decision_records (
-      record_id, scenario_id, owner_user_id, review_date, decision, prediction
+      record_id, scenario_id, owner_user_id, review_date, decision, prediction,
+      workspace_id, visibility  -- P1 amendment: stamped at birth
     ) VALUES (
       COALESCE(p_record_id, gen_random_uuid()),
-      p_scenario_id, v_owner, p_review_date, p_decision, p_prediction
+      p_scenario_id, v_owner, p_review_date, p_decision, p_prediction,
+      p_workspace_id, p_visibility
     )
     RETURNING * INTO v_new;
   EXCEPTION WHEN unique_violation THEN
@@ -659,12 +739,16 @@ $$;
 --    auto-GRANT EXECUTE to anon/authenticated on new public functions;
 --    REVOKE FROM PUBLIC alone is insufficient.
 -- ------------------------------------------------------------
+-- (Signature includes the P1-amendment parameters. Safe pre-execution:
+-- no prior version of the function exists in any database, so the
+-- CREATE above makes exactly one function — no overload, per the
+-- distinct-names/no-overloads rule in the header.)
 REVOKE EXECUTE ON FUNCTION public.create_decision_record(
-  uuid, jsonb, jsonb, timestamptz, uuid, text
+  uuid, jsonb, jsonb, timestamptz, uuid, text, uuid, text
 ) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.create_decision_record(
-  uuid, jsonb, jsonb, timestamptz, uuid, text
+  uuid, jsonb, jsonb, timestamptz, uuid, text, uuid, text
 ) TO service_role;
 
 REVOKE EXECUTE ON FUNCTION public.record_decision_outcome(
