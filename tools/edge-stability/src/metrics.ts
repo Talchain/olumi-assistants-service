@@ -103,7 +103,10 @@ export function canonicalEdges(drafts: Draft[]): CanonicalEdge[] {
     const means = present.map((s) => c.bySeed.get(s)!.strengthMean);
     const stdsv = present.map((s) => c.bySeed.get(s)!.strengthStd);
     const exists = present.map((s) => c.bySeed.get(s)!.existsProbability);
-    const structural = means.every((m) => Math.abs(Math.abs(m) - 1) < 0.05);
+    // Structural edges are pinned at +1.0 by the grammar (decision->option, option->factor).
+    // Test the SIGNED value, not |mean|: a causal edge drawn +1.0 in one draw and -1.0 in another
+    // is a full-strength DIRECTION REVERSAL, not structural — it must reach the sign-flip count.
+    const structural = means.every((m) => Math.abs(m - 1) < 0.05);
     const signFlip = means.some((m) => m > 0.05) && means.some((m) => m < -0.05);
     return {
       fromLabel: c.fromLabel, toLabel: c.toLabel,
@@ -133,8 +136,11 @@ export interface BriefStability {
   signFlips: number; // causal edges whose drawn coefficient flips sign across draws
 }
 
-export function briefStability(briefId: string, drafts: Draft[]): BriefStability {
-  const seeds = drafts.map((d) => d.seed).sort((a, b) => a - b);
+export function briefStability(briefId: string, draftsIn: Draft[]): BriefStability {
+  // Sort by seed FIRST so every metric (esp. the drafts[0] reference used by the node-label
+  // reproducibility rate) is deterministic regardless of filesystem listing order.
+  const drafts = [...draftsIn].sort((a, b) => a.seed - b.seed);
+  const seeds = drafts.map((d) => d.seed);
   const nodeCount = stats(drafts.map((d) => d.nodeCount));
   const edgeCount = stats(drafts.map((d) => d.edgeCount));
   // shared node labels across ALL drafts (exact + fuzzy)

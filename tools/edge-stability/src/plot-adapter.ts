@@ -24,7 +24,10 @@ interface DraftEdge { from: string; to: string; exists_probability?: number; str
 interface DraftGraph { nodes: DraftNode[]; edges: DraftEdge[]; }
 
 export interface V2Intervention { value: number; source: "cee_hypothesis"; }
-export interface V2Option { id: string; label: string; interventions: Record<string, V2Intervention>; }
+// is_baseline is the AUTHORITATIVE status-quo flag from the draft grammar. PLoT ignores
+// unknown nested keys (V2_RUN_ALLOWED_KEYS gates top-level only), so carrying it on the
+// option is safe and lets the flip-rate classify status-quo without a keyword-regex guess.
+export interface V2Option { id: string; label: string; interventions: Record<string, V2Intervention>; is_baseline: boolean; }
 export interface V2RunRequest {
   graph: { nodes: Array<{ id: string; kind: string; label: string; observed_state: { value: number; std: number; cap?: number } }>; edges: Array<{ from: string; to: string; exists_probability: number; strength: { mean: number; std: number } }>; };
   options: V2Option[];
@@ -171,6 +174,10 @@ export function adaptDraftToV2(graph: DraftGraph, seed: string, rule: SynthesisR
   const optionEdges = (graph.edges ?? []).filter((e) => optionIds.has(e.from) && ctrl.has(e.to));
   let drafted = 0, synthesized = 0;
   const options: V2Option[] = optionNodes.map((opt) => {
+    // Authoritative status-quo flag (top-level, or nested for older drafts) — carried through
+    // so the flip-rate classifies status-quo by the grammar's own flag, not a label regex.
+    const isBaseline = (opt as { is_baseline?: boolean }).is_baseline === true
+      || (opt.data as { is_baseline?: boolean } | null)?.is_baseline === true;
     const interventions: Record<string, V2Intervention> = {};
     const own = readOptionInterventions(opt);
     const ownFactors = Object.keys(own).filter((fid) => graphNodeIds.has(fid));
@@ -180,18 +187,20 @@ export function adaptDraftToV2(graph: DraftGraph, seed: string, rule: SynthesisR
     } else {
       // fallback: synthesize from option->factor wiring
       synthesized++;
-      const isBaseline = (opt as { is_baseline?: boolean }).is_baseline === true || (opt.data as { is_baseline?: boolean } | null)?.is_baseline === true;
       for (const fid of optionEdges.filter((e) => e.from === opt.id).map((e) => e.to)) {
         const f = ctrl.get(fid)!;
         const rawV = isBaseline ? baselineValue(f) : activeValue(f, rule);
         if (rawV !== null) interventions[fid] = { value: normalise ? to01(rawV, f) : rawV, source: "cee_hypothesis" };
       }
     }
-    return { id: opt.id, label: opt.label, interventions };
+    return { id: opt.id, label: opt.label, interventions, is_baseline: isBaseline };
   });
 
   const interventionSource: AdaptResult["interventionSource"] = drafted > 0 && synthesized === 0 ? "draft" : synthesized > 0 && drafted === 0 ? "synthesized" : drafted > 0 ? "draft" : "synthesized";
-  const optionsDifferentiated = new Set(options.map((o) => JSON.stringify(o.interventions))).size >= 2;
+  // Order-independent bundle identity: sort factor ids so options differing only in intervention
+  // KEY ORDER (same {fid:value} set) are NOT falsely counted as differentiated.
+  const bundleKey = (o: V2Option) => Object.entries(o.interventions).map(([k, v]) => `${k}=${v.value}`).sort().join("|");
+  const optionsDifferentiated = new Set(options.map(bundleKey)).size >= 2;
   if (!optionsDifferentiated) notes.push(`options NOT differentiated: <2 distinct intervention bundles across ${options.length} options (CEE would fail IDENTICAL_OPTION_INTERVENTIONS)`);
   if (synthesized > 0 && drafted > 0) notes.push(`mixed intervention source: ${drafted} draft, ${synthesized} synthesized`);
   const allValuesIn01 = [...options.flatMap((o) => Object.values(o.interventions).map((i) => i.value)), ...graphNodes.map((n) => n.observed_state.value)].every((v) => v >= 0 && v <= 1);

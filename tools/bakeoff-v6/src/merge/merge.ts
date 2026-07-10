@@ -13,11 +13,14 @@ import { ProposalEnvelope, isArtifactType } from "./proposals.ts";
 import type { DeferArtifact, MergeFailure, MergeReport } from "../types.ts";
 
 interface GraphCandidate {
-  schema_version: string;
+  schema_version?: string;
   nodes: Array<Record<string, unknown> & { id: string; kind: string; label: string }>;
   edges: Array<Record<string, unknown> & { from: string; to: string }>;
-  options: Array<Record<string, unknown> & { id: string; label: string }>;
-  goal_node_id: string;
+  // V3-egress shape only; the v8 LLM-boundary draft has NO top-level options[] /
+  // goal_node_id (options are nodes with kind:"option"). Both are optional here so
+  // the merge operates on either shape.
+  options?: Array<Record<string, unknown> & { id: string; label: string }>;
+  goal_node_id?: string;
   [key: string]: unknown;
 }
 
@@ -46,7 +49,10 @@ export function mergeProposals(m1Candidate: unknown, proposals: unknown[]): Merg
   const nodeIds = new Set(base.nodes.map((n) => n.id));
   const nodeLabels = new Set(base.nodes.map((n) => normalizeLabel(n.label)));
   const edgePairs = new Set(base.edges.map((e) => `${e.from}→${e.to}`));
-  const optionIds = new Set(base.options.map((o) => o.id));
+  // Option ids come from the NODES (kind:"option") — the authoritative source in the
+  // v8 draft, and equivalent to base.options[] in the V3 shape. Never deref base.options
+  // directly: it is absent on v8 drafts and dereferencing it threw on every live arm-C run.
+  const optionIds = new Set(base.nodes.filter((n) => n.kind === "option").map((n) => n.id));
 
   const fail = (index: number, type: string | null, reason: string) => {
     failures.push({ proposal_index: index, proposal_type: type, reason });
@@ -146,12 +152,16 @@ export function mergeProposals(m1Candidate: unknown, proposals: unknown[]): Merg
       nodeIds.add(nodeToAdd.id);
       nodeLabels.add(normalizeLabel(nodeToAdd.label));
       if (proposal.type === "added_option" && !optionIds.has(nodeToAdd.id)) {
-        base.options.push({
-          id: nodeToAdd.id,
-          label: nodeToAdd.label,
-          status: "needs_user_mapping",
-          interventions: {},
-        });
+        // The option NODE is already pushed above (base.nodes). Only mirror it into a
+        // top-level options[] when that V3-shape array exists; v8 drafts have none.
+        if (Array.isArray(base.options)) {
+          base.options.push({
+            id: nodeToAdd.id,
+            label: nodeToAdd.label,
+            status: "needs_user_mapping",
+            interventions: {},
+          });
+        }
         optionIds.add(nodeToAdd.id);
       }
     }

@@ -28,6 +28,19 @@ export function makeValidCandidate(): Record<string, unknown> {
   };
 }
 
+/**
+ * A v8 LLM-BOUNDARY draft candidate: the shape M1 actually emits at run time —
+ * nodes (options are kind:"option" nodes) + edges, and NO top-level options[],
+ * goal_node_id or schema_version. This is what mergeProposals receives on every
+ * live arm-C run; the V3-shaped makeValidCandidate() masked the base.options deref.
+ */
+export function makeV8DraftCandidate(): Record<string, unknown> {
+  const v3 = makeValidCandidate();
+  const { options, goal_node_id, schema_version, ...v8 } = v3 as Record<string, unknown>;
+  void options; void goal_node_id; void schema_version;
+  return v8;
+}
+
 export function mkEdge(
   from: string,
   to: string,

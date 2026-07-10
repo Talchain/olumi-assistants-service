@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { mergeProposals } from "../src/merge/merge.ts";
 import { stableStringify } from "../src/util/stable.ts";
-import { makeValidCandidate, mkEdge } from "./helpers.ts";
+import { makeValidCandidate, makeV8DraftCandidate, mkEdge } from "./helpers.ts";
 
 const validRiskProposal = () => ({
   type: "added_risk",
@@ -26,6 +26,37 @@ describe("deterministic arm-C merge", () => {
     expect(report.post_merge_valid).toBe(true);
     const nodes = (merged as { nodes: Array<{ id: string }> }).nodes;
     expect(nodes.some((n) => n.id === "risk_vendor")).toBe(true);
+  });
+
+  it("RED: applies a proposal on the v8 LLM-boundary draft shape (no top-level options[]) instead of throwing", () => {
+    // Live arm-C feeds this shape; before the fix, base.options.map(...) threw for
+    // EVERY live candidate -> applied=0, failures=[] (proposals landed in no bucket).
+    const draft = makeV8DraftCandidate();
+    expect((draft as { options?: unknown }).options).toBeUndefined();
+    const { report, merged } = mergeProposals(draft, [validRiskProposal()]);
+    expect(report.applied).toBe(1);
+    expect(report.failures).toEqual([]);
+    const nodes = (merged as { nodes: Array<{ id: string }> }).nodes;
+    expect(nodes.some((n) => n.id === "risk_vendor")).toBe(true);
+    // no phantom options[] array is invented on the v8 shape
+    expect((merged as { options?: unknown }).options).toBeUndefined();
+  });
+
+  it("RED: an added_option proposal adds the option NODE on the v8 shape (option-node source of truth)", () => {
+    const optionProposal = {
+      type: "added_option",
+      delta: {
+        node: { id: "opt_hybrid", kind: "option", label: "Hybrid buy-then-extend" },
+        edge: mkEdge("opt_hybrid", "fac_cost"),
+        question: null,
+      },
+      evidence_pointer: "brief: phased approach",
+      rationale: "A hybrid path was not modelled.",
+    };
+    const { report, merged } = mergeProposals(makeV8DraftCandidate(), [optionProposal]);
+    expect(report.applied).toBe(1);
+    const nodes = (merged as { nodes: Array<{ id: string; kind: string }> }).nodes;
+    expect(nodes.some((n) => n.id === "opt_hybrid" && n.kind === "option")).toBe(true);
   });
 
   it("records a malformed proposal (missing evidence_pointer) as a failure", () => {

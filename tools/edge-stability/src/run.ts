@@ -23,8 +23,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 interface Candidate {
   brief_id: string; seed: number; arm: string;
   candidate: { nodes?: Array<{ id: string; kind: string; label: string }>; edges?: Array<Record<string, unknown>> } | null;
+  failure?: unknown;
+  validation?: { valid?: boolean };
   served_models?: string[];
   prompt_hashes?: Record<string, string>;
+}
+
+/** A draw is FAILED (not a 0-node draft) when generation crashed / the record is flagged. */
+function isFailedDraw(c: Candidate): boolean {
+  return c.candidate == null
+    || !Array.isArray(c.candidate.nodes) || c.candidate.nodes.length === 0
+    || c.failure != null
+    || c.validation?.valid === false;
 }
 
 function toDraft(c: Candidate): Draft {
@@ -46,20 +56,24 @@ function toDraft(c: Candidate): Draft {
   return { seed: c.seed, nodeLabelsByKind, nodeCount: nodes.length, edgeCount: edges.length, edges };
 }
 
-function loadRun(runDir: string): { byBrief: Map<string, Draft[]>; attribution: { models: string[]; promptHashes: Set<string>; arm: string } } {
+function loadRun(runDir: string): { byBrief: Map<string, Draft[]>; failedByBrief: Map<string, number>; attribution: { models: string[]; promptHashes: Set<string>; arm: string } } {
   const dir = join(runDir, "candidates");
   const byBrief = new Map<string, Draft[]>();
+  const failedByBrief = new Map<string, number>();
   const models = new Set<string>(); const promptHashes = new Set<string>(); let arm = "A";
   for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
     const c = JSON.parse(readFileSync(join(dir, f), "utf-8")) as Candidate;
     if (c.arm && c.arm !== "A") continue; // edge-stability measures the draft (arm A / arm-c M1)
     arm = c.arm ?? "A";
+    // A failed/crashed draw is NOT a 0-node draft — counting it as one silently zeroes the whole
+    // brief's reproducibility. Exclude it from the stability sample and count it as its own signal.
+    if (isFailedDraw(c)) { failedByBrief.set(c.brief_id, (failedByBrief.get(c.brief_id) ?? 0) + 1); continue; }
     (byBrief.get(c.brief_id) ?? byBrief.set(c.brief_id, []).get(c.brief_id)!).push(toDraft(c));
     for (const m of c.served_models ?? []) models.add(m);
     const ph = c.prompt_hashes ?? {};
     if (ph["arm-a.system.txt"]) promptHashes.add(ph["arm-a.system.txt"]);
   }
-  return { byBrief, attribution: { models: [...models], promptHashes, arm } };
+  return { byBrief, failedByBrief, attribution: { models: [...models], promptHashes, arm } };
 }
 
 function pct(x: number): string { return `${Math.round(x * 100)}%`; }
@@ -139,20 +153,26 @@ async function main(): Promise<void> {
   const outDir = resolve(process.cwd(), (values["out-dir"] as string) ?? join(HERE, "../reports"));
   mkdirSync(outDir, { recursive: true });
 
-  const { byBrief, attribution } = loadRun(runDir);
+  const { byBrief, failedByBrief, attribution } = loadRun(runDir);
   const briefs = [...byBrief.entries()].sort((a, b) => a[0].localeCompare(b[0]))
     .map(([id, drafts]) => briefStability(id, drafts));
 
-  const md = report(label, briefs, attribution, ref);
+  const failedDraws = [...failedByBrief.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const totalFailed = failedDraws.reduce((a, [, n]) => a + n, 0);
+  const md = report(label, briefs, attribution, ref)
+    + (totalFailed > 0
+      ? `\n## Failed draws (excluded from stability metrics — an instability signal, not 0-node drafts)\n${failedDraws.map(([b, n]) => `- ${b}: ${n} failed/crashed draw(s)`).join("\n")}\nTotal: ${totalFailed} draw(s) failed generation; each brief's stability is measured over its VALID draws only.\n`
+      : "");
   const jsonArtifact = {
     label, attribution: { models: attribution.models, promptHashes: [...attribution.promptHashes], armMeasured: attribution.arm, ref },
+    failedDraws: Object.fromEntries(failedDraws), totalFailed,
     briefs,
   };
   writeFileSync(join(outDir, `${label}.md`), md);
   writeFileSync(join(outDir, `${label}.json`), JSON.stringify(jsonArtifact, null, 2));
   console.log(`edge-stability report: ${join(outDir, `${label}.md`)}`);
-  console.log(`briefs: ${briefs.length} | seeds/brief: ${briefs[0]?.seeds.length ?? 0}`);
-  for (const b of briefs) console.log(`  ${b.briefId}: node-label reprod ${pct(b.sharedNodeLabelRateFuzzy)} fuzzy, edges-in-all ${b.edgesInAllDrafts}, causal-recurring ${b.causalRecurring} (stable ${b.causalStable}, sign-flips ${b.signFlips})`);
+  console.log(`briefs: ${briefs.length} | valid draws/brief: ${briefs[0]?.seeds.length ?? 0} | failed draws: ${totalFailed}`);
+  for (const b of briefs) console.log(`  ${b.briefId}: node-label reprod ${pct(b.sharedNodeLabelRateFuzzy)} fuzzy, edges-in-all ${b.edgesInAllDrafts}, causal-recurring ${b.causalRecurring} (stable ${b.causalStable}, sign-flips ${b.signFlips})${(failedByBrief.get(b.briefId) ?? 0) ? ` [${failedByBrief.get(b.briefId)} failed]` : ""}`);
 }
 
 main().catch((err) => { console.error(`edge-stability failed: ${(err as Error).message}`); process.exit(1); });

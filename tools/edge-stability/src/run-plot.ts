@@ -106,9 +106,14 @@ async function main(): Promise<void> {
     const r = await callPlot(body, pinnedSeed);
     // Map recommended option id -> label (from the request) -> semantic identity, so ID churn
     // across draws (opt_x vs option_x) does not inflate the flip-rate.
-    const recLabel = r.recommended ? (body.options?.find((o: any) => o.id === r.recommended)?.label ?? r.recommended) : undefined;
+    const recOpt = r.recommended ? body.options?.find((o: any) => o.id === r.recommended) : undefined;
+    const recLabel = recOpt ? (recOpt.label ?? r.recommended) : (r.recommended ? r.recommended : undefined);
     const recNorm = recLabel ? norm(recLabel) : undefined;
-    const recIsSQ = recLabel ? isStatusQuo(recLabel) : undefined;
+    // Status-quo classification: AUTHORITATIVE grammar flag (is_baseline) when the request carries
+    // it; fall back to the label-keyword heuristic only for older requests that lack the flag.
+    const recIsSQ = recOpt
+      ? (typeof recOpt.is_baseline === "boolean" ? recOpt.is_baseline : isStatusQuo(recLabel ?? ""))
+      : undefined;
     results.push({ brief, seed, http: r.http ?? 0, regime_ok: r.regime_ok ?? false, ...r, recLabel, recNorm, recIsSQ } as CallResult);
     console.log(`  ${brief} s${seed}: HTTP ${r.http} ${r.analysis_status ?? "-"} echo:${r.regime_ok} rec=${recNorm ?? "-"}${recIsSQ === true ? "[SQ]" : recIsSQ === false ? "[act]" : ""}${r.error ? " ERR:" + r.error : ""}`);
   }
