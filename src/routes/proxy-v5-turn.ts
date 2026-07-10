@@ -33,6 +33,10 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config } from "../config/index.js";
 import { log } from "../utils/telemetry.js";
 import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
+import {
+  BROWSER_PROXY_SOURCE_HEADER,
+  BROWSER_PROXY_SOURCE_VALUE,
+} from "../utils/browser-proxy-source.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -49,6 +53,12 @@ const ALLOWED_REQUEST_HEADERS = [
   "x-user-id",
   "x-olumi-client-build",
   "x-olumi-payload-hash",
+  // Login 3.4 CEE-half seam: the browser's Supabase access token
+  // (`Authorization: Bearer <jwt>`) passes through to the internal turn
+  // route, where the flag-gated CEE_REQUIRE_USER_JWT verification consumes
+  // it. Inert until the UI sends the header. Service auth is unaffected:
+  // the injected x-olumi-assist-key is checked FIRST by the auth plugin.
+  "authorization",
 ] as const;
 
 /** Response headers safe to propagate back to the browser. */
@@ -242,6 +252,13 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     }
     // Propagate request ID
     internalHeaders["x-request-id"] = requestId;
+    // Stamp browser-proxy provenance (login 3.4 CEE-half). Set
+    // unconditionally AFTER the allowlist copy so a browser-supplied value
+    // can never reach the internal route — the flag-gated user-JWT
+    // enforcement refuses unauthenticated turns carrying this marker while
+    // exempting direct key-authed service callers. Inert while the flag is
+    // off (nothing reads it).
+    internalHeaders[BROWSER_PROXY_SOURCE_HEADER] = BROWSER_PROXY_SOURCE_VALUE;
 
     // 4. Internal routing via app.inject()
     // app.inject() runs the request through the full Fastify hook chain

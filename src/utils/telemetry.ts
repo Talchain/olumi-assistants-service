@@ -316,6 +316,13 @@ export const TelemetryEvents = {
   AuthFailed: "assist.auth.failed",
   RateLimited: "assist.auth.rate_limited",
 
+  // User-JWT identity events (login 3.4 CEE-half — CEE_REQUIRE_USER_JWT).
+  // Emitted ONLY when the flag is on; the flag-off path is dormant.
+  UserJwtVerified: "assist.auth.user_jwt_verified",
+  UserJwtRefused: "assist.auth.user_jwt_refused",
+  UserJwtIdentityMismatch: "assist.auth.user_jwt_identity_mismatch",
+  UserJwtServiceCallerLegacy: "assist.auth.user_jwt_service_caller_legacy",
+
   // Guard violations
   GuardViolation: "assist.draft.guard_violation",
 

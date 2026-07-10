@@ -388,6 +388,112 @@ describe("POST /proxy/v5/turn", () => {
     });
   });
 
+  // ---- Authorization forwarding + proxy-source marker (login 3.4 CEE-half) ----
+
+  describe("Authorization forwarding + browser-proxy marker", () => {
+    it("forwards the browser Authorization header to the internal route (Supabase JWT seam)", async () => {
+      let capturedAuthorization: string | undefined;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedAuthorization = req.headers["authorization"] as string;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          authorization: "Bearer test-only-forged-token.abc.def",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(capturedAuthorization).toBe("Bearer test-only-forged-token.abc.def");
+    });
+
+    it("stamps x-olumi-proxy-source: cee-browser-proxy on every internal request", async () => {
+      let capturedProxySource: string | undefined;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedProxySource = req.headers["x-olumi-proxy-source"] as string;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(capturedProxySource).toBe("cee-browser-proxy");
+    });
+
+    it("overrides a browser-supplied x-olumi-proxy-source with the canonical value (unspoofable)", async () => {
+      let capturedProxySource: string | undefined;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedProxySource = req.headers["x-olumi-proxy-source"] as string;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          "x-olumi-proxy-source": "spoofed-value",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(capturedProxySource).toBe("cee-browser-proxy");
+    });
+
+    it("still injects the assist key via x-olumi-assist-key when Authorization is forwarded", async () => {
+      let capturedAssistKey: string | undefined;
+      let capturedAuthorization: string | undefined;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedAssistKey = req.headers["x-olumi-assist-key"] as string;
+          capturedAuthorization = req.headers["authorization"] as string;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          authorization: "Bearer test-only-forged-token.abc.def",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(capturedAssistKey).toBe(TEST_ASSIST_KEY);
+      expect(capturedAuthorization).toBe("Bearer test-only-forged-token.abc.def");
+    });
+  });
+
   // ---- Response header propagation ----
 
   describe("response header propagation", () => {

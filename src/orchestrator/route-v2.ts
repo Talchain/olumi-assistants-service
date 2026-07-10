@@ -1121,14 +1121,16 @@ const NO_LIVE_PROPOSAL_TEXT =
  *   - `reply.code(500).send(boundaryError)` — OK
  *   - `reply.send(raw)` (default 200)       — type error: 200 wants brand
  *
- * The pre-flight 422 path uses `pre.status` which is typed as the
- * pre-flight failure status. The `400 | 422 | 500: BoundaryError` mapping
- * covers every possible pre-status output (per buildBoundaryError /
- * runPreFlight definitions).
+ * The pre-flight 401/422 path uses `pre.status` which is typed as the
+ * pre-flight failure status. The `400 | 401 | 422 | 500: BoundaryError`
+ * mapping covers every possible pre-status output (per buildBoundaryError /
+ * runPreFlight definitions; 401 is the flag-gated sign_in_required refusal
+ * from the CEE_REQUIRE_USER_JWT identity step — login 3.4 CEE-half).
  */
 export type V5RouteReply = {
   200: FinalisedV5Response;
   400: BoundaryError;
+  401: BoundaryError;
   422: BoundaryError;
   500: BoundaryError;
 };
