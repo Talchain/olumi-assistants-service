@@ -55,6 +55,27 @@ export class SmokeStubVerdictProvider implements VerdictProvider {
     }
 
     const elements = decomposed.map((el) => this.verdictFor(el, hitsByElement, seenTexts, rByText));
+
+    // Orphan safety hits: a safety cell can fire on an element_id that NO decomposed element carries
+    // — an intervention referencing a nonexistent factor (safety-cells.ts:74) or a goal_node_id
+    // referencing no node (:100). Those hits live in hitsByElement but nothing reads them, so the
+    // violation would be silently dropped from the score. A structural reference to a nonexistent
+    // element is definitionally ungrounded and must SAFETY_CAP the graph, so surface each as a
+    // synthetic element rather than losing it.
+    const decomposedIds = new Set(decomposed.map((el) => el.element_id));
+    for (const [elementId, hits] of hitsByElement) {
+      if (decomposedIds.has(elementId)) continue;
+      elements.push({
+        id: elementId,
+        gate: "ungrounded_or_fabricated",
+        value: null,
+        flags: [...new Set(hits.map((h) => h.cell))],
+        corroborated: true, // structurally derived: the referenced element genuinely does not exist
+        satisfies: null,
+        is_defer_artifact: false,
+      });
+    }
+
     return { provider: this.name, elements, r_items: rItems, r_pending: !r || r.length === 0 };
   }
 
