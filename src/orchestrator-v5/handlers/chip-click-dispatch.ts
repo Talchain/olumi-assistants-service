@@ -659,6 +659,21 @@ export async function dispatchChipClickRunAnalysis(
     const confirmationText = typeof decl?.confirmation_template === 'function'
       ? decl.confirmation_template(outcome)
       : (decl?.confirmation_template ?? outcome.assistant_text);
+    // Review F1 — hash gate for the compose fallback. On this path the
+    // snapshot passed below is the EXACT object the handler hashed into
+    // `graph_hash_at_run` (one-shot reader, no second DB read), so the
+    // fact's own hash gates the fallback open by construction; passing it
+    // keeps the compose-side gate uniform with the routed path (where the
+    // handler and the turn context read the graph separately).
+    const composedRunFact = enrichedFacts.find(
+      (f) => f.fact_type === 'run_analysis',
+    );
+    const composedRunFactGraphHash =
+      composedRunFact !== undefined &&
+      composedRunFact.fact_type === 'run_analysis' &&
+      typeof composedRunFact.result.graph_hash_at_run === 'string'
+        ? composedRunFact.result.graph_hash_at_run
+        : null;
     let response = composeToolCallResponse({
       orientation: '',  // no Sonnet orientation on chip clicks.
       confirmation: confirmationText,
@@ -672,6 +687,7 @@ export async function dispatchChipClickRunAnalysis(
       // against (single-source-of-truth pre-load above); on the injected-
       // registry test path fall back to the turn context's persisted graph.
       persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+      persistedGraphHash: composedRunFactGraphHash,
     });
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.

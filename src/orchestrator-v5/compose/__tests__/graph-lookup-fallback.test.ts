@@ -31,7 +31,12 @@
  *   (d) flag-off dormancy unchanged — persistedGraph never causes a
  *       directive on its own;
  *   (e) enrichment graph, when present and non-empty, stays authoritative
- *       (the fallback never overrides it).
+ *       (the fallback never overrides it);
+ *   (f) review F1 — the CURRENT-TURN branch consults the fallback only
+ *       when the caller-supplied `persistedGraphHash` equals the fact's
+ *       `graph_hash_at_run` (concurrent-writer window between the
+ *       handler's execution-time read and the turn-start context read);
+ *       the prior-fact FRESH lifecycle branch needs no hash.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -288,8 +293,14 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
     await restoreFlag();
   });
 
-  it('builder: production-shaped fact + fallback → directive with the recommended-option target ref', () => {
-    const directive = buildRecommendedOptionUiDirective(productionShapedFact(), PERSISTED_GRAPH);
+  it('builder: production-shaped fact + fallback-carrying lookup → directive with the recommended-option target ref', () => {
+    const fact = productionShapedFact();
+    // Review F2: the builder consumes the lookup the compose site already
+    // built for the fact's Phase 3 blocks (one build per fact).
+    const directive = buildRecommendedOptionUiDirective(
+      fact,
+      buildGraphNodeLookup(fact, PERSISTED_GRAPH),
+    );
     expect(directive).not.toBeNull();
     expect(directive).toMatchObject({
       type: 'ui_directive',
@@ -304,6 +315,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
     });
     const directives = byType(env.blocks, 'ui_directive');
     expect(directives).toHaveLength(1);
@@ -318,6 +330,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact({ leadingOptionId: 'fac_delivery_risk' })],
       persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
     });
     expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
   });
@@ -327,6 +340,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact({ leadingOptionId: 'opt_unknown' })],
       persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
     });
     expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
   });
@@ -365,6 +379,7 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
     });
     const flips = reviewCardsOfKind(env.blocks, 'flip_threshold');
     expect(flips).toHaveLength(1);
@@ -378,6 +393,7 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
     });
     const scenarios = reviewCardsOfKind(env.blocks, 'scenario_context');
     expect(scenarios).toHaveLength(1);
@@ -391,6 +407,7 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
     });
     const priority = reviewCardsOfKind(env.blocks, 'evidence_priority');
     expect(priority).toHaveLength(1);
@@ -420,6 +437,106 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
           computed_at: '2026-07-10T09:00:00.000Z',
         },
         requestId: 'req-fallback-prior-refs',
+        scenarioId: 'scen-lookup-fallback',
+      },
+    });
+    const flips = reviewCardsOfKind(env.blocks, 'flip_threshold');
+    expect(flips).toHaveLength(1);
+    expect((flips[0] as unknown as { target_refs: unknown[] }).target_refs).toEqual([
+      { id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review F1 — the current-turn fallback is HASH-GATED
+// ---------------------------------------------------------------------------
+//
+// On the routed path the run_analysis handler does its own Supabase read at
+// execution time while compose receives the turn-start persisted graph — a
+// concurrent writer in that window can rename/remove nodes between the two
+// reads. The current-turn branch therefore consults the fallback ONLY when
+// the caller-supplied `persistedGraphHash` (the executor's already-computed
+// canonical hash of that same persisted graph) equals the fact's
+// `graph_hash_at_run`. On mismatch — or when no hash is supplied — the
+// branch fails closed to the pre-fix behaviour. The prior-fact lifecycle
+// branch needs no hash: its FRESH verdict is already derived against the
+// same persisted graph.
+
+describe('current-turn fallback hash gate (review F1)', () => {
+  beforeEach(async () => {
+    await setFlag('true');
+  });
+  afterEach(async () => {
+    await restoreFlag();
+  });
+
+  it('persistedGraphHash === graph_hash_at_run → fallback consulted (directive + resolved target_refs)', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [productionShapedFact()],
+      persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
+    });
+    expect(byType(env.blocks, 'ui_directive')).toHaveLength(1);
+    expect(reviewCardsOfKind(env.blocks, 'flip_threshold')).toHaveLength(1);
+  });
+
+  it('persistedGraphHash MISMATCH → fallback NOT consulted; pre-fix fail-closed behaviour', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [productionShapedFact()],
+      persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: 'gh_concurrent_writer_diverged',
+    });
+    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
+    expect(reviewCardsOfKind(env.blocks, 'flip_threshold')).toHaveLength(0);
+    expect(reviewCardsOfKind(env.blocks, 'scenario_context')).toHaveLength(0);
+    expect(byType(env.blocks, 'evidence')).toHaveLength(0);
+    // Lookup-free blocks are unaffected — same as the neither-source baseline.
+    const narrative = reviewCardsOfKind(env.blocks, 'narrative');
+    expect(narrative).toHaveLength(1);
+    expect((narrative[0] as unknown as { target_refs: unknown[] }).target_refs).toEqual([]);
+  });
+
+  it('persistedGraphHash ABSENT (null) → fallback NOT consulted on the current-turn branch', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [productionShapedFact()],
+      persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: null,
+    });
+    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
+    expect(reviewCardsOfKind(env.blocks, 'flip_threshold')).toHaveLength(0);
+  });
+
+  it('persistedGraphHash omitted entirely → fallback NOT consulted on the current-turn branch', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [productionShapedFact()],
+      persistedGraph: PERSISTED_GRAPH,
+    });
+    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
+    expect(reviewCardsOfKind(env.blocks, 'flip_threshold')).toHaveLength(0);
+  });
+
+  it('prior-fact FRESH lifecycle rebuild needs NO hash — fallback still resolves target_refs', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [],
+      persistedGraph: PERSISTED_GRAPH,
+      // no persistedGraphHash — the FRESH verdict is the gate on this branch.
+      lifecycle: {
+        priorFacts: [productionShapedFact() as unknown as HandlerFact],
+        freshness: {
+          freshness: 'fresh',
+          selected_fact_index: 0,
+          graph_hash_at_run: GRAPH_HASH,
+          current_graph_hash: GRAPH_HASH,
+          reason: 'graph_hash_match',
+          computed_at: '2026-07-10T09:00:00.000Z',
+        },
+        requestId: 'req-f1-prior-fresh-no-hash',
         scenarioId: 'scen-lookup-fallback',
       },
     });
@@ -476,11 +593,12 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT OFF, fallback present',
     await restoreFlag();
   });
 
-  it('flag unset: persistedGraph alone never produces a directive', () => {
+  it('flag unset: persistedGraph (with an open hash gate) never produces a directive', () => {
     const env = composeToolCallResponse({
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
     });
     expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
   });
@@ -491,6 +609,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT OFF, fallback present',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
     });
     expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
   });
@@ -503,6 +622,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT OFF, fallback present',
         ...BASE_INPUT,
         handlerFacts: [productionShapedFact()],
         persistedGraph: PERSISTED_GRAPH,
+        persistedGraphHash: GRAPH_HASH,
       });
 
       await setFlag('true');
@@ -510,6 +630,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT OFF, fallback present',
         ...BASE_INPUT,
         handlerFacts: [productionShapedFact()],
         persistedGraph: PERSISTED_GRAPH,
+        persistedGraphHash: GRAPH_HASH,
       });
 
       expect(byType(flagOn.blocks, 'ui_directive')).toHaveLength(1);
