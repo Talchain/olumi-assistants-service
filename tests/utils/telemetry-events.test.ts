@@ -558,6 +558,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // relative-delta resolution at the set_factor_value dispatch seam.
         EditGraphBareSingleOpWrapped: "edit_graph.bare_single_op_wrapped",
         V5RelativeDeltaResolved: "v5.turn_executor.relative_delta_resolved",
+        // PR #414 review — F3 fail-open fallback made dashboard-visible
+        V5CommittedGraphReprojectionFailed:
+          "v5.turn_executor.committed_graph_reprojection_failed",
         // M3 freeze-gate cleanup (2026-06-05) — register inherited live emit()
         // sites so drift is enforced again. All diagnostic-only; none have a
         // Datadog metric mapping (see debugOnlyEvents). No emit-site changes.
@@ -1245,6 +1248,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // the operational signal; no Datadog metric mapping yet.
         TelemetryEvents.EditGraphBareSingleOpWrapped,
         TelemetryEvents.V5RelativeDeltaResolved,
+        // PR #414 review — F3 fail-open re-projection fallback: diagnostic-only
+        // (structured warn log is the operational signal; no Datadog metric
+        // mapping until dashboards pick the event up).
+        TelemetryEvents.V5CommittedGraphReprojectionFailed,
         // CI hygiene baseline (Tranche B) — pre-existing live emit() sites
         // registered to unblock telemetry validation. All diagnostic-only;
         // structured logs are the operational signal until Datadog mappings
@@ -1843,6 +1850,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // relative-delta resolution at the set_factor_value dispatch seam
         "edit_graph.bare_single_op_wrapped",
         "v5.turn_executor.relative_delta_resolved",
+        // PR #414 review — F3 fail-open re-projection fallback visibility
+        "v5.turn_executor.committed_graph_reprojection_failed",
         // Lane 8 — GM referee live wiring + MM commit-seam version hook
         "v5.candidate_mutation.would_apply",
         "v5.candidate_mutation.held",
