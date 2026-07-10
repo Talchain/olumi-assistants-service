@@ -304,7 +304,7 @@ function oneBlockOfEachType(): Block[] {
 // ============================================================================
 
 describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
-  it('freezes the allowlist to exactly the 12 boundary block types', () => {
+  it('freezes the emission allowlist to exactly 12 block types (boundary union minus the not-yet-surfaced 0.15.0 pair)', () => {
     // Snapshot-style pin (sorted) so the readable list cannot drift silently.
     expect([...FROZEN_V5_BLOCK_TYPES].sort()).toEqual(
       [
