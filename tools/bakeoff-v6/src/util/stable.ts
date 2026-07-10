@@ -11,7 +11,10 @@ export function stableStringify(value: unknown, indent = 2): string {
 function sortKeysDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeysDeep);
   if (value !== null && typeof value === "object") {
-    const out: Record<string, unknown> = {};
+    // Object.create(null): a parsed candidate with an own "__proto__" key would, on a plain {},
+    // hit the prototype setter (dropping the key + mutating the prototype) and silently corrupt the
+    // canonical hash. A null-prototype accumulator makes "__proto__" a normal own key.
+    const out: Record<string, unknown> = Object.create(null);
     for (const key of Object.keys(value as Record<string, unknown>).sort()) {
       out[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
     }

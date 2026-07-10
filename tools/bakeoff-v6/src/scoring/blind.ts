@@ -43,9 +43,10 @@ function projectNode(raw: unknown): BlindNode | null {
   const data = asRecord(node.data); // v8 factor values/units live under node.data, not observed_state
   const out: BlindNode = { id: node.id, kind: node.kind, label: node.label };
   if (typeof node.description === "string") out.description = node.description;
-  // Prefer V3 observed_state.value; fall back to v8 node.data.value so the invented-value safety
-  // cell can actually see the drafted number on live boundary-shape candidates.
+  // Prefer V3 observed_state.value; on v8, use HUMAN-SCALE data.raw_value (not the normalised
+  // [0,1] data.value) so the invented-value safety cell compares against the brief's raw numbers.
   if (typeof observed.value === "number") out.value = observed.value;
+  else if (typeof data.raw_value === "number") out.value = data.raw_value;
   else if (typeof data.value === "number") out.value = data.value;
   if (typeof observed.unit === "string") out.unit = observed.unit;
   else if (typeof data.unit === "string") out.unit = data.unit;

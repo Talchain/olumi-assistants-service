@@ -52,6 +52,14 @@ async function main(): Promise<void> {
       })
     : DEFAULT_SEEDS;
 
+  // Validate --run-seed like --seeds: a non-integer (e.g. Number("abc")=NaN) would flow into
+  // mulberry32(NaN) and silently corrupt every seeded shuffle/blind map.
+  let runSeed = DEFAULT_RUN_SEED;
+  if (values["run-seed"] !== undefined) {
+    runSeed = Number(values["run-seed"]);
+    if (!Number.isInteger(runSeed)) throw new Error(`invalid run-seed: ${values["run-seed"]}`);
+  }
+
   const runId = (values["run-id"] as string | undefined) ?? `run-${Date.now()}`;
 
   const summary = await runPipeline({
@@ -62,7 +70,7 @@ async function main(): Promise<void> {
     seeds,
     resultsDir: (values["results-dir"] as string | undefined) ?? resolve(HERE, "../../results"),
     attestationsPath: (values.attestations as string | undefined) ?? null,
-    runSeed: values["run-seed"] ? Number(values["run-seed"]) : DEFAULT_RUN_SEED,
+    runSeed,
     holisticLlm: Boolean(values["holistic-llm"]),
     preflightOnly: values.stage === "preflight",
     promptSet: (values["prompt-set"] as string | undefined) ?? null,
