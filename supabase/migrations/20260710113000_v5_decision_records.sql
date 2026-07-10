@@ -39,6 +39,17 @@
 --                                       event; idempotent on identical
 --                                       retry.
 --
+-- RECORDS OUTLIVE SCENARIOS BY DESIGN (orchestrator ruling, 2026-07-10):
+--   There is NO foreign key from decision_records to scenarios. Scenario
+--   deletion is a routine event here (user deletes, cleanup scripts — the
+--   existing scenarios FKs all CASCADE), and a CASCADE from this table
+--   would silently destroy exactly the Brier calibration history the
+--   table exists to accumulate. The record is self-contained (embedded
+--   decision snapshot + prediction); scenario existence is validated at
+--   CREATE time inside create_decision_record under the scenarios row
+--   lock; record_decision_outcome works correctly on a record whose
+--   scenario has since been deleted (it just skips the journey event).
+--
 -- Ownership (Decision 3 — Branch A, same posture as model_versions):
 --   - owner_user_id uuid NOT NULL — no unowned durable rows, ever.
 --     Denormalised from scenarios.user_id AT WRITE TIME inside the RPC.
@@ -112,7 +123,12 @@
 CREATE TABLE IF NOT EXISTS public.decision_records (
   -- Contract PK name (DecisionRecordSchema.record_id) — pass-through parity.
   record_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  scenario_id    UUID NOT NULL REFERENCES public.scenarios(id) ON DELETE CASCADE,
+  -- Deliberately NO foreign key to scenarios (orchestrator ruling,
+  -- 2026-07-10): records OUTLIVE scenarios by design — see header.
+  -- Scenario existence is enforced at create time inside the RPC under
+  -- the scenarios row lock; a dangling scenario_id on an old record is
+  -- valid history and still parses under the contract.
+  scenario_id    UUID NOT NULL,
   -- D3 Branch A: NOT NULL, denormalised from scenarios.user_id at write
   -- time. No FK to auth.users (see header). Unowned durable rows are
   -- impossible by constraint.
@@ -161,7 +177,9 @@ COMMENT ON TABLE public.decision_records IS
   'captured at decision time; outcome filled once at review time. The '
   'Brier-calibration capture substrate (3.2 scores on top). Written '
   'EXCLUSIVELY by the CEE service role via create_decision_record / '
-  'record_decision_outcome. Column names + JSONB shapes mirror '
+  'record_decision_outcome. Records OUTLIVE scenarios by design — no FK; '
+  'scenario deletion must never destroy Brier history. '
+  'Column names + JSONB shapes mirror '
   '@talchain/schemas 0.15.0 DecisionRecordSchema verbatim (pass-through '
   'doctrine). Ownership: D3 Branch A (owner_user_id NOT NULL; guests '
   'refused with DR001).';
@@ -393,12 +411,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  v_scenario_id UUID;
-  v_rec         public.decision_records%ROWTYPE;
-  v_event_id    TEXT;
-  v_new_seq     INTEGER;
-  v_event       JSONB;
-  v_events      JSONB;
+  v_scenario_id     UUID;
+  v_scenario_exists BOOLEAN := false;
+  v_rec             public.decision_records%ROWTYPE;
+  v_event_id        TEXT;
+  v_new_seq         INTEGER;
+  v_event           JSONB;
+  v_events          JSONB;
 BEGIN
   -- Parameter guards mirroring dr_outcome_shape + the Zod enum.
   IF p_outcome IS NULL OR jsonb_typeof(p_outcome) <> 'object'
@@ -409,8 +428,9 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  -- Locate the record (no lock yet) to learn its scenario, then take the
-  -- scenarios lock FIRST — identical lock order to create_decision_record.
+  -- Locate the record (no lock yet) to learn its scenario. The record may
+  -- legitimately OUTLIVE its scenario (no FK by design — see header):
+  -- scenario absence is NOT an error on this path, only record absence is.
   SELECT scenario_id INTO v_scenario_id
     FROM public.decision_records
     WHERE record_id = p_record_id;
@@ -419,11 +439,16 @@ BEGIN
       USING ERRCODE = 'DR404';
   END IF;
 
+  -- If the scenario still exists, lock it FIRST (identical lock order to
+  -- create_decision_record) to serialise the journey-event append. When
+  -- it has been deleted, proceed without it — the record outlives it and
+  -- the journey event is deliberately skipped below.
   PERFORM 1 FROM public.scenarios WHERE id = v_scenario_id FOR UPDATE;
+  v_scenario_exists := FOUND;
 
-  -- Re-select under lock (the row cannot vanish while the scenario lock
-  -- is held — deletes cascade from scenarios — but re-read for the
-  -- write-once check to be race-free).
+  -- Re-select the record under its own lock so the write-once check is
+  -- race-free. Record deletion is possible via service-role maintenance
+  -- between the first read and this lock — DR404 covers that race.
   SELECT * INTO v_rec
     FROM public.decision_records
     WHERE record_id = p_record_id
@@ -460,28 +485,35 @@ BEGIN
     WHERE record_id = p_record_id
     RETURNING * INTO v_rec;
 
-  v_event_id := COALESCE(p_event_id, 'decision_outcome_recorded_' || p_record_id::text);
-  SELECT events, event_seq + 1 INTO v_events, v_new_seq
-    FROM public.scenarios WHERE id = v_scenario_id;
-  IF NOT EXISTS (
-    SELECT 1 FROM jsonb_array_elements(COALESCE(v_events, '[]'::jsonb)) AS e
-    WHERE e->>'event_id' = v_event_id
-  ) THEN
-    v_event := jsonb_build_object(
-      'event_id',   v_event_id,
-      'event_type', 'decision_outcome_recorded',
-      'seq',        v_new_seq,
-      'timestamp',  to_jsonb(now()),
-      'details',    jsonb_strip_nulls(jsonb_build_object(
-                      'record_id', p_record_id,
-                      'result', p_outcome->>'result'
-                    ))
-    );
-    UPDATE public.scenarios
-      SET events    = COALESCE(events, '[]'::jsonb) || jsonb_build_array(v_event),
-          event_seq = v_new_seq,
-          updated_at = now()
-      WHERE id = v_scenario_id;
+  -- Journey event — only when the scenario still exists. Scenario deleted
+  -- → the record outlives it (no FK by design); there is no journey to
+  -- append to, so skip deliberately and return event_id NULL.
+  IF v_scenario_exists THEN
+    v_event_id := COALESCE(p_event_id, 'decision_outcome_recorded_' || p_record_id::text);
+    SELECT events, event_seq + 1 INTO v_events, v_new_seq
+      FROM public.scenarios WHERE id = v_scenario_id;
+    IF NOT EXISTS (
+      SELECT 1 FROM jsonb_array_elements(COALESCE(v_events, '[]'::jsonb)) AS e
+      WHERE e->>'event_id' = v_event_id
+    ) THEN
+      v_event := jsonb_build_object(
+        'event_id',   v_event_id,
+        'event_type', 'decision_outcome_recorded',
+        'seq',        v_new_seq,
+        'timestamp',  to_jsonb(now()),
+        'details',    jsonb_strip_nulls(jsonb_build_object(
+                        'record_id', p_record_id,
+                        'result', p_outcome->>'result'
+                      ))
+      );
+      UPDATE public.scenarios
+        SET events    = COALESCE(events, '[]'::jsonb) || jsonb_build_array(v_event),
+            event_seq = v_new_seq,
+            updated_at = now()
+        WHERE id = v_scenario_id;
+    END IF;
+  ELSE
+    v_event_id := NULL;
   END IF;
 
   RETURN jsonb_build_object(
