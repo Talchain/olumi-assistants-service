@@ -715,6 +715,124 @@ describe('sanitiseOlumiResponseForEgress', () => {
       expect(block.review_trigger).toBeUndefined();
     }
   });
+
+  // 0.15.0 wave — exhaustive-switch coverage for the two new block kinds
+  // (held_proposal per ROADMAP 1.43, ui_directive per seamlessness R4).
+  // Fail-closed policy (adjudicated): every human-readable prose/copy field
+  // is scrubbed; typed id / ref / enum / numeric fields stay untouched.
+  // Neither kind is emitted by CEE yet — these cases are dormant-but-armed
+  // for the upcoming emitter lanes.
+
+  it('0.15.0 — held_proposal scrubs summary; leaves proposal_id / mutation_class / reason_code / action refs untouched', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            type: 'held_proposal',
+            proposal_id: 'gmh_a1b2c3d4e5f6',
+            summary: 'Holding the change to fac_delivery_cost for confirmation.',
+            mutation_class: 'structural',
+            reason_code: 'STRUCTURAL_APPLY_HELD',
+            confirm_action_id: 'gmh_a1b2c3d4e5f6',
+            decline_action_id: 'gmh_ffeeddccbbaa',
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-hp1', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('held_proposal');
+    if (block.type === 'held_proposal') {
+      // Prose scrubbed — entity ID resolved to its graph label.
+      expect(block.summary).toBe('Holding the change to Delivery Cost for confirmation.');
+      expect(block.summary).not.toContain('fac_delivery_cost');
+      // Typed machine fields untouched.
+      expect(block.proposal_id).toBe('gmh_a1b2c3d4e5f6');
+      expect(block.mutation_class).toBe('structural');
+      expect(block.reason_code).toBe('STRUCTURAL_APPLY_HELD');
+      expect(block.confirm_action_id).toBe('gmh_a1b2c3d4e5f6');
+      expect(block.decline_action_id).toBe('gmh_ffeeddccbbaa');
+    }
+  });
+
+  it('0.15.0 — held_proposal absent-graph path produces readable generic fallback in summary', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            type: 'held_proposal',
+            proposal_id: 'gmh_a1b2c3d4e5f6',
+            summary: 'Holding the change to fac_delivery_cost for confirmation.',
+            mutation_class: 'tunable',
+            reason_code: 'TUNABLE_APPLY_HELD',
+            confirm_action_id: 'gmh_a1b2c3d4e5f6',
+          },
+        ],
+      }),
+      { graph: null, requestId: 'req-hp2', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('held_proposal');
+    if (block.type === 'held_proposal') {
+      expect(block.summary).toBe('Holding the change to the relevant factor for confirmation.');
+      // Optional decline_action_id stays absent — no spurious keys.
+      expect(block.decline_action_id).toBeUndefined();
+    }
+  });
+
+  it('0.15.0 — ui_directive scrubs note; leaves verb / targets[] ids / duration_ms untouched', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            type: 'ui_directive',
+            verb: 'highlight',
+            targets: [{ id: 'fac_delivery_cost', label: 'Delivery Cost', kind: 'factor' }],
+            duration_ms: 3000,
+            note: 'Look at fac_delivery_cost first.',
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-ud1', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('ui_directive');
+    if (block.type === 'ui_directive') {
+      // Copy scrubbed — entity ID resolved to its graph label.
+      expect(block.note).toBe('Look at Delivery Cost first.');
+      expect(block.note).not.toContain('fac_delivery_cost');
+      // Typed machine fields untouched — targets[].id is intentional
+      // targeting (same treatment as target_refs on Phase-3 blocks).
+      expect(block.verb).toBe('highlight');
+      expect(block.targets[0]!.id).toBe('fac_delivery_cost');
+      expect(block.duration_ms).toBe(3000);
+    }
+  });
+
+  it('0.15.0 — ui_directive leaves undefined optional fields undefined (no spurious empty strings)', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            type: 'ui_directive',
+            verb: 'open_inspector',
+            targets: [{ id: 'opt_premium', label: 'Premium Tier', kind: 'option' }],
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-ud2', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('ui_directive');
+    if (block.type === 'ui_directive') {
+      // A `note: ''` here would also violate the strict boundary schema
+      // (note has .min(1)) — absence must be preserved exactly.
+      expect(block.note).toBeUndefined();
+      expect(block.duration_ms).toBeUndefined();
+      expect(block.verb).toBe('open_inspector');
+      expect(block.targets[0]!.id).toBe('opt_premium');
+    }
+  });
 });
 
 // ----------------------------------------------------------------------------

@@ -305,6 +305,27 @@ function sanitiseBlock(block: Block, collect: (s: string) => string): Block {
           : {}),
       };
 
+    case 'held_proposal':
+      // 0.15.0 (ROADMAP 1.43 held-mutation shape). User-facing prose field:
+      //   summary (display-safe by construction per the boundary schema, but
+      //   fail-closed policy: scrub anyway).
+      // proposal_id (minted gmh_ handle), mutation_class / reason_code
+      // (enums), confirm_action_id / decline_action_id (refs into this
+      // response's suggested_actions[].id) — typed machine fields, untouched.
+      // NOT emitted by CEE yet — dormant-but-armed for the emitter lane.
+      return { ...block, summary: collect(block.summary) };
+
+    case 'ui_directive':
+      // 0.15.0 (seamlessness R4). User-facing copy field: optional note.
+      // verb (enum), targets (TargetRef[] — ids are intentional targeting,
+      // same treatment as target_refs on Phase-3 blocks), duration_ms
+      // (number) — typed machine fields, untouched. NOT emitted by CEE yet —
+      // dormant-but-armed for the emitter lane.
+      return {
+        ...block,
+        ...(block.note !== undefined ? { note: collect(block.note) } : {}),
+      };
+
     default: {
       const _exhaustive: never = block;
       void _exhaustive;

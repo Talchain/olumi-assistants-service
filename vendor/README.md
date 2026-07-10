@@ -7,57 +7,58 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.14.0.tgz`
+### `talchain-schemas-0.15.0.tgz`
 
-**Purpose:** pre-publish consumption of `@talchain/schemas` v0.14.0
-(rollout step 2 of `olumi-schemas` `docs/enrichment-v1/ROLLOUT.md` —
-CEE is the FIRST consumer to adopt). v0.14.0 is a superset of 0.13.1;
-both deltas over the previously-pinned 0.13.0 are additive:
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.15.0
+(the 0.15.0 contract wave, olumi-schemas PR #7 — CEE-first pin bump per
+the established rollout mechanics: CEE adopts before any consumer starts
+emitting/depending on the new shapes). 0.15.0 is a superset of 0.14.0;
+the whole delta is strictly additive (394 src insertions, 0 deletions —
+zero removed, renamed, or tightened fields):
 
-- **0.13.1 delta (the ingress-skew defusal):** two OPTIONAL keys on
-  `MessageTurnPayloadSchema` — `generate_model` / `explicit_generate`.
-  The schema is `.strict()`, so on 0.13.0 CEE's B1 `validateIngress`
-  REJECTED (422 `INGRESS_CONTRACT_VIOLATION`, fail-closed) any
-  `kind:'message'` turn carrying either key. With this pin CEE now
-  ACCEPTS them — a UI on 0.13.1+ may start emitting the flags on
-  `/orchestrate/v2/turn` without detonating the validator.
-- **0.14.0 delta (opt-in enrichment envelope):** typed
-  `AnalysisEnrichmentSchema` (passthrough + all-optional) for the
-  PLoT→CEE analysis-enrichment payload, `parseAnalysisEnrichment`,
-  and `CEE_UI_ENRICHMENT_KEEP_LIST` — the single source of truth for
-  the 11-key CEE→UI safe-transport keep-list, mirrored against
-  `src/orchestrator-v5/compose.ts` `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`
-  by the drift bolt in `tests/contract/cee-to-ui.contract.test.ts`.
-  No transport field changes, no strictness changes.
+- Optional top-level `reasoning` on `OlumiResponseSchema` (formalises
+  the `_reasoning` wire sidecar).
+- New `held_proposal` block kind (`HeldProposalBlockSchema`) — durable,
+  display-safe shape for held Graph Management mutations.
+- New `ui_directive` block kind (`UiDirectiveBlockSchema` +
+  `UiDirectiveVerb` enum).
+- New `selection_change` inbound system-event (new `SystemEventSchema`
+  member) + shared `SelectedElementRefSchema`.
+- New optional `selected_elements` on `MessageTurnPayloadSchema`
+  (reuses the shared ref schema).
+- New standalone `DecisionRecordSchema`
+  (`src/boundary/decision-record.ts`) — not wired into
+  `OlumiResponseSchema` or any other producer schema yet.
 
 No CEE import breaks: CEE code imports only names that exist in
-0.13.0; 0.14.0 adds names. No behavioural change until code opts in
-to the new envelope types.
+0.14.0; 0.15.0 only adds new names/enum members plus the new optional
+fields above. No behavioural change until code opts in to the new
+shapes — this bump is pin-only.
 
-Source: `olumi-schemas` `main` @ `5612e266632bd759d4b5457923e58517b3a0f531`
-(tag `v0.14.0`; published to GitHub Packages); built via
-`npm ci && npm run prepublishOnly && npm pack` from that commit.
+Source: `olumi-schemas` `main` @ `b02ba489c368b8ab32e071a141212a221ed28705`
+(v0.15.0; published to GitHub Packages); built via
+`npm ci && npm run prepublishOnly && npm pack` from that commit
+(745/745 package tests passed at build time).
 
-**Checksum verification:** `vendor/talchain-schemas-0.14.0.tgz.sha256`
+**Checksum verification:** `vendor/talchain-schemas-0.15.0.tgz.sha256`
 holds the canonical sha256 hash
-(`4e4915552a36654b7736eb56d42740e44b5c655209b606882782c55aff749767`).
+(`50cc1e0c4d5fcab11cd75417c458dad17e7033760c9f4d30d50329a4b946f19f`).
 The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
 tarball bytes against this manifest on every push.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
-restores the prior `vendor/talchain-schemas-0.13.0.tgz`, its
+restores the prior `vendor/talchain-schemas-0.14.0.tgz`, its
 `.sha256` manifest, the prior `package.json` `file:` reference, and
-this README's prior state — i.e. the entire pin returns to v0.13.0 in
+this README's prior state — i.e. the entire pin returns to v0.14.0 in
 one commit. Re-run `pnpm install` after the revert to repopulate
-`node_modules` from the restored tarball. NOTE: rolling back re-arms
-the 0.13.0 strict-ingress landmine — the UI must not be emitting
-`generate_model`/`explicit_generate` while CEE sits on ≤0.13.0.
+`node_modules` from the restored tarball.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
 0.11.0 at coaching-amendment, 0.12.0 at DL-7 edit-graph fact,
-0.13.0 at V5 Phase 3A block types) are removed on each bump — only
-the currently-pinned version lives in `vendor/`.
+0.13.0 at V5 Phase 3A block types, 0.14.0 at enrichment-v1 CEE-first
+adoption) are removed on each bump — only the currently-pinned version
+lives in `vendor/`.
 
 **How to update:**
 
@@ -83,8 +84,8 @@ shasum -a 256 /path/to/olumi-assistants-service/vendor/talchain-schemas-<version
 ```
 
 **Removal criterion:** delete this tarball + the vendor entry and switch
-`package.json` to a registry version (`"@talchain/schemas": "^0.14.0"`,
-or whatever version is current at the time of the switch). 0.14.0 IS
+`package.json` to a registry version (`"@talchain/schemas": "^0.15.0"`,
+or whatever version is current at the time of the switch). 0.15.0 IS
 published to GitHub Packages, but per ROLLOUT.md the staging consumers
 stay on the vendored-tarball mechanism until all three services' prod
 branches are migrated. Until then, every consuming repo is expected to
