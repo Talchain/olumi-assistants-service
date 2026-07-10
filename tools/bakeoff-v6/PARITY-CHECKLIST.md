@@ -30,10 +30,38 @@ per-option interventions, and the edge-stability outcome-flip pass ran on option
 ## Known parity requirements (keep current as the served prompt evolves)
 | served requirement | served ref | benchmark status |
 |---|---|---|
-| Each option emits `data.interventions` (array {factor_id,value}); no two identical | defaults.ts:108/137/180 | ALIGNED 2026-07-09 (all M1 arm prompts) |
+| Each option emits `data.interventions` (array {factor_id,value}); no two identical | defaults.ts:108/137/180 | ALIGNED 2026-07-09 in 8/14 M1 prompt files — see manifest below |
 | Graph is a connected DAG; every factor reaches an outcome/risk | defaults.ts:~5/9 | present (STRUCTURE + FACTORS rules) |
 | Every edge `effect_direction` matches sign of `strength.mean` | defaults.ts:~7 | present (PARAMETERS) |
 | Causal edges have varied coefficients (not all 0.5) | defaults.ts:~10 | present (PARAMETERS) |
 
 Extend this table whenever the served prompt gains a structural requirement, and re-diff before
 the next scored run.
+
+## Alignment manifest (complete scope, per the absence-claim rule)
+**Precise claim:** *every M1-emitting arm prompt in the prompt-sets that back the faithful
+`es-v0a` measurement and its blind-grade companions carries the served `data.interventions`
+structural REQUIREMENT (emission + "no two identical"), not merely a descriptive mention.*
+
+**Scope searched (exhaustive, not sampled):** `prompts/**/{arm-a,arm-c.m1}.system.txt` — every
+M1-emitting file across all 7 prompt-sets (arm-a = M1; arm-c.m1 = arm-C's M1 draft leg). 14 files.
+Alignment marker = file contains BOTH `data.interventions` AND the "no two options … identical"
+uniqueness clause (grep-verified 2026-07-09; not a mention count).
+
+| prompt-set | arm-a.system.txt | arm-c.m1.system.txt | status |
+|---|---|---|---|
+| `prompts/` (default) | ✅ | ✅ | ALIGNED |
+| `prompts/v0.4.3/` | ✅ | ✅ | ALIGNED — **the set that produced the es-v0a number of record** |
+| `prompts/v0.4.4/` | ✅ | ✅ | ALIGNED |
+| `prompts/m1-dedup/` | ✅ | ✅ | ALIGNED — blind-grade companion draws |
+| `prompts/m1-plain/` | ✗ | ✗ | ABLATION — descriptive mention only (2×), requirement absent BY DESIGN (plain variant) |
+| `prompts/m1-lean-audit/` | ✗ | ✗ | ABLATION — mention only (1×), requirement absent BY DESIGN (lean variant) |
+| `prompts/v0.4.3-B/` | ✗ | ✗ | UNALIGNED — mention only (1×); a v0.4.3 B-variant NOT yet re-aligned |
+
+**Load-bearing conclusion:** the faithful flip-rate (v0.4.3) and every blind-grade companion
+(m1-dedup, default, v0.4.4) run on ALIGNED prompts — the number of record is clean. The three
+✗ sets are experimental/ablation variants that were **not** used in any measured run; each is a
+deliberate ablation (m1-plain, m1-lean-audit) or a not-yet-realigned draft (v0.4.3-B), and per
+check step 4 any of them is **blocked from a scored run** until it is either aligned or its
+omission is recorded as a justified ablation. This corrects the earlier "all M1 arm prompts"
+phrasing, which overgeneralised from the aligned subset.
