@@ -76,6 +76,7 @@ export const V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY = 8192;
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
+  ReplayThinkingBlock,
   SystemCacheBlock,
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
@@ -344,10 +345,24 @@ function buildRepairMessages(
   originalMessages: AnthropicMessage[],
   assistantContent: ToolResponseBlock[],
   validationDetail: string,
+  replayThinkingBlocks?: readonly ReplayThinkingBlock[],
 ): AnthropicMessage[] {
   const messages: AnthropicMessage[] = [...originalMessages];
 
-  messages.push({ role: 'assistant', content: assistantContent });
+  // ROADMAP 1.55(b) — Anthropic's extended-thinking + tool-use protocol:
+  // the assistant echo that carries the tool_use must START with the
+  // complete, unmodified thinking block(s) from the original response, or
+  // the repair call is rejected with 400 invalid_request_error. The blocks
+  // are prepended VERBATIM (opaque signature intact) into the API-BOUND
+  // message only — they never enter RoutingResult content, orientationText,
+  // or any client-facing surface (guarded by
+  // route-with-tool-use-thinking-replay.test.ts).
+  const assistantEcho: Array<ToolResponseBlock | ReplayThinkingBlock> =
+    replayThinkingBlocks && replayThinkingBlocks.length > 0
+      ? [...replayThinkingBlocks, ...assistantContent]
+      : assistantContent;
+
+  messages.push({ role: 'assistant', content: assistantEcho });
 
   const toolUseBlocks = assistantContent.filter(
     (b): b is Extract<ToolResponseBlock, { type: 'tool_use' }> => b.type === 'tool_use',
@@ -674,6 +689,7 @@ export async function routeWithToolUse(
     firstCallArgs.messages,
     firstResult.content,
     parsedOrError.detail,
+    firstResult.replay_thinking_blocks,
   );
   assertAnthropicMessageProtocol(repairMessages);
 

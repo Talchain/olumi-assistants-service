@@ -652,10 +652,14 @@ describe("chatWithToolsAnthropic — reasoning capture (ROADMAP 1.42)", () => {
     // Reasoning captured verbatim.
     expect(result.reasoning).toBe(REASONING_TEXT);
 
-    // The signature must NEVER appear anywhere in the serialised result —
-    // neither in content[] nor in the captured reasoning.
-    const serializedResult = JSON.stringify(result);
-    expect(serializedResult).not.toContain(SIGNATURE);
+    // The signature must NEVER appear in any CLIENT-FACING field —
+    // content[] and reasoning are what flow toward assistant_text /
+    // orientationText. (Since ROADMAP 1.55b the whole-result object also
+    // carries `replay_thinking_blocks` — verbatim blocks, signature
+    // included, for API-BOUND REPLAY ONLY — so the guard is scoped to the
+    // client-facing fields rather than the full serialised result.)
+    const serializedClientFacing = JSON.stringify({ content: result.content, reasoning: result.reasoning });
+    expect(serializedClientFacing).not.toContain(SIGNATURE);
 
     // content[] is unaffected by the flag: still only text + tool_use blocks,
     // no thinking block, no reasoning leak into content.
@@ -700,7 +704,9 @@ describe("chatWithToolsAnthropic — reasoning capture (ROADMAP 1.42)", () => {
     });
 
     expect(result.reasoning).toBeUndefined();
-    expect(JSON.stringify(result)).not.toContain("opaque_encrypted_blob");
+    // Client-facing fields only — since ROADMAP 1.55b the opaque data IS
+    // retained on `replay_thinking_blocks` for API-bound protocol replay.
+    expect(JSON.stringify({ content: result.content, reasoning: result.reasoning })).not.toContain("opaque_encrypted_blob");
     warnSpy.mockRestore();
   });
 
@@ -730,10 +736,13 @@ describe("chatWithToolsAnthropic — reasoning capture (ROADMAP 1.42)", () => {
     expect(result.reasoning).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(result, "reasoning")).toBe(false);
 
-    const serializedResult = JSON.stringify(result);
-    expect(serializedResult).not.toContain(SIGNATURE);
-    expect(serializedResult).not.toContain(REASONING_TEXT);
-    expect(serializedResult).not.toContain('"type":"thinking"');
+    // Client-facing fields only — since ROADMAP 1.55b the verbatim block
+    // (signature included) IS retained on `replay_thinking_blocks` for
+    // API-bound protocol replay, flag or no flag.
+    const serializedClientFacing = JSON.stringify({ content: result.content, reasoning: result.reasoning });
+    expect(serializedClientFacing).not.toContain(SIGNATURE);
+    expect(serializedClientFacing).not.toContain(REASONING_TEXT);
+    expect(serializedClientFacing).not.toContain('"type":"thinking"');
 
     expect(result.content).toHaveLength(2);
     expect(result.content.every((b) => b.type === "text" || b.type === "tool_use")).toBe(true);
