@@ -26,8 +26,8 @@ import { describe, expect, it } from 'vitest';
 
 import { createSetFactorValueHandler } from '../set-factor-value.js';
 import { buildD1Fixture, buildHandlerInvocation } from '../d1-shared/__tests__/fixtures.js';
-import type { GraphV3T } from '../../../schemas/cee-v3.js';
-import type { ProposalAction } from '../../routing/types.js';
+import type { GraphV3T } from '../../../../schemas/cee-v3.js';
+import type { ProposalAction } from '../../../routing/types.js';
 
 function capExtensionProposal(): ProposalAction {
   return {
