@@ -3,17 +3,19 @@
  * the flag-gated (CEE_REQUIRE_USER_JWT, default OFF) Supabase-JWT identity
  * resolution for /orchestrate/v2/turn (login 3.4 CEE-half, ships dark).
  *
- * Resolution matrix under test:
+ * Resolution matrix under test (missing-token refusal for the browser path
+ * lives at the proxy front door — see proxy-v5-turn.test.ts):
  *
- *   flag OFF                                → mode 'off' (legacy behaviour,
- *                                             headers never consulted)
- *   flag ON + valid Supabase JWT            → mode 'verified' (identity = sub)
- *   flag ON + no JWT + browser-proxy marker → mode 'refused' missing_token
- *   flag ON + no JWT + direct caller        → mode 'service_legacy'
- *                                             (key-authed service carve-out)
- *   flag ON + invalid/expired JWT           → mode 'refused' (any path — a
- *                                             caller that presented a JWT
- *                                             asked to be verified)
+ *   flag OFF                      → mode 'off' (legacy behaviour,
+ *                                   headers never consulted)
+ *   flag ON + valid Supabase JWT  → mode 'verified' (identity = sub)
+ *   flag ON + no JWT              → mode 'service_legacy' (key-authed
+ *                                   service carve-out — service auth was
+ *                                   enforced before the route)
+ *   flag ON + invalid/expired JWT → mode 'refused' (a caller that
+ *                                   presented a JWT asked to be verified;
+ *                                   no downgrade-to-carve-out by sending
+ *                                   garbage)
  *
  * All tokens are forged locally with a test-only secret.
  */
@@ -45,12 +47,8 @@ vi.mock("../../utils/telemetry.js", () => ({
   ),
 }));
 
-const {
-  resolveUserIdentity,
-  buildSignInRequiredError,
-  BROWSER_PROXY_SOURCE_HEADER,
-  BROWSER_PROXY_SOURCE_VALUE,
-} = await import("../user-identity.js");
+const { resolveUserIdentity, buildSignInRequiredError, extractJwtCandidate } =
+  await import("../user-identity.js");
 
 async function forgeJwt(opts?: {
   expired?: boolean;
@@ -79,13 +77,23 @@ beforeEach(() => {
   emitSpy.mockReset();
 });
 
+describe("extractJwtCandidate", () => {
+  it("extracts a JWT-shaped Bearer token", async () => {
+    const token = await forgeJwt();
+    expect(extractJwtCandidate(`Bearer ${token}`)).toBe(token);
+  });
+
+  it("returns null for absent / non-Bearer / opaque-key values", () => {
+    expect(extractJwtCandidate(undefined)).toBeNull();
+    expect(extractJwtCandidate("Basic dXNlcjpwdw==")).toBeNull();
+    expect(extractJwtCandidate("Bearer test-assist-key-abc123")).toBeNull();
+  });
+});
+
 describe("resolveUserIdentity — flag OFF (dormancy)", () => {
-  it("returns mode 'off' and emits no telemetry, even with a proxy marker and garbage token", async () => {
+  it("returns mode 'off' and emits no telemetry, even with a garbage token present", async () => {
     mockConfig.auth.requireUserJwt = false;
-    const req = makeReq({
-      authorization: "Bearer garbage.garbage.garbage",
-      [BROWSER_PROXY_SOURCE_HEADER]: BROWSER_PROXY_SOURCE_VALUE,
-    });
+    const req = makeReq({ authorization: "Bearer garbage.garbage.garbage" });
     const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
     expect(result).toEqual({ mode: "off" });
     expect(emitSpy).not.toHaveBeenCalled();
@@ -93,49 +101,26 @@ describe("resolveUserIdentity — flag OFF (dormancy)", () => {
 });
 
 describe("resolveUserIdentity — flag ON", () => {
-  it("valid JWT → mode 'verified' with userId from sub (direct caller)", async () => {
+  it("valid JWT → mode 'verified' with userId from sub", async () => {
     const req = makeReq({ authorization: `Bearer ${await forgeJwt()}` });
     const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
     expect(result).toEqual({ mode: "verified", userId: SUB });
   });
 
-  it("valid JWT → mode 'verified' (browser-proxy path)", async () => {
-    const req = makeReq({
-      authorization: `Bearer ${await forgeJwt()}`,
-      [BROWSER_PROXY_SOURCE_HEADER]: BROWSER_PROXY_SOURCE_VALUE,
-    });
-    const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
-    expect(result).toEqual({ mode: "verified", userId: SUB });
-  });
-
-  it("no Authorization + browser-proxy marker → refused missing_token", async () => {
-    const req = makeReq({ [BROWSER_PROXY_SOURCE_HEADER]: BROWSER_PROXY_SOURCE_VALUE });
-    const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
-    expect(result).toEqual({ mode: "refused", reason: "missing_token" });
-  });
-
-  it("no Authorization + direct caller → mode 'service_legacy' (key-authed carve-out)", async () => {
+  it("no Authorization → mode 'service_legacy' (key-authed carve-out)", async () => {
     const req = makeReq({});
     const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
     expect(result).toEqual({ mode: "service_legacy" });
+    expect(emitSpy.mock.calls.map((c) => c[0])).toContain("UserJwtServiceCallerLegacy");
   });
 
-  it("Bearer token that is not JWT-shaped (assist key) + direct caller → service_legacy", async () => {
+  it("Bearer token that is not JWT-shaped (assist key) → service_legacy", async () => {
     const req = makeReq({ authorization: "Bearer test-assist-key-abc123" });
     const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
     expect(result).toEqual({ mode: "service_legacy" });
   });
 
-  it("Bearer token that is not JWT-shaped + browser-proxy marker → refused missing_token", async () => {
-    const req = makeReq({
-      authorization: "Bearer test-assist-key-abc123",
-      [BROWSER_PROXY_SOURCE_HEADER]: BROWSER_PROXY_SOURCE_VALUE,
-    });
-    const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
-    expect(result).toEqual({ mode: "refused", reason: "missing_token" });
-  });
-
-  it("invalid-signature JWT → refused invalid_token, even for a direct caller", async () => {
+  it("invalid-signature JWT → refused invalid_token (no downgrade to carve-out)", async () => {
     const req = makeReq({
       authorization: `Bearer ${await forgeJwt({ secret: "another-test-only-secret-000" })}`,
     });

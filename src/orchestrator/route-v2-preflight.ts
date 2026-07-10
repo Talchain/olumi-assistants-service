@@ -86,9 +86,12 @@ export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcom
   const requestId = getOrGenerateRequestId(req);
 
   // Step 0 — flag-gated user-identity resolution (CEE_REQUIRE_USER_JWT).
-  // 'off' (flag down) and 'service_legacy' (key-authed direct caller, no
-  // JWT) leave today's behaviour untouched; 'refused' short-circuits with
-  // the typed recoverable sign_in_required 401 BEFORE any body validation.
+  // 'off' (flag down) and 'service_legacy' (key-authed caller, no JWT —
+  // the browser proxy refuses JWT-less turns at its own front door when
+  // the flag is on, so no browser path reaches the carve-out) leave
+  // today's behaviour untouched; 'refused' (present-but-invalid/expired
+  // JWT, or missing verification material) short-circuits with the typed
+  // recoverable sign_in_required 401 BEFORE any body validation.
   const identity = await resolveUserIdentity(req, requestId);
   if (identity.mode === 'refused') {
     log.warn(

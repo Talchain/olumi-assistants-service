@@ -2,20 +2,22 @@
  * runPreFlight × flag-gated Supabase-JWT verification (CEE_REQUIRE_USER_JWT,
  * login 3.4 CEE-half, ships dark).
  *
- * Pins the four behaviour claims at the shared pre-flight chokepoint that
- * every /orchestrate/v2/turn dispatch branch runs through:
+ * Pins the behaviour claims at the shared pre-flight chokepoint that every
+ * /orchestrate/v2/turn dispatch branch runs through:
  *
  *   1. Flag OFF  → byte-identical legacy behaviour: client-supplied body
  *      `user_id` reaches the scenario pre-flight untouched; no verification
- *      runs even when a proxy marker / garbage Authorization is present.
+ *      runs even when a garbage Authorization header is present.
  *   2. Flag ON + valid JWT → identity DERIVED from the token's `sub`; the
  *      client-supplied `user_id` is IGNORED (mismatch emits telemetry only).
- *   3. Flag ON + missing/invalid/expired JWT on the browser-proxy path →
- *      typed recoverable 401 sign_in_required BoundaryError; the session
- *      store is never touched.
- *   4. Flag ON + no JWT from a direct (key-authed) service caller →
- *      legacy client-supplied identity still accepted (harness carve-out;
- *      never available to proxy paths).
+ *   3. Flag ON + invalid/expired JWT → typed recoverable 401
+ *      sign_in_required BoundaryError; the session store is never touched.
+ *      (The MISSING-token refusal for browser traffic lives at the proxy
+ *      front door — see proxy-v5-turn.test.ts.)
+ *   4. Flag ON + no JWT → legacy client-supplied identity still accepted
+ *      (key-authed service-caller carve-out; service auth is enforced by
+ *      the auth plugin before the route, and the browser proxy refuses
+ *      JWT-less turns before forwarding).
  *
  * All JWTs are forged locally with a test-only secret.
  *
@@ -70,9 +72,6 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
 }));
 
 const { runPreFlight } = await import('../../../src/orchestrator/route-v2-preflight.js');
-const { BROWSER_PROXY_SOURCE_HEADER, BROWSER_PROXY_SOURCE_VALUE } = await import(
-  '../../../src/utils/browser-proxy-source.js'
-);
 
 async function forgeJwt(opts?: { expired?: boolean; secret?: string }): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
@@ -117,11 +116,10 @@ beforeEach(() => {
 });
 
 describe('runPreFlight — flag OFF (dormancy pin)', () => {
-  it('client-supplied user_id reaches the store untouched; garbage Authorization + proxy marker are inert', async () => {
+  it('client-supplied user_id reaches the store untouched; garbage Authorization is inert', async () => {
     mockConfig.auth.requireUserJwt = false;
     const req = makeReq(makeBody(BODY_USER_ID), {
       authorization: 'Bearer garbage.garbage.garbage',
-      [BROWSER_PROXY_SOURCE_HEADER]: BROWSER_PROXY_SOURCE_VALUE,
     });
 
     const result = await runPreFlight(req as never);
@@ -130,6 +128,8 @@ describe('runPreFlight — flag OFF (dormancy pin)', () => {
     if (!result.ok) throw new Error('unreachable');
     expect(result.context.extensions.userId).toBe(BODY_USER_ID);
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, BODY_USER_ID);
+    expect(emitSpy.mock.calls.map((c) => c[0])).not.toContain('UserJwtVerified');
+    expect(emitSpy.mock.calls.map((c) => c[0])).not.toContain('UserJwtRefused');
   });
 });
 
@@ -160,9 +160,9 @@ describe('runPreFlight — flag ON', () => {
     expect(emitSpy.mock.calls.map((c) => c[0])).not.toContain('UserJwtIdentityMismatch');
   });
 
-  it('missing JWT on browser-proxy path: typed recoverable 401; store never touched', async () => {
+  it('expired JWT: typed recoverable 401; store never touched', async () => {
     const req = makeReq(makeBody(BODY_USER_ID), {
-      [BROWSER_PROXY_SOURCE_HEADER]: BROWSER_PROXY_SOURCE_VALUE,
+      authorization: `Bearer ${await forgeJwt({ expired: true })}`,
     });
 
     const result = await runPreFlight(req as never);
@@ -174,7 +174,7 @@ describe('runPreFlight — flag ON', () => {
       {
         "boundary": "B1",
         "details": {
-          "auth_reason": "missing_token",
+          "auth_reason": "expired_token",
           "code": "sign_in_required",
           "reason": "sign_in_required",
           "recoverable": true,
@@ -186,22 +186,6 @@ describe('runPreFlight — flag ON', () => {
         "validator": "user_jwt",
       }
     `);
-    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
-  });
-
-  it('expired JWT: 401 with auth_reason expired_token', async () => {
-    const req = makeReq(makeBody(BODY_USER_ID), {
-      authorization: `Bearer ${await forgeJwt({ expired: true })}`,
-    });
-
-    const result = await runPreFlight(req as never);
-
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('unreachable');
-    expect(result.status).toBe(401);
-    expect((result.error.details as { auth_reason?: string }).auth_reason).toBe(
-      'expired_token',
-    );
     expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
   });
 
@@ -221,7 +205,7 @@ describe('runPreFlight — flag ON', () => {
     expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
   });
 
-  it('no JWT from a direct key-authed caller: legacy client identity accepted (service carve-out)', async () => {
+  it('no JWT from a key-authed caller: legacy client identity accepted (service carve-out)', async () => {
     const req = makeReq(makeBody(BODY_USER_ID));
 
     const result = await runPreFlight(req as never);
@@ -230,12 +214,13 @@ describe('runPreFlight — flag ON', () => {
     if (!result.ok) throw new Error('unreachable');
     expect(result.context.extensions.userId).toBe(BODY_USER_ID);
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, BODY_USER_ID);
+    expect(emitSpy.mock.calls.map((c) => c[0])).toContain('UserJwtServiceCallerLegacy');
   });
 
-  it('auth precedes body validation: unauthenticated proxy request with an invalid body gets 401, not 422', async () => {
+  it('auth precedes body validation: an invalid JWT on an invalid body gets 401, not 422', async () => {
     const req = makeReq(
       { kind: 'message', message: 'no scenario_id here' },
-      { [BROWSER_PROXY_SOURCE_HEADER]: BROWSER_PROXY_SOURCE_VALUE },
+      { authorization: `Bearer ${await forgeJwt({ expired: true })}` },
     );
 
     const result = await runPreFlight(req as never);

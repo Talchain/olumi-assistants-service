@@ -31,12 +31,12 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config } from "../config/index.js";
-import { log } from "../utils/telemetry.js";
+import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
 import {
-  BROWSER_PROXY_SOURCE_HEADER,
-  BROWSER_PROXY_SOURCE_VALUE,
-} from "../utils/browser-proxy-source.js";
+  buildSignInRequiredError,
+  extractJwtCandidate,
+} from "../orchestrator/user-identity.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -238,6 +238,33 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       });
     }
 
+    // 2.5. Flag-gated required-login front door (login 3.4 CEE-half,
+    // CEE_REQUIRE_USER_JWT default OFF — dormant today). This proxy is the
+    // browser-facing turn surface, so "this is a browser request" is
+    // structural truth HERE — no request-header trust involved. When the
+    // flag is on, a turn without a JWT-shaped Authorization header is
+    // refused with the same typed recoverable sign_in_required
+    // BoundaryError the internal route emits for invalid/expired tokens,
+    // so the UI sees one wire shape for "sign in required". Tokens that
+    // ARE present are verified downstream in the shared pre-flight
+    // (runPreFlight → resolveUserIdentity), which derives user identity
+    // from the verified `sub`. Direct key-authed service callers hitting
+    // /orchestrate/v2/turn are NOT affected by this check — their
+    // carve-out is documented in src/orchestrator/user-identity.ts.
+    if (config.auth.requireUserJwt && extractJwtCandidate(request.headers.authorization) === null) {
+      log.warn({ requestId }, "[proxy-v5] Rejected: sign-in required (no user JWT presented)");
+      emit(TelemetryEvents.UserJwtRefused, {
+        request_id: requestId,
+        reason: "missing_token",
+        via_browser_proxy: true,
+      });
+      const cors = buildCorsHeaders(origin as string);
+      for (const [k, v] of Object.entries(cors)) {
+        reply.header(k, v);
+      }
+      return reply.code(401).send(buildSignInRequiredError("missing_token", requestId));
+    }
+
     // 3. Build internal request headers
     const internalHeaders: Record<string, string> = {};
     for (const name of ALLOWED_REQUEST_HEADERS) {
@@ -252,13 +279,6 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     }
     // Propagate request ID
     internalHeaders["x-request-id"] = requestId;
-    // Stamp browser-proxy provenance (login 3.4 CEE-half). Set
-    // unconditionally AFTER the allowlist copy so a browser-supplied value
-    // can never reach the internal route — the flag-gated user-JWT
-    // enforcement refuses unauthenticated turns carrying this marker while
-    // exempting direct key-authed service callers. Inert while the flag is
-    // off (nothing reads it).
-    internalHeaders[BROWSER_PROXY_SOURCE_HEADER] = BROWSER_PROXY_SOURCE_VALUE;
 
     // 4. Internal routing via app.inject()
     // app.inject() runs the request through the full Fastify hook chain

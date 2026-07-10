@@ -10,22 +10,33 @@
  * from a verified Supabase JWT (`sub`) and client-supplied identity is
  * dead input on browser paths.
  *
- * Resolution matrix (see LOGIN-CEE-HALF-SPEC-2026-07-10):
+ * Two-layer enforcement (see LOGIN-CEE-HALF-SPEC-2026-07-10):
+ *
+ *   - The CEE browser proxy (/proxy/v5/turn, the only browser-facing turn
+ *     surface in this process) refuses turns WITHOUT a JWT-shaped
+ *     Authorization header at its own front door when the flag is on —
+ *     "this is a browser request" is structural truth there, so no
+ *     request-header trust is involved. See proxy-v5-turn.ts.
+ *   - This module runs inside the shared /orchestrate/v2/turn pre-flight
+ *     and VERIFIES any presented JWT, deriving identity from it.
+ *
+ * Resolution matrix at this seam:
  *
  *   flag OFF                      → 'off' — legacy behaviour, headers never
  *                                   consulted, zero new telemetry (dormant).
  *   flag ON + valid Supabase JWT  → 'verified' — user_id := token sub;
  *                                   caller-supplied user_id is IGNORED.
- *   flag ON + no JWT, via the CEE browser proxy (unspoofable marker header,
- *     see src/utils/browser-proxy-source.ts)
- *                                 → 'refused' missing_token — typed
- *                                   recoverable 401 (sign_in_required).
- *   flag ON + no JWT, direct caller
- *                                 → 'service_legacy' — key-authed service
- *                                   callers (internal harnesses; the service
- *                                   auth layer has already vetted them) may
- *                                   keep supplying user_id. NEVER available
- *                                   to proxy paths.
+ *   flag ON + no JWT              → 'service_legacy' — the caller may keep
+ *                                   supplying user_id. Reaching this route
+ *                                   without a JWT means the caller passed
+ *                                   service auth (assist key / HMAC,
+ *                                   enforced by the auth plugin BEFORE the
+ *                                   route) or came through the browser
+ *                                   proxy — and the proxy has already
+ *                                   refused JWT-less turns when the flag is
+ *                                   on. So this carve-out is reachable by
+ *                                   key-authed service callers (internal
+ *                                   harnesses) only, never browser paths.
  *   flag ON + present-but-invalid JWT
  *                                 → 'refused' — a caller that presented a
  *                                   JWT asked to be verified; failing open
@@ -48,13 +59,7 @@ import type { BoundaryError } from "@talchain/schemas/boundary";
 
 import { config } from "../config/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
-import {
-  BROWSER_PROXY_SOURCE_HEADER,
-  BROWSER_PROXY_SOURCE_VALUE,
-} from "../utils/browser-proxy-source.js";
 import { looksLikeJwt, verifySupabaseUserJwt } from "../utils/supabase-user-jwt.js";
-
-export { BROWSER_PROXY_SOURCE_HEADER, BROWSER_PROXY_SOURCE_VALUE };
 
 export type UserIdentityRefusalReason =
   | "missing_token"
@@ -69,9 +74,23 @@ export type UserIdentityResolution =
   | { readonly mode: "refused"; readonly reason: UserIdentityRefusalReason };
 
 /**
+ * Extract a JWT-shaped Bearer token from an Authorization header value.
+ * Returns null for absent headers, non-Bearer schemes, and opaque
+ * (non-JWT-shaped) tokens such as assist keys.
+ */
+export function extractJwtCandidate(
+  authorizationHeader: string | string[] | undefined,
+): string | null {
+  const bearer =
+    typeof authorizationHeader === "string" && authorizationHeader.startsWith("Bearer ")
+      ? authorizationHeader.substring(7).trim()
+      : null;
+  return bearer !== null && looksLikeJwt(bearer) ? bearer : null;
+}
+
+/**
  * Resolve the caller's user identity from the request headers.
- * Reads ONLY `authorization` and the browser-proxy marker header; never
- * logs token contents.
+ * Reads ONLY the `authorization` header; never logs token contents.
  */
 export async function resolveUserIdentity(
   req: FastifyRequest,
@@ -81,27 +100,13 @@ export async function resolveUserIdentity(
     return { mode: "off" };
   }
 
-  const viaBrowserProxy =
-    req.headers[BROWSER_PROXY_SOURCE_HEADER] === BROWSER_PROXY_SOURCE_VALUE;
-
-  const authHeader = req.headers.authorization;
-  const bearer =
-    typeof authHeader === "string" && authHeader.startsWith("Bearer ")
-      ? authHeader.substring(7).trim()
-      : null;
-  const jwtCandidate = bearer !== null && looksLikeJwt(bearer) ? bearer : null;
+  const jwtCandidate = extractJwtCandidate(req.headers.authorization);
 
   if (jwtCandidate === null) {
-    if (viaBrowserProxy) {
-      emit(TelemetryEvents.UserJwtRefused, {
-        request_id: requestId,
-        reason: "missing_token",
-        via_browser_proxy: true,
-      });
-      return { mode: "refused", reason: "missing_token" };
-    }
-    // Direct key-authed service caller (internal harness / pre-migration
-    // edge function): the service-auth layer has already vetted the caller.
+    // No user JWT presented. The browser proxy has already refused
+    // JWT-less turns at its front door (flag on), so this caller is a
+    // key-authed service caller (internal harness / pre-migration edge
+    // function) that the service-auth layer has already vetted.
     emit(TelemetryEvents.UserJwtServiceCallerLegacy, {
       request_id: requestId,
     });
@@ -122,14 +127,12 @@ export async function resolveUserIdentity(
     emit(TelemetryEvents.UserJwtRefused, {
       request_id: requestId,
       reason: result.reason,
-      via_browser_proxy: viaBrowserProxy,
     });
     return { mode: "refused", reason: result.reason };
   }
 
   emit(TelemetryEvents.UserJwtVerified, {
     request_id: requestId,
-    via_browser_proxy: viaBrowserProxy,
   });
   return { mode: "verified", userId: result.userId };
 }
@@ -143,6 +146,9 @@ export async function resolveUserIdentity(
  * lets the UI distinguish "session expired — refresh/re-login" from
  * "never signed in". `retryable: false` — retrying the same request
  * unchanged cannot succeed; recovery is signing in.
+ *
+ * Emitted from two sites, same bytes: the browser proxy (missing_token)
+ * and the /orchestrate/v2/turn pre-flight (invalid/expired/unavailable).
  */
 export function buildSignInRequiredError(
   reason: UserIdentityRefusalReason,
