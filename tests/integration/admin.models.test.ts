@@ -285,6 +285,13 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     vi.resetModules();
     cleanBaseUrl();
     vi.stubEnv("LLM_PROVIDER", "anthropic");
+    // server.ts build() fails fast when LLM_PROVIDER=anthropic without an
+    // API key (src/server.ts ~line 172). This suite only exercises the
+    // /admin/models/routing REPORTING surface — no LLM call is ever made —
+    // so a dummy key is required for boot and safe here. Without it the
+    // whole describe block dies in beforeAll (CI's integration job has no
+    // ANTHROPIC_API_KEY).
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key-not-used");
     vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
     vi.stubEnv("PROMPTS_ENABLED", "true");
     vi.stubEnv("PROMPTS_STORE_TYPE", "file");
