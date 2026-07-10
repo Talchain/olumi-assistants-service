@@ -211,6 +211,105 @@ describe("PLoTClient", () => {
     });
   });
 
+  describe("run — typed failure envelope (200 with analysis_status failed/blocked, no results)", () => {
+    it("failed(200) with critiques carries v2RunError (not PLOT_RESPONSE_MALFORMED)", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          analysis_status: "failed",
+          status_reason: "ISL timed out",
+          critiques: [
+            { code: "ISL_TIMEOUT", message: "inference timed out", user_message: "The analysis timed out. Try again." },
+          ],
+        }),
+      });
+
+      const client = createPLoTClient()!;
+
+      try {
+        await client.run(VALID_RUN_PAYLOAD, "req-tf-1");
+        expect.unreachable("run should throw");
+      } catch (e) {
+        const err = e as PLoTError;
+        expect(err).toBeInstanceOf(PLoTError);
+        expect(err.v2RunError).toBeDefined();
+        expect(err.v2RunError?.analysis_status).toBe("failed");
+        expect(err.v2RunError?.status_reason).toBe("ISL timed out");
+        expect(err.v2RunError?.critiques?.[0]?.code).toBe("ISL_TIMEOUT");
+        expect(err.v2RunError?.critiques?.[0]?.user_message).toBe("The analysis timed out. Try again.");
+        expect(err.orchestratorErrorOverride?.code).not.toBe("PLOT_RESPONSE_MALFORMED");
+      }
+    });
+
+    it("blocked(200) with critiques carries v2RunError", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          analysis_status: "blocked",
+          status_reason: "Graph too complex",
+          critiques: [{ code: "GRAPH_TOO_COMPLEX", message: "graph exceeds complexity budget" }],
+        }),
+      });
+
+      const client = createPLoTClient()!;
+
+      try {
+        await client.run(VALID_RUN_PAYLOAD, "req-tf-2");
+        expect.unreachable("run should throw");
+      } catch (e) {
+        const err = e as PLoTError;
+        expect(err.v2RunError?.analysis_status).toBe("blocked");
+        expect(err.v2RunError?.critiques?.[0]?.code).toBe("GRAPH_TOO_COMPLEX");
+      }
+    });
+
+    it("bodies WITHOUT analysis_status stay classified PLOT_RESPONSE_MALFORMED", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ meta: { response_hash: "h" } }),
+      });
+
+      const client = createPLoTClient()!;
+
+      try {
+        await client.run(VALID_RUN_PAYLOAD, "req-tf-3");
+        expect.unreachable("run should throw");
+      } catch (e) {
+        const err = e as PLoTError;
+        expect(err.orchestratorErrorOverride?.code).toBe("PLOT_RESPONSE_MALFORMED");
+        expect(err.v2RunError).toBeUndefined();
+      }
+    });
+  });
+
+  describe("run — 422 critique passthrough", () => {
+    it("critique code and user_message survive the 422 parse", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: () => Promise.resolve({
+          analysis_status: "blocked",
+          status_reason: "Graph too complex",
+          critiques: [
+            { code: "GRAPH_TOO_COMPLEX", message: "graph exceeds budget", user_message: "Simplify the model." },
+          ],
+        }),
+      });
+
+      const client = createPLoTClient()!;
+
+      try {
+        await client.run(VALID_RUN_PAYLOAD, "req-422-code");
+        expect.unreachable("run should throw");
+      } catch (e) {
+        const err = e as PLoTError;
+        expect(err.status).toBe(422);
+        expect(err.v2RunError?.critiques?.[0]?.code).toBe("GRAPH_TOO_COMPLEX");
+        expect(err.v2RunError?.critiques?.[0]?.user_message).toBe("Simplify the model.");
+      }
+    });
+  });
+
   describe("run — error.v1 envelope (5xx)", () => {
     it("parses error.v1 envelope from 500 response", async () => {
       fetchSpy.mockResolvedValue({

@@ -1091,6 +1091,31 @@ const ConfigSchema = z.object({
     browserProxyAllowedOrigins: z.string().optional(), // BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
     browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(125_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (5s headroom above DRAFT_REQUEST_BUDGET_MS=120s, must be < ROUTE_TIMEOUT_MS)
   }).default({}),
+}).superRefine((data, ctx) => {
+  // CEE_REQUIRE_USER_JWT=true requires configured service auth, in every
+  // environment. The user-identity carve-out (src/orchestrator/user-identity.ts)
+  // trusts a JWT-less request as a key-authed service caller because the auth
+  // plugin (src/plugins/auth.ts) enforces assist-key/HMAC auth BEFORE the
+  // route — but that plugin skips all checks when no keys and no HMAC secret
+  // are configured, which would silently reopen the x-user-id IDOR. Production
+  // already fails keyless at boot (src/server.ts); this refine closes the
+  // staging/dev window. Trim semantics match server.ts's check.
+  const hasApiKeys =
+    Boolean(data.auth.assistApiKey?.trim().length) ||
+    Boolean(data.auth.assistApiKeys?.some((k) => k.trim().length > 0));
+  const hasHmacSecret = Boolean(data.auth.hmacSecret?.trim().length);
+  if (data.auth.requireUserJwt && !hasApiKeys && !hasHmacSecret) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["auth", "requireUserJwt"],
+      message:
+        "CEE_REQUIRE_USER_JWT=true requires service auth to be configured: " +
+        "set ASSIST_API_KEY/ASSIST_API_KEYS or an HMAC secret " +
+        "(CEE_HMAC_SECRET/HMAC_SECRET), or unset CEE_REQUIRE_USER_JWT. " +
+        "Without service auth the auth plugin disables itself and the " +
+        "JWT-less service carve-out would trust caller-supplied user ids.",
+    });
+  }
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

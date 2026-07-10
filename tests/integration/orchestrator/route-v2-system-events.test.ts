@@ -183,6 +183,34 @@ describe('POST /orchestrate/v2/turn — system event dispatch', () => {
     expect(llmChatMock).not.toHaveBeenCalled();
   });
 
+  it('selection_change → 200 + NO commit (client-only event)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: makeSystemEventPayload(
+        { kind: 'selection_change', selected: [{ id: 'node-1', kind: 'factor' }] },
+        '7',
+      ),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(llmChatMock).not.toHaveBeenCalled();
+  });
+
+  it('selection_change cleared → 200 + NO commit (client-only event)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: makeSystemEventPayload(
+        { kind: 'selection_change', selected: [], cleared: true },
+        '8',
+      ),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(llmChatMock).not.toHaveBeenCalled();
+  });
+
   it('system event with malformed event kind → 422 BoundaryError', async () => {
     const payload = makeSystemEventPayload(
       { kind: 'not_a_real_event', foo: 'bar' },

@@ -75,6 +75,16 @@ export const CRITIQUE_BUCKETS: Readonly<Record<string, CritiqueBucket>> = {
   LOW_EFFECTIVE_SAMPLES: 'S',
   DEGENERATE_OPTION_ZERO_VARIANCE: 'S',
   HIGH_TIE_RATE: 'S',
+  // PLoT-authored (not ISL critique.py): degraded-success disclosure from
+  // PLoT's complexity guard (#209/#212). Consciously promoted to S per the
+  // CRITIQUE_BUCKETS honest-surfacing ruling (seam item 3) — a reduced-samples
+  // run the user never hears about is a claim-integrity leak. NOTE: the
+  // transport keep-list does not carry `critiques` today AND PLoT rides this
+  // disclosure on a Tier-3 claim-denied warning channel, so no orchestrated
+  // surface renders it yet — the answer-text caveat half is pending a
+  // claim-safety review (Brief 4 §9); this entry is the fail-safe so any
+  // future critique-carrying surface gets the approved copy.
+  SAMPLES_REDUCED_FOR_COMPLEXITY: 'S',
 };
 
 /**
@@ -142,6 +152,11 @@ export const S_BUCKET_REPLACEMENTS: Readonly<
 
   HIGH_TIE_RATE: (_ctx, _vars) =>
     `The options are very close in this analysis. Treat the current lead as finely balanced.`,
+
+  // Seam item 3 (CRITIQUE_BUCKETS ruling). If the answer-text caveat half
+  // lands after its claim-safety review, keep that copy in this voice.
+  SAMPLES_REDUCED_FOR_COMPLEXITY: (_ctx, _vars) =>
+    `Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.`,
 };
 
 // ============================================================================

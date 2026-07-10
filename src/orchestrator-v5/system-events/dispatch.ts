@@ -3,9 +3,9 @@
  *
  * v0.7.0 introduced `kind: 'system_event'` on OrchestratorTurnPayload. System
  * events (patch_accepted, patch_dismissed, direct_graph_edit, chip_click,
- * undo, redo) are deterministic Layer 0 operations — no LLM routing, no
- * handler dispatch. The route (route-v2.ts) intercepts them BEFORE calling
- * runTurnExecutor because:
+ * undo, redo, selection_change) are deterministic Layer 0 operations — no
+ * LLM routing, no handler dispatch. The route (route-v2.ts) intercepts them
+ * BEFORE calling runTurnExecutor because:
  *   (1) system-event payloads have no `message` field, so TurnExecutor's
  *       ORIENT step (which needs a user message) cannot fire.
  *   (2) these events map to UI state changes the server records without
@@ -14,11 +14,11 @@
  * Persistence (Paul decision in planning round, matching V4 semantics):
  *   - patch_accepted, patch_dismissed, direct_graph_edit, chip_click
  *     → commit via commitDirectAnswer (append_turn_atomic).
- *   - undo, redo → no commit; return commitPerformed: false with
- *     commitSkippedReason: 'client_only_event'. The route recognises this
- *     reason and still returns 200 — the skip is honest, not a fake
- *     success. See src/orchestrator/route-v2.ts for the skip-reason
- *     allowlist.
+ *   - undo, redo, selection_change → no commit; return commitPerformed:
+ *     false with commitSkippedReason: 'client_only_event'. The route
+ *     recognises this reason and still returns 200 — the skip is honest,
+ *     not a fake success. See src/orchestrator/route-v2.ts for the
+ *     skip-reason allowlist.
  *
  * Response envelope: empty assistant_text, no blocks, no actions — the UI
  * renders the state change visually. Mirrors the silent-acknowledgement
@@ -44,7 +44,7 @@ export interface DispatchSystemEventResult {
   /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
-   *   undo / redo / chip_click / patch_dismissed
+   *   undo / redo / selection_change / chip_click / patch_dismissed
    *     No server-side graph state to inspect. analysisReady stays
    *     undefined; the finaliser stamps no analysis_ready, and the UI's
    *     prior `ceeAnalysisReady` remains the truth (it was correct before
@@ -84,9 +84,14 @@ export interface DispatchSystemEventParams {
 // the client's graph history, not in Supabase turn state. Typed against
 // `SystemEventKindLiteral` so adding a new kind to the schema without
 // updating this list is a compile-time error (not a silent runtime miss).
+//
+// selection_change is client-only ACKED as a holding position — R5 will
+// likely route it into ephemeral turn context (never a committed turn);
+// revisit the dispatch branch, not this guard, when R5 lands.
 const CLIENT_ONLY_EVENT_KINDS: ReadonlySet<SystemEventKindLiteral> = new Set<SystemEventKindLiteral>([
   'undo',
   'redo',
+  'selection_change',
 ]);
 
 function buildAcknowledgementResponse(
