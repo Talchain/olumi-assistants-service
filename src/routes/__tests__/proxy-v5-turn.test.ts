@@ -18,6 +18,9 @@ const mockConfig = {
   },
   auth: {
     assistApiKey: TEST_ASSIST_KEY,
+    // CEE_REQUIRE_USER_JWT default OFF — the required-login front-door
+    // tests below flip this per-test and restore it.
+    requireUserJwt: false,
   },
 };
 
@@ -26,6 +29,7 @@ vi.mock("../../config/index.js", () => ({ config: mockConfig }));
 vi.mock("../../utils/telemetry.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   emit: vi.fn(),
+  TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
 // Import after mocks
@@ -335,6 +339,7 @@ describe("POST /proxy/v5/turn", () => {
       vi.mock("../../utils/telemetry.js", () => ({
         log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
         emit: vi.fn(),
+        TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
       }));
       const { proxyV5TurnRoute: freshRoute } = await import("../proxy-v5-turn.js");
       await freshRoute(freshApp);
@@ -385,6 +390,193 @@ describe("POST /proxy/v5/turn", () => {
       });
 
       expect(capturedUserId).toBe("user-uuid-123");
+    });
+  });
+
+  // ---- Authorization forwarding + required-login front door (login 3.4 CEE-half) ----
+
+  describe("Authorization forwarding + required-login front door", () => {
+    it("forwards the browser Authorization header to the internal route (Supabase JWT seam)", async () => {
+      let capturedAuthorization: string | undefined;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedAuthorization = req.headers["authorization"] as string;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          authorization: "Bearer test-only-forged-token.abc.def",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(capturedAuthorization).toBe("Bearer test-only-forged-token.abc.def");
+    });
+
+    it("flag OFF (default): a turn with NO Authorization is forwarded unchanged (dormancy pin)", async () => {
+      let internalCalled = false;
+
+      app = buildApp({
+        internalHandler: (_req: any, reply: any) => {
+          internalCalled = true;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(internalCalled).toBe(true);
+      expect(res.statusCode).toBe(200);
+    });
+
+    it("flag ON: a turn with NO Authorization gets the typed recoverable 401 sign_in_required (never forwarded)", async () => {
+      mockConfig.auth.requireUserJwt = true;
+      let internalCalled = false;
+
+      app = buildApp({
+        internalHandler: (_req: any, reply: any) => {
+          internalCalled = true;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          "x-user-id": "user-uuid-123",
+          "x-request-id": "req-jwt-required-1",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+      mockConfig.auth.requireUserJwt = false;
+
+      expect(internalCalled).toBe(false);
+      expect(res.statusCode).toBe(401);
+      // Browser must be able to read the refusal
+      expect(res.headers["access-control-allow-origin"]).toBe(STAGING_ORIGIN);
+      const body = JSON.parse(res.body);
+      expect(body).toEqual({
+        error: "INGRESS_CONTRACT_VIOLATION",
+        boundary: "B1",
+        direction: "ingress",
+        validator: "user_jwt",
+        details: {
+          reason: "sign_in_required",
+          code: "sign_in_required",
+          recoverable: true,
+          auth_reason: "missing_token",
+        },
+        request_id: "req-jwt-required-1",
+        retryable: false,
+      });
+    });
+
+    it("flag ON: a non-JWT-shaped Bearer token is refused (no opaque-token smuggling)", async () => {
+      mockConfig.auth.requireUserJwt = true;
+      let internalCalled = false;
+
+      app = buildApp({
+        internalHandler: (_req: any, reply: any) => {
+          internalCalled = true;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          authorization: "Bearer not-a-jwt",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+      mockConfig.auth.requireUserJwt = false;
+
+      expect(internalCalled).toBe(false);
+      expect(res.statusCode).toBe(401);
+      expect(JSON.parse(res.body).details.auth_reason).toBe("missing_token");
+    });
+
+    it("flag ON: a JWT-shaped Authorization is forwarded to the internal route for verification", async () => {
+      mockConfig.auth.requireUserJwt = true;
+      let capturedAuthorization: string | undefined;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedAuthorization = req.headers["authorization"] as string;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.forged-test-signature",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+      mockConfig.auth.requireUserJwt = false;
+
+      expect(res.statusCode).toBe(200);
+      expect(capturedAuthorization).toBe(
+        "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.forged-test-signature",
+      );
+    });
+
+    it("still injects the assist key via x-olumi-assist-key when Authorization is forwarded", async () => {
+      let capturedAssistKey: string | undefined;
+      let capturedAuthorization: string | undefined;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedAssistKey = req.headers["x-olumi-assist-key"] as string;
+          capturedAuthorization = req.headers["authorization"] as string;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          authorization: "Bearer test-only-forged-token.abc.def",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(capturedAssistKey).toBe(TEST_ASSIST_KEY);
+      expect(capturedAuthorization).toBe("Bearer test-only-forged-token.abc.def");
     });
   });
 

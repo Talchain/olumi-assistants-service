@@ -80,6 +80,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         AuthFailed: "assist.auth.failed",
         RateLimited: "assist.auth.rate_limited",
 
+        // User-JWT identity events (login 3.4 CEE-half — CEE_REQUIRE_USER_JWT,
+        // flag default OFF; dormant until the Paul-gated flip)
+        UserJwtVerified: "assist.auth.user_jwt_verified",
+        UserJwtRefused: "assist.auth.user_jwt_refused",
+        UserJwtIdentityMismatch: "assist.auth.user_jwt_identity_mismatch",
+        UserJwtServiceCallerLegacy: "assist.auth.user_jwt_service_caller_legacy",
+
         LlmRetry: "assist.llm.retry",
         LlmRetrySuccess: "assist.llm.retry_success",
         LlmRetryExhausted: "assist.llm.retry_exhausted",
@@ -1320,6 +1327,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V6DualDraftM2Outcome,
         TelemetryEvents.V6DualDraftMergeReport,
         TelemetryEvents.V6DualDraftDegraded,
+        // CEE_REQUIRE_USER_JWT (flag default OFF, login 3.4 CEE-half, ships
+        // dark) — user-JWT identity events are diagnostic-only structured
+        // logs until the Paul-gated flip; no Datadog metric mapping yet.
+        TelemetryEvents.UserJwtVerified,
+        TelemetryEvents.UserJwtRefused,
+        TelemetryEvents.UserJwtIdentityMismatch,
+        TelemetryEvents.UserJwtServiceCallerLegacy,
       ];
 
       for (const event of allEvents) {
@@ -1370,6 +1384,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.auth.success",
         "assist.auth.failed",
         "assist.auth.rate_limited",
+        "assist.auth.user_jwt_verified",
+        "assist.auth.user_jwt_refused",
+        "assist.auth.user_jwt_identity_mismatch",
+        "assist.auth.user_jwt_service_caller_legacy",
         "assist.draft.sse_client_closed",
         "assist.llm.retry",
         "assist.llm.retry_success",

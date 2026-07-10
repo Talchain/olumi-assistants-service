@@ -31,8 +31,12 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config } from "../config/index.js";
-import { log } from "../utils/telemetry.js";
+import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
+import {
+  buildSignInRequiredError,
+  extractJwtCandidate,
+} from "../orchestrator/user-identity.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -49,6 +53,12 @@ const ALLOWED_REQUEST_HEADERS = [
   "x-user-id",
   "x-olumi-client-build",
   "x-olumi-payload-hash",
+  // Login 3.4 CEE-half seam: the browser's Supabase access token
+  // (`Authorization: Bearer <jwt>`) passes through to the internal turn
+  // route, where the flag-gated CEE_REQUIRE_USER_JWT verification consumes
+  // it. Inert until the UI sends the header. Service auth is unaffected:
+  // the injected x-olumi-assist-key is checked FIRST by the auth plugin.
+  "authorization",
 ] as const;
 
 /** Response headers safe to propagate back to the browser. */
@@ -226,6 +236,33 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
           request_id: requestId,
         },
       });
+    }
+
+    // 2.5. Flag-gated required-login front door (login 3.4 CEE-half,
+    // CEE_REQUIRE_USER_JWT default OFF — dormant today). This proxy is the
+    // browser-facing turn surface, so "this is a browser request" is
+    // structural truth HERE — no request-header trust involved. When the
+    // flag is on, a turn without a JWT-shaped Authorization header is
+    // refused with the same typed recoverable sign_in_required
+    // BoundaryError the internal route emits for invalid/expired tokens,
+    // so the UI sees one wire shape for "sign in required". Tokens that
+    // ARE present are verified downstream in the shared pre-flight
+    // (runPreFlight → resolveUserIdentity), which derives user identity
+    // from the verified `sub`. Direct key-authed service callers hitting
+    // /orchestrate/v2/turn are NOT affected by this check — their
+    // carve-out is documented in src/orchestrator/user-identity.ts.
+    if (config.auth?.requireUserJwt === true && extractJwtCandidate(request.headers.authorization) === null) {
+      log.warn({ requestId }, "[proxy-v5] Rejected: sign-in required (no user JWT presented)");
+      emit(TelemetryEvents.UserJwtRefused, {
+        request_id: requestId,
+        reason: "missing_token",
+        via_browser_proxy: true,
+      });
+      const cors = buildCorsHeaders(origin as string);
+      for (const [k, v] of Object.entries(cors)) {
+        reply.header(k, v);
+      }
+      return reply.code(401).send(buildSignInRequiredError("missing_token", requestId));
     }
 
     // 3. Build internal request headers

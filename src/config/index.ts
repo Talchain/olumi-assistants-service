@@ -374,6 +374,22 @@ const ConfigSchema = z.object({
     hmacMaxSkewMs: z.coerce.number().int().positive().default(300000), // 5 minutes
     islApiKey: z.string().optional(),
     shareSecret: z.string().optional(),
+    // Login 3.4 CEE-half (ships dark). CEE_REQUIRE_USER_JWT — flag-gated
+    // Supabase-JWT verification on /orchestrate/v2/turn: identity is derived
+    // from a verified token's `sub`; unauthenticated browser-proxy turns get
+    // a typed recoverable 401 (sign_in_required). Default OFF = byte-identical
+    // legacy behaviour. Flip is Paul-gated (Supabase staging↔prod isolation
+    // check). See src/orchestrator/user-identity.ts.
+    requireUserJwt: booleanString.default(false),
+    // SUPABASE_JWT_SECRET — legacy HS256 shared secret for verifying Supabase
+    // access tokens (value set via environment only; never committed/logged).
+    supabaseJwtSecret: z.string().optional(),
+    // SUPABASE_JWKS_URL — JWKS endpoint for asymmetric (ES256/RS256) Supabase
+    // signing keys. Falls back to `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`.
+    supabaseJwksUrl: z.string().optional(),
+    // SUPABASE_URL — same env var the session store reads; used here only to
+    // derive the default JWKS URL when SUPABASE_JWKS_URL is unset.
+    supabaseUrl: z.string().optional(),
   }),
 
   // LLM Configuration
@@ -1087,6 +1103,10 @@ function parseConfig(): Config {
       islApiKey: env.ISL_API_KEY,
       // CEE_SHARE_SECRET preferred; falls back to SHARE_SECRET
       shareSecret: env.CEE_SHARE_SECRET ?? env.SHARE_SECRET,
+      requireUserJwt: env.CEE_REQUIRE_USER_JWT,
+      supabaseJwtSecret: env.SUPABASE_JWT_SECRET,
+      supabaseJwksUrl: env.SUPABASE_JWKS_URL,
+      supabaseUrl: env.SUPABASE_URL,
     },
     llm: {
       provider: env.LLM_PROVIDER,

@@ -1,15 +1,22 @@
 /**
  * V5 orchestrator route pre-flight helper.
  *
- * Runs, in order, the three ingress-side checks that EVERY dispatch branch
+ * Runs, in order, the ingress-side checks that EVERY dispatch branch
  * in route-v2.ts depends on:
  *
+ *   0. User identity    — `resolveUserIdentity` (flag-gated Supabase-JWT
+ *      verification, CEE_REQUIRE_USER_JWT, default OFF — login 3.4 CEE-half.
+ *      Runs FIRST: authentication precedes body validation, so an
+ *      unauthenticated caller learns nothing about payload validity. When
+ *      the flag is off this is a single config read — dormant.)
  *   1. Extension parse  — `parseRequestExtensions`
  *   2. B1 ingress       — `validateIngress` (on the body with extension keys stripped)
- *   3. Scenario upsert  — `preflightEnsureScenario`
+ *   3. Scenario upsert  — `preflightEnsureScenario` (fed by the VERIFIED
+ *      identity when step 0 derived one — the caller-supplied `user_id`
+ *      extension is ignored on verified turns)
  *
  * Returns a discriminated union so the caller stays the single owner of
- * `reply.code(...).send(...)`. On failure, the caller sends the 422; on
+ * `reply.code(...).send(...)`. On failure, the caller sends the 401/422; on
  * success, the caller destructures `context` and proceeds to dispatch.
  *
  * This helper exists so the "all branches share pre-flight" invariant is
@@ -28,13 +35,14 @@ import type { FastifyRequest } from 'fastify';
 import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { getOrGenerateRequestId } from '../utils/request-id.js';
-import { log } from '../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { validateIngress } from '../validators/b1.js';
 import {
   parseRequestExtensions,
   type ParsedRequestExtensions,
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
+import { buildSignInRequiredError, resolveUserIdentity } from './user-identity.js';
 
 // `@talchain/schemas` `OrchestratorTurnPayload` is `.strict()` and would
 // reject `graph_state` / `analysis_state` / `user_id` as unknown keys. We
@@ -72,10 +80,30 @@ export interface PreFlightContext {
 
 export type PreFlightOutcome =
   | { readonly ok: true; readonly context: PreFlightContext }
-  | { readonly ok: false; readonly status: 422; readonly error: BoundaryError };
+  | { readonly ok: false; readonly status: 401 | 422; readonly error: BoundaryError };
 
 export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcome> {
   const requestId = getOrGenerateRequestId(req);
+
+  // Step 0 — flag-gated user-identity resolution (CEE_REQUIRE_USER_JWT).
+  // 'off' (flag down) and 'service_legacy' (key-authed caller, no JWT —
+  // the browser proxy refuses JWT-less turns at its own front door when
+  // the flag is on, so no browser path reaches the carve-out) leave
+  // today's behaviour untouched; 'refused' (present-but-invalid/expired
+  // JWT, or missing verification material) short-circuits with the typed
+  // recoverable sign_in_required 401 BEFORE any body validation.
+  const identity = await resolveUserIdentity(req, requestId);
+  if (identity.mode === 'refused') {
+    log.warn(
+      { request_id: requestId, auth_reason: identity.reason },
+      'V5 pre-flight: unauthenticated turn refused (sign_in_required)',
+    );
+    return {
+      ok: false,
+      status: 401,
+      error: buildSignInRequiredError(identity.reason, requestId),
+    };
+  }
 
   const extensions = parseRequestExtensions(req.body, requestId);
   if (!extensions.ok) {
@@ -105,9 +133,33 @@ export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcom
     return { ok: false, status: 422, error: ingress.error };
   }
 
+  // Effective identity: on a verified turn the JWT-derived user_id is
+  // authoritative and the caller-supplied `user_id` extension is IGNORED
+  // (spec: after the flip, client identity from any public path is dead
+  // input). A mismatch is telemetry-only — the verified value wins.
+  let effectiveUserId = extensions.value.userId;
+  if (identity.mode === 'verified') {
+    if (extensions.value.userId !== null && extensions.value.userId !== identity.userId) {
+      emit(TelemetryEvents.UserJwtIdentityMismatch, {
+        request_id: requestId,
+        claimed_user_id_prefix: extensions.value.userId.slice(0, 8),
+        verified_user_id_prefix: identity.userId.slice(0, 8),
+      });
+      log.warn(
+        {
+          request_id: requestId,
+          claimed_user_id_prefix: extensions.value.userId.slice(0, 8),
+          verified_user_id_prefix: identity.userId.slice(0, 8),
+        },
+        'V5 pre-flight: caller-supplied user_id differs from verified JWT sub — using verified identity',
+      );
+    }
+    effectiveUserId = identity.userId;
+  }
+
   const preflight = await preflightEnsureScenario(
     ingress.value.scenario_id,
-    extensions.value.userId,
+    effectiveUserId,
     requestId,
   );
   if (!preflight.ok) {
@@ -128,7 +180,10 @@ export async function runPreFlight(req: FastifyRequest): Promise<PreFlightOutcom
     context: {
       requestId,
       ingress: ingress.value,
-      extensions: extensions.value,
+      // Thread the effective (verified-when-available) identity to every
+      // downstream consumer — ownership checks and RPC p_user_id all read
+      // extensions.userId.
+      extensions: { ...extensions.value, userId: effectiveUserId },
     },
   };
 }
