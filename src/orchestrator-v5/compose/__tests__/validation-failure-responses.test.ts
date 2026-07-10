@@ -379,6 +379,222 @@ describe('composeValidationFailure — PARAMETER_INVALID missing_value (Fix B)',
 });
 
 // ---------------------------------------------------------------------------
+// 1.16 diagnosis cluster items A1/A2/B — composer honesty for the remaining
+// set_factor_value rejection reasons. The validator threads a sanitised,
+// user-readable `details.issue` (e.g. "Value £250,000 exceeds the factor's
+// cap of £200,000.") for every predicate rejection, but the composer only
+// had branches for missing_value / bare_ratio_on_unit_factor — everything
+// else collapsed into the useless "'value' needs to be a valid value."
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID value_exceeds_cap (items A1+A2, 1.16)', () => {
+  const FULL_DETAILS = {
+    parameter: 'value',
+    rejection_reason: 'value_exceeds_cap',
+    issue: "Value £250,000 exceeds the factor's cap of £200,000.",
+    handler_id: 'set_factor_value',
+    unit: '£',
+    value: 250000,
+    operator: 'set',
+    factor_id: 'fac_migration',
+    factor_label: 'Migration Cost',
+    suggested_cap: 320000,
+  };
+
+  it('renders the honest cap message, never the generic fallback', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: "Value £250,000 exceeds the factor's cap of £200,000.",
+      details: FULL_DETAILS,
+    });
+    expect(template_id).toBe('parameter_invalid_value_exceeds_cap');
+    expect(response.assistant_text).toContain('£250,000');
+    expect(response.assistant_text).toContain('£200,000');
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    expect(response.assistant_text).not.toContain('unknown');
+    assertStyle(response.assistant_text);
+  });
+
+  it('A2: explicit unit + set operator + suggested cap → user-consented rescale chip', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: FULL_DETAILS,
+    });
+    const rescale = response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap');
+    expect(rescale).toBeDefined();
+    expect(rescale?.label).toBe('Set to £250,000 and extend the scale');
+    // The replay message must (a) name the factor so the pending-action
+    // resumer can label-match it, (b) carry NO digits and NO edit verb so
+    // the clarification-resume pre-route claims it instead of the
+    // deterministic value-update path (which would drop the cap).
+    expect(rescale?.message).toBe('Extend the scale for Migration Cost and use the new value.');
+    expect(rescale?.message).not.toMatch(/\d/);
+    // A fallback prompt chip is still present alongside.
+    expect(response.suggested_actions.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('A2 negative: no rescale chip without an explicit unit', () => {
+    const { unit: _unit, ...noUnit } = FULL_DETAILS;
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...noUnit, issue: "Value 250000 exceeds the factor's cap of 200000." },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('A2 negative: no rescale chip for delta operators (suggested cap covers the stated value only)', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...FULL_DETAILS, operator: 'increase' },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+  });
+
+  it('A2 negative: no rescale chip without a factor label (resumer could not match the replay)', () => {
+    const { factor_label: _label, ...noLabel } = FULL_DETAILS;
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: noLabel,
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+  });
+
+  // PR #413 review FIXUP 2 — degrade-only label gate. The chip's replay is
+  // only deterministic when the resumer can claim it: a label containing a
+  // digit ("Phase 2 Cost") or an edit verb ("Set-up Cost" — \bset\b matches
+  // across the hyphen) makes the rendered replay message trip the resumer's
+  // EDIT_VERB_OR_QUANTITY_PATTERN negative gate, so the click would fall to
+  // the LLM WITHOUT the cap and loop the same honest failure. Suppress the
+  // chip whenever the rendered message fails the resumer's own predicate;
+  // the honest copy and the retry prompt remain.
+  it('A2 negative (FIXUP 2): label containing a digit ("Phase 2 Cost") suppresses the chip', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...FULL_DETAILS, factor_label: 'Phase 2 Cost' },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+    // Degrade-only: honest copy + a prompt chip still present.
+    expect(response.assistant_text).toContain('£250,000');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('A2 negative (FIXUP 2): label containing an edit verb ("Set-up Cost") suppresses the chip', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...FULL_DETAILS, factor_label: 'Set-up Cost' },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+  });
+});
+
+describe('composeValidationFailure — PARAMETER_INVALID remaining rejection reasons (item A1, 1.16)', () => {
+  it('bare_number_outside_cap → renders the sanitised issue', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'outside range',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_number_outside_cap',
+        issue: "Value 250000 is outside the factor's expected range [0, 200000] and no unit was given.",
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_number_outside_cap');
+    expect(response.assistant_text).toContain('250000');
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('cap_non_positive → renders the sanitised issue', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad cap',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'cap_non_positive',
+        issue: 'Cap must be positive (received -5).',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_cap_non_positive');
+    expect(response.assistant_text).toContain('Cap must be positive');
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('B: delta_no_existing_value → names the entity and offers an absolute-set chip', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'no existing value',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'delta_no_existing_value',
+        issue: 'This factor has no recorded current value to adjust from.',
+        handler_id: 'set_factor_value',
+        factor_label: 'Team Size',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_delta_no_existing_value');
+    expect(response.assistant_text).toContain('Team Size');
+    expect(response.assistant_text.toLowerCase()).toContain("doesn't have a recorded value yet");
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    const chip = response.suggested_actions[0];
+    expect(chip?.message).toContain('Team Size');
+    assertStyle(response.assistant_text);
+  });
+
+  it('B: delta_no_existing_value without a label falls back to neutral phrasing', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'no existing value',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'delta_no_existing_value',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_delta_no_existing_value');
+    expect(response.assistant_text.toLowerCase()).toContain("doesn't have a recorded value yet");
+    expect(response.assistant_text).not.toContain('that item');
+    assertStyle(response.assistant_text);
+  });
+
+  it('general fallback: constraint_description absent but issue present → renders the issue', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'unit mismatch',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'unit_mismatch',
+        issue: 'This factor uses £; the value provided is in %.',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_issue');
+    expect(response.assistant_text).toContain('This factor uses £');
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('generic path unchanged when neither issue nor constraint_description exist', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad',
+      details: { parameter: 'value' },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).toContain('needs to be a valid value');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Value/unit honesty — bare_ratio_on_unit_factor clarification branch.
 // A bare sub-1 value on a unit-bearing factor reads as a proportion, not a
 // value in that unit. The copy must be honest, unit-aware, NOT currency-

@@ -94,6 +94,7 @@ import {
 } from './compose/goal-target-receipt-guard.js';
 import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
+import { buildRescaleCapPendingActions } from './session/rescale-cap-pending.js';
 import {
   composeStateQueryChip,
   tryStateQueryGuard,
@@ -2859,9 +2860,18 @@ export async function runTurnExecutor(
             parameters: [
               {
                 name: 'value',
+                // 1.16 item A2 — a pending carrying an explicit `cap` (the
+                // consented rescale chip) synthesises the structured
+                // {value, unit, cap} shape; proposalCap takes precedence in
+                // the shared predicate + handler, so the cap extension
+                // applies atomically with the value.
                 value:
-                  action.unit !== undefined
-                    ? { value: action.value, unit: action.unit }
+                  action.unit !== undefined || action.cap !== undefined
+                    ? {
+                        value: action.value,
+                        ...(action.unit !== undefined ? { unit: action.unit } : {}),
+                        ...(action.cap !== undefined ? { cap: action.cap } : {}),
+                      }
                     : action.value,
                 operator: action.operator,
                 source: 'user_explicit',
@@ -3029,6 +3039,9 @@ export async function runTurnExecutor(
                     value: a.value,
                     ...(a.unit !== undefined ? { unit: a.unit } : {}),
                     operator: a.operator,
+                    // 1.16 item A2 — preserve a consented rescale cap
+                    // across the ambiguity re-clarify, same as value/unit.
+                    ...(a.cap !== undefined ? { cap: a.cap } : {}),
                   },
                   preconditions: {
                     target_entity_ids: [a.factor_id],
@@ -4890,6 +4903,21 @@ export async function runTurnExecutor(
           }),
         );
 
+        // 1.16 item A2 — the value_exceeds_cap recovery may carry the
+        // user-consented "extend the scale" chip. The chip itself cannot
+        // carry the structured {value, unit, cap} (the boundary Action is
+        // strict), so persist the matching set_factor_value pending action
+        // alongside the recovery turn; the chip's replay is claimed by the
+        // clarification-resume pre-route, which synthesises the proposal
+        // from this pending — cap included. Fail-closed inside the builder
+        // (chip absent / details incomplete / no live graph hash → []).
+        const rescalePendingActions = buildRescaleCapPendingActions({
+          error: validationResult.error,
+          response: recoveredResponse,
+          scenarioId: context.session_id,
+          currentGraphHash: freshness?.current_graph_hash,
+        });
+
         // Commit as a direct_answer so route-v2 sees commit_performed=true
         // and returns 200. Commit failure on a recoverable path is still
         // fatal — BUT the original recoverable outcome is logged
@@ -4906,6 +4934,9 @@ export async function runTurnExecutor(
             llm_calls_used: llmCallsUsed,
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
+            ...(rescalePendingActions.length > 0
+              ? { pending_actions: rescalePendingActions }
+              : {}),
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');

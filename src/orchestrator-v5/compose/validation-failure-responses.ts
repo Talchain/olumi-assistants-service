@@ -31,9 +31,21 @@ import {
   sanitiseForUser,
   type EntityLike,
 } from './helpers.js';
+import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
+import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 
 const ENTITY_SIBLING_CAP = 4;
 const AMBIGUOUS_CANDIDATE_CAP = 5;
+
+/**
+ * 1.16 item A2 — stable chip id for the user-consented "extend the scale"
+ * chip on `value_exceeds_cap` rejections. Exported so the turn-executor's
+ * recoverable-validator commit site can detect the chip on the composed
+ * response and persist the matching `set_factor_value` pending action
+ * (structured {value, unit, cap}) under the SAME id — the pending-action
+ * resumer correlates chip and pending via `chip_id`.
+ */
+export const RESCALE_EXTEND_CAP_CHIP_ID = 'chip_prompt_rescale_extend_cap';
 
 export interface ComposedValidationFailure {
   readonly response: OlumiResponse;
@@ -335,6 +347,164 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
         ],
       },
       template_id: 'parameter_invalid_bare_ratio_on_unit_factor',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // 1.16 items A1/A2/B — honest copy for the remaining set_factor_value
+  // rejection reasons. The validator threads a sanitised, user-readable
+  // `details.issue` for every predicate rejection (e.g. "Value £250,000
+  // exceeds the factor's cap of £200,000."), but these reasons previously
+  // fell through to the generic "'value' needs to be a valid value." —
+  // useless copy that told the user nothing about WHY the edit was refused.
+  const rejectionReason = readString(details.rejection_reason);
+  const issue = readString(details.issue);
+  const factorLabel = readString(details.factor_label);
+
+  if (rejectionReason === 'value_exceeds_cap') {
+    const chips: SuggestedAction[] = [];
+    const honestIssue = sanitiseForUser(issue ?? error.message);
+    // A2 — user-consented rescale chip (never auto-applied). Attached only
+    // when: the proposal carried an EXPLICIT unit (value_exceeds_cap
+    // implies it, but the details may be minimal on legacy emitters), the
+    // operator is an absolute 'set' (the suggested cap covers the stated
+    // value, not a computed delta), a suggested cap was computed, and the
+    // factor label is known. The label matters because the chip's replay
+    // message must NAME the factor: the clarification-resume pre-route
+    // matches the reply against the pending action's factor label. The
+    // message deliberately carries NO digits and NO edit verb so it is
+    // claimed by the resume path (which holds the structured {value, unit,
+    // cap} on the persisted pending action) rather than by the
+    // deterministic value-update path (which would drop the cap).
+    const proposedValue = typeof details.value === 'number' ? details.value : undefined;
+    const unit = readString(details.unit);
+    const suggestedCap = typeof details.suggested_cap === 'number' ? details.suggested_cap : undefined;
+    const operator = readString(details.operator) ?? 'set';
+    if (
+      proposedValue !== undefined &&
+      unit !== undefined &&
+      suggestedCap !== undefined &&
+      suggestedCap >= proposedValue &&
+      factorLabel !== undefined &&
+      operator === 'set'
+    ) {
+      const label = safeLabel({ label: factorLabel, kind: undefined });
+      const replayMessage = `Extend the scale for ${label} and use the new value.`;
+      // PR #413 review FIXUP 2 — degrade-only label gate. The replay is
+      // only deterministic when tryClarificationResume can claim it; a
+      // label carrying a digit ("Phase 2 Cost") or an edit verb ("Set-up
+      // Cost") trips the resumer's negative gate, the click falls to the
+      // LLM WITHOUT the cap, and the user loops the same honest failure.
+      // Apply the resumer's OWN predicate to the exact rendered message
+      // and suppress the chip when it fails — the honest copy and the
+      // retry prompt below still ship.
+      if (isClaimableByClarificationResume(replayMessage)) {
+        chips.push({
+          id: RESCALE_EXTEND_CAP_CHIP_ID,
+          label: `Set to ${formatValueWithUnit(proposedValue, unit)} and extend the scale`,
+          message: replayMessage,
+        });
+      }
+    }
+    chips.push({
+      id: chipId('prompt', 'param-cap-retry'),
+      label: 'Try a different value',
+      message: `Use a different value for ${parameter}.`,
+    });
+    return {
+      body: {
+        assistant_text:
+          `${honestIssue} I haven't changed anything. ` +
+          `You can extend the scale to allow it, or give a value within the current range.`,
+        suggested_actions: chips,
+      },
+      template_id: 'parameter_invalid_value_exceeds_cap',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  if (rejectionReason === 'bare_number_outside_cap') {
+    return {
+      body: {
+        assistant_text:
+          `${sanitiseForUser(issue ?? error.message)} I haven't changed anything. ` +
+          `Tell me the value with its unit, for example £100,000, and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-supply-unit-value'),
+            label: 'Tell me the value',
+            message: `Use a specific value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_bare_number_outside_cap',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  if (rejectionReason === 'cap_non_positive') {
+    return {
+      body: {
+        assistant_text:
+          `${sanitiseForUser(issue ?? error.message)} I haven't changed anything. ` +
+          `Give the value with a sensible scale and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-cap-retry'),
+            label: 'Try a different value',
+            message: `Use a different value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_cap_non_positive',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // Item B — relative-edit honesty. A delta ("increase X by 10%") was
+  // refused because the factor has no recorded current value to adjust
+  // from. Name the entity and steer toward an absolute set.
+  if (rejectionReason === 'delta_no_existing_value') {
+    const subject = factorLabel !== undefined
+      ? safeLabel({ label: factorLabel, kind: undefined })
+      : 'That factor';
+    return {
+      body: {
+        assistant_text:
+          `${subject} doesn't have a recorded value yet, so I can't adjust it ` +
+          `relative to a current value. Tell me what the value should be, for ` +
+          `example £100,000, and I'll set it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-absolute-set'),
+            label: 'Set its value',
+            message: `Set ${subject} to a specific value.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_delta_no_existing_value',
+      chip_type: 'text_prompt',
+    };
+  }
+
+  // General fallback (item A1): when there is no constraint description but
+  // the validator supplied a user-readable issue, render the issue rather
+  // than the meaningless "'value' needs to be a valid value.".
+  if (readString(details.constraint_description) === undefined && issue !== undefined) {
+    return {
+      body: {
+        assistant_text:
+          `${sanitiseForUser(issue)} I haven't changed anything. ` +
+          `Tell me what you'd like instead and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-retry'),
+            label: 'Try a different value',
+            message: `Use a different value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_issue',
       chip_type: 'text_prompt',
     };
   }

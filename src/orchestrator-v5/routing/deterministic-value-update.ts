@@ -60,6 +60,7 @@ import {
   NUMERIC_SUFFIX_SOURCE,
 } from '../context/cqe/rules.js';
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
+import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
 import { impliesOptionInterventionEdit } from './option-intervention-guard.js';
@@ -485,15 +486,57 @@ export function tryDeterministicValueUpdate(
 
   const matched = [...substringMatches, ...diceMatches].slice(0, MAX_CANDIDATES);
   if (matched.length === 0) {
-    // Brief contract: "All candidates < 0.4 → { matched: false } (LLM
-    // falls through)". Pure semantic-synonym mismatches like "budget" →
-    // "Hiring and Staffing Cost" (bigramDice ~0.04, no shared lexical
-    // material) land here. KNOWN RESIDUAL RISK: Test G's exact
-    // "Increase the budget to £300k" prompt against a graph with no
-    // budget-keyworded label still falls through to the LLM, which has
-    // been observed to misroute. A robust fix needs either a curated
-    // synonym layer or LLM understanding — deferred.
-    return { matched: false, skip_reason: 'no_candidate_match' };
+    // 1.16 item B — kind-gate clarify restore. The type filter (#383) is
+    // right for RANKING (non-factor nodes must never outrank or crowd
+    // factor candidates), but when the factor-filtered pool yields NO
+    // match at all, the user may have named a non-factor node directly
+    // ("Set Customer Churn Risk to 20%"). Before the filter, that message
+    // dispatched `set_factor_value` on the risk node and the CALLER's
+    // kind check downgraded it to the kind-gate clarify
+    // (`downgrade_reason: 'non_factor_kind'`) — a cheap deterministic
+    // recovery. The filter silently removed it: the message fell through
+    // to the LLM as `no_candidate_match`. Restore it narrowly: when the
+    // UNFILTERED pool contains exactly ONE substring match and it is a
+    // non-factor node, dispatch it so the caller's kind gate produces the
+    // clarify. Multiple matches or Dice-only evidence keep the
+    // conservative fall-through.
+    if (factorNodeIds !== undefined && candidatesPool !== rawCandidatesPool) {
+      const nonFactorSubstring: ValueUpdateCandidate[] = [];
+      for (const f of rawCandidatesPool) {
+        if (factorNodeIds.has(f.id)) continue; // factor pool already checked
+        if (f.label == null) continue;
+        const normLabel = f.label.trim().toLowerCase();
+        if (normLabel.length === 0) continue;
+        if (normMessage.includes(normLabel)) {
+          nonFactorSubstring.push({
+            id: f.id,
+            label: f.label,
+            score: 1,
+            source: 'substring',
+            labelMatchIndex: normMessage.indexOf(normLabel),
+          });
+        }
+      }
+      if (nonFactorSubstring.length === 1) {
+        // Feed the single non-factor match through the normal dispatch
+        // logic below (quantity attribution guard + single-substring
+        // dispatch) rather than returning early, so multi-quantity
+        // messages keep their conservative `ambiguous_quantity` skip.
+        substringMatches.push(nonFactorSubstring[0]!);
+        matched.push(nonFactorSubstring[0]!);
+      }
+    }
+    if (matched.length === 0) {
+      // Brief contract: "All candidates < 0.4 → { matched: false } (LLM
+      // falls through)". Pure semantic-synonym mismatches like "budget" →
+      // "Hiring and Staffing Cost" (bigramDice ~0.04, no shared lexical
+      // material) land here. KNOWN RESIDUAL RISK: Test G's exact
+      // "Increase the budget to £300k" prompt against a graph with no
+      // budget-keyworded label still falls through to the LLM, which has
+      // been observed to misroute. A robust fix needs either a curated
+      // synonym layer or LLM understanding — deferred.
+      return { matched: false, skip_reason: 'no_candidate_match' };
+    }
   }
 
   // AC.2 — multi-quantity ambiguity guard, with a narrow "from X to Y"
@@ -801,6 +844,18 @@ export function buildClarifyAssistantText(
 /**
  * Build prompt-replay messages for each candidate chip, preserving the
  * user's original verb where possible.
+ *
+ * 1.16 item E — value-slot rendering. CQE's `raw_text` is the FULL pattern
+ * match (context/cqe/rules.ts `emit`: raw = match[0]), and the sentence-
+ * level patterns capture the whole leading phrase — so embedding raw_text
+ * produced "Set X to Set migration cost to £250k." (garbled copy whose
+ * replay also re-parses unreliably). The value slot now renders from the
+ * PARSED quantity via `mapCqeQuantityToProposalValue` (undoes CQE's
+ * pre-normalisation, e.g. percentage 0.25 → 25 '%') + `formatValueWithUnit`
+ * (canonical "£250,000" / "25%"); `raw_text` remains ONLY as the fallback
+ * for a null-value quantity. Delta operators keep their "by" preposition so
+ * the chip's replay re-parses as the same delta rather than silently
+ * flipping into an absolute set.
  */
 export function buildClarifyChipMessage(
   message: string,
@@ -809,11 +864,23 @@ export function buildClarifyChipMessage(
 ): string {
   const verbMatch = message.match(EDIT_VERB_PATTERN);
   const verb = verbMatch ? verbMatch[0].toLowerCase() : 'set';
-  const valueText = quantity.raw_text || (quantity.value != null ? String(quantity.value) : '');
+  let valueText = '';
+  if (quantity.value != null) {
+    const { value, unit } = mapCqeQuantityToProposalValue(quantity);
+    valueText = formatValueWithUnit(value, unit);
+  } else if (quantity.raw_text) {
+    valueText = quantity.raw_text;
+  }
   if (valueText === '') {
     return `${capitalise(verb)} ${candidate.label}.`;
   }
-  return `${capitalise(verb)} ${candidate.label} to ${valueText}.`;
+  const preposition =
+    quantity.operator === 'increment' ||
+    quantity.operator === 'decrement' ||
+    quantity.operator === 'add'
+      ? 'by'
+      : 'to';
+  return `${capitalise(verb)} ${candidate.label} ${preposition} ${valueText}.`;
 }
 
 function capitalise(s: string): string {

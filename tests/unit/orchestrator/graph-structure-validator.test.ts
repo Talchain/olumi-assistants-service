@@ -117,9 +117,9 @@ describe('validateGraphStructure', () => {
     expect(result.violations.find((v) => v.code === 'ORPHAN_NODE')!.detail).toContain('orphan_1');
   });
 
-  it('NO_PATH_TO_GOAL: detects node not reachable from decision', () => {
+  it('NO_PATH_TO_GOAL: detects island subgraph that cannot reach the goal', () => {
     const graph = makeValidGraph();
-    // Add a disconnected subgraph (connected to each other but not to decision)
+    // Add a disconnected subgraph (connected to each other but with no path to the goal)
     graph.nodes.push({ id: 'island_a', kind: 'factor', label: 'Island A' } as GraphV3T['nodes'][number]);
     graph.nodes.push({ id: 'island_b', kind: 'factor', label: 'Island B' } as GraphV3T['nodes'][number]);
     graph.edges.push({
@@ -130,6 +130,133 @@ describe('validateGraphStructure', () => {
     const result = validateGraphStructure(graph);
     expect(result.valid).toBe(false);
     expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(true);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 1.16 diagnosis cluster item C — reachability predicate flip.
+  //
+  // The second checkPathToGoal loop previously required every edged node
+  // to be reachable FROM the decision, which wrongly rejected legitimate
+  // exogenous influences: a new node whose ONLY edge is an outbound edge
+  // into a factor that reaches the goal (e.g. an external risk driving a
+  // cost factor) has a perfectly valid forward path to the goal, yet was
+  // rejected NO_PATH_TO_GOAL because nothing points at it from the
+  // decision side. The correct predicate — matching the user-facing
+  // message "cannot reach the goal" — is a reverse-BFS from the goal:
+  // flag nodes that cannot REACH the goal via forward directed edges.
+  // ──────────────────────────────────────────────────────────────────────
+
+  describe('NO_PATH_TO_GOAL — reachability predicate (item C, 1.16)', () => {
+    it('new node with only an outbound edge into a goal-reaching factor → ACCEPTED', () => {
+      const graph = makeValidGraph();
+      // Exogenous influence: risk_new → fac_x, and fac_x → goal_1 exists.
+      // No inbound edge to risk_new from the decision side.
+      graph.nodes.push({ id: 'risk_new', kind: 'risk', label: 'Supplier failure' } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'risk_new', to: 'fac_x',
+        strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative',
+      } as GraphV3T['edges'][number]);
+
+      const result = validateGraphStructure(graph);
+      expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(false);
+      expect(result.valid).toBe(true);
+    });
+
+    it('true dead-end (edged node with no forward path to the goal) → still fails', () => {
+      const graph = makeValidGraph();
+      // Sink: opt_a → fac_sink, and fac_sink has no outbound edge — it
+      // cannot reach the goal via forward edges.
+      graph.nodes.push({ id: 'fac_sink', kind: 'factor', label: 'Dead-end factor' } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'opt_a', to: 'fac_sink',
+        strength: { mean: 0.2, std: 0.1 }, exists_probability: 0.7, effect_direction: 'positive',
+      } as GraphV3T['edges'][number]);
+
+      const result = validateGraphStructure(graph);
+      expect(result.valid).toBe(false);
+      expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(true);
+      const violation = result.violations.find((v) => v.code === 'NO_PATH_TO_GOAL')!;
+      expect(violation.detail).toContain('fac_sink');
+    });
+
+    it('orphan option (no factor edge) reports OPTION_NO_FACTOR_EDGES only — no redundant NO_PATH_TO_GOAL', () => {
+      // The edit repair loop gates on "ALL new violations repairable"
+      // (STRUCTURAL_REPAIRABLE_CODES = {OPTION_NO_FACTOR_EDGES}). An option
+      // with no outbound factor edge trivially cannot reach the goal, so
+      // without suppression the SAME defect would also emit NO_PATH_TO_GOAL
+      // and make the orphan-option repair path unreachable. The specific
+      // violation subsumes the generic one for the same node.
+      const graph = makeValidGraph();
+      graph.nodes.push({ id: 'opt_orphan', kind: 'option', label: 'Orphan Option' } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'dec_1', to: 'opt_orphan',
+        strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive',
+      } as GraphV3T['edges'][number]);
+
+      const result = validateGraphStructure(graph);
+      expect(hasViolation(result, 'OPTION_NO_FACTOR_EDGES')).toBe(true);
+      expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(false);
+    });
+
+    // PR #413 review FIXUP 3 — the predicate flip opened a gap: a FLOATING
+    // option (outbound option → factor edge, but NO inbound decision →
+    // option edge) reaches the goal, so the new loop 2 passes it — yet the
+    // old loop 2 caught it (not reachable FROM the decision). An option no
+    // decision can select is structurally meaningless; an explicit check
+    // (distinct code + message from NO_PATH_TO_GOAL) closes the gap.
+    it('FIXUP 3: floating option (option→factor edge, no decision→option inbound) → violation', () => {
+      const graph = makeValidGraph();
+      graph.nodes.push({ id: 'opt_float', kind: 'option', label: 'Floating Option' } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'opt_float', to: 'fac_x',
+        strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive',
+      } as GraphV3T['edges'][number]);
+
+      const result = validateGraphStructure(graph);
+      expect(result.valid).toBe(false);
+      expect(hasViolation(result, 'OPTION_NOT_LINKED_TO_DECISION')).toBe(true);
+      const violation = result.violations.find((v) => v.code === 'OPTION_NOT_LINKED_TO_DECISION')!;
+      expect(violation.detail).toContain('opt_float');
+      // Distinct from the reachability code — this option DOES reach the goal.
+      expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(false);
+    });
+
+    it('FIXUP 3: normally-linked options (decision→option inbound) pass', () => {
+      const result = validateGraphStructure(makeValidGraph());
+      expect(hasViolation(result, 'OPTION_NOT_LINKED_TO_DECISION')).toBe(false);
+      expect(result.valid).toBe(true);
+    });
+
+    it('FIXUP 3: no decision node at all → NO_DECISION owns it (no per-option noise)', () => {
+      const graph = makeValidGraph();
+      graph.nodes = graph.nodes.filter((n) => n.kind !== 'decision');
+      graph.edges = graph.edges.filter((e) => e.from !== 'dec_1');
+
+      const result = validateGraphStructure(graph);
+      expect(hasViolation(result, 'NO_DECISION')).toBe(true);
+      expect(hasViolation(result, 'OPTION_NOT_LINKED_TO_DECISION')).toBe(false);
+    });
+
+    it('goal unreachable from decision still fails via loop 1 (unchanged)', () => {
+      const graph = makeValidGraph();
+      // Sever the only path into the goal: fac_x → goal_1.
+      graph.edges = graph.edges.filter((e) => !(e.from === 'fac_x' && e.to === 'goal_1'));
+      // Keep goal edged (so the orphan check doesn't own it instead):
+      // goal_1 → island (an outbound edge that does not restore decision→goal).
+      graph.nodes.push({ id: 'fac_after_goal', kind: 'factor', label: 'Post-goal factor' } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'goal_1', to: 'fac_after_goal',
+        strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
+      } as GraphV3T['edges'][number]);
+
+      const result = validateGraphStructure(graph);
+      expect(result.valid).toBe(false);
+      expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(true);
+      // Loop 1's violation names the goal node.
+      expect(
+        result.violations.some((v) => v.code === 'NO_PATH_TO_GOAL' && v.detail.includes('goal_1')),
+      ).toBe(true);
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────
