@@ -40,11 +40,17 @@ function projectNode(raw: unknown): BlindNode | null {
   const node = asRecord(raw);
   if (typeof node.id !== "string" || typeof node.kind !== "string" || typeof node.label !== "string") return null;
   const observed = asRecord(node.observed_state);
+  const data = asRecord(node.data); // v8 factor values/units live under node.data, not observed_state
   const out: BlindNode = { id: node.id, kind: node.kind, label: node.label };
   if (typeof node.description === "string") out.description = node.description;
+  // Prefer V3 observed_state.value; fall back to v8 node.data.value so the invented-value safety
+  // cell can actually see the drafted number on live boundary-shape candidates.
   if (typeof observed.value === "number") out.value = observed.value;
+  else if (typeof data.value === "number") out.value = data.value;
   if (typeof observed.unit === "string") out.unit = observed.unit;
+  else if (typeof data.unit === "string") out.unit = data.unit;
   if (typeof node.category === "string") out.category = node.category;
+  else if (typeof data.category === "string") out.category = data.category;
   return out;
 }
 
@@ -86,13 +92,43 @@ function projectOption(raw: unknown): BlindOption | null {
   return out;
 }
 
+/** v8 option nodes carry interventions at data.interventions (array [{factor_id,value}] or object
+ *  {factor_id: value}); reshape to the {factorId: {value}} form projectOption consumes. */
+function v8OptionInterventions(optNode: Record<string, unknown>): Record<string, unknown> {
+  const iv = asRecord(optNode.data).interventions;
+  const out: Record<string, { value: number }> = {};
+  if (Array.isArray(iv)) {
+    for (const it of iv) { const r = asRecord(it); if (typeof r.factor_id === "string" && typeof r.value === "number") out[r.factor_id] = { value: r.value }; }
+  } else if (iv && typeof iv === "object") {
+    for (const [k, v] of Object.entries(iv as Record<string, unknown>)) {
+      if (typeof v === "number") out[k] = { value: v };
+      else { const r = asRecord(v); if (typeof r.value === "number") out[k] = { value: r.value }; }
+    }
+  }
+  return out;
+}
+
 export function projectBlindGraph(candidate: unknown): BlindGraph {
   const raw = asRecord(candidate) as RawGraphLike;
+  const nodes = (raw.nodes ?? []) as unknown[];
+  // Options: top-level options[] (V3 egress) OR option NODES (v8 LLM-boundary). Without this,
+  // every v8 candidate projected to options=[] / goal_node_id="", producing a fake unsafe_to_apply
+  // safety hit and a holistic option-coverage=0 ceiling on every live row.
+  const hasV3Options = Array.isArray(raw.options) && raw.options.length > 0;
+  const optionRecords: unknown[] = hasV3Options
+    ? (raw.options as unknown[])
+    : nodes.map(asRecord).filter((n) => n.kind === "option").map((n) => ({
+        id: n.id, label: n.label, status: "needs_user_mapping", interventions: v8OptionInterventions(n),
+      }));
+  const goalFromNodes = nodes.map(asRecord).find((n) => n.kind === "goal");
+  const goal_node_id = typeof raw.goal_node_id === "string" && raw.goal_node_id
+    ? raw.goal_node_id
+    : (typeof goalFromNodes?.id === "string" ? goalFromNodes.id : "");
   return {
     nodes: (raw.nodes ?? []).map(projectNode).filter((n): n is BlindNode => n !== null),
     edges: (raw.edges ?? []).map(projectEdge).filter((e): e is BlindEdge => e !== null),
-    options: (raw.options ?? []).map(projectOption).filter((o): o is BlindOption => o !== null),
-    goal_node_id: typeof raw.goal_node_id === "string" ? raw.goal_node_id : "",
+    options: optionRecords.map(projectOption).filter((o): o is BlindOption => o !== null),
+    goal_node_id,
   };
 }
 

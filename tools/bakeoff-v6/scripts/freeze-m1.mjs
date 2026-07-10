@@ -18,19 +18,25 @@ if (!runDir || !outDir) {
 }
 mkdirSync(outDir, { recursive: true });
 const candDir = join(runDir, "candidates");
-const files = readdirSync(candDir).filter((f) => f.startsWith(`${prefix}_`) || f.startsWith(`${prefix}`) && f.includes("_"));
-let wrote = 0, skipped = 0;
-for (const f of readdirSync(candDir)) {
-  if (!f.startsWith(`${prefix}_`)) continue;
+// Deterministic order: sort candidate files so freezing is reproducible regardless of the
+// filesystem's readdir order (the frozen graph is the "identical M1" every M2 variant critiques).
+const files = readdirSync(candDir).filter((f) => f.startsWith(`${prefix}_`)).sort();
+let wrote = 0, skipped = 0, dupSeeds = 0;
+const frozen = new Set(); // brief_id -> already frozen (first / lowest-seed wins deterministically)
+for (const f of files) {
   const rec = JSON.parse(readFileSync(join(candDir, f), "utf-8"));
-  if (!rec.validation?.valid) { console.warn(`skip ${rec.brief_id}: source candidate was INVALID — not freezing`); skipped++; continue; }
+  // Freeze exactly ONE graph per brief. On a multi-seed run, keep the first (lowest seed by sort)
+  // and skip the rest, so we never silently overwrite with the readdir-order-last seed.
+  if (frozen.has(rec.brief_id)) { dupSeeds++; continue; }
+  if (!rec.validation?.valid) { console.warn(`skip ${f}: source candidate INVALID — not freezing`); skipped++; continue; }
   const graph = rec.candidate;
-  if (!graph || typeof graph !== "object") { console.warn(`skip ${rec.brief_id}: no candidate graph`); skipped++; continue; }
+  if (!graph || typeof graph !== "object") { console.warn(`skip ${f}: no candidate graph`); skipped++; continue; }
   writeFileSync(
     join(outDir, `${rec.brief_id}.json`),
     JSON.stringify({ brief_id: rec.brief_id, source: `${runDir} / ${f}`, candidate: graph }, null, 2) + "\n",
   );
+  frozen.add(rec.brief_id);
   wrote++;
-  console.log(`froze ${rec.brief_id}`);
+  console.log(`froze ${rec.brief_id} (from ${f})`);
 }
-console.log(`froze ${wrote} M1 graphs to ${outDir} (${skipped} skipped as invalid/missing)`);
+console.log(`froze ${wrote} M1 graph(s) [one per brief] to ${outDir}; ${skipped} skipped (invalid/missing)${dupSeeds ? `; ${dupSeeds} extra seed-draw(s) ignored — first seed per brief wins` : ""}`);

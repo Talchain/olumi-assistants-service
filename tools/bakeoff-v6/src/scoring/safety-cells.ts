@@ -22,7 +22,9 @@ const STOPWORDS = new Set(
 /** All numbers plausibly derivable from the brief (raw + k/m/bn expansions + percents as fractions). */
 export function briefNumberSet(brief: string): Set<number> {
   const numbers = new Set<number>();
-  const re = /(\d[\d,]*(?:\.\d+)?)\s*(k|m|bn|b|million|thousand|billion|%|percent)?/gi;
+  // (?![a-z]) after the suffix: a magnitude suffix must NOT be the first letter of a following word,
+  // else "12 months" mints 12,000,000 (suffix "m") and whitelists a genuinely-invented value.
+  const re = /(\d[\d,]*(?:\.\d+)?)\s*(k|m|bn|b|million|thousand|billion|%|percent)?(?![a-z])/gi;
   for (const match of brief.matchAll(re)) {
     const raw = Number(match[1].replace(/,/g, ""));
     if (!Number.isFinite(raw)) continue;
