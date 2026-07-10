@@ -148,8 +148,15 @@ CREATE TABLE IF NOT EXISTS public.decision_records (
   -- Indexable projection for 3.2 Brier aggregation; cannot skew from the
   -- JSONB because it is generated.
   outcome_result TEXT GENERATED ALWAYS AS (outcome->>'result') STORED,
-  -- Shape guards mirroring the Zod schema's required keys + closed result
-  -- vocabulary, so the DB cannot hold a row the contract would reject.
+  -- Shape guards: required keys + the closed result vocabulary. These
+  -- CHECKs are the LAST line; the RPCs enforce the stronger value-level
+  -- guards (types, key-set whitelists, ranges — see the RPC guard blocks
+  -- for exactly what is and is not enforced). Honest scope: the DB layer
+  -- as a whole enforces everything in DecisionRecordSchema EXCEPT the
+  -- exact Zod datetime STRING grammar inside the JSONB (recorded_at is
+  -- guarded to be timestamptz-castable, which is looser than
+  -- z.string().datetime({offset:true})) — that final grammar check is
+  -- the app layer's parse.
   CONSTRAINT dr_decision_shape CHECK (
     jsonb_typeof(decision) = 'object'
     AND decision ? 'chosen_option_id'
@@ -261,31 +268,74 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  v_owner    UUID;
-  v_existing public.decision_records%ROWTYPE;
-  v_new      public.decision_records%ROWTYPE;
-  v_event_id TEXT;
-  v_new_seq  INTEGER;
-  v_event    JSONB;
-  v_events   JSONB;
+  v_owner          UUID;
+  v_existing       public.decision_records%ROWTYPE;
+  v_new            public.decision_records%ROWTYPE;
+  v_event_id       TEXT;
+  v_existing_event JSONB;
+  v_new_seq        INTEGER;
+  v_event          JSONB;
+  v_events         JSONB;
 BEGIN
-  -- Parameter guards — typed errors before constraint noise. These mirror
-  -- the dr_*_shape CHECKs (and the Zod schema's required keys).
-  IF p_decision IS NULL OR jsonb_typeof(p_decision) <> 'object'
-     OR NOT (p_decision ? 'chosen_option_id')
-     OR NOT (p_decision ? 'chosen_option_label')
-     OR NOT (p_decision ? 'graph_hash')
-     OR COALESCE(p_decision->>'graph_hash', '') = '' THEN
-    RAISE EXCEPTION 'create_decision_record: p_decision must be an object with chosen_option_id, chosen_option_label and a non-empty graph_hash'
+  -- Parameter guards — VALUE-LEVEL, not just key presence (fixup 2, from
+  -- the pre-execution adversarial review). Rationale: outcome is
+  -- write-once and the sub-objects are read back into a .strict() Zod
+  -- parse, so one malformed service-role call would otherwise create a
+  -- permanently unrepairable row that poisons Brier readback. Enforced
+  -- here: object-ness, key-set WHITELISTS (the schemas are .strict() —
+  -- unknown keys must never persist), string-typed non-empty required
+  -- fields, numeric types + ranges for confidence, and finiteness of
+  -- review_date. NOT enforced (app-layer parse territory): the exact Zod
+  -- datetime string grammar.
+  IF p_decision IS NULL OR jsonb_typeof(p_decision) <> 'object' THEN
+    RAISE EXCEPTION 'create_decision_record: p_decision must be a JSON object'
       USING ERRCODE = '22023'; -- invalid_parameter_value
   END IF;
-  IF p_prediction IS NULL OR jsonb_typeof(p_prediction) <> 'object'
-     OR COALESCE(p_prediction->>'statement', '') = '' THEN
-    RAISE EXCEPTION 'create_decision_record: p_prediction must be an object with a non-empty statement'
+  IF p_decision - 'chosen_option_id' - 'chosen_option_label' - 'graph_hash' - 'analysis_summary'
+     <> '{}'::jsonb THEN
+    RAISE EXCEPTION 'create_decision_record: p_decision carries keys outside the DecisionRecordDecisionSchema whitelist'
       USING ERRCODE = '22023';
   END IF;
-  IF p_review_date IS NULL THEN
-    RAISE EXCEPTION 'create_decision_record: p_review_date must not be null'
+  IF jsonb_typeof(p_decision->'chosen_option_id') IS DISTINCT FROM 'string'
+     OR p_decision->>'chosen_option_id' = ''
+     OR jsonb_typeof(p_decision->'chosen_option_label') IS DISTINCT FROM 'string'
+     OR p_decision->>'chosen_option_label' = ''
+     OR jsonb_typeof(p_decision->'graph_hash') IS DISTINCT FROM 'string'
+     OR p_decision->>'graph_hash' = '' THEN
+    RAISE EXCEPTION 'create_decision_record: chosen_option_id, chosen_option_label and graph_hash must be non-empty strings'
+      USING ERRCODE = '22023';
+  END IF;
+  IF p_decision ? 'analysis_summary' THEN
+    IF jsonb_typeof(p_decision->'analysis_summary') <> 'object'
+       OR (p_decision->'analysis_summary') - 'leading_option' - 'win_probability' - 'goal_fit' - 'robustness_band'
+          <> '{}'::jsonb
+       OR (p_decision->'analysis_summary' ? 'leading_option'
+           AND (jsonb_typeof(p_decision->'analysis_summary'->'leading_option') <> 'string'
+                OR p_decision->'analysis_summary'->>'leading_option' = ''))
+       OR (p_decision->'analysis_summary' ? 'win_probability'
+           AND (jsonb_typeof(p_decision->'analysis_summary'->'win_probability') <> 'number'
+                OR (p_decision->'analysis_summary'->>'win_probability')::numeric NOT BETWEEN 0 AND 1))
+       OR (p_decision->'analysis_summary' ? 'goal_fit'
+           AND jsonb_typeof(p_decision->'analysis_summary'->'goal_fit') <> 'number')
+       OR (p_decision->'analysis_summary' ? 'robustness_band'
+           AND (jsonb_typeof(p_decision->'analysis_summary'->'robustness_band') <> 'string'
+                OR p_decision->'analysis_summary'->>'robustness_band' = '')) THEN
+      RAISE EXCEPTION 'create_decision_record: analysis_summary violates DecisionRecordAnalysisSummarySchema (whitelist/types/ranges)'
+        USING ERRCODE = '22023';
+    END IF;
+  END IF;
+  IF p_prediction IS NULL OR jsonb_typeof(p_prediction) <> 'object'
+     OR p_prediction - 'statement' - 'confidence' <> '{}'::jsonb
+     OR jsonb_typeof(p_prediction->'statement') IS DISTINCT FROM 'string'
+     OR p_prediction->>'statement' = ''
+     OR (p_prediction ? 'confidence'
+         AND (jsonb_typeof(p_prediction->'confidence') <> 'number'
+              OR (p_prediction->>'confidence')::numeric NOT BETWEEN 0 AND 1)) THEN
+    RAISE EXCEPTION 'create_decision_record: p_prediction must be {statement: non-empty string, confidence?: number in [0,1]} and nothing else'
+      USING ERRCODE = '22023';
+  END IF;
+  IF p_review_date IS NULL OR NOT isfinite(p_review_date) THEN
+    RAISE EXCEPTION 'create_decision_record: p_review_date must be a finite timestamptz'
       USING ERRCODE = '22023';
   END IF;
 
@@ -335,24 +385,70 @@ BEGIN
     END IF;
   END IF;
 
-  INSERT INTO public.decision_records (
-    record_id, scenario_id, owner_user_id, review_date, decision, prediction
-  ) VALUES (
-    COALESCE(p_record_id, gen_random_uuid()),
-    p_scenario_id, v_owner, p_review_date, p_decision, p_prediction
-  )
-  RETURNING * INTO v_new;
+  -- INSERT with a unique_violation net (fixup 2, defect 2): the scenarios
+  -- row lock does NOT serialise two concurrent creates carrying the same
+  -- p_record_id under DIFFERENT scenarios, and a same-scenario concurrent
+  -- replay can also race past the pre-check above. Without this handler
+  -- the caller would see raw SQLSTATE 23505 instead of the typed replay
+  -- semantics.
+  BEGIN
+    INSERT INTO public.decision_records (
+      record_id, scenario_id, owner_user_id, review_date, decision, prediction
+    ) VALUES (
+      COALESCE(p_record_id, gen_random_uuid()),
+      p_scenario_id, v_owner, p_review_date, p_decision, p_prediction
+    )
+    RETURNING * INTO v_new;
+  EXCEPTION WHEN unique_violation THEN
+    -- A p_record_id-less insert cannot meaningfully collide (gen_random_uuid);
+    -- surface anything that strange verbatim.
+    IF p_record_id IS NULL THEN
+      RAISE;
+    END IF;
+    -- Re-run the replay branch against the row the concurrent writer won.
+    SELECT * INTO v_existing
+      FROM public.decision_records
+      WHERE record_id = p_record_id;
+    IF NOT FOUND THEN
+      RAISE; -- collision vanished — not a replay; surface the original error
+    END IF;
+    IF v_existing.scenario_id <> p_scenario_id THEN
+      RAISE EXCEPTION 'create_decision_record: record % already exists under a different scenario', p_record_id
+        USING ERRCODE = '22023';
+    END IF;
+    RETURN jsonb_build_object(
+      'record', jsonb_strip_nulls(jsonb_build_object(
+        'record_id',   v_existing.record_id,
+        'scenario_id', v_existing.scenario_id,
+        'created_at',  to_jsonb(v_existing.created_at),
+        'decision',    v_existing.decision,
+        'prediction',  v_existing.prediction,
+        'review_date', to_jsonb(v_existing.review_date),
+        'outcome',     v_existing.outcome
+      )),
+      'deduped', true,
+      'event_id', NULL
+    );
+  END;
 
   -- Journey event — same shape append_scenario_event produces, so the
   -- existing Journey tab renders it with zero UI change. Idempotent by
-  -- event_id (deterministic default keyed on the new record id).
+  -- event_id (deterministic default keyed on the new record id). Fixup 2,
+  -- defect 3: a caller-supplied p_event_id that collides with an existing
+  -- event belonging to a DIFFERENT record is a caller bug — raise 22023
+  -- rather than silently skipping the append while returning the event_id
+  -- as if it were this record's.
   v_event_id := COALESCE(p_event_id, 'decision_recorded_' || v_new.record_id::text);
   SELECT events, event_seq + 1 INTO v_events, v_new_seq
     FROM public.scenarios WHERE id = p_scenario_id;
-  IF NOT EXISTS (
-    SELECT 1 FROM jsonb_array_elements(COALESCE(v_events, '[]'::jsonb)) AS e
-    WHERE e->>'event_id' = v_event_id
-  ) THEN
+  SELECT e INTO v_existing_event
+    FROM jsonb_array_elements(COALESCE(v_events, '[]'::jsonb)) AS e
+    WHERE e->>'event_id' = v_event_id;
+  IF FOUND AND (v_existing_event->'details'->>'record_id') IS DISTINCT FROM v_new.record_id::text THEN
+    RAISE EXCEPTION 'create_decision_record: p_event_id % collides with an existing journey event for a different record', v_event_id
+      USING ERRCODE = '22023';
+  END IF;
+  IF NOT FOUND THEN
     v_event := jsonb_build_object(
       'event_id',   v_event_id,
       'event_type', 'decision_recorded',
@@ -415,18 +511,38 @@ DECLARE
   v_scenario_exists BOOLEAN := false;
   v_rec             public.decision_records%ROWTYPE;
   v_event_id        TEXT;
+  v_existing_event  JSONB;
   v_new_seq         INTEGER;
   v_event           JSONB;
   v_events          JSONB;
 BEGIN
-  -- Parameter guards mirroring dr_outcome_shape + the Zod enum.
+  -- Parameter guards — VALUE-LEVEL (fixup 2; outcome is write-once, so a
+  -- malformed accepted payload would be permanently unrepairable). Same
+  -- enforcement scope statement as create_decision_record's guards.
   IF p_outcome IS NULL OR jsonb_typeof(p_outcome) <> 'object'
-     OR NOT (p_outcome ? 'recorded_at')
+     OR p_outcome - 'recorded_at' - 'result' - 'notes' - 'brier_component'
+        <> '{}'::jsonb
+     OR jsonb_typeof(p_outcome->'recorded_at') IS DISTINCT FROM 'string'
+     OR p_outcome->>'recorded_at' = ''
      OR COALESCE(p_outcome->>'result', '')
-        NOT IN ('better', 'as_expected', 'worse', 'abandoned') THEN
-    RAISE EXCEPTION 'record_decision_outcome: p_outcome must be an object with recorded_at and result in (better|as_expected|worse|abandoned)'
+        NOT IN ('better', 'as_expected', 'worse', 'abandoned')
+     OR (p_outcome ? 'notes'
+         AND (jsonb_typeof(p_outcome->'notes') <> 'string'
+              OR p_outcome->>'notes' = ''))
+     OR (p_outcome ? 'brier_component'
+         AND (jsonb_typeof(p_outcome->'brier_component') <> 'number'
+              OR (p_outcome->>'brier_component')::numeric < 0)) THEN
+    RAISE EXCEPTION 'record_decision_outcome: p_outcome must be {recorded_at: string, result: better|as_expected|worse|abandoned, notes?: non-empty string, brier_component?: number >= 0} and nothing else'
       USING ERRCODE = '22023';
   END IF;
+  -- recorded_at must at least be a real point in time (castability guard;
+  -- the exact Zod offset-datetime grammar remains the app layer's parse).
+  BEGIN
+    PERFORM (p_outcome->>'recorded_at')::timestamptz;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'record_decision_outcome: recorded_at is not a valid timestamp'
+      USING ERRCODE = '22023';
+  END;
 
   -- Locate the record (no lock yet) to learn its scenario. The record may
   -- legitimately OUTLIVE its scenario (no FK by design — see header):
@@ -492,10 +608,16 @@ BEGIN
     v_event_id := COALESCE(p_event_id, 'decision_outcome_recorded_' || p_record_id::text);
     SELECT events, event_seq + 1 INTO v_events, v_new_seq
       FROM public.scenarios WHERE id = v_scenario_id;
-    IF NOT EXISTS (
-      SELECT 1 FROM jsonb_array_elements(COALESCE(v_events, '[]'::jsonb)) AS e
-      WHERE e->>'event_id' = v_event_id
-    ) THEN
+    -- Fixup 2, defect 3: same cross-record p_event_id collision rule as
+    -- create_decision_record — never silently skip-and-claim.
+    SELECT e INTO v_existing_event
+      FROM jsonb_array_elements(COALESCE(v_events, '[]'::jsonb)) AS e
+      WHERE e->>'event_id' = v_event_id;
+    IF FOUND AND (v_existing_event->'details'->>'record_id') IS DISTINCT FROM p_record_id::text THEN
+      RAISE EXCEPTION 'record_decision_outcome: p_event_id % collides with an existing journey event for a different record', v_event_id
+        USING ERRCODE = '22023';
+    END IF;
+    IF NOT FOUND THEN
       v_event := jsonb_build_object(
         'event_id',   v_event_id,
         'event_type', 'decision_outcome_recorded',
