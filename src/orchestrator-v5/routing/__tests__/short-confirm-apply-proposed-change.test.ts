@@ -56,10 +56,11 @@ describe('tryShortConfirmResume — apply_proposed_change resumable', () => {
     },
   );
 
-  it('picks the MOST RECENTLY EMITTED proposal when two apply_proposed_change are live (V5 P0.2 most-recent-wins)', () => {
-    // V5 P0.2 — most-recent-wins replaces the prior recovery_ambiguous
-    // clarification: a bare "yes" against multiple live proposals resumes
-    // the latest offer. The turn-executor echoes its label ("Applying: …").
+  it('CONSENT-CLARITY AMENDMENT: two live apply_proposed_change + bare "yes" → recovery_ambiguous listing both (supersedes V5 P0.2 most-recent-wins)', () => {
+    // Ratified doctrine (Paul, 2026-07-11): a bare confirmation with
+    // MULTIPLE live consent-expecting pendings never silently resolves
+    // one — the executor lists them (numbered) and the user picks by
+    // number, chip, "all of them", or "none".
     const out = tryShortConfirmResume({
       message: 'yes',
       pendingActions: [
@@ -77,9 +78,12 @@ describe('tryShortConfirmResume — apply_proposed_change resumable', () => {
     });
     expect(out.matched).toBe(true);
     if (!out.matched) return;
-    expect(out.dispatch).toBe('pending_action');
-    if (out.dispatch !== 'pending_action') return;
-    expect(out.pending.chip_id).toBe('prop_bbbbbbbbbbbb');
+    expect(out.dispatch).toBe('recovery_ambiguous');
+    if (out.dispatch !== 'recovery_ambiguous') return;
+    expect(out.candidates.map((c) => c.chip_id)).toEqual([
+      'prop_aaaaaaaaaaaa',
+      'prop_bbbbbbbbbbbb',
+    ]);
   });
 
   it('returns recovery_expired when the apply_proposed_change is expired', () => {

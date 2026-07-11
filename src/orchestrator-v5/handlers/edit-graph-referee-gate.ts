@@ -55,6 +55,7 @@ import {
   buildHeldProposalBlock,
   type HeldProposalBlockInput,
 } from '../compose/held-proposal.js';
+import { sanitisePublicCopyOrFallback } from '../compose/proposed-change.js';
 import type { HeldProposalBlock } from '@talchain/schemas/boundary';
 import { mutationTelemetryEvent } from '../graph-management/telemetry.js';
 import type {
@@ -238,6 +239,137 @@ export const GM_REJECTED_ASSISTANT_TEXT =
 export const GM_CLARIFY_ASSISTANT_TEXT =
   'Before I change anything in the model I need a little more direction. ' +
   'Tell me exactly what you would like this change to affect.';
+
+// ---------------------------------------------------------------------------
+// CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — named consent asks.
+// Doctrine (a): every consent ask states EXACTLY what the user is
+// confirming. The held ask, its chip and its persisted public copy all
+// name the held change; the generic constants above remain the safe
+// fallbacks when no subject can be derived (or the derived subject would
+// leak unsafe copy).
+// ---------------------------------------------------------------------------
+
+/** Structural view of a patch operation — enough to name its subject. */
+export interface HeldOpLike {
+  readonly op: string;
+  readonly path: string;
+  readonly value?: unknown;
+}
+
+function opAsRecord(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
+/** Resolve a node id to its graph label; fall back to null (never the raw id —
+ *  internal ids must not leak into user copy). */
+function nodeLabelFromGraph(graph: unknown, nodeId: string): string | null {
+  const nodes = opAsRecord(graph).nodes;
+  if (!Array.isArray(nodes)) return null;
+  for (const n of nodes) {
+    const rec = opAsRecord(n);
+    if (rec.id === nodeId && typeof rec.label === 'string' && rec.label.trim().length > 0) {
+      return rec.label.trim();
+    }
+  }
+  return null;
+}
+
+/** Truncate a label for chip/ask interpolation (keeps copy short). */
+function clampLabel(label: string): string {
+  const trimmed = label.trim().replace(/\s+/g, ' ');
+  return trimmed.length > 60 ? `${trimmed.slice(0, 57)}...` : trimmed;
+}
+
+/** Name ONE held operation, or null when nothing user-safe can be said. */
+function describeHeldOp(op: HeldOpLike, currentGraph: unknown): string | null {
+  switch (op.op) {
+    case 'add_node': {
+      const label = opAsRecord(op.value).label;
+      return typeof label === 'string' && label.trim().length > 0
+        ? `add '${clampLabel(label)}'`
+        : null;
+    }
+    case 'update_node': {
+      const label = nodeLabelFromGraph(currentGraph, op.path);
+      return label !== null ? `update '${clampLabel(label)}'` : null;
+    }
+    case 'remove_node': {
+      const label = nodeLabelFromGraph(currentGraph, op.path);
+      return label !== null ? `remove '${clampLabel(label)}'` : null;
+    }
+    case 'add_edge': {
+      const v = opAsRecord(op.value);
+      const from = typeof v.from === 'string' ? nodeLabelFromGraph(currentGraph, v.from) : null;
+      const to = typeof v.to === 'string' ? nodeLabelFromGraph(currentGraph, v.to) : null;
+      return from !== null && to !== null
+        ? `link '${clampLabel(from)}' to '${clampLabel(to)}'`
+        : null;
+    }
+    case 'remove_edge':
+    case 'update_edge':
+      // Edge paths carry internal ids; without a cheap safe resolution we
+      // stay generic rather than leak them.
+      return op.op === 'remove_edge' ? 'remove a link' : 'adjust a link';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Name a held batch: the first nameable operation plus a count of the
+ * rest. Returns null when nothing user-safe can be derived — callers
+ * fall back to the generic swept copy, never blank text.
+ */
+export function describeHeldOperationsSubject(
+  operations: readonly HeldOpLike[],
+  currentGraph: unknown,
+): string | null {
+  if (operations.length === 0) return null;
+  const first = describeHeldOp(operations[0]!, currentGraph);
+  if (first === null) return null;
+  if (operations.length === 1) return first;
+  const rest = operations.length - 1;
+  return `${first} and ${rest} more ${rest === 1 ? 'change' : 'changes'}`;
+}
+
+/** True iff `subject` survives the render-safety filter verbatim
+ *  (no em dash, no internal tokens — the same filter chips render with). */
+function subjectIsSafe(subject: string): boolean {
+  return sanitisePublicCopyOrFallback(subject, ' ') === subject.trim();
+}
+
+/**
+ * The held consent ask, NAMED. Falls back to the generic swept
+ * {@link GM_HELD_ASSISTANT_TEXT} when no safe subject is available.
+ */
+export function buildGmHeldAssistantText(subject: string | null): string {
+  if (subject === null || !subjectIsSafe(subject)) return GM_HELD_ASSISTANT_TEXT;
+  return (
+    `I'm holding the change to ${subject} rather than applying it straight away. ` +
+    'Nothing in the model moves until you confirm. Reply yes to continue, or tell ' +
+    'me what to adjust instead.'
+  );
+}
+
+/**
+ * Named chip / persisted public copy for a held pending. The label is the
+ * capitalised subject; the message is an explicit confirmation naming the
+ * subject, so a chip click (which replays the message as user text)
+ * resolves via the exact-match pre-route to THIS hold — never ambiguously
+ * via a bare "Yes" when several consents are live.
+ */
+export function buildGmHeldPublicCopy(subject: string | null): {
+  label: string;
+  message: string;
+} {
+  if (subject === null || !subjectIsSafe(subject)) {
+    return { label: GM_HELD_CHIP_LABEL, message: GM_HELD_CHIP_MESSAGE };
+  }
+  const label = subject.charAt(0).toUpperCase() + subject.slice(1);
+  return { label, message: `Yes, ${subject}.` };
+}
 
 // ---------------------------------------------------------------------------
 // Internals.
@@ -443,6 +575,13 @@ function buildHeldPending(
     }
     return { apply_wiring: GM_HELD_APPLY_WIRING_DECLINE };
   })();
+  // CONSENT-CLARITY AMENDMENT — name the held change in the persisted
+  // public copy so (a) the ask states exactly what a yes applies, (b) the
+  // multi-consent disambiguation list renders distinct labels, and (c) a
+  // chip click resolves via exact-match to THIS hold. Falls back to the
+  // generic swept copy when no safe subject is derivable.
+  const heldSubject = describeHeldOperationsSubject(input.operations, input.currentGraph);
+  const heldPublicCopy = buildGmHeldPublicCopy(heldSubject);
   const pending: PendingAction = {
     id: randomUUID(),
     scenario_id: input.scenarioId,
@@ -468,8 +607,8 @@ function buildHeldPending(
         params: {},
         target_entity_ids: [],
       },
-      public_label: GM_HELD_CHIP_LABEL,
-      public_message: GM_HELD_CHIP_MESSAGE,
+      public_label: heldPublicCopy.label,
+      public_message: heldPublicCopy.message,
     },
     preconditions: { graph_hash: input.currentGraphHash },
     // F-HELD fix 2a: GM-hold-specific turn budget (4), NOT the chip default
@@ -482,8 +621,8 @@ function buildHeldPending(
   };
   const chip: EditGmChip = {
     id: proposalRef,
-    label: GM_HELD_CHIP_LABEL,
-    message: GM_HELD_CHIP_MESSAGE,
+    label: heldPublicCopy.label,
+    message: heldPublicCopy.message,
   };
   return { pending, chip, targetKey };
 }
@@ -568,7 +707,11 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       return {
         governing,
         blockApply: true,
-        assistantText: GM_HELD_ASSISTANT_TEXT,
+        // CONSENT-CLARITY AMENDMENT — the ask names the held change
+        // (falls back to the generic swept copy when no safe subject).
+        assistantText: buildGmHeldAssistantText(
+          describeHeldOperationsSubject(input.operations, input.currentGraph),
+        ),
         suggestedActions: [held.chip],
         pendingActions: [held.pending],
         publicReason,

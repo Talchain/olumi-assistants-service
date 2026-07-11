@@ -70,13 +70,33 @@ import { log } from '../../utils/telemetry.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Honest applied receipt for a confirmed hold. Ships ONLY after the commit
- * succeeds (the caller composes-then-commits atomically; a commit throw
- * surfaces STATE_COMMIT_FAILED instead). No em dash; no internal tokens.
+ * Honest applied receipt for a confirmed hold — the GENERIC fallback.
+ * Ships ONLY after the commit succeeds (the caller composes-then-commits
+ * atomically; a commit throw surfaces STATE_COMMIT_FAILED instead). No em
+ * dash; no internal tokens.
+ *
+ * CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11): the primary receipt is
+ * {@link buildGmHeldAppliedReceipt}, which NAMES what was confirmed. This
+ * constant remains only for the no-derivable-subject fallback.
  */
 export const GM_HELD_APPLIED_ASSISTANT_TEXT =
   'Done. I have applied the change you confirmed. Run the analysis again ' +
   'when you are ready to see how it plays out.';
+
+/**
+ * CONSENT-CLARITY AMENDMENT — named applied receipt. Doctrine (a): the
+ * receipt names EXACTLY what was confirmed ("Confirmed: update
+ * 'Marketing'."), never a bare "Done". One sentence per applied subject
+ * (an "all of them" resume can confirm several holds in one commit),
+ * then the rerun guidance. Empty input (no safe subject derivable) falls
+ * back to the generic swept copy — never blank text.
+ */
+export function buildGmHeldAppliedReceipt(subjects: readonly string[]): string {
+  const named = subjects.map((s) => s.trim()).filter((s) => s.length > 0);
+  if (named.length === 0) return GM_HELD_APPLIED_ASSISTANT_TEXT;
+  const confirmations = named.map((s) => `Confirmed: ${s}.`).join(' ');
+  return `${confirmations} Run the analysis again when you are ready to see how it plays out.`;
+}
 
 /** Rerun affordance offered when the post-apply graph is analysis-ready. */
 export const GM_HELD_APPLIED_RERUN_CHIP = Object.freeze({

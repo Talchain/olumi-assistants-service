@@ -612,7 +612,7 @@ describe('Proposed-change route-level — recovery branches commit deterministic
   });
 });
 
-describe('Proposed-change route-level — bare confirm with multiple proposals resumes the most recent (P0-2 most-recent-wins)', () => {
+describe('Proposed-change route-level — CONSENT-CLARITY: bare confirm with multiple proposals lists them (supersedes P0-2 most-recent-wins)', () => {
   beforeEach(() => {
     appendCalls.length = 0;
     addConstraintCalls.length = 0;
@@ -623,19 +623,17 @@ describe('Proposed-change route-level — bare confirm with multiple proposals r
     vi.clearAllMocks();
   });
 
-  it('bare "yes" with two live proposals dispatches the MOST RECENT (no clarification, no LLM) and echoes its label', async () => {
-    // V5 P0.2 — most-recent-wins replaces the prior recovery_ambiguous
-    // numbered clarification: a bare confirm against multiple live
-    // proposals resumes the most-recently-emitted one. The resume echo
-    // names the chosen proposal so a wrong-target resume stays visible.
-    // (Ordinal resolution — "the first one" — is covered separately by
-    // the deterministic-confirmations describe above.)
+  it('bare "yes" with two live proposals lists BOTH (numbered, named) with All/None chips — NO dispatch, NO LLM', async () => {
+    // CONSENT-CLARITY AMENDMENT (Paul ratified 2026-07-11): a bare
+    // confirmation with MULTIPLE live consent-expecting pendings must
+    // never silently resolve one (the prior P0.2 posture resumed the
+    // most recently emitted). The turn lists every live consent and the
+    // user resolves by number, chip, 'all of them', or 'none'.
     const proposalA = applyProposedPendingAction(); // EMITTED_AT_ISO, "Add the cost cap"
     const proposalB: PendingAction = {
       ...applyProposedPendingAction(),
       id: `pa-${randomUUID()}`,
       chip_id: 'prop_bbbbbbbbbbbb',
-      // Emitted AFTER proposalA → most-recent-wins selects this one.
       emitted_at_iso: '2026-05-07T11:05:00.000Z',
       action: {
         kind: 'apply_proposed_change',
@@ -652,17 +650,28 @@ describe('Proposed-change route-level — bare confirm with multiple proposals r
 
     pendingActionsForRead = [proposalA, proposalB];
     const adapter = throwingRoutingAdapter();
-    const result = await runTurnExecutor(payload('yes'), 'req-most-recent-wins', {
+    const result = await runTurnExecutor(payload('yes'), 'req-multi-consent-list', {
       routingAdapter: adapter,
       handlerRegistry: stubbedRegistry(),
     });
-    // Deterministic: no LLM, and NO numbered clarification round-trip.
+    // Deterministic: no LLM — and NO mutation on the listing turn.
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
-    expect(result.response.assistant_text).not.toContain('Which one would you like?');
-    // Dispatched the most-recently-emitted proposal's handler exactly once.
-    expect(addConstraintCalls).toHaveLength(1);
-    // Resume echo names the resumed (most-recent) proposal.
-    expect(result.response.assistant_text).toContain('Applying: Add the time cap.');
+    expect(addConstraintCalls).toHaveLength(0);
+    // The list names both consents, numbered, with the resolution routes.
+    expect(result.response.assistant_text).toContain('1) Add the cost cap');
+    expect(result.response.assistant_text).toContain('2) Add the time cap');
+    expect(result.response.assistant_text.toLowerCase()).toContain('all of them');
+    // Chips: one per candidate plus All/None.
+    const chips = result.response.suggested_actions ?? [];
+    expect(chips.some((c) => c.id === 'prop_aaaaaaaaaaaa')).toBe(true);
+    expect(chips.some((c) => c.id === 'prop_bbbbbbbbbbbb')).toBe(true);
+    expect(chips.some((c) => c.label === 'All of them')).toBe(true);
+    expect(chips.some((c) => c.label === 'None')).toBe(true);
+    // Both proposals re-persist so the follow-up pick has live offers.
+    const write = appendCalls[appendCalls.length - 1]!;
+    const persisted = (write.pending_actions ?? []) as ReadonlyArray<{ chip_id?: string }>;
+    expect(persisted.some((p) => p.chip_id === 'prop_aaaaaaaaaaaa')).toBe(true);
+    expect(persisted.some((p) => p.chip_id === 'prop_bbbbbbbbbbbb')).toBe(true);
   });
 });
 
@@ -713,7 +722,7 @@ describe('Proposed-change route-level — mixed-kind bare confirm resumes the mo
   });
 });
 
-describe('Proposed-change route-level — bare confirm emits NO numbered clarification (P0-2 most-recent-wins)', () => {
+describe('Proposed-change route-level — CONSENT-CLARITY: typed "yes" with two live proposals emits the numbered consent list', () => {
   beforeEach(() => {
     appendCalls.length = 0;
     addConstraintCalls.length = 0;
@@ -724,19 +733,17 @@ describe('Proposed-change route-level — bare confirm emits NO numbered clarifi
     vi.clearAllMocks();
   });
 
-  it('typed "yes" with two live proposals resumes the most recent WITHOUT a numbered clarification', async () => {
-    // V5 P0.2 — the numbered-clarification round-trip is retired for bare
-    // confirms; most-recent-wins resumes the latest offer directly.
-    // (Numbered clarification still fires for genuine LABEL-MATCH
-    // ambiguity — see the duplicate-label tests below — and that path's
-    // render-safe sanitisation is pinned there + at the unit level.)
+  it('typed "yes" with two live proposals emits the numbered consent list and applies NOTHING', async () => {
+    // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11): the numbered listing
+    // replaces most-recent-wins for the consent class — a bare confirm
+    // never silently resolves one of several live consents.
     pendingActionsForRead = [
       applyProposedPendingAction(), // EMITTED_AT_ISO, "Add the cost cap"
       {
         ...applyProposedPendingAction(),
         id: `pa-${randomUUID()}`,
         chip_id: 'prop_bbbbbbbbbbbb',
-        emitted_at_iso: '2026-05-07T11:05:00.000Z', // NEWER → wins
+        emitted_at_iso: '2026-05-07T11:05:00.000Z',
         action: {
           kind: 'apply_proposed_change',
           proposal_ref: 'prop_bbbbbbbbbbbb',
@@ -751,18 +758,18 @@ describe('Proposed-change route-level — bare confirm emits NO numbered clarifi
       },
     ];
     const adapter = throwingRoutingAdapter();
-    const result = await runTurnExecutor(payload('yes'), 'req-no-clarification', {
+    const result = await runTurnExecutor(payload('yes'), 'req-consent-clarification', {
       routingAdapter: adapter,
       handlerRegistry: stubbedRegistry(),
     });
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
-    expect(addConstraintCalls).toHaveLength(1);
-    // No numbered clarification list any more.
-    expect(result.response.assistant_text).not.toContain('1) Add the cost cap');
-    expect(result.response.assistant_text).not.toContain('2) Add the time cap');
-    expect(result.response.assistant_text).not.toContain('Which one would you like?');
-    // The most-recent proposal is echoed.
-    expect(result.response.assistant_text).toContain('Applying: Add the time cap.');
+    // NO mutation on the listing turn.
+    expect(addConstraintCalls).toHaveLength(0);
+    // The numbered consent list names both.
+    expect(result.response.assistant_text).toContain('1) Add the cost cap');
+    expect(result.response.assistant_text).toContain('2) Add the time cap');
+    // Nothing is echoed as applying.
+    expect(result.response.assistant_text).not.toContain('Applying:');
   });
 });
 
@@ -1304,9 +1311,11 @@ describe('Proposed-change route-level — render-safe sanitisation of unsafe per
     },
   );
 
-  it('all-malformed: most-recent-wins resumes the latest and its unsafe label is sanitised in the echo', async () => {
-    // Two unsafe-label proposals; the NEWER wins. Its unsafe label must
-    // still collapse to the deterministic fallback in "Applying: …".
+  it('all-malformed: CONSENT-CLARITY lists both (generic prompt — identical fallback labels), nothing dispatches, no unsafe token leaks', async () => {
+    // CONSENT-CLARITY AMENDMENT: two live consents + a bare confirm list
+    // instead of resuming the latest. Both labels sanitise to the SAME
+    // render-safe fallback, so the numbered list would not help — the
+    // generic prompt fires. No unsafe token reaches the user either way.
     pendingActionsForRead = [
       applyProposedWithUnsafePublicCopy({
         chipId: 'prop_aaaaaaaaaaaa',
@@ -1319,7 +1328,7 @@ describe('Proposed-change route-level — render-safe sanitisation of unsafe per
           label: 'See {"raw":"json"}',
           message: 'invalid_type encountered',
         }),
-        emitted_at_iso: '2026-05-07T11:05:00.000Z', // NEWER → wins
+        emitted_at_iso: '2026-05-07T11:05:00.000Z',
       },
     ];
     const adapter = throwingRoutingAdapter();
@@ -1328,10 +1337,20 @@ describe('Proposed-change route-level — render-safe sanitisation of unsafe per
       handlerRegistry: stubbedRegistry(),
     });
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
-    expect(addConstraintCalls).toHaveLength(1);
-    expect(result.response.assistant_text).toContain('Applying: Apply this change.');
+    // NO silent pick, NO mutation.
+    expect(addConstraintCalls).toHaveLength(0);
+    expect(result.response.assistant_text).toContain(
+      'I had more than one offer open. Which would you like?',
+    );
     for (const token of FORBIDDEN_AT_RENDER) {
       expect(result.response.assistant_text).not.toContain(token);
+    }
+    const chips = result.response.suggested_actions ?? [];
+    for (const chip of chips) {
+      for (const token of FORBIDDEN_AT_RENDER) {
+        expect(chip.label).not.toContain(token);
+        expect(chip.message).not.toContain(token);
+      }
     }
   });
 });

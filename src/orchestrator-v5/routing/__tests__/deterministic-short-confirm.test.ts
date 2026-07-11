@@ -419,7 +419,7 @@ describe('tryShortConfirmResume — F-HELD consent-priority', () => {
     }
   });
 
-  it('most-recent-wins is retained WITHIN the consent-expecting kind (two live holds → newest hold)', () => {
+  it('CONSENT-CLARITY AMENDMENT: two live holds + bare "yes" → recovery_ambiguous listing BOTH (supersedes most-recent-wins within the consent class)', () => {
     const olderHold = makeHoldPending({
       id: 'pa-hold-old',
       chip_id: 'gmh_older0000001',
@@ -450,11 +450,14 @@ describe('tryShortConfirmResume — F-HELD consent-priority', () => {
       currentTurnIndex: 3,
       nowMs: NOW_MS,
     });
+    // Ratified doctrine (Paul, 2026-07-11): a bare confirm with MULTIPLE
+    // live consent-expecting pendings must never silently pick one — the
+    // executor lists them and the user resolves by number / chip / "all".
     expect(r.matched).toBe(true);
-    if (r.matched && r.dispatch === 'pending_action') {
-      expect(r.pending.id).toBe('pa-hold-new');
+    if (r.matched && r.dispatch === 'recovery_ambiguous') {
+      expect(r.candidates.map((c) => c.id)).toEqual(['pa-hold-old', 'pa-hold-new']);
     } else {
-      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+      throw new Error(`expected recovery_ambiguous dispatch, got ${JSON.stringify(r)}`);
     }
   });
 

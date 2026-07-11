@@ -96,6 +96,7 @@ import {
 import {
   scopePendingsToChipClickIntent,
   tryShortConfirmResume,
+  SHORT_CONFIRM_PATTERN,
 } from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
 import { buildRescaleCapPendingActions } from './session/rescale-cap-pending.js';
@@ -130,17 +131,19 @@ import {
   PROPOSAL_SUPERSEDED_RESPONSE,
 } from './routing/proposed-change-synthesis.js';
 import {
+  buildGmHeldAppliedReceipt,
   executeGmHeldResume,
   readGmHeldResume,
-  GM_HELD_APPLIED_ASSISTANT_TEXT,
   GM_HELD_APPLIED_RERUN_CHIP,
   type GmHeldResumeRead,
 } from './handlers/gm-held-execute.js';
+import { describeHeldOperationsSubject } from './handlers/edit-graph-referee-gate.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import {
   RENDER_SAFE_LABEL_FALLBACK,
   resolveProposalRenderCopy,
+  sanitisePublicCopyOrFallback,
 } from './compose/proposed-change.js';
 import {
   derivePendingActivity,
@@ -1793,9 +1796,15 @@ export async function runTurnExecutor(
         }
         // Honest applied path. The receipt text ships ONLY when the commit
         // below succeeds (a throw surfaces STATE_COMMIT_FAILED instead).
+        // CONSENT-CLARITY AMENDMENT — the receipt NAMES what was confirmed
+        // ("Confirmed: update 'Marketing'."), never a bare "Done"; falls
+        // back to the generic swept copy when no safe subject derives.
         const gmReadiness = computeStructuralReadiness(outcome.appliedGraph);
+        const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph);
         const appliedResponse = composeDirectAnswerResponse({
-          assistant_text: GM_HELD_APPLIED_ASSISTANT_TEXT,
+          assistant_text: buildGmHeldAppliedReceipt(
+            gmAppliedSubject !== null ? [gmAppliedSubject] : [],
+          ),
           stage: context.stage,
           suggested_actions:
             gmReadiness?.status === 'ready' ? [{ ...GM_HELD_APPLIED_RERUN_CHIP }] : [],
@@ -1887,6 +1896,213 @@ export async function runTurnExecutor(
               err: serialiseError(error),
             },
             'V5 TurnExecutor commit failure on GM held-execute apply',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
+      // CONSENT-CLARITY AMENDMENT — "all of them" over MULTIPLE GM holds
+      // (live mode only; the caller verified every candidate carries an
+      // executable payload). Applies the confirmed holds SEQUENTIALLY in
+      // one commit: each batch is re-refereed against the WORKING graph
+      // (the previous step's applied result) via `executeGmHeldResume`'s
+      // internal gate — a "yes to all" never overrides an integrity
+      // rejection, and a later hold is judged against the model the
+      // earlier ones just produced. Pin gate: every hold must still pin
+      // the ORIGINAL base (like-for-like with the single-resume path);
+      // any divergence declines the whole set as superseded, applying
+      // nothing. Per-step declines are reported BY NAME; the receipt
+      // names every applied change (doctrine (a)). Nothing persists
+      // unless at least one step executed — and then only through the
+      // single durable writer, atomically.
+      const commitGmHeldResumeAll = async (
+        holds: readonly PendingAction[],
+        reads: readonly Extract<GmHeldResumeRead, { kind: 'ok' }>[],
+      ): Promise<TurnExecutorRunResult> => {
+        const gmBaseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+        let workingGraph: unknown = gmBaseGraph;
+        let workingHash: string | null = null;
+        try {
+          workingHash = computeAnalysisAffectingGraphHash(
+            workingGraph as GraphStateIngress | null | undefined,
+          );
+        } catch {
+          workingHash = null;
+        }
+        if (workingHash === null) {
+          return commitProposedChangeRecovery('superseded', 'consent_all_no_base');
+        }
+        for (const hold of holds) {
+          const pin = hold.preconditions.graph_hash;
+          if (typeof pin !== 'string' || pin.length === 0 || pin !== workingHash) {
+            return commitProposedChangeRecovery('superseded', 'consent_all_superseded');
+          }
+        }
+        type ExecutedGmOutcome = Extract<
+          ReturnType<typeof executeGmHeldResume>,
+          { status: 'executed' }
+        >;
+        const appliedSubjects: string[] = [];
+        const appliedFacts: ExecutedGmOutcome['fact'][] = [];
+        const consumedRefs: string[] = [];
+        const declinedLabels: string[] = [];
+        let lastExecuted: ExecutedGmOutcome | null = null;
+        for (let i = 0; i < holds.length; i += 1) {
+          if (workingHash === null) {
+            // A mid-chain hash derivation failed — fail closed for the
+            // REMAINING holds rather than applying against an unverified
+            // base. Already-applied steps stay applied (each was refereed).
+            declinedLabels.push(resolveProposalRenderCopy(holds[i]!.action).label);
+            continue;
+          }
+          const preStepGraph = workingGraph;
+          const outcome = executeGmHeldResume({
+            operations: reads[i]!.operations,
+            currentGraph: preStepGraph,
+            currentGraphHash: workingHash,
+            freshness: freshness?.freshness ?? 'unknown',
+            hasExistingAnalysis:
+              freshness?.freshness === 'fresh' || freshness?.freshness === 'stale',
+            scenarioId: context.session_id,
+            turnId: context.request_id,
+            requestId,
+          });
+          if (outcome.status !== 'executed') {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: context.session_id,
+                pending_action_id: holds[i]!.id,
+                outcome: outcome.status,
+                position: i,
+              },
+              'GM held-execute (all) — one confirmed hold declined (fail-closed); the others are unaffected',
+            );
+            declinedLabels.push(resolveProposalRenderCopy(holds[i]!.action).label);
+            continue;
+          }
+          emit(TelemetryEvents.PendingActionMatched, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            pending_action_id: holds[i]!.id,
+            kind: holds[i]!.action.kind,
+            chip_id: holds[i]!.chip_id,
+            candidate_count: holds.length,
+          });
+          const subject = describeHeldOperationsSubject(reads[i]!.operations, preStepGraph);
+          if (subject !== null) appliedSubjects.push(subject);
+          appliedFacts.push(outcome.fact);
+          consumedRefs.push(holds[i]!.chip_id);
+          lastExecuted = outcome;
+          workingGraph = outcome.mutatedGraph;
+          try {
+            workingHash = computeAnalysisAffectingGraphHash(
+              outcome.mutatedGraph as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            workingHash = null;
+          }
+        }
+        if (lastExecuted === null) {
+          // Every hold declined at re-referee / apply — fail-closed, the
+          // sanctioned decline copy, nothing persisted.
+          return commitProposedChangeRecovery('invalid', 'consent_all_all_declined');
+        }
+        // Honest applied path (mirrors the single-resume commit exactly).
+        // Receipt names every applied change; per-name decline sentence
+        // for any hold the re-referee refused — never a silent partial.
+        const gmReadiness = computeStructuralReadiness(lastExecuted.appliedGraph);
+        let receiptText = buildGmHeldAppliedReceipt(appliedSubjects);
+        if (declinedLabels.length > 0) {
+          const declinedNamed = declinedLabels.map((l) => `'${l}'`).join(', ');
+          receiptText += ` I couldn't take ${declinedNamed} forward, so the model is unchanged for ${
+            declinedLabels.length === 1 ? 'that one' : 'those'
+          }.`;
+        }
+        const appliedResponse = composeDirectAnswerResponse({
+          assistant_text: receiptText,
+          stage: context.stage,
+          suggested_actions:
+            gmReadiness?.status === 'ready' ? [{ ...GM_HELD_APPLIED_RERUN_CHIP }] : [],
+        });
+        sonnetTextForLog = appliedResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'execute';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        const preApplyEffectiveTurnGraph = effectiveTurnGraph;
+        effectiveTurnGraph = lastExecuted.appliedGraph;
+        try {
+          const committed = await commitTurn(appliedResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: appliedFacts,
+            graph: lastExecuted.mutatedGraph,
+            // Every APPLIED hold is consumed (zombie-chip guard); declined
+            // holds keep the existing pending lifecycle and its honest
+            // outcomes.
+            consumedPendingRefs: consumedRefs,
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = {
+            ...committed.response,
+            draft_graph: buildAppliedGraphWireField(lastExecuted.appliedGraph),
+          };
+          handlerEmittedMutatedGraph = true;
+          analysisReadyForTurn = gmReadiness;
+          const postApplyHash = ((): string | null => {
+            try {
+              return computeAnalysisAffectingGraphHash(
+                lastExecuted!.mutatedGraph as GraphStateIngress | null | undefined,
+              );
+            } catch {
+              return null;
+            }
+          })();
+          freshness = deriveAnalysisFreshness(
+            context.prior_facts,
+            postApplyHash,
+            config.cee.optionIdentityFreshnessGuard
+              ? extractGraphOptionIds(lastExecuted.mutatedGraph)
+              : undefined,
+          );
+          for (const ref of consumedRefs) {
+            const consumedHold = holds.find((h) => h.chip_id === ref)!;
+            emit(TelemetryEvents.PendingActionConsumed, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: consumedHold.id,
+              kind: consumedHold.action.kind,
+              chip_id: consumedHold.chip_id,
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+            });
+          }
+        } catch (error) {
+          effectiveTurnGraph = preApplyEffectiveTurnGraph;
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'gm_held_execute_apply_all',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on GM held-execute apply-all',
           );
           failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
           response = buildFailureResponse(
@@ -2302,20 +2518,26 @@ export async function runTurnExecutor(
         }
         return finalizeRun();
       } else if (shortConfirmDispatch.dispatch === 'recovery_ambiguous') {
-        // UNREACHABLE since V5 P0.2 most-recent-wins (commit 9aa6e2f5):
-        // `tryShortConfirmResume` no longer returns `recovery_ambiguous`
-        // — a bare confirm with >1 live resumable now resumes the most
-        // recent. Retained (compiles, dead) pending a dedicated cleanup
-        // PR that also drops the union member + `multiple_ambiguous`
-        // skip-reason. NOTE: the numbered-clarification UX for genuine
-        // LABEL-MATCH collisions is unaffected — that path emits
-        // `PendingActionRecoveryAmbiguous` + its own clarification
-        // independently (see the label-pick `ambiguous` branch below).
+        // CONSENT-CLARITY AMENDMENT (Paul ratified 2026-07-11) — LIVE again.
+        // This branch was unreachable under V5 P0.2 most-recent-wins
+        // (commit 9aa6e2f5); the ratified doctrine reverses that for the
+        // CONSENT class: a bare confirmation arriving while MULTIPLE
+        // consent-expecting pendings are live must NOT silently resolve
+        // one. The resumer now returns every live consent candidate here
+        // (apply_proposed_change first, then proposed_concept) and this
+        // branch lists them — numbered, short labels, one chip per item
+        // plus "All of them" and "None" — with NO mutation on this turn.
+        // A follow-up numbered reply / chip click / "all" resolves via
+        // the existing pre-routes against the re-persisted candidates.
         emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
           request_id: requestId,
           scenario_id: context.session_id,
           candidate_count: shortConfirmDispatch.candidates.length,
           kinds: shortConfirmDispatch.candidates.map((c) => c.action.kind),
+          // Payload discriminator on the existing frozen event name —
+          // distinguishes the doctrine-(b) multi-consent listing from the
+          // label-collision clarification that shares this event.
+          trigger: 'multi_consent_bare_confirm',
         });
         // Build one chip per candidate so the user can pick the
         // intended action. Chip messages are kind-specific so the
@@ -2338,6 +2560,25 @@ export async function runTurnExecutor(
                 label: 'Explore what would change this',
                 message: 'Explore what would change the result.',
                 action_type: 'what_would_flip',
+              };
+            }
+            if (cand.action.kind === 'proposed_concept') {
+              // CONSENT-CLARITY AMENDMENT — a live concept offer counts as
+              // a consent-expecting candidate. Its persisted public copy is
+              // parser-required and names the concept; the chip carries NO
+              // action_type (a plain message chip), so a click replays the
+              // message through the normal pipeline where the concept
+              // continuation / edit path resolves it — existing machinery.
+              return {
+                id: cand.chip_id,
+                label: sanitisePublicCopyOrFallback(
+                  cand.action.public_label,
+                  'Add the suggested idea',
+                ),
+                message: sanitisePublicCopyOrFallback(
+                  cand.action.public_message,
+                  'Continue with the suggested idea.',
+                ),
               };
             }
             // apply_proposed_change — surface the proposal's chip id
@@ -2387,7 +2628,14 @@ export async function runTurnExecutor(
         const allProposals = shortConfirmDispatch.candidates.every(
           (c) => c.action.kind === 'apply_proposed_change',
         );
-        if (allProposals) {
+        // CONSENT-CLARITY guard: a bare short-confirm ("yes") must never
+        // exact-match a LEGACY candidate whose persisted public message is
+        // itself a bare confirm ('Yes' — the pre-amendment GM hold chip
+        // copy). Without this gate, one legacy hold among the candidates
+        // would silently swallow the disambiguation the doctrine requires.
+        // Genuinely targeted replies (ordinals, labels, named messages)
+        // are not short-confirms and still resolve below.
+        if (allProposals && !SHORT_CONFIRM_PATTERN.test(resumerMessage)) {
           // Pass-8 P1-1: pass the same render copy the chips show.
           // The matcher uses both label AND message for exact-match
           // resolution, and demands an unambiguous unique match.
@@ -2408,6 +2656,18 @@ export async function runTurnExecutor(
               chip_id: ordinal.pending.chip_id,
               candidate_count: shortConfirmDispatch.candidates.length,
             });
+            // Lane 34 parity: a GM held pending resolved by ordinal/label
+            // must route through the dedicated held-execute resume (live
+            // mode), exactly like the bare-confirm pending_action branch —
+            // the generic synthesis would resolve it 'invalid' and decline
+            // a change the user explicitly picked.
+            const ordinalGmRead = readGmHeldResume(ordinal.pending);
+            if (
+              ordinalGmRead.kind !== 'not_gm_held' &&
+              config.features.graphManagementMode === 'live'
+            ) {
+              return commitGmHeldResume(ordinal.pending, ordinalGmRead);
+            }
             const decision = decideProposedChangeSynthesis({
               pending: ordinal.pending,
               currentGraphHash: freshness?.current_graph_hash ?? undefined,
@@ -2469,12 +2729,12 @@ export async function runTurnExecutor(
           // the numbered-clarification commit. The handler-dispatch
           // path picks it up after this if/else block.
         } else {
-        // V5 G7/G8 P1-1: when every candidate is a proposal with a
-        // persisted public label, render the assistant text as a
-        // numbered list of those labels so the user can read the
-        // options as a list (per the brief: "Which one would you
-        // like? 1) <label> 2) <label>"). Mixed-kind candidates fall
-        // back to the generic prompt.
+        // CONSENT-CLARITY AMENDMENT — doctrine (b) listing copy: name
+        // every pending consent (numbered, short labels) and offer the
+        // three resolution routes explicitly (a number, all of them,
+        // none). No mutation happens on this turn. Falls back to the
+        // generic prompt only when a label is the render-safe fallback
+        // (a numbered list of identical placeholders would not help).
         const allCandidatesHaveLabels = ambiguousChips.every(
           (c) => c.label.length > 0 && c.label !== RENDER_SAFE_LABEL_FALLBACK,
         );
@@ -2482,12 +2742,32 @@ export async function runTurnExecutor(
           .map((c, i) => `${i + 1}) ${c.label}`)
           .join(' ');
         const ambiguousAssistantText = allCandidatesHaveLabels
-          ? `Which one would you like? ${numberedList}`
+          ? `I have more than one change waiting for your go-ahead, so I want to ` +
+            `be sure which one you meant. ${numberedList}. Reply with a number ` +
+            `to apply one, 'all of them', or 'none'.`
           : 'I had more than one offer open. Which would you like?';
+        // Resolution chips: one per candidate (built above), then the
+        // collective options. "All of them." resolves via the resumer's
+        // consent_all pattern; "Not now." resolves via the proposal-
+        // dismissal pre-route. Neither carries an action_type — they are
+        // plain message chips riding existing machinery.
+        const consentResolutionChips: SuggestedAction[] = [
+          ...ambiguousChips,
+          {
+            id: 'chip_consent_pick_all',
+            label: 'All of them',
+            message: 'All of them.',
+          },
+          {
+            id: 'chip_consent_pick_none',
+            label: 'None',
+            message: 'Not now.',
+          },
+        ];
         const ambiguousResponse = composeDirectAnswerResponse({
           assistant_text: ambiguousAssistantText,
           stage: context.stage,
-          suggested_actions: ambiguousChips,
+          suggested_actions: consentResolutionChips,
         });
         sonnetTextForLog = ambiguousResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -2511,8 +2791,14 @@ export async function runTurnExecutor(
           // proposal's chip_id, proposal_ref, expires_at_iso are
           // unchanged. Wall-clock TTL still applies, so an offer
           // that would have expired before resume still expires.
+          // CONSENT-CLARITY: BOTH consent kinds re-persist — a listed
+          // `proposed_concept` must stay live for the follow-up pick just
+          // like a listed proposal (its this-turn copy supersedes the
+          // carried prior via the kind-level concept supersession rule).
           const proposalsToRepersist = shortConfirmDispatch.candidates.filter(
-            (c) => c.action.kind === 'apply_proposed_change',
+            (c) =>
+              c.action.kind === 'apply_proposed_change' ||
+              c.action.kind === 'proposed_concept',
           );
           const chipDerivedForAmbiguous = derivePendingActionsFromFinalizedChips(ambiguousChips, {
             scenario_id: context.session_id,
@@ -2562,6 +2848,128 @@ export async function runTurnExecutor(
         }
         return finalizeRun();
         }
+      } else if (shortConfirmDispatch.dispatch === 'consent_all') {
+        // CONSENT-CLARITY AMENDMENT — the user confirmed ALL listed
+        // consents ("all of them" / the 'All of them' chip). Two paths:
+        //
+        //  1. Every candidate is a GM hold with an executable payload AND
+        //     graph management is live → apply them sequentially in ONE
+        //     commit via `commitGmHeldResumeAll` (each step re-refereed
+        //     against the working graph; named receipt per applied
+        //     change; per-name decline for anything the referee refuses).
+        //
+        //  2. Any other composition (generic proposals, concept offers,
+        //     GM off/shadow) has NO safe one-shot apply: generic
+        //     proposals are hash-gated to their emit-time base BY DESIGN,
+        //     so applying one invalidates the rest — a one-turn "apply
+        //     all" would over-claim. Honest posture: NO mutation, restate
+        //     the numbered list and take them one at a time.
+        const allCandidates = shortConfirmDispatch.candidates;
+        const gmReads = allCandidates.map((c) => readGmHeldResume(c));
+        const executableReads = gmReads.filter(
+          (r): r is Extract<GmHeldResumeRead, { kind: 'ok' }> => r.kind === 'ok',
+        );
+        if (
+          executableReads.length === allCandidates.length &&
+          config.features.graphManagementMode === 'live'
+        ) {
+          return commitGmHeldResumeAll(allCandidates, executableReads);
+        }
+        emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          candidate_count: allCandidates.length,
+          kinds: allCandidates.map((c) => c.action.kind),
+          trigger: 'consent_all_one_at_a_time',
+        });
+        const oneAtATimeChips: SuggestedAction[] = allCandidates.map((cand) => {
+          if (cand.action.kind === 'proposed_concept') {
+            return {
+              id: cand.chip_id,
+              label: sanitisePublicCopyOrFallback(
+                cand.action.public_label,
+                'Add the suggested idea',
+              ),
+              message: sanitisePublicCopyOrFallback(
+                cand.action.public_message,
+                'Continue with the suggested idea.',
+              ),
+            };
+          }
+          const renderCopy = resolveProposalRenderCopy(cand.action);
+          const inlineHandlerId =
+            cand.action.kind === 'apply_proposed_change'
+              ? (cand.action.inline_patch as { handler_id?: unknown })?.handler_id
+              : undefined;
+          // Proposal-backed candidates carry their public action_type; a
+          // GM hold's dispatch key is NOT a wire action type, so its chip
+          // stays a plain message chip (message replay resolves it).
+          return isProposedChangeActionType(inlineHandlerId)
+            ? {
+                id: cand.chip_id,
+                label: renderCopy.label,
+                message: renderCopy.message,
+                action_type: inlineHandlerId,
+              }
+            : { id: cand.chip_id, label: renderCopy.label, message: renderCopy.message };
+        });
+        const oneAtATimeNumbered = oneAtATimeChips
+          .map((c, i) => `${i + 1}) ${c.label}`)
+          .join(' ');
+        const oneAtATimeResponse = composeDirectAnswerResponse({
+          assistant_text:
+            `I can apply those one at a time, checking each against the latest ` +
+            `model. ${oneAtATimeNumbered}. Reply with a number to start, or 'none'.`,
+          stage: context.stage,
+          suggested_actions: [
+            ...oneAtATimeChips,
+            { id: 'chip_consent_pick_none', label: 'None', message: 'Not now.' },
+          ],
+        });
+        sonnetTextForLog = oneAtATimeResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          // Re-persist every listed consent (identity preserved; wall TTL
+          // still applies) so the follow-up pick has live offers.
+          const committed = await commitTurn(oneAtATimeResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            pending_actions: allCandidates,
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'consent_all_one_at_a_time',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on consent-all one-at-a-time listing',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
       }
 
       // V5 G7/G8 P1-1: live-proposal label/ordinal pre-route. Fires
@@ -2611,6 +3019,20 @@ export async function runTurnExecutor(
               chip_id: labelPick.pending.chip_id,
               candidate_count: liveProposals.length,
             });
+            // CONSENT-CLARITY / lane 34 parity: GM holds now carry NAMED
+            // public copy ("Yes, update 'Marketing'."), so a hold-chip
+            // click (message replay) or a typed named confirmation lands
+            // HERE, not in the bare-confirm branch. Route it through the
+            // dedicated held-execute resume in live mode — the generic
+            // synthesis would resolve the GM handler id 'invalid' and
+            // decline a change the user explicitly picked.
+            const labelGmRead = readGmHeldResume(labelPick.pending);
+            if (
+              labelGmRead.kind !== 'not_gm_held' &&
+              config.features.graphManagementMode === 'live'
+            ) {
+              return commitGmHeldResume(labelPick.pending, labelGmRead);
+            }
             const decision = decideProposedChangeSynthesis({
               pending: labelPick.pending,
               currentGraphHash: freshness?.current_graph_hash ?? undefined,

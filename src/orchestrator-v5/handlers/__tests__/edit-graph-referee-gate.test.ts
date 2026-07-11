@@ -133,7 +133,13 @@ describe('live verdict routing', () => {
     const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP] }));
     expect(d.governing).toBe('held');
     expect(d.blockApply).toBe(true);
-    expect(d.assistantText).toBe(GM_HELD_ASSISTANT_TEXT);
+    // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — doctrine (a): the
+    // held ask NAMES the change it is holding, keeping the swept
+    // consent framing ("Nothing in the model moves until you confirm").
+    expect(d.assistantText).toContain("update 'Marketing spend'");
+    expect(d.assistantText).toContain('Nothing in the model moves until you confirm');
+    expect(findSuccessClaimHit(d.assistantText!)).toBeNull();
+    expect(findForbiddenPhraseHit(d.assistantText!)).toBeNull();
     expect(d.pendingActions).toHaveLength(1);
     const pending = d.pendingActions![0]!;
     // The pending is REAL: it round-trips the session parser.
@@ -141,9 +147,12 @@ describe('live verdict routing', () => {
     expect(pending.action.kind).toBe('apply_proposed_change');
     expect(pending.chip_id).toBe(d.suggestedActions![0]!.id);
     expect(pending.preconditions.graph_hash).toBe(hashOf(GRAPH));
-    // Chip copy is the held copy pair.
-    expect(d.suggestedActions![0]!.label).toBe(GM_HELD_CHIP_LABEL);
-    expect(d.suggestedActions![0]!.message).toBe(GM_HELD_CHIP_MESSAGE);
+    // Chip copy names its subject (consent-clarity), so a chip click /
+    // typed reply resolves to THIS hold via exact-match, never a bare
+    // 'Yes' colliding with other live consents.
+    expect(d.suggestedActions![0]!.label).toBe("Update 'Marketing spend'");
+    expect(d.suggestedActions![0]!.message).toBe("Yes, update 'Marketing spend'.");
+    expect(findForbiddenPhraseHit(d.suggestedActions![0]!.label)).toBeNull();
     expect(d.publicReason).toMatchObject({
       source: 'graph_management',
       verdict: 'held',

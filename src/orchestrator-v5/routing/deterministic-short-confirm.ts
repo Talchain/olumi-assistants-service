@@ -37,6 +37,7 @@
 
 import type { PendingAction } from '../session/pending-action.js';
 import {
+  CONFIRMATION_EXPECTING_ACTION_TYPES,
   isPendingActionExpired,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
@@ -130,6 +131,46 @@ export type ShortConfirmSkipReason =
   | 'multiple_ambiguous';
 
 /**
+ * CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — "all of them" pattern.
+ *
+ * Recognised ONLY while at least one live consent-expecting pending
+ * exists, and ONLY for EXPLICIT collective forms: "all of them" /
+ * "all of those" / "all of it" / "both of them" / "apply all" /
+ * "apply both" / "apply them all" / "yes to all". The disambiguation
+ * chip sends "All of them.", so the chip path always resolves.
+ *
+ * Deliberately EXCLUDED (adversarial review, 2026-07-11): bare "all" /
+ * "both" / "do all". A bare "both" is routinely the answer to an
+ * UNRELATED assistant question ("which options should I compare?" →
+ * "both"); binding it to live consents would fire an unintended
+ * multi-mutation — the exact intent-mismatch class the amendment
+ * targets. Bare forms fall through to the normal gates (and the LLM)
+ * untouched.
+ *
+ * Anchored start-to-end with the usual politeness/punctuation tail so
+ * any substantive content ("all of the numbers") falls through.
+ */
+export const CONSENT_RESOLVE_ALL_PATTERN =
+  /^\s*(?:all\s+of\s+(?:them|those|it)|both\s+of\s+(?:them|those)|yes\s+to\s+all|apply\s+(?:them\s+all|all(?:\s+of\s+(?:them|those))?|both(?:\s+of\s+(?:them|those))?))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+
+/**
+ * Order consent-expecting candidates for LISTING and for ordinal
+ * resolution: `apply_proposed_change` entries first (in input order —
+ * the read side places the freshest first), then `proposed_concept`.
+ * This keeps the numbered list the executor renders aligned with the
+ * ordinal pre-resolve above, which indexes into the live
+ * `apply_proposed_change` set: "1" always means the first listed item.
+ */
+export function orderConsentCandidates(
+  candidates: readonly PendingAction[],
+): readonly PendingAction[] {
+  return [
+    ...candidates.filter((pa) => pa.action.kind === 'apply_proposed_change'),
+    ...candidates.filter((pa) => pa.action.kind !== 'apply_proposed_change'),
+  ];
+}
+
+/**
  * Coarse summary of analysis state at resume time. Drives the
  * `what_would_flip` freshness precondition: a stale or missing analysis
  * means resuming what_would_flip would surface a misleading answer, so
@@ -153,6 +194,20 @@ export type ShortConfirmDispatch =
   | {
       readonly matched: true;
       readonly dispatch: 'recovery_ambiguous';
+      readonly candidates: readonly PendingAction[];
+    }
+  | {
+      /**
+       * CONSENT-CLARITY AMENDMENT — the user answered the multi-consent
+       * disambiguation (or typed it unprompted) with an "all of them"
+       * confirmation. `candidates` carries every live consent-expecting
+       * pending in listing order (see `orderConsentCandidates`). The
+       * executor applies them together only where a safe direct-apply
+       * path exists (GM holds); otherwise it lists them honestly and
+       * takes them one at a time — never a silent partial apply.
+       */
+      readonly matched: true;
+      readonly dispatch: 'consent_all';
       readonly candidates: readonly PendingAction[];
     }
   | {
@@ -299,6 +354,41 @@ export function tryShortConfirmResume(
     }
   }
 
+  // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — "all of them".
+  // Checked BEFORE the bare-confirm pattern gates because "all of them"
+  // is not a SHORT_CONFIRM phrase, and before the edit-verb gate because
+  // "apply all" / "do all" carry no edit verb but must still resolve
+  // deterministically. Fires only when at least one LIVE consent-
+  // expecting pending exists — with none, the message falls through to
+  // the normal gates (and ultimately the LLM) untouched.
+  const liveConsentExpectingAll = orderConsentCandidates(
+    input.pendingActions.filter(
+      (pa) =>
+        CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
+        !isExpired(pa, input.nowMs, input.currentTurnIndex),
+    ),
+  );
+  if (
+    liveConsentExpectingAll.length > 0 &&
+    CONSENT_RESOLVE_ALL_PATTERN.test(input.message)
+  ) {
+    if (liveConsentExpectingAll.length > 1) {
+      return {
+        matched: true,
+        dispatch: 'consent_all',
+        candidates: liveConsentExpectingAll,
+      };
+    }
+    // Exactly one live consent: "all of them" means that one. Resolve it
+    // through the normal single-pending path when the kind is bare-
+    // confirm-resumable; a lone `proposed_concept` keeps its dedicated
+    // continuation (fall through — same as a bare "yes" today).
+    const only = liveConsentExpectingAll[0]!;
+    if (only.action.kind === 'apply_proposed_change') {
+      return { matched: true, dispatch: 'pending_action', pending: only };
+    }
+  }
+
   // Edit-verb / numeric-quantity gate. Override only when a live
   // apply_proposed_change exists AND the message matches a
   // proposal-targeted confirmation phrase ("add that" / "make that
@@ -330,6 +420,29 @@ export function tryShortConfirmResume(
     return { matched: true, dispatch: 'recovery_expired', expired_count: expired.length };
   }
 
+  // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — ratified doctrine (b):
+  // when a bare confirmation arrives while MULTIPLE consent-expecting
+  // pendings are live, the system must NOT silently resolve one of them
+  // (the pre-amendment posture was most-recent-wins WITHIN the consent
+  // class). Return every live consent candidate so the executor lists
+  // them (numbered, short labels) with per-item chips plus "All of them"
+  // and "None" — no mutation on that turn. Ordinal picks ("the first
+  // one") were already resolved deterministically by the pre-resolve
+  // block above, so only genuinely subject-less confirmations reach
+  // this rule. `proposed_concept` counts: it is consent-expecting even
+  // though its resume rides the concept-continuation path, so a bare
+  // "yes" with a live concept AND a live proposal is ambiguous.
+  const liveConsentExpecting = live.filter((pa) =>
+    CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind),
+  );
+  if (liveConsentExpecting.length > 1) {
+    return {
+      matched: true,
+      dispatch: 'recovery_ambiguous',
+      candidates: orderConsentCandidates(liveConsentExpecting),
+    };
+  }
+
   // Filter to kinds with a synthesis path.
   let resumable = live.filter((pa) => RESUMABLE_KINDS.has(pa.action.kind));
   // PROPOSAL_CONFIRM_PATTERN is unambiguous about proposal intent —
@@ -343,9 +456,9 @@ export function tryShortConfirmResume(
     // TurnExecutor. Fall through to the LLM rather than misfire.
     return { matched: false, skip_reason: 'kind_not_yet_resumable' };
   }
-  // F-HELD CONSENT-PRIORITY (wire finding 2026-07-11; orchestrator ruling —
-  // consent-first, orchestrator-default pending Paul ratification): a bare
-  // confirm answers the live CONSENT-EXPECTING pending, not the newest chip
+  // F-HELD CONSENT-PRIORITY (wire finding 2026-07-11; ratified by Paul
+  // 2026-07-11 WITH the consent-clarity amendment above): a bare confirm
+  // answers the live CONSENT-EXPECTING pending, not the newest chip
   // suggestion. Wire captures 13c→14c showed "yes" binding to a
   // freshly-minted run_analysis offer while a GM hold (apply_proposed_change)
   // was still live — the held change was never applied. Class priority is
@@ -353,20 +466,27 @@ export function tryShortConfirmResume(
   // explicit accept/decline) outranks the chip-suggestion kinds
   // (`run_analysis` / `what_would_flip`) REGARDLESS of emit recency.
   // Liveness still comes first — an expired hold never outranks anything
-  // (the expiry split above already removed it).
+  // (the expiry split above already removed it). By the time this pick
+  // runs, the amendment rule above guarantees AT MOST ONE live
+  // consent-expecting pending remains — the multi-consent case returned
+  // `recovery_ambiguous` (list, never a silent pick).
   const consentExpecting = resumable.filter(
     (pa) => pa.action.kind === 'apply_proposed_change',
   );
   const pickPool = consentExpecting.length > 0 ? consentExpecting : resumable;
 
-  // V5 P0.2 — most-recent-wins is retained WITHIN the picked class: when
-  // multiple live pendings of the winning class coexist, the MOST RECENTLY
-  // EMITTED one wins, so "do it" / "make that update" resumes the latest
-  // offer without a clarification detour. Ordinal pointers ("the first
-  // one") are still resolved by index in the pre-resolve block above, and
-  // the turn-executor echoes the chosen proposal's label ("Applying: …")
-  // so a wrong-target resume stays visible. Graph-hash divergence,
-  // idempotency and stale-proposal recovery remain enforced downstream by
+  // V5 P0.2 — most-recent-wins is retained WITHIN the picked class for the
+  // NON-consent suggestion kinds only (run_analysis / what_would_flip):
+  // when multiple live pendings of the winning class coexist, the MOST
+  // RECENTLY EMITTED one wins, so "do it" resumes the latest offer
+  // without a clarification detour. For the consent class this can no
+  // longer bind more than one candidate — the consent-clarity amendment
+  // rule above lists multiple live consents instead of picking. Ordinal
+  // pointers ("the first one") are still resolved by index in the
+  // pre-resolve block above, and the turn-executor echoes the chosen
+  // proposal's label ("Applying: …") so a wrong-target resume stays
+  // visible. Graph-hash divergence, idempotency and stale-proposal
+  // recovery remain enforced downstream by
   // `decideProposedChangeSynthesis` before any mutation is applied.
   // Tie-break: equal `emitted_at_iso` resolves to the first in input
   // order (Array.prototype.sort is stable) — deterministic, and the

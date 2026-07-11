@@ -1153,7 +1153,11 @@ export function buildProposalPendingAction(
       kind: 'proposed_concept',
       concept: input.concept,
       preferred_kind: input.preferred_kind,
-      public_label: 'Continue with the proposed update',
+      // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — doctrine (a): the
+      // consent ask names its subject. The label previously read
+      // 'Continue with the proposed update' (unnamed), which rendered
+      // indistinguishably in the multi-consent disambiguation list.
+      public_label: `Add '${input.concept}'`,
       public_message: `Continue with ${input.concept}.`,
     },
     preconditions: input.graph_hash !== undefined

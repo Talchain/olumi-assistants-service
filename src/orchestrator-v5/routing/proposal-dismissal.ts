@@ -98,8 +98,19 @@ export function tryProposalDismissal(
 
   // proposal_ref == chip_id for apply_proposed_change (the filtered kind); the
   // ternary keeps the type-narrowing explicit and falls back to chip_id.
-  const dismissed_refs = liveProposals.map((pa) =>
+  //
+  // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11): a dismissal also retires
+  // any live `proposed_concept` offer. The multi-consent disambiguation
+  // lists BOTH consent kinds and offers 'None' — "none of them" must mean
+  // none of the LISTED items, not "none of the proposals but the concept
+  // silently stays live". The trigger gate above (≥1 live proposal) is
+  // unchanged.
+  const liveConcepts = input.livePendingActions.filter(
+    (pa) => pa.action.kind === 'proposed_concept',
+  );
+  const dismissed = [...liveProposals, ...liveConcepts];
+  const dismissed_refs = dismissed.map((pa) =>
     pa.action.kind === 'apply_proposed_change' ? pa.action.proposal_ref : pa.chip_id,
   );
-  return { matched: true, dismissed_count: liveProposals.length, dismissed_refs };
+  return { matched: true, dismissed_count: dismissed.length, dismissed_refs };
 }
