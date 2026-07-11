@@ -87,6 +87,37 @@ exactly once, so the once-per-turn decrement invariant holds with the dispatcher
    would also change TurnExecutor-path behaviour ruled in F-HELD round 1. Default: leave rule 4
    as-is; documented in the updated comment block.
 
+## Round-3 fixup (adversarial review, commits 4–5 of this branch)
+
+**Concern 1 (blocking) — false lapse notice on fulfilled proposals.** The thread-through had no
+fulfilment awareness: when THIS turn's mutation itself delivered the held change (the user's edit
+adds the very concept a `proposed_concept` offer proposed; the user applies a GM held batch by
+hand), the hold failed the re-referee (already applied) and emitted the honest-lapse notice — a
+FALSE "your held proposal lapsed" sentence on the fulfilling turn. RED reproduced verbatim at the
+edit dispatcher: `I have added Customer churn as a risk.` + `The suggestion to add 'customer churn'
+has lapsed because the model changed, say the word if you still want it.` (9/9 new fixtures fail on
+the unfixed tree). Fix (`hold-thread-through.ts` module doc (c)): dispatchers thread this turn's
+APPLIED operations (edit; draft passes null — the whole new graph IS the mutation); a lapse is
+reclassified `fulfilled_by_this_mutation` (notice suppressed, same frozen telemetry event) ONLY
+when the hold's target entities + operation kinds are satisfied by the applied mutation — concept:
+an applied `add_node` carrying the concept (edit) / concept present in the new draft (draft); GM
+batch: EVERY held op matched by an applied op (kind + target; add_node also by label) or satisfied
+by the post-mutation end state (add present / remove absent — the already-applied/no-op re-referee
+failure class checked directly on the graph, not via blocker codes). Generic apply proposals and
+payload-less GM holds keep their notice — no comparable op record; a redundant notice beats a
+wrongly-suppressed one. The notice is built from the first NON-fulfilled lapse (F-HELD 2b
+one-sentence precedent preserved).
+
+**Concern 3 — consent holds silently evicted by the per-turn cap.** The fresh-first
+`PENDING_ACTIONS_PER_TURN_CAP` slice (`commit.ts`) silently dropped a validly-threaded live consent
+hold when this turn's own pendings filled the cap. Fix: consent-priority cap fill — live
+CONFIRMATION_EXPECTING pendings win over non-consent pendings within the cap, original relative
+order preserved (a fresh consent hold still beats a carried one; an evicted non-consent pending
+loses only its short-confirm resumability, its chip still renders); a consent hold that STILL
+cannot fit (all-consent overflow) lapses with the existing honest F-HELD 2b notice, never silently.
+Track 2 `survivedCount` is now counted by identity against the survivor list (the old head/tail
+arithmetic assumed this turn's pendings always all persist).
+
 ## Residuals (out of this lane's scope, documented in code)
 
 - **chip-click dispatch** (`handlers/chip-click-dispatch.ts`, 2 commit sites) and **system-event
@@ -101,12 +132,23 @@ exactly once, so the once-per-turn decrement invariant holds with the dispatcher
 - If BOTH pending reads fail on an edit turn (buildTurnContext throw + degraded standalone read),
   the carry list degrades to [] — a degraded read cannot preserve what it cannot see; store-layer
   telemetry fires.
+- Round-3 additions:
+  - **Fulfilment via a generic apply proposal cannot be detected** — its `inline_patch` speaks the
+    handler vocabulary (`handler_id`/`params`), not patch ops, so a user manually performing the
+    proposed change still gets the (now redundant but not false-in-kind) lapse notice.
+  - **`dispatchEditGraph` still passes no `consumedPendingRefs`** — fulfilment is detected at the
+    thread-through, not recorded as consumption; the lifecycle tally attributes these retirements
+    to the lapse path (`v5.pending_action.invalidated`, detail `fulfilled_by_this_mutation`), not
+    `consumedCount`.
+  - A GM hold whose batch still referees cleanly against the fulfilled graph (e.g. a duplicate-add
+    under a fresh node id that the referee tolerates) THREADS rather than retires — it may re-offer
+    an already-delivered change; the confirm-time re-referee still gates any apply.
 
-## Gates (exact commands, this worktree)
+## Gates (exact commands, this worktree; re-run at round-3 head)
 
 - `pnpm typecheck:src` — clean (0 errors).
-- `pnpm test:required` — **1031 files / 19873 passed, 0 failed** (8 files / 99 tests skipped, 13 todo).
-- `pnpm exec vitest run src/orchestrator-v5` — **350 files / 7007 passed, 0 failed** (1 skipped).
-- `pnpm exec eslint <6 touched src files + 3 test files>` — clean.
+- `pnpm test:required` — **1031 files / 19883 passed, 0 failed** (8 files / 99 tests skipped, 13 todo).
+- `pnpm exec vitest run src/orchestrator-v5` — **350 files / 7017 passed, 0 failed** (1 skipped).
+- `pnpm exec eslint <touched src + test files>` — clean.
 - Stale-`.js` shadow check — no hits.
 - `git diff --cached --name-only | grep -c node_modules` — **0** on every commit.
