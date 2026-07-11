@@ -338,3 +338,54 @@ describe('finaliseLifecycleAgainstCap — post-cap survivor/cap-drop split (Trac
     expect(out.capDroppedCount).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-HELD fix 2b — honest lapse notice inputs. The carry-forward pass is the
+// SINGLE turn-TTL decrement site, so it is also the only place a
+// confirmation-expecting pending's turn-TTL lapse is observable. The detailed
+// result surfaces the lapsed confirmation-expecting pendings so the commit
+// seam can attach the deterministic lapse sentence (previously a silent drop).
+// ---------------------------------------------------------------------------
+
+describe('computeSurvivingPriorPendingsDetailed — lapsedConfirmationExpecting (F-HELD 2b)', () => {
+  function runAnalysisPending(overrides: { turnCount?: number } = {}): PendingAction {
+    return {
+      id: 'pa-ra',
+      scenario_id: SCENARIO,
+      chip_id: 'chip_action_rerun_analysis',
+      action: { kind: 'run_analysis' },
+      preconditions: {},
+      expires_at_turn_count: overrides.turnCount ?? 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-06-10T11:59:00.000Z',
+    };
+  }
+
+  it('a turn-TTL-dropped apply_proposed_change appears in lapsedConfirmationExpecting', () => {
+    const hold = proposal({ ref: 'prop_hold', turnCount: 1 });
+    const out = computeSurvivingPriorPendingsDetailed([hold], [], [], GRAPH_HASH, NOW);
+    expect(out.summary.expiredTurnsCount).toBe(1);
+    expect(out.lapsedConfirmationExpecting).toHaveLength(1);
+    expect(out.lapsedConfirmationExpecting[0]!.chip_id).toBe('prop_hold');
+  });
+
+  it('a turn-TTL-dropped run_analysis chip pending is NOT reported (suggestion lapse is not a consent lapse)', () => {
+    const out = computeSurvivingPriorPendingsDetailed(
+      [runAnalysisPending({ turnCount: 1 })], [], [], GRAPH_HASH, NOW,
+    );
+    expect(out.summary.expiredTurnsCount).toBe(1);
+    expect(out.lapsedConfirmationExpecting).toHaveLength(0);
+  });
+
+  it('wall-expired, hash-invalidated, consumed and surviving holds are NOT reported (turn-TTL drops only)', () => {
+    const wall = proposal({ ref: 'prop_wall', expiresAtIso: '2026-06-10T11:00:00.000Z' });
+    const hash = proposal({ ref: 'prop_hash', graphHash: 'stale_hash' });
+    const consumed = proposal({ ref: 'prop_consumed' });
+    const survivor = proposal({ ref: 'prop_alive', turnCount: 2 });
+    const out = computeSurvivingPriorPendingsDetailed(
+      [wall, hash, consumed, survivor], [], ['prop_consumed'], GRAPH_HASH, NOW,
+    );
+    expect(out.lapsedConfirmationExpecting).toHaveLength(0);
+    expect(out.survivors.map((p) => p.chip_id)).toEqual(['prop_alive']);
+  });
+});

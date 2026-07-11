@@ -464,15 +464,68 @@ export function checkCoachingOutput(
   return { safe: true };
 }
 
+/**
+ * F-HELD fix 3b — the live held offer the degrade path must restate instead
+ * of stomping it with a competing analysis offer. Copy fields are the
+ * pending's persisted PUBLIC copy (emit-time safety-filtered); `chip_id` is
+ * the proposal ref so the re-rendered chip replays exactly the offer the
+ * bare-confirm resumer (consent-priority) resolves.
+ */
+export interface HeldOfferForDegrade {
+  readonly chip_id: string;
+  readonly label: string;
+  readonly message: string;
+}
+
+/** Minimal chip shape for the held confirm re-offer (assignable to SuggestedAction). */
+export interface HeldConfirmSuggestedAction {
+  readonly id: string;
+  readonly label: string;
+  readonly message: string;
+  /**
+   * Deliberately absent: the held confirm chip is a plain replay chip ("Yes")
+   * that the bare-confirm resumer resolves via consent-priority — it must
+   * NOT carry an executable action_type of its own. Declared (as undefined)
+   * so the union with StaleRerunSuggestedAction stays discriminable by
+   * property access.
+   */
+  readonly action_type?: undefined;
+}
+
 export interface CoachingDegradeResponse {
   readonly assistant_text: string;
-  readonly suggested_actions: readonly StaleRerunSuggestedAction[];
+  readonly suggested_actions: ReadonlyArray<
+    StaleRerunSuggestedAction | HeldConfirmSuggestedAction
+  >;
 }
 
 export interface BuildCoachingDegradeOptions {
   /** Graph option count, for the "no analysis yet" absent copy. Defaults to 0. */
   readonly optionCount?: number;
+  /**
+   * F-HELD fix 3b — when a live confirmation-expecting hold exists, the
+   * state-unsafe degrade restates the held offer + its confirm chip instead
+   * of the #298 trust template + rerun chip. Wire capture 13c is the RED
+   * fixture: the absent template stomped a direct answer to the assistant's
+   * own disambiguation question AND minted the competing run_analysis offer
+   * that the next bare "yes" bound to — hijacking the consent flow. Omit for
+   * the unchanged no-hold behaviour.
+   */
+  readonly liveHold?: HeldOfferForDegrade;
 }
+
+/**
+ * F-HELD fix 3b — deterministic held-aware degrade copy. Mirrors the swept
+ * GM_HELD_ASSISTANT_TEXT wording ("holding … Nothing in the model moves
+ * until you confirm") so the copy family stays within the
+ * provisional_doctrine_v0 language that edit-graph-referee-gate.test.ts
+ * already sweeps against the egress guards. No values, hashes, labels or
+ * internal tokens; no LLM text.
+ */
+export const HELD_AWARE_DEGRADE_TEXT =
+  "I'm still holding a change to your model rather than applying it straight " +
+  'away. Nothing in the model moves until you confirm. Reply yes to continue ' +
+  'with it, or tell me what to adjust instead.';
 
 /**
  * Neutral safe copy for an always-on violation (internal field / mutation /
@@ -503,9 +556,28 @@ export function buildCoachingDegradeResponse(
   opts: BuildCoachingDegradeOptions = {},
 ): CoachingDegradeResponse {
   // Fresh + usable: the violation was an always-on prose issue, NOT a state
-  // problem. Do not claim the analysis is stale / missing / degraded.
+  // problem. Do not claim the analysis is stale / missing / degraded. This
+  // outranks the held-aware branch: with a fine analysis there is no
+  // competing rerun offer to suppress, and neutral copy misstates nothing.
   if (!isStateUnsafe(pack)) {
     return { assistant_text: NEUTRAL_DEGRADE_TEXT, suggested_actions: [] };
+  }
+  // F-HELD fix 3b — a live hold outranks every state-unsafe trust template.
+  // Rationale: each of those templates ships the rerun chip, which mints the
+  // competing consent offer (13c). While the user has an unanswered hold, the
+  // honest degrade is to restate that offer and its confirm chip; the trust
+  // language returns as soon as the hold resolves or lapses.
+  if (opts.liveHold !== undefined) {
+    return {
+      assistant_text: HELD_AWARE_DEGRADE_TEXT,
+      suggested_actions: [
+        {
+          id: opts.liveHold.chip_id,
+          label: opts.liveHold.label,
+          message: opts.liveHold.message,
+        },
+      ],
+    };
   }
   const optionCount = opts.optionCount ?? 0;
   let assistant_text: string;

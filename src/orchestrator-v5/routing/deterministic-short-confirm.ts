@@ -22,11 +22,12 @@
  *     the handler indicated by `inline_patch.handler_id`.
  *
  *   The remaining kinds (`set_factor_value`, `edit_graph_add_risk`)
- *   are recognised as "valid pending actions" but do not yet have a
- *   synthesis path in TurnExecutor; they will be added when their
- *   resume drivers land. Until then, those kinds appear in
- *   `candidates` and fall through to the LLM (matched=false,
- *   skip_reason='kind_not_yet_resumable') — never silently misfired.
+ *   are recognised as "valid pending actions" but are CLARIFICATION
+ *   continuations, not bare-confirm resumables: their drivers live in
+ *   `tryClarificationResume` (label answer / driver answer), not here.
+ *   In this module those kinds appear in `candidates` and fall through
+ *   to the LLM (matched=false, skip_reason='kind_not_yet_resumable') —
+ *   never silently misfired.
  *
  * Negative gate: messages containing edit verbs or numeric quantities
  * are NOT short-confirmations. They might be value updates instead and
@@ -200,12 +201,11 @@ export interface TryShortConfirmResumeInput {
  *                                TurnExecutor before dispatch.
  *
  * The remaining kinds (`set_factor_value`, `edit_graph_add_risk`) are
- * persisted but resume requires either a follow-up driver/parameter
- * or a label-match pre-route that disambiguates between candidates of
- * the same kind (e.g. user types "Engineering Budget" alone after a
- * multi-candidate clarify). That pre-route is the bounded follow-up
- * for full clarification continuity; until it lands those kinds are
- * deliberately excluded from the bare-confirm resumer.
+ * persisted but resume requires a follow-up driver/parameter or a
+ * label match — that continuity lives in `tryClarificationResume`
+ * (the label-answer pre-route for set_factor_value; the F-HELD 4b
+ * driver-answer pre-route for edit_graph_add_risk), so those kinds
+ * stay deliberately excluded from the bare-confirm resumer.
  *
  * `proposed_concept` is ALSO excluded here. It IS confirmation-expecting
  * (it flips `pending_confirmation` — Track 2's
@@ -316,24 +316,38 @@ export function tryShortConfirmResume(
     // TurnExecutor. Fall through to the LLM rather than misfire.
     return { matched: false, skip_reason: 'kind_not_yet_resumable' };
   }
-  // V5 P0.2 — DELIBERATE behaviour change (replaces the prior
-  // `recovery_ambiguous` clarification round-trip): when multiple live
-  // resumable pendings coexist, the MOST RECENTLY EMITTED relevant pending
-  // wins, so "do it" / "make that update" resumes the latest offer without
-  // a clarification detour. Expired pendings are already filtered out above
-  // (so an expired-newer never wins). Ordinal pointers ("the first one")
-  // are still resolved by index in the pre-resolve block above, and the
-  // turn-executor echoes the chosen proposal's label ("Applying: …") so a
-  // wrong-target resume stays visible. Graph-hash divergence, idempotency
-  // and stale-proposal recovery remain enforced downstream by
+  // F-HELD CONSENT-PRIORITY (wire finding 2026-07-11; orchestrator ruling —
+  // consent-first, orchestrator-default pending Paul ratification): a bare
+  // confirm answers the live CONSENT-EXPECTING pending, not the newest chip
+  // suggestion. Wire captures 13c→14c showed "yes" binding to a
+  // freshly-minted run_analysis offer while a GM hold (apply_proposed_change)
+  // was still live — the held change was never applied. Class priority is
+  // therefore: live `apply_proposed_change` (a proposal awaiting the user's
+  // explicit accept/decline) outranks the chip-suggestion kinds
+  // (`run_analysis` / `what_would_flip`) REGARDLESS of emit recency.
+  // Liveness still comes first — an expired hold never outranks anything
+  // (the expiry split above already removed it).
+  const consentExpecting = resumable.filter(
+    (pa) => pa.action.kind === 'apply_proposed_change',
+  );
+  const pickPool = consentExpecting.length > 0 ? consentExpecting : resumable;
+
+  // V5 P0.2 — most-recent-wins is retained WITHIN the picked class: when
+  // multiple live pendings of the winning class coexist, the MOST RECENTLY
+  // EMITTED one wins, so "do it" / "make that update" resumes the latest
+  // offer without a clarification detour. Ordinal pointers ("the first
+  // one") are still resolved by index in the pre-resolve block above, and
+  // the turn-executor echoes the chosen proposal's label ("Applying: …")
+  // so a wrong-target resume stays visible. Graph-hash divergence,
+  // idempotency and stale-proposal recovery remain enforced downstream by
   // `decideProposedChangeSynthesis` before any mutation is applied.
   // Tie-break: equal `emitted_at_iso` resolves to the first in input
   // order (Array.prototype.sort is stable) — deterministic, and the
   // read side already places the freshest proposal first.
   const pending =
-    resumable.length === 1
-      ? resumable[0]!
-      : [...resumable].sort((a, b) => emittedAtMs(b) - emittedAtMs(a))[0]!;
+    pickPool.length === 1
+      ? pickPool[0]!
+      : [...pickPool].sort((a, b) => emittedAtMs(b) - emittedAtMs(a))[0]!;
 
   // Freshness precondition for what_would_flip: if analysis is missing
   // or stale, do not resume. The whole point of "what would flip" is

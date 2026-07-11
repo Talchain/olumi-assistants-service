@@ -419,3 +419,235 @@ describe('commitDirectAnswer — persist-site intercept repair (Track S 0.13c-4)
     expect((dirtyGraph.nodes[0] as Record<string, unknown>).intercept).toBe(0.5); // input untouched
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-HELD (wire finding 2026-07-11) — held-consent lifecycle at the commit seam.
+// Fix 2b: a confirmation-expecting pending that turn-TTL-drops at commit gets
+// ONE deterministic lapse sentence on the response being committed (previously
+// a silent drop). Fix 3a: while a confirmation-expecting pending is live,
+// competing run_analysis SUGGESTION chips are not minted (recovery chips with
+// dedicated ids are never touched).
+// ---------------------------------------------------------------------------
+
+describe('F-HELD — held-consent lifecycle at the commit seam', () => {
+  function makeSpyStore(): {
+    readonly store: SessionStore;
+    readonly appendCalls: Array<SessionTurnWrite>;
+  } {
+    const appendCalls: Array<SessionTurnWrite> = [];
+    const noop = createNoopSessionStore({ appendId: 'row-fheld' });
+    const spy = vi.spyOn(noop, 'append').mockImplementation(async (write) => {
+      appendCalls.push(write);
+      return { id: 'row-fheld' };
+    });
+    void spy;
+    return { store: noop, appendCalls };
+  }
+
+  function holdPending(overrides: {
+    ref?: string;
+    turnCount?: number;
+    label?: string;
+  } = {}): PendingAction {
+    const ref = overrides.ref ?? 'gmh_fheld0000001';
+    return {
+      id: `pa-${ref}`,
+      scenario_id: META.scenario_id,
+      chip_id: ref,
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: ref,
+        inline_patch: {
+          handler_id: 'graph_management_held_v1',
+          params: {},
+          target_entity_ids: [],
+        },
+        public_label: overrides.label ?? 'Continue with this change',
+        public_message: 'Yes',
+      },
+      preconditions: { graph_hash: 'hash_fheld' },
+      expires_at_turn_count: overrides.turnCount ?? 4,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-07-11T00:00:00.000Z',
+    };
+  }
+
+  function runAnalysisChipPending(turnCount: number): PendingAction {
+    return {
+      id: 'pa-ra-prior',
+      scenario_id: META.scenario_id,
+      chip_id: 'chip_action_rerun_analysis',
+      action: { kind: 'run_analysis' },
+      preconditions: {},
+      expires_at_turn_count: turnCount,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-07-11T00:00:00.000Z',
+    };
+  }
+
+  const RERUN_SUGGESTION_CHIP: SuggestedAction = {
+    id: 'chip_action_rerun_analysis',
+    label: 'Re-run analysis',
+    message: 'Re-run the analysis.',
+    action_type: 'run_analysis',
+  };
+  const RECOVERY_RETRY_CHIP: SuggestedAction = {
+    id: 'chip_action_run_analysis_retry',
+    label: 'Re-run analysis',
+    message: 'Run the analysis',
+    action_type: 'run_analysis',
+  };
+  const PROMPT_CHIP: SuggestedAction = {
+    id: 'chip_prompt_explore',
+    label: 'What could change the outcome?',
+    message: 'What could change the outcome of this analysis?',
+  };
+
+  describe('fix 2b — honest lapse notice on turn-TTL drop', () => {
+    it('appends the deterministic lapse sentence (wire + durable copy) when a hold turn-TTL-drops at commit', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'Here is what I can tell you about the model.',
+        stage: 'frame',
+      });
+      const { store, appendCalls } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, priorPendingActions: [holdPending({ turnCount: 1 })] },
+        store,
+      );
+      expect(result.response.assistant_text).toContain(
+        "The held change 'Continue with this change' has lapsed",
+      );
+      expect(result.response.assistant_text).toContain(
+        'say the word if you still want it',
+      );
+      // The original answer is preserved, notice appended after it.
+      expect(result.response.assistant_text.startsWith('Here is what I can tell you')).toBe(true);
+      // Durable copy carries the same sentence (stored == wire).
+      expect(appendCalls[0]!.assistantMessage).toContain('has lapsed');
+      // The lapsed hold did not persist.
+      expect(appendCalls[0]!.pending_actions ?? []).toHaveLength(0);
+      expect(result.pendingLifecycle.expiredTurnsCount).toBe(1);
+    });
+
+    it('emits NO notice while the hold still survives (turn-TTL 4 → 3)', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'Still thinking about your question.',
+        stage: 'frame',
+      });
+      const { store, appendCalls } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, priorPendingActions: [holdPending({ turnCount: 4 })] },
+        store,
+      );
+      expect(result.response.assistant_text).not.toContain('has lapsed');
+      expect((appendCalls[0]!.pending_actions ?? []).map((p) => p.chip_id)).toEqual([
+        'gmh_fheld0000001',
+      ]);
+    });
+
+    it('emits NO notice for a lapsing run_analysis chip pending (suggestion lapse is not a consent lapse)', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'Answer.',
+        stage: 'frame',
+      });
+      const { store } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, priorPendingActions: [runAnalysisChipPending(1)] },
+        store,
+      );
+      expect(result.response.assistant_text).not.toContain('has lapsed');
+    });
+
+    it('emits NO notice when the hold was consumed this turn (applied is not lapsed)', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'Applied.',
+        stage: 'frame',
+      });
+      const { store } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        {
+          ...META,
+          priorPendingActions: [holdPending({ turnCount: 1 })],
+          consumedPendingRefs: ['gmh_fheld0000001'],
+        },
+        store,
+      );
+      expect(result.response.assistant_text).not.toContain('has lapsed');
+    });
+  });
+
+  describe("fix 3a — steer-don't-bind: competing run_analysis suggestion chips", () => {
+    it('drops the run_analysis SUGGESTION chip and its would-be pending while a hold is live', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'No analysis has been run on your model yet.',
+        stage: 'frame',
+        suggested_actions: [RERUN_SUGGESTION_CHIP, PROMPT_CHIP],
+      });
+      const { store, appendCalls } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, priorPendingActions: [holdPending({ turnCount: 4 })] },
+        store,
+      );
+      // The competing consent offer is not rendered…
+      expect((result.response.suggested_actions ?? []).map((c) => c.id)).toEqual([
+        'chip_prompt_explore',
+      ]);
+      // …and not persisted as a resumable pending; the hold carries forward.
+      const persistedKinds = (appendCalls[0]!.pending_actions ?? []).map(
+        (p) => p.action.kind,
+      );
+      expect(persistedKinds).toEqual(['apply_proposed_change']);
+    });
+
+    it('NEVER suppresses recovery chips (dedicated ids), even while a hold is live', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'That analysis attempt failed.',
+        stage: 'frame',
+        suggested_actions: [RECOVERY_RETRY_CHIP],
+      });
+      const { store } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, priorPendingActions: [holdPending({ turnCount: 4 })] },
+        store,
+      );
+      expect((result.response.suggested_actions ?? []).map((c) => c.id)).toEqual([
+        'chip_action_run_analysis_retry',
+      ]);
+    });
+
+    it('no live hold → the response object is returned unchanged (byte-identical fast path)', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'Answer.',
+        stage: 'frame',
+        suggested_actions: [RERUN_SUGGESTION_CHIP],
+      });
+      const { store } = makeSpyStore();
+      const result = await commitDirectAnswer(composed, META, store);
+      expect(result.response).toBe(composed);
+    });
+
+    it('a hold that lapses THIS commit does not suppress (chips return as the hold dies) and the notice still fires', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'Answer.',
+        stage: 'frame',
+        suggested_actions: [RERUN_SUGGESTION_CHIP],
+      });
+      const { store } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, priorPendingActions: [holdPending({ turnCount: 1 })] },
+        store,
+      );
+      expect((result.response.suggested_actions ?? []).map((c) => c.id)).toEqual([
+        'chip_action_rerun_analysis',
+      ]);
+      expect(result.response.assistant_text).toContain('has lapsed');
+    });
+  });
+});

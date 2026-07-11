@@ -141,6 +141,7 @@ import {
 } from './compose/proposed-change.js';
 import {
   derivePendingActivity,
+  filterLivePendingActions,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
@@ -982,8 +983,40 @@ export async function runTurnExecutor(
       usable_for_chips: pack.usable_for_chips,
       blocked: pack.blocked,
     });
+    // F-HELD fix 3b — thread the live hold (if any) into the degrade so a
+    // state-unsafe degrade RESTATES the held offer + its confirm chip instead
+    // of stomping the reply with buildAnalysisAbsentTemplate + a competing
+    // run_analysis chip (wire capture 13c). The hold is the most recently
+    // emitted LIVE apply_proposed_change among the prior turn's pendings —
+    // the same single-prior-turn authority every other pending consumer in
+    // this file reads — and only the standard variant with persisted public
+    // copy qualifies (a legacy no-copy hold degrades exactly as before).
+    const liveHolds = filterLivePendingActions(
+      context.most_recent_pending_actions ?? [],
+      Date.now(),
+    ).filter((pa) => pa.action.kind === 'apply_proposed_change');
+    const newestHold =
+      liveHolds.length === 0
+        ? undefined
+        : [...liveHolds].sort(
+            (a, b) => Date.parse(b.emitted_at_iso) - Date.parse(a.emitted_at_iso),
+          )[0];
+    const holdForDegrade =
+      newestHold !== undefined &&
+      newestHold.action.kind === 'apply_proposed_change' &&
+      typeof newestHold.action.public_label === 'string' &&
+      newestHold.action.public_label.length > 0 &&
+      typeof newestHold.action.public_message === 'string' &&
+      newestHold.action.public_message.length > 0
+        ? {
+            chip_id: newestHold.chip_id,
+            label: newestHold.action.public_label,
+            message: newestHold.action.public_message,
+          }
+        : undefined;
     const degrade = buildCoachingDegradeResponse(pack, {
       optionCount: contextPackForLog?.graph.counts.options ?? 0,
+      ...(holdForDegrade !== undefined ? { liveHold: holdForDegrade } : {}),
     });
     return {
       assistant_text: degrade.assistant_text,
@@ -2913,6 +2946,93 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           consumedPendingAction = pending;
         }
+      } else if (
+        clarificationDispatch.matched &&
+        clarificationDispatch.dispatch === 'edit_graph_add_risk'
+      ) {
+        // F-HELD fix 4b (A-variant) — deterministic continuation for the
+        // add-risk driver answer (wire 04c→10c: previously dropped to the
+        // LLM, which coached instead of continuing the add). No V5 add
+        // handler exists (the deterministic add path lives in legacy
+        // handleEditGraph behind the route-level edit dispatch), so the
+        // resume acknowledges risk + driver and offers an EXECUTABLE replay
+        // chip whose compound message routes to the edit pipeline on click
+        // (edit verb present; deliberately NOT end-anchored on "as a risk",
+        // so the bare add-risk clarify classifier cannot re-claim it). The
+        // answered clarify pending is consumed — its question has been
+        // answered; the continuation now rides the chip.
+        const pending = clarificationDispatch.pending;
+        emit(TelemetryEvents.PendingActionMatched, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          pending_action_id: pending.id,
+          kind: 'edit_graph_add_risk',
+          chip_id: pending.chip_id,
+          candidate_count: 1,
+        });
+        const riskLabel = clarificationDispatch.riskLabel;
+        const driverLabel = clarificationDispatch.driverLabel;
+        const addRiskResumeResponse = composeDirectAnswerResponse({
+          // Deterministic copy family: mirrors the swept GM held wording
+          // ("Nothing in the model moves until you confirm") — no success
+          // claim, no denial phrase, no internal tokens, no em dash.
+          assistant_text:
+            `Got it: I can add ${riskLabel} as a risk with ${driverLabel} as its main driver. ` +
+            'Nothing in the model moves until you confirm. Use the suggestion below to add it, ' +
+            'or tell me what to adjust instead.',
+          stage: context.stage,
+          suggested_actions: [
+            {
+              id: 'chip_add_risk_apply',
+              label: 'Add it to the model',
+              message: `Add ${riskLabel} as a risk, with ${driverLabel} as its main driver.`,
+            },
+          ],
+        });
+        sonnetTextForLog = addRiskResumeResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitTurn(addRiskResumeResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            // The driver question has been ANSWERED — consume the clarify
+            // pending so it cannot zombie into a second resume.
+            consumedPendingRefs: [pending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'add_risk_driver_resume',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on add-risk driver resume',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
       } else if (clarificationDispatch.matched) {
         // Focused recovery dispatches — the resumer claimed the turn
         // but the persisted clarification is no longer applicable

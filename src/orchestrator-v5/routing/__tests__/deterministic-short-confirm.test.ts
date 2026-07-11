@@ -338,3 +338,143 @@ describe('tryShortConfirmResume — dispatch', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-HELD consent-priority (2026-07-11 wire finding; orchestrator ruling:
+// consent-first, orchestrator-default pending Paul ratification). A bare
+// confirm answers the live CONSENT-EXPECTING pending (apply_proposed_change),
+// not the newest chip suggestion — wire captures 13c→14c show "yes" binding
+// to a freshly-minted run_analysis offer while a GM hold was still live, so
+// the held factor was never applied.
+// ---------------------------------------------------------------------------
+
+describe('tryShortConfirmResume — F-HELD consent-priority', () => {
+  function makeHoldPending(overrides: Partial<PendingAction> = {}): PendingAction {
+    return {
+      id: 'pa-hold-1',
+      scenario_id: SCENARIO_ID,
+      chip_id: 'gmh_abcdef123456',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'gmh_abcdef123456',
+        inline_patch: {
+          handler_id: 'graph_management_held_v1',
+          params: {},
+          target_entity_ids: [],
+        },
+        public_label: 'Continue with this change',
+        public_message: 'Yes',
+      },
+      preconditions: { graph_hash: 'hash_a' },
+      expires_at_turn_count: 4,
+      expires_at_iso: '2026-05-05T12:10:00.000Z', // 10 min after NOW_MS
+      emitted_at_iso: '2026-05-05T11:58:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('bare "yes" resumes the LIVE HOLD even when a NEWER run_analysis chip pending is live (wire 13c→14c shape)', () => {
+    const hold = makeHoldPending();
+    const newerChip = makeRunAnalysisPending({
+      id: 'pa-ra-newer',
+      chip_id: 'chip_action_rerun_analysis',
+      emitted_at_iso: '2026-05-05T11:59:30.000Z', // newer than the hold
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [newerChip, hold],
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-hold-1');
+      expect(r.pending.action.kind).toBe('apply_proposed_change');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('consent-priority is order-independent (hold listed first)', () => {
+    const hold = makeHoldPending();
+    const newerChip = makeRunAnalysisPending({
+      id: 'pa-ra-newer',
+      chip_id: 'chip_action_rerun_analysis',
+      emitted_at_iso: '2026-05-05T11:59:30.000Z',
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [hold, newerChip],
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-hold-1');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('most-recent-wins is retained WITHIN the consent-expecting kind (two live holds → newest hold)', () => {
+    const olderHold = makeHoldPending({
+      id: 'pa-hold-old',
+      chip_id: 'gmh_older0000001',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'gmh_older0000001',
+        inline_patch: { handler_id: 'graph_management_held_v1', params: {}, target_entity_ids: [] },
+        public_label: 'Continue with this change',
+        public_message: 'Yes',
+      },
+      emitted_at_iso: '2026-05-05T11:57:00.000Z',
+    });
+    const newerHold = makeHoldPending({
+      id: 'pa-hold-new',
+      chip_id: 'gmh_newer0000001',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'gmh_newer0000001',
+        inline_patch: { handler_id: 'graph_management_held_v1', params: {}, target_entity_ids: [] },
+        public_label: 'Continue with this change',
+        public_message: 'Yes',
+      },
+      emitted_at_iso: '2026-05-05T11:59:00.000Z',
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [olderHold, newerHold],
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-hold-new');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('an EXPIRED hold does not outrank a live chip suggestion (liveness first, then class)', () => {
+    const expiredHold = makeHoldPending({
+      expires_at_iso: '2026-05-05T11:50:00.000Z', // wall-expired at NOW_MS
+    });
+    const liveChip = makeRunAnalysisPending({
+      id: 'pa-ra-live',
+      emitted_at_iso: '2026-05-05T11:59:30.000Z',
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [expiredHold, liveChip],
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-ra-live');
+      expect(r.pending.action.kind).toBe('run_analysis');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+});

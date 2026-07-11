@@ -561,3 +561,63 @@ describe('buildCoachingDegradeResponse — verdict-correct safe copy', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-HELD fix 3b (wire capture 13c is the RED fixture): while a GM hold is
+// live, the state-unsafe degrade previously stomped the reply with
+// buildAnalysisAbsentTemplate + a competing run_analysis chip — hijacking the
+// consent flow ("yes" then bound to the fresh rerun offer, 14c). With a live
+// hold the degrade must restate the held offer + its confirm chip instead.
+// ---------------------------------------------------------------------------
+
+describe('buildCoachingDegradeResponse — held-aware degrade (F-HELD 3b)', () => {
+  const LIVE_HOLD = {
+    chip_id: 'gmh_13cfixture01',
+    label: 'Continue with this change',
+    message: 'Yes',
+  } as const;
+
+  it('13c shape: state-unsafe (none) + live hold → held-aware template + the hold confirm chip, NOT the absent template, NO rerun chip', () => {
+    const r = buildCoachingDegradeResponse(NONE, { optionCount: 3, liveHold: LIVE_HOLD });
+    expect(r.assistant_text).not.toBe(buildAnalysisAbsentTemplate(3, undefined));
+    expect(r.assistant_text.toLowerCase()).toContain('holding');
+    expect(r.assistant_text.toLowerCase()).toContain('confirm');
+    expect(r.suggested_actions).toHaveLength(1);
+    expect(r.suggested_actions[0]!.id).toBe('gmh_13cfixture01');
+    expect(r.suggested_actions[0]!.label).toBe('Continue with this change');
+    expect(r.suggested_actions[0]!.message).toBe('Yes');
+    // No competing run_analysis offer minted by the degrade.
+    expect(
+      r.suggested_actions.some(
+        (c) => (c as { action_type?: string }).action_type === 'run_analysis',
+      ),
+    ).toBe(false);
+  });
+
+  it('every state-unsafe branch (stale / unknown / blocked) is held-aware when a hold is live', () => {
+    for (const p of [STALE, UNKNOWN, BLOCKED]) {
+      const r = buildCoachingDegradeResponse(p, { liveHold: LIVE_HOLD });
+      expect(r.assistant_text.toLowerCase()).toContain('holding');
+      expect(r.suggested_actions[0]!.id).toBe('gmh_13cfixture01');
+    }
+  });
+
+  it('fresh + usable state stays NEUTRAL even when a hold is live (the analysis is fine; only the prose was unsafe)', () => {
+    const r = buildCoachingDegradeResponse(FRESH, { liveHold: LIVE_HOLD });
+    expect(r.assistant_text).toBe(NEUTRAL_DEGRADE_TEXT);
+    expect(r.suggested_actions).toHaveLength(0);
+  });
+
+  it('no live hold → behaviour unchanged (absent template + rerun chip)', () => {
+    const r = buildCoachingDegradeResponse(NONE, { optionCount: 3 });
+    expect(r.assistant_text).toBe(buildAnalysisAbsentTemplate(3, undefined));
+    expect(r.suggested_actions[0]!.id).toBe('chip_action_rerun_analysis');
+  });
+
+  it('held-aware copy never narrates a value, hash, option label or internal token', () => {
+    const r = buildCoachingDegradeResponse(NONE, { liveHold: LIVE_HOLD });
+    expect(r.assistant_text).not.toMatch(/[£$€]/);
+    expect(r.assistant_text).not.toMatch(/\b[0-9a-f]{12,}\b/i);
+    expect(r.assistant_text).not.toMatch(/apply_proposed_change|graph_hash|pending/i);
+  });
+});

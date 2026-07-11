@@ -60,7 +60,6 @@ import type {
   RefereeVerdict,
 } from '../graph-management/types.js';
 import {
-  PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
 } from '../session/pending-action.js';
@@ -131,6 +130,21 @@ export const GM_HELD_APPLY_WIRING_DECLINE = 'decline_with_clarify_v0';
  * this bound is generous.
  */
 export const GM_HELD_OPERATIONS_MAX_JSON_CHARS = 16_000;
+
+/**
+ * F-HELD fix 2a (wire finding 2026-07-11) — GM holds get their OWN turn-TTL,
+ * longer than the chip-suggestion default (`PENDING_ACTION_DEFAULT_TURN_TTL`
+ * = 2). A hold is an explicit consent question, not a disposable suggestion:
+ * with the 2-turn default, one clarify detour plus one answer turn killed the
+ * hold before the user could get back to it (scenario-A wire variant: the
+ * clarify was answered after 2 intervening turns and the held factor was
+ * never applied). Four turns gives a short detour room to resolve while the
+ * wall-clock TTL (`PENDING_ACTION_DEFAULT_WALL_TTL_MS`, unchanged) still
+ * bounds total lifetime. When the hold DOES lapse, the commit carry-forward
+ * now surfaces an honest lapse notice (see commit.ts, F-HELD fix 2b) instead
+ * of dropping it silently.
+ */
+export const GM_HELD_PENDING_TURN_TTL = 4;
 
 export interface EditGmDecision {
   readonly governing: EditGmGoverningVerdict;
@@ -366,7 +380,9 @@ function buildHeldPending(
       public_message: GM_HELD_CHIP_MESSAGE,
     },
     preconditions: { graph_hash: input.currentGraphHash },
-    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+    // F-HELD fix 2a: GM-hold-specific turn budget (4), NOT the chip default
+    // (2) — see the GM_HELD_PENDING_TURN_TTL doc above.
+    expires_at_turn_count: GM_HELD_PENDING_TURN_TTL,
     expires_at_iso: new Date(
       Date.parse(nowIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
     ).toISOString(),

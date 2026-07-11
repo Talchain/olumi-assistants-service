@@ -30,11 +30,18 @@
  *   - all candidate factors have been removed from the live graph
  *   - the reply matches multiple candidates (re-clarify with chips)
  *
- * `edit_graph_add_risk` continuity is a planned follow-up and is
- * NOT handled here. The shape it needs is different (the user's
- * reply is a DRIVER factor, not the target risk label) and the
- * deterministic add path lives in legacy `handleEditGraph` rather
- * than the V5 handler registry.
+ * `edit_graph_add_risk` continuity (F-HELD fix 4b, A-variant): the
+ * add-risk clarify ("What factor drives it most?") persists an
+ * `edit_graph_add_risk` pending (emitted by edit-graph-dispatch's
+ * clarify branch), and this module claims the DRIVER answer — either
+ * an answer-shaped reply ("Team size drives it most.") or a bare
+ * factor label — against that pending, with the same liveness + hash
+ * gates as set_factor_value. The deterministic add path still lives
+ * in legacy `handleEditGraph` (no V5 add handler exists), so the
+ * dispatch is a deterministic continuation in TurnExecutor: an
+ * acknowledgement restating risk + driver plus an EXECUTABLE replay
+ * chip whose compound message routes to the edit pipeline. The
+ * answered pending is consumed by that turn's commit.
  */
 
 import type { GraphLookup } from './validator.js';
@@ -133,6 +140,28 @@ export type ClarificationResumeDispatch =
         readonly pending: PendingAction;
         readonly factorLabel: string;
       }>;
+    }
+  | {
+      /**
+       * F-HELD fix 4b — the add-risk driver answer was claimed. The caller
+       * (TurnExecutor) composes the deterministic continuation:
+       * acknowledgement + executable replay chip, consuming `pending`.
+       */
+      readonly matched: true;
+      readonly dispatch: 'edit_graph_add_risk';
+      readonly pending: PendingAction;
+      /** The risk label the clarify was about (persisted on the pending). */
+      readonly riskLabel: string;
+      /**
+       * The driver named in the reply — the GRAPH label when it resolved to
+       * an existing factor, else the user's own phrase (a new-concept
+       * driver; the clarify's own examples routinely suggest factors that
+       * do not exist yet).
+       */
+      readonly driverLabel: string;
+      /** Resolved factor id, or null for a new-concept driver. */
+      readonly driverFactorId: string | null;
+      readonly matchKind: 'exact' | 'substring' | 'fuzzy' | 'answer_shape';
     };
 
 export interface TryClarificationResumeInput {
@@ -168,7 +197,10 @@ const FUZZY_DICE_FLOOR = 0.5;
  * emitted by `compose/proposed-change.ts::emitProposedChange` and
  * resumed via the deterministic short-confirm path, with hash
  * divergence enforced by `decideProposedChangeSynthesis` before
- * dispatch. `edit_graph_add_risk` remains reserved-but-not-emitted.
+ * dispatch. `edit_graph_add_risk` is emitted by the add-risk clarify
+ * branch in edit-graph-dispatch (F-HELD fix 4a) and resumed by this
+ * module's driver-answer branch; the `mutating` classification below
+ * is what makes its hash gate fail closed.
  * Classifying both as `mutating` means the divergence guard fires
  * by default rather than slipping through the non-mutating branch.
  *
@@ -252,6 +284,156 @@ function graphHashConflicts(
   return persisted !== currentGraphHash;
 }
 
+/** Emit timestamp in ms for most-recent-wins ordering; malformed → oldest. */
+function emittedAtMs(pa: PendingAction): number {
+  const ms = Date.parse(pa.emitted_at_iso);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * F-HELD fix 4b — driver-answer shapes for the add-risk clarify question
+ * ("What factor drives it most — for example team size, hiring pace, or
+ * onboarding complexity?"). All anchored ^…$ with optional trailing
+ * punctuation, capturing the driver phrase. Kept deliberately narrow: the
+ * scaffold ("… drives it most") is the strong evidence the reply is
+ * answering OUR question, which is what licenses claiming a driver that is
+ * not (yet) a factor in the graph.
+ */
+const DRIVER_ANSWER_SCAFFOLDS: readonly RegExp[] = [
+  // "Team size drives it most." / "Team size affects it the most"
+  /^\s*(.+?)\s+(?:drives|affects|influences|impacts)\s+(?:it|this|that)(?:\s+(?:the\s+)?most)?\s*[.!?]*\s*$/i,
+  // "Mostly team size." / "Mainly hiring pace"
+  /^\s*(?:mostly|mainly|primarily|probably)\s+(.+?)\s*[.!?]*\s*$/i,
+  // "It's mostly team size." / "It is mainly hiring pace"
+  /^\s*it(?:['’]s|\s+is)\s+(?:mostly|mainly|primarily)\s+(.+?)\s*[.!?]*\s*$/i,
+  // "Team size is the main driver." / "Hiring pace would be the biggest factor"
+  /^\s*(.+?)\s+(?:is|would\s+be)\s+the\s+(?:main|biggest|primary|key|strongest)\s+(?:driver|factor)\s*[.!?]*\s*$/i,
+];
+
+/** Bounded driver phrase: non-empty, ≤ 80 chars, not a bare pronoun. */
+function normaliseDriverCandidate(raw: string): string | null {
+  const candidate = raw.trim().replace(/\s+/g, ' ');
+  if (candidate.length < 2 || candidate.length > 80) return null;
+  if (/^(?:it|its|it['’]s|this|that|these|those|they|them|one)$/i.test(candidate)) return null;
+  return candidate;
+}
+
+function extractDriverCandidate(
+  message: string,
+): { readonly candidate: string; readonly viaScaffold: boolean } | null {
+  for (const re of DRIVER_ANSWER_SCAFFOLDS) {
+    const m = re.exec(message);
+    if (m !== null) {
+      const candidate = normaliseDriverCandidate(m[1]!);
+      if (candidate !== null) return { candidate, viaScaffold: true };
+    }
+  }
+  // Bare-label reply (terse answer / chip echo): the whole message is the
+  // candidate. Only ever claimed when it actually matches a graph factor.
+  const bare = normaliseDriverCandidate(message);
+  return bare !== null ? { candidate: bare, viaScaffold: false } : null;
+}
+
+/**
+ * Resolve the driver phrase against the live graph's FACTOR labels. Same
+ * exact → substring → fuzzy ladder as the set_factor_value flow; a match is
+ * returned only when it is UNIQUE at its tier (an ambiguous driver falls back
+ * to the scaffold path — the edit pipeline disambiguates with full context).
+ */
+function matchDriverToFactors(
+  candidate: string,
+  graphLookup: GraphLookup | undefined,
+): { readonly id: string; readonly label: string; readonly matchKind: 'exact' | 'substring' | 'fuzzy' } | null {
+  if (graphLookup === undefined) return null;
+  const norm = candidate.toLowerCase();
+  // The lookup vocabulary collapses factor/outcome/decision/risk/action into
+  // the generic 'node' bucket (see graph-lookup-adapter.ts toEntityKind), so
+  // this matches against all generic node labels — a uniqueness-gated label
+  // match over that set is the closest available "factor label" resolution.
+  const factors = graphLookup
+    .listEntitiesByKind('node')
+    .filter((f): f is { id: string; label: string } => typeof f.label === 'string' && f.label.trim().length > 0);
+  const exact = factors.filter((f) => f.label.trim().toLowerCase() === norm);
+  if (exact.length === 1) return { id: exact[0]!.id, label: exact[0]!.label, matchKind: 'exact' };
+  if (exact.length > 1) return null;
+  const substring = factors.filter((f) => {
+    const normLabel = f.label.trim().toLowerCase();
+    return norm.includes(normLabel) || normLabel.includes(norm);
+  });
+  if (substring.length === 1) {
+    return { id: substring[0]!.id, label: substring[0]!.label, matchKind: 'substring' };
+  }
+  if (substring.length > 1) return null;
+  let best: { id: string; label: string; score: number } | null = null;
+  let bestIsUnique = true;
+  for (const f of factors) {
+    const score = bigramDice(norm, f.label.trim().toLowerCase());
+    if (score < FUZZY_DICE_FLOOR) continue;
+    if (best === null || score > best.score) {
+      best = { id: f.id, label: f.label, score };
+      bestIsUnique = true;
+    } else if (score === best.score) {
+      bestIsUnique = false;
+    }
+  }
+  return best !== null && bestIsUnique
+    ? { id: best.id, label: best.label, matchKind: 'fuzzy' }
+    : null;
+}
+
+/**
+ * F-HELD fix 4b — the add-risk driver-answer branch. Mirrors the
+ * set_factor_value house style (kind gate → liveness → hash gate → match),
+ * with ONE deliberate asymmetry: the answer-shape/label test runs FIRST, so
+ * an arbitrary free-text reply is never claimed by an expiry/divergence
+ * recovery. (The set_factor clarify expects any reply; the add-risk clarify's
+ * answer either carries the scaffold or names a factor.)
+ */
+function tryAddRiskDriverResume(
+  input: TryClarificationResumeInput,
+  addRiskPendings: readonly PendingAction[],
+): ClarificationResumeDispatch {
+  const extraction = extractDriverCandidate(input.message);
+  if (extraction === null) {
+    return { matched: false, skip_reason: 'no_label_match' };
+  }
+  const match = matchDriverToFactors(extraction.candidate, input.graphLookup);
+  if (match === null && !extraction.viaScaffold) {
+    return { matched: false, skip_reason: 'no_label_match' };
+  }
+
+  const live = filterLivePendingActions(addRiskPendings, input.nowMs);
+  if (live.length === 0) {
+    return {
+      matched: true,
+      dispatch: 'recovery_expired',
+      expired_count: addRiskPendings.length,
+    };
+  }
+  const hashSafe = live.filter(
+    (pa) => !graphHashConflicts(pa, input.currentGraphHash),
+  );
+  if (hashSafe.length === 0) {
+    return { matched: true, dispatch: 'recovery_graph_changed' };
+  }
+  // Newest wins (single-slot in practice — each clarify emit supersedes by
+  // key at commit; distinct labels can briefly coexist, freshest question first).
+  const pending = [...hashSafe].sort((a, b) => emittedAtMs(b) - emittedAtMs(a))[0]!;
+  const action = pending.action;
+  if (action.kind !== 'edit_graph_add_risk') {
+    return { matched: false, skip_reason: 'no_pending_clarification' };
+  }
+  return {
+    matched: true,
+    dispatch: 'edit_graph_add_risk',
+    pending,
+    riskLabel: action.label,
+    driverLabel: match?.label ?? extraction.candidate,
+    driverFactorId: match?.id ?? null,
+    matchKind: match?.matchKind ?? 'answer_shape',
+  };
+}
+
 export function tryClarificationResume(
   input: TryClarificationResumeInput,
 ): ClarificationResumeDispatch {
@@ -269,7 +451,18 @@ export function tryClarificationResume(
   const setFactorPendings = input.pendingActions.filter(
     (p) => p.action.kind === 'set_factor_value',
   );
+  // F-HELD fix 4b — the add-risk driver-answer branch. Runs only when NO
+  // set_factor_value clarification is pending: the two clarify kinds are not
+  // co-emitted in practice, and if they ever coexist the value-update
+  // clarify (an already-DECIDED change awaiting only its target) keeps its
+  // existing precedence.
   if (setFactorPendings.length === 0) {
+    const addRiskPendings = input.pendingActions.filter(
+      (p) => p.action.kind === 'edit_graph_add_risk',
+    );
+    if (addRiskPendings.length > 0) {
+      return tryAddRiskDriverResume(input, addRiskPendings);
+    }
     return { matched: false, skip_reason: 'no_pending_clarification' };
   }
 

@@ -340,3 +340,101 @@ describe('Wave 5E — clarification-resume route-level', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-HELD fix 4b (A-variant) — route-level driver-answer resume for
+// edit_graph_add_risk. Wire shape 04c→10c: the add-risk clarify asked
+// "What factor drives it most?" and the reply was dropped to the LLM, which
+// coached instead of continuing the add. The resumer must claim the reply,
+// acknowledge deterministically (no LLM call), consume the answered pending,
+// and offer an EXECUTABLE follow-up chip whose replay message routes to the
+// edit pipeline.
+// ---------------------------------------------------------------------------
+
+describe('F-HELD 4b — add-risk driver-answer resume route-level', () => {
+  const ADD_RISK_GRAPH = {
+    nodes: [
+      ...FACTOR_GRAPH.nodes,
+      { id: 'f_team_size', kind: 'factor', label: 'Team size' },
+    ],
+    edges: FACTOR_GRAPH.edges,
+  };
+  const ADD_RISK_GRAPH_HASH = computeAnalysisAffectingGraphHash(
+    ADD_RISK_GRAPH as never,
+  );
+
+  function makeAddRiskPending(): PendingAction {
+    return {
+      id: `pa-add-risk-${randomUUID()}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: 'chip_add_risk_clarify',
+      action: {
+        kind: 'edit_graph_add_risk',
+        label: 'client concentration',
+      },
+      preconditions: {
+        ...(ADD_RISK_GRAPH_HASH != null
+          ? { graph_hash: ADD_RISK_GRAPH_HASH }
+          : {}),
+      },
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-05-05T00:00:00.000Z',
+    };
+  }
+
+  beforeEach(() => {
+    appendCalls.length = 0;
+    mockedPendingActions = [makeAddRiskPending()];
+  });
+
+  it('wire 10c shape: the driver answer is claimed deterministically — no LLM call, ack + executable chip, pending consumed', async () => {
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      payload('Team size drives it most.'),
+      'req-add-risk-driver-resume',
+      {
+        routingAdapter: adapter,
+        graphState: ADD_RISK_GRAPH as never,
+      },
+    );
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.telemetry.commit_performed).toBe(true);
+    // Deterministic acknowledgement restates risk + driver, promises nothing
+    // it cannot do, and steers to the executable continuation.
+    expect(result.response.assistant_text).toMatch(/client concentration/i);
+    expect(result.response.assistant_text).toMatch(/team size/i);
+    const chips = result.response.suggested_actions ?? [];
+    expect(chips.length).toBeGreaterThan(0);
+    const applyChip = chips[0]!;
+    // The replay message is a compound edit instruction: it routes to the
+    // edit pipeline (edit verb present) and does NOT re-match the bare
+    // add-risk clarify classifier (which is end-anchored on "as a risk").
+    expect(applyChip.message).toMatch(/^Add client concentration as a risk, /i);
+    expect(applyChip.message).toMatch(/team size/i);
+    // The answered clarify pending is consumed — not carried forward.
+    expect(appendCalls.length).toBeGreaterThan(0);
+    const write = appendCalls[0]! as {
+      pending_actions?: ReadonlyArray<{ action: { kind: string } }>;
+    };
+    expect(
+      (write.pending_actions ?? []).some(
+        (pa) => pa.action.kind === 'edit_graph_add_risk',
+      ),
+    ).toBe(false);
+  });
+
+  it('an unrelated reply with a live add-risk pending still reaches the LLM (no over-claiming)', async () => {
+    const adapter = callingRoutingAdapter();
+    await runTurnExecutor(
+      payload('what should we look at next'),
+      'req-add-risk-no-claim',
+      {
+        routingAdapter: adapter,
+        graphState: ADD_RISK_GRAPH as never,
+      },
+    );
+    expect(adapter.chatWithTools).toHaveBeenCalled();
+  });
+});
