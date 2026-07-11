@@ -2178,3 +2178,61 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     expect(out!).not.toContain('strongest driver');
   });
 });
+
+describe('samples_reduced suffix (seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY disclosure)', () => {
+  const REDUCED_SUFFIX =
+    ' Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.';
+  const CASE_A_BASE =
+    'Hire One Senior Technical Lead currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.';
+
+  it('samples_reduced: true appends the reduced-samples suffix to the emitted headline', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      samples_reduced: true,
+    });
+    expect(out).toBe(`${CASE_A_BASE}${REDUCED_SUFFIX}`);
+  });
+
+  it('suffixed headline passes isAllowedRunAnalysisAssistantText', () => {
+    expect(isAllowedRunAnalysisAssistantText(`${CASE_A_BASE}${REDUCED_SUFFIX}`)).toBe(true);
+  });
+
+  it('reduced suffix composes BEFORE the status suffix (grammar order)', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'partial',
+      samples_reduced: true,
+    });
+    expect(out).toBe(
+      `${CASE_A_BASE}${REDUCED_SUFFIX} The run was flagged as partial — treat as provisional.`,
+    );
+    expect(isAllowedRunAnalysisAssistantText(out)).toBe(true);
+  });
+
+  it('flag absent or false → headline unchanged (default posture)', () => {
+    const withoutFlag = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    const withFalse = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      samples_reduced: false,
+    });
+    expect(withoutFlag).toBe(CASE_A_BASE);
+    expect(withFalse).toBe(CASE_A_BASE);
+  });
+
+  it('REDUCED_SAMPLES locked template is registered in the mirror set and allowed', () => {
+    const template =
+      'Ran analysis on your current scenario. Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.';
+    expect(RUN_ANALYSIS_LOCKED_TEMPLATES.has(template)).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(template)).toBe(true);
+    expect(RUN_ANALYSIS_ASSISTANT_TEMPLATES.REDUCED_SAMPLES).toBe(template);
+  });
+});

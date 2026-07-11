@@ -218,6 +218,64 @@ describe('run_analysis handler — happy path', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY disclosure (CRITIQUE_BUCKETS
+// ruling): the reduced-samples fact must reach the user on BOTH prose paths.
+// ---------------------------------------------------------------------------
+
+describe('run_analysis handler — reduced-samples disclosure', () => {
+  const REDUCED_SUFFIX =
+    ' Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.';
+
+  it('headline path: inference_warnings code appends the disclosure suffix', async () => {
+    const fixture = {
+      ...(JSON.parse(JSON.stringify(happyFixture)) as Record<string, unknown>),
+      inference_warnings: [{ code: 'SAMPLES_REDUCED_FOR_COMPLEXITY' }],
+    };
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(fixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toBe(
+      `Option A currently leads by 24 percentage points because Price is the strongest driver.${REDUCED_SUFFIX}`,
+    );
+  });
+
+  it('template path: headline-ineligible results select the REDUCED_SAMPLES locked template', async () => {
+    // No option_label anywhere → resolveWinner rejects the id-shaped label →
+    // headline null → template path. Status absent + records present → the
+    // DEFAULT template, which the disclosure replaces.
+    const fixture = {
+      results: [
+        { option_id: 'opt_a', win_probability: 0.62 },
+        { option_id: 'opt_b', win_probability: 0.38 },
+      ],
+      meta: { response_hash: 'hash-reduced-1' },
+      inference_warnings: [{ code: 'SAMPLES_REDUCED_FOR_COMPLEXITY' }],
+    };
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(fixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toBe(
+      'Ran analysis on your current scenario. Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.',
+    );
+  });
+
+  it('no warning code → prose unchanged (default posture)', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toBe(
+      'Option A currently leads by 24 percentage points because Price is the strongest driver.',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // V5 state-trust freshness fields (schema 0.10.0+)
 //
 // graph_hash_at_run + computed_at must land on every successful run_analysis
