@@ -32,7 +32,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type { DecisionRecordAnalysisSummary } from '@talchain/schemas/boundary';
+import type {
+  DecisionRecordAnalysisSummary,
+  DecisionRecordConfidenceSourceLiteral,
+} from '@talchain/schemas/boundary';
 
 // ---------------------------------------------------------------------------
 // Typed errors (adapter throws typed, callers map — session-store idiom).
@@ -58,10 +61,19 @@ export class DecisionRecordStoreError extends Error {
 
 /**
  * Write payload for `create_decision_record`. Sub-object shapes mirror
- * @talchain/schemas 0.15.0 DecisionRecordDecisionSchema /
+ * @talchain/schemas 0.16.0 DecisionRecordDecisionSchema /
  * DecisionRecordPredictionSchema VERBATIM (pass-through doctrine — the RPC
  * enforces the same key-set whitelists value-level; anything off-whitelist
  * is a 22023 refusal, so the builder in capture.ts validates before send).
+ *
+ * ⚠ 0.16.0 SEAM NOTE: the merged-but-UNEXECUTED migration
+ * (supabase/migrations/20260710113000_v5_decision_records.sql) still guards
+ * p_prediction against the 0.15.0 key-set {statement, confidence} — its
+ * whitelist (and the dr_prediction_shape CHECK) must be amended in place
+ * (the file's own documented pre-execution amendment flow) to admit
+ * confidence_source / probability_of_goal / probability_of_joint_goal
+ * BEFORE the Paul-gated execution, or every capture from this seam will be
+ * 22023-refused wholesale once the RPC exists.
  */
 export interface CreateDecisionRecordWrite {
   readonly scenario_id: string;
@@ -77,6 +89,19 @@ export interface CreateDecisionRecordWrite {
   readonly prediction: {
     readonly statement: string;
     readonly confidence?: number;
+    /** Provenance of the prediction's model-side values (0.16.0, calibration
+     *  honesty §2 — the two populations are never blended). This seam only
+     *  ever produces 'model_derived'; 'user_stated' belongs to a future
+     *  elicitation lane. */
+    readonly confidence_source?: DecisionRecordConfidenceSourceLiteral;
+    /** Chosen option's P(single goal threshold met) — ISL via PLoT, recorded
+     *  VERBATIM (D-N Option-B derisk; 0.16.0). Absent when no goal target
+     *  existed at capture — never a fabricated 0. */
+    readonly probability_of_goal?: number;
+    /** Chosen option's P(ALL goal constraints jointly met) — ISL
+     *  constraint_analysis.joint_probability via PLoT, recorded VERBATIM
+     *  (D-N Option-B derisk; 0.16.0). Absent when unscored — never 0. */
+    readonly probability_of_joint_goal?: number;
   };
   /** ISO timestamptz. */
   readonly review_date: string;

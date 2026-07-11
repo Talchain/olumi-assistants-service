@@ -207,7 +207,9 @@ describe('flag ON — happy path', () => {
         chosen_option_label: 'Option A',
         graph_hash: EXPECTED_GRAPH_HASH,
       },
-      prediction: { statement: SUMMARY, confidence: 0.62 },
+      // confidence_source stamped on every write from this seam (0.16.0
+      // addendum — no user-stated path exists here; calibration honesty §2).
+      prediction: { statement: SUMMARY, confidence: 0.62, confidence_source: 'model_derived' },
       review_date: '2026-10-08T12:00:00.000Z', // computed_at + 90 days
       record_id: EXPECTED_RECORD_ID,
       event_id: `decision_recorded_${EXPECTED_RECORD_ID}`,
