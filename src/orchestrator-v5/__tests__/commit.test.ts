@@ -277,6 +277,74 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       });
     });
 
+    // Adversarial round-3 concern 3: the fresh-first cap slice could silently
+    // EVICT a validly-threaded live consent hold — the exact silent-wipe class
+    // the hold-thread-through fix closes at the dispatch seam. Within the cap,
+    // live consent holds (CONFIRMATION_EXPECTING kinds) now win over
+    // non-consent pendings; a consent hold that STILL cannot fit (all-consent
+    // overflow) lapses with the honest F-HELD 2b notice, never silently.
+    function makeSuggestionPending(ref: string): PendingAction {
+      return {
+        id: `pa-${ref}`,
+        scenario_id: META.scenario_id,
+        chip_id: ref,
+        action: { kind: 'run_analysis' },
+        preconditions: { graph_hash: 'gh-1' },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: '2026-06-10T11:59:00.000Z',
+      } as PendingAction;
+    }
+
+    it('cap pressure from NON-consent pendings does not evict a threaded live consent hold — the hold persists within the cap', async () => {
+      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const thisTurn = [
+        makeSuggestionPending('c1'),
+        makeSuggestionPending('c2'),
+        makeSuggestionPending('c3'),
+      ];
+      const prior = [makePreSupplied('prior-hold')];
+      const { store, appendCalls } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, graph_hash: 'gh-1', pending_actions: thisTurn, priorPendingActions: prior },
+        store,
+      );
+      const persistedIds = (appendCalls[0].pending_actions ?? []).map((p) => p.chip_id);
+      // The consent hold survives; the LAST non-consent pending yields its slot.
+      expect(persistedIds).toContain('prior-hold');
+      expect(persistedIds).toEqual(['c1', 'c2', 'prior-hold']);
+      expect(result.pendingLifecycle).toMatchObject({
+        priorCount: 1,
+        survivedCount: 1,
+        capDroppedCount: 0,
+      });
+      // Nothing lapsed → no notice.
+      expect(result.response.assistant_text ?? '').not.toContain('lapsed');
+    });
+
+    it('all-consent overflow: the consent hold that still cannot fit lapses with the honest notice, never silently', async () => {
+      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      // Three fresh consent pendings occupy the whole cap; the carried consent
+      // hold cannot fit even with consent-priority (fresh-first within class).
+      const thisTurn = [makePreSupplied('t1'), makePreSupplied('t2'), makePreSupplied('t3')];
+      const prior = [makePreSupplied('prior-hold')];
+      const { store, appendCalls } = makeSpyStore();
+      const result = await commitDirectAnswer(
+        composed,
+        { ...META, graph_hash: 'gh-1', pending_actions: thisTurn, priorPendingActions: prior },
+        store,
+      );
+      expect((appendCalls[0].pending_actions ?? []).map((p) => p.chip_id)).toEqual(['t1', 't2', 't3']);
+      expect(result.pendingLifecycle).toMatchObject({
+        priorCount: 1,
+        survivedCount: 0,
+        capDroppedCount: 1,
+      });
+      // Honest lapse (F-HELD 2b register), not a silent wipe.
+      expect(result.response.assistant_text ?? '').toContain('has lapsed');
+    });
+
     it('no cap pressure → the live prior survivor persists and is counted as survived', async () => {
       const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
       const prior = [makePreSupplied('prior-live')];

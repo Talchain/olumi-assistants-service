@@ -357,6 +357,73 @@ describe('dispatchEditGraph — holds thread through mutating commits (task_2e1b
     expect(invalidatedEvents()).toHaveLength(1);
   });
 
+  it('does NOT emit a lapse notice when this turn\'s edit FULFILS a prior proposed_concept hold (adversarial round-3 concern 1)', async () => {
+    const pin = hashOf(BASE_GRAPH);
+    const hold: PendingAction = {
+      id: 'pend-concept-1',
+      scenario_id: SCENARIO_ID,
+      chip_id: 'chip-concept-1',
+      action: {
+        kind: 'proposed_concept',
+        concept: 'customer churn',
+        preferred_kind: 'risk',
+        public_label: 'Continue with the proposed update',
+        public_message: 'Continue with customer churn.',
+      },
+      preconditions: { graph_hash: pin },
+      expires_at_turn_count: 4,
+      expires_at_iso: new Date(Date.now() + 600_000).toISOString(),
+      emitted_at_iso: new Date().toISOString(),
+    } as PendingAction;
+    installTurnContext([hold]);
+
+    // The user's edit ADDS the very concept the hold proposed.
+    const parsed = GraphV3.safeParse(clone(BASE_GRAPH));
+    if (!parsed.success) throw new Error('fixture must GraphV3-parse');
+    const fulfilledGraph = parsed.data;
+    fulfilledGraph.nodes.push({ id: 'risk_churn', kind: 'risk', label: 'Customer churn' } as GraphV3T['nodes'][number]);
+    fulfilledGraph.edges.push({ from: 'risk_churn', to: 'goal_g', strength: { mean: 0.3, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' } as GraphV3T['edges'][number]);
+    vi.mocked(handleEditGraph).mockResolvedValue({
+      blocks: [],
+      assistantText: 'I have added Customer churn as a risk.',
+      latencyMs: 900,
+      appliedGraph: fulfilledGraph as unknown as EditGraphResult['appliedGraph'],
+      wasRejected: false,
+      operations: [
+        { op: 'add_node', path: 'risk_churn', value: { kind: 'risk', label: 'Customer churn' } },
+        { op: 'add_edge', path: 'risk_churn::goal_g', value: { from: 'risk_churn', to: 'goal_g' } },
+      ],
+    } as EditGraphResult);
+
+    const result = await dispatchEditGraph({
+      // Phrased so NEITHER deterministic intercept claims the turn (the
+      // add-risk classifier needs an "add X as a risk" shape; the proposal
+      // matcher is mooted by the mocked loadMostRecentPendingActions=[]) —
+      // the fulfilment happens on the LLM-applied edit path.
+      payload: makePayload('Please reflect customer churn in the model'),
+      requestId: 'req-hold-fulfilled',
+      request: STUB_REQUEST,
+      graphState: clone(BASE_GRAPH) as GraphStateIngress,
+      analysisState: null,
+    });
+
+    const meta = commitMeta();
+    // The fulfilled hold is retired (not threaded) — its purpose is served.
+    expect((meta.priorPendingActions ?? []).map((p) => p.chip_id)).not.toContain(hold.chip_id);
+    // But NO false "your held proposal lapsed" sentence on the very turn the
+    // user fulfilled it.
+    expect(result.response.assistant_text ?? '').not.toContain('lapsed');
+    // Telemetry stays honest: the retirement is recorded as fulfilment.
+    const lapses = invalidatedEvents();
+    expect(lapses).toHaveLength(1);
+    expect(lapses[0]!.data).toMatchObject({
+      reason: 'graph_hash_changed',
+      detail: 'fulfilled_by_this_mutation',
+      kind: 'proposed_concept',
+      site: 'edit_graph_dispatch',
+    });
+  });
+
   it('NON-MUTATING edit turn (rejection) threads every prior pending through UNCHANGED — no lapse, no notice, no telemetry', async () => {
     const pin = hashOf(BASE_GRAPH);
     const hold = makeGmHold(pin, HOLD_OPS_STILL_VALID);

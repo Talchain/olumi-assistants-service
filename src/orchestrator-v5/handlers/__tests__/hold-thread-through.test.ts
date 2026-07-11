@@ -257,6 +257,147 @@ describe('threadHoldsThroughMutatingCommit — kind matrix', () => {
   });
 });
 
+describe('fulfilment-aware lapse — no false notice when THIS turn delivered the held change (adversarial round-3 concern 1)', () => {
+  /** NEW_GRAPH + the very node the concept hold proposed. */
+  const NEW_GRAPH_WITH_MORALE = {
+    nodes: [
+      ...NEW_GRAPH.nodes,
+      { id: 'fac_team_morale', kind: 'factor', label: 'Team morale', observed_state: { value: 0.5 } },
+    ],
+    edges: [
+      ...NEW_GRAPH.edges,
+      { from: 'fac_team_morale', to: 'goal_g', strength: { mean: 0.3, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    ],
+  };
+  const MORALE_HASH = hashOf(NEW_GRAPH_WITH_MORALE);
+
+  function conceptHold(): PendingAction {
+    return basePending({
+      action: {
+        kind: 'proposed_concept',
+        concept: 'team morale',
+        preferred_kind: 'factor',
+        public_label: 'Continue with the proposed update',
+        public_message: 'Continue with team morale.',
+      },
+    });
+  }
+
+  function fulfilInput(overrides: {
+    graph?: unknown;
+    graphHash?: string;
+    appliedOperations?: readonly { op: string; path: string; value?: unknown }[] | null;
+    priors: readonly PendingAction[];
+  }) {
+    return {
+      priorPendingActions: overrides.priors,
+      graphAfterCommit: overrides.graph ?? NEW_GRAPH_WITH_MORALE,
+      graphHashAfterCommit: overrides.graphHash ?? MORALE_HASH,
+      appliedOperations: overrides.appliedOperations ?? null,
+      nowMs: NOW,
+      scenarioId: SCENARIO_ID,
+      turnId: 'turn-1',
+      requestId: 'req-1',
+    };
+  }
+
+  it("user's edit FULFILS a prior proposed_concept hold (applied add_node matches the concept): lapse reported for telemetry, NO notice", () => {
+    const r = threadHoldsThroughMutatingCommit(
+      fulfilInput({
+        priors: [conceptHold()],
+        appliedOperations: [
+          { op: 'add_node', path: 'fac_team_morale', value: { kind: 'factor', label: 'Team morale' } },
+        ],
+      }),
+    );
+    expect(r.threaded).toHaveLength(0);
+    expect(r.lapsed).toHaveLength(1);
+    expect(r.lapsed[0]!.detail).toBe('fulfilled_by_this_mutation');
+    // The false "your held proposal lapsed" sentence must NOT fire on the
+    // very turn the user fulfilled the proposal.
+    expect(r.notice).toBeNull();
+  });
+
+  it('draft turn whose NEW graph contains the proposed concept (no per-op record): NO notice', () => {
+    const r = threadHoldsThroughMutatingCommit(
+      fulfilInput({ priors: [conceptHold()], appliedOperations: null }),
+    );
+    expect(r.threaded).toHaveLength(0);
+    expect(r.lapsed[0]!.detail).toBe('fulfilled_by_this_mutation');
+    expect(r.notice).toBeNull();
+  });
+
+  it('GM hold whose held batch the user applied by hand this turn (same op kind + target): NO notice, governing still reported', () => {
+    // Full canonical shape — PatchOperationsArraySchema requires value.id on
+    // add_node (readGmHeldResume gate), mirroring what buildHeldPending stores.
+    const heldAdd = { op: 'add_node', path: 'fac_team_morale', value: { id: 'fac_team_morale', kind: 'factor', label: 'Team morale' } };
+    const hold = gmHold([heldAdd]);
+    const r = threadHoldsThroughMutatingCommit(
+      fulfilInput({ priors: [hold], appliedOperations: [heldAdd] }),
+    );
+    expect(r.threaded).toHaveLength(0);
+    expect(r.lapsed).toHaveLength(1);
+    expect(r.lapsed[0]!.detail).toBe('fulfilled_by_this_mutation');
+    // The re-referee genuinely failed (id collision) — the verdict is still
+    // reported honestly even though the notice is suppressed.
+    expect(r.lapsed[0]!.governing).toBe('rejected');
+    expect(r.notice).toBeNull();
+  });
+
+  it('GM held REMOVE already performed (end state satisfied, applied ops unrelated): NO notice', () => {
+    const hold = gmHold([{ op: 'remove_node', path: 'fac_gone' }]);
+    const r = threadHoldsThroughMutatingCommit(
+      fulfilInput({
+        graph: NEW_GRAPH,
+        graphHash: NEW_HASH,
+        priors: [hold],
+        appliedOperations: [
+          { op: 'update_node', path: 'fac_demand', value: { observed_state: { value: 0.6 } } },
+        ],
+      }),
+    );
+    expect(r.threaded).toHaveLength(0);
+    expect(r.lapsed[0]!.detail).toBe('fulfilled_by_this_mutation');
+    expect(r.notice).toBeNull();
+  });
+
+  it('GUARD — an UNRELATED applied edit does not suppress the concept lapse notice', () => {
+    const r = threadHoldsThroughMutatingCommit(
+      fulfilInput({
+        graph: NEW_GRAPH,
+        graphHash: NEW_HASH,
+        priors: [conceptHold()],
+        appliedOperations: [
+          { op: 'add_node', path: 'fac_other', value: { kind: 'factor', label: 'Something else' } },
+        ],
+      }),
+    );
+    expect(r.lapsed[0]!.detail).toBe('proposal_base_moved');
+    expect(r.notice).toContain("'team morale'");
+  });
+
+  it('GUARD — mixed lapse: the notice names the first NON-fulfilled hold; both lapses are reported for telemetry', () => {
+    const fulfilledConcept = conceptHold();
+    const genuinelyInvalidated = gmHold(
+      [{ op: 'update_node', path: 'fac_gone', value: { observed_state: { value: 1 } } }],
+      { id: 'pend-2', chip_id: 'gmh_fedcba654321' },
+    );
+    const r = threadHoldsThroughMutatingCommit(
+      fulfilInput({
+        priors: [fulfilledConcept, genuinelyInvalidated],
+        appliedOperations: [
+          { op: 'add_node', path: 'fac_team_morale', value: { kind: 'factor', label: 'Team morale' } },
+        ],
+      }),
+    );
+    expect(r.lapsed).toHaveLength(2);
+    expect(r.lapsed[0]!.detail).toBe('fulfilled_by_this_mutation');
+    expect(r.lapsed[1]!.detail).toBe('held_batch_invalid_post_mutation');
+    expect(r.notice).toContain("'Continue with this change'");
+    expect(r.notice).not.toContain("'team morale'");
+  });
+});
+
 describe('lapse-notice copy safety (§6.6 by construction)', () => {
   const NOTICES = [
     buildHoldMutationLapseNotice(gmHold([])),

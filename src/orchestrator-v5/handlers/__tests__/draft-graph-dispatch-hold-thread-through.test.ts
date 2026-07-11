@@ -221,6 +221,50 @@ describe('dispatchDraftGraph — holds thread through draft commits (task_2e1b8c
     });
   });
 
+  it('does NOT emit a lapse notice when the NEW draft contains the concept a prior proposed_concept hold proposed (fulfilment, adversarial round-3 concern 1)', async () => {
+    const pin = hashOf(OLD_GRAPH);
+    const hold: PendingAction = {
+      id: 'pend-concept-1',
+      scenario_id: SCENARIO_ID,
+      chip_id: 'chip-concept-1',
+      action: {
+        kind: 'proposed_concept',
+        // 'Demand' exists in NEW_DRAFT_GRAPH — the redraft delivered it.
+        concept: 'demand',
+        preferred_kind: 'factor',
+        public_label: 'Continue with the proposed update',
+        public_message: 'Continue with demand.',
+      },
+      preconditions: { graph_hash: pin },
+      expires_at_turn_count: 4,
+      expires_at_iso: new Date(Date.now() + 600_000).toISOString(),
+      emitted_at_iso: new Date().toISOString(),
+    } as PendingAction;
+    vi.mocked(loadMostRecentPendingActions).mockResolvedValue([hold]);
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-draft-fulfilled',
+      request: STUB_REQUEST,
+    });
+
+    const meta = commitMeta();
+    // The fulfilled hold is retired (not threaded) — its purpose is served.
+    expect((meta.priorPendingActions ?? []).map((p) => p.chip_id)).not.toContain(hold.chip_id);
+    // But NO false "your held proposal lapsed" sentence on the turn whose
+    // draft delivered the concept.
+    expect(result.response.assistant_text ?? '').not.toContain('lapsed');
+    // Telemetry stays honest: the retirement is recorded as fulfilment.
+    const lapses = invalidatedEvents();
+    expect(lapses).toHaveLength(1);
+    expect(lapses[0]!.data).toMatchObject({
+      reason: 'graph_hash_changed',
+      detail: 'fulfilled_by_this_mutation',
+      kind: 'proposed_concept',
+      site: 'draft_graph_dispatch',
+    });
+  });
+
   it('THREADS a hold whose operations still referee cleanly against the NEW draft, re-pinned to the new hash', async () => {
     const pin = hashOf(OLD_GRAPH);
     const hold = makeGmHold(pin, [
