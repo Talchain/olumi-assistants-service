@@ -13,7 +13,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { tryShortConfirmResume } from '../deterministic-short-confirm.js';
+import {
+  scopePendingsToChipClickIntent,
+  tryShortConfirmResume,
+} from '../deterministic-short-confirm.js';
 import type { PendingAction } from '../../session/pending-action.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -336,5 +339,225 @@ describe('tryShortConfirmResume — dispatch', () => {
     if (r.matched) {
       expect(r.dispatch).toBe('rerun_analysis_required');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-HELD consent-priority (2026-07-11 wire finding; orchestrator ruling:
+// consent-first, orchestrator-default pending Paul ratification). A bare
+// confirm answers the live CONSENT-EXPECTING pending (apply_proposed_change),
+// not the newest chip suggestion — wire captures 13c→14c show "yes" binding
+// to a freshly-minted run_analysis offer while a GM hold was still live, so
+// the held factor was never applied.
+// ---------------------------------------------------------------------------
+
+describe('tryShortConfirmResume — F-HELD consent-priority', () => {
+  function makeHoldPending(overrides: Partial<PendingAction> = {}): PendingAction {
+    return {
+      id: 'pa-hold-1',
+      scenario_id: SCENARIO_ID,
+      chip_id: 'gmh_abcdef123456',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'gmh_abcdef123456',
+        inline_patch: {
+          handler_id: 'graph_management_held_v1',
+          params: {},
+          target_entity_ids: [],
+        },
+        public_label: 'Continue with this change',
+        public_message: 'Yes',
+      },
+      preconditions: { graph_hash: 'hash_a' },
+      expires_at_turn_count: 4,
+      expires_at_iso: '2026-05-05T12:10:00.000Z', // 10 min after NOW_MS
+      emitted_at_iso: '2026-05-05T11:58:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('bare "yes" resumes the LIVE HOLD even when a NEWER run_analysis chip pending is live (wire 13c→14c shape)', () => {
+    const hold = makeHoldPending();
+    const newerChip = makeRunAnalysisPending({
+      id: 'pa-ra-newer',
+      chip_id: 'chip_action_rerun_analysis',
+      emitted_at_iso: '2026-05-05T11:59:30.000Z', // newer than the hold
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [newerChip, hold],
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-hold-1');
+      expect(r.pending.action.kind).toBe('apply_proposed_change');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('consent-priority is order-independent (hold listed first)', () => {
+    const hold = makeHoldPending();
+    const newerChip = makeRunAnalysisPending({
+      id: 'pa-ra-newer',
+      chip_id: 'chip_action_rerun_analysis',
+      emitted_at_iso: '2026-05-05T11:59:30.000Z',
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [hold, newerChip],
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-hold-1');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('most-recent-wins is retained WITHIN the consent-expecting kind (two live holds → newest hold)', () => {
+    const olderHold = makeHoldPending({
+      id: 'pa-hold-old',
+      chip_id: 'gmh_older0000001',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'gmh_older0000001',
+        inline_patch: { handler_id: 'graph_management_held_v1', params: {}, target_entity_ids: [] },
+        public_label: 'Continue with this change',
+        public_message: 'Yes',
+      },
+      emitted_at_iso: '2026-05-05T11:57:00.000Z',
+    });
+    const newerHold = makeHoldPending({
+      id: 'pa-hold-new',
+      chip_id: 'gmh_newer0000001',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'gmh_newer0000001',
+        inline_patch: { handler_id: 'graph_management_held_v1', params: {}, target_entity_ids: [] },
+        public_label: 'Continue with this change',
+        public_message: 'Yes',
+      },
+      emitted_at_iso: '2026-05-05T11:59:00.000Z',
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [olderHold, newerHold],
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-hold-new');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('an EXPIRED hold does not outrank a live chip suggestion (liveness first, then class)', () => {
+    const expiredHold = makeHoldPending({
+      expires_at_iso: '2026-05-05T11:50:00.000Z', // wall-expired at NOW_MS
+    });
+    const liveChip = makeRunAnalysisPending({
+      id: 'pa-ra-live',
+      emitted_at_iso: '2026-05-05T11:59:30.000Z',
+    });
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [expiredHold, liveChip],
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-ra-live');
+      expect(r.pending.action.kind).toBe('run_analysis');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-HELD round 2, FIXUP 1 — intent-vs-kind guard for chip-click resumes.
+// A chip click carries an EXPLICIT intent (route-v2 detectChipClickResumeIntent
+// → TurnExecutor synthesises "yes"); without scoping, consent-priority would
+// resolve that synthetic "yes" to a live hold and EXECUTE a held mutation off
+// an explanation click. The scope helper narrows the candidate set to the
+// clicked kind BEFORE the resumer runs; typed "yes" (no intent) is unscoped.
+// ---------------------------------------------------------------------------
+
+describe('scopePendingsToChipClickIntent — chip-click intent-vs-kind guard (F-HELD round 2)', () => {
+  function hold(): PendingAction {
+    return {
+      id: 'pa-hold-guard',
+      scenario_id: SCENARIO_ID,
+      chip_id: 'gmh_guard00000001',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'gmh_guard00000001',
+        inline_patch: { handler_id: 'graph_management_held_v1', params: {}, target_entity_ids: [] },
+        public_label: 'Continue with this change',
+        public_message: 'Yes',
+      },
+      preconditions: { graph_hash: 'hash_a' },
+      expires_at_turn_count: 4,
+      expires_at_iso: '2026-05-05T12:10:00.000Z',
+      emitted_at_iso: '2026-05-05T11:58:00.000Z',
+    };
+  }
+  function wwf(): PendingAction {
+    return makeRunAnalysisPending({
+      id: 'pa-wwf-guard',
+      chip_id: 'chip_action_wwf_guard',
+      action: { kind: 'what_would_flip' },
+      emitted_at_iso: '2026-05-05T11:57:00.000Z', // OLDER than the hold
+    });
+  }
+
+  it('scopes to what_would_flip pendings when the chip-click intent is what_would_flip', () => {
+    const scoped = scopePendingsToChipClickIntent([hold(), wwf()], 'what_would_flip');
+    expect(scoped.map((pa) => pa.action.kind)).toEqual(['what_would_flip']);
+  });
+
+  it('is the identity for typed confirmations (no intent) — consent-priority untouched', () => {
+    const all = [hold(), wwf()];
+    expect(scopePendingsToChipClickIntent(all, undefined)).toBe(all);
+  });
+
+  it('RED F-HELD regression: a wwf CHIP CLICK with a live hold resumes the WWF pending, never the hold', () => {
+    // The exact hijack chain: synthetic "yes" + unscoped pendings would let
+    // consent-priority pick the hold. With the scope applied first, the
+    // resumer only ever sees the clicked kind.
+    const scoped = scopePendingsToChipClickIntent([hold(), wwf()], 'what_would_flip');
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: scoped,
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+      analysisFreshness: 'fresh',
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-wwf-guard');
+      expect(r.pending.action.kind).toBe('what_would_flip');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('wwf chip click with ONLY a hold live scopes to empty → no_pending (the chip-click no-pending recovery owns it)', () => {
+    const scoped = scopePendingsToChipClickIntent([hold()], 'what_would_flip');
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: scoped,
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'no_pending' });
   });
 });

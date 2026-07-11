@@ -13,9 +13,11 @@ import { describe, expect, it } from 'vitest';
 import {
   checkCoachingOutput,
   buildCoachingDegradeResponse,
+  selectLiveHoldForDegrade,
   NEUTRAL_DEGRADE_TEXT,
   type CoachingViolation,
 } from '../coaching-output-postcheck.js';
+import type { PendingAction } from '../../session/pending-action.js';
 import type { CoachingStatePack } from '../../context/canonical-analysis-state.js';
 import {
   buildAnalysisAbsentTemplate,
@@ -559,5 +561,149 @@ describe('buildCoachingDegradeResponse — verdict-correct safe copy', () => {
       expect(assistant_text).not.toMatch(/\b[0-9a-f]{12,}\b/i);
       expect(assistant_text).not.toMatch(/Option [A-Z]\b/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-HELD fix 3b (wire capture 13c is the RED fixture): while a GM hold is
+// live, the state-unsafe degrade previously stomped the reply with
+// buildAnalysisAbsentTemplate + a competing run_analysis chip — hijacking the
+// consent flow ("yes" then bound to the fresh rerun offer, 14c). With a live
+// hold the degrade must restate the held offer + its confirm chip instead.
+// ---------------------------------------------------------------------------
+
+describe('buildCoachingDegradeResponse — held-aware degrade (F-HELD 3b)', () => {
+  const LIVE_HOLD = {
+    chip_id: 'gmh_13cfixture01',
+    label: 'Continue with this change',
+    message: 'Yes',
+  } as const;
+
+  it('13c shape: state-unsafe (none) + live hold → held-aware template + the hold confirm chip, NOT the absent template, NO rerun chip', () => {
+    const r = buildCoachingDegradeResponse(NONE, { optionCount: 3, liveHold: LIVE_HOLD });
+    expect(r.assistant_text).not.toBe(buildAnalysisAbsentTemplate(3, undefined));
+    expect(r.assistant_text.toLowerCase()).toContain('holding');
+    expect(r.assistant_text.toLowerCase()).toContain('confirm');
+    expect(r.suggested_actions).toHaveLength(1);
+    expect(r.suggested_actions[0]!.id).toBe('gmh_13cfixture01');
+    expect(r.suggested_actions[0]!.label).toBe('Continue with this change');
+    expect(r.suggested_actions[0]!.message).toBe('Yes');
+    // No competing run_analysis offer minted by the degrade.
+    expect(
+      r.suggested_actions.some(
+        (c) => (c as { action_type?: string }).action_type === 'run_analysis',
+      ),
+    ).toBe(false);
+  });
+
+  it('every state-unsafe branch (stale / unknown / blocked) is held-aware when a hold is live', () => {
+    for (const p of [STALE, UNKNOWN, BLOCKED]) {
+      const r = buildCoachingDegradeResponse(p, { liveHold: LIVE_HOLD });
+      expect(r.assistant_text.toLowerCase()).toContain('holding');
+      expect(r.suggested_actions[0]!.id).toBe('gmh_13cfixture01');
+    }
+  });
+
+  it('fresh + usable state stays NEUTRAL even when a hold is live (the analysis is fine; only the prose was unsafe)', () => {
+    const r = buildCoachingDegradeResponse(FRESH, { liveHold: LIVE_HOLD });
+    expect(r.assistant_text).toBe(NEUTRAL_DEGRADE_TEXT);
+    expect(r.suggested_actions).toHaveLength(0);
+  });
+
+  it('no live hold → behaviour unchanged (absent template + rerun chip)', () => {
+    const r = buildCoachingDegradeResponse(NONE, { optionCount: 3 });
+    expect(r.assistant_text).toBe(buildAnalysisAbsentTemplate(3, undefined));
+    expect(r.suggested_actions[0]!.id).toBe('chip_action_rerun_analysis');
+  });
+
+  it('held-aware copy never narrates a value, hash, option label or internal token', () => {
+    const r = buildCoachingDegradeResponse(NONE, { liveHold: LIVE_HOLD });
+    expect(r.assistant_text).not.toMatch(/[£$€]/);
+    expect(r.assistant_text).not.toMatch(/\b[0-9a-f]{12,}\b/i);
+    expect(r.assistant_text).not.toMatch(/apply_proposed_change|graph_hash|pending/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-HELD round 2, FIXUP 3 — hold selection for the held-aware degrade.
+// A hold read at expires_at_turn_count=1 lapses at THIS turn's commit (the
+// carry-forward decrements 1 → 0), so restating it with a confirm chip in the
+// same message that carries the lapse notice would contradict itself and ship
+// a dead chip. The selector requires expires_at_turn_count > 1.
+// ---------------------------------------------------------------------------
+
+describe('selectLiveHoldForDegrade — same-commit lapse contradiction guard (F-HELD round 2)', () => {
+  const NOW = Date.parse('2026-07-11T12:00:00.000Z');
+
+  function hold(overrides: {
+    id?: string;
+    ref?: string;
+    turnCount?: number;
+    expiresAtIso?: string;
+    emittedAtIso?: string;
+    legacy?: boolean;
+  } = {}): PendingAction {
+    const ref = overrides.ref ?? 'gmh_degrade000001';
+    return {
+      id: overrides.id ?? `pa-${ref}`,
+      scenario_id: 'sc-degrade',
+      chip_id: ref,
+      action: overrides.legacy
+        ? {
+            kind: 'apply_proposed_change',
+            proposal_ref: ref,
+            inline_patch: { handler_id: 'graph_management_held_v1' },
+            __legacy_no_public_copy: true,
+          }
+        : {
+            kind: 'apply_proposed_change',
+            proposal_ref: ref,
+            inline_patch: { handler_id: 'graph_management_held_v1' },
+            public_label: 'Continue with this change',
+            public_message: 'Yes',
+          },
+      preconditions: { graph_hash: 'hash_d' },
+      expires_at_turn_count: overrides.turnCount ?? 4,
+      expires_at_iso: overrides.expiresAtIso ?? '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: overrides.emittedAtIso ?? '2026-07-11T11:59:00.000Z',
+    } as PendingAction;
+  }
+
+  it('a live hold with turn budget remaining (TTL 4) is selected with its public copy', () => {
+    const r = selectLiveHoldForDegrade([hold()], NOW);
+    expect(r).toEqual({
+      chip_id: 'gmh_degrade000001',
+      label: 'Continue with this change',
+      message: 'Yes',
+    });
+  });
+
+  it('RED F-HELD round 2: a hold at expires_at_turn_count=1 is NOT selected (it lapses at this very commit)', () => {
+    expect(selectLiveHoldForDegrade([hold({ turnCount: 1 })], NOW)).toBeUndefined();
+  });
+
+  it('a wall-expired hold is NOT selected', () => {
+    expect(
+      selectLiveHoldForDegrade(
+        [hold({ expiresAtIso: '2026-07-11T11:00:00.000Z' })],
+        NOW,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('a legacy no-public-copy hold is NOT selected (nothing safe to restate)', () => {
+    expect(selectLiveHoldForDegrade([hold({ legacy: true })], NOW)).toBeUndefined();
+  });
+
+  it('the NEWEST qualifying hold wins when several are live', () => {
+    const older = hold({ id: 'pa-old', ref: 'gmh_older0000001', emittedAtIso: '2026-07-11T11:00:00.000Z' });
+    const newer = hold({ id: 'pa-new', ref: 'gmh_newer0000001', emittedAtIso: '2026-07-11T11:30:00.000Z' });
+    const r = selectLiveHoldForDegrade([older, newer], NOW);
+    expect(r?.chip_id).toBe('gmh_newer0000001');
+  });
+
+  it('undefined / empty input → undefined', () => {
+    expect(selectLiveHoldForDegrade(undefined, NOW)).toBeUndefined();
+    expect(selectLiveHoldForDegrade([], NOW)).toBeUndefined();
   });
 });

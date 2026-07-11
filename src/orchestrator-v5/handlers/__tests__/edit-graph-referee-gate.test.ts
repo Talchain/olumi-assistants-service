@@ -20,6 +20,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   evaluateEditGraphMutations,
   gmHeldProposalRef,
+  GM_HELD_PENDING_TURN_TTL,
   GM_HELD_ASSISTANT_TEXT,
   GM_HELD_CHIP_LABEL,
   GM_HELD_CHIP_MESSAGE,
@@ -149,6 +150,22 @@ describe('live verdict routing', () => {
       blocker_code: 'TUNABLE_APPLY_HELD',
       base_hash_match: true,
     });
+  });
+
+  it('F-HELD lifecycle: the held pending carries the GM hold turn-TTL (4), not the chip default (2)', () => {
+    // F-HELD fix 2a (wire finding 2026-07-11): a hold that lapses after the
+    // chip-default 2 turns dies before a short clarify detour resolves.
+    // GM holds get their own, longer turn budget; wall TTL is unchanged.
+    // NOTE the budget only counts TURN-EXECUTOR-committed turns — edit/
+    // draft-classified commits thread no priorPendingActions and wipe live
+    // holds outright (known residual; see GM_HELD_PENDING_TURN_TTL doc).
+    const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP] }));
+    expect(d.governing).toBe('held');
+    const pending = d.pendingActions![0]!;
+    expect(GM_HELD_PENDING_TURN_TTL).toBe(4);
+    expect(pending.expires_at_turn_count).toBe(GM_HELD_PENDING_TURN_TTL);
+    // Still parse-valid with the longer TTL.
+    expect(parsePendingAction(pending)).not.toBeNull();
   });
 
   it('the GENERIC synthesis path still declines the held pending (lane 34: only the dedicated live-mode held-execute branch may apply it)', () => {

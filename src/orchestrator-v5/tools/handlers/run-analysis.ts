@@ -66,6 +66,7 @@ import {
 import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
 import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/turn-timings.js';
 import { config } from '../../../config/index.js';
+import { hasReducedSamplesDisclosure } from '../../compose/claim-safety-cage.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
@@ -121,6 +122,13 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
   // requires a caveat for partial regardless of record count.
   PARTIAL_NO_RESULTS:
     'Ran analysis on your current scenario. The engine flagged the run as partial and produced no option comparisons — treat with caution.',
+  // Seam item 3 (CRITIQUE_BUCKETS ruling): PLoT reported
+  // SAMPLES_REDUCED_FOR_COMPLEXITY on an otherwise-ok run. Fires only when
+  // the deterministic headline does not (the headline carries the same
+  // disclosure as REDUCED_SAMPLES_SUFFIX); replaces DEFAULT only, so the
+  // PARTIAL / UNKNOWN_STATUS caution templates are never compounded.
+  REDUCED_SAMPLES:
+    'Ran analysis on your current scenario. Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.',
 } as const;
 
 // ============================================================================
@@ -708,7 +716,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // alpha hardening plan: caveats for partial / unknown-status surface
     // through the existing `summary` / `assistant_text` fields only — do
     // NOT extend RunAnalysisHandlerFactSchema.
-    const template = selectTemplate(statusOutcome.kind, resultRecords.length);
+    const baseTemplate = selectTemplate(statusOutcome.kind, resultRecords.length);
+    // Seam item 3: surface PLoT's reduced-samples disclosure. On the
+    // template path it replaces DEFAULT only (PARTIAL/UNKNOWN caveats are
+    // not compounded); on the headline path it rides as a suffix via
+    // `samples_reduced` below. The presence check is cage-owned (claim-safety
+    // ruling, Option B) and pinned to this single call site — do not add a
+    // second consumer without a fresh claim-safety review.
+    const samplesReduced = hasReducedSamplesDisclosure(
+      response as Record<string, unknown>,
+    );
+    const template =
+      samplesReduced && baseTemplate === RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT
+        ? RUN_ANALYSIS_ASSISTANT_TEMPLATES.REDUCED_SAMPLES
+        : baseTemplate;
     // Deterministic headline: when PLoT supplies enough data (winner label +
     // either a top driver, fragility, or a usable win_probability) the
     // headline replaces the bland template. Returns null when data is too
@@ -721,6 +742,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       enrichment: response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
       status_kind: headlineStatusKind,
+      samples_reduced: samplesReduced,
       // Spine A backstop: the headline reads raw `factor_sensitivity` directly
       // (bypassing projectTopDrivers), so it must skip option-controlled levers.
       // Source the controlled-id set from the RAW persisted graph (covers all
