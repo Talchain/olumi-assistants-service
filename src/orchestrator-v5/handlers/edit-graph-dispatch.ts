@@ -70,6 +70,11 @@ import {
   loadRecentConversationTurns,
 } from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import {
+  appendLapseNotice,
+  emitHoldLapseTelemetry,
+  threadHoldsThroughMutatingCommit,
+} from './hold-thread-through.js';
 import { projectConversation } from '../context/context-pack-assembler.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
@@ -1782,6 +1787,13 @@ export async function dispatchEditGraph(
   // The current graph hash, surfaced out of the try so the resume path
   // can use it to construct the refreshed pending action.
   let currentGraphHashForRecovery: string | null = null;
+  // HOLD-WIPE fix (task_2e1b8c87): the prior turn's pendings, surfaced out
+  // of the try below so the commit can thread them (a live consent hold
+  // must survive an edit-classified commit — previously this path threaded
+  // NO priorPendingActions and silently wiped it). The catch branch retries
+  // via the cheap single-row read; both reads degrade to [] (a degraded
+  // read cannot preserve what it cannot see — logged at the store layer).
+  let priorPendingForCarry: readonly PendingAction[] = [];
   // `proposalPendingForCommit` is declared at the top of the function
   // (above the intercept) so the early-emit path can populate it
   // directly. The recovery-path resume below assigns it for the
@@ -1806,6 +1818,7 @@ export async function dispatchEditGraph(
     // TTL mirrors the `isExpired` semantics used by
     // tryClarificationResume / tryShortConfirmResume.
     const priorPending = turnContext.most_recent_pending_actions ?? [];
+    priorPendingForCarry = priorPending;
     const recoveryGateOutcome = resolveProposalResume({
       message: payload.message,
       pendingActions: priorPending,
@@ -1872,6 +1885,15 @@ export async function dispatchEditGraph(
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
       'V5 edit_graph dispatch — freshness derivation failed; emitting derivation_failed verdict',
+    );
+    // HOLD-WIPE fix: the buildTurnContext pending read above may not have
+    // run (it can be the very throw that landed us here). Retry via the
+    // standalone single-row read — contracted never to throw (degrades to
+    // [] with store-layer telemetry) — so a freshness failure alone cannot
+    // reopen the silent hold wipe.
+    priorPendingForCarry = await loadMostRecentPendingActions(
+      payload.scenario_id,
+      requestId,
     );
     let currentGraphHash: string | null = null;
     try {
@@ -2681,7 +2703,41 @@ export async function dispatchEditGraph(
     ) {
       pendingActionsForCommit = [...gmDecision.pendingActions].slice(0, 3);
     }
-    await commitDirectAnswer(response, {
+    // ── HOLD-WIPE fix (task_2e1b8c87): thread holds through this commit ──
+    // Closes the F-HELD round-2 KNOWN RESIDUAL: edit-classified commits
+    // previously threaded NO priorPendingActions, silently wiping live
+    // consent holds. On a graph-writing commit each live hold is validated
+    // against the post-edit graph — threaded re-pinned when still coherent,
+    // honestly lapsed (deterministic notice + redacted telemetry) when the
+    // mutation genuinely invalidated it. Non-mutating turns (rejections,
+    // no-ops, GM-blocked verdicts, withheld writes) thread every prior
+    // through UNCHANGED; the carry-forward inside commitDirectAnswer owns
+    // TTL/wall/supersession bookkeeping either way.
+    const graphWrittenThisTurn = graphForCommit !== undefined;
+    const holdThread = threadHoldsThroughMutatingCommit({
+      priorPendingActions: priorPendingForCarry,
+      graphAfterCommit: graphWrittenThisTurn ? graphForCommit : null,
+      graphHashAfterCommit: graphWrittenThisTurn ? currentGraphHashForRecovery : null,
+      nowMs: Date.now(),
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    if (holdThread.notice !== null) {
+      // Injected BEFORE the commit so the durable assistant_message and the
+      // wire copy carry the same honest sentence (F-HELD 2b seam doctrine).
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, holdThread.notice),
+      };
+    }
+    emitHoldLapseTelemetry(holdThread.lapsed, {
+      requestId,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      site: 'edit_graph_dispatch',
+    });
+    const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'direct_answer',
@@ -2713,6 +2769,17 @@ export async function dispatchEditGraph(
       ...(pendingActionsForCommit !== undefined
         ? { pending_actions: pendingActionsForCommit }
         : {}),
+      // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
+      // carry-forward runs on this path — same contract as the TurnExecutor
+      // commitTurn wrapper. graph_hash is threaded ONLY on graph-writing
+      // commits (the post-edit persisted hash): it pins this turn's
+      // chip-derived pendings and drives the carry-forward's hash rule; a
+      // non-mutating turn threads none so an ingress-echo divergence can
+      // never falsely invalidate a carried hold.
+      priorPendingActions: holdThread.threaded,
+      ...(graphWrittenThisTurn && currentGraphHashForRecovery !== null
+        ? { graph_hash: currentGraphHashForRecovery }
+        : {}),
       // V5 Stage 2B-1b: the route-v2 edit path never runs buildTurnContext,
       // so no coaching_state is derived for this turn — persist NULL explicitly.
       coaching_state: null,
@@ -2728,6 +2795,22 @@ export async function dispatchEditGraph(
       // egress is graph-free too), keeping stored == wire.
       contentGraph: graphForCommit,
     });
+    // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
+    // the commit seam itself may rewrite the response (turn-TTL lapse
+    // notice, F-HELD 2b; steer-don't-bind chip suppression, F-HELD 3a).
+    // Adopt the committed response when the seam actually rewrote it. The
+    // untouched fast path returns the SAME object (identity-equal), so this
+    // is a no-op there; a bare `{}` (test-double shape) has no
+    // assistant_text and is treated as "not rewritten".
+    const committedResponse = commitResult?.response;
+    if (
+      committedResponse !== undefined &&
+      committedResponse !== response &&
+      typeof committedResponse.assistant_text === 'string' &&
+      committedResponse.assistant_text.length > 0
+    ) {
+      response = committedResponse;
+    }
     log.info(
       {
         request_id: requestId,

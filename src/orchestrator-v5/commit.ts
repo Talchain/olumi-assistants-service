@@ -330,9 +330,11 @@ function pendingMatchKey(pa: PendingAction): string {
  *
  * Pure and deterministic (clock injected). This is the single place the
  * turn-count TTL is decremented — see the once-per-turn invariant in the
- * consumption-path matrix (Docs/v5/v5-signature-loop-reliability.md): only the
- * TurnExecutor `commitTurn` wrapper threads `priorPendingActions`, never the
- * route-level dispatchers.
+ * consumption-path matrix (Docs/v5/v5-signature-loop-reliability.md). The
+ * TurnExecutor `commitTurn` wrapper threads `priorPendingActions`, and — the
+ * HOLD-WIPE fix (task_2e1b8c87) — so do the edit/draft route dispatchers
+ * (via handlers/hold-thread-through.ts). Each turn commits exactly once, so
+ * the once-per-turn decrement invariant holds across all threading callers.
  */
 export interface SurvivingPriorPendingsResult {
   readonly survivors: readonly PendingAction[];
@@ -549,11 +551,19 @@ function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
  * have no deterministic line-injection path into assistant_text today, so
  * none could carry this without a new channel).
  *
- * KNOWN RESIDUAL: this notice (and the whole TTL/carry-forward lifecycle)
- * fires only on commits that thread `priorPendingActions` — the TurnExecutor
- * `commitTurn` wrapper alone. Edit- and draft-classified dispatch commits
- * pass none, so they silently WIPE live holds with no notice. Follow-up
- * lane: "thread priorPendingActions through edit/draft dispatch commits".
+ * RESIDUAL CLOSED for edit/draft (HOLD-WIPE fix, task_2e1b8c87): this
+ * notice (and the whole TTL/carry-forward lifecycle) fires only on commits
+ * that thread `priorPendingActions` — previously the TurnExecutor
+ * `commitTurn` wrapper alone, so edit- and draft-classified dispatch
+ * commits silently WIPED live holds. Both dispatchers now thread priors
+ * (handlers/hold-thread-through.ts) and additionally handle
+ * mutation-caused invalidation honestly at their own seam (a hold whose
+ * pinned base the mutation moved is validated against the new graph and
+ * either re-pinned or lapsed with a notice + telemetry BEFORE this
+ * carry-forward runs — hash-rule drops here stay notice-less by design,
+ * because consent holds can no longer reach rule 4 with a stale pin from
+ * those paths). REMAINING wipe sharers (out of that lane's scope):
+ * chip-click dispatch and system-event dispatch thread no priors.
  */
 function buildHeldLapseNotice(pa: PendingAction): string {
   const a = pa.action;
