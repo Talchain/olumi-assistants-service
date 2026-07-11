@@ -519,6 +519,11 @@ export async function dispatchDraftGraph(
       priorPendingActions,
       graphAfterCommit: draftResult.graphOutput ?? null,
       graphHashAfterCommit: draftResult.graphOutput != null ? postDraftGraphHash : null,
+      // No per-operation record on a draft — the whole NEW graph IS the
+      // mutation. Fulfilment detection (round-3 concern 1) falls back to
+      // the post-draft end state: a concept the redraft itself delivered
+      // retires without the false "has lapsed" sentence.
+      appliedOperations: null,
       nowMs: Date.now(),
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,

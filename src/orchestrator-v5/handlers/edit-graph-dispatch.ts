@@ -2718,6 +2718,14 @@ export async function dispatchEditGraph(
       priorPendingActions: priorPendingForCarry,
       graphAfterCommit: graphWrittenThisTurn ? graphForCommit : null,
       graphHashAfterCommit: graphWrittenThisTurn ? currentGraphHashForRecovery : null,
+      // Fulfilment detection (round-3 concern 1): the APPLIED ops let the
+      // thread-through recognise a hold whose change THIS edit itself
+      // delivered (e.g. the user's edit adds the very concept a
+      // proposed_concept offer held) and retire it WITHOUT the false
+      // "has lapsed" sentence. Only meaningful on a graph-writing commit —
+      // `graphForCommit` is set iff the mutation applied (and was not
+      // withheld), when `editResult.operations` is exactly the applied batch.
+      appliedOperations: graphWrittenThisTurn ? editResult.operations ?? null : null,
       nowMs: Date.now(),
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,

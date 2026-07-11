@@ -30,6 +30,23 @@
  *      and why it lapsed (appended to the committed response so stored
  *      copy == wire copy) plus redacted `v5.pending_action.invalidated`
  *      telemetry. Never a silent wipe.
+ *  (c) FULFILMENT, no notice (adversarial round-3 concern 1) — a hold whose
+ *      change THIS turn's mutation itself delivered (the user's edit adds
+ *      the very concept a `proposed_concept` offer proposed; the user
+ *      applies a GM hold's batch by hand) is retired like a lapse (it is
+ *      spent — carrying it forward would re-offer something already in the
+ *      model) but the "has lapsed" sentence is SUPPRESSED: telling the user
+ *      their held proposal lapsed on the very turn they fulfilled it is a
+ *      false claim. Detection is conservative — the hold's target entities
+ *      + operation kinds must be satisfied by this turn's APPLIED mutation
+ *      (per-op comparison on the edit path; post-mutation end-state where
+ *      the whole graph is the mutation, i.e. the draft path, or where the
+ *      failing op class has a cheap end-state oracle: add/remove). Generic
+ *      apply proposals keep their notice — their `inline_patch` speaks the
+ *      handler vocabulary, not patch ops, so fulfilment cannot be compared
+ *      without guessing; a redundant notice beats a wrongly-suppressed one.
+ *      The retirement stays observable via the same frozen telemetry event
+ *      with `detail: 'fulfilled_by_this_mutation'`.
  *
  * Non-confirmation-expecting pendings (run_analysis / what_would_flip
  * suggestion offers, set_factor_value / edit_graph_add_risk clarification
@@ -54,6 +71,10 @@ import {
   assessHeldBatchAgainstGraph,
   type EditGmGoverningVerdict,
 } from './edit-graph-referee-gate.js';
+import {
+  parseEdgeTargetPath,
+  type EditPatchOperationLike,
+} from '../graph-management/adapters/edit-graph-producer.js';
 
 export interface HoldThreadThroughInput {
   /** The prior turn's pendings (`most_recent_pending_actions`, unfiltered). */
@@ -66,6 +87,11 @@ export interface HoldThreadThroughInput {
    *  every prior through unchanged (fail toward preservation; the commit
    *  carry-forward's both-hashes-known rule is equally inert then). */
   readonly graphHashAfterCommit: string | null;
+  /** This turn's APPLIED patch operations (edit path). Null/omitted when the
+   *  mutation has no per-operation record — the draft path, where the whole
+   *  NEW graph IS the mutation and fulfilment detection falls back to the
+   *  post-mutation end state. Fulfilment input only; never re-applied. */
+  readonly appliedOperations?: readonly EditPatchOperationLike[] | null;
   readonly nowMs: number;
   readonly scenarioId: string;
   readonly turnId: string;
@@ -77,7 +103,11 @@ export type HoldLapseDetail =
   | 'held_batch_invalid_post_mutation'
   /** Hash-gated proposal (generic apply / concept offer) whose emit-time
    *  base moved — its confirm path would refuse it by design. */
-  | 'proposal_base_moved';
+  | 'proposal_base_moved'
+  /** THIS turn's mutation itself delivered the held change (module doc (c)):
+   *  the hold retires spent, telemetry records it, the "has lapsed" notice
+   *  is suppressed — it would be a false claim on the fulfilling turn. */
+  | 'fulfilled_by_this_mutation';
 
 export interface LapsedHold {
   readonly pending: PendingAction;
@@ -89,11 +119,159 @@ export interface LapsedHold {
 export interface HoldThreadThroughResult {
   /** Pendings to pass as `CommitMetadata.priorPendingActions`. */
   readonly threaded: readonly PendingAction[];
-  /** Live consent holds genuinely invalidated by THIS mutation. */
+  /** Live consent holds retired by THIS mutation (genuinely invalidated OR
+   *  fulfilled by it — see `detail`). */
   readonly lapsed: readonly LapsedHold[];
-  /** Deterministic lapse sentence (first lapsed hold; F-HELD 2b precedent:
-   *  one sentence even if several lapse at once). Null when none lapsed. */
+  /** Deterministic lapse sentence (first NON-fulfilled lapsed hold; F-HELD
+   *  2b precedent: one sentence even if several lapse at once). Null when
+   *  none lapsed, or when every lapse was fulfilment (module doc (c)). */
   readonly notice: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Fulfilment detection (module doc (c)) — conservative, pure, total.
+// ---------------------------------------------------------------------------
+
+/** Trim + collapse whitespace + lowercase; null for non-strings/blank. */
+function normLabel(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const norm = v.trim().replace(/\s+/g, ' ').toLowerCase();
+  return norm.length > 0 ? norm : null;
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
+function graphList(graph: unknown, key: 'nodes' | 'edges'): readonly Record<string, unknown>[] {
+  const list = asRecord(graph)[key];
+  if (!Array.isArray(list)) return [];
+  return list.map(asRecord);
+}
+
+function graphHasNodeId(graph: unknown, id: string): boolean {
+  return graphList(graph, 'nodes').some((n) => n.id === id);
+}
+
+function graphHasNodeLabelled(graph: unknown, targetLabel: string): boolean {
+  return graphList(graph, 'nodes').some((n) => {
+    const label = normLabel(n.label);
+    return label !== null && (label === targetLabel || label.includes(targetLabel));
+  });
+}
+
+/**
+ * True when THIS turn's mutation delivered the offered concept. Edit path
+ * (per-op record available): ONLY an applied `add_node` carrying the concept
+ * counts — a label that merely pre-exists elsewhere in the graph must not
+ * suppress the notice. Draft path (no per-op record): the whole NEW graph IS
+ * the mutation, so presence of the concept in it is exactly "this turn's
+ * mutation contains it".
+ */
+function conceptFulfilledByThisMutation(
+  concept: string,
+  appliedOps: readonly EditPatchOperationLike[] | null,
+  graphAfterCommit: unknown,
+): boolean {
+  const target = normLabel(concept);
+  if (target === null) return false;
+  if (appliedOps !== null) {
+    return appliedOps.some((op) => {
+      if (op.op !== 'add_node') return false;
+      const label = normLabel(asRecord(op.value).label);
+      return label !== null && (label === target || label.includes(target));
+    });
+  }
+  return graphHasNodeLabelled(graphAfterCommit, target);
+}
+
+/**
+ * "Same operation kind + same target" comparison between a HELD op and an
+ * APPLIED op (the reviewer's fulfilment formula). `add_node` also matches on
+ * the label — the user's own add mints a different node id than the hold did.
+ */
+function appliedOpMatchesHeldOp(
+  held: EditPatchOperationLike,
+  applied: EditPatchOperationLike,
+): boolean {
+  if (applied.op !== held.op) return false;
+  switch (held.op) {
+    case 'add_node': {
+      if (applied.path === held.path) return true;
+      const heldLabel = normLabel(asRecord(held.value).label);
+      return heldLabel !== null && heldLabel === normLabel(asRecord(applied.value).label);
+    }
+    case 'remove_node':
+    case 'update_node':
+      return applied.path === held.path;
+    case 'add_edge': {
+      const hv = asRecord(held.value);
+      const av = asRecord(applied.value);
+      return (
+        typeof hv.from === 'string' && hv.from.length > 0 && hv.from === av.from &&
+        typeof hv.to === 'string' && hv.to.length > 0 && hv.to === av.to
+      );
+    }
+    case 'remove_edge':
+    case 'update_edge': {
+      const ht = parseEdgeTargetPath(held.path);
+      const at = parseEdgeTargetPath(applied.path);
+      return ht !== null && at !== null && ht.from === at.from && ht.to === at.to;
+    }
+    default:
+      return false;
+  }
+}
+
+/**
+ * End-state oracle for ONE held op against the post-mutation graph — the
+ * "already-applied / no-op class" the re-referee's failure encodes
+ * (ENTITY_ID_COLLISION on an add, ENTITY_NOT_FOUND on a remove), checked
+ * directly on the graph instead of via blocker codes so a coincidental code
+ * (e.g. an id collision with an UNRELATED node) cannot suppress the notice
+ * on its own for removes, and adds also accept a label match. Field updates
+ * have no cheap end-state oracle (the target value lives behind per-field
+ * semantics) — applied-op matching is their only fulfilment signal.
+ */
+function heldOpEndStateSatisfied(
+  held: EditPatchOperationLike,
+  graphAfterCommit: unknown,
+): boolean {
+  switch (held.op) {
+    case 'add_node': {
+      if (graphHasNodeId(graphAfterCommit, held.path)) return true;
+      const label = normLabel(asRecord(held.value).label);
+      return label !== null && graphHasNodeLabelled(graphAfterCommit, label);
+    }
+    case 'remove_node':
+      return !graphHasNodeId(graphAfterCommit, held.path);
+    case 'remove_edge': {
+      const t = parseEdgeTargetPath(held.path);
+      return (
+        t !== null &&
+        !graphList(graphAfterCommit, 'edges').some((e) => e.from === t.from && e.to === t.to)
+      );
+    }
+    default:
+      return false;
+  }
+}
+
+/** Whole-batch fulfilment: EVERY held op satisfied (a partially-delivered
+ *  hold still deserves the honest notice — part of it is NOT in). */
+function heldBatchFulfilledByThisMutation(
+  heldOps: readonly EditPatchOperationLike[],
+  appliedOps: readonly EditPatchOperationLike[] | null,
+  graphAfterCommit: unknown,
+): boolean {
+  if (heldOps.length === 0) return false;
+  return heldOps.every(
+    (held) =>
+      (appliedOps !== null && appliedOps.some((a) => appliedOpMatchesHeldOp(held, a))) ||
+      heldOpEndStateSatisfied(held, graphAfterCommit),
+  );
 }
 
 /**
@@ -108,6 +286,7 @@ export function threadHoldsThroughMutatingCommit(
   if (priors.length === 0 || newHash === null) {
     return { threaded: priors, lapsed: [], notice: null };
   }
+  const appliedOps = input.appliedOperations ?? null;
   const threaded: PendingAction[] = [];
   const lapsed: LapsedHold[] = [];
   for (const pa of priors) {
@@ -150,7 +329,17 @@ export function threadHoldsThroughMutatingCommit(
         } else {
           lapsed.push({
             pending: pa,
-            detail: 'held_batch_invalid_post_mutation',
+            // Module doc (c): a batch THIS turn's mutation already delivered
+            // retires as fulfilment (notice suppressed), not as a lapse the
+            // user must re-consent to. The governing verdict stays reported
+            // honestly either way.
+            detail: heldBatchFulfilledByThisMutation(
+              read.operations,
+              appliedOps,
+              input.graphAfterCommit,
+            )
+              ? 'fulfilled_by_this_mutation'
+              : 'held_batch_invalid_post_mutation',
             governing: assessment.governing,
           });
         }
@@ -160,9 +349,23 @@ export function threadHoldsThroughMutatingCommit(
     // Generic apply proposal, payload-less GM hold (decline posture), or a
     // hash-pinned concept offer: the confirm/resume path is gated on the
     // emit-time hash by design, so the mutation genuinely invalidates it.
-    lapsed.push({ pending: pa, detail: 'proposal_base_moved', governing: null });
+    // Module doc (c): a concept offer this turn's mutation itself delivered
+    // retires as fulfilment. Generic apply proposals / payload-less GM holds
+    // deliberately keep the notice — no comparable op record exists.
+    const fulfilled =
+      pa.action.kind === 'proposed_concept' &&
+      conceptFulfilledByThisMutation(pa.action.concept, appliedOps, input.graphAfterCommit);
+    lapsed.push({
+      pending: pa,
+      detail: fulfilled ? 'fulfilled_by_this_mutation' : 'proposal_base_moved',
+      governing: null,
+    });
   }
-  const notice = lapsed.length > 0 ? buildHoldMutationLapseNotice(lapsed[0]!.pending) : null;
+  // One sentence, first NON-fulfilled lapse (F-HELD 2b precedent); all-
+  // fulfilled retirements are notice-less by design (module doc (c)).
+  const noticeworthy = lapsed.find((l) => l.detail !== 'fulfilled_by_this_mutation');
+  const notice =
+    noticeworthy !== undefined ? buildHoldMutationLapseNotice(noticeworthy.pending) : null;
   return { threaded, lapsed, notice };
 }
 
