@@ -161,3 +161,43 @@ export function isClaimUsable(field: string, input: ClaimUsableInput): boolean {
 export function isTier3LeakBlocked(field: string): boolean {
   return TIER3_LEAK_BLOCK_FIELDS.includes(field);
 }
+
+/**
+ * Reduced-samples disclosure presence check (claim-safety ruling on
+ * `parallel-briefs/W2-CLAIM-SAFETY-CASE.md`, Option B — 2026-07-11).
+ *
+ * PLoT discloses that it reduced the simulation count for a complex model
+ * by riding a `SAMPLES_REDUCED_FOR_COMPLEXITY` code on its warning channel
+ * (a Tier-3 deny field) and, belt-and-braces, on `critiques`. The ruling
+ * classifies a presence-only membership test on the CODE as deterministic
+ * honest disclosure (density-wall class), NOT a claim from the field's
+ * content — nothing here reads, stores, or interpolates any value or
+ * wording from the entries.
+ *
+ * The check lives in THIS file by design: the cage stays the sole owner of
+ * what may be presence-tested against Tier-3 fields, so no user-facing
+ * string producer ever carries the deny-key literal (the static scan in
+ * tests/contract/tier3-leak-guard.static.guard.test.ts stays maximally
+ * strict). Consumption is pinned to exactly ONE call site
+ * (tests/contract/reduced-samples-disclosure-single-site.guard.test.ts) —
+ * a second consumer requires a fresh claim-safety review, not a new import.
+ */
+export function hasReducedSamplesDisclosure(
+  response: Record<string, unknown>,
+): boolean {
+  for (const key of ['inference_warnings', 'critiques'] as const) {
+    const arr = response[key];
+    if (
+      Array.isArray(arr) &&
+      arr.some(
+        (entry) =>
+          entry !== null &&
+          typeof entry === 'object' &&
+          (entry as Record<string, unknown>).code === 'SAMPLES_REDUCED_FOR_COMPLEXITY',
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}

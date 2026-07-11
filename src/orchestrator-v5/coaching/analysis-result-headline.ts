@@ -99,15 +99,26 @@ function eliminatedSentence(count: number): string {
  */
 const ELIMINATED_SENTENCE_MAX_CHARS = eliminatedSentence(999).length;
 
+// Seam item 3 (CRITIQUE_BUCKETS ruling): honest disclosure when PLoT reduced
+// the simulation count for a complex model (SAMPLES_REDUCED_FOR_COMPLEXITY).
+// Same voice as the S-bucket replacement in compose/sanitise-enrichment.ts —
+// keep the two in sync if either changes. Composes BEFORE the status suffix.
+export const REDUCED_SAMPLES_SUFFIX =
+  ' Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.';
+
 /**
  * Registry-side maximum length for a deterministic run_analysis
  * assistant_text. The base headline (including any status suffix) is capped
  * at {@link MAX_HEADLINE_CHARS} exactly as before; the Mission B narration
- * tails (robustness honesty + eliminated options) are budgeted on top so
- * honest tails can never force a fallback to a stronger-case shed.
+ * tails (robustness honesty + eliminated options) and the seam-item-3
+ * reduced-samples disclosure are budgeted on top so honest tails can never
+ * force a fallback to a stronger-case shed.
  */
 export const MAX_ASSISTANT_TEXT_CHARS =
-  MAX_HEADLINE_CHARS + NOT_ROBUST_SENTENCE.length + ELIMINATED_SENTENCE_MAX_CHARS;
+  MAX_HEADLINE_CHARS +
+  NOT_ROBUST_SENTENCE.length +
+  ELIMINATED_SENTENCE_MAX_CHARS +
+  REDUCED_SAMPLES_SUFFIX.length;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -171,6 +182,17 @@ export interface AnalysisResultHeadlineInput {
   readonly enrichment: Record<string, unknown>;
   readonly leading_option_id: string;
   readonly status_kind: 'ok' | 'partial' | 'unknown';
+  /**
+   * Seam item 3: PLoT reported SAMPLES_REDUCED_FOR_COMPLEXITY for this run.
+   * Detection is cage-owned (the presence helper in
+   * compose/claim-safety-cage.ts — claim-safety ruling, Option B); this file
+   * receives only the boolean and never touches the source field. When true
+   * the headline appends {@link REDUCED_SAMPLES_SUFFIX} — a fixed disclosure
+   * sentence; no value from the response is interpolated. Budgeted on top of
+   * the headline cap (like the Mission B tails) so the disclosure never
+   * forces a stronger case to shed information.
+   */
+  readonly samples_reduced?: boolean;
   /**
    * Spine A backstop: factor_ids an option intervenes on. The top-driver
    * resolver skips these so an option-controlled lever is never named as the
@@ -308,8 +330,13 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // MAX_HEADLINE_CHARS; the tail rides on its own budget (lengthCap) so an
   // honest tail never forces a stronger case to shed information.
   const narrationTail = buildNarrationTail(enrichment, winner);
-  const suffix = `${narrationTail}${statusSuffix(status_kind)}`;
-  const lengthCap = MAX_HEADLINE_CHARS + narrationTail.length;
+  // Seam item 3: reduced-samples disclosure rides between the narration
+  // tail and the status suffix (mirrored by TAIL_PATTERN in the grammar).
+  const reducedSamplesSuffix =
+    input.samples_reduced === true ? REDUCED_SAMPLES_SUFFIX : '';
+  const suffix = `${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
+  const lengthCap =
+    MAX_HEADLINE_CHARS + narrationTail.length + reducedSamplesSuffix.length;
   const marginBucket = computeMarginBucket(winner);
   const hasDriver = driverLabel !== null;
   const hasFragility = caution !== null;
@@ -1118,6 +1145,7 @@ export const RUN_ANALYSIS_LOCKED_TEMPLATES: ReadonlySet<string> = new Set([
   'Ran analysis on your current scenario. Some results may be incomplete — treat with caution.',
   'Ran analysis on your current scenario. The analysis engine reported an unfamiliar status — treat the result with caution.',
   'Ran analysis on your current scenario. The engine flagged the run as partial and produced no option comparisons — treat with caution.',
+  'Ran analysis on your current scenario. Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.',
 ]);
 
 /**
@@ -1180,12 +1208,14 @@ const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_S
 
 // Mission B narration tail (provisional_doctrine_v0): optional robustness
 // honesty sentence, then optional eliminated-options sentence, then the
-// optional status suffix — in exactly that order, mirroring
-// buildNarrationTail + statusSuffix composition in computeHeadline.
+// optional seam-item-3 reduced-samples disclosure, then the optional status
+// suffix — in exactly that order, mirroring buildNarrationTail +
+// reducedSamplesSuffix + statusSuffix composition in computeHeadline.
 const NOT_ROBUST_RE_SRC = escapeForRegex(NOT_ROBUST_SENTENCE);
 const ELIMINATED_RE_SRC =
   ' \\d{1,3} options are effectively eliminated \\(each has less than a 1% chance of winning\\)\\.';
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?${STATUS_SUFFIX_PATTERN}`;
+const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}`;
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three
 // claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
