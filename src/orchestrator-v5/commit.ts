@@ -47,7 +47,11 @@ import type {
   PendingAction,
   PendingLifecycleSummary,
 } from './session/pending-action.js';
-import { PENDING_ACTIONS_PER_TURN_CAP } from './session/pending-action.js';
+import {
+  CONFIRMATION_EXPECTING_ACTION_TYPES,
+  isPendingActionExpired,
+  PENDING_ACTIONS_PER_TURN_CAP,
+} from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
@@ -333,6 +337,19 @@ function pendingMatchKey(pa: PendingAction): string {
 export interface SurvivingPriorPendingsResult {
   readonly survivors: readonly PendingAction[];
   readonly summary: PendingLifecycleSummary;
+  /**
+   * F-HELD fix 2b — the prior CONFIRMATION-EXPECTING pendings (kinds in
+   * `CONFIRMATION_EXPECTING_ACTION_TYPES`) dropped by the TURN-COUNT TTL in
+   * THIS pass. The carry-forward is the single turn-TTL decrement site, so
+   * this is the only place a consent-expecting lapse is observable; the
+   * commit seam reads it to attach the honest one-sentence lapse notice
+   * (previously the hold died silently). Wall-expiry, hash-invalidation,
+   * consumption and supersession are deliberately NOT reported here — they
+   * have their own surfaced outcomes (apply/dismiss receipts, divergence
+   * recoveries) or are wall-bounded staleness where re-offering copy risks
+   * contradicting a much older conversation state.
+   */
+  readonly lapsedConfirmationExpecting: readonly PendingAction[];
 }
 
 /**
@@ -365,6 +382,7 @@ export function computeSurvivingPriorPendingsDetailed(
     (pa) => pa.action.kind === 'proposed_concept',
   );
   const survivors: PendingAction[] = [];
+  const lapsedConfirmationExpecting: PendingAction[] = [];
   let consumedCount = 0;
   let supersededCount = 0;
   let expiredWallCount = 0;
@@ -393,11 +411,21 @@ export function computeSurvivingPriorPendingsDetailed(
     }
     // 5. turn-count TTL — decrement once per carried turn; drop when exhausted.
     const nextTurnCount = pa.expires_at_turn_count - 1;
-    if (nextTurnCount <= 0) { expiredTurnsCount += 1; continue; }
+    if (nextTurnCount <= 0) {
+      expiredTurnsCount += 1;
+      // F-HELD fix 2b: a consent-expecting pending lapsing by turn-TTL is
+      // the silent-drop case the lapse notice closes. Turn-TTL drops ONLY —
+      // see the field doc on SurvivingPriorPendingsResult.
+      if (CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind)) {
+        lapsedConfirmationExpecting.push(pa);
+      }
+      continue;
+    }
     survivors.push({ ...pa, expires_at_turn_count: nextTurnCount });
   }
   return {
     survivors,
+    lapsedConfirmationExpecting,
     summary: {
       priorCount: prior.length,
       consumedCount,
@@ -457,6 +485,90 @@ export function finaliseLifecycleAgainstCap(
     survivedCount: persisted,
     capDroppedCount: eligible - persisted,
   };
+}
+
+/**
+ * F-HELD fix 3a (steer-don't-bind, design option a) — the SUGGESTION-CLASS
+ * run_analysis chip ids that must not be minted while a confirmation-expecting
+ * pending is live. These are the generic "re-run analysis" offers the
+ * chip-generator (and its deterministic siblings) attach to ordinary answers —
+ * exactly the competing consent offer that hijacked the bare "yes" in wire
+ * capture 13c→14c.
+ *
+ * Scope discipline: ERROR/RECOVERY chips are NEVER suppressed. Every recovery
+ * mint carries a dedicated id ('chip_action_run_analysis_retry',
+ * 'chip_action_retry_analysis', 'chip_action_run_analysis_after_expiry',
+ * 'chip_action_run_analysis_after_chip_no_pending',
+ * 'chip_action_rerun_analysis_gm_stale', 'chip_clarify_pending_N') — none of
+ * them appear in this set, so their affordances survive intact.
+ *
+ * Documented residual — COMPLETE manifest of mints sharing the generic
+ * 'chip_action_rerun_analysis' id (round-2 FIXUP 5b), all suppressed for the
+ * duration of a live hold; each keeps its re-run guidance in assistant_text:
+ *   - compose/chip-generator.ts (suggestion mints — the intended targets);
+ *   - routing/run-comparison-gate.ts RERUN_CHIP (stale/unconfirmed
+ *     "what changed?" recovery — can co-occur with a live hold);
+ *   - routing/stale-rerun-guard.ts RERUN_ACTION (stale-rerun guard, ALSO
+ *     re-used by the coaching degrade path; the degrade's own hold case is
+ *     handled upstream by the held-aware template, F-HELD 3b);
+ *   - routing/post-analysis-label-intercept.ts RERUN_ANALYSIS_CHIP
+ *     (post-analysis label-click chip set);
+ *   - turn-executor.ts what_would_flip stale-resume recovery (cannot
+ *     co-occur with a live hold after the consent-priority fix: the hold
+ *     wins the bare-confirm pick, and chip clicks are intent-scoped).
+ * Steer-don't-bind accepts the one-click-affordance loss on the sharers
+ * while the hold is unresolved.
+ */
+const SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS: ReadonlySet<string> = new Set([
+  'chip_action_rerun_analysis',
+  'chip_action_rerun_analysis_after_mutation',
+]);
+
+function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
+  return (
+    chip.action_type === 'run_analysis' &&
+    SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS.has(chip.id)
+  );
+}
+
+/**
+ * F-HELD fix 2b — the deterministic one-sentence lapse notice attached when a
+ * confirmation-expecting pending is turn-TTL-dropped by THIS commit's
+ * carry-forward pass.
+ *
+ * SEAM CHOICE (documented per the fix brief): the notice is injected at the
+ * commit chokepoint itself, onto the response being committed, NOT via a
+ * next-turn deterministic-line channel. Rationale: (a) the carry-forward
+ * inside `commitDirectAnswer` is the SINGLE turn-TTL decrement site, so the
+ * lapse is only observable here; (b) the response being committed IS the
+ * next user-visible message after the last turn on which the hold was
+ * resumable — deferring one more turn would need new durable state for
+ * strictly later delivery; (c) appending before the durable
+ * `assistant_message` derivation keeps stored copy == wire copy (the
+ * recent_changes / coaching-state style seams are read-side projections and
+ * have no deterministic line-injection path into assistant_text today, so
+ * none could carry this without a new channel).
+ *
+ * KNOWN RESIDUAL: this notice (and the whole TTL/carry-forward lifecycle)
+ * fires only on commits that thread `priorPendingActions` — the TurnExecutor
+ * `commitTurn` wrapper alone. Edit- and draft-classified dispatch commits
+ * pass none, so they silently WIPE live holds with no notice. Follow-up
+ * lane: "thread priorPendingActions through edit/draft dispatch commits".
+ */
+function buildHeldLapseNotice(pa: PendingAction): string {
+  const a = pa.action;
+  const label =
+    (a.kind === 'apply_proposed_change' || a.kind === 'proposed_concept') &&
+    typeof a.public_label === 'string' &&
+    a.public_label.trim().length > 0
+      ? a.public_label.trim()
+      : null;
+  // F-HELD round 2 (FIXUP 2): comma, not an em dash — this string is
+  // injected AFTER every sanitise seam, so it must satisfy house style
+  // (no em dash in user-facing copy) directly.
+  return label !== null
+    ? `The held change '${label}' has lapsed, say the word if you still want it.`
+    : 'A held change has lapsed, say the word if you still want it.';
 }
 
 /**
@@ -530,7 +642,8 @@ export async function commitDirectAnswer(
   // duplicate / over-budget) can never leave an orphaned resumable pending that
   // a later "yes" short-confirm could resume — the "persisted pending ⟹
   // rendered chip" invariant is structural at every derivation site.
-  const chipDerivedPending =
+  const nowMsForPendings = Date.now();
+  const initialChipDerivedPending =
     metadata.pending_actions === undefined
       ? derivePendingActionsFromFinalizedChips(
           (response.suggested_actions ?? []) as readonly SuggestedAction[],
@@ -542,6 +655,68 @@ export async function commitDirectAnswer(
         )
       : metadata.pending_actions;
 
+  // F-HELD fix 3a (steer-don't-bind): while a confirmation-expecting pending
+  // remains live AFTER this commit, do not mint competing run_analysis
+  // SUGGESTION chips (or their derived pendings). "Live after this commit" =
+  // a live confirmation-expecting pending among THIS turn's own pendings
+  // (e.g. a GM hold emitted this turn) OR among the carry-forward SURVIVORS
+  // (so a hold that is consumed / lapsing / hash-invalidated this very
+  // commit does NOT suppress — the chips return as the hold dies).
+  //
+  // The preliminary carry-forward below is recomputed after suppression:
+  // removing a chip-derived run_analysis pending can only change
+  // SAME-KEY supersession of a prior run_analysis pending, never the
+  // confirmation-expecting outcomes (their keys are proposal refs, not chip
+  // ids, and concept supersession is kind-level) — so the hold verdict and
+  // the lapse list are identical between the two pure passes.
+  const hasLiveConfirmationExpecting = (list: readonly PendingAction[]): boolean =>
+    list.some(
+      (pa) =>
+        CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
+        !isPendingActionExpired(pa, nowMsForPendings),
+    );
+  const prelimCarryForward = computeSurvivingPriorPendingsDetailed(
+    metadata.priorPendingActions ?? [],
+    initialChipDerivedPending,
+    metadata.consumedPendingRefs ?? [],
+    metadata.graph_hash,
+    nowMsForPendings,
+  );
+  const holdLiveAfterCommit =
+    hasLiveConfirmationExpecting(initialChipDerivedPending) ||
+    hasLiveConfirmationExpecting(prelimCarryForward.survivors);
+
+  let responseForCommit = response;
+  let chipDerivedPending = initialChipDerivedPending;
+  if (holdLiveAfterCommit) {
+    const chips = (responseForCommit.suggested_actions ??
+      []) as readonly SuggestedAction[];
+    const suppressedIds = new Set(
+      chips.filter(isCompetingRunAnalysisSuggestionChip).map((c) => c.id),
+    );
+    if (suppressedIds.size > 0) {
+      responseForCommit = {
+        ...responseForCommit,
+        suggested_actions: chips.filter(
+          (c) => !isCompetingRunAnalysisSuggestionChip(c),
+        ),
+      };
+      // Keep the "persisted pending ⟹ rendered chip" invariant: any pending
+      // riding a suppressed chip (derived OR pre-supplied) is dropped with it.
+      chipDerivedPending = initialChipDerivedPending.filter(
+        (pa) => !(pa.action.kind === 'run_analysis' && suppressedIds.has(pa.chip_id)),
+      );
+      log.info(
+        {
+          scenario_id: metadata.scenario_id,
+          turn_id: metadata.turn_id,
+          suppressed_chip_ids: [...suppressedIds],
+        },
+        'V5 commit — competing run_analysis suggestion chips suppressed while a confirmation-expecting pending is live (F-HELD steer-don\'t-bind)',
+      );
+    }
+  }
+
   // V5 Signature Loop — carry forward the prior turn's surviving pendings so a
   // single non-consuming turn (which commits an empty `chipDerivedPending`)
   // does NOT wipe a still-valid proposal. This turn's own pendings come FIRST so
@@ -552,13 +727,43 @@ export async function commitDirectAnswer(
     chipDerivedPending,
     metadata.consumedPendingRefs ?? [],
     metadata.graph_hash,
-    Date.now(),
+    nowMsForPendings,
   );
   const survivingPrior = carryForward.survivors;
   const finalPendings: readonly PendingAction[] = [
     ...chipDerivedPending,
     ...survivingPrior,
   ].slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+
+  // F-HELD fix 2b — honest lapse notice. When THIS commit's carry-forward
+  // turn-TTL-dropped a confirmation-expecting pending, attach ONE
+  // deterministic sentence to the response being committed (see
+  // `buildHeldLapseNotice` for the seam-choice rationale). One sentence even
+  // if several lapse at once (cap is 3): the first in prior order — the read
+  // side places the freshest offer first — names the lapse; re-offering
+  // machinery stays out of scope here (say-the-word re-consent is the ruled
+  // posture, not silent re-arming).
+  const lapsedHolds = carryForward.lapsedConfirmationExpecting;
+  if (lapsedHolds.length > 0) {
+    const notice = buildHeldLapseNotice(lapsedHolds[0]!);
+    const baseText =
+      typeof responseForCommit.assistant_text === 'string'
+        ? responseForCommit.assistant_text
+        : '';
+    responseForCommit = {
+      ...responseForCommit,
+      assistant_text:
+        baseText.trim().length > 0 ? `${baseText}\n\n${notice}` : notice,
+    };
+    log.info(
+      {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        lapsed_kinds: lapsedHolds.map((pa) => pa.action.kind),
+      },
+      'V5 commit — confirmation-expecting pending lapsed by turn TTL; deterministic lapse notice attached (F-HELD)',
+    );
+  }
 
   // Track 2 — finalise the lifecycle tally against the cap. This turn's own
   // pendings occupy the head of `finalPendings`, so the eligible survivors that
@@ -588,8 +793,14 @@ export async function commitDirectAnswer(
   // provisional response carries empty assistant_text — its narrative is
   // reconstructable from the persisted graph in context).
   const userMessage = capConversationText(metadata.userMessage);
+  // F-HELD: derived from `responseForCommit` (not the raw input response) so
+  // the durable copy includes the lapse notice / excludes suppressed chips'
+  // context exactly as the wire will — stored copy == wire copy.
   const assistantMessage = capConversationText(
-    durablePublicAssistantText(response.assistant_text, parseContentGraph(metadata.contentGraph)),
+    durablePublicAssistantText(
+      responseForCommit.assistant_text,
+      parseContentGraph(metadata.contentGraph),
+    ),
   );
 
   // Track S 0.13c-4: persist-site intercept repair. This is the single chokepoint
@@ -787,7 +998,13 @@ export async function commitDirectAnswer(
 
   const graphPersisted = graphWasProvided(metadata.graph);
   return {
-    response,
+    // F-HELD: the committed response (lapse notice attached / competing
+    // suggestion chips suppressed when those seams fired; the SAME object as
+    // the input on the untouched fast path). Callers that consume
+    // `CommitResult.response` (the TurnExecutor commitTurn wrapper — the only
+    // caller that threads `priorPendingActions`) surface it on the wire, so
+    // wire copy == durable copy.
+    response: responseForCommit,
     performed: true,
     persisted_row_id: persistedRowId,
     graphPersisted,

@@ -93,7 +93,10 @@ import {
   decideGoalTargetReceipt,
   formatGoalTargetNotSavedText,
 } from './compose/goal-target-receipt-guard.js';
-import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
+import {
+  scopePendingsToChipClickIntent,
+  tryShortConfirmResume,
+} from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
 import { buildRescaleCapPendingActions } from './session/rescale-cap-pending.js';
 import {
@@ -218,6 +221,7 @@ import { summariseGraphCounts } from './context/build-context-summary.js';
 import {
   checkCoachingOutput,
   buildCoachingDegradeResponse,
+  selectLiveHoldForDegrade,
 } from './coaching/coaching-output-postcheck.js';
 import {
   buildFlipProposalEmit,
@@ -982,8 +986,22 @@ export async function runTurnExecutor(
       usable_for_chips: pack.usable_for_chips,
       blocked: pack.blocked,
     });
+    // F-HELD fix 3b — thread the live hold (if any) into the degrade so a
+    // state-unsafe degrade RESTATES the held offer + its confirm chip instead
+    // of stomping the reply with buildAnalysisAbsentTemplate + a competing
+    // run_analysis chip (wire capture 13c). Selection lives in
+    // `selectLiveHoldForDegrade` (same single-prior-turn authority every
+    // other pending consumer in this file reads): newest LIVE standard
+    // apply_proposed_change with public copy AND `expires_at_turn_count > 1`
+    // — a hold at 1 lapses at THIS commit, so restating it would contradict
+    // the same-message lapse notice with a dead chip (round-2 FIXUP 3).
+    const holdForDegrade = selectLiveHoldForDegrade(
+      context.most_recent_pending_actions,
+      Date.now(),
+    );
     const degrade = buildCoachingDegradeResponse(pack, {
       optionCount: contextPackForLog?.graph.counts.options ?? 0,
+      ...(holdForDegrade !== undefined ? { liveHold: holdForDegrade } : {}),
     });
     return {
       assistant_text: degrade.assistant_text,
@@ -1892,9 +1910,19 @@ export async function runTurnExecutor(
       const resumerMessage = options.chipClickResumeIntent
         ? 'yes'
         : payload.message;
+      // F-HELD round 2 (FIXUP 1) — intent-vs-kind guard: the synthetic "yes"
+      // a chip click produces must only ever resolve pendings of the CLICKED
+      // kind. Without this scope, the consent-priority pick would resolve a
+      // wwf chip click to a live apply_proposed_change hold and execute a
+      // held mutation off an explanation click. Typed "yes" (no intent flag)
+      // passes the full set through — consent-priority untouched.
+      const pendingsForShortConfirm = scopePendingsToChipClickIntent(
+        context.most_recent_pending_actions ?? [],
+        options.chipClickResumeIntent,
+      );
       const shortConfirmDispatch = tryShortConfirmResume({
         message: resumerMessage,
-        pendingActions: context.most_recent_pending_actions ?? [],
+        pendingActions: pendingsForShortConfirm,
         currentTurnIndex: context.prior_turns.length,
         nowMs: Date.now(),
         analysisFreshness: freshness?.freshness,
@@ -2913,6 +2941,93 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           consumedPendingAction = pending;
         }
+      } else if (
+        clarificationDispatch.matched &&
+        clarificationDispatch.dispatch === 'edit_graph_add_risk'
+      ) {
+        // F-HELD fix 4b (A-variant) — deterministic continuation for the
+        // add-risk driver answer (wire 04c→10c: previously dropped to the
+        // LLM, which coached instead of continuing the add). No V5 add
+        // handler exists (the deterministic add path lives in legacy
+        // handleEditGraph behind the route-level edit dispatch), so the
+        // resume acknowledges risk + driver and offers an EXECUTABLE replay
+        // chip whose compound message routes to the edit pipeline on click
+        // (edit verb present; deliberately NOT end-anchored on "as a risk",
+        // so the bare add-risk clarify classifier cannot re-claim it). The
+        // answered clarify pending is consumed — its question has been
+        // answered; the continuation now rides the chip.
+        const pending = clarificationDispatch.pending;
+        emit(TelemetryEvents.PendingActionMatched, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          pending_action_id: pending.id,
+          kind: 'edit_graph_add_risk',
+          chip_id: pending.chip_id,
+          candidate_count: 1,
+        });
+        const riskLabel = clarificationDispatch.riskLabel;
+        const driverLabel = clarificationDispatch.driverLabel;
+        const addRiskResumeResponse = composeDirectAnswerResponse({
+          // Deterministic copy family: mirrors the swept GM held wording
+          // ("Nothing in the model moves until you confirm") — no success
+          // claim, no denial phrase, no internal tokens, no em dash.
+          assistant_text:
+            `Got it: I can add ${riskLabel} as a risk with ${driverLabel} as its main driver. ` +
+            'Nothing in the model moves until you confirm. Use the suggestion below to add it, ' +
+            'or tell me what to adjust instead.',
+          stage: context.stage,
+          suggested_actions: [
+            {
+              id: 'chip_add_risk_apply',
+              label: 'Add it to the model',
+              message: `Add ${riskLabel} as a risk, with ${driverLabel} as its main driver.`,
+            },
+          ],
+        });
+        sonnetTextForLog = addRiskResumeResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitTurn(addRiskResumeResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            // The driver question has been ANSWERED — consume the clarify
+            // pending so it cannot zombie into a second resume.
+            consumedPendingRefs: [pending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'add_risk_driver_resume',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on add-risk driver resume',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
       } else if (clarificationDispatch.matched) {
         // Focused recovery dispatches — the resumer claimed the turn
         // but the persisted clarification is no longer applicable

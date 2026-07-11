@@ -540,3 +540,222 @@ describe('tryClarificationResume — kind classification regression', () => {
     expect(actualMutating).toEqual(expectedMutating);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-HELD fix 4b (A-variant) — driver-answer resume for edit_graph_add_risk.
+// Wire shape 04c→10c (2026-07-11): the add-risk clarify asks "What factor
+// drives it most?" and the user's answer ("Team size drives it most.") was
+// dropped. The resumer must claim that reply against a live, hash-safe
+// edit_graph_add_risk pending, mirroring the set_factor_value pattern
+// (kind gate + liveness + hash gate, then label match).
+// ---------------------------------------------------------------------------
+
+describe('tryClarificationResume — edit_graph_add_risk driver-answer resume (F-HELD 4b)', () => {
+  function addRiskPending(overrides: Partial<PendingAction> = {}): PendingAction {
+    return {
+      id: `pa-add-risk-${Math.random()}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: 'chip_add_risk_clarify',
+      action: {
+        kind: 'edit_graph_add_risk',
+        label: 'client concentration',
+      },
+      preconditions: { graph_hash: DEFAULT_GRAPH_HASH },
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-05-05T00:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  const FACTOR_LOOKUP = makeGraphLookup([
+    { id: 'f_team_size', label: 'Team size' },
+    { id: 'f_budget', label: 'Available budget' },
+  ]);
+
+  it('wire 10c shape: "Team size drives it most." resolves the driver against the graph', () => {
+    const pending = addRiskPending();
+    const r = tryClarificationResume({
+      message: 'Team size drives it most.',
+      pendingActions: [pending],
+      graphLookup: FACTOR_LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'edit_graph_add_risk') {
+      expect(r.pending.id).toBe(pending.id);
+      expect(r.riskLabel).toBe('client concentration');
+      expect(r.driverFactorId).toBe('f_team_size');
+      expect(r.driverLabel).toBe('Team size');
+    } else {
+      throw new Error(`expected edit_graph_add_risk dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('a bare factor-label reply also resolves (chip-click / terse answer shape)', () => {
+    const r = tryClarificationResume({
+      message: 'Team size',
+      pendingActions: [addRiskPending()],
+      graphLookup: FACTOR_LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'edit_graph_add_risk') {
+      expect(r.driverFactorId).toBe('f_team_size');
+    } else {
+      throw new Error(`expected edit_graph_add_risk dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('an answer-shaped reply naming a NEW driver (not in the graph) is still claimed, with driverFactorId null', () => {
+    // The clarify examples routinely suggest factors that do NOT exist yet
+    // ("for example team size, hiring pace, or onboarding complexity") — the
+    // answer scaffold is the strong signal, not graph membership.
+    const r = tryClarificationResume({
+      message: 'Hiring pace drives it most.',
+      pendingActions: [addRiskPending()],
+      graphLookup: FACTOR_LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'edit_graph_add_risk') {
+      expect(r.driverFactorId).toBeNull();
+      expect(r.driverLabel).toBe('Hiring pace');
+      expect(r.matchKind).toBe('answer_shape');
+    } else {
+      throw new Error(`expected edit_graph_add_risk dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('an unrelated free-text reply is NOT claimed (falls through to the LLM)', () => {
+    const r = tryClarificationResume({
+      message: 'what should we look at next',
+      pendingActions: [addRiskPending()],
+      graphLookup: FACTOR_LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'no_label_match' });
+  });
+
+  it('all add-risk pendings expired → recovery_expired', () => {
+    const r = tryClarificationResume({
+      message: 'Team size drives it most.',
+      pendingActions: [
+        addRiskPending({ expires_at_iso: '2026-05-06T11:00:00.000Z' }), // 1h before NOW_MS
+      ],
+      graphLookup: FACTOR_LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r).toMatchObject({ matched: true, dispatch: 'recovery_expired' });
+  });
+
+  it('graph hash diverged since the clarify → recovery_graph_changed (mutating kind, fail-closed)', () => {
+    const r = tryClarificationResume({
+      message: 'Team size drives it most.',
+      pendingActions: [addRiskPending()],
+      graphLookup: FACTOR_LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: 'sha256:diverged',
+    });
+    expect(r).toMatchObject({ matched: true, dispatch: 'recovery_graph_changed' });
+  });
+
+  it('missing graph_hash on the pending → recovery_graph_changed (house hash gate fails closed)', () => {
+    const r = tryClarificationResume({
+      message: 'Team size drives it most.',
+      pendingActions: [addRiskPending({ preconditions: {} })],
+      graphLookup: FACTOR_LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r).toMatchObject({ matched: true, dispatch: 'recovery_graph_changed' });
+  });
+
+  it('the edit-verb negative gate still protects real edit messages ("add it to the model")', () => {
+    const r = tryClarificationResume({
+      message: 'add it to the model',
+      pendingActions: [addRiskPending()],
+      graphLookup: FACTOR_LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'message_likely_value_update' });
+  });
+
+  it('set_factor_value pendings take precedence when both kinds coexist (existing flow unchanged)', () => {
+    const r = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [setFactorValuePending(), addRiskPending()],
+      graphLookup: makeGraphLookup([{ id: 'f_eng_time', label: 'Engineering Time Commitment' }]),
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched) {
+      expect(r.dispatch).toBe('set_factor_value');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-HELD round 2, FIXUP 4 — negation/filler stop-list for the driver matcher.
+// Scaffold 2 ("probably <X>") previously captured "not" from "Probably not"
+// and claimed it as a NEW driver concept — a declined clarify must fall to
+// the LLM, not mint an add-risk continuation for the driver "not".
+// ---------------------------------------------------------------------------
+
+describe('tryClarificationResume — driver stop-list rejects negations/fillers (F-HELD round 2)', () => {
+  function addRiskPendingR2(): PendingAction {
+    return {
+      id: `pa-add-risk-r2-${Math.random()}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: 'chip_add_risk_clarify',
+      action: { kind: 'edit_graph_add_risk', label: 'client concentration' },
+      preconditions: { graph_hash: DEFAULT_GRAPH_HASH },
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-05-05T00:00:00.000Z',
+    };
+  }
+  const LOOKUP = makeGraphLookup([{ id: 'f_team_size', label: 'Team size' }]);
+
+  it.each([
+    'Probably not',
+    'probably not.',
+    'Mostly nothing',
+    'Mainly no',
+    'It is mostly unsure',
+    'probably maybe',
+  ])('"%s" is NOT claimed as a driver answer (falls through to the LLM)', (msg) => {
+    const r = tryClarificationResume({
+      message: msg,
+      pendingActions: [addRiskPendingR2()],
+      graphLookup: LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'no_label_match' });
+  });
+
+  it('a genuine driver answer still resolves after the stop-list ("Probably hiring pace")', () => {
+    const r = tryClarificationResume({
+      message: 'Probably hiring pace',
+      pendingActions: [addRiskPendingR2()],
+      graphLookup: LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'edit_graph_add_risk') {
+      expect(r.driverLabel).toBe('hiring pace');
+      expect(r.matchKind).toBe('answer_shape');
+    } else {
+      throw new Error(`expected edit_graph_add_risk dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+});

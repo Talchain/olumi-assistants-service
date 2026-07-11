@@ -37,6 +37,10 @@ const PENDING_RUN_ANALYSIS: PendingAction = {
 };
 
 const appendCalls: Array<Record<string, unknown>> = [];
+// Let-bound so individual tests can vary the seeded pending set (F-HELD
+// round 2 chip-click intent-guard tests seed a hold + wwf pair). Reset in
+// beforeEach to the historic single run_analysis pending.
+let mockedPendings: ReadonlyArray<PendingAction> = [PENDING_RUN_ANALYSIS];
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -52,7 +56,7 @@ vi.mock('../session/index.js', () => ({
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),
-    readMostRecentPendingActions: async () => [PENDING_RUN_ANALYSIS],
+    readMostRecentPendingActions: async () => mockedPendings,
   }),
   resetSessionStoreForTests: () => undefined,
 }));
@@ -148,6 +152,7 @@ function callingRoutingAdapter() {
 describe('Short-confirm pre-route — route-level zero-LLM assertion', () => {
   beforeEach(() => {
     appendCalls.length = 0;
+    mockedPendings = [PENDING_RUN_ANALYSIS];
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -316,5 +321,93 @@ describe('Short-confirm pre-route — route-level zero-LLM assertion', () => {
     expect(result.response.assistant_text).toMatch(/analysis/i);
     expect(result.response.assistant_text).not.toMatch(/no pending action/i);
     expect(result.response.assistant_text).not.toMatch(/internal error/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-HELD round 2, FIXUP 1 — route-level regression for the chip-click hijack.
+// Chain under test: route-v2 detectChipClickResumeIntent → synthetic "yes" →
+// tryShortConfirmResume. Without the intent-vs-kind guard, consent-priority
+// (F-HELD fix 1) would pick a live apply_proposed_change hold over the wwf
+// pending and EXECUTE the held mutation off an explanation click (the hash
+// gate passes because analysis does not mutate the graph).
+// ---------------------------------------------------------------------------
+
+describe('F-HELD round 2 — wwf chip click never resolves a live hold', () => {
+  const HOLD_PENDING: PendingAction = {
+    id: `pa-hold-${randomUUID()}`,
+    scenario_id: SCENARIO_ID,
+    chip_id: 'gmh_route00000001',
+    action: {
+      kind: 'apply_proposed_change',
+      proposal_ref: 'gmh_route00000001',
+      inline_patch: {
+        handler_id: 'graph_management_held_v1',
+        params: {},
+        target_entity_ids: [],
+      },
+      public_label: 'Continue with this change',
+      public_message: 'Yes',
+    },
+    preconditions: { graph_hash: 'hash_route' },
+    expires_at_turn_count: 4,
+    expires_at_iso: '2099-12-31T23:59:59.000Z',
+    emitted_at_iso: '2026-05-05T00:01:00.000Z', // NEWER than the wwf pending
+  };
+  const WWF_PENDING: PendingAction = {
+    id: `pa-wwf-${randomUUID()}`,
+    scenario_id: SCENARIO_ID,
+    chip_id: 'chip_action_wwf_route',
+    action: { kind: 'what_would_flip' },
+    preconditions: {},
+    expires_at_turn_count: 2,
+    expires_at_iso: '2099-12-31T23:59:59.000Z',
+    emitted_at_iso: '2026-05-05T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    appendCalls.length = 0;
+    mockedPendings = [HOLD_PENDING, WWF_PENDING];
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('hold + wwf pending both live: the wwf CHIP CLICK resumes the WWF path, never the hold', async () => {
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      payload('Explore what would change the result.'),
+      'req-wwf-click-hold-live',
+      {
+        routingAdapter: adapter,
+        chipClickResumeIntent: 'what_would_flip',
+      },
+    );
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    // The wwf pending resolves; with no fresh analysis in the mock store it
+    // downgrades to the rerun_analysis_required recovery — WWF-flavoured
+    // copy, never the hold's proposed-change / held-execute path.
+    expect(result.response.assistant_text).toMatch(/what would change this/i);
+    expect(result.response.assistant_text).not.toMatch(/holding|proposed change/i);
+    // The hold is untouched: not consumed, carried forward with this commit.
+    const write = appendCalls[0] as {
+      pending_actions?: ReadonlyArray<{ chip_id: string }>;
+    };
+    expect(
+      (write.pending_actions ?? []).some((pa) => pa.chip_id === 'gmh_route00000001'),
+    ).toBe(true);
+  });
+
+  it('typed "yes" (no chip-click intent) keeps consent-priority: the hold wins over the wwf pending', async () => {
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(payload('yes'), 'req-typed-yes-hold-live', {
+      routingAdapter: adapter,
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    // GM mode is off in tests, so the picked hold routes through the generic
+    // proposed-change synthesis (decline-with-clarify posture) — the point
+    // pinned here is only that the WWF downgrade copy did NOT fire, i.e. the
+    // hold (not the wwf pending) was the resumer's pick.
+    expect(result.response.assistant_text).not.toMatch(/what would change this/i);
   });
 });

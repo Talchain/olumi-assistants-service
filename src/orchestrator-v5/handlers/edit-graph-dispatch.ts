@@ -98,7 +98,13 @@ import {
 } from './edit-graph-referee-gate.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
+import {
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+  PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+  type PendingAction,
+} from '../session/pending-action.js';
 import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
+import { randomUUID } from 'node:crypto';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
 // V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
@@ -1265,6 +1271,11 @@ export async function dispatchEditGraph(
   let proposalPendingForCommit:
     | import('../session/pending-action.js').PendingAction
     | null = null;
+  // F-HELD fix 4a (A-variant) — the `edit_graph_add_risk` pending emitted by
+  // the deterministic add-risk clarify branch, so the driver answer one turn
+  // later can resume via `tryClarificationResume` (the documented-but-never-
+  // emitted kind from session/pending-action.ts). Null on every other path.
+  let addRiskPendingForCommit: PendingAction | null = null;
 
   // R7 — single per-turn observability event. Each branch fills the accumulator
   // as it resolves; `emitEditTurnEventOnce` is invoked from the commit-try
@@ -1412,6 +1423,53 @@ export async function dispatchEditGraph(
           appliedGraph: null,
           wasRejected: false,
         };
+        // F-HELD fix 4a — persist the `edit_graph_add_risk` pending with the
+        // clarify turn so the driver answer on the next turn has something
+        // to resume against (wire 04c→10c: the answer was previously
+        // dropped). The pending carries the ORIGINAL risk label (per the
+        // kind's doc in session/pending-action.ts) and the emit-time
+        // analysis-affecting graph hash — the resume is a mutating kind, so
+        // the clarification resumer's hash gate fails closed without it. If
+        // the hash cannot be computed we emit NO pending (mirrors
+        // buildHeldPending's "no readable frame → no safe pending" posture)
+        // rather than persisting one that can only ever dispatch
+        // recovery_graph_changed.
+        const addRiskEmitGraphHash = ((): string | null => {
+          try {
+            return computeAnalysisAffectingGraphHash(graphState);
+          } catch {
+            return null;
+          }
+        })();
+        if (addRiskEmitGraphHash !== null) {
+          const addRiskEmittedAtIso = new Date().toISOString();
+          addRiskPendingForCommit = {
+            id: randomUUID(),
+            scenario_id: payload.scenario_id,
+            // Server-only pending (no rendered chip — same convention as the
+            // value-update clarify's chip-less pendings): the chip_id is a
+            // stable synthetic handle for telemetry / consumption matching.
+            chip_id: 'chip_add_risk_clarify',
+            action: {
+              kind: 'edit_graph_add_risk',
+              label: classified.label,
+            },
+            preconditions: { graph_hash: addRiskEmitGraphHash },
+            expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+            expires_at_iso: new Date(
+              Date.parse(addRiskEmittedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+            ).toISOString(),
+            emitted_at_iso: addRiskEmittedAtIso,
+          };
+        } else {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: payload.scenario_id,
+            },
+            'V5 edit_graph add_risk clarify — graph hash unavailable; no resumable pending emitted (fail-closed)',
+          );
+        }
         log.info(
           {
             request_id: requestId,
@@ -2588,6 +2646,18 @@ export async function dispatchEditGraph(
         },
       );
       pendingActionsForCommit = [proposalPendingForCommit, ...chipDerived].slice(0, 3);
+    }
+    // F-HELD fix 4a — the add-risk clarify emits its resumable pending.
+    // Mutually exclusive with the proposal path above (the clarify branch
+    // fires pre-LLM, before the proposal intercept can run) and with the GM
+    // held branch below (GM only engages on applied mutations; the clarify
+    // applies nothing) — but ordered proposal-first / GM-wins for the same
+    // deterministic-precedence policy as the other two.
+    if (addRiskPendingForCommit !== null) {
+      pendingActionsForCommit = [
+        addRiskPendingForCommit,
+        ...(pendingActionsForCommit ?? []),
+      ].slice(0, 3);
     }
     // Lane 8: a GM-live HELD verdict persists its REAL pending confirmation
     // (apply_proposed_change; resume is structurally decline-with-clarify —
