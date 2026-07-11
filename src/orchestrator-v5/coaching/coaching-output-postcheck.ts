@@ -49,6 +49,10 @@ import {
   buildAnalysisUnconfirmedTemplate,
 } from '../tools/handlers/no-op-helpers.js';
 import {
+  RENDER_SAFE_LABEL_FALLBACK,
+  sanitisePublicCopyOrFallback,
+} from '../compose/proposed-change.js';
+import {
   RERUN_ACTION,
   type StaleRerunSuggestedAction,
 } from '../routing/stale-rerun-guard.js';
@@ -532,6 +536,32 @@ export const HELD_AWARE_DEGRADE_TEXT =
   'with it, or tell me what to adjust instead.';
 
 /**
+ * CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — doctrine (a): the degrade
+ * RE-ASK names the hold it restates. The hold's persisted public label is
+ * render-sanitised first; a label that sanitises away, or one of the
+ * generic legacy/fallback labels (which would read "the change to continue
+ * with this change"), falls back to the unnamed swept copy above.
+ */
+export function buildHeldAwareDegradeText(label: string | null | undefined): string {
+  const safe = sanitisePublicCopyOrFallback(label ?? undefined, '');
+  if (
+    safe.length === 0 ||
+    safe === RENDER_SAFE_LABEL_FALLBACK ||
+    // Legacy GM hold chip label (edit-graph-referee-gate GM_HELD_CHIP_LABEL,
+    // stated literally to keep this module referee-gate-free).
+    safe === 'Continue with this change'
+  ) {
+    return HELD_AWARE_DEGRADE_TEXT;
+  }
+  const subject = safe.charAt(0).toLowerCase() + safe.slice(1);
+  return (
+    `I'm still holding the change to ${subject} rather than applying it straight ` +
+    'away. Nothing in the model moves until you confirm. Reply yes to continue ' +
+    'with it, or tell me what to adjust instead.'
+  );
+}
+
+/**
  * F-HELD round 2 (FIXUP 3) — select the live hold the degrade may restate.
  *
  * Selection rules:
@@ -625,7 +655,9 @@ export function buildCoachingDegradeResponse(
   // language returns as soon as the hold resolves or lapses.
   if (opts.liveHold !== undefined) {
     return {
-      assistant_text: HELD_AWARE_DEGRADE_TEXT,
+      // CONSENT-CLARITY AMENDMENT — the re-ask names the hold it restates
+      // (falls back to the unnamed swept copy for legacy/fallback labels).
+      assistant_text: buildHeldAwareDegradeText(opts.liveHold.label),
       suggested_actions: [
         {
           id: opts.liveHold.chip_id,

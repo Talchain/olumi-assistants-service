@@ -73,10 +73,6 @@ import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import {
-  GM_HELD_ASSISTANT_TEXT,
-  GM_HELD_CHIP_MESSAGE,
-} from '../edit-graph-referee-gate.js';
-import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
@@ -278,8 +274,11 @@ describe('mode=live', () => {
     expect(metadata.expectedGraphIdentityHash).toBeUndefined(); // no CAS observation without a write
 
     // Held copy replaces the ack prose; §6.6 by construction.
+    // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11): the ask NAMES the
+    // held change (doctrine (a)) while keeping the swept consent framing.
     const text = (response as { assistant_text: string }).assistant_text;
-    expect(text).toBe(GM_HELD_ASSISTANT_TEXT);
+    expect(text).toContain("update 'Price'");
+    expect(text).toContain('Nothing in the model moves until you confirm');
     expect(findSuccessClaimHit(text)).toBeNull();
     expect(findForbiddenPhraseHit(text)).toBeNull();
 
@@ -291,11 +290,13 @@ describe('mode=live', () => {
     expect(parsed!.action.kind).toBe('apply_proposed_change');
 
     // …and its confirm chip is on the wire (chip id == proposal_ref bridge).
+    // Consent-clarity: the chip message names its subject so a click
+    // resolves via exact-match to THIS hold.
     const chips = (response as { suggested_actions: Array<{ id: string; message: string }> })
       .suggested_actions;
     expect(chips).toHaveLength(1);
     expect(chips[0]!.id).toBe(parsed!.chip_id);
-    expect(chips[0]!.message).toBe(GM_HELD_CHIP_MESSAGE);
+    expect(chips[0]!.message).toBe("Yes, update 'Price'.");
 
     // The wire carries the redacted public reason (codes only, no candidate internals).
     const blocks = (response as { blocks: Array<{ details?: Record<string, unknown> }> }).blocks;
