@@ -24,6 +24,10 @@
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  DecisionRecordDecisionSchema,
+  DecisionRecordPredictionSchema,
+} from '@talchain/schemas/boundary';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
@@ -102,7 +106,7 @@ describe('buildDecisionRecordWrite — happy path', () => {
         chosen_option_label: 'Option A',
         graph_hash: expectedGraphHash,
       },
-      prediction: { statement: SUMMARY, confidence: 0.62 },
+      prediction: { statement: SUMMARY, confidence: 0.62, confidence_source: 'model_derived' },
       review_date: '2026-10-08T12:00:00.000Z', // computed_at + 90 days
       record_id: expectedRecordId,
       event_id: `decision_recorded_${expectedRecordId}`,
@@ -138,7 +142,10 @@ describe('buildDecisionRecordWrite — happy path', () => {
       SCENARIO_ID,
     );
     if (built.kind !== 'write') throw new Error('expected write');
-    expect(built.write.prediction).toEqual({ statement: SUMMARY });
+    expect(built.write.prediction).toEqual({
+      statement: SUMMARY,
+      confidence_source: 'model_derived',
+    });
   });
 
   it('resolves the leading record by option_label when option_id is absent (extractOptionId parity)', () => {
@@ -318,5 +325,226 @@ describe('buildDecisionRecordWrite — skip matrix (no RPC-able record)', () => 
       SCENARIO_ID,
     );
     expect(built).toEqual({ kind: 'skip', reason: 'empty_summary' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0.16.0 addendum — D-N Option-B scoring capture (both probabilities) +
+// confidence provenance. Ruling (2026-07-11, PAUL-CHECKLIST rulings batch):
+// "both candidate probabilities get captured from day one so a Neil overrule
+// is a recompute, never lost data."
+// ---------------------------------------------------------------------------
+
+describe('buildDecisionRecordWrite — D-N scoring probabilities (0.16.0 addendum)', () => {
+  /** Goal-bearing fixture: the leading option's comparison record carries
+   *  BOTH goal-attainment probabilities (the PLoT #204 live shape —
+   *  probability_of_goal from ISL per-option results, probability_of_joint_goal
+   *  from constraint_analysis.joint_probability; both ride the same
+   *  option_comparison[] rows the leader is already resolved from). */
+  function makeGoalBearingFact(): RunAnalysisHandlerFact {
+    return makeFact({
+      result: {
+        enrichment: {
+          option_comparison: [
+            {
+              option_id: 'opt_a',
+              option_label: 'Option A',
+              win_probability: 0.62,
+              probability_of_goal: 0.31,
+              probability_of_joint_goal: 0.293,
+            },
+            {
+              option_id: 'opt_b',
+              option_label: 'Option B',
+              win_probability: 0.38,
+              probability_of_goal: 0.22,
+              probability_of_joint_goal: 0.19,
+            },
+          ],
+        },
+      },
+    });
+  }
+
+  it('captures BOTH probabilities from the CHOSEN option verbatim (never rescaled, never another option)', () => {
+    const built = buildDecisionRecordWrite(makeGoalBearingFact(), SCENARIO_ID);
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(built.write.prediction).toEqual({
+      statement: SUMMARY,
+      confidence: 0.62,
+      confidence_source: 'model_derived',
+      probability_of_goal: 0.31, // the leader's, not opt_b's 0.22
+      probability_of_joint_goal: 0.293, // verbatim [0,1] float — no percent rescale
+    });
+  });
+
+  it('absent goal fit → HONEST OMISSION: neither probability key exists (never a fabricated 0)', () => {
+    // The default fixture is exactly the pre-goal-target shape: comparison
+    // records carry win_probability only.
+    const built = buildDecisionRecordWrite(makeFact(), SCENARIO_ID);
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect('probability_of_goal' in built.write.prediction).toBe(false);
+    expect('probability_of_joint_goal' in built.write.prediction).toBe(false);
+    expect(Object.values(built.write.prediction)).not.toContain(0);
+  });
+
+  it('the two probabilities are independent: one present, one absent → only the present one lands', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              {
+                option_id: 'opt_a',
+                option_label: 'Option A',
+                win_probability: 0.62,
+                probability_of_goal: 0.31,
+                // no probability_of_joint_goal (no constraints on the goal)
+              },
+            ],
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(built.write.prediction.probability_of_goal).toBe(0.31);
+    expect('probability_of_joint_goal' in built.write.prediction).toBe(false);
+  });
+
+  it('unusable values (out of [0,1] / non-finite / non-number) are OMITTED — never clamped, defaulted, or zeroed', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              {
+                option_id: 'opt_a',
+                option_label: 'Option A',
+                win_probability: 0.62,
+                probability_of_goal: 1.5, // out of range
+                probability_of_joint_goal: Number.NaN, // non-finite
+              },
+            ],
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect('probability_of_goal' in built.write.prediction).toBe(false);
+    expect('probability_of_joint_goal' in built.write.prediction).toBe(false);
+  });
+
+  it('boundary values 0 and 1 are REAL producer values and are kept (omission is for absence, not extremes)', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              {
+                option_id: 'opt_a',
+                option_label: 'Option A',
+                win_probability: 0.62,
+                probability_of_goal: 0,
+                probability_of_joint_goal: 1,
+              },
+            ],
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    expect(built.write.prediction.probability_of_goal).toBe(0);
+    expect(built.write.prediction.probability_of_joint_goal).toBe(1);
+  });
+
+  it("stamps confidence_source:'model_derived' on EVERY write from this seam (no user-stated path exists here)", () => {
+    // Everything this hook can place on prediction is model-derived (the
+    // deterministic summary, the leader's win_probability, ISL's
+    // goal-attainment probabilities). The unconditional stamp makes the
+    // provenance explicit on the record itself instead of leaning on the
+    // schema's absent⇒model_derived disclosed inference — the calibration
+    // pack's binding honesty constraint (04 §2) is that the two populations
+    // are NEVER blended, so provenance is stamped at the source.
+    const withConfidence = buildDecisionRecordWrite(makeGoalBearingFact(), SCENARIO_ID);
+    if (withConfidence.kind !== 'write') throw new Error('expected write');
+    expect(withConfidence.write.prediction.confidence_source).toBe('model_derived');
+
+    // Even with NO usable confidence, the statement itself is model-derived.
+    const withoutConfidence = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              { option_id: 'opt_a', option_label: 'Option A', win_probability: 1.5 },
+            ],
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (withoutConfidence.kind !== 'write') throw new Error('expected write');
+    expect(withoutConfidence.write.prediction.confidence_source).toBe('model_derived');
+  });
+});
+
+describe('schemas 0.16.0 strict-parse — the blocked-lane unblock proof', () => {
+  // The capture-addendum lane was CORRECTLY BLOCKED on 2026-07-11
+  // (HANDOVER.md ~02:45 wave entry): 0.15.0 DecisionRecordSchema is
+  // .strict() at every level, so these additive fields were hard-rejected
+  // at every layer. Reproduced against built dists in olumi-schemas PR #8:
+  // base 0.15.0 → REJECTED — "prediction: Unrecognized key(s):
+  // 'confidence_source', 'probability_of_goal', 'probability_of_joint_goal'".
+  // These specs prove the vendored 0.16.0 now ACCEPTS exactly that payload,
+  // while .strict() itself stays armed (the rejection mechanism is intact —
+  // only the whitelist grew).
+
+  it('0.16.0 DecisionRecordPredictionSchema accepts the exact prediction shape 0.15.0 rejected', () => {
+    const parsed = DecisionRecordPredictionSchema.safeParse({
+      statement: 'Option A currently leads.',
+      confidence: 0.62,
+      confidence_source: 'model_derived',
+      probability_of_goal: 0.31,
+      probability_of_joint_goal: 0.293,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('the BUILT write round-trips its sub-objects through the 0.16.0 .strict() schemas unchanged', () => {
+    const built = buildDecisionRecordWrite(
+      makeFact({
+        result: {
+          enrichment: {
+            option_comparison: [
+              {
+                option_id: 'opt_a',
+                option_label: 'Option A',
+                win_probability: 0.62,
+                probability_of_goal: 0.31,
+                probability_of_joint_goal: 0.293,
+              },
+            ],
+          },
+        },
+      }),
+      SCENARIO_ID,
+    );
+    if (built.kind !== 'write') throw new Error('expected write');
+    const prediction = DecisionRecordPredictionSchema.safeParse(built.write.prediction);
+    expect(prediction.success).toBe(true);
+    if (prediction.success) expect(prediction.data).toEqual(built.write.prediction);
+    const decision = DecisionRecordDecisionSchema.safeParse(built.write.decision);
+    expect(decision.success).toBe(true);
+  });
+
+  it('.strict() stays armed: an off-schema key on prediction still hard-rejects (the exact 0.15.0 mechanism)', () => {
+    const parsed = DecisionRecordPredictionSchema.safeParse({
+      statement: 'Option A currently leads.',
+      probability_of_goal: 0.31,
+      rogue_key: true,
+    });
+    expect(parsed.success).toBe(false);
   });
 });
