@@ -187,10 +187,18 @@ function fixStructuralEdgesNotCanonical(
     const isDecisionOption = fromKind === "decision" && toKind === "option";
     if (!isOptionFactor && !isDecisionOption) continue;
 
-    // Only canonicalise if not already canonical (format-aware check)
+    // Only canonicalise if not already canonical (format-aware check).
+    // MUST include effect_direction: the validator's canonical tuple
+    // (graph-validator.ts STRUCTURAL_EDGE_NOT_CANONICAL_ERROR) requires
+    // direction === "positive" in addition to the numerics. A numerics-only
+    // pre-check skipped edges with canonical numerics but missing/negative
+    // direction, so the violation survived the sweep and post-enforcement
+    // re-validation failed the request closed (CEE_GRAPH_INVALID → 422).
     const isCanonical = format === "LEGACY"
       ? (edge as Record<string, unknown>).weight === 1 && (edge as Record<string, unknown>).belief === 1
-      : edge.strength_mean === 1 && edge.strength_std === 0.01 && edge.belief_exists === 1;
+        && edge.effect_direction === "positive"
+      : edge.strength_mean === 1 && edge.strength_std === 0.01 && edge.belief_exists === 1
+        && edge.effect_direction === "positive";
 
     if (!isCanonical) {
       // decision→option: always fix proactively (LLMs frequently produce probability splits)

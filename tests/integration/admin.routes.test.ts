@@ -9,8 +9,17 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
+
+// NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
+// store treats it as a literal file name in cwd. Suites that share the
+// literal ":memory:" race each other's atomic rename (`:memory:.tmp` ->
+// `:memory:`) when vitest runs them in parallel forks, failing store init
+// non-deterministically. Use a per-suite unique temp path instead.
+const STORE_PATH = join(tmpdir(), `prompt-store-admin-routes-${process.pid}-${Date.now()}.json`);
 
 const ADMIN_KEY = "test-admin-key-for-integration";
 const ADMIN_HEADERS = {
@@ -25,7 +34,7 @@ beforeAll(async () => {
   vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
   vi.stubEnv("PROMPTS_ENABLED", "true");
   vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-  vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+  vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
   vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
   // Prevent any real API keys from leaking into tests
   vi.stubEnv("ASSIST_API_KEY", "test-assist-key");

@@ -91,7 +91,10 @@ describe("Key Rotation Scenarios", () => {
     } finally {
       await server.close();
     }
-  });
+    // 15s: this test cold-imports and boots a full server (vi.resetModules)
+    // and then issues two draft requests; the 5s default flakes under a
+    // parallel suite run. Timeout raised deliberately — not masking a hang.
+  }, 15_000);
 
   it("rejects retired keys after removal from config", async () => {
     vi.resetModules();
@@ -127,7 +130,8 @@ describe("Key Rotation Scenarios", () => {
     } finally {
       await server.close();
     }
-  });
+    // 15s: same cold server boot as the rotation-window test above.
+  }, 15_000);
 });
 
 describe("Rate Limit Exhaustion", () => {

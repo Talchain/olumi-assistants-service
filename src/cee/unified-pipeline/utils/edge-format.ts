@@ -91,14 +91,22 @@ export function patchEdgeNumeric(
 
 /**
  * Create canonical structural edge params (option→factor).
- * mean=1, std=0.01, existence=1.0 in the correct format.
+ * mean=1, std=0.01, existence=1.0, direction="positive" in the correct format.
  * Preserves all other fields on the edge.
+ *
+ * effect_direction MUST be set here: since d1628b946 the validator's strict
+ * canonical check (STRUCTURAL_EDGE_NOT_CANONICAL_ERROR) requires
+ * effect_direction === "positive", so a repair that only patches the numeric
+ * fields can never satisfy post-enforcement re-validation and the pipeline
+ * fails closed with CEE_GRAPH_INVALID (the mass 422s in the integration suite).
  */
 export function canonicalStructuralEdge(
   edge: EdgeT,
   format: EdgeFormat,
 ): EdgeT {
-  return patchEdgeNumeric(edge, format, { mean: 1, std: 0.01, existence: 1.0 });
+  const patched = patchEdgeNumeric(edge, format, { mean: 1, std: 0.01, existence: 1.0 });
+  patched.effect_direction = "positive";
+  return patched;
 }
 
 // ---------------------------------------------------------------------------

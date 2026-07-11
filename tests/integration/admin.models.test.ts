@@ -10,9 +10,18 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
+
+// NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
+// store treats it as a literal file name in cwd. Suites that share the
+// literal ":memory:" race each other's atomic rename (`:memory:.tmp` ->
+// `:memory:`) when vitest runs them in parallel forks, failing store init
+// non-deterministically. Use a per-suite unique temp path instead.
+const STORE_PATH = join(tmpdir(), `prompt-store-admin-models-${process.pid}-${Date.now()}.json`);
 
 const ADMIN_KEY = "test-admin-key-models";
 const ADMIN_HEADERS = { "X-Admin-Key": ADMIN_KEY };
@@ -24,7 +33,7 @@ beforeAll(async () => {
   vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
   vi.stubEnv("PROMPTS_ENABLED", "true");
   vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-  vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+  vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
   vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
   vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
   cleanBaseUrl();
@@ -121,7 +130,7 @@ describe("GET /admin/models/routing", () => {
     vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
     vi.stubEnv("PROMPTS_ENABLED", "true");
     vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-    vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+    vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
     vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
     vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
 
@@ -285,10 +294,17 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     vi.resetModules();
     cleanBaseUrl();
     vi.stubEnv("LLM_PROVIDER", "anthropic");
+    // server.ts build() fails fast when LLM_PROVIDER=anthropic without an
+    // API key (src/server.ts ~line 172). This suite only exercises the
+    // /admin/models/routing REPORTING surface — no LLM call is ever made —
+    // so a dummy key is required for boot and safe here. Without it the
+    // whole describe block dies in beforeAll (CI's integration job has no
+    // ANTHROPIC_API_KEY).
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key-not-used");
     vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
     vi.stubEnv("PROMPTS_ENABLED", "true");
     vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-    vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+    vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
     vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
     vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
 
@@ -372,7 +388,7 @@ describe("Read-only key deployment (ADMIN_API_KEY_READ only)", () => {
     vi.stubEnv("ADMIN_API_KEY_READ", READ_KEY);
     vi.stubEnv("PROMPTS_ENABLED", "true");
     vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-    vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+    vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
     vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
     vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
 
