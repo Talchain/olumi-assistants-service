@@ -121,7 +121,9 @@ export function formatConformalExplanation(
   explanation += `with ${(confidence * 100).toFixed(0)}% confidence.`;
 
   if (conformal.wellCalibrated === true) {
-    explanation += ' This interval is well-calibrated based on historical data.';
+    // Honest framing: no historical-outcome calibration loop exists yet, so
+    // this must not claim calibration "based on historical data".
+    explanation += ' This interval passed internal calibration checks; it has not been validated against historical outcomes.';
   } else if (conformal.wellCalibrated === false) {
     explanation += ' Note: This interval may be less reliable due to limited calibration data.';
   }

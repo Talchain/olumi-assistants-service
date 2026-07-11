@@ -402,7 +402,23 @@ describe('Plain-English Template Functions', () => {
       expect(explanation).toContain('10.00');
       expect(explanation).toContain('20.00');
       expect(explanation).toContain('90%');
-      expect(explanation).toContain('well-calibrated');
+      expect(explanation).toContain('internal calibration checks');
+      expect(explanation).toContain('has not been validated against historical outcomes');
+    });
+
+    it('does not claim historical calibration data that does not exist', () => {
+      // No historical-outcome calibration loop exists (P.1/2.1 open); the
+      // well-calibrated copy must not attribute the interval to historical data.
+      const explanation = formatConformalExplanation(
+        {
+          available: true,
+          interval: { lower: 10, upper: 20 },
+          confidence: 0.9,
+          wellCalibrated: true,
+        },
+        'Prediction Node',
+      );
+      expect(explanation).not.toContain('based on historical data');
     });
 
     it('should warn about poor calibration', () => {

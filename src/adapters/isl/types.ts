@@ -344,7 +344,11 @@ export interface PredictionInterval {
   /** Interval width (upper - lower) */
   interval_width: number;
 
-  /** Whether interval is well-calibrated based on historical data */
+  /**
+   * Whether the interval passed ISL's internal calibration checks.
+   * NOTE: no historical-outcome calibration loop exists yet; this flag
+   * must not be presented to users as validation against historical data.
+   */
   well_calibrated: boolean;
 
   /** Factors affecting interval width */
