@@ -693,6 +693,13 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     // The explanation handlers are not consulted on the run_analysis path.
     expect(explainResultsHandlerMock).not.toHaveBeenCalled();
     expect(whatWouldFlipHandlerMock).not.toHaveBeenCalled();
+    // F-DG negative pin (W1 overnight 2026-07-11): the deterministic
+    // chip-click whitelist (run_analysis / explain_results /
+    // what_would_flip) never MUTATES the graph, so its responses must
+    // never carry the applied-mutation `draft_graph` wire field — that
+    // attach is scoped to committed D1 mutations (turn-executor STEP 7,
+    // GM-held resume, edit_graph apply). See applied-graph-emit.ts.
+    expect('draft_graph' in out.response).toBe(false);
   });
 
   afterEach(async () => {
