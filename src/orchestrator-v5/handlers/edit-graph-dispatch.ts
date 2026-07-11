@@ -2012,6 +2012,14 @@ export async function dispatchEditGraph(
                 severity: 'warn',
                 details: gmDecision.publicReason,
               },
+              // R8 (flag-gated, ships dark): the typed held_proposal block —
+              // ADDITIVE next to the public-reason block so flag-off wire
+              // output is byte-identical. Gate-built, schema-validated,
+              // fail-closed null (see compose/held-proposal.ts).
+              ...(config.features.heldProposalEmit === true &&
+              gmDecision.heldProposalBlock != null
+                ? [gmDecision.heldProposalBlock]
+                : []),
             ] as OlumiResponse['blocks'],
           }
         : {}),

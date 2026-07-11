@@ -103,21 +103,36 @@ const FROZEN_V5_BLOCK_TYPES = [
   // ships dark), so deployed behaviour is unchanged until the flag is
   // deliberately set AFTER gates 2–5 land in DGAI.
   'ui_directive',
+  // 0.15.0 / seamlessness R8 (CEE half) — MOVED here from
+  // CONTRACT_PRESENT_NOT_YET_SURFACED per this file's surfacing protocol
+  // (W2 overnight lane, 2026-07-11). §2 gate status at the move:
+  //   1. contract          — SATISFIED (0.15.0 wave, adopted by CEE PR #405).
+  //   2. DGAI parser        — NOT YET (A2 held-proposal card, Sunday lane).
+  //   3. DGAI mapper        — NOT YET (A2 lane).
+  //   4. renderer/consumer  — NOT YET (A2 lane).
+  //   5. visibility tests   — NOT YET (A2 lane).
+  //   6. degrade behaviour  — CEE-side specified+tested (fail-closed builder
+  //                          compose/held-proposal.ts + strict-schema
+  //                          validate-before-emit + pre-existing egress scrub
+  //                          case); DGAI-side = #187 unknown-block tolerance.
+  // DOUBLE-GATED like ui_directive: the only emission site
+  // (edit-graph-dispatch.ts GM held branch, gate-built block) is behind
+  // CEE_HELD_PROPOSAL_EMIT (default OFF, absent from all deploy configs —
+  // ships dark) until gates 2-5 land in DGAI.
+  'held_proposal',
 ] as const;
 
 type FrozenBlockType = (typeof FROZEN_V5_BLOCK_TYPES)[number];
 
 // Contract-present but NOT yet cleared for CEE emission. The 0.15.0 schema
 // wave (olumi-schemas PR #7, b02ba489c) added held_proposal and ui_directive
-// to the boundary `Block` union; ui_directive moved onto the emission
-// allowlist with the flag-gated R4 emitter (see its entry above).
-// held_proposal remains here: its §2 surfacing gate (contract + DGAI parser +
-// mapper + renderer + visibility tests + degrade behaviour) is NOT yet
-// satisfied and CEE has no emitter for it. The egress scrubber
-// (`output-safety.ts::sanitiseBlock`) covers it (dormant-but-armed).
-// TO SURFACE IT: satisfy the §2 gate, then MOVE the entry from this list
-// into `FROZEN_V5_BLOCK_TYPES` — do not duplicate it.
-const CONTRACT_PRESENT_NOT_YET_SURFACED = ['held_proposal'] as const;
+// to the boundary `Block` union; both have since moved onto the emission
+// allowlist with flag-gated emitters (R4 ui_directive, R8 held_proposal —
+// see their entries above). This set is currently EMPTY; a future
+// contract-only block kind lands here first, then MOVES into
+// `FROZEN_V5_BLOCK_TYPES` when its §2 surfacing gate + emitter exist —
+// do not duplicate entries across the two lists.
+const CONTRACT_PRESENT_NOT_YET_SURFACED = [] as const;
 
 type NotYetSurfacedBlockType = (typeof CONTRACT_PRESENT_NOT_YET_SURFACED)[number];
 
@@ -330,6 +345,16 @@ function oneBlockOfEachType(): Block[] {
       verb: 'highlight',
       targets: [{ id: 'opt_premium', label: 'Premium Tier', kind: 'option' }],
     },
+    {
+      // R8 emitter shape: typed codes + action refs + fixed-template
+      // summary — exactly what compose/held-proposal.ts produces.
+      type: 'held_proposal',
+      proposal_id: 'gmh_abc123def456',
+      summary: "A change to 'Delivery risk' is held for your confirmation.",
+      mutation_class: 'tunable',
+      reason_code: 'TUNABLE_APPLY_HELD',
+      confirm_action_id: 'gmh_abc123def456',
+    },
   ] as Block[];
 }
 
@@ -338,7 +363,7 @@ function oneBlockOfEachType(): Block[] {
 // ============================================================================
 
 describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
-  it('freezes the emission allowlist to exactly 13 block types (boundary union minus not-yet-surfaced held_proposal)', () => {
+  it('freezes the emission allowlist to exactly 14 block types (the full boundary union)', () => {
     // Snapshot-style pin (sorted) so the readable list cannot drift silently.
     expect([...FROZEN_V5_BLOCK_TYPES].sort()).toEqual(
       [
@@ -352,6 +377,10 @@ describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
         'explanation',
         'flip_analysis',
         'graph_patch',
+        // R8 CEE half — flag-gated emitter (CEE_HELD_PROPOSAL_EMIT, default
+        // OFF). See the FROZEN_V5_BLOCK_TYPES entry comment for the §2 gate
+        // status at the move.
+        'held_proposal',
         'review_card',
         'text',
         // R4 CEE-half slice 1 — flag-gated emitter (CEE_UI_DIRECTIVE_EMIT,
@@ -364,7 +393,7 @@ describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
 
   it('has no duplicate entries', () => {
     expect(new Set(FROZEN_V5_BLOCK_TYPES).size).toBe(FROZEN_V5_BLOCK_TYPES.length);
-    expect(FROZEN_V5_BLOCK_TYPES.length).toBe(13);
+    expect(FROZEN_V5_BLOCK_TYPES.length).toBe(14);
   });
 
   it('the compile-time union-equality assertion is in force', () => {
@@ -380,14 +409,12 @@ describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
     expect(disjoint).toBe(true);
   });
 
-  it('pins the contract-present-but-not-yet-surfaced set to exactly held_proposal', () => {
-    // held_proposal is in the boundary union (0.15.0 wave) but NOT cleared
-    // for CEE emission — its §2 surfacing gate is unsatisfied and CEE has no
-    // emitter. ui_directive moved to the frozen allowlist with the R4
-    // flag-gated emitter lane. This pin makes any silent growth of the
-    // "in contract, not surfaced" set a deliberate decision, mirroring the
-    // frozen-allowlist pin above.
-    expect([...CONTRACT_PRESENT_NOT_YET_SURFACED].sort()).toEqual(['held_proposal']);
+  it('pins the contract-present-but-not-yet-surfaced set to exactly EMPTY', () => {
+    // Both 0.15.0 additions (ui_directive R4, held_proposal R8) have moved
+    // to the frozen allowlist with flag-gated emitters. This pin makes any
+    // silent growth of the "in contract, not surfaced" set a deliberate
+    // decision, mirroring the frozen-allowlist pin above.
+    expect([...CONTRACT_PRESENT_NOT_YET_SURFACED].sort()).toEqual([]);
   });
 });
 
