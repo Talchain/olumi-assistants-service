@@ -2,18 +2,40 @@
 -- Decision Records v1 — `decision_records` substrate (ROADMAP 3.1)
 -- Authored by the Platform & MVP workstream (Account 3), 2026-07-10.
 --
--- ⚠️  AUTHORED AS CODE — NOT YET EXECUTED. Execution is Paul-gated
---     (batched by the orchestrator). Update this header with the
---     execution date + evidence pointer when applied, per the
---     20260705120000_v5_model_versions.sql precedent.
+-- ✅ EXECUTED ON STAGING. Header corrected 2026-07-12 — it stayed
+--     stale as "NOT YET EXECUTED / Date executed: (pending)" after the
+--     fact (evidence pointers below, per the
+--     20260705120000_v5_model_versions.sql precedent).
 --
 -- Target: Staging Supabase
 -- Date authored: 2026-07-10
--- Date executed: (pending)
+-- Date executed: 2026-07-10/11 (Paul-gated batch). No dedicated
+--   execution artefact exists; liveness is EVIDENCED by:
+--     * W&I Gate-0 staging audit, 2026-07-11 (~15:15–16:25 UTC): table
+--       + both RPCs live, function-body sha256 captured —
+--       parallel-briefs/workspace-lane-evidence/gate0/
+--       db-catalog-2026-07-11.json. That pack's migration-registry
+--       entry for this file is ABSENT from supabase_migrations (the F1
+--       ledger-drift finding: 10–11 Jul executions not ledgered;
+--       reconciliation owed — see the 2026-07-12 CHANGELOG entry).
+--     * DR guard amendment PRE-CHECK, 2026-07-11T18:46Z: the exact
+--       8-param create_decision_record found live with the 0.15.0-era
+--       whitelists — acceptance-evidence/security/
+--       DR-GUARD-AMENDMENT-EXECUTED-2026-07-12.md.
+-- Guard amendment executed: 2026-07-11T18:46:35Z (lane working date
+--   2026-07-12) — create_decision_record key whitelists widened to
+--   schemas 0.16.0 on the LIVE staging function, single transaction,
+--   pre/post-checks + fresh-session verification all PASSED. Evidence:
+--   acceptance-evidence/security/DR-GUARD-AMENDMENT-EXECUTED-2026-07-12.md
+--   (SQL: DR-GUARD-AMENDMENT-DRAFT-2026-07-12.sql, executed
+--   byte-for-byte). This file's function body matches live as of that
+--   amendment.
 --
--- CHANGELOG (pre-execution amendments — this file is merged but NOT
---   yet executed, so it is amended in place rather than superseded;
---   precedent: PR #415 amending #410's claim RPC file):
+-- CHANGELOG (in-place amendments; precedent: PR #415 amending #410's
+--   claim RPC file. The 2026-07-10 entry was authored under the
+--   original "merged but NOT yet executed" premise; that premise no
+--   longer holds — the 2026-07-12 entry was applied LIVE-FIRST: the
+--   staging function was amended, then this file reconciled to match):
 --   - 2026-07-10 (workspace/identity lane, Decision P1 per
 --     parallel-briefs/WORKSPACE-IDENTITY-DESIGN-v1.md §18/§P1 —
 --     authored AHEAD of Paul's ratification of P1; stated honestly:
@@ -38,6 +60,26 @@
 --     stays clean; they join the envelope only when the contract
 --     adds them. No RLS policy change here: 'workspace' visibility
 --     is read via a Phase-2 additive policy, not this file.
+--   - 2026-07-12 (calibration pack / D-N derisk, schemas 0.16.0):
+--     widen create_decision_record key whitelists — p_decision admits
+--     committed_by_user (boolean), p_prediction admits
+--     confidence_source ('model_derived'|'user_stated'),
+--     probability_of_goal and probability_of_joint_goal (numbers in
+--     [0,1]) — value-guarded per this file's whitelist style. Applied
+--     to the LIVE staging function via
+--     acceptance-evidence/security/DR-GUARD-AMENDMENT-DRAFT-2026-07-12.sql
+--     (the file's original "merged but not executed" premise no longer
+--     held). Executed 2026-07-11T18:46Z, single transaction,
+--     pre/post-checks + fresh-session verification all PASSED —
+--     acceptance-evidence/security/DR-GUARD-AMENDMENT-EXECUTED-2026-07-12.md.
+--     Table CHECK constraints untouched (presence-only; verified
+--     unchanged pre and post). Drift-register obligation: this
+--     live-first amendment — and the unledgered 10–11 Jul execution of
+--     this file itself (F1) — must be appended to the "applied,
+--     pending ledger row" register the F3 exception established
+--     (parallel-briefs/A1-RULING-F3-AND-GATE1-2026-07-12.md) once the
+--     W&I lane creates it; the register file does not exist yet at
+--     this writing.
 --
 -- CONTRACT: @talchain/schemas 0.15.0 `DecisionRecordSchema`
 --   (olumi-schemas src/boundary/decision-record.ts). That schema's own
@@ -350,11 +392,17 @@ BEGIN
   -- fields, numeric types + ranges for confidence, and finiteness of
   -- review_date. NOT enforced (app-layer parse territory): the exact Zod
   -- datetime string grammar.
+  -- 0.16.0 amendment (2026-07-12): whitelists widened to the schemas
+  -- 0.16.0 additive fields — decision.committed_by_user;
+  -- prediction.confidence_source / probability_of_goal /
+  -- probability_of_joint_goal — value-guarded to mirror the Zod schema
+  -- exactly (boolean; closed enum; numbers in [0,1]).
   IF p_decision IS NULL OR jsonb_typeof(p_decision) <> 'object' THEN
     RAISE EXCEPTION 'create_decision_record: p_decision must be a JSON object'
       USING ERRCODE = '22023'; -- invalid_parameter_value
   END IF;
   IF p_decision - 'chosen_option_id' - 'chosen_option_label' - 'graph_hash' - 'analysis_summary'
+     - 'committed_by_user'
      <> '{}'::jsonb THEN
     RAISE EXCEPTION 'create_decision_record: p_decision carries keys outside the DecisionRecordDecisionSchema whitelist'
       USING ERRCODE = '22023';
@@ -366,6 +414,14 @@ BEGIN
      OR jsonb_typeof(p_decision->'graph_hash') IS DISTINCT FROM 'string'
      OR p_decision->>'graph_hash' = '' THEN
     RAISE EXCEPTION 'create_decision_record: chosen_option_id, chosen_option_label and graph_hash must be non-empty strings'
+      USING ERRCODE = '22023';
+  END IF;
+  -- 0.16.0 amendment: committed_by_user distinguishes an explicit "log
+  -- this decision" commit from ambient auto-capture; optional boolean
+  -- (absent = disclosed inference, per the schema comment).
+  IF p_decision ? 'committed_by_user'
+     AND jsonb_typeof(p_decision->'committed_by_user') <> 'boolean' THEN
+    RAISE EXCEPTION 'create_decision_record: committed_by_user must be a boolean'
       USING ERRCODE = '22023';
   END IF;
   IF p_decision ? 'analysis_summary' THEN
@@ -387,14 +443,27 @@ BEGIN
         USING ERRCODE = '22023';
     END IF;
   END IF;
+  -- 0.16.0 amendment: prediction whitelist widened; new keys value-guarded
+  -- (confidence_source closed enum per DecisionRecordConfidenceSource; the
+  -- two probabilities recorded verbatim but must be numbers in [0,1]).
   IF p_prediction IS NULL OR jsonb_typeof(p_prediction) <> 'object'
-     OR p_prediction - 'statement' - 'confidence' <> '{}'::jsonb
+     OR p_prediction - 'statement' - 'confidence' - 'confidence_source'
+        - 'probability_of_goal' - 'probability_of_joint_goal' <> '{}'::jsonb
      OR jsonb_typeof(p_prediction->'statement') IS DISTINCT FROM 'string'
      OR p_prediction->>'statement' = ''
      OR (p_prediction ? 'confidence'
          AND (jsonb_typeof(p_prediction->'confidence') <> 'number'
-              OR (p_prediction->>'confidence')::numeric NOT BETWEEN 0 AND 1)) THEN
-    RAISE EXCEPTION 'create_decision_record: p_prediction must be {statement: non-empty string, confidence?: number in [0,1]} and nothing else'
+              OR (p_prediction->>'confidence')::numeric NOT BETWEEN 0 AND 1))
+     OR (p_prediction ? 'confidence_source'
+         AND (jsonb_typeof(p_prediction->'confidence_source') <> 'string'
+              OR p_prediction->>'confidence_source' NOT IN ('model_derived', 'user_stated')))
+     OR (p_prediction ? 'probability_of_goal'
+         AND (jsonb_typeof(p_prediction->'probability_of_goal') <> 'number'
+              OR (p_prediction->>'probability_of_goal')::numeric NOT BETWEEN 0 AND 1))
+     OR (p_prediction ? 'probability_of_joint_goal'
+         AND (jsonb_typeof(p_prediction->'probability_of_joint_goal') <> 'number'
+              OR (p_prediction->>'probability_of_joint_goal')::numeric NOT BETWEEN 0 AND 1)) THEN
+    RAISE EXCEPTION 'create_decision_record: p_prediction must be {statement: non-empty string, confidence?: number in [0,1], confidence_source?: ''model_derived''|''user_stated'', probability_of_goal?: number in [0,1], probability_of_joint_goal?: number in [0,1]} and nothing else'
       USING ERRCODE = '22023';
   END IF;
   IF p_review_date IS NULL OR NOT isfinite(p_review_date) THEN
