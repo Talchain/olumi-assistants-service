@@ -33,6 +33,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -49,6 +50,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -65,6 +67,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -81,6 +84,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -97,6 +101,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -114,6 +119,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -132,6 +138,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -240,6 +247,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -254,6 +262,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -268,6 +277,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -282,6 +292,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -328,6 +339,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
         });
@@ -444,6 +456,7 @@ describe("CEE Key Insight Generator", () => {
       ];
 
       const result = generateKeyInsight({
+        identifiability: { identifiable: true },
         graph: minimalGraph as any,
         ranked_actions: rankedActions,
         top_drivers: drivers,
@@ -486,6 +499,7 @@ describe("CEE Key Insight Generator", () => {
       ];
 
       const result = generateKeyInsight({
+        identifiability: { identifiable: true },
         graph: minimalGraph as any,
         ranked_actions: rankedActions,
         top_drivers: drivers,
@@ -508,6 +522,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           goal_text: "reach profitability",
@@ -525,6 +540,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           goal_text: "survive the downturn",
@@ -544,6 +560,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           goal_text: "Reach £20k MRR in 12 months",
@@ -562,6 +579,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           goal_text: "achieving positive cash flow",
@@ -585,6 +603,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           goal_text: "reduce costs",
@@ -606,6 +625,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           goal_text: "maximize revenue",
@@ -625,6 +645,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           // No goal_text provided
@@ -661,6 +682,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           goal_text: "profitability",
@@ -678,6 +700,7 @@ describe("CEE Key Insight Generator", () => {
         ];
 
         const result = generateKeyInsight({
+          identifiability: { identifiable: true },
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
           goal_text: "stability",
@@ -812,6 +835,7 @@ describe("CEE Key Insight Generator", () => {
       ];
 
       const result = generateKeyInsight({
+        identifiability: { identifiable: true },
         graph: minimalGraph as any,
         ranked_actions: rankedActions,
         goal_text: "revenue growth",
@@ -845,6 +869,7 @@ describe("CEE Key Insight Generator", () => {
       ];
 
       const result = generateKeyInsight({
+        identifiability: { identifiable: true },
         graph: minimalGraph as any,
         ranked_actions: rankedActions,
       });
@@ -856,21 +881,6 @@ describe("CEE Key Insight Generator", () => {
 
   describe("identifiability-aware narratives", () => {
     describe("recommendation_status field", () => {
-      it("returns 'actionable' when identifiable (default)", () => {
-        const rankedActions: RankedAction[] = [
-          { node_id: "o1", label: "Option A", expected_utility: 0.75 },
-          { node_id: "o2", label: "Option B", expected_utility: 0.50 },
-        ];
-
-        const result = generateKeyInsight({
-          graph: minimalGraph as any,
-          ranked_actions: rankedActions,
-          // No identifiability provided - defaults to identifiable=true
-        });
-
-        expect(result.recommendation_status).toBe("actionable");
-      });
-
       it("returns 'actionable' when explicitly identifiable", () => {
         const rankedActions: RankedAction[] = [
           { node_id: "o1", label: "Option A", expected_utility: 0.75 },
@@ -907,6 +917,66 @@ describe("CEE Key Insight Generator", () => {
       });
     });
 
+    describe("fail-honest default when identifiability signal is absent", () => {
+      // On the live path ISL's identifiability router is disabled, so the
+      // signal is ALWAYS absent. Absence of evidence must not select the
+      // confident causal language path.
+      const absentSignalActions: RankedAction[] = [
+        { node_id: "o1", label: "Option A", expected_utility: 0.75 },
+        { node_id: "o2", label: "Option B", expected_utility: 0.50 },
+      ];
+
+      it("treats absent signal as not identifiable: recommendation_status is 'exploratory'", () => {
+        const result = generateKeyInsight({
+          graph: minimalGraph as any,
+          ranked_actions: absentSignalActions,
+          // No identifiability provided
+        });
+
+        expect(result.recommendation_status).toBe("exploratory");
+      });
+
+      it("uses hedged headline, not confident causal copy, when signal is absent", () => {
+        const result = generateKeyInsight({
+          graph: minimalGraph as any,
+          ranked_actions: absentSignalActions,
+        });
+
+        expect(result.headline).toContain("cannot be confirmed");
+        expect(result.headline).not.toMatch(/clear best (choice|path)/i);
+      });
+
+      it("uses scenario-analysis confidence statement when signal is absent", () => {
+        const result = generateKeyInsight({
+          graph: minimalGraph as any,
+          ranked_actions: absentSignalActions,
+        });
+
+        expect(result.confidence_statement.toLowerCase()).toContain("scenario analysis");
+        expect(result.confidence_statement).not.toContain("high confidence");
+      });
+
+      it("acknowledges the unconfirmed causal claim in evidence when signal is absent", () => {
+        const result = generateKeyInsight({
+          graph: minimalGraph as any,
+          ranked_actions: absentSignalActions,
+        });
+
+        expect(result.evidence).toBeDefined();
+        expect(result.evidence!.some((e) => e.includes("Causal effects could not be confirmed"))).toBe(true);
+      });
+
+      it("emits an identifiability note explaining the limitation when signal is absent", () => {
+        const result = generateKeyInsight({
+          graph: minimalGraph as any,
+          ranked_actions: absentSignalActions,
+        });
+
+        expect(result.identifiability_note).toBeDefined();
+        expect(result.identifiability_note).toContain("not definitively established");
+      });
+    });
+
     describe("identifiability_note field", () => {
       it("includes method note when identifiable with method", () => {
         const rankedActions: RankedAction[] = [
@@ -926,7 +996,7 @@ describe("CEE Key Insight Generator", () => {
         expect(result.identifiability_note).toContain("backdoor");
       });
 
-      it("returns undefined when identifiable without method", () => {
+      it("returns undefined when explicitly identifiable without method", () => {
         const rankedActions: RankedAction[] = [
           { node_id: "o1", label: "Option A", expected_utility: 0.75 },
         ];
@@ -934,7 +1004,9 @@ describe("CEE Key Insight Generator", () => {
         const result = generateKeyInsight({
           graph: minimalGraph as any,
           ranked_actions: rankedActions,
-          // No identifiability provided
+          identifiability: {
+            identifiable: true,
+          },
         });
 
         expect(result.identifiability_note).toBeUndefined();
