@@ -36,6 +36,18 @@
  *     an event per guest turn (the MM WARN-spam lesson).
  *   - Outcome writes (record_decision_outcome) are OUT OF SCOPE — a later
  *     surface. Only create_decision_record is called here.
+ *   - 0.16.0 addendum (D-N Option-B derisk, ruled 2026-07-11): the chosen
+ *     option's `probability_of_goal` + `probability_of_joint_goal` are
+ *     captured VERBATIM onto prediction (both, from day one — a Neil
+ *     overrule is then a recompute, never lost data), and
+ *     `confidence_source: 'model_derived'` is stamped on every write
+ *     (this seam has no user-stated path; calibration honesty §2).
+ *     Absent/unusable values stay ABSENT — never 0. This lane was blocked
+ *     under 0.15.0 (.strict() hard-rejected the fields at every layer —
+ *     HANDOVER.md ~02:45 wave entry, 2026-07-11) and unblocked by the
+ *     0.16.0 vendor bump in this same PR. ⚠ The merged-but-unexecuted
+ *     migration still whitelists the 0.15.0 prediction key-set — see the
+ *     SEAM NOTE on CreateDecisionRecordWrite (store-adapter.ts).
  *
  * Idempotency: record_id is a deterministic UUID over
  * (scenario_id, decision.graph_hash, computed_at), so a retried turn
@@ -143,6 +155,19 @@ function readComparisonRecords(
   return [];
 }
 
+/**
+ * A probability value is USABLE only when it is a finite number in [0,1]
+ * (the RPC's value-level guard and the 0.16.0 schema range). Anything else
+ * — absent, non-number, non-finite, out of range — yields undefined: the
+ * field is then OMITTED from the write, never clamped, defaulted, or zeroed
+ * (a fabricated value would be scored; absence is honest).
+ */
+function usableUnitInterval(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1
+    ? raw
+    : undefined;
+}
+
 /** Mirrors run-analysis.ts `extractOptionId`: option_id first, label fallback. */
 function comparisonRecordOptionId(record: Record<string, unknown>): string | null {
   if (typeof record.option_id === 'string' && record.option_id.length > 0) {
@@ -211,14 +236,19 @@ export function buildDecisionRecordWrite(
 
   // Leader's win probability as prediction.confidence — only when usable
   // under the RPC's value-level guard (number in [0,1]).
-  const rawWinProbability = leadingRecord.win_probability;
-  const usableConfidence =
-    typeof rawWinProbability === 'number' &&
-    Number.isFinite(rawWinProbability) &&
-    rawWinProbability >= 0 &&
-    rawWinProbability <= 1
-      ? rawWinProbability
-      : undefined;
+  const usableConfidence = usableUnitInterval(leadingRecord.win_probability);
+
+  // D-N Option-B scoring derisk (0.16.0 addendum, ruled 2026-07-11): BOTH
+  // of the chosen option's goal-attainment probabilities, recorded VERBATIM
+  // from the same comparison record the leader was resolved from —
+  // `probability_of_goal` (ISL per-option: P(single goal threshold met))
+  // and `probability_of_joint_goal` (ISL constraint_analysis.joint_probability
+  // via PLoT: P(ALL constraints jointly met)). Capturing both from day one
+  // makes a Neil overrule a recompute, never lost data. Each is independent
+  // and optional-forward: absent/unusable values stay ABSENT (never 0 —
+  // a fabricated probability would poison Brier scoring, ROADMAP 3.2).
+  const probabilityOfGoal = usableUnitInterval(leadingRecord.probability_of_goal);
+  const probabilityOfJointGoal = usableUnitInterval(leadingRecord.probability_of_joint_goal);
 
   // Optional-forward analysis_summary: strict contract parse before send —
   // an off-whitelist key or out-of-range value would otherwise fail the
@@ -251,6 +281,20 @@ export function buildDecisionRecordWrite(
       prediction: {
         statement,
         ...(usableConfidence !== undefined ? { confidence: usableConfidence } : {}),
+        // Every value this seam can place on prediction is model-derived
+        // (deterministic summary, leader win_probability, ISL goal
+        // probabilities) — stamped explicitly on EVERY write so provenance
+        // lives on the record itself rather than leaning on the schema's
+        // absent⇒model_derived disclosed inference. 'user_stated' belongs
+        // to a future elicitation lane; it is unreachable from this seam
+        // (calibration honesty §2: the two populations are never blended).
+        confidence_source: 'model_derived',
+        ...(probabilityOfGoal !== undefined
+          ? { probability_of_goal: probabilityOfGoal }
+          : {}),
+        ...(probabilityOfJointGoal !== undefined
+          ? { probability_of_joint_goal: probabilityOfJointGoal }
+          : {}),
       },
       review_date: new Date(computedAtMs + REVIEW_HORIZON_MS).toISOString(),
       record_id: recordId,
