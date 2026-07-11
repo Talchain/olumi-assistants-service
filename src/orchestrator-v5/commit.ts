@@ -316,6 +316,9 @@ function pendingMatchKey(pa: PendingAction): string {
  * turn-count TTL decremented). A prior pending survives iff ALL hold:
  *   1. not consumed this turn (applied / dismissed — `consumedRefs`);
  *   2. not superseded by a this-turn pending with the same key (newer wins);
+ *      for `proposed_concept` supersession is KIND-level: ANY fresh
+ *      capture this turn supersedes every carried concept (single-slot
+ *      proposal memory — diagnosis D2a);
  *   3. not wall-clock expired (`expires_at_iso > nowMs`; malformed → expired);
  *   4. graph-hash precondition still matches `currentGraphHash` when BOTH are
  *      known (a mismatch = the graph moved underneath it → invalidated);
@@ -350,6 +353,17 @@ export function computeSurvivingPriorPendingsDetailed(
 ): SurvivingPriorPendingsResult {
   const consumed = new Set(consumedRefs);
   const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
+  // Diagnosis D2a (live 2026-07-10 stale-resume specimen): proposal memory
+  // is a SINGLE-SLOT store — when this turn's assistant text produced a
+  // capturable offer (a fresh `proposed_concept` entry in `thisTurn`),
+  // every CARRIED `proposed_concept` is superseded by it, kind-level.
+  // Key-level supersession alone can never fire for this kind: each
+  // capture mints a fresh UUID chip_id, so a carried stale concept used
+  // to survive alongside the fresh one and (with the old end-first read)
+  // even win over it.
+  const thisTurnHasFreshProposedConcept = thisTurn.some(
+    (pa) => pa.action.kind === 'proposed_concept',
+  );
   const survivors: PendingAction[] = [];
   let consumedCount = 0;
   let supersededCount = 0;
@@ -359,7 +373,10 @@ export function computeSurvivingPriorPendingsDetailed(
   for (const pa of prior) {
     const key = pendingMatchKey(pa);
     if (consumed.has(key)) { consumedCount += 1; continue; } // 1. applied / dismissed
-    if (thisTurnKeys.has(key)) { supersededCount += 1; continue; } // 2. superseded
+    if (
+      thisTurnKeys.has(key)
+      || (pa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
+    ) { supersededCount += 1; continue; } // 2. superseded (same key, or fresher concept capture)
     const expiresMs = Date.parse(pa.expires_at_iso);
     if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
     // 4. graph-hash invalidation — only when both hashes are known.

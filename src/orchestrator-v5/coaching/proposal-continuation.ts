@@ -75,8 +75,44 @@ const CONCEPT_PATTERNS: ReadonlyArray<{
   readonly pattern: RegExp;
   readonly preferred_kind: 'risk' | 'factor' | 'either' | 'capture';
 }> = [
+  // Diagnosis D1a (live 2026-07-10 run-1 wire capture): the kind word is
+  // routinely preceded by an adjective ("add marketing budget as a NEW
+  // factor"). Without an adjective slot this pattern failed, the generic
+  // "would you like me to add X" pattern captured the whole tail, and the
+  // kind-strip left the mangled persisted concept "marketing budget as a
+  // new". The tail carries TWO branches (group 2 XOR group 3 = kind):
+  //   - group 2: kind word directly after the article — byte-identical
+  //     to the pre-D1a behaviour, no lookahead;
+  //   - group 3: one or two adjectives before the kind word (lazy
+  //     bounded slot), guarded by a negative lookahead on "(to|in) the
+  //     (model|decision|graph)" so the slot never swallows a concept
+  //     word in the kind-anchored "add a {concept} factor to the model"
+  //     shape (PR #418 review fixup 2: "add a software as a service
+  //     factor to the model" must fall through to that pattern and
+  //     capture "software as a service", not "software").
   {
-    pattern: /\b(?:add(?:ing)?|include|introduce)\s+(.+?)\s+as\s+(?:a\s+|an\s+)?(risk|factor|driver)\b/i,
+    pattern: /\b(?:add(?:ing)?|include|introduce)\s+(.+?)\s+as\s+(?:a\s+|an\s+)?(?:(risk|factor|driver)\b|(?:\w+\s+){1,2}?(risk|factor|driver)\b(?!\s+(?:to|in)\s+the\s+(?:model|decision|graph)\b))/i,
+    preferred_kind: 'capture',
+  },
+  // Diagnosis D1b (live 2026-07-10 run-2 wire capture): the passive
+  // proposal form — "would you like marketing budget ADDED as a new
+  // factor?" — matched NO pattern (`add(?:ing)?` does not cover the
+  // passive participle "added"), so nothing was captured and the
+  // continuation never resumed.
+  //
+  // PR #418 review fixup 1b: anchored to an interrogative lead
+  // ("(would|do|should) you …") so declarative retrospectives ("I have
+  // already seen churn added as a factor in similar models") and
+  // reported negatives ("You said you did not want churn added as a
+  // factor") never fire — only a live offer is a proposal. The bounded
+  // filler between "you" and the verb admits softeners ("would you
+  // perhaps like…") but blocks negations ("would you rather NOT have…").
+  // The lead-in verbs bound the left edge of the concept (a bare
+  // `(.+?)\s+added` would swallow the whole question prefix); the
+  // optional `to (have|see|get)` bridge covers "would you like to see X
+  // added as a risk?". Same bounded adjective slot as D1a.
+  {
+    pattern: /\b(?:would|do|should)\s+you\s+(?:(?!(?:not|never)\b)\w+\s+){0,2}?(?:like|want|prefer|have|see)\s+(?:to\s+(?:have|see|get)\s+)?(.+?)\s+(?:to\s+be\s+)?added\s+as\s+(?:a\s+|an\s+)?(?:\w+\s+){0,2}?(risk|factor|driver)\b/i,
     preferred_kind: 'capture',
   },
   // PR #218 smoke follow-up: "add a {concept} factor to the model" form.
@@ -284,6 +320,40 @@ const QUESTION_TAIL_TOKENS: ReadonlyArray<RegExp> = [
   /\bfirst\s*$/i,
 ];
 
+/**
+ * PR #418 review fixup 1a — capture-time negation/contrast screen.
+ *
+ * The D2a single-slot supersession makes a FALSE capture strictly
+ * costlier: it evicts a genuine carried concept from proposal memory.
+ * So the widened capture patterns gain a screen: when a negation or
+ * contrast token appears in a short window immediately BEFORE the
+ * pattern match, the sentence is describing what NOT to add ("I
+ * wouldn't recommend adding X as a separate risk", "Rather than adding
+ * X as a standalone factor…", "We should avoid adding X as a direct
+ * driver") and the capture is rejected. Window semantics mirror
+ * `hasLeadingNegation` (30 chars); the token list is capture-specific
+ * (`n't` covers wouldn't/shouldn't/don't; the curly-apostrophe variant
+ * is included because LLM prose routinely uses U+2019).
+ */
+const CAPTURE_NEGATION_WINDOW_CHARS = 30;
+const CAPTURE_NEGATION_TOKENS: ReadonlyArray<RegExp> = [
+  /\bnot\b/i,
+  // Straight (U+0027) and curly (U+2019) apostrophes both accepted; the
+  // curly char is written as a `\u2019` escape so the source stays
+  // ASCII — same rationale as the CLAUSE_BOUNDARY_PATTERNS apostrophe.
+  /n['\u2019]t\b/i,
+  /\bavoid\b/i,
+  /\brather\s+than\b/i,
+  /\binstead\s+of\b/i,
+  /\bnever\b/i,
+];
+
+function hasLeadingCaptureNegation(text: string, matchIndex: number): boolean {
+  const windowStart = Math.max(0, matchIndex - CAPTURE_NEGATION_WINDOW_CHARS);
+  const window = text.slice(windowStart, matchIndex);
+  return CAPTURE_NEGATION_TOKENS.some((p) => p.test(window));
+}
+
 function truncateAtClauseBoundary(s: string): string {
   let earliest = s.length;
   for (const p of CLAUSE_BOUNDARY_PATTERNS) {
@@ -295,6 +365,21 @@ function truncateAtClauseBoundary(s: string): string {
   return s.slice(0, earliest).trim();
 }
 
+/**
+ * Diagnosis D1c: trailing "as a( new)?" residue left behind when the
+ * kind word is stripped from a generic capture. The generic pattern
+ * ("would you like me to add X?") captures up to the sentence
+ * terminator, so "…add marketing budget as a new factor?" yields
+ * "marketing budget as a new factor"; the kind-strip removes only
+ * "factor", leaving the mangled "marketing budget as a new" (live
+ * 2026-07-10 persisted specimen). Applied ONLY after a kind word was
+ * stripped — a concept that legitimately contains "as a …" without a
+ * trailing kind word ("software as a service") is never touched.
+ * Article required + at most two trailing words, mirroring the bounded
+ * adjective slot in the capture patterns.
+ */
+const TRAILING_AS_ARTICLE_RESIDUE = /\s+as\s+(?:a|an)(?:\s+\w+){0,2}\s*$/i;
+
 function stripTrailingKindWord(
   s: string,
 ): { readonly text: string; readonly kind: 'risk' | 'factor' | null } {
@@ -302,8 +387,17 @@ function stripTrailingKindWord(
     const m = entry.pattern.exec(s);
     if (m) {
       const candidate = s.slice(0, m.index).trim();
+      // Diagnosis D1c: after the kind word goes, also strip an "as a
+      // ( new)?" residue so "marketing budget as a new [factor]"
+      // reduces to "marketing budget", not "marketing budget as a new".
+      const withoutResidue = candidate
+        .replace(TRAILING_AS_ARTICLE_RESIDUE, '')
+        .trim();
       // Require post-strip text to have ≥2 alpha chars so we don't
       // strip "factor" or "risk" down to "".
+      if (withoutResidue !== candidate && /[A-Za-z]{2,}/.test(withoutResidue)) {
+        return { text: withoutResidue, kind: entry.kind };
+      }
       if (/[A-Za-z]{2,}/.test(candidate)) {
         return { text: candidate, kind: entry.kind };
       }
@@ -426,6 +520,11 @@ export function extractProposedConcept(
   for (const entry of CONCEPT_PATTERNS) {
     const match = entry.pattern.exec(text);
     if (!match) continue;
+    // PR #418 review fixup 1a: a negation/contrast token in the short
+    // window before the match means the sentence describes what NOT to
+    // add — reject this pattern's capture (a later pattern may still
+    // match a different, non-negated span).
+    if (hasLeadingCaptureNegation(text, match.index)) continue;
     const raw = match[1];
     if (typeof raw !== 'string') continue;
 
@@ -449,7 +548,10 @@ export function extractProposedConcept(
 
     let preferredKind: 'risk' | 'factor' | 'either';
     if (entry.preferred_kind === 'capture') {
-      const captured = match[2]?.toLowerCase();
+      // Pattern 1's two-branch tail puts the kind word in group 2
+      // (kind-adjacent) XOR group 3 (adjective-slotted); every other
+      // capture pattern uses group 2 only.
+      const captured = (match[2] ?? match[3])?.toLowerCase();
       if (captured === 'risk') preferredKind = 'risk';
       else if (captured === 'factor' || captured === 'driver') preferredKind = 'factor';
       else preferredKind = 'either';
@@ -1064,17 +1166,26 @@ export function buildProposalPendingAction(
 }
 
 /**
- * Locate the most recent `proposed_concept` action in a list of pending
+ * Locate the FRESHEST `proposed_concept` action in a list of pending
  * actions from the prior turn. Returns null if none is present or if the
  * action shape is unexpected (defensive — parsePendingAction has already
  * validated, but this lets the resumer narrow without an `as` cast).
+ *
+ * ORDER CONTRACT (diagnosis D2, live 2026-07-10 stale-resume specimen):
+ * `commitDirectAnswer` persists `[...thisTurnPendings, ...carriedSurvivors]`
+ * — this turn's FRESH entries occupy the FRONT of the row and carried
+ * (older) survivors the tail. The scan is therefore FRONT-FIRST so the
+ * fresh capture always wins over a carried stale one. The previous
+ * end-first scan inverted this and resumed a 2-turn-old proposal over
+ * the immediately-preceding turn's offer. Pinned by
+ * `proposal-continuation.test.ts` ("fresh capture wins over a carried
+ * stale one").
  */
 export function findProposedConceptAction(
   pendingActions: readonly PendingAction[] | null | undefined,
 ): { concept: string; preferred_kind: 'risk' | 'factor' | 'either' } | null {
   if (!pendingActions || pendingActions.length === 0) return null;
-  for (let i = pendingActions.length - 1; i >= 0; i--) {
-    const pa = pendingActions[i];
+  for (const pa of pendingActions) {
     if (!pa) continue;
     if (pa.action.kind !== 'proposed_concept') continue;
     return {
@@ -1086,10 +1197,14 @@ export function findProposedConceptAction(
 }
 
 /**
- * Locate the most recent `proposed_concept` pending action entry (full
+ * Locate the FRESHEST `proposed_concept` pending action entry (full
  * object, not the narrowed concept). Used by the resume sites that also
  * need to inspect `preconditions.graph_hash` for divergence and
  * `expires_at_iso` for wall-clock expiry.
+ *
+ * Same FRONT-FIRST order contract as `findProposedConceptAction` above:
+ * commit persists this turn's fresh pendings first, carried survivors
+ * last, so the first match is the freshest capture (diagnosis D2).
  *
  * Returns null when no `proposed_concept` entry is present.
  */
@@ -1097,8 +1212,7 @@ export function findProposedConceptEntry(
   pendingActions: readonly PendingAction[] | null | undefined,
 ): PendingAction | null {
   if (!pendingActions || pendingActions.length === 0) return null;
-  for (let i = pendingActions.length - 1; i >= 0; i--) {
-    const pa = pendingActions[i];
+  for (const pa of pendingActions) {
     if (!pa) continue;
     if (pa.action.kind !== 'proposed_concept') continue;
     return pa;
@@ -1118,10 +1232,15 @@ export function findProposedConceptEntry(
  *     unparseable timestamp as expired so the resume fails closed);
  *   - the current wall-clock time is after `expires_at_iso`.
  *
- * Turn-count TTL is NOT checked here because it is effectively enforced
- * by `readMostRecentPendingActions`'s most-recent-only read pattern
- * (proposals from more than one turn back are not in the prior turn's
- * pending_actions row by the time the next-turn resumer queries).
+ * Turn-count TTL is NOT checked here. It is enforced at COMMIT time by
+ * the carry-forward pass (`computeSurvivingPriorPendingsDetailed` in
+ * `commit.ts`): each carried entry has `expires_at_turn_count`
+ * decremented once per turn and is dropped when it reaches zero, or
+ * earlier when a fresher capture supersedes it. It is NOT implicitly
+ * enforced by the most-recent-only read — carry-forward re-persists
+ * surviving entries into each newer turn's pending_actions row, so a
+ * proposal from more than one turn back CAN still appear in the most
+ * recent row until its turn TTL exhausts (diagnosis D3 correction).
  */
 export function isProposedConceptExpired(pa: PendingAction, nowMs: number): boolean {
   const expiresMs = Date.parse(pa.expires_at_iso);
@@ -1178,10 +1297,11 @@ export interface ResolveProposalResumeResult {
  * use `rejection` to emit `v5.proposal_continuation.invalidated` with
  * the specific reason.
  *
- * Turn-count TTL is NOT enforced here — it is implicitly handled by
- * `readMostRecentPendingActions`'s most-recent-only read pattern.
- * Proposals from more than one turn back are not in the prior turn's
- * pending_actions row by the time the next-turn resumer queries.
+ * Turn-count TTL is NOT enforced here — it is enforced at COMMIT time
+ * by the carry-forward pass in `commit.ts` (decrement-then-drop, plus
+ * supersession by a fresher capture). Carry-forward re-persists
+ * surviving entries into each newer turn's row, so the most-recent-only
+ * read does NOT bound their age by itself (diagnosis D3 correction).
  */
 export function resolveProposalResume(
   input: ResolveProposalResumeInput,
