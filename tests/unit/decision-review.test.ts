@@ -402,8 +402,11 @@ describe('Plain-English Template Functions', () => {
       expect(explanation).toContain('10.00');
       expect(explanation).toContain('20.00');
       expect(explanation).toContain('90%');
-      expect(explanation).toContain('internal calibration checks');
       expect(explanation).toContain('has not been validated against historical outcomes');
+      // No pass/fail calibration verdict exists anywhere in the pipeline —
+      // the copy must not assert one.
+      expect(explanation).not.toContain('passed');
+      expect(explanation).not.toContain('well-calibrated');
     });
 
     it('does not claim historical calibration data that does not exist', () => {

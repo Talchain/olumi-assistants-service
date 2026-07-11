@@ -195,7 +195,8 @@ export const CEEKeyInsightInput = z
     goals: z.array(GoalInfoSchema).optional(),
     primary_goal_id: z.string().optional(),
     // Identifiability from ISL - optional for backward compatibility
-    // If not provided, assumes identifiable (current behaviour)
+    // If not provided, treated as NOT identifiable (fail-honest): confident
+    // causal language requires an explicit positive signal
     identifiability: IdentifiabilitySchema.optional(),
   })
   .strict();

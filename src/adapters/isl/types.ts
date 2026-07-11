@@ -345,9 +345,11 @@ export interface PredictionInterval {
   interval_width: number;
 
   /**
-   * Whether the interval passed ISL's internal calibration checks.
-   * NOTE: no historical-outcome calibration loop exists yet; this flag
-   * must not be presented to users as validation against historical data.
+   * Calibration flag declared by this adapter type. NOTE: ISL does not emit
+   * this field today (its calibration assessment yields metrics only, never
+   * a pass/fail verdict) and no historical-outcome calibration loop exists;
+   * user-facing copy must not present it as a calibration verdict or as
+   * validation against historical data.
    */
   well_calibrated: boolean;
 

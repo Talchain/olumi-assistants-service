@@ -98,7 +98,7 @@ export const ISLConformalResultSchema = z.object({
     .optional(),
   /** Confidence level for the interval */
   confidence: z.number().min(0).max(1).optional(),
-  /** Whether the interval passed ISL's internal calibration checks (no historical-outcome calibration loop exists yet) */
+  /** Calibration flag (ISL emits no such field today and computes no pass/fail verdict; no historical-outcome calibration loop exists — not a calibration claim) */
   wellCalibrated: z.boolean().optional(),
   /** Factors affecting interval width */
   widthFactors: z.array(z.string()).optional(),
