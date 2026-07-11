@@ -380,6 +380,111 @@ describe('consent-clarity — "all of them"', () => {
   });
 });
 
+describe('consent-clarity — bare "all"/"both" are NOT all-consent confirmations (review item 1)', () => {
+  function passthroughAdapter(text: string) {
+    return {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () => ({
+          content: [{ type: 'text', text }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'mock',
+          latencyMs: 0,
+        })),
+    };
+  }
+
+  it.each(['both', 'all'])(
+    'bare %j with two live GM holds mutates NOTHING and falls through to the normal lane',
+    async (msg) => {
+      // Adversarial-review BLOCKING finding: a bare "both"/"all" can be the
+      // answer to an UNRELATED assistant question ("which options should I
+      // compare?" → "both"). Treating it as an all-consents confirmation
+      // would fire an immediate double mutation — exactly the
+      // intent-mismatch class the amendment targets. Only EXPLICIT forms
+      // ("all of them", "both of them", "apply all", "apply both", "yes to
+      // all") resolve consents; bare forms fall through untouched.
+      setGmMode('live');
+      pendingActionsForRead = [holdA(), holdB()];
+      const adapter = passthroughAdapter('Which do you mean?');
+      await runTurnExecutor(payload(msg), `req-consent-bare-${msg}`, {
+        routingAdapter: adapter,
+      });
+      // Falls through to the normal lane (LLM) — NO deterministic mutation.
+      expect(adapter.chatWithTools).toHaveBeenCalled();
+      for (const write of appendCalls) {
+        expect(write.graph).toBeUndefined();
+        expect((write.handler_facts as unknown[]) ?? []).toHaveLength(0);
+      }
+    },
+  );
+});
+
+describe('consent-clarity — apply-all with a mid-chain referee decline (review item 2)', () => {
+  it('three holds, step 2 fails the re-referee → exactly steps 1+3 applied in ONE commit; receipt names the applied pair AND the declined one', async () => {
+    setGmMode('live');
+    // Hold C's batch re-adds an EXISTING node id → R3 ENTITY_ID_COLLISION →
+    // governing 'rejected' at the re-referee. A "yes to all" never overrides
+    // an integrity rejection; the other two holds are unaffected.
+    const holdC = gmHeldPending({
+      ref: 'gmh_cccccccccccc',
+      nodeId: 'fac-marketing',
+      description: 'unused',
+      label: 'Re-add Marketing',
+      message: 'Yes, re-add Marketing.',
+      emittedAtIso: '2026-07-11T11:00:30.000Z',
+    });
+    const holdCPatch = (holdC.action as { inline_patch: Record<string, unknown> }).inline_patch;
+    (holdC.action as { inline_patch: Record<string, unknown> }).inline_patch = {
+      ...holdCPatch,
+      operations: [
+        {
+          op: 'add_node',
+          path: 'fac-marketing',
+          value: { id: 'fac-marketing', kind: 'factor', label: 'Marketing' },
+        },
+      ],
+      operations_count: 1,
+    };
+    // Listing order: A (applies), C (declined mid-chain), B (applies).
+    pendingActionsForRead = [holdA(), holdC, holdB()];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('all of them'), 'req-consent-all-partial', {
+      routingAdapter: adapter,
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(appendCalls).toHaveLength(1);
+    const write = lastAppend();
+    // Steps 1 + 3 applied in the single commit; step 2 applied NOTHING.
+    const graph = write.graph as { nodes?: Array<Record<string, unknown>> } | undefined;
+    expect(graph).toBeDefined();
+    expect(graph!.nodes!.find((n) => n.id === 'fac-marketing')!.description).toBe(
+      'Quarterly ad budget',
+    );
+    expect(graph!.nodes!.find((n) => n.id === 'goal-g')!.description).toBe(
+      'North star statement',
+    );
+    expect(graph!.nodes!.filter((n) => n.id === 'fac-marketing')).toHaveLength(1);
+    const facts = (write.handler_facts ?? []) as ReadonlyArray<Record<string, unknown>>;
+    expect(facts).toHaveLength(2);
+    expect(facts.every((f) => f.fact_type === 'edit_graph')).toBe(true);
+    // Receipt names BOTH applied changes AND the declined one — honest
+    // partial, never silent.
+    const assistant = String(write.assistantMessage ?? '');
+    expect(assistant).toContain("Confirmed: update 'Marketing'.");
+    expect(assistant).toContain("Confirmed: update 'Goal'.");
+    expect(assistant).toContain("I couldn't take 'Re-add Marketing' forward");
+    expect(findForbiddenPhraseHit(assistant)).toBeNull();
+    // Applied holds consumed; the declined hold is NOT consumed (it keeps
+    // the existing pending lifecycle and its honest outcomes).
+    const persisted = (write.pending_actions ?? []) as ReadonlyArray<{ chip_id?: string }>;
+    expect(persisted.some((p) => p.chip_id === HOLD_A_REF)).toBe(false);
+    expect(persisted.some((p) => p.chip_id === HOLD_B_REF)).toBe(false);
+    expect(persisted.some((p) => p.chip_id === 'gmh_cccccccccccc')).toBe(true);
+  });
+});
+
 describe('consent-clarity — single consent receipt names what was confirmed', () => {
   it('"yes" on ONE live GM hold applies it and the receipt names the change (never a bare "Done")', async () => {
     setGmMode('live');

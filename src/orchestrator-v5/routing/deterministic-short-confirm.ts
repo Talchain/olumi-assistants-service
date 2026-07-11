@@ -134,14 +134,24 @@ export type ShortConfirmSkipReason =
  * CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — "all of them" pattern.
  *
  * Recognised ONLY while at least one live consent-expecting pending
- * exists (the disambiguation list offers "All of them" as a chip, and a
- * typed "all" / "both" / "yes to all" must resolve the same way).
+ * exists, and ONLY for EXPLICIT collective forms: "all of them" /
+ * "all of those" / "all of it" / "both of them" / "apply all" /
+ * "apply both" / "apply them all" / "yes to all". The disambiguation
+ * chip sends "All of them.", so the chip path always resolves.
+ *
+ * Deliberately EXCLUDED (adversarial review, 2026-07-11): bare "all" /
+ * "both" / "do all". A bare "both" is routinely the answer to an
+ * UNRELATED assistant question ("which options should I compare?" →
+ * "both"); binding it to live consents would fire an unintended
+ * multi-mutation — the exact intent-mismatch class the amendment
+ * targets. Bare forms fall through to the normal gates (and the LLM)
+ * untouched.
+ *
  * Anchored start-to-end with the usual politeness/punctuation tail so
- * any substantive content ("all of the numbers") falls through to the
- * normal gates.
+ * any substantive content ("all of the numbers") falls through.
  */
 export const CONSENT_RESOLVE_ALL_PATTERN =
-  /^\s*(?:all(?:\s+of\s+(?:them|those))?|both(?:\s+of\s+them)?|yes\s+to\s+all|(?:apply|do)\s+(?:them\s+)?all|all\s+of\s+it)(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:all\s+of\s+(?:them|those|it)|both\s+of\s+(?:them|those)|yes\s+to\s+all|apply\s+(?:them\s+all|all(?:\s+of\s+(?:them|those))?|both(?:\s+of\s+(?:them|those))?))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * Order consent-expecting candidates for LISTING and for ordinal

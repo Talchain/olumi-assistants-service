@@ -185,17 +185,41 @@ describe('consent-clarity — "all of them" resolution', () => {
     expect(r.candidates).toHaveLength(2);
   });
 
-  it.each(['all', 'All of them.', 'both', 'yes to all', 'apply all', 'all please'])(
-    '%j is recognised as an all-consents confirmation',
+  it.each([
+    'All of them.',
+    'all of them please',
+    'all of those',
+    'both of them',
+    'yes to all',
+    'apply all',
+    'apply both',
+    'apply them all',
+  ])('%j is recognised as an all-consents confirmation (explicit forms only)', (msg) => {
+    const r = tryShortConfirmResume({
+      message: msg,
+      pendingActions: [makeApplyProposedPending(1), makeApplyProposedPending(2)],
+      ...baseInput,
+    });
+    expect(r.matched).toBe(true);
+    if (!r.matched) return;
+    expect(r.dispatch).toBe('consent_all');
+  });
+
+  it.each(['all', 'both', 'all please', 'both!', 'do all'])(
+    'bare %j is NOT an all-consents confirmation (review item 1: it may answer an unrelated question)',
     (msg) => {
+      // Adversarial-review BLOCKING finding: "both" / "all" can be the
+      // answer to an unrelated assistant question ("which options should I
+      // compare?" → "both"); binding it to live consents would fire an
+      // unintended multi-mutation. Only the explicit forms resolve; the
+      // disambiguation chip sends "All of them." so the chip path is
+      // unaffected.
       const r = tryShortConfirmResume({
         message: msg,
         pendingActions: [makeApplyProposedPending(1), makeApplyProposedPending(2)],
         ...baseInput,
       });
-      expect(r.matched).toBe(true);
-      if (!r.matched) return;
-      expect(r.dispatch).toBe('consent_all');
+      expect(r.matched).toBe(false);
     },
   );
 
