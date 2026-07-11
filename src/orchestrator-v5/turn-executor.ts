@@ -93,7 +93,10 @@ import {
   decideGoalTargetReceipt,
   formatGoalTargetNotSavedText,
 } from './compose/goal-target-receipt-guard.js';
-import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
+import {
+  scopePendingsToChipClickIntent,
+  tryShortConfirmResume,
+} from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
 import { buildRescaleCapPendingActions } from './session/rescale-cap-pending.js';
 import {
@@ -141,7 +144,6 @@ import {
 } from './compose/proposed-change.js';
 import {
   derivePendingActivity,
-  filterLivePendingActions,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
@@ -219,6 +221,7 @@ import { summariseGraphCounts } from './context/build-context-summary.js';
 import {
   checkCoachingOutput,
   buildCoachingDegradeResponse,
+  selectLiveHoldForDegrade,
 } from './coaching/coaching-output-postcheck.js';
 import {
   buildFlipProposalEmit,
@@ -986,34 +989,16 @@ export async function runTurnExecutor(
     // F-HELD fix 3b — thread the live hold (if any) into the degrade so a
     // state-unsafe degrade RESTATES the held offer + its confirm chip instead
     // of stomping the reply with buildAnalysisAbsentTemplate + a competing
-    // run_analysis chip (wire capture 13c). The hold is the most recently
-    // emitted LIVE apply_proposed_change among the prior turn's pendings —
-    // the same single-prior-turn authority every other pending consumer in
-    // this file reads — and only the standard variant with persisted public
-    // copy qualifies (a legacy no-copy hold degrades exactly as before).
-    const liveHolds = filterLivePendingActions(
-      context.most_recent_pending_actions ?? [],
+    // run_analysis chip (wire capture 13c). Selection lives in
+    // `selectLiveHoldForDegrade` (same single-prior-turn authority every
+    // other pending consumer in this file reads): newest LIVE standard
+    // apply_proposed_change with public copy AND `expires_at_turn_count > 1`
+    // — a hold at 1 lapses at THIS commit, so restating it would contradict
+    // the same-message lapse notice with a dead chip (round-2 FIXUP 3).
+    const holdForDegrade = selectLiveHoldForDegrade(
+      context.most_recent_pending_actions,
       Date.now(),
-    ).filter((pa) => pa.action.kind === 'apply_proposed_change');
-    const newestHold =
-      liveHolds.length === 0
-        ? undefined
-        : [...liveHolds].sort(
-            (a, b) => Date.parse(b.emitted_at_iso) - Date.parse(a.emitted_at_iso),
-          )[0];
-    const holdForDegrade =
-      newestHold !== undefined &&
-      newestHold.action.kind === 'apply_proposed_change' &&
-      typeof newestHold.action.public_label === 'string' &&
-      newestHold.action.public_label.length > 0 &&
-      typeof newestHold.action.public_message === 'string' &&
-      newestHold.action.public_message.length > 0
-        ? {
-            chip_id: newestHold.chip_id,
-            label: newestHold.action.public_label,
-            message: newestHold.action.public_message,
-          }
-        : undefined;
+    );
     const degrade = buildCoachingDegradeResponse(pack, {
       optionCount: contextPackForLog?.graph.counts.options ?? 0,
       ...(holdForDegrade !== undefined ? { liveHold: holdForDegrade } : {}),
@@ -1925,9 +1910,19 @@ export async function runTurnExecutor(
       const resumerMessage = options.chipClickResumeIntent
         ? 'yes'
         : payload.message;
+      // F-HELD round 2 (FIXUP 1) — intent-vs-kind guard: the synthetic "yes"
+      // a chip click produces must only ever resolve pendings of the CLICKED
+      // kind. Without this scope, the consent-priority pick would resolve a
+      // wwf chip click to a live apply_proposed_change hold and execute a
+      // held mutation off an explanation click. Typed "yes" (no intent flag)
+      // passes the full set through — consent-priority untouched.
+      const pendingsForShortConfirm = scopePendingsToChipClickIntent(
+        context.most_recent_pending_actions ?? [],
+        options.chipClickResumeIntent,
+      );
       const shortConfirmDispatch = tryShortConfirmResume({
         message: resumerMessage,
-        pendingActions: context.most_recent_pending_actions ?? [],
+        pendingActions: pendingsForShortConfirm,
         currentTurnIndex: context.prior_turns.length,
         nowMs: Date.now(),
         analysisFreshness: freshness?.freshness,

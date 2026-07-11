@@ -154,9 +154,11 @@ describe('live verdict routing', () => {
 
   it('F-HELD lifecycle: the held pending carries the GM hold turn-TTL (4), not the chip default (2)', () => {
     // F-HELD fix 2a (wire finding 2026-07-11): a hold that lapses after the
-    // chip-default 2 turns dies before a short clarify detour resolves
-    // (scenario-A variant: clarify answered after 2 intervening turns).
+    // chip-default 2 turns dies before a short clarify detour resolves.
     // GM holds get their own, longer turn budget; wall TTL is unchanged.
+    // NOTE the budget only counts TURN-EXECUTOR-committed turns — edit/
+    // draft-classified commits thread no priorPendingActions and wipe live
+    // holds outright (known residual; see GM_HELD_PENDING_TURN_TTL doc).
     const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP] }));
     expect(d.governing).toBe('held');
     const pending = d.pendingActions![0]!;

@@ -135,14 +135,23 @@ export const GM_HELD_OPERATIONS_MAX_JSON_CHARS = 16_000;
  * F-HELD fix 2a (wire finding 2026-07-11) — GM holds get their OWN turn-TTL,
  * longer than the chip-suggestion default (`PENDING_ACTION_DEFAULT_TURN_TTL`
  * = 2). A hold is an explicit consent question, not a disposable suggestion:
- * with the 2-turn default, one clarify detour plus one answer turn killed the
- * hold before the user could get back to it (scenario-A wire variant: the
- * clarify was answered after 2 intervening turns and the held factor was
- * never applied). Four turns gives a short detour room to resolve while the
- * wall-clock TTL (`PENDING_ACTION_DEFAULT_WALL_TTL_MS`, unchanged) still
- * bounds total lifetime. When the hold DOES lapse, the commit carry-forward
- * now surfaces an honest lapse notice (see commit.ts, F-HELD fix 2b) instead
- * of dropping it silently.
+ * with the 2-turn default, one clarify detour plus one answer turn killed
+ * the hold before the user could get back to it. Four turns gives a short
+ * detour room to resolve while the wall-clock TTL
+ * (`PENDING_ACTION_DEFAULT_WALL_TTL_MS`, unchanged) still bounds total
+ * lifetime. When the hold DOES lapse by turn TTL, the commit carry-forward
+ * surfaces an honest lapse notice (see commit.ts, F-HELD fix 2b) instead of
+ * dropping it silently.
+ *
+ * KNOWN RESIDUAL (round-2 correction — this budget does NOT cover the
+ * scenario-A wire variant end-to-end): the carry-forward/TTL/notice
+ * machinery runs only on commits that thread `priorPendingActions`, and
+ * ONLY the TurnExecutor `commitTurn` wrapper does. Edit-classified and
+ * draft-classified turns commit via `dispatchEditGraph` /
+ * `dispatchDraftGraph` WITHOUT `priorPendingActions`, so any live hold is
+ * silently WIPED on those turns — no TTL decrement, no lapse notice, no
+ * chip suppression — including the add-risk clarify turn itself. Follow-up
+ * lane: "thread priorPendingActions through edit/draft dispatch commits".
  */
 export const GM_HELD_PENDING_TURN_TTL = 4;
 

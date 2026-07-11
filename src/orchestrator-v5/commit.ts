@@ -500,14 +500,24 @@ export function finaliseLifecycleAgainstCap(
  * 'chip_action_retry_analysis', 'chip_action_run_analysis_after_expiry',
  * 'chip_action_run_analysis_after_chip_no_pending',
  * 'chip_action_rerun_analysis_gm_stale', 'chip_clarify_pending_N') — none of
- * them appear in this set, so their affordances survive intact. Documented
- * residual: two recovery-flavoured mints share the generic
- * 'chip_action_rerun_analysis' id (the what_would_flip stale resume and the
- * run-comparison gate). The former cannot co-occur with a live hold after the
- * F-HELD consent-priority fix (the hold wins the bare-confirm pick, so the
- * wwf stale downgrade never fires while a hold is live); the latter keeps its
- * re-run guidance in assistant_text with the one-click chip suppressed for
- * the duration of the hold — steer-don't-bind accepts that trade.
+ * them appear in this set, so their affordances survive intact.
+ *
+ * Documented residual — COMPLETE manifest of mints sharing the generic
+ * 'chip_action_rerun_analysis' id (round-2 FIXUP 5b), all suppressed for the
+ * duration of a live hold; each keeps its re-run guidance in assistant_text:
+ *   - compose/chip-generator.ts (suggestion mints — the intended targets);
+ *   - routing/run-comparison-gate.ts RERUN_CHIP (stale/unconfirmed
+ *     "what changed?" recovery — can co-occur with a live hold);
+ *   - routing/stale-rerun-guard.ts RERUN_ACTION (stale-rerun guard, ALSO
+ *     re-used by the coaching degrade path; the degrade's own hold case is
+ *     handled upstream by the held-aware template, F-HELD 3b);
+ *   - routing/post-analysis-label-intercept.ts RERUN_ANALYSIS_CHIP
+ *     (post-analysis label-click chip set);
+ *   - turn-executor.ts what_would_flip stale-resume recovery (cannot
+ *     co-occur with a live hold after the consent-priority fix: the hold
+ *     wins the bare-confirm pick, and chip clicks are intent-scoped).
+ * Steer-don't-bind accepts the one-click-affordance loss on the sharers
+ * while the hold is unresolved.
  */
 const SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS: ReadonlySet<string> = new Set([
   'chip_action_rerun_analysis',
@@ -538,6 +548,12 @@ function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
  * recent_changes / coaching-state style seams are read-side projections and
  * have no deterministic line-injection path into assistant_text today, so
  * none could carry this without a new channel).
+ *
+ * KNOWN RESIDUAL: this notice (and the whole TTL/carry-forward lifecycle)
+ * fires only on commits that thread `priorPendingActions` — the TurnExecutor
+ * `commitTurn` wrapper alone. Edit- and draft-classified dispatch commits
+ * pass none, so they silently WIPE live holds with no notice. Follow-up
+ * lane: "thread priorPendingActions through edit/draft dispatch commits".
  */
 function buildHeldLapseNotice(pa: PendingAction): string {
   const a = pa.action;
@@ -547,9 +563,12 @@ function buildHeldLapseNotice(pa: PendingAction): string {
     a.public_label.trim().length > 0
       ? a.public_label.trim()
       : null;
+  // F-HELD round 2 (FIXUP 2): comma, not an em dash — this string is
+  // injected AFTER every sanitise seam, so it must satisfy house style
+  // (no em dash in user-facing copy) directly.
   return label !== null
-    ? `The held change '${label}' has lapsed — say the word if you still want it.`
-    : 'A held change has lapsed — say the word if you still want it.';
+    ? `The held change '${label}' has lapsed, say the word if you still want it.`
+    : 'A held change has lapsed, say the word if you still want it.';
 }
 
 /**

@@ -310,11 +310,20 @@ const DRIVER_ANSWER_SCAFFOLDS: readonly RegExp[] = [
   /^\s*(.+?)\s+(?:is|would\s+be)\s+the\s+(?:main|biggest|primary|key|strongest)\s+(?:driver|factor)\s*[.!?]*\s*$/i,
 ];
 
-/** Bounded driver phrase: non-empty, ≤ 80 chars, not a bare pronoun. */
+/**
+ * Bounded driver phrase: non-empty, ≤ 80 chars, not a bare pronoun, and not
+ * a negation/filler. The stop-list (round-2 FIXUP 4) closes the false
+ * positive where scaffold 2 captured "not" from "Probably not" and claimed
+ * a declined clarify as the new-driver concept "not" — a declined or
+ * non-committal reply must fall to the LLM, never mint a continuation.
+ */
+const DRIVER_STOP_LIST =
+  /^(?:it|its|it['’]s|this|that|these|those|they|them|one|not|no|none|nothing|neither|nope|maybe|unsure|(?:i\s+)?don['’]?t\s+know|dunno|no\s+idea|not\s+sure)$/i;
+
 function normaliseDriverCandidate(raw: string): string | null {
   const candidate = raw.trim().replace(/\s+/g, ' ');
   if (candidate.length < 2 || candidate.length > 80) return null;
-  if (/^(?:it|its|it['’]s|this|that|these|those|they|them|one)$/i.test(candidate)) return null;
+  if (DRIVER_STOP_LIST.test(candidate)) return null;
   return candidate;
 }
 

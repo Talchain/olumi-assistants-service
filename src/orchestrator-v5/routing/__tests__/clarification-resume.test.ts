@@ -701,3 +701,61 @@ describe('tryClarificationResume — edit_graph_add_risk driver-answer resume (F
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-HELD round 2, FIXUP 4 — negation/filler stop-list for the driver matcher.
+// Scaffold 2 ("probably <X>") previously captured "not" from "Probably not"
+// and claimed it as a NEW driver concept — a declined clarify must fall to
+// the LLM, not mint an add-risk continuation for the driver "not".
+// ---------------------------------------------------------------------------
+
+describe('tryClarificationResume — driver stop-list rejects negations/fillers (F-HELD round 2)', () => {
+  function addRiskPendingR2(): PendingAction {
+    return {
+      id: `pa-add-risk-r2-${Math.random()}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: 'chip_add_risk_clarify',
+      action: { kind: 'edit_graph_add_risk', label: 'client concentration' },
+      preconditions: { graph_hash: DEFAULT_GRAPH_HASH },
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-05-05T00:00:00.000Z',
+    };
+  }
+  const LOOKUP = makeGraphLookup([{ id: 'f_team_size', label: 'Team size' }]);
+
+  it.each([
+    'Probably not',
+    'probably not.',
+    'Mostly nothing',
+    'Mainly no',
+    'It is mostly unsure',
+    'probably maybe',
+  ])('"%s" is NOT claimed as a driver answer (falls through to the LLM)', (msg) => {
+    const r = tryClarificationResume({
+      message: msg,
+      pendingActions: [addRiskPendingR2()],
+      graphLookup: LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'no_label_match' });
+  });
+
+  it('a genuine driver answer still resolves after the stop-list ("Probably hiring pace")', () => {
+    const r = tryClarificationResume({
+      message: 'Probably hiring pace',
+      pendingActions: [addRiskPendingR2()],
+      graphLookup: LOOKUP,
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'edit_graph_add_risk') {
+      expect(r.driverLabel).toBe('hiring pace');
+      expect(r.matchKind).toBe('answer_shape');
+    } else {
+      throw new Error(`expected edit_graph_add_risk dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+});

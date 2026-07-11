@@ -13,7 +13,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { tryShortConfirmResume } from '../deterministic-short-confirm.js';
+import {
+  scopePendingsToChipClickIntent,
+  tryShortConfirmResume,
+} from '../deterministic-short-confirm.js';
 import type { PendingAction } from '../../session/pending-action.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -476,5 +479,85 @@ describe('tryShortConfirmResume — F-HELD consent-priority', () => {
     } else {
       throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-HELD round 2, FIXUP 1 — intent-vs-kind guard for chip-click resumes.
+// A chip click carries an EXPLICIT intent (route-v2 detectChipClickResumeIntent
+// → TurnExecutor synthesises "yes"); without scoping, consent-priority would
+// resolve that synthetic "yes" to a live hold and EXECUTE a held mutation off
+// an explanation click. The scope helper narrows the candidate set to the
+// clicked kind BEFORE the resumer runs; typed "yes" (no intent) is unscoped.
+// ---------------------------------------------------------------------------
+
+describe('scopePendingsToChipClickIntent — chip-click intent-vs-kind guard (F-HELD round 2)', () => {
+  function hold(): PendingAction {
+    return {
+      id: 'pa-hold-guard',
+      scenario_id: SCENARIO_ID,
+      chip_id: 'gmh_guard00000001',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'gmh_guard00000001',
+        inline_patch: { handler_id: 'graph_management_held_v1', params: {}, target_entity_ids: [] },
+        public_label: 'Continue with this change',
+        public_message: 'Yes',
+      },
+      preconditions: { graph_hash: 'hash_a' },
+      expires_at_turn_count: 4,
+      expires_at_iso: '2026-05-05T12:10:00.000Z',
+      emitted_at_iso: '2026-05-05T11:58:00.000Z',
+    };
+  }
+  function wwf(): PendingAction {
+    return makeRunAnalysisPending({
+      id: 'pa-wwf-guard',
+      chip_id: 'chip_action_wwf_guard',
+      action: { kind: 'what_would_flip' },
+      emitted_at_iso: '2026-05-05T11:57:00.000Z', // OLDER than the hold
+    });
+  }
+
+  it('scopes to what_would_flip pendings when the chip-click intent is what_would_flip', () => {
+    const scoped = scopePendingsToChipClickIntent([hold(), wwf()], 'what_would_flip');
+    expect(scoped.map((pa) => pa.action.kind)).toEqual(['what_would_flip']);
+  });
+
+  it('is the identity for typed confirmations (no intent) — consent-priority untouched', () => {
+    const all = [hold(), wwf()];
+    expect(scopePendingsToChipClickIntent(all, undefined)).toBe(all);
+  });
+
+  it('RED F-HELD regression: a wwf CHIP CLICK with a live hold resumes the WWF pending, never the hold', () => {
+    // The exact hijack chain: synthetic "yes" + unscoped pendings would let
+    // consent-priority pick the hold. With the scope applied first, the
+    // resumer only ever sees the clicked kind.
+    const scoped = scopePendingsToChipClickIntent([hold(), wwf()], 'what_would_flip');
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: scoped,
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+      analysisFreshness: 'fresh',
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'pending_action') {
+      expect(r.pending.id).toBe('pa-wwf-guard');
+      expect(r.pending.action.kind).toBe('what_would_flip');
+    } else {
+      throw new Error(`expected pending_action dispatch, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  it('wwf chip click with ONLY a hold live scopes to empty → no_pending (the chip-click no-pending recovery owns it)', () => {
+    const scoped = scopePendingsToChipClickIntent([hold()], 'what_would_flip');
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: scoped,
+      currentTurnIndex: 3,
+      nowMs: NOW_MS,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'no_pending' });
   });
 });

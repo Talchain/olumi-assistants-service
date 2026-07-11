@@ -240,6 +240,33 @@ function emittedAtMs(pa: PendingAction): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+/**
+ * F-HELD round 2 (FIXUP 1) — intent-vs-kind guard for chip-click resumes.
+ *
+ * A chip click carries an EXPLICIT intent: route-v2's
+ * `detectChipClickResumeIntent` maps a `what_would_flip` chip click to the
+ * TurnExecutor option `chipClickResumeIntent`, and the executor feeds the
+ * resumer a SYNTHETIC "yes". That synthetic confirmation must only ever
+ * resolve pendings of the CLICKED kind — without this scope, the F-HELD
+ * consent-priority pick would prefer a live `apply_proposed_change` hold
+ * over the wwf pending and EXECUTE a held graph mutation off an explanation
+ * click (the hold's hash gate passes because analysis does not mutate the
+ * graph). Callers apply this BEFORE `tryShortConfirmResume`.
+ *
+ * Typed confirmations (no intent flag) pass through untouched — the
+ * consent-priority ruling governs a genuine bare "yes", not a click whose
+ * intent the user already named. When the scope empties the set, the
+ * resumer returns `no_pending` and the chip-click no-pending recovery owns
+ * the turn (an honest "that offer is no longer available"), never the hold.
+ */
+export function scopePendingsToChipClickIntent(
+  pendings: readonly PendingAction[],
+  chipClickResumeIntent: 'what_would_flip' | undefined,
+): readonly PendingAction[] {
+  if (chipClickResumeIntent !== 'what_would_flip') return pendings;
+  return pendings.filter((pa) => pa.action.kind === 'what_would_flip');
+}
+
 export function tryShortConfirmResume(
   input: TryShortConfirmResumeInput,
 ): ShortConfirmDispatch {

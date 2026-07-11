@@ -39,6 +39,10 @@
 
 import type { CoachingStatePack } from '../context/canonical-analysis-state.js';
 import {
+  filterLivePendingActions,
+  type PendingAction,
+} from '../session/pending-action.js';
+import {
   buildAnalysisAbsentTemplate,
   buildAnalysisDegradedTemplate,
   buildAnalysisStaleTemplate,
@@ -526,6 +530,58 @@ export const HELD_AWARE_DEGRADE_TEXT =
   "I'm still holding a change to your model rather than applying it straight " +
   'away. Nothing in the model moves until you confirm. Reply yes to continue ' +
   'with it, or tell me what to adjust instead.';
+
+/**
+ * F-HELD round 2 (FIXUP 3) — select the live hold the degrade may restate.
+ *
+ * Selection rules:
+ *   - live per the shared read-time liveness predicate (wall TTL + turn TTL);
+ *   - `expires_at_turn_count > 1` REQUIRED: a hold read at 1 lapses at THIS
+ *     turn's commit (the carry-forward decrements 1 → 0), so restating it
+ *     with a confirm chip in the SAME message that carries the lapse notice
+ *     would contradict itself and ship a dead chip;
+ *   - standard variant with persisted public copy only (a legacy no-copy
+ *     hold has nothing safe to restate);
+ *   - newest emitted wins when several qualify (the read side places the
+ *     freshest offer first; the sort makes it order-independent).
+ *
+ * Pure; clock injected. Lives here (not in the TurnExecutor closure) so the
+ * same-commit-lapse contradiction guard is unit-testable next to the
+ * degrade template it feeds.
+ */
+export function selectLiveHoldForDegrade(
+  pendings: readonly PendingAction[] | undefined,
+  nowMs: number,
+): HeldOfferForDegrade | undefined {
+  const holds = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa) =>
+      pa.action.kind === 'apply_proposed_change' &&
+      pa.expires_at_turn_count > 1 &&
+      typeof pa.action.public_label === 'string' &&
+      pa.action.public_label.length > 0 &&
+      typeof pa.action.public_message === 'string' &&
+      pa.action.public_message.length > 0,
+  );
+  if (holds.length === 0) return undefined;
+  const newest = [...holds].sort(
+    (a, b) => Date.parse(b.emitted_at_iso) - Date.parse(a.emitted_at_iso),
+  )[0]!;
+  const action = newest.action;
+  // Redundant with the filter above, but keeps this branch cast-free and
+  // fail-closed under future refactors.
+  if (
+    action.kind !== 'apply_proposed_change' ||
+    typeof action.public_label !== 'string' ||
+    typeof action.public_message !== 'string'
+  ) {
+    return undefined;
+  }
+  return {
+    chip_id: newest.chip_id,
+    label: action.public_label,
+    message: action.public_message,
+  };
+}
 
 /**
  * Neutral safe copy for an always-on violation (internal field / mutation /

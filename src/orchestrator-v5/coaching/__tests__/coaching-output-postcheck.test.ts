@@ -13,9 +13,11 @@ import { describe, expect, it } from 'vitest';
 import {
   checkCoachingOutput,
   buildCoachingDegradeResponse,
+  selectLiveHoldForDegrade,
   NEUTRAL_DEGRADE_TEXT,
   type CoachingViolation,
 } from '../coaching-output-postcheck.js';
+import type { PendingAction } from '../../session/pending-action.js';
 import type { CoachingStatePack } from '../../context/canonical-analysis-state.js';
 import {
   buildAnalysisAbsentTemplate,
@@ -619,5 +621,89 @@ describe('buildCoachingDegradeResponse — held-aware degrade (F-HELD 3b)', () =
     expect(r.assistant_text).not.toMatch(/[£$€]/);
     expect(r.assistant_text).not.toMatch(/\b[0-9a-f]{12,}\b/i);
     expect(r.assistant_text).not.toMatch(/apply_proposed_change|graph_hash|pending/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-HELD round 2, FIXUP 3 — hold selection for the held-aware degrade.
+// A hold read at expires_at_turn_count=1 lapses at THIS turn's commit (the
+// carry-forward decrements 1 → 0), so restating it with a confirm chip in the
+// same message that carries the lapse notice would contradict itself and ship
+// a dead chip. The selector requires expires_at_turn_count > 1.
+// ---------------------------------------------------------------------------
+
+describe('selectLiveHoldForDegrade — same-commit lapse contradiction guard (F-HELD round 2)', () => {
+  const NOW = Date.parse('2026-07-11T12:00:00.000Z');
+
+  function hold(overrides: {
+    id?: string;
+    ref?: string;
+    turnCount?: number;
+    expiresAtIso?: string;
+    emittedAtIso?: string;
+    legacy?: boolean;
+  } = {}): PendingAction {
+    const ref = overrides.ref ?? 'gmh_degrade000001';
+    return {
+      id: overrides.id ?? `pa-${ref}`,
+      scenario_id: 'sc-degrade',
+      chip_id: ref,
+      action: overrides.legacy
+        ? {
+            kind: 'apply_proposed_change',
+            proposal_ref: ref,
+            inline_patch: { handler_id: 'graph_management_held_v1' },
+            __legacy_no_public_copy: true,
+          }
+        : {
+            kind: 'apply_proposed_change',
+            proposal_ref: ref,
+            inline_patch: { handler_id: 'graph_management_held_v1' },
+            public_label: 'Continue with this change',
+            public_message: 'Yes',
+          },
+      preconditions: { graph_hash: 'hash_d' },
+      expires_at_turn_count: overrides.turnCount ?? 4,
+      expires_at_iso: overrides.expiresAtIso ?? '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: overrides.emittedAtIso ?? '2026-07-11T11:59:00.000Z',
+    } as PendingAction;
+  }
+
+  it('a live hold with turn budget remaining (TTL 4) is selected with its public copy', () => {
+    const r = selectLiveHoldForDegrade([hold()], NOW);
+    expect(r).toEqual({
+      chip_id: 'gmh_degrade000001',
+      label: 'Continue with this change',
+      message: 'Yes',
+    });
+  });
+
+  it('RED F-HELD round 2: a hold at expires_at_turn_count=1 is NOT selected (it lapses at this very commit)', () => {
+    expect(selectLiveHoldForDegrade([hold({ turnCount: 1 })], NOW)).toBeUndefined();
+  });
+
+  it('a wall-expired hold is NOT selected', () => {
+    expect(
+      selectLiveHoldForDegrade(
+        [hold({ expiresAtIso: '2026-07-11T11:00:00.000Z' })],
+        NOW,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('a legacy no-public-copy hold is NOT selected (nothing safe to restate)', () => {
+    expect(selectLiveHoldForDegrade([hold({ legacy: true })], NOW)).toBeUndefined();
+  });
+
+  it('the NEWEST qualifying hold wins when several are live', () => {
+    const older = hold({ id: 'pa-old', ref: 'gmh_older0000001', emittedAtIso: '2026-07-11T11:00:00.000Z' });
+    const newer = hold({ id: 'pa-new', ref: 'gmh_newer0000001', emittedAtIso: '2026-07-11T11:30:00.000Z' });
+    const r = selectLiveHoldForDegrade([older, newer], NOW);
+    expect(r?.chip_id).toBe('gmh_newer0000001');
+  });
+
+  it('undefined / empty input → undefined', () => {
+    expect(selectLiveHoldForDegrade(undefined, NOW)).toBeUndefined();
+    expect(selectLiveHoldForDegrade([], NOW)).toBeUndefined();
   });
 });

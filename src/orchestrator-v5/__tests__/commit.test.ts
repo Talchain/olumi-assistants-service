@@ -521,6 +521,9 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
       expect(result.response.assistant_text).toContain(
         'say the word if you still want it',
       );
+      // F-HELD round 2, FIXUP 2: the notice is injected AFTER every sanitise
+      // seam, so it must satisfy house style directly — no em dash.
+      expect(result.response.assistant_text).not.toContain('\u2014');
       // The original answer is preserved, notice appended after it.
       expect(result.response.assistant_text.startsWith('Here is what I can tell you')).toBe(true);
       // Durable copy carries the same sentence (stored == wire).
