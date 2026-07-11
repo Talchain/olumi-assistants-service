@@ -148,15 +148,18 @@ export const GM_HELD_OPERATIONS_MAX_JSON_CHARS = 16_000;
  * surfaces an honest lapse notice (see commit.ts, F-HELD fix 2b) instead of
  * dropping it silently.
  *
- * KNOWN RESIDUAL (round-2 correction — this budget does NOT cover the
- * scenario-A wire variant end-to-end): the carry-forward/TTL/notice
- * machinery runs only on commits that thread `priorPendingActions`, and
- * ONLY the TurnExecutor `commitTurn` wrapper does. Edit-classified and
- * draft-classified turns commit via `dispatchEditGraph` /
- * `dispatchDraftGraph` WITHOUT `priorPendingActions`, so any live hold is
- * silently WIPED on those turns — no TTL decrement, no lapse notice, no
- * chip suppression — including the add-risk clarify turn itself. Follow-up
- * lane: "thread priorPendingActions through edit/draft dispatch commits".
+ * RESIDUAL CLOSED for edit/draft (HOLD-WIPE fix, task_2e1b8c87): the
+ * round-2 correction documented here that edit- and draft-classified
+ * dispatch commits threaded NO `priorPendingActions` and silently WIPED
+ * live holds. Both dispatchers now thread the prior pendings through
+ * `threadHoldsThroughMutatingCommit` (handlers/hold-thread-through.ts):
+ * a graph-writing commit validates each live hold against the
+ * post-mutation graph (via `assessHeldBatchAgainstGraph` below) and either
+ * threads it re-pinned or lapses it HONESTLY (deterministic notice +
+ * redacted telemetry); non-mutating turns thread all priors unchanged.
+ * REMAINING sharers of the wipe (not in this lane's scope): chip-click
+ * dispatch (handlers/chip-click-dispatch.ts) and system-event dispatch
+ * (system-events/dispatch.ts) still commit without `priorPendingActions`.
  */
 export const GM_HELD_PENDING_TURN_TTL = 4;
 
@@ -330,6 +333,72 @@ function refereeBatch(input: EditGmEvaluationInput): RefereedBatch {
     return parsed.ok ? parsed.envelope : null;
   });
   return { verdicts, envelopes };
+}
+
+/** Result of a hold-thread structural assessment (HOLD-WIPE fix). */
+export interface HeldBatchAssessment {
+  /** True iff the governing verdict is one the held-execute resume accepts. */
+  readonly valid: boolean;
+  readonly governing: EditGmGoverningVerdict;
+}
+
+/**
+ * HOLD-WIPE fix (task_2e1b8c87) — pure STRUCTURAL re-assessment of a held
+ * operations batch against a NEW graph (the graph a mutating edit/draft
+ * commit is about to persist). Used by `threadHoldsThroughMutatingCommit`
+ * (handlers/hold-thread-through.ts) to decide whether a live consent hold
+ * can thread through the mutation (valid → re-pin + carry forward) or must
+ * lapse honestly (invalid → notice + telemetry, never a silent wipe).
+ *
+ * Deliberate divergences from `evaluateEditGraphMutations`:
+ *  - NO telemetry, NO copy, NO pending construction — this is an
+ *    assessment, not a dispatch verdict. The confirm-time resume
+ *    (gm-held-execute.ts) re-referees WITH telemetry before any apply.
+ *  - `baseGraphHash` = `currentGraphHash` BY CONSTRUCTION: the question is
+ *    "is this batch still structurally coherent against the new graph?",
+ *    not "was it generated against it?" — the emit-time base is stale by
+ *    premise (the graph just moved underneath the hold).
+ *  - freshness is NEUTRALISED to 'none' (frame-trustworthy): analysis
+ *    currency is a property of the ANALYSIS, not of the hold's structure,
+ *    and the confirm-time re-referee re-checks it with the resume turn's
+ *    REAL freshness verdict. Judging staleness here would lapse holds the
+ *    user could still legitimately confirm after a re-run.
+ *
+ * `valid` mirrors `executeGmHeldResume`'s acceptance set exactly
+ * (governing 'held' | 'proceed' executes; anything else declines), so a
+ * threaded hold is one the resume path could actually accept. Fail-closed:
+ * any exception assesses as invalid ('rejected').
+ */
+export function assessHeldBatchAgainstGraph(input: {
+  readonly operations: readonly EditPatchOperationLike[];
+  readonly currentGraph: unknown;
+  readonly currentGraphHash: string;
+  readonly scenarioId: string;
+  readonly turnId: string;
+  readonly requestId: string;
+}): HeldBatchAssessment {
+  try {
+    const { verdicts } = refereeBatch({
+      // mode/requestId are type-required by EditGmEvaluationInput but unused
+      // by refereeBatch (no telemetry, no routing on this pure path).
+      mode: 'shadow',
+      operations: input.operations,
+      currentGraph: input.currentGraph,
+      currentGraphHash: input.currentGraphHash,
+      baseGraphHash: input.currentGraphHash,
+      freshness: 'none',
+      scenarioId: input.scenarioId,
+      turnId: input.turnId,
+      requestId: input.requestId,
+    });
+    const governing = governingOf(verdicts);
+    return {
+      valid: governing === 'held' || governing === 'proceed',
+      governing,
+    };
+  } catch {
+    return { valid: false, governing: 'rejected' };
+  }
 }
 
 function buildHeldPending(

@@ -330,9 +330,11 @@ function pendingMatchKey(pa: PendingAction): string {
  *
  * Pure and deterministic (clock injected). This is the single place the
  * turn-count TTL is decremented — see the once-per-turn invariant in the
- * consumption-path matrix (Docs/v5/v5-signature-loop-reliability.md): only the
- * TurnExecutor `commitTurn` wrapper threads `priorPendingActions`, never the
- * route-level dispatchers.
+ * consumption-path matrix (Docs/v5/v5-signature-loop-reliability.md). The
+ * TurnExecutor `commitTurn` wrapper threads `priorPendingActions`, and — the
+ * HOLD-WIPE fix (task_2e1b8c87) — so do the edit/draft route dispatchers
+ * (via handlers/hold-thread-through.ts). Each turn commits exactly once, so
+ * the once-per-turn decrement invariant holds across all threading callers.
  */
 export interface SurvivingPriorPendingsResult {
   readonly survivors: readonly PendingAction[];
@@ -549,11 +551,19 @@ function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
  * have no deterministic line-injection path into assistant_text today, so
  * none could carry this without a new channel).
  *
- * KNOWN RESIDUAL: this notice (and the whole TTL/carry-forward lifecycle)
- * fires only on commits that thread `priorPendingActions` — the TurnExecutor
- * `commitTurn` wrapper alone. Edit- and draft-classified dispatch commits
- * pass none, so they silently WIPE live holds with no notice. Follow-up
- * lane: "thread priorPendingActions through edit/draft dispatch commits".
+ * RESIDUAL CLOSED for edit/draft (HOLD-WIPE fix, task_2e1b8c87): this
+ * notice (and the whole TTL/carry-forward lifecycle) fires only on commits
+ * that thread `priorPendingActions` — previously the TurnExecutor
+ * `commitTurn` wrapper alone, so edit- and draft-classified dispatch
+ * commits silently WIPED live holds. Both dispatchers now thread priors
+ * (handlers/hold-thread-through.ts) and additionally handle
+ * mutation-caused invalidation honestly at their own seam (a hold whose
+ * pinned base the mutation moved is validated against the new graph and
+ * either re-pinned or lapsed with a notice + telemetry BEFORE this
+ * carry-forward runs — hash-rule drops here stay notice-less by design,
+ * because consent holds can no longer reach rule 4 with a stale pin from
+ * those paths). REMAINING wipe sharers (out of that lane's scope):
+ * chip-click dispatch and system-event dispatch thread no priors.
  */
 function buildHeldLapseNotice(pa: PendingAction): string {
   const a = pa.action;
@@ -730,20 +740,59 @@ export async function commitDirectAnswer(
     nowMsForPendings,
   );
   const survivingPrior = carryForward.survivors;
-  const finalPendings: readonly PendingAction[] = [
+  // Adversarial round-3 concern 3 — consent-priority cap fill. The plain
+  // fresh-first slice could silently EVICT a validly-threaded live consent
+  // hold (a CONFIRMATION_EXPECTING pending awaiting the user's explicit yes)
+  // whenever this turn's own pendings filled the cap — the same silent-wipe
+  // class the hold-thread-through fix closes at the dispatch seam. Within
+  // the cap, live consent holds now win over non-consent pendings; original
+  // relative order (this turn's own pendings first, so a FRESH consent hold
+  // still beats a carried one) is preserved among the kept entries. A
+  // non-consent pending dropped this way loses only its short-confirm
+  // resumability — its chip still renders (the persisted-pending ⟹
+  // rendered-chip invariant is one-directional). A consent hold that STILL
+  // cannot fit (all-consent overflow) lapses with the honest F-HELD 2b
+  // notice below, never silently.
+  const combinedPendings: readonly PendingAction[] = [
     ...chipDerivedPending,
     ...survivingPrior,
-  ].slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+  ];
+  let finalPendings: readonly PendingAction[];
+  let capEvictedConsentHolds: readonly PendingAction[] = [];
+  if (combinedPendings.length <= PENDING_ACTIONS_PER_TURN_CAP) {
+    finalPendings = combinedPendings;
+  } else {
+    const isLiveConsentHold = (pa: PendingAction): boolean =>
+      CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
+      !isPendingActionExpired(pa, nowMsForPendings);
+    const keep = new Set<PendingAction>();
+    for (const pa of combinedPendings) {
+      if (keep.size >= PENDING_ACTIONS_PER_TURN_CAP) break;
+      if (isLiveConsentHold(pa)) keep.add(pa);
+    }
+    for (const pa of combinedPendings) {
+      if (keep.size >= PENDING_ACTIONS_PER_TURN_CAP) break;
+      if (!isLiveConsentHold(pa)) keep.add(pa);
+    }
+    finalPendings = combinedPendings.filter((pa) => keep.has(pa));
+    capEvictedConsentHolds = combinedPendings.filter(
+      (pa) => isLiveConsentHold(pa) && !keep.has(pa),
+    );
+  }
 
   // F-HELD fix 2b — honest lapse notice. When THIS commit's carry-forward
-  // turn-TTL-dropped a confirmation-expecting pending, attach ONE
-  // deterministic sentence to the response being committed (see
-  // `buildHeldLapseNotice` for the seam-choice rationale). One sentence even
-  // if several lapse at once (cap is 3): the first in prior order — the read
-  // side places the freshest offer first — names the lapse; re-offering
-  // machinery stays out of scope here (say-the-word re-consent is the ruled
-  // posture, not silent re-arming).
-  const lapsedHolds = carryForward.lapsedConfirmationExpecting;
+  // turn-TTL-dropped a confirmation-expecting pending — or (round-3
+  // concern 3) the consent-priority cap fill above still could not seat a
+  // live consent hold — attach ONE deterministic sentence to the response
+  // being committed (see `buildHeldLapseNotice` for the seam-choice
+  // rationale). One sentence even if several lapse at once (cap is 3): the
+  // first in prior order — the read side places the freshest offer first —
+  // names the lapse; re-offering machinery stays out of scope here
+  // (say-the-word re-consent is the ruled posture, not silent re-arming).
+  const lapsedHolds = [
+    ...carryForward.lapsedConfirmationExpecting,
+    ...capEvictedConsentHolds,
+  ];
   if (lapsedHolds.length > 0) {
     const notice = buildHeldLapseNotice(lapsedHolds[0]!);
     const baseText =
@@ -761,20 +810,23 @@ export async function commitDirectAnswer(
         turn_id: metadata.turn_id,
         lapsed_kinds: lapsedHolds.map((pa) => pa.action.kind),
       },
-      'V5 commit — confirmation-expecting pending lapsed by turn TTL; deterministic lapse notice attached (F-HELD)',
+      'V5 commit — confirmation-expecting pending lapsed (turn TTL or consent-priority cap overflow); deterministic lapse notice attached (F-HELD)',
     );
   }
 
-  // Track 2 — finalise the lifecycle tally against the cap. This turn's own
-  // pendings occupy the head of `finalPendings`, so the eligible survivors that
-  // actually persisted = whatever tail remains after them. `survivedCount` is
-  // corrected to that persisted count and the evicted remainder is attributed
-  // to `capDroppedCount`, so the diagnostic reflects what was WRITTEN, not
+  // Track 2 — finalise the lifecycle tally against the cap. Counted by
+  // IDENTITY against the survivor list (the consent-priority fill above can
+  // seat a survivor by evicting one of this turn's own pendings, so the old
+  // head/tail arithmetic no longer holds). `survivedCount` is corrected to
+  // the persisted count and the evicted remainder is attributed to
+  // `capDroppedCount`, so the diagnostic reflects what was WRITTEN, not
   // pre-cap eligibility (Track 3 may read this as persisted survivor truth).
-  const persistedSurvivorCount = Math.max(
-    0,
-    finalPendings.length - chipDerivedPending.length,
-  );
+  // A cap-evicted pending of THIS turn's own stays outside the partition —
+  // the seven-fate tally covers prior pendings only.
+  const survivorIdentity = new Set<PendingAction>(survivingPrior);
+  const persistedSurvivorCount = finalPendings.filter((pa) =>
+    survivorIdentity.has(pa),
+  ).length;
   const pendingLifecycle = finaliseLifecycleAgainstCap(
     carryForward.summary,
     persistedSurvivorCount,

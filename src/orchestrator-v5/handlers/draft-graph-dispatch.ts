@@ -54,6 +54,12 @@ import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tool
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { config } from '../../config/index.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { loadMostRecentPendingActions } from '../build-turn-context.js';
+import {
+  appendLapseNotice,
+  emitHoldLapseTelemetry,
+  threadHoldsThroughMutatingCommit,
+} from './hold-thread-through.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -486,6 +492,50 @@ export async function dispatchDraftGraph(
     }
     const briefTextForCommit = briefNorm.value;
 
+    // ── HOLD-WIPE fix (task_2e1b8c87): thread holds through this commit ──
+    // Closes the F-HELD round-2 KNOWN RESIDUAL for the draft path: this
+    // commit previously threaded NO priorPendingActions, so ANY draft turn
+    // silently wiped a live consent hold. Read the prior turn's pendings
+    // (single-row read; [] on a genuinely-first turn, degrades to [] on
+    // failure with store-layer telemetry — NOTE this is NOT the forbidden
+    // `readRecent` turn-chain read the freshness invariant below pins) and
+    // validate holds against the NEW draft graph: threaded re-pinned when
+    // the held batch still referees cleanly, honest lapse (notice +
+    // redacted telemetry) when the wholesale redraft invalidated it.
+    const priorPendingActions = await loadMostRecentPendingActions(
+      payload.scenario_id,
+      requestId,
+    );
+    const postDraftGraphHash = ((): string | null => {
+      try {
+        return computeAnalysisAffectingGraphHash(
+          draftResult.graphOutput as GraphStateIngress | null | undefined,
+        );
+      } catch {
+        return null;
+      }
+    })();
+    const holdThread = threadHoldsThroughMutatingCommit({
+      priorPendingActions,
+      graphAfterCommit: draftResult.graphOutput ?? null,
+      graphHashAfterCommit: draftResult.graphOutput != null ? postDraftGraphHash : null,
+      // No per-operation record on a draft — the whole NEW graph IS the
+      // mutation. Fulfilment detection (round-3 concern 1) falls back to
+      // the post-draft end state: a concept the redraft itself delivered
+      // retires without the false "has lapsed" sentence.
+      appliedOperations: null,
+      nowMs: Date.now(),
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    emitHoldLapseTelemetry(holdThread.lapsed, {
+      requestId,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      site: 'draft_graph_dispatch',
+    });
+
     // Capture persistence_ms for the diagnostic trace's substage timings.
     // Cheap: two Date.now() calls regardless of flag state — the timing is
     // only surfaced when the trace is built (flag-on); flag-off path
@@ -495,6 +545,11 @@ export async function dispatchDraftGraph(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
       // sent to the client (the caller uses the response we return).
+      // HOLD-WIPE fix: the lapse notice IS committed on the provisional
+      // response (assistant_text below) so the durable copy carries it; the
+      // committed text is re-attached to the real wire response after the
+      // build (stored copy ⊆ wire copy — the draft narrative itself is
+      // reconstructable from the persisted graph, per the note below).
       //
       // V5 Conversation Context Reliability: the draft turn's assistant
       // narrative is built AFTER this commit (it needs graphPersisted, and
@@ -507,7 +562,7 @@ export async function dispatchDraftGraph(
       // user brief (userMessage) — it is graphPersisted-independent and
       // side-effect-free. Capturing the draft narrative without a second write
       // or breaking the telemetry-after-persistence invariant is a follow-up.
-      { response_version: 2, assistant_text: '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
+      { response_version: 2, assistant_text: holdThread.notice ?? '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
@@ -534,6 +589,13 @@ export async function dispatchDraftGraph(
         // trusting the request.
         graph: draftResult.graphOutput ?? undefined,
         briefText: briefTextForCommit,
+        // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
+        // carry-forward runs on this path; graph_hash is the NEW draft's
+        // analysis-affecting hash (only when a graph is actually written).
+        priorPendingActions: holdThread.threaded,
+        ...(draftResult.graphOutput != null && postDraftGraphHash !== null
+          ? { graph_hash: postDraftGraphHash }
+          : {}),
         // V5 Stage 2B-1b: the route-v2 draft path never runs buildTurnContext,
         // so no coaching_state is derived for this turn — persist NULL explicitly.
         coaching_state: null,
@@ -543,7 +605,20 @@ export async function dispatchDraftGraph(
     );
     const persistenceMs = Date.now() - commitStartedAt;
 
-    const response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId);
+    let response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId);
+    // HOLD-WIPE fix — the committed provisional response carried the lapse
+    // notice (and the commit seam may have appended its own turn-TTL lapse
+    // notice, F-HELD 2b). The REAL wire response is built above, so
+    // re-attach the committed text here — the honest sentence must ship,
+    // never be stored-only. A bare `{}` commit result (test-double shape)
+    // has no assistant_text and appends nothing.
+    const committedText = commitResult.response?.assistant_text;
+    if (typeof committedText === 'string' && committedText.trim().length > 0) {
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, committedText.trim()),
+      };
+    }
     // V5 finaliser contract: surface the rich pipeline payload on the
     // dispatch result so route-v2.ts can stamp it via finaliseV5Response.
     // Only surface when the graph actually persisted — a non-persisted
@@ -597,9 +672,9 @@ export async function dispatchDraftGraph(
     // shape lands on a session with prior facts) surface as a divergence
     // between the wire `none` and any later turn's actual `freshness`
     // verdict — operators have a grep target.
-    const currentGraphHash = computeAnalysisAffectingGraphHash(
-      draftResult.graphOutput as GraphStateIngress | null | undefined,
-    );
+    // HOLD-WIPE fix: reuse the pre-commit hash of the SAME graph object
+    // (pure function, identical input) instead of re-deriving it here.
+    const currentGraphHash = postDraftGraphHash;
     const freshness: FreshnessDerivation = {
       freshness: 'none',
       reason: 'no_successful_run_analysis_fact',
