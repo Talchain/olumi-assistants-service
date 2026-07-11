@@ -51,6 +51,11 @@ import {
 import { refereeMutationBatch } from '../graph-management/referee.js';
 import { parseEnvelope } from '../graph-management/parse-envelope.js';
 import { mutationTargetKey } from '../graph-management/pending-projection.js';
+import {
+  buildHeldProposalBlock,
+  type HeldProposalBlockInput,
+} from '../compose/held-proposal.js';
+import type { HeldProposalBlock } from '@talchain/schemas/boundary';
 import { mutationTelemetryEvent } from '../graph-management/telemetry.js';
 import type {
   CandidateMutationEnvelope,
@@ -150,6 +155,15 @@ export interface EditGmDecision {
   readonly publicReason: Record<string, unknown> | null;
   /** Per-verdict tally for logs/diagnostics (closed enum keys). */
   readonly verdictCounts: Readonly<Partial<Record<MutationVerdict, number>>>;
+  /**
+   * R8: schema-valid held_proposal block for the governing held verdict.
+   * Present ONLY on the initial-hold (dispatchPath 'edit_graph')
+   * held-with-pending path; null/absent everywhere else (incl. the
+   * gm_held_resume re-referee — the block must not double-emit on confirm).
+   * The wire append is flag-gated at the dispatch seam
+   * (config.features.heldProposalEmit, ships dark).
+   */
+  readonly heldProposalBlock?: HeldProposalBlock | null;
 }
 
 const PROCEED_DECISION: EditGmDecision = {
@@ -299,7 +313,7 @@ function buildHeldPending(
   input: EditGmEvaluationInput,
   heldVerdict: RefereeVerdict,
   heldEnvelope: CandidateMutationEnvelope | null,
-): { pending: PendingAction; chip: EditGmChip } | null {
+): { pending: PendingAction; chip: EditGmChip; targetKey: string } | null {
   // parsePendingAction requires a non-empty preconditions.graph_hash — a
   // held verdict without a readable frame cannot carry a safe pending.
   if (input.currentGraphHash === null) return null;
@@ -377,7 +391,7 @@ function buildHeldPending(
     label: GM_HELD_CHIP_LABEL,
     message: GM_HELD_CHIP_MESSAGE,
   };
-  return { pending, chip };
+  return { pending, chip, targetKey };
 }
 
 /** The rerun affordance for the stale template (existing executable chip shape). */
@@ -443,6 +457,20 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
           verdictCounts,
         };
       }
+      // R8: build the typed held_proposal block on the INITIAL hold only —
+      // gm_held_resume re-referees on confirm and must not mint a second
+      // block. Builder is fail-closed (unmappable code / class → null).
+      const heldProposalBlock: HeldProposalBlock | null =
+        (input.dispatchPath ?? 'edit_graph') === 'edit_graph'
+          ? buildHeldProposalBlock({
+              proposalId: held.chip.id,
+              confirmActionId: held.chip.id,
+              mutationClass: gv.mutation_class,
+              blockerCode: gv.blocker?.code ?? null,
+              targetKey: held.targetKey,
+              graph: input.currentGraph as HeldProposalBlockInput['graph'],
+            })
+          : null;
       return {
         governing,
         blockApply: true,
@@ -451,6 +479,7 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
         pendingActions: [held.pending],
         publicReason,
         verdictCounts,
+        heldProposalBlock,
       };
     }
 

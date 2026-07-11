@@ -323,3 +323,68 @@ describe('mode=live', () => {
     }
   });
 });
+
+// ── R8: held_proposal block emission (CEE_HELD_PROPOSAL_EMIT, ships dark) ──
+
+describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
+  const HELD_SUMMARY = "A change to 'Price' is held for your confirmation.";
+
+  function heldProposalBlocksOf(response: unknown): Array<Record<string, unknown>> {
+    const blocks = (response as { blocks?: Array<Record<string, unknown>> }).blocks ?? [];
+    return blocks.filter((b) => b.type === 'held_proposal');
+  }
+
+  it('flag OFF (default): held response carries NO held_proposal block (dormancy baseline)', async () => {
+    setMode('live');
+    const { response } = await runDispatch(FIELD_OPS);
+    expect(heldProposalBlocksOf(response)).toHaveLength(0);
+  });
+
+  it('flag ON: exactly ONE schema-valid held_proposal block, additive next to the existing blocks', async () => {
+    setMode('live');
+    vi.stubEnv('CEE_HELD_PROPOSAL_EMIT', 'true');
+    _resetConfigCache();
+    const { response } = await runDispatch(FIELD_OPS);
+
+    const heldBlocks = heldProposalBlocksOf(response);
+    expect(heldBlocks).toHaveLength(1);
+    const block = heldBlocks[0]!;
+
+    // Strict boundary schema — a malformed KNOWN kind strict-fails the whole
+    // envelope UI-side (R4 hazard class), so the emitter must produce a
+    // fully valid block or nothing.
+    const { HeldProposalBlockSchema } = await import('@talchain/schemas/boundary');
+    const parsed = HeldProposalBlockSchema.safeParse(block);
+    expect(parsed.success, JSON.stringify(parsed.success ? {} : parsed.error.issues)).toBe(true);
+
+    // Typed content — codes and refs, never free prose or doctrine wording.
+    expect(block.mutation_class).toBe('tunable');
+    expect(block.reason_code).toBe('TUNABLE_APPLY_HELD');
+    expect(block.summary).toBe(HELD_SUMMARY);
+
+    // confirm_action_id must reference the REAL confirm chip on THIS response.
+    const chips = (response as { suggested_actions: Array<{ id: string }> }).suggested_actions;
+    expect(chips).toHaveLength(1);
+    expect(block.confirm_action_id).toBe(chips[0]!.id);
+    expect(block.proposal_id).toBe(chips[0]!.id);
+    expect(block.decline_action_id).toBeUndefined();
+  });
+
+  it('flag ON is ADDITIVE: response minus the held_proposal block matches flag-off (same block types, same copy)', async () => {
+    setMode('live');
+    const { response: offResponse } = await runDispatch(FIELD_OPS);
+
+    vi.clearAllMocks(); // runDispatch pins exactly one commit call per run
+    vi.stubEnv('CEE_HELD_PROPOSAL_EMIT', 'true');
+    _resetConfigCache();
+    const { response: onResponse } = await runDispatch(FIELD_OPS);
+
+    const off = offResponse as { assistant_text: string; suggested_actions: unknown[]; blocks: Array<{ type: string }> };
+    const on = onResponse as { assistant_text: string; suggested_actions: unknown[]; blocks: Array<{ type: string }> };
+    expect(on.assistant_text).toBe(off.assistant_text);
+    expect(JSON.stringify(on.suggested_actions)).toBe(JSON.stringify(off.suggested_actions));
+    expect(on.blocks.filter((b) => b.type !== 'held_proposal').map((b) => b.type)).toEqual(
+      off.blocks.map((b) => b.type),
+    );
+  });
+});
