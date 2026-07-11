@@ -103,7 +103,11 @@ export interface KeyInsightInput {
   goals?: GoalInfo[];
   /** Primary goal ID for multi-goal scenarios (optional) */
   primary_goal_id?: string;
-  /** Identifiability from ISL - if not provided, assumes identifiable */
+  /**
+   * Identifiability from ISL. If not provided, treated as NOT identifiable
+   * (fail-honest): confident causal language requires an explicit positive
+   * signal, never absence of evidence.
+   */
   identifiability?: Identifiability;
 }
 
@@ -376,8 +380,12 @@ export function generateKeyInsight(input: KeyInsightInput): KeyInsightOutput {
     return generateNoDataInsight();
   }
 
-  // Determine identifiability - default to true (identifiable) if not provided
-  const isIdentifiable = identifiability?.identifiable ?? true;
+  // Determine identifiability — fail-honest: absence of an identifiability
+  // signal is NOT evidence of identifiability. On the live path ISL's
+  // identifiability router is disabled, so the signal is routinely absent;
+  // defaulting to identifiable would select confident causal language from
+  // no evidence. Absent signal → hedged/exploratory language path.
+  const isIdentifiable = identifiability?.identifiable ?? false;
 
   // Sort by expected utility (descending)
   const sorted = [...ranked_actions].sort(
@@ -898,7 +906,8 @@ function generateEvidence(
   winner: RankedAction,
   drivers?: Driver[],
   goal?: { text: string; type: string } | null,
-  isIdentifiable: boolean = true,
+  // Fail-honest default: confident language requires an explicit signal
+  isIdentifiable: boolean = false,
   identifiability?: Identifiability
 ): string[] {
   const evidence: string[] = [];
@@ -975,7 +984,8 @@ function generateNextSteps(
   outcomeType: "positive" | "negative" | "neutral",
   isCloseRace: boolean,
   goal?: { text: string; type: string } | null,
-  isIdentifiable: boolean = true
+  // Fail-honest default: confident language requires an explicit signal
+  isIdentifiable: boolean = false
 ): string[] {
   const steps: string[] = [];
 

@@ -4396,8 +4396,9 @@ components:
           $ref: '#/components/schemas/IdentifiabilityV1'
           description: |
             Identifiability status from ISL causal analysis. If not provided,
-            the system assumes causal effects are identifiable (default behavior).
-            When identifiable=false, headlines and evidence use exploratory language.
+            the system treats causal effects as NOT identifiable (fail-honest
+            default) and uses exploratory language. Confident causal language
+            requires an explicit identifiable=true signal.
 
     HeadlineStructuredV1:
       type: object
