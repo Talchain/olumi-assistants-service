@@ -6699,6 +6699,29 @@ export async function runTurnExecutor(
           analysisReadyForTurn = computeStructuralReadiness(
             committedGraphParse.data,
           );
+          // F-DG (W1 overnight 2026-07-11, wire-proven): #414 attached the
+          // applied post-mutation graph as `draft_graph` on the edit_graph
+          // apply family (edit-graph-dispatch + GM held-consent), but the
+          // routed D1 typed-handler receipts composed HERE — including the
+          // pending-action chip replays (e.g. the £250k consented
+          // cap-extension resume), which synthesise an execute proposal and
+          // funnel into this same commit — shipped without it. The UI's only
+          // inline-graph ingestion path is the top-level `draft_graph` wire
+          // field (adaptDraftResponse/applyDraftResult), so those applied
+          // mutations were invisible on the canvas. Attach the SAME typed
+          // parse of the SAME committed graph the readiness/egress
+          // re-projections above use, in exactly the draft-dispatch shape
+          // (see applied-graph-emit.ts). Gating parity with #414: committed
+          // success only — this branch runs after `commitTurn` resolved and
+          // only when a graph was persisted this turn (swap-withheld and
+          // non-mutating turns never reach it; the commit-failure catch
+          // below replaces the response wholesale). On a failed GraphV3
+          // parse (the else branch) nothing is attached — fail open to the
+          // pre-fix wire, consistent with the readiness fail-open.
+          response = {
+            ...response,
+            draft_graph: buildAppliedGraphWireField(committedGraphParse.data),
+          };
         } else {
           // Should be unreachable: D1 handlers GraphV3-validate the mutated
           // graph and the persistence merge only restores top-level fields.

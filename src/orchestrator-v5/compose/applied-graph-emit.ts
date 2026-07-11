@@ -20,7 +20,9 @@
  *
  * Callers MUST pass the graph view whose nodes/edges are identical to what was
  * durably committed this turn (edit_graph: `editResult.appliedGraph`; GM held
- * consent: `outcome.appliedGraph`) and MUST attach the field only AFTER the
+ * consent: `outcome.appliedGraph`; routed D1 STEP 7 commit — typed-handler
+ * applies AND pending-action chip replays, F-DG W1 2026-07-11:
+ * `committedGraphParse.data`) and MUST attach the field only AFTER the
  * commit succeeded — a failed commit must never advertise unpersisted state.
  */
 

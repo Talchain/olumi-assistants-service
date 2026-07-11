@@ -312,5 +312,13 @@ describe('goal-target receipt honesty guard at the STEP 7 commit chokepoint', ()
     // BOTH the wire and the stored assistant_message (pre-commit swap).
     expect(result.response.assistant_text).toBe(GOAL_TARGET_NOT_SAVED_TEXT);
     expect(result.response.assistant_text).not.toContain('Success target set:');
+
+    // F-DG negative pin (W1 overnight 2026-07-11): the swap withheld the
+    // graph write, so the STEP 7 applied-graph attach must not fire — a
+    // swapped turn never advertises its unpersisted mutation via the
+    // `draft_graph` wire field either (same predicate as the withheld
+    // commit: the attach reads the graph the commit persisted, and this
+    // turn persisted none). See applied-graph-emit.ts.
+    expect('draft_graph' in result.response).toBe(false);
   });
 });
