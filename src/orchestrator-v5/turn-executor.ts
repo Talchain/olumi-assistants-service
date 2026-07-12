@@ -180,8 +180,10 @@ import type { CoachingSignalId } from './coaching/types.js';
 import { detectCoachingSignal } from './signals/coaching-signals.js';
 import {
   assembleContextPackWithSummary,
+  CONTEXT_PACK_RECENT_TURNS_CAP,
   type ContextPack,
 } from './context/context-pack-assembler.js';
+import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import { emitContextBudget } from './context/context-budget-telemetry.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
@@ -945,6 +947,14 @@ export async function runTurnExecutor(
   let sonnetTextForLog = '';
   let contextPackForLog: ContextPack | null = null;
   /**
+   * Context v2 S4-INJECT: summary staleness (turns after the stored
+   * summary's watermark) computed by the injection loader at assembly time.
+   * Null when no summary entered this prompt (flag below 'inject', no
+   * stored summary, or store read failure) — surfaced on
+   * `v5.context_budget.summary_lag_turns` at the routing emit site.
+   */
+  let summaryLagForBudget: number | null = null;
+  /**
    * V5 Coaching Context Pack v1 — shared deterministic post-check for the two
    * LLM-authored coaching compose branches (coach / converse). When the
    * behaviour flag projected a canonical verdict this turn
@@ -1451,6 +1461,21 @@ export async function runTurnExecutor(
       const coachingContext = coachingPromptCanonical
         ? summariseCoachingStatePack(coachingPromptCanonical)
         : undefined;
+      // Context v2 S4-INJECT (ROADMAP 1.73; 01 §2/§4, 05 §S4 inject row):
+      // read the stored rolling summary for injection. The loader owns the
+      // whole ladder — 'off'/'maintain' return immediately (no store
+      // construction, no RPC; byte-identity pinned by test), 'inject'
+      // performs ONE read and degrades to "no block" on any failure (never
+      // a turn failure). Lag/staleness (01 §4) is computed against the same
+      // prior turns the pack's verbatim window projects from.
+      const summaryInjection = await loadConversationSummaryForInjection({
+        flag: config.features.rollingSummary,
+        scenarioId: context.session_id,
+        windowTurnsNewestFirst: context.prior_turns,
+        windowDepth: CONTEXT_PACK_RECENT_TURNS_CAP,
+        requestId,
+      });
+      summaryLagForBudget = summaryInjection.lagTurns;
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
@@ -1502,6 +1527,9 @@ export async function runTurnExecutor(
         // pack/frame agreement by construction. LLM-routing-visible via the
         // serialised pack; kill-switch documented at the derivation site.
         pendingConfirmation: pendingConfirmationForTurn,
+        // Context v2 S4-INJECT: undefined below 'inject' / when no stored
+        // summary exists → the pack key is absent (byte-identity).
+        conversationSummary: summaryInjection.section ?? undefined,
       });
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
@@ -5038,6 +5066,11 @@ export async function runTurnExecutor(
           // prompt's projections; conversation/brief are embedded as-is).
           const routingSectionChars: Record<string, number> = {
             conversation: packJsonChars(contextPack.conversation),
+            // Context v2 S4-INJECT: the rolling-summary block's compact
+            // size. 0 below 'inject' / when no stored summary — the key is
+            // always present so the dashboard shows the layer arriving
+            // (03 §1 pre-declared the 1,300-char routing budget for it).
+            conversation_summary: packJsonChars(contextPack.conversation_summary),
             brief: packJsonChars(contextPack.brief),
             display_analysis: packJsonChars(contextPack.display_analysis),
             display_graph: packJsonChars(contextPack.display_graph),
@@ -5079,7 +5112,10 @@ export async function runTurnExecutor(
             section_chars: routingSectionChars,
             total_chars: routingTotalChars,
             truncations: routingTruncations,
-            summary_lag_turns: null, // no summary layer until S4
+            // Context v2 S4-INJECT: populated (≥0) when a stored summary
+            // entered this prompt; null otherwise (flag below 'inject', no
+            // stored summary, or store read failure).
+            summary_lag_turns: summaryLagForBudget,
             ui_narrowed:
               narrowingMarker == null
                 ? null

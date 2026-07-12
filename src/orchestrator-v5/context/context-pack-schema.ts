@@ -379,6 +379,27 @@ const CoachingStatePackSchema = z
   })
   .strict();
 
+/**
+ * Context v2 S4-INJECT (ROADMAP 1.73; design pack 01 §2/§4): the rolling
+ * conversation summary section. `.strict()` so no field can silently join
+ * the prompt-facing block without review (same posture as
+ * CoachingStatePackSchema). `note` is the in-band staleness disclosure —
+ * present IFF `stale` (never silently stale, 01 §4). Doctrine P: `text` is
+ * summariser prose (no raw floats by the summariser's own contract).
+ *
+ * NOTE: `conversation_summary` also names a V4 prompt-zones registry entry
+ * (src/orchestrator/prompt-zones/*) — unrelated; this is the V5 pack path.
+ */
+const ContextPackConversationSummarySchema = z
+  .object({
+    text: z.string(),
+    current_to_turn_id: z.string(),
+    lag_turns: z.number().int().nonnegative(),
+    stale: z.boolean(),
+    note: z.string().optional(),
+  })
+  .strict();
+
 export const ContextPackSchema = z
   .object({
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
@@ -401,6 +422,12 @@ export const ContextPackSchema = z
     display_analysis: DisplaySafeAnalysisSchema,
     display_graph: DisplaySafeGraphSchema,
     conversation: ContextPackConversationSchema,
+    /**
+     * Context v2 S4-INJECT: present ONLY when CEE_ROLLING_SUMMARY='inject'
+     * and a stored summary exists (key absent otherwise — off/maintain
+     * byte-identity).
+     */
+    conversation_summary: ContextPackConversationSummarySchema.optional(),
     recent_changes: z.array(RecentMutationSchema).readonly(),
     coaching: CoachingCacheSchema,
     compound_detected: z.boolean(),

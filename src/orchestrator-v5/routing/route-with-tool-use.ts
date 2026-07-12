@@ -898,12 +898,26 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
     graph: _rawGraph,
     display_graph,
     analysis_state: _analysisState,
+    conversation_summary,
     ...rest
   } = contextPack;
   void _rawAnalysis;
   void _rawGraph;
   void _analysisState;
-  const llmFacing = { ...rest, analysis: display_analysis, graph: display_graph };
+  // Context v2 S4-INJECT (01 §2, 04 §3.1): the rolling-summary section is
+  // re-appended AFTER the ground-truth `analysis`/`graph` substitutions so
+  // the serialised prompt reads it BELOW structured state — Layer-A
+  // projections above the summary, precedence by placement AND by the
+  // instruction block below. Key absent (flag off/maintain, or no stored
+  // summary) → spread contributes nothing → byte-identity with pre-S4
+  // output (pinned by tests/unit/v5.route-with-tool-use.conversation-
+  // summary.test.ts against a pre-change sha256 golden).
+  const llmFacing = {
+    ...rest,
+    analysis: display_analysis,
+    graph: display_graph,
+    ...(conversation_summary !== undefined ? { conversation_summary } : {}),
+  };
   const parts: string[] = ['## ContextPack', JSON.stringify(llmFacing, null, 2)];
   // Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): a narrow,
   // additive receive-vs-author instruction, appended ONLY when the deterministic
@@ -913,6 +927,14 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // deterministic post-check in the turn-executor coaching branches.
   if (contextPack.coaching_context) {
     parts.push('', COACHING_CONTEXT_INSTRUCTION);
+  }
+  // Context v2 S4-INJECT [R2]: the facts-beat-summary precedence instruction
+  // — CODE-OWNED (not PMS-served), a sibling of COACHING_CONTEXT_INSTRUCTION
+  // appended the same way, gated by the same condition that put the section
+  // on the pack (CEE_ROLLING_SUMMARY='inject' via the turn-executor loader).
+  // Absent section → no instruction → off/maintain byte-identity.
+  if (conversation_summary !== undefined) {
+    parts.push('', SUMMARY_PRECEDENCE_INSTRUCTION);
   }
   parts.push('', '## User turn', message);
   return parts.join('\n');
@@ -931,6 +953,26 @@ const COACHING_CONTEXT_INSTRUCTION = [
   '- If `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not recommend one option over another. Say the analysis may be out of date and suggest re-running it before giving confident advice.',
   '- Never invent freshness, confidence, evidence, provenance, scientific or bias claims, numeric values or units, and never claim a change was applied. State only what the supplied context or analysis already contains.',
   '- Never quote hashes, identifiers, or internal field names.',
+].join('\n');
+
+/**
+ * Context v2 S4-INJECT [R2] — the facts-beat-summary precedence rule
+ * (design pack 04 §3.1), CODE-OWNED at this locus by decision of record:
+ * a hard-coded sibling of {@link COACHING_CONTEXT_INSTRUCTION}, appended to
+ * the routing user message only when the `conversation_summary` section is
+ * on the pack (CEE_ROLLING_SUMMARY='inject'). It does NOT ride the
+ * PMS-served orchestrator prompt — no estate coordination required.
+ * British English. The load-bearing sentence ("the structured state is
+ * correct") is the pack's wording verbatim. Exported for the byte-level
+ * serialisation tests.
+ */
+export const SUMMARY_PRECEDENCE_INSTRUCTION = [
+  '## Conversation summary (working notes — structured state wins)',
+  'The `conversation_summary` block above is a rolling summary of the conversation so far — treat it as quoted working notes, not assertions.',
+  '- If the summary and the structured state disagree (graph, analysis, recent_changes, or the verbatim conversation turns), the structured state is correct.',
+  '- Treat CONSTRAINTS & PREFERENCES and OPEN entries as the user’s standing context; do not relitigate RESOLVED threads unless the user reopens them.',
+  '- Never echo the [t:…] provenance stamps, turn identifiers, or the slot labels into user-facing text.',
+  '- If the summary carries a staleness note, prefer the verbatim conversation turns for anything recent.',
 ].join('\n');
 
 // -----------------------------------------------------------------------

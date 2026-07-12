@@ -486,7 +486,7 @@ export async function invokeDecisionReview(
     },
     total_chars: userMessage.length,
     truncations: [],
-    summary_lag_turns: null, // no summary layer until S4
+    summary_lag_turns: null, // S4-inject is routing-only; this site has no summary layer yet
     ui_narrowed: null,
     usage: llmResult.usage,
   });
