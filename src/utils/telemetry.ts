@@ -549,6 +549,12 @@ export const TelemetryEvents = {
   //                            disclosure ratchet later flips.
   V5ContextBudget: "v5.context_budget",
   V5ContextTruncation: "v5.context_truncation",
+  // Context Architecture v2 S6 (ROADMAP 1.73; design pack 02 §Seam 3).
+  // Shadow validation of the PLoT→CEE enrichment passthrough (the
+  // platform's known-open seam): emitted when CEE_ENRICHMENT_VALIDATION
+  // is shadow/enforce and AnalysisEnrichmentSchema.safeParse fails on a
+  // PLoT run response. Log-only; the turn proceeds unchanged (stage 1).
+  V5EnrichmentSchemaMismatch: "v5.enrichment.schema_mismatch",
 
   // V5 latency observability (Fix 4 — per-stage timings).
   // Always emitted to logs. The matching `_timings` block on the wire

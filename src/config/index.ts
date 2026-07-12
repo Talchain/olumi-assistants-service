@@ -621,6 +621,28 @@ const ConfigSchema = z.object({
     // tests/unit/edit-context-brief.test.ts). Ships dark: not declared in
     // render*.yaml.
     contextBriefAllSites: booleanString.default(false),
+    // CEE_ENRICHMENT_VALIDATION — Context Architecture v2 S6 (ROADMAP 1.73,
+    // design pack 02 §Seam 3): staged validation of the PLoT→CEE enrichment
+    // passthrough (the platform's known-open seam — attached today as
+    // `response as Record<string, unknown>`, zero schema imports).
+    //   'off'     (default): no parse at all — byte-identical to pre-S6.
+    //   'shadow'  : AnalysisEnrichmentSchema.safeParse on every PLoT run
+    //               response; mismatch → v5.enrichment.schema_mismatch
+    //               event; turn proceeds UNCHANGED. Produces the
+    //               mismatch-rate evidence stage 3 requires.
+    //   'enforce' : stage 3 is NOT shipped in this slice — 02 §Seam 3
+    //               forbids enforcement before preconditions (a)–(c)
+    //               (producer trace + 7-day/200-analysis shadow-clean).
+    //               Setting it today DOWNGRADES to shadow behaviour with a
+    //               warning (see enrichment-validation.ts).
+    // Unrecognised values fall back to 'off'. Ships dark: not declared in
+    // render*.yaml.
+    enrichmentValidation: z
+      .union([z.string(), z.undefined()])
+      .transform((val): "off" | "shadow" | "enforce" => {
+        const lower = (val ?? "").toLowerCase().trim();
+        return lower === "shadow" || lower === "enforce" ? lower : "off";
+      }),
   }),
 
   // Prompt Cache Configuration
@@ -1241,6 +1263,7 @@ function parseConfig(): Config {
       decisionRecordCapture: env.CEE_DECISION_RECORD_CAPTURE,
       contextDisclosureV2: env.CEE_CONTEXT_DISCLOSURE_V2,
       contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
+      enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
