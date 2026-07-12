@@ -8,6 +8,10 @@
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import type { V2RunResponseEnvelope, ConversationContext } from "../types.js";
 import type { GraphV3Compact, CompactNode, CompactEdge, EditCompactGraph, EditCompactNode, EditCompactEdge, AnalysisResponseSummary, OptionSummary, DriverSummary } from "./types.js";
+import {
+  emitContextTruncation,
+  type ContextTruncationRecord,
+} from "../../orchestrator-v5/context/context-budget-telemetry.js";
 
 // ============================================================================
 // Robustness Band Mapping
@@ -93,21 +97,50 @@ export function editCompactGraph(graph: GraphV3T): EditCompactGraph {
 // ============================================================================
 
 /**
- * Produce a JSON string of the graph, safely truncated to `maxBytes`.
+ * Result of a graph-JSON truncation with enough metadata for disclosure
+ * (S1, CEE_CONTEXT_DISCLOSURE_V2) and cut-site telemetry (S0).
+ */
+export interface TruncateGraphJsonResult {
+  readonly json: string;
+  readonly truncated: boolean;
+  /** Node/edge counts actually present in `json` (post-truncation). */
+  readonly keptNodes: number;
+  readonly keptEdges: number;
+  readonly originalChars: number;
+}
+
+/**
+ * Produce a JSON string of the graph, safely truncated to `maxBytes`,
+ * with truncation metadata.
  *
  * Unlike `JSON.stringify().substring(n)`, this iteratively removes edges then
  * nodes to keep the result valid JSON. Returns the full string if it fits.
  */
-export function truncateGraphJson(graph: EditCompactGraph, maxBytes: number): string {
+export function truncateGraphJsonWithMeta(graph: EditCompactGraph, maxBytes: number): TruncateGraphJsonResult {
   const full = JSON.stringify(graph);
-  if (full.length <= maxBytes) return full;
+  if (full.length <= maxBytes) {
+    return {
+      json: full,
+      truncated: false,
+      keptNodes: graph.nodes.length,
+      keptEdges: graph.edges.length,
+      originalChars: full.length,
+    };
+  }
 
   let truncated = { ...graph, nodes: [...graph.nodes], edges: [...graph.edges] };
+  const done = (json: string): TruncateGraphJsonResult => ({
+    json,
+    truncated: true,
+    keptNodes: truncated.nodes.length,
+    keptEdges: truncated.edges.length,
+    originalChars: full.length,
+  });
 
   // Iteratively reduce: remove edges first, then nodes
   for (let i = 0; i < 10; i++) {
     const json = JSON.stringify(truncated);
-    if (json.length <= maxBytes) return json;
+    if (json.length <= maxBytes) return done(json);
 
     if (truncated.edges.length > 1) {
       const newLen = Math.ceil(truncated.edges.length * 0.8);
@@ -125,7 +158,15 @@ export function truncateGraphJson(graph: EditCompactGraph, maxBytes: number): st
     }
   }
 
-  return JSON.stringify(truncated);
+  return done(JSON.stringify(truncated));
+}
+
+/**
+ * Back-compat string form of {@link truncateGraphJsonWithMeta}. Kept so
+ * existing callers/tests are untouched; byte-identical output.
+ */
+export function truncateGraphJson(graph: EditCompactGraph, maxBytes: number): string {
+  return truncateGraphJsonWithMeta(graph, maxBytes).json;
 }
 
 // ============================================================================
@@ -155,9 +196,18 @@ export function renderRecentConversationForEdit(
   messages: readonly { role: 'user' | 'assistant'; content: string }[],
   maxChars: number = 4000,
 ): string {
-  if (messages.length === 0) return '';
+  return renderRecentConversationForEditWithMeta(messages, maxChars).text;
+}
+
+/** Metadata form of {@link renderRecentConversationForEdit} (S0 telemetry). */
+export function renderRecentConversationForEditWithMeta(
+  messages: readonly { role: 'user' | 'assistant'; content: string }[],
+  maxChars: number = 4000,
+): { text: string; dropped: number; originalChars: number } {
+  if (messages.length === 0) return { text: '', dropped: 0, originalChars: 0 };
 
   const lines = messages.map((m) => `${m.role}: ${m.content}`);
+  const originalChars = lines.join('\n').length;
 
   let dropped = 0;
   while (lines.join('\n').length > maxChars && lines.length > 1) {
@@ -166,9 +216,10 @@ export function renderRecentConversationForEdit(
   }
 
   const body = lines.join('\n');
-  return dropped > 0
+  const text = dropped > 0
     ? `(${dropped} earlier turn${dropped === 1 ? '' : 's'} omitted for length)\n${body}`
     : body;
+  return { text, dropped, originalChars };
 }
 
 // ============================================================================
@@ -193,16 +244,73 @@ export function serialiseEditContextForLLM(
   maxGraphBytes: number = 8000,
   maxConversationChars: number = 4000,
 ): string {
+  return serialiseEditContextForLLMWithMeta(context, maxGraphBytes, maxConversationChars).text;
+}
+
+/**
+ * Per-section metadata alongside the rendered context (Context v2 S0):
+ * section char counts feed `v5.context_budget` at the edit/repair adapter
+ * boundary; truncation records mirror the `v5.context_truncation` events
+ * emitted at the cut sites inside this function.
+ */
+export interface SerialisedEditContext {
+  readonly text: string;
+  /** Rendered chars per section (headers included), 0 when absent. */
+  readonly sectionChars: Readonly<Record<string, number>>;
+  readonly truncations: readonly ContextTruncationRecord[];
+}
+
+/** Metadata form of {@link serialiseEditContextForLLM}. Byte-identical text. */
+export function serialiseEditContextForLLMWithMeta(
+  context: ConversationContext,
+  maxGraphBytes: number = 8000,
+  maxConversationChars: number = 4000,
+): SerialisedEditContext {
   const sections: string[] = [];
+  const sectionChars: Record<string, number> = {};
+  const truncations: ContextTruncationRecord[] = [];
+  const scenarioId = context.scenario_id ?? null;
+
+  // Tracks the rendered length of the current logical section: sections[]
+  // entries joined with '\n\n' — attribute the joiner to the section that
+  // follows it, matching total = sum(sectionChars) exactly.
+  const measure = (name: string, render: () => void): void => {
+    const before = sections.join('\n\n').length;
+    render();
+    const after = sections.join('\n\n').length;
+    if (after > before) sectionChars[name] = after - before;
+  };
 
   // Graph section (always present — handler validates graph exists before calling)
   if (context.graph) {
-    const compact = editCompactGraph(context.graph as GraphV3T);
-    const graphJson = truncateGraphJson(compact, maxGraphBytes);
-    sections.push(`## Current Graph (${compact.nodes.length} nodes, ${compact.edges.length} edges)`);
-    sections.push('```json');
-    sections.push(graphJson);
-    sections.push('```');
+    measure('graph_json', () => {
+      const compact = editCompactGraph(context.graph as GraphV3T);
+      const graphCut = truncateGraphJsonWithMeta(compact, maxGraphBytes);
+      if (graphCut.truncated) {
+        // S0: the cut becomes observable. In-prompt disclosure (marker +
+        // honest header counts) is S1's, behind CEE_CONTEXT_DISCLOSURE_V2 —
+        // until that flips, this is an UNdisclosed cut and says so.
+        emitContextTruncation({
+          site: 'serialise.truncateGraphJson',
+          section: 'graph_json',
+          original_chars: graphCut.originalChars,
+          kept_chars: graphCut.json.length,
+          strategy: 'drop_edges_then_nodes',
+          disclosed: false,
+          scenario_id: scenarioId,
+        });
+        truncations.push({
+          section: 'graph_json',
+          original_chars: graphCut.originalChars,
+          kept_chars: graphCut.json.length,
+          disclosed: false,
+        });
+      }
+      sections.push(`## Current Graph (${compact.nodes.length} nodes, ${compact.edges.length} edges)`);
+      sections.push('```json');
+      sections.push(graphCut.json);
+      sections.push('```');
+    });
   }
 
   // Recent conversation (prior turns only — current message is sent
@@ -210,39 +318,65 @@ export function serialiseEditContextForLLM(
   // graph, so facts the user already established are not pushed out by
   // later sections when the prompt is trimmed upstream.
   if (context.messages && context.messages.length > 0) {
-    const rendered = renderRecentConversationForEdit(context.messages, maxConversationChars);
-    if (rendered.length > 0) {
-      sections.push('## Recent Conversation');
-      sections.push(rendered);
-    }
+    measure('conversation', () => {
+      const rendered = renderRecentConversationForEditWithMeta(context.messages, maxConversationChars);
+      if (rendered.dropped > 0) {
+        // Always disclosed in-prompt ("(N earlier turns omitted for length)").
+        emitContextTruncation({
+          site: 'serialise.renderRecentConversationForEdit',
+          section: 'conversation',
+          original_chars: rendered.originalChars,
+          kept_chars: rendered.text.length,
+          strategy: 'drop_oldest_turns',
+          disclosed: true,
+          scenario_id: scenarioId,
+        });
+        truncations.push({
+          section: 'conversation',
+          original_chars: rendered.originalChars,
+          kept_chars: rendered.text.length,
+          disclosed: true,
+        });
+      }
+      if (rendered.text.length > 0) {
+        sections.push('## Recent Conversation');
+        sections.push(rendered.text);
+      }
+    });
   }
 
   // Framing metadata
   if (context.framing) {
-    sections.push(`## Decision Stage: ${context.framing.stage}`);
-    if (context.framing.goal) {
-      sections.push(`Goal: ${context.framing.goal}`);
-    }
-    if (context.framing.constraints && (context.framing.constraints as unknown[]).length > 0) {
-      sections.push(`Constraints: ${JSON.stringify(context.framing.constraints)}`);
-    }
+    measure('framing', () => {
+      sections.push(`## Decision Stage: ${context.framing!.stage}`);
+      if (context.framing!.goal) {
+        sections.push(`Goal: ${context.framing!.goal}`);
+      }
+      if (context.framing!.constraints && (context.framing!.constraints as unknown[]).length > 0) {
+        sections.push(`Constraints: ${JSON.stringify(context.framing!.constraints)}`);
+      }
+    });
   }
 
   // Analysis summary (if available)
   if (context.analysis_response) {
-    const summary = summariseAnalysisResponse(context.analysis_response);
-    sections.push('## Analysis Summary');
-    sections.push(JSON.stringify(summary));
+    measure('analysis_summary', () => {
+      const summary = summariseAnalysisResponse(context.analysis_response!);
+      sections.push('## Analysis Summary');
+      sections.push(JSON.stringify(summary));
+    });
   }
 
   // Selected elements (FOCUS section)
   if (context.selected_elements && context.selected_elements.length > 0) {
-    sections.push('## FOCUS');
-    sections.push('The user has selected these elements. Prioritise changes to these:');
-    sections.push(context.selected_elements.map(el => `- ${el}`).join('\n'));
+    measure('focus', () => {
+      sections.push('## FOCUS');
+      sections.push('The user has selected these elements. Prioritise changes to these:');
+      sections.push(context.selected_elements!.map(el => `- ${el}`).join('\n'));
+    });
   }
 
-  return sections.join('\n\n');
+  return { text: sections.join('\n\n'), sectionChars, truncations };
 }
 
 // ============================================================================

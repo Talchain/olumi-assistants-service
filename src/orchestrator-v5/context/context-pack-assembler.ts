@@ -37,6 +37,7 @@ import type {
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
+import { emitContextTruncation } from './context-budget-telemetry.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import {
@@ -566,6 +567,16 @@ export function projectBrief(
   if (trimmed.length <= CONTEXT_PACK_BRIEF_CHAR_CAP) {
     return { text: trimmed, truncated: false, original_chars: trimmed.length };
   }
+  // Context v2 S0: the slice was already DISCLOSED in-pack (truncated +
+  // original_chars); it now also lands on the truncation telemetry stream.
+  emitContextTruncation({
+    site: 'context-pack-assembler.projectBrief',
+    section: 'brief',
+    original_chars: trimmed.length,
+    kept_chars: CONTEXT_PACK_BRIEF_CHAR_CAP,
+    strategy: 'hard_slice',
+    disclosed: true,
+  });
   return {
     text: trimmed.slice(0, CONTEXT_PACK_BRIEF_CHAR_CAP),
     truncated: true,
@@ -1306,6 +1317,27 @@ export function projectConversation(
   }));
 
   const lastTool = priorTurns.find((t) => t.turn_class === 'handler' && t.handler_id !== null);
+
+  // Context v2 S0: the window slice becomes observable. Char accounting is
+  // over the projected conversation CONTENT (user/assistant message text) —
+  // the thing the LLM loses when a turn falls out of the window.
+  // `disclosed:false` until S1's `{shown, available}` window disclosure
+  // flips (CEE_CONTEXT_DISCLOSURE_V2) — this IS design-pack broken seam 1.
+  if (priorTurns.length > CONTEXT_PACK_RECENT_TURNS_CAP) {
+    const contentChars = (turns: readonly SessionTurnWithContent[]): number =>
+      turns.reduce(
+        (sum, t) => sum + (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0),
+        0,
+      );
+    emitContextTruncation({
+      site: 'context-pack-assembler.projectConversation',
+      section: 'conversation',
+      original_chars: contentChars(priorTurns),
+      kept_chars: contentChars(priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP)),
+      strategy: 'window_slice',
+      disclosed: false,
+    });
+  }
 
   return {
     recent_turns: recent,

@@ -63,6 +63,7 @@ import {
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { emitContextBudget } from '../context/context-budget-telemetry.js';
 import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
@@ -377,6 +378,32 @@ export async function dispatchDraftGraph(
   }
 
   try {
+    // Context v2 S0 (ROADMAP 1.73, 03 §2): draft is INSTRUMENTED but NOT
+    // re-budgeted (the 58,564-char draft prompt is ROADMAP 1.75's scope).
+    // The draft LLM call happens inside the unified pipeline; its usage
+    // surfaces post-hoc via toolLLMTelemetry (prompt/completion tokens —
+    // cache token fields are not carried on that trace, so they report
+    // null). Emitted only when an LLM call actually landed.
+    if (draftResult.toolLLMTelemetry) {
+      emitContextBudget({
+        call_site: 'draft_graph',
+        model: draftResult.toolLLMTelemetry.model || null,
+        prompt_version: draftResult.toolLLMTelemetry.prompt_version ?? null,
+        prompt_hash: draftResult.toolLLMTelemetry.prompt_hash ?? null,
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        section_chars: { brief: payload.message.length },
+        total_chars: payload.message.length,
+        truncations: [],
+        summary_lag_turns: null,
+        ui_narrowed: null,
+        usage: {
+          input_tokens: draftResult.toolLLMTelemetry.input_tokens,
+          output_tokens: draftResult.toolLLMTelemetry.output_tokens,
+        },
+      });
+    }
+
     // M2 LLM calls made by the dual-draft stage this turn (0 or 1). Counted
     // whenever M2 actually reached the model — even if the merge applied
     // nothing, timed out, or errored — NOT gated on whether a merge landed.
