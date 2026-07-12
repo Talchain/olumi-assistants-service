@@ -65,10 +65,16 @@ describe("Cost Calculation", () => {
       expect(cost).toBeCloseTo(0.09, 6);
     });
 
-    it("calculates cost for claude-3-5-haiku-20241022", () => {
+    it("calculates cost for claude-3-5-haiku-20241022 (retired; kept for historical cost tracking)", () => {
       const cost = calculateCost("claude-3-5-haiku-20241022", 1000, 1000);
       // $0.80/1M in + $4/1M out → $0.0008 + $0.004 = $0.0048
       expect(cost).toBeCloseTo(0.0048, 6);
+    });
+
+    it("calculates cost for claude-haiku-4-5 (current fast tier)", () => {
+      const cost = calculateCost("claude-haiku-4-5", 1000, 1000);
+      // $1/1M in + $5/1M out → $0.001 + $0.005 = $0.006
+      expect(cost).toBeCloseTo(0.006, 6);
     });
 
     it("calculates cost for claude-opus-4-6", () => {

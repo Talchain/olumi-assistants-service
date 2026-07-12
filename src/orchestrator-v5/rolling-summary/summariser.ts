@@ -4,7 +4,7 @@
  * The model call is behind an injectable port so the maintainer's containment
  * logic (monotonic write, regen horizon, parse-reject) is unit-tested with a
  * fake — no network, deterministic. The production impl wraps chatWithAnthropic
- * on a HAIKU-class model (CEE_MODEL_SUMMARY, default claude-3-5-haiku-20241022).
+ * on a HAIKU-class model (CEE_MODEL_SUMMARY, default claude-haiku-4-5).
  *
  * SUMMARISER_SYSTEM_PROMPT is CODE-DEFINED and registered in
  * PROMPT-ESTATE-REGISTER.md (unowned prompts are the estate's known failure

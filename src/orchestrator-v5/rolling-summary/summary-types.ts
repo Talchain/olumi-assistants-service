@@ -63,7 +63,7 @@ export const SUMMARY_SCHEMA_VERSION = 1;
 
 /** Haiku-class default (the only haiku entry in src/config/models.ts). The
  *  1.74 estate lane can re-point CEE_MODEL_SUMMARY estate-wide. */
-export const DEFAULT_SUMMARY_MODEL = 'claude-3-5-haiku-20241022';
+export const DEFAULT_SUMMARY_MODEL = 'claude-haiku-4-5';
 
 /** Generator provenance stamped on every write — which path produced it. */
 export type RollingSummaryGenerator = 'regen' | 'incremental' | 'floor';
