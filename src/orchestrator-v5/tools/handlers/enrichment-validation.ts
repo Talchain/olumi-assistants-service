@@ -67,10 +67,14 @@ export function validateEnrichmentShadow(
     const parsed = parseAnalysisEnrichment(response);
     if (parsed.success) return;
 
+    // {path, code} ONLY — no `message`. Zod's invalid_enum_value message
+    // echoes the RECEIVED producer value ("… received '<value>'"), which the
+    // design's "no content values on the mismatch event" rule forbids. code +
+    // path fully localise the schema divergence for the harness-v1 consumer
+    // without carrying any producer-emitted field value.
     const issues = ('error' in parsed ? parsed.error.issues : []).slice(0, MAX_ISSUE_RECORDS).map((issue) => ({
       path: issue.path.join('.'),
       code: issue.code,
-      message: issue.message,
     }));
     const issueCount = 'error' in parsed ? parsed.error.issues.length : 0;
 

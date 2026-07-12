@@ -101,10 +101,13 @@ describe('validateEnrichmentShadow (CEE_ENRICHMENT_VALIDATION)', () => {
     expect(ev.keys_seen).toEqual(Object.keys(MALFORMED_RESPONSE));
     const issues = ev.issues as Array<Record<string, unknown>>;
     expect(issues.length).toBeGreaterThan(0);
-    // Issue records are bounded, structured, and content-free (path/code/
-    // message from Zod — type errors over KEYS, never user prose).
+    // Issue records are bounded, structured, and CONTENT-FREE: {path, code}
+    // only. `message` was dropped (review finding) because Zod's
+    // invalid_enum_value message echoes the RECEIVED producer value
+    // ("… received '<value>'"), which the design's "no content values on the
+    // mismatch event" rule forbids — path+code fully localise the divergence.
     for (const issue of issues) {
-      expect(Object.keys(issue).sort()).toEqual(['code', 'message', 'path']);
+      expect(Object.keys(issue).sort()).toEqual(['code', 'path']);
     }
     expect(ev.issue_count).toBe(issues.length);
   });
