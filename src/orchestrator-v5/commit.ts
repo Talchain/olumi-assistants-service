@@ -220,8 +220,9 @@ export const CONVERSATION_TEXT_CAP = 2000;
  * Context v2 S0 (ROADMAP 1.73): a cut here now emits `v5.context_truncation`
  * — this was the platform's canonical SILENT slice (design pack 00 §broken
  * seam 1). The persistence cap itself stays (storage bound, sane); only the
- * observability changes. `disclosed:false` because nothing downstream marks
- * the projected turn as cut until S1 (CEE_CONTEXT_DISCLOSURE_V2) flips.
+ * observability changes. `disclosed` tracks CEE_CONTEXT_DISCLOSURE_V2 (S1):
+ * with the flag on, the pack projection marks the cut turn `truncated:true`
+ * (projectConversation's at-cap inference), so downstream LLMs can see it.
  *
  * Exported for direct unit coverage of the emit contract (S0 tests); the
  * `section` names the durable column the cut applies to.
@@ -239,7 +240,7 @@ export function capConversationText(
       original_chars: text.length,
       kept_chars: CONVERSATION_TEXT_CAP,
       strategy: 'hard_slice',
-      disclosed: false,
+      disclosed: config.features.contextDisclosureV2,
     });
     return text.slice(0, CONVERSATION_TEXT_CAP);
   }

@@ -593,6 +593,20 @@ const ConfigSchema = z.object({
     // Paul's execution gate; enablement is sequenced behind it (see
     // ROADMAP 3.1 and parallel-briefs/PLATFORM-REPORT-2026-07-10-1.md).
     decisionRecordCapture: booleanString.default(false),
+    // CEE_CONTEXT_DISCLOSURE_V2 — Context Architecture v2 S1 (ROADMAP 1.73,
+    // design pack 02 §Disclosure): in-band disclosure of the two remaining
+    // silent context cuts. When true: (1) the edit-lane graph section header
+    // reports POST-truncation counts + an in-section
+    // "(graph truncated: showing X of Y nodes, Z of W edges)" marker
+    // (pre-S1 the header actively misreported full counts over truncated
+    // JSON); (2) the routing pack conversation gains
+    // `window: {shown, available}` and per-turn `truncated` flags for
+    // messages at the persistence cap. Default OFF; flag-off is
+    // BYTE-IDENTICAL prompt output (pinned by
+    // tests/unit/context-disclosure-v2.test.ts) — prompt bytes change on
+    // flip, so enablement waits on the harness A/B (05 §S1). Ships dark:
+    // not declared in render*.yaml.
+    contextDisclosureV2: booleanString.default(false),
   }),
 
   // Prompt Cache Configuration
@@ -1211,6 +1225,7 @@ function parseConfig(): Config {
       uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,
       heldProposalEmit: env.CEE_HELD_PROPOSAL_EMIT,
       decisionRecordCapture: env.CEE_DECISION_RECORD_CAPTURE,
+      contextDisclosureV2: env.CEE_CONTEXT_DISCLOSURE_V2,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
