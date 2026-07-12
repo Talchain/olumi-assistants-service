@@ -12,9 +12,12 @@
  *    add_option codes restate the T4.0 hand-off contract
  *    (Docs/t4/dual-model-typed-mutation-handoff-contract.md) + PR #300's proven
  *    add_option blocker split.
- *  - `STRUCTURAL_APPLY_HELD` / `TUNABLE_APPLY_HELD` encode the fail-closed posture
- *    for structural/tunable mutations while spine-policy §3b/§6 remain PENDING
- *    (Paul, 2026-07-03: pending policy → held; no broad tunable auto-apply).
+ *  - `STRUCTURAL_APPLY_HELD` encodes the propose-confirm posture for structural
+ *    mutations. `TUNABLE_APPLY_HELD` is RETIRED as a referee outcome by the D-S
+ *    ruling (ROADMAP §D, Paul 2026-07-12: tunables auto-apply via candidate-build
+ *    + R6 parity) but stays REGISTERED — historical held pendings and the
+ *    held_proposal wire enum (@talchain/schemas HeldProposalReasonCode) still
+ *    carry it, and removing a wire-ratified code would be a breaking change.
  */
 
 // --- R1 envelope / schema (fail-closed parse) --------------------------------
@@ -59,8 +62,10 @@ export const ADD_OPTION_APPLY_UNWIRED = 'ADD_OPTION_APPLY_UNWIRED' as const;
 export const OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE =
   'OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE' as const;
 export const GRAPH_OPTIONS_MALFORMED = 'GRAPH_OPTIONS_MALFORMED' as const;
-// structural / tunable held-pending-doctrine (§3b/§6 PENDING → held)
+// structural propose-confirm posture (unchanged by D-S)
 export const STRUCTURAL_APPLY_HELD = 'STRUCTURAL_APPLY_HELD' as const;
+// RETIRED as a referee outcome (D-S, ROADMAP §D Paul 2026-07-12) — kept
+// registered for historical pendings + the ratified held_proposal wire enum.
 export const TUNABLE_APPLY_HELD = 'TUNABLE_APPLY_HELD' as const;
 export const REMOVE_UNCONFIRMED = 'REMOVE_UNCONFIRMED' as const;
 

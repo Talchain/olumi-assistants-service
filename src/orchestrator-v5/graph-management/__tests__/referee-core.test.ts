@@ -1,8 +1,11 @@
 /**
  * Track 3 — referee R2–R7 + kind-posture + totality.
  *
- * Fail-closed proof: every kind resolves to a classified verdict; the only
- * `would_apply` case is a hash-neutral rename on a fresh, hash-matching frame.
+ * Fail-closed proof: every kind resolves to a classified verdict. Since the
+ * D-S ruling (ROADMAP §D, Paul 2026-07-12) the would_apply-eligible set is
+ * the TUNABLE class (rename_node, update_node_field, update_edge_field) via
+ * candidate-build + R6 parity; every structural kind stays held
+ * (propose-confirm), removes stay held-unconfirmed.
  */
 import { describe, it, expect } from 'vitest';
 import { refereeMutation, refereeMutationBatch } from '../referee.js';
@@ -22,7 +25,6 @@ import {
   PIPELINE_OWNED_FIELD,
   ENGINE_CLAIM_IN_TEXT,
   STRUCTURAL_APPLY_HELD,
-  TUNABLE_APPLY_HELD,
   REMOVE_UNCONFIRMED,
 } from '../reason-codes.js';
 import {
@@ -39,7 +41,7 @@ const envFor = (kind: keyof typeof SAMPLE_PAYLOADS, graph: unknown = G, over = {
   makeEnvelope(kind, SAMPLE_PAYLOADS[kind], { base_graph_hash: hashOf(graph), ...over });
 
 describe('R2 — frame / stale gate', () => {
-  it('rename on a fresh, hash-matching frame → would_apply (the only would_apply case)', () => {
+  it('rename on a fresh, hash-matching frame → would_apply', () => {
     const v = refereeMutation(envFor('rename_node'), G, frameFor(G));
     expect(v.verdict).toBe('would_apply');
     expect(v.candidate).toBeDefined();
@@ -71,8 +73,19 @@ describe('R2 — frame / stale gate', () => {
     expect(v.verdict).toBe('stale');
   });
 
-  it('freshness STALE → stale (fail-CLOSED — regression: previously fell through to would_apply)', () => {
+  it('freshness STALE + tunable (rename) → would_apply (D-S R2 relaxation — consecutive tunable tweaks; ROADMAP §D, Paul 2026-07-12)', () => {
+    // Pre-D-S this pinned stale-fail-closed for ALL kinds; the D-S ruling
+    // consciously relaxes the freshness rung for the TUNABLE class only
+    // (the first auto-applied tunable flips freshness to stale, so the old
+    // rule would block every consecutive tweak). Hash divergence still
+    // stales (see the base-hash test above) and 'unknown' still fails
+    // closed (see below).
     const v = refereeMutation(envFor('rename_node'), G, frameFor(G, 'stale'));
+    expect(v.verdict).toBe('would_apply');
+  });
+
+  it('freshness STALE + STRUCTURAL → stale ANALYSIS_NOT_FRESH (fail-closed posture unchanged outside the D-S tunable relaxation)', () => {
+    const v = refereeMutation(envFor('add_node'), G, frameFor(G, 'stale'));
     expect(v.verdict).toBe('stale');
     // No-silent-outcome: the freshness-driven stale carries a machine-readable code.
     expect(v.blocker?.code).toBe(ANALYSIS_NOT_FRESH);
@@ -84,7 +97,7 @@ describe('R2 — frame / stale gate', () => {
   });
 });
 
-describe('R7 — kind posture (fail-closed; §3b/§6 pending → held)', () => {
+describe('R7 — kind posture (structural held; tunables auto-apply per D-S)', () => {
   it('add_node → held STRUCTURAL_APPLY_HELD', () => {
     const v = refereeMutation(envFor('add_node'), G, frameFor(G));
     expect(v.verdict).toBe('held');
@@ -98,10 +111,17 @@ describe('R7 — kind posture (fail-closed; §3b/§6 pending → held)', () => {
     expect(v.blocker?.code).toBe(STRUCTURAL_APPLY_HELD);
   });
 
-  it('update_node_field (allowed field) → held TUNABLE_APPLY_HELD (no tunable auto-apply)', () => {
+  it('update_node_field (allowed field) → would_apply (D-S tunable auto-apply — ROADMAP §D, Paul 2026-07-12; was held TUNABLE_APPLY_HELD)', () => {
     const v = refereeMutation(envFor('update_node_field'), G, frameFor(G));
-    expect(v.verdict).toBe('held');
-    expect(v.blocker?.code).toBe(TUNABLE_APPLY_HELD);
+    expect(v.verdict).toBe('would_apply');
+    expect(v.candidate).toBeDefined();
+    expect(v.mutation_class).toBe('tunable');
+  });
+
+  it('update_edge_field (allowed field) → would_apply (D-S tunable auto-apply)', () => {
+    const v = refereeMutation(envFor('update_edge_field'), G, frameFor(G));
+    expect(v.verdict).toBe('would_apply');
+    expect(v.candidate).toBeDefined();
     expect(v.mutation_class).toBe('tunable');
   });
 

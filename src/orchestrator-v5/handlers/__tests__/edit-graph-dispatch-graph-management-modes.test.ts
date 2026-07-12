@@ -5,12 +5,18 @@
  *  - shadow: referee evaluates + emits v5.candidate_mutation.* telemetry;
  *    the wire response AND the commit metadata are byte-identical to off
  *    (the CAS-observe pattern).
- *  - live + would_apply (rename): proceeds through the EXISTING apply path
- *    exactly as today (graph persists, edit fact persists).
- *  - live + held (tunable field update): the mutation is NOT persisted — no
- *    graph on the commit, no edit fact, no analysis_ready, returned graph
- *    null — and a REAL apply_proposed_change pending + confirm chip ship
- *    with held copy that carries no ack prose (§6.6 by construction).
+ *  - live + would_apply (rename AND — since the D-S ruling, ROADMAP §D,
+ *    Paul 2026-07-12 — every tunable field update): proceeds through the
+ *    EXISTING apply path exactly as today (graph persists, edit fact
+ *    persists, applied receipt + rerun chip untouched).
+ *  - live + held (STRUCTURAL change; pre-D-S this class included tunables):
+ *    the mutation is NOT persisted — no graph on the commit, no edit fact,
+ *    no analysis_ready, returned graph null — and a REAL
+ *    apply_proposed_change pending + confirm chip ship with held copy that
+ *    carries no ack prose (§6.6 by construction).
+ *  - D-S fixture of record: the 11 Jul manual-test batch shape (8
+ *    update_edge_field envelopes, base_hash_match=true) applies in ONE
+ *    commit with zero held events.
  *
  * Harness mirrors edit-graph-dispatch-graph-cas-trusted-base.test.ts:
  * mocked handleEditGraph / commitDirectAnswer / loadPersistedGraphStrict +
@@ -134,12 +140,42 @@ const RENAME_OPS: PatchOperation[] = [
   { op: 'update_node', path: 'fac_price', value: { label: 'Price (revised)' } },
 ];
 
-/** update_node touching a non-label tunable field → held (TUNABLE_APPLY_HELD). */
+/** update_node touching a non-label tunable field → would_apply since D-S
+ *  (ROADMAP §D, Paul 2026-07-12); pre-D-S this held TUNABLE_APPLY_HELD. */
 const FIELD_OPS: PatchOperation[] = [
   { op: 'update_node', path: 'fac_price', value: { description: 'List price per unit' } },
 ];
 
-function makeAppliedEditResult(ops: PatchOperation[]): EditGraphResult {
+/** Structural change (add_node, new id) → held STRUCTURAL_APPLY_HELD — the
+ *  propose-confirm class D-S leaves unchanged. */
+const STRUCT_OPS: PatchOperation[] = [
+  { op: 'add_node', path: 'fac_cost', value: { id: 'fac_cost', kind: 'factor', label: 'Cost' } },
+];
+
+/** D-S fixture of record — the 11 Jul manual-test batch shape: 8 tunable
+ *  update_edge_field envelopes (strength / exists_probability tweaks). */
+const EIGHT_TUNABLE_EDGE_OPS: PatchOperation[] = Array.from({ length: 8 }, (_, i) => ({
+  op: 'update_edge' as const,
+  path: 'fac_price::goal_revenue',
+  value:
+    i % 2 === 0
+      ? { strength: { mean: 0.3 + i * 0.05, std: 0.1 } }
+      : { exists_probability: 0.8 - i * 0.02 },
+  old_value:
+    i % 2 === 0 ? { strength: { mean: 0.5, std: 0.1 } } : { exists_probability: 0.9 },
+})) as PatchOperation[];
+
+/** The V4 applied receipt's rerun chip shape (edit-graph.ts, rerun_recommended). */
+const V4_RERUN_CHIP = {
+  label: 'Re-run analysis',
+  prompt: 'run the analysis again',
+  role: 'facilitator' as const,
+};
+
+function makeAppliedEditResult(
+  ops: PatchOperation[],
+  overrides: Partial<EditGraphResult> = {},
+): EditGraphResult {
   return {
     blocks: [],
     assistantText: 'Renamed "Price" to "Price (revised)"',
@@ -149,6 +185,7 @@ function makeAppliedEditResult(ops: PatchOperation[]): EditGraphResult {
     appliedChanges: APPLIED_CHANGES,
     operations: ops,
     operation_meta: ops.map(() => ({ impact: 'low' as const, rationale: '' })),
+    ...overrides,
   };
 }
 
@@ -171,9 +208,9 @@ function makeCommitResult() {
   };
 }
 
-async function runDispatch(ops: PatchOperation[]) {
+async function runDispatch(ops: PatchOperation[], resultOverrides: Partial<EditGraphResult> = {}) {
   (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
-    makeAppliedEditResult(ops),
+    makeAppliedEditResult(ops, resultOverrides),
   );
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
     makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>,
@@ -262,9 +299,70 @@ describe('mode=live', () => {
     expect(result.analysisReady).toBeDefined();
   });
 
-  it('held (tunable field update): NO persist, NO fact, NO analysis_ready — real pending + held copy instead', async () => {
+  it('tunable field update AUTO-APPLIES (D-S, ROADMAP §D Paul 2026-07-12): graph persists, edit fact persists, no pending, ack prose untouched (pre-D-S pin: held with pending)', async () => {
     setMode('live');
     const { result, response, metadata } = await runDispatch(FIELD_OPS);
+
+    // The existing apply path ran exactly as in mode=off.
+    expect(metadata.graph).toBeDefined();
+    expect((metadata.handler_facts as unknown[]).length).toBe(1);
+    expect(result.graph).not.toBeNull();
+    expect(result.analysisReady).toBeDefined();
+
+    // Honest receipt: the V4 applied narration reaches the wire unswapped —
+    // never the consent-ask copy on an applied tunable (F3 guard class).
+    const text = (response as { assistant_text: string }).assistant_text;
+    expect(text).toBe('Renamed "Price" to "Price (revised)"');
+    expect(text).not.toContain('Nothing in the model moves until you confirm');
+    expect(text).not.toContain('Proposing to');
+
+    // No consent pending shipped with the commit.
+    expect((metadata.pending_actions as unknown[] | undefined) ?? []).toHaveLength(0);
+  });
+
+  it('D-S fixture of record: 8 tunable update_edge_field ops apply in ONE commit — zero held events, applied receipt keeps the rerun chip', async () => {
+    setMode('live');
+    const emitSpy = vi.spyOn(await import('../../../utils/telemetry.js'), 'emit');
+    try {
+      const { response, metadata } = await runDispatch(EIGHT_TUNABLE_EDGE_OPS, {
+        assistantText: 'Updated the influence of Price on Revenue.',
+        appliedChanges: { ...APPLIED_CHANGES, rerun_recommended: true },
+        suggestedActions: [V4_RERUN_CHIP],
+      });
+
+      // Applied in one commit (runDispatch pins exactly one commit call),
+      // with the edit fact and persisted graph.
+      expect(metadata.graph).toBeDefined();
+      expect((metadata.handler_facts as unknown[]).length).toBe(1);
+
+      // Zero held events on the hold path; all 8 envelopes would_apply.
+      const mutationEvents = emitSpy.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('v5.candidate_mutation.'),
+      );
+      expect(mutationEvents).toHaveLength(8);
+      expect(
+        mutationEvents.every((c) => c[0] === 'v5.candidate_mutation.would_apply'),
+      ).toBe(true);
+
+      // The applied receipt's rerun affordance survives to the wire
+      // (generated by edit-graph.ts when rerun_recommended — the existing
+      // edit-applied vocabulary D-S reuses).
+      const chips = (response as { suggested_actions: Array<{ label: string; message: string }> })
+        .suggested_actions;
+      expect(chips.some((c) => c.label === 'Re-run analysis')).toBe(true);
+
+      // Honest receipt text, no consent ask, no proposal language.
+      const text = (response as { assistant_text: string }).assistant_text;
+      expect(text).toBe('Updated the influence of Price on Revenue.');
+      expect(text).not.toContain('Proposing to');
+    } finally {
+      emitSpy.mockRestore();
+    }
+  });
+
+  it('held (STRUCTURAL add): NO persist, NO fact, NO analysis_ready — real pending + held copy instead (propose-confirm unchanged by D-S)', async () => {
+    setMode('live');
+    const { result, response, metadata } = await runDispatch(STRUCT_OPS);
 
     // Structural honesty: nothing persisted, nothing stamped.
     expect(metadata.graph).toBeUndefined();
@@ -276,8 +374,9 @@ describe('mode=live', () => {
     // Held copy replaces the ack prose; §6.6 by construction.
     // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11): the ask NAMES the
     // held change (doctrine (a)) while keeping the swept consent framing.
+    // D-O consent naming unchanged by D-S.
     const text = (response as { assistant_text: string }).assistant_text;
-    expect(text).toContain("update 'Price'");
+    expect(text).toContain("add 'Cost'");
     expect(text).toContain('Nothing in the model moves until you confirm');
     expect(findSuccessClaimHit(text)).toBeNull();
     expect(findForbiddenPhraseHit(text)).toBeNull();
@@ -296,23 +395,33 @@ describe('mode=live', () => {
       .suggested_actions;
     expect(chips).toHaveLength(1);
     expect(chips[0]!.id).toBe(parsed!.chip_id);
-    expect(chips[0]!.message).toBe("Yes, update 'Price'.");
+    expect(chips[0]!.message).toBe("Yes, add 'Cost'.");
 
     // The wire carries the redacted public reason (codes only, no candidate internals).
     const blocks = (response as { blocks: Array<{ details?: Record<string, unknown> }> }).blocks;
     expect(blocks[0]!.details).toMatchObject({
       source: 'graph_management',
       verdict: 'held',
-      blocker_code: 'TUNABLE_APPLY_HELD',
+      blocker_code: 'STRUCTURAL_APPLY_HELD',
     });
     expect(blocks[0]!.details).not.toHaveProperty('candidate');
+  });
+
+  it('MIXED tunable+structural batch: held WHOLESALE — nothing persisted, no partial apply (D-S batch boundary)', async () => {
+    setMode('live');
+    const { result, metadata } = await runDispatch([...FIELD_OPS, ...STRUCT_OPS]);
+    expect(metadata.graph).toBeUndefined();
+    expect((metadata.handler_facts as unknown[]).length).toBe(0);
+    expect(result.graph).toBeNull();
+    expect((metadata.pending_actions as unknown[])).toHaveLength(1);
   });
 
   it('held flow reports an honest R7 outcome (proposal, graph_management branch), never success', async () => {
     setMode('live');
     const emitSpy = vi.spyOn(await import('../../../utils/telemetry.js'), 'emit');
     try {
-      await runDispatch(FIELD_OPS);
+      // (op switched FIELD_OPS → STRUCT_OPS per D-S: tunables now apply.)
+      await runDispatch(STRUCT_OPS);
       const turnEvents = emitSpy.mock.calls.filter((c) => c[0] === 'v5.edit_graph.turn');
       expect(turnEvents).toHaveLength(1);
       expect(turnEvents[0]![1]).toMatchObject({
@@ -328,7 +437,11 @@ describe('mode=live', () => {
 // ── R8: held_proposal block emission (CEE_HELD_PROPOSAL_EMIT, ships dark) ──
 
 describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
-  const HELD_SUMMARY = "A change to 'Price' is held for your confirmation.";
+  // Ops switched FIELD_OPS → STRUCT_OPS per D-S (tunables no longer hold, so
+  // only structural changes mint held_proposal blocks). The added node's id
+  // is not in the PRE-edit graph, so the label-resolving summary falls back
+  // to the generic template — the builder contract, not a regression.
+  const HELD_SUMMARY = 'A change to the model is held for your confirmation.';
 
   function heldProposalBlocksOf(response: unknown): Array<Record<string, unknown>> {
     const blocks = (response as { blocks?: Array<Record<string, unknown>> }).blocks ?? [];
@@ -337,7 +450,7 @@ describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
 
   it('flag OFF (default): held response carries NO held_proposal block (dormancy baseline)', async () => {
     setMode('live');
-    const { response } = await runDispatch(FIELD_OPS);
+    const { response } = await runDispatch(STRUCT_OPS);
     expect(heldProposalBlocksOf(response)).toHaveLength(0);
   });
 
@@ -345,7 +458,7 @@ describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
     setMode('live');
     vi.stubEnv('CEE_HELD_PROPOSAL_EMIT', 'true');
     _resetConfigCache();
-    const { response } = await runDispatch(FIELD_OPS);
+    const { response } = await runDispatch(STRUCT_OPS);
 
     const heldBlocks = heldProposalBlocksOf(response);
     expect(heldBlocks).toHaveLength(1);
@@ -359,8 +472,8 @@ describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
     expect(parsed.success, JSON.stringify(parsed.success ? {} : parsed.error.issues)).toBe(true);
 
     // Typed content — codes and refs, never free prose or doctrine wording.
-    expect(block.mutation_class).toBe('tunable');
-    expect(block.reason_code).toBe('TUNABLE_APPLY_HELD');
+    expect(block.mutation_class).toBe('structural');
+    expect(block.reason_code).toBe('STRUCTURAL_APPLY_HELD');
     expect(block.summary).toBe(HELD_SUMMARY);
 
     // confirm_action_id must reference the REAL confirm chip on THIS response.
@@ -373,12 +486,12 @@ describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
 
   it('flag ON is ADDITIVE: response minus the held_proposal block matches flag-off (same block types, same copy)', async () => {
     setMode('live');
-    const { response: offResponse } = await runDispatch(FIELD_OPS);
+    const { response: offResponse } = await runDispatch(STRUCT_OPS);
 
     vi.clearAllMocks(); // runDispatch pins exactly one commit call per run
     vi.stubEnv('CEE_HELD_PROPOSAL_EMIT', 'true');
     _resetConfigCache();
-    const { response: onResponse } = await runDispatch(FIELD_OPS);
+    const { response: onResponse } = await runDispatch(STRUCT_OPS);
 
     const off = offResponse as { assistant_text: string; suggested_actions: unknown[]; blocks: Array<{ type: string }> };
     const on = onResponse as { assistant_text: string; suggested_actions: unknown[]; blocks: Array<{ type: string }> };

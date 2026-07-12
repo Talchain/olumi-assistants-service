@@ -56,6 +56,18 @@ export interface AddOptionPayload {
     readonly interventions?: Readonly<Record<string, Record<string, unknown>>>;
   };
 }
+/** D-S (ROADMAP §D, Paul 2026-07-12): tunable field-update payload shapes. */
+export interface UpdateNodeFieldPayload {
+  readonly node_id: string;
+  readonly field: string;
+  readonly to: unknown;
+}
+export interface UpdateEdgeFieldPayload {
+  readonly from_node: string;
+  readonly to_node: string;
+  readonly field: string;
+  readonly to: unknown;
+}
 
 /**
  * Map a candidate-build error to a REDACTED blocker. Crucial: `err.message` from
@@ -190,6 +202,116 @@ export function buildAddOptionCandidate(
         clone.edges.push(makeEdge(payload.option.id, e.to_factor_id, e.strength, e.effect_direction));
       }
       return { before: null, after: { option_id: payload.option.id } };
+    });
+    return { candidate: exposeCandidate(mutatedGraph) };
+  } catch (err) {
+    return { error: toBlocker(err) };
+  }
+}
+
+// ============================================================================
+// Tunable field-update builders (D-S ruling — ROADMAP §D, Paul 2026-07-12)
+// ============================================================================
+
+/**
+ * Field paths arrive in every producer spelling: bare root (`description`),
+ * dotted (`strength.mean`, `observed_state.value`), or slash-keyed
+ * (`data/value`, `data/interventions/<fac_id>`). Segments that could reach
+ * the prototype chain are refused outright (the field string is
+ * model-controlled; assigning through `__proto__`/`constructor`/`prototype`
+ * would pollute shared state, and no sanctioned tunable path uses them).
+ */
+const FORBIDDEN_PATH_SEGMENTS: ReadonlySet<string> = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+]);
+
+/**
+ * Set `value` at the (possibly nested) `field` path on `target`. Intermediate
+ * segments that are absent or non-object are replaced with fresh objects —
+ * mirroring the edit pipeline's leaf-path write semantics. A type-invalid
+ * result (e.g. an object grafted over a typed scalar) is caught by the
+ * post-mutation GraphV3 re-validation in `applyAndValidateMutation`, so this
+ * setter never needs schema knowledge. Undeclared NodeV3/EdgeV3 spellings
+ * (e.g. `data/*`) are STRIPPED by that re-validation — readiness-neutral for
+ * the referee's R6 parity check; the live edit pipeline owns the real write.
+ */
+function setTunableFieldPath(
+  target: Record<string, unknown>,
+  field: string,
+  value: unknown,
+): void {
+  const segments = field.split(/[/.]/).filter((s) => s.length > 0);
+  if (segments.length === 0) {
+    throw new D1HandlerError('PARAMETER_INVALID', 'Empty field path.');
+  }
+  for (const seg of segments) {
+    if (FORBIDDEN_PATH_SEGMENTS.has(seg)) {
+      throw new D1HandlerError('PARAMETER_INVALID', 'Forbidden field path segment.');
+    }
+  }
+  let cursor: Record<string, unknown> = target;
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    const seg = segments[i]!;
+    const next = cursor[seg];
+    if (next === null || typeof next !== 'object' || Array.isArray(next)) {
+      cursor[seg] = {};
+    }
+    cursor = cursor[seg] as Record<string, unknown>;
+  }
+  cursor[segments[segments.length - 1]!] = value;
+}
+
+/**
+ * Build the candidate graph for an `update_node_field` envelope. D-S ruling
+ * (ROADMAP §D, Paul 2026-07-12): tunable value edits are would_apply-eligible,
+ * so the referee needs a real candidate for the R6 readiness-parity check —
+ * same sanctioned seam and redaction contract as the other builders. R4
+ * field-safety has already allowlisted `field` before this runs; the builder
+ * stays total regardless.
+ */
+export function buildUpdateNodeFieldCandidate(
+  persistedGraph: unknown,
+  payload: UpdateNodeFieldPayload,
+): CandidateBuildResult {
+  try {
+    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+      const node = clone.nodes.find((n) => n.id === payload.node_id);
+      if (!node) {
+        throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${payload.node_id} not found in graph.`);
+      }
+      setTunableFieldPath(node as Record<string, unknown>, payload.field, payload.to);
+      return { before: null, after: { node_id: payload.node_id } };
+    });
+    return { candidate: exposeCandidate(mutatedGraph) };
+  } catch (err) {
+    return { error: toBlocker(err) };
+  }
+}
+
+/**
+ * Build the candidate graph for an `update_edge_field` envelope (D-S ruling —
+ * see `buildUpdateNodeFieldCandidate`). Targets the FIRST edge matching
+ * from→to, mirroring `graphHasEdge`'s R3 existence semantics.
+ */
+export function buildUpdateEdgeFieldCandidate(
+  persistedGraph: unknown,
+  payload: UpdateEdgeFieldPayload,
+): CandidateBuildResult {
+  try {
+    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+      const edge = clone.edges.find(
+        (e) => e.from === payload.from_node && e.to === payload.to_node,
+      );
+      if (!edge) {
+        throw new D1HandlerError(
+          'ENTITY_NOT_FOUND',
+          `Edge ${payload.from_node} -> ${payload.to_node} not found in graph.`,
+        );
+      }
+      setTunableFieldPath(edge as Record<string, unknown>, payload.field, payload.to);
+      return { before: null, after: { from: payload.from_node, to: payload.to_node } };
     });
     return { candidate: exposeCandidate(mutatedGraph) };
   } catch (err) {

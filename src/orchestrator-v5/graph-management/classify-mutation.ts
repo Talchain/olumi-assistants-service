@@ -1,13 +1,14 @@
 /**
  * Track 3 — structural / tunable classifier (MECHANICAL taxonomy).
  *
- * This labels a mutation kind; it does NOT authorise apply. §6 (structural-vs-
- * tunable doctrine) is PENDING, so the classifier's OUTPUT never un-holds anything
- * — the referee's verdict table keeps every structural mutation and every tunable
- * value-edit HELD (Paul, 2026-07-03: no broad tunable auto-apply). The only
- * `would_apply`-eligible kind is `rename_node` (a label-only, analysis-hash-neutral
- * tunable — T4.0 §1 invariant). When §6 lands, only the verdict table changes; this
- * taxonomy is stable.
+ * This labels a mutation kind; it does NOT authorise apply. The D-S ruling
+ * (ROADMAP §D, Paul 2026-07-12) signed off the tunable half of §6: the
+ * referee's verdict table now makes ALL THREE tunable kinds (rename_node,
+ * update_node_field, update_edge_field) would_apply-eligible via
+ * candidate-build + R6 readiness parity, while every structural mutation
+ * stays HELD (propose-confirm) and removes stay held-unconfirmed. As
+ * predicted here pre-D-S, only the verdict table changed; this taxonomy is
+ * stable.
  *
  * Floor taxonomy (T4.0 R4 allowlist posture + slice4 packet §4 §6 floor):
  *  - tunable      = node label/metadata + value fields, edge strength/probability

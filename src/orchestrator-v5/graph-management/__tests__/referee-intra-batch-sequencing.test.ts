@@ -27,7 +27,6 @@ import {
   ENGINE_CLAIM_IN_TEXT,
   SCHEMA_INVALID,
   STRUCTURAL_APPLY_HELD,
-  TUNABLE_APPLY_HELD,
 } from '../reason-codes.js';
 import { buildReadyGraph, frameFor, hashOf, makeEnvelope } from './fixtures.js';
 import { evaluateEditGraphMutations } from '../../handlers/edit-graph-referee-gate.js';
@@ -152,7 +151,7 @@ describe('negative controls — genuinely absent references STILL reject ENTITY_
 });
 
 describe('other kinds see prior intra-batch entities', () => {
-  it('update_node_field on an intra-batch-added node → held TUNABLE_APPLY_HELD (not ENTITY_NOT_FOUND)', () => {
+  it('update_node_field on an intra-batch-added node → would_apply, not ENTITY_NOT_FOUND (D-S tunable auto-apply, ROADMAP §D Paul 2026-07-12; SAFE: the defining add_node is held, so the batch can never govern proceed)', () => {
     const vs = refereeMutationBatch(
       [
         addNode('fac_x', 'Factor X'),
@@ -165,8 +164,12 @@ describe('other kinds see prior intra-batch entities', () => {
       G,
       frameFor(G),
     );
-    expect(vs[1]!.verdict).toBe('held');
-    expect(vs[1]!.blocker?.code).toBe(TUNABLE_APPLY_HELD);
+    // Pre-D-S pin was held TUNABLE_APPLY_HELD; the point of THIS test is
+    // unchanged — the sequenced view resolves the intra-batch entity, so the
+    // verdict is a doctrine outcome, never ENTITY_NOT_FOUND.
+    expect(vs[0]!.verdict).toBe('held'); // the structural add still holds
+    expect(vs[1]!.verdict).toBe('would_apply');
+    expect(vs[1]!.blocker?.code).not.toBe(ENTITY_NOT_FOUND);
   });
 
   it('add_option targeting an intra-batch-added factor → held (linkage integrity passes), not ENTITY_NOT_FOUND', () => {
