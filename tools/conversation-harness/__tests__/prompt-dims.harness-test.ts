@@ -48,6 +48,19 @@ function row(partial: Partial<TurnRow> & { turn: string }): TurnRow {
   };
 }
 
+/** Full TurnSurfaces with sensible defaults. */
+function surf(partial: Partial<TurnSurfaces>): TurnSurfaces {
+  return {
+    hasHeldProposal: false,
+    winProbabilities: null,
+    leadingOptionLabel: null,
+    optionLabels: [],
+    winPctByLabel: {},
+    payloadPercentages: [],
+    ...partial,
+  };
+}
+
 describe('surfacesFromWire', () => {
   it('lifts held_proposal, win probabilities and the leading option label', () => {
     const s = surfacesFromWire({
@@ -69,6 +82,9 @@ describe('surfacesFromWire', () => {
     expect(s.hasHeldProposal).toBe(true);
     expect(s.leadingOptionLabel).toBe('Option A');
     expect(s.optionLabels).toEqual(['Option A', 'Option B']);
+    expect(s.winPctByLabel).toMatchObject({ 'Option A': 78, 'Option B': 18 });
+    expect(s.payloadPercentages).toContain(78);
+    expect(s.payloadPercentages).toContain(18);
   });
 
   it('falls back to argmax of win_probabilities when no option_comparison', () => {
@@ -105,7 +121,7 @@ describe('PQ2 question-asking (neutral)', () => {
 });
 
 describe('PQ3 grounding (higher-better)', () => {
-  it('marks a numeric/label-citing turn grounded and a generic turn not', () => {
+  it('marks a numeric/label-citing turn grounded and a generic turn not (no payload)', () => {
     const d = pqGrounding(
       [
         row({ turn: 'G1', assistantText: 'Option A leads in 78% of simulations.' }),
@@ -118,6 +134,21 @@ describe('PQ3 grounding (higher-better)', () => {
     const per = (d.details as any).perTurn;
     expect(per.find((p: any) => p.turn === 'G1').grounded).toBe(true);
     expect(per.find((p: any) => p.turn === 'G2').grounded).toBe(false);
+  });
+
+  it('payload-traceable: a fabricated % is NOT grounding when analysis payload exists', () => {
+    const surfaces = { G1: surf({ payloadPercentages: [78, 18], winPctByLabel: { 'Option A': 78 }, optionLabels: ['Option A'] }) };
+    // Cites 55% — absent from the payload (78/18) and names no label -> not grounded.
+    const d = pqGrounding([row({ turn: 'G1', assistantText: 'This option wins about 55% of the time.' })], [], surfaces);
+    expect(d.value).toBe(0);
+    expect((d.details as any).traceableNumberFraction).toBe(0);
+  });
+
+  it('payload-traceable: a real % counts and traceableNumberFraction is 1.0', () => {
+    const surfaces = { G1: surf({ payloadPercentages: [78, 18], winPctByLabel: { 'Option A': 78 }, optionLabels: ['Option A'] }) };
+    const d = pqGrounding([row({ turn: 'G1', assistantText: 'It wins about 78% of the time.' })], [], surfaces);
+    expect(d.value).toBe(1);
+    expect((d.details as any).traceableNumberFraction).toBe(1);
   });
 });
 
@@ -155,29 +186,36 @@ describe('PQ5 guard-cleanliness (lower-better, gating)', () => {
 
 describe('PQ6 coherence (lower-better, gating)', () => {
   it('flags a success claim while a proposal is still held', () => {
-    const surfaces: Record<string, TurnSurfaces> = {
-      T1: { hasHeldProposal: true, winProbabilities: null, leadingOptionLabel: null, optionLabels: [] },
-    };
+    const surfaces = { T1: surf({ hasHeldProposal: true }) };
     const d = pqCoherence([row({ turn: 'T1', guardHits: { ...CLEAN_GUARDS, structuralSuccessClaim: true } })], surfaces);
     expect(d.value).toBe(1);
     expect((d.details as any).contradictions[0].kind).toBe('success-claim-with-held-proposal');
   });
 
   it('flags a win-claim that contradicts the analysis blocks', () => {
-    const surfaces: Record<string, TurnSurfaces> = {
-      T1: { hasHeldProposal: false, winProbabilities: { 'Option A': 0.8, 'Option B': 0.2 }, leadingOptionLabel: 'Option A', optionLabels: ['Option A', 'Option B'] },
-    };
+    const surfaces = { T1: surf({ winProbabilities: { 'Option A': 0.8, 'Option B': 0.2 }, leadingOptionLabel: 'Option A', optionLabels: ['Option A', 'Option B'], winPctByLabel: { 'Option A': 80, 'Option B': 20 } }) };
     const d = pqCoherence([row({ turn: 'T1', assistantText: 'Option B comes out ahead here.' })], surfaces);
     expect(d.value).toBe(1);
     expect((d.details as any).contradictions[0].kind).toBe('win-claim-contradicts-blocks');
   });
 
   it('does not flag a coherent win-claim', () => {
-    const surfaces: Record<string, TurnSurfaces> = {
-      T1: { hasHeldProposal: false, winProbabilities: { 'Option A': 0.8, 'Option B': 0.2 }, leadingOptionLabel: 'Option A', optionLabels: ['Option A', 'Option B'] },
-    };
+    const surfaces = { T1: surf({ winProbabilities: { 'Option A': 0.8, 'Option B': 0.2 }, leadingOptionLabel: 'Option A', optionLabels: ['Option A', 'Option B'], winPctByLabel: { 'Option A': 80, 'Option B': 20 } }) };
     const d = pqCoherence([row({ turn: 'T1', assistantText: 'Option A comes out ahead here.' })], surfaces);
     expect(d.value).toBe(0);
+  });
+
+  it('flags a prose % that disagrees with the payload win-% (B1 fragment-contradiction detector)', () => {
+    const surfaces = { T1: surf({ optionLabels: ['Option A', 'Option B'], winPctByLabel: { 'Option A': 80, 'Option B': 20 }, leadingOptionLabel: 'Option A' }) };
+    // Prose attributes ~50% to Option A, but the payload win-% for Option A is 80%.
+    const d = pqCoherence([row({ turn: 'T1', assistantText: 'Option A wins roughly 50% of the time.' })], surfaces);
+    expect((d.details as any).contradictions.some((c: any) => c.kind === 'number-disagrees-with-payload')).toBe(true);
+  });
+
+  it('does not flag a prose % that matches the payload', () => {
+    const surfaces = { T1: surf({ optionLabels: ['Option A', 'Option B'], winPctByLabel: { 'Option A': 80, 'Option B': 20 }, leadingOptionLabel: 'Option A' }) };
+    const d = pqCoherence([row({ turn: 'T1', assistantText: 'Option A wins about 80% of the time.' })], surfaces);
+    expect((d.details as any).contradictions.some((c: any) => c.kind === 'number-disagrees-with-payload')).toBe(false);
   });
 });
 
@@ -185,7 +223,7 @@ describe('runPromptDims', () => {
   it('returns all six prompt dims exactly once and unions surface option labels into grounding', () => {
     const dims = runPromptDims(
       [row({ turn: 'T1', assistantText: 'Option A leads by a wide margin.' })],
-      { surfacesByTurn: { T1: { hasHeldProposal: false, winProbabilities: null, leadingOptionLabel: 'Option A', optionLabels: ['Option A'] } } },
+      { surfacesByTurn: { T1: surf({ leadingOptionLabel: 'Option A', optionLabels: ['Option A'] }) } },
     );
     expect(dims.map((d) => d.dim.split('-')[0]).sort()).toEqual(['PQ1', 'PQ2', 'PQ3', 'PQ4', 'PQ5', 'PQ6']);
     // "Option A" came only from the surface, yet grounding recognises it.

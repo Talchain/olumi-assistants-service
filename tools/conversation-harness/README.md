@@ -46,6 +46,8 @@ scorer/dims.ts           v0 property-based dims (pure, self-tested)
 scorer/prompt-dims.ts    prompt-quality dims (1.70 v1): comparable scalars for A/B
 scorer/score-run.ts      per-run scorer — imports PRODUCTION guards from src/ (never copies)
 scorer/ab-verdict.ts     A/B verdict (1.70 v1): baseline vs candidate deltas + call
+scorer/llm-judge.ts      OPT-IN rubric LLM-judge (1.70 v1): specificity/actionability/
+                         depth/no-filler, N reruns, mean+variance delta (live model)
 scorer/localize.ts       localization reporter v0
 journeys/                journey-v2 + frozen journeys (proven) + scenarios s1–s5 (new)
 fixtures/                frozen-graph.json + frozen-brief.txt (deterministic analysed state)
@@ -178,15 +180,47 @@ v0: property-based, NEVER exact-text. `value = null` = not measurable this run
 |---|---|---|---|
 | PQ1 brevity-density | lower-better | verbosity — mean coach-turn words (+ sentence length, bullet ratio) | no |
 | PQ2 question-asking | **neutral** | question count / post-draft framing question (good for clarify, bad for terse coach — reported, not scored) | no |
-| PQ3 grounding | higher-better | coaching that cites specific numbers / named graph options vs generic prose | no |
+| PQ3 grounding | higher-better | coaching whose claims **trace to the analysis payload** — a cited % must match a real win-% / percentile (±1); a fabricated number is not grounding (`traceableNumberFraction` in details is the fabrication detector) | no |
 | PQ4 chip-correctness | higher-better | chips present on either/or + enumerated question turns; identical-repeat penalty (details) | no |
 | PQ5 guard-cleanliness | lower-better | forbidden phrase / success claim / held-science / mutation-language / structural-success hits (the imported `src/` guards) | **yes** |
-| PQ6 coherence | lower-better | cross-surface contradiction: says "done" while a proposal is still held; claims a mutation then asks to apply; names a winner the analysis blocks contradict | **yes** |
+| PQ6 coherence | lower-better | cross-surface / cross-fragment contradiction: says "done" while a proposal is still held; claims a mutation then asks to apply; names a winner the blocks contradict; **a prose % attributed to an option that disagrees with that option's payload win-%** | **yes** |
 
 A **gating** regression (PQ5 or PQ6) caps the overall verdict at *worse* no matter
 how many other dims improved — introducing a forbidden phrase, or making the coach
 name the wrong winner, is disqualifying. `score-run.ts` emits these as the
 `prompt_dims` block of `scores.json`.
+
+**PQ3 vs PQ6 — grounding vs attribution.** They are complementary and both
+property-based: PQ3 asks *did this number come from the analysis at all* (lenient
+— win-% **and** percentiles count as payload figures), PQ6 asks *is the number
+correctly attributed* (strict — a win-% claim must match `win_probabilities`). A
+coach that quotes `55%` when the payload has a `54%` percentile is grounded (PQ3)
+but, if it attributes that `55%` to the leading option whose true win-% is `78%`,
+PQ6 flags a `number-disagrees-with-payload` contradiction. PQ6's numeric check is
+the **fragment-contradiction detector the decision_review DECOMPOSITION (B1)
+needs** — when one call becomes four parallel fragments (headline / driver-bite /
+fragility / calibration), a number a monolith kept implicitly consistent can
+silently diverge; this dim catches it.
+
+### LLM-judge (opt-in — `scorer/llm-judge.ts`)
+
+Property dims can't judge *is the coaching actually better*. The LLM-judge scores
+each coach turn on a rubric — **specificity, actionability, coaching_depth,
+no_generic_filler** (1–5 each) — independently per side (no position bias), N≥3
+times, and reports per-criterion + overall **mean and variance** deltas with a
+better/worse/mixed call. A delta counts only if it clears the combined rerun
+stdev (so a swing inside judge variance reads as flat). It makes **live model
+calls** (default `claude-opus-4-8`), so it is **opt-in and not part of the default
+hermetic pipeline**:
+
+```bash
+LLM_JUDGE=1 BASELINE_DIR=runs/base-1 CANDIDATE_DIR=runs/cand-1 \
+  pnpm exec tsx scorer/llm-judge.ts   # -> runs/cand-1/llm-judge.json
+```
+
+The prompt-building, response parsing, and mean/variance aggregation are pure and
+self-tested; only the thin model-call wrapper needs credentials (`ANTHROPIC_API_KEY`
+or an `ant` profile).
 
 ### Verdict + flakiness (`scorer/ab-verdict.ts`)
 
@@ -306,9 +340,18 @@ Prompt A/B (1.70 v1):
 - Noise thresholds in `ab-verdict.ts` (`NOISE_THRESHOLD`) are seeded from
   judgement, not yet from a measured rerun-spread distribution — tighten them
   once a few real N≥3 arm A/Bs are captured.
-- PQ6 coherence proxies are deliberately **conservative** (win-claim contradiction
-  fires only when a lead sentence names exactly one option); it catches the clear
-  cases and will miss subtly-hedged contradictions — expand as real misses appear.
+- PQ6 coherence proxies are deliberately **conservative** (win-claim + numeric
+  contradiction fire only when a sentence names exactly one option); they catch the
+  clear cases and will miss subtly-hedged contradictions — expand as real misses
+  appear. The numeric tolerance (±3 pts on win-% attribution) is a starting value.
+- PQ3 grounding traceability includes percentiles in the payload figure set
+  (lenient by design — see "grounding vs attribution" above); if fabrication
+  detection needs to be sharper, restrict `payloadPercentages` to the win-% set.
+- The **LLM-judge is opt-in and was NOT run live in this lane** (needs credentials
+  + live calls); its pure logic is self-tested and it is not wired into the default
+  `ab-verdict`. Wiring it into the verdict as an additional (non-gating) signal is a
+  v1.1 follow-up.
 - The prompt-eval pipeline (`score-run` → `ab-verdict`) is proven end-to-end on the
-  redacted sample run; a **live hermetic-arm A/B** additionally needs
-  `staging-parity.env` + a built store and was not run in the build lane.
+  redacted sample run (incl. the payload-traceable grounding + B1 numeric
+  fragment-contradiction detector on real ISL payload); a **live hermetic-arm A/B**
+  additionally needs `staging-parity.env` + a built store and was not run here.

@@ -47,9 +47,15 @@ export interface PromptDimScore {
  * the per-turn map from the same wires it already loads. */
 export interface TurnSurfaces {
   hasHeldProposal: boolean;
-  winProbabilities: Record<string, number> | null; // option label -> win probability
+  winProbabilities: Record<string, number> | null; // option label -> win probability (0..1)
   leadingOptionLabel: string | null;
   optionLabels: string[];
+  /** Win-% per option as an integer percentage (for prose ↔ payload number
+   * matching). Keyed by option label. */
+  winPctByLabel: Record<string, number>;
+  /** Every integer figure that appears anywhere in the analysis payload
+   * (win-% + option outcome percentiles as %), for number-traceability. */
+  payloadPercentages: number[];
 }
 
 export function surfacesFromWire(wire: unknown): TurnSurfaces {
@@ -69,25 +75,41 @@ export function surfacesFromWire(wire: unknown): TurnSurfaces {
     : ((analysis?.enrichment as Record<string, unknown> | undefined)?.option_comparison as
         | Record<string, unknown>[]
         | undefined) ?? [];
+  const payloadPercentages = new Set<number>();
+  const addPct = (v: unknown) => {
+    if (typeof v === 'number' && Number.isFinite(v)) payloadPercentages.add(Math.round(v));
+  };
   for (const opt of comparison) {
     const label = String(opt?.label ?? opt?.option_label ?? '');
     if (label) optionLabels.push(label);
     if (analysis?.leading_option_id != null && opt?.id === analysis.leading_option_id) {
       leadingOptionLabel = label || leadingOptionLabel;
     }
+    const outcome = (opt?.outcome ?? {}) as Record<string, unknown>;
+    // Outcome percentiles are fractions in [-1,1]; surface as integer % too.
+    for (const k of ['p10', 'p50', 'p90', 'mean']) addPct((outcome[k] as number) * 100);
+    addPct((opt?.win_probability as number) * 100);
   }
-  if (leadingOptionLabel == null && winProbabilities) {
-    const entries = Object.entries(winProbabilities);
-    if (entries.length > 0) {
-      leadingOptionLabel = entries.sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0][0];
+  const winPctByLabel: Record<string, number> = {};
+  if (winProbabilities) {
+    for (const [label, prob] of Object.entries(winProbabilities)) {
+      const pct = Math.round((prob ?? 0) * 100);
+      winPctByLabel[label] = pct;
+      payloadPercentages.add(pct);
+      if (!optionLabels.includes(label)) optionLabels.push(label);
     }
-    for (const k of Object.keys(winProbabilities)) if (!optionLabels.includes(k)) optionLabels.push(k);
+    if (leadingOptionLabel == null) {
+      const entries = Object.entries(winProbabilities);
+      if (entries.length > 0) leadingOptionLabel = entries.sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0][0];
+    }
   }
   return {
     hasHeldProposal: w.held_proposal != null && w.held_proposal !== false,
     winProbabilities,
     leadingOptionLabel,
     optionLabels,
+    winPctByLabel,
+    payloadPercentages: [...payloadPercentages],
   };
 }
 
@@ -122,6 +144,27 @@ function bulletLines(text: string): number {
 
 function numbersCited(text: string): string[] {
   return text.match(/\b\d+(?:\.\d+)?%?|£[\d,]+/g) ?? [];
+}
+
+/** Integer percentages that appear in prose (e.g. "78%" -> 78). */
+function prosePercentages(text: string): number[] {
+  return [...text.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) => Math.round(Number(m[1])));
+}
+
+/** A prose % is payload-traceable if some payload % is within ±tol (rounding). */
+function isTraceable(pct: number, payload: number[], tol = 1): boolean {
+  return payload.some((p) => Math.abs(p - pct) <= tol);
+}
+
+/** Extract (option label, %) pairs asserted in one sentence: a % is attributed
+ * to the single option label that co-occurs with it in the sentence. */
+function optionPercentPairs(sentence: string, optionLabels: string[]): { label: string; pct: number }[] {
+  const pcts = prosePercentages(sentence);
+  if (pcts.length === 0) return [];
+  const lower = sentence.toLowerCase();
+  const named = optionLabels.filter((l) => l.length > 2 && lower.includes(l.toLowerCase()));
+  if (named.length !== 1) return []; // ambiguous attribution -> skip (conservative)
+  return pcts.map((pct) => ({ label: named[0], pct }));
 }
 
 function labelsNamed(text: string, graphLabels: string[]): string[] {
@@ -239,31 +282,69 @@ export function pqQuestionAsking(rows: TurnRow[]): PromptDimScore {
   };
 }
 
-// ---------- PQ3 grounding (higher-better) — coaching cites specifics not prose ----------
+// ---------- PQ3 grounding (higher-better) — coaching TRACEABLE to the payload ----------
 
-export function pqGrounding(rows: TurnRow[], graphLabels: string[]): PromptDimScore {
+export function pqGrounding(
+  rows: TurnRow[],
+  graphLabels: string[],
+  surfacesByTurn: Record<string, TurnSurfaces> = {},
+): PromptDimScore {
   const coach = coachRows(rows);
+  let anyPayload = false;
   const perTurn = coach.map((r) => {
+    const s = surfacesByTurn[r.turn];
+    const payload = s?.payloadPercentages ?? [];
+    if (payload.length > 0) anyPayload = true;
     const numbers = numbersCited(r.assistantText);
     const labels = labelsNamed(r.assistantText, graphLabels);
-    const grounded = (numbers.length >= 1 || labels.length >= 1) && !genericOnly(r.assistantText, numbers.length, labels.length);
-    return { turn: r.turn, numbers: numbers.length, labels: labels.length, generic: genericOnly(r.assistantText, numbers.length, labels.length), grounded };
+    // Payload-traceable grounding: when the turn HAS analysis payload, a cited
+    // percentage only counts if it traces to a real payload figure (the review's
+    // "fraction of claims that trace to a real payload field"); when no payload
+    // exists (e.g. a clarify turn), fall back to citing any specific number.
+    const pcts = prosePercentages(r.assistantText);
+    const traceablePcts = payload.length > 0 ? pcts.filter((p) => isTraceable(p, payload)) : pcts;
+    const nonPctNumbers = numbers.filter((n) => !/%$/.test(n)).length;
+    const groundedNumberCount = payload.length > 0 ? traceablePcts.length + nonPctNumbers : numbers.length;
+    const grounded =
+      (groundedNumberCount >= 1 || labels.length >= 1) &&
+      !genericOnly(r.assistantText, groundedNumberCount, labels.length);
+    return {
+      turn: r.turn,
+      labels: labels.length,
+      prosePercentages: pcts.length,
+      traceablePercentages: traceablePcts.length,
+      hasPayload: payload.length > 0,
+      generic: genericOnly(r.assistantText, groundedNumberCount, labels.length),
+      grounded,
+    };
   });
   const groundedFrac = perTurn.length
     ? Number((perTurn.filter((t) => t.grounded).length / perTurn.length).toFixed(3))
     : null;
+  // Number-traceability sub-metric: across turns with payload, what fraction of
+  // prose percentages trace to a real payload figure (fabrication detector).
+  const withPct = perTurn.filter((t) => t.hasPayload && t.prosePercentages > 0);
+  const traceableNumberFraction = withPct.length
+    ? Number(
+        (
+          withPct.reduce((a, t) => a + t.traceablePercentages, 0) /
+          withPct.reduce((a, t) => a + t.prosePercentages, 0)
+        ).toFixed(3),
+      )
+    : null;
   return {
     dim: 'PQ3-grounding',
-    label: 'Grounding (fraction of coach turns citing specific graph/analysis facts)',
+    label: 'Grounding (coach turns whose claims trace to the analysis payload)',
     direction: 'higher-better',
     gating: false,
     flaky: true,
     value: groundedFrac,
     unit: 'fraction',
-    details: { groundedFraction: groundedFrac, graphLabelCount: graphLabels.length, perTurn },
+    details: { groundedFraction: groundedFrac, traceableNumberFraction, anyPayload, graphLabelCount: graphLabels.length, perTurn },
     notes: [
-      'grounded turn = cites >=1 specific number OR names >=1 graph option/factor label, and is not dominated by a generic-advice marker',
-      'reuses the v0 number-grounding direction — a coaching prompt that quotes the analysis beats one that emits generic prose',
+      'grounded turn = names >=1 real graph option/factor OR cites >=1 payload-TRACEABLE number, and is not dominated by generic-advice prose',
+      'when analysis payload is present, a prose % only counts if it matches a real win-% / percentile (±1) — a fabricated number is NOT grounding',
+      'traceableNumberFraction (details) is the fabrication detector: <1.0 means the coach quoted numbers absent from the payload',
     ],
   };
 }
@@ -385,6 +466,20 @@ export function pqCoherence(rows: TurnRow[], surfacesByTurn: Record<string, Turn
         }
       }
     }
+    // (d) a % attributed to an option in prose disagrees with that option's
+    // payload win-% by more than tolerance. This is the fragment-contradiction
+    // detector the decision_review DECOMPOSITION (B1) needs: 4 parallel
+    // fragments can silently diverge on a number a monolith kept consistent.
+    if (s?.winPctByLabel && Object.keys(s.winPctByLabel).length > 0) {
+      for (const sent of sentenceList(r.assistantText)) {
+        for (const { label, pct } of optionPercentPairs(sent, s.optionLabels)) {
+          const truth = s.winPctByLabel[label];
+          if (truth != null && Math.abs(truth - pct) > 3) {
+            contradictions.push({ turn: r.turn, kind: 'number-disagrees-with-payload', detail: `text says "${label}" ~${pct}% but payload win-% is ${truth}%` });
+          }
+        }
+      }
+    }
   }
   const measurable = active.some((r) => r.guardHits != null || surfacesByTurn[r.turn] != null);
   return {
@@ -421,7 +516,7 @@ export function runPromptDims(rows: TurnRow[], opts: RunPromptDimsOpts = {}): Pr
   return [
     pqBrevityDensity(rows),
     pqQuestionAsking(rows),
-    pqGrounding(rows, graphLabels),
+    pqGrounding(rows, graphLabels, surfacesByTurn),
     pqChipCorrectness(rows),
     pqGuardCleanliness(rows),
     pqCoherence(rows, surfacesByTurn),
