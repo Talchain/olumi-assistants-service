@@ -643,6 +643,30 @@ const ConfigSchema = z.object({
         const lower = (val ?? "").toLowerCase().trim();
         return lower === "shadow" || lower === "enforce" ? lower : "off";
       }),
+    // CEE_ROLLING_SUMMARY — Context Architecture v2 S4 (ROADMAP 1.73, design
+    // pack 01 §2, 05 §S4): the two-stage rolling-conversation-summary flag.
+    //   'off'      (default): the commit-seam maintainer is NOT invoked —
+    //              byte-identical to pre-S4 (no store construction, no model
+    //              call, no env reads; pinned by commit-rolling-summary-hook.test).
+    //   'maintain' (shadow): the summariser WRITES + STORES summaries off the
+    //              turn path (fire-and-forget, monotonic write), but NOTHING
+    //              consumes them — no prompt sees a summary. Lets a week of real
+    //              summaries be inspected before any prompt injects one.
+    //   'inject'  : the summary additionally enters the routing/edit prompts —
+    //              the S4 INJECTION FOLLOW-UP wires this; it gates on D-G2/D-G4
+    //              ratification + the harness 1.70 continuity scenario. Until
+    //              that lands, 'inject' behaves like 'maintain' (maintainer on;
+    //              no injection code present yet).
+    // Unrecognised values fall back to 'off'. Ships dark: not in render*.yaml,
+    // AND the backing migration (20260712120000_v5_rolling_summary.sql) is a
+    // DRAFT — the RPCs do not exist on staging until Paul executes it, so a
+    // stray flip degrades to swallowed store errors, never a turn failure.
+    rollingSummary: z
+      .union([z.string(), z.undefined()])
+      .transform((val): "off" | "maintain" | "inject" => {
+        const lower = (val ?? "").toLowerCase().trim();
+        return lower === "maintain" || lower === "inject" ? lower : "off";
+      }),
   }),
 
   // Prompt Cache Configuration
@@ -807,6 +831,7 @@ const ConfigSchema = z.object({
       orchestrator: z.string().optional(), // Model for orchestrator Phase 3 + tool-calling
       edit_graph: z.string().optional(), // Model for edit_graph tool handler
       m2_review: z.string().optional(), // Model for V6 dual-draft M2 graph review (CEE_MODEL_M2_REVIEW; recommended claude-opus-4-8 at activation)
+      summary: z.string().optional(), // Context v2 S4 rolling summariser (CEE_MODEL_SUMMARY; haiku-class default, 1.74 estate re-points it)
     }).default({}),
     // Per-operation max tokens limits
     maxTokens: z.object({
@@ -821,6 +846,7 @@ const ConfigSchema = z.object({
       orchestrator: z.coerce.number().int().positive().optional(), // Max tokens for orchestrator Phase 3
       edit_graph: z.coerce.number().int().positive().optional(), // Max tokens for edit_graph tool
       m2_review: z.coerce.number().int().positive().optional(), // Max tokens for V6 dual-draft M2 review (default 4096 in m2-review.ts)
+      summary: z.coerce.number().int().positive().optional(), // Context v2 S4 rolling summariser (the module sets its own default)
     }).default({}),
     // Tiered model selection (Phase: Model Selection)
     modelSelection: z.object({
@@ -1264,6 +1290,7 @@ function parseConfig(): Config {
       contextDisclosureV2: env.CEE_CONTEXT_DISCLOSURE_V2,
       contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
       enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
+      rollingSummary: env.CEE_ROLLING_SUMMARY,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,
@@ -1421,6 +1448,7 @@ function parseConfig(): Config {
         orchestrator: env.CEE_MODEL_ORCHESTRATOR,
         edit_graph: env.CEE_MODEL_EDIT_GRAPH,
         m2_review: env.CEE_MODEL_M2_REVIEW,
+        summary: env.CEE_MODEL_SUMMARY,
       },
       // Per-operation max tokens limits
       maxTokens: {

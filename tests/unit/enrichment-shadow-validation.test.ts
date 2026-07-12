@@ -54,8 +54,8 @@ function setMode(mode: string | undefined): void {
 
 function mismatchEvents(): Record<string, unknown>[] {
   return emitSpy.mock.calls
-    .filter((c) => c[0] === TelemetryEvents.V5EnrichmentSchemaMismatch)
-    .map((c) => c[1] as Record<string, unknown>);
+    .filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5EnrichmentSchemaMismatch)
+    .map((c: readonly unknown[]) => c[1] as Record<string, unknown>);
 }
 
 /** Fails AnalysisEnrichmentSchema: analysis_status must be an enum string. */

@@ -555,6 +555,23 @@ export const TelemetryEvents = {
   // is shadow/enforce and AnalysisEnrichmentSchema.safeParse fails on a
   // PLoT run response. Log-only; the turn proceeds unchanged (stage 1).
   V5EnrichmentSchemaMismatch: "v5.enrichment.schema_mismatch",
+  // Context Architecture v2 S4 (ROADMAP 1.73; design pack 01 §2/§4, 03 §2).
+  // Rolling conversation summary. Both LOG-ONLY (debugOnlyEvents; no Datadog
+  // mapping — harness 1.70 v1 is the consumer), content-free (statuses/counts,
+  // never summary text).
+  //   v5.summary.updated — one per commit-seam maintainer pass: status
+  //                        (applied/regressed/rejected_kept_prior/floor/…),
+  //                        generator (regen/incremental/floor), duration_ms,
+  //                        chars, capped_fallback. `regressed` is the R4
+  //                        monotonic no-op — an out-of-order/stale write that
+  //                        the DB guard refused (NOT an error).
+  //   v5.summary.lag     — the staleness-invariant signal (01 §4): emitted when
+  //                        summary_lag_turns exceeds the verbatim-window bound,
+  //                        so a summariser outage is loud + disclosed. Emitted
+  //                        by the injector at assembly time (S4 injection
+  //                        follow-up); registered here with the maintainer.
+  V5SummaryUpdated: "v5.summary.updated",
+  V5SummaryLag: "v5.summary.lag",
 
   // V5 latency observability (Fix 4 — per-stage timings).
   // Always emitted to logs. The matching `_timings` block on the wire
