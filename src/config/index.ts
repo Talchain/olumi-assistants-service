@@ -593,6 +593,56 @@ const ConfigSchema = z.object({
     // Paul's execution gate; enablement is sequenced behind it (see
     // ROADMAP 3.1 and parallel-briefs/PLATFORM-REPORT-2026-07-10-1.md).
     decisionRecordCapture: booleanString.default(false),
+    // CEE_CONTEXT_DISCLOSURE_V2 — Context Architecture v2 S1 (ROADMAP 1.73,
+    // design pack 02 §Disclosure): in-band disclosure of the two remaining
+    // silent context cuts. When true: (1) the edit-lane graph section header
+    // reports POST-truncation counts + an in-section
+    // "(graph truncated: showing X of Y nodes, Z of W edges)" marker
+    // (pre-S1 the header actively misreported full counts over truncated
+    // JSON); (2) the routing pack conversation gains
+    // `window: {shown, available}` and per-turn `truncated` flags for
+    // messages at the persistence cap. Default OFF; flag-off is
+    // BYTE-IDENTICAL prompt output (pinned by
+    // tests/unit/context-disclosure-v2.test.ts) — prompt bytes change on
+    // flip, so enablement waits on the harness A/B (05 §S1). Ships dark:
+    // not declared in render*.yaml.
+    contextDisclosureV2: booleanString.default(false),
+    // CEE_CONTEXT_BRIEF_ALL_SITES — Context Architecture v2 S2 (ROADMAP
+    // 1.73, design pack 02 §Seam 1): thread the persisted decision brief
+    // (`scenarios.brief_text`) into the edit/repair LLM context — the two
+    // turn-path sites that today receive NOTHING of the brief. When true,
+    // dispatchEditGraph reads the brief (one extra scenarios read, degrade-
+    // to-absent on failure) and the edit-context serialiser renders a
+    // `## Decision Brief` section: first 1,000 chars, truncation disclosed
+    // (edit needs decision framing to resolve "the hire option" style
+    // referents, not the full narrative — 02 §Seam 1 sizes table).
+    // Repair inherits automatically (same contextSection). Default OFF;
+    // flag-off = no read, no section, byte-identical prompts (pinned by
+    // tests/unit/edit-context-brief.test.ts). Ships dark: not declared in
+    // render*.yaml.
+    contextBriefAllSites: booleanString.default(false),
+    // CEE_ENRICHMENT_VALIDATION — Context Architecture v2 S6 (ROADMAP 1.73,
+    // design pack 02 §Seam 3): staged validation of the PLoT→CEE enrichment
+    // passthrough (the platform's known-open seam — attached today as
+    // `response as Record<string, unknown>`, zero schema imports).
+    //   'off'     (default): no parse at all — byte-identical to pre-S6.
+    //   'shadow'  : AnalysisEnrichmentSchema.safeParse on every PLoT run
+    //               response; mismatch → v5.enrichment.schema_mismatch
+    //               event; turn proceeds UNCHANGED. Produces the
+    //               mismatch-rate evidence stage 3 requires.
+    //   'enforce' : stage 3 is NOT shipped in this slice — 02 §Seam 3
+    //               forbids enforcement before preconditions (a)–(c)
+    //               (producer trace + 7-day/200-analysis shadow-clean).
+    //               Setting it today DOWNGRADES to shadow behaviour with a
+    //               warning (see enrichment-validation.ts).
+    // Unrecognised values fall back to 'off'. Ships dark: not declared in
+    // render*.yaml.
+    enrichmentValidation: z
+      .union([z.string(), z.undefined()])
+      .transform((val): "off" | "shadow" | "enforce" => {
+        const lower = (val ?? "").toLowerCase().trim();
+        return lower === "shadow" || lower === "enforce" ? lower : "off";
+      }),
   }),
 
   // Prompt Cache Configuration
@@ -1211,6 +1261,9 @@ function parseConfig(): Config {
       uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,
       heldProposalEmit: env.CEE_HELD_PROPOSAL_EMIT,
       decisionRecordCapture: env.CEE_DECISION_RECORD_CAPTURE,
+      contextDisclosureV2: env.CEE_CONTEXT_DISCLOSURE_V2,
+      contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
+      enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

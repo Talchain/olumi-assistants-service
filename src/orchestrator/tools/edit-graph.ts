@@ -55,7 +55,8 @@ import type {
 import type { RouteMetadata } from "../pipeline/types.js";
 import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "../plot-client.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
-import { serialiseEditContextForLLM } from "../context/serialise.js";
+import { serialiseEditContextForLLMWithMeta } from "../context/serialise.js";
+import { emitContextBudget } from "../../orchestrator-v5/context/context-budget-telemetry.js";
 import {
   validatePatchOperations,
   formatPatchValidationErrors,
@@ -1739,6 +1740,10 @@ export async function handleEditGraph(
 
   // Capture prompt metadata for telemetry/debugging
   let promptMeta: ReturnType<typeof getSystemPromptMeta> | undefined;
+  // Context v2 S0: repair-prompt identity for the repair-attempt
+  // `v5.context_budget` events. Resolved lazily on the first repair attempt;
+  // `null` = resolution failed (observability-only, never fatal).
+  let repairPromptMeta: ReturnType<typeof getSystemPromptMeta> | null | undefined;
   try {
     promptMeta = getSystemPromptMeta('edit_graph');
   } catch {
@@ -1759,8 +1764,12 @@ export async function handleEditGraph(
     );
   }
 
-  // Build context section for LLM (edit compact graph + framing + analysis + selected elements)
-  const contextSection = serialiseEditContextForLLM(context);
+  // Build context section for LLM (edit compact graph + framing + analysis + selected elements).
+  // Context v2 S0: the WithMeta form additionally yields per-section char
+  // counts + truncation records for `v5.context_budget` at this adapter
+  // boundary. `.text` is byte-identical to the legacy serialiser output.
+  const serialisedContext = serialiseEditContextForLLMWithMeta(context);
+  const contextSection = serialisedContext.text;
 
   // Combine system prompt with serialised context
   const fullSystemPrompt = `${systemPrompt}\n\n${intentInstruction ? `${intentInstruction}\n\n` : ''}${contextSection}`;
@@ -1888,6 +1897,36 @@ export async function handleEditGraph(
     inputTokensSum += chatResult.usage?.input_tokens ?? 0;
     outputTokensSum += chatResult.usage?.output_tokens ?? 0;
     lastStopReason = chatResult.stopReason ?? null;
+
+    // Context v2 S0 (ROADMAP 1.73, 03 §2): once per LLM call at this
+    // adapter boundary — repair attempts are their own call_site so the
+    // dashboard separates first-try context cost from repair context cost.
+    // The contextSection is IDENTICAL across attempts (only the system
+    // prompt + user message differ), so section_chars repeat by design.
+    // Prompt identity: the edit prompt's meta is captured above; the
+    // repair prompt's is resolved lazily on first repair attempt.
+    if (isRepair && repairPromptMeta === undefined) {
+      try {
+        repairPromptMeta = getSystemPromptMeta('repair_edit_graph');
+      } catch {
+        repairPromptMeta = null; // metadata is observability-only
+      }
+    }
+    const budgetPromptMeta = isRepair ? repairPromptMeta : promptMeta;
+    emitContextBudget({
+      call_site: isRepair ? 'repair_edit_graph' : 'edit_graph',
+      model: chatResult.model ?? null,
+      prompt_version: budgetPromptMeta?.prompt_version != null ? String(budgetPromptMeta.prompt_version) : null,
+      prompt_hash: budgetPromptMeta?.prompt_hash ?? null,
+      request_id: requestId,
+      scenario_id: context.scenario_id ?? null,
+      section_chars: serialisedContext.sectionChars,
+      total_chars: contextSection.length,
+      truncations: serialisedContext.truncations,
+      summary_lag_turns: null, // no summary layer until S4
+      ui_narrowed: null, // narrowing marker is a routing-ingress concern
+      usage: chatResult.usage,
+    });
 
     // Bidirected edges: the edit_graph prompt (v6) constrains output to directional
     // from/to operations only. Bidirected edge references in the schema are for

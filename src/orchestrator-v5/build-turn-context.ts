@@ -654,6 +654,45 @@ export async function loadRecentConversationTurns(
 }
 
 /**
+ * Context Architecture v2 S2 (ROADMAP 1.73, 02 §Seam 1) — standalone
+ * `scenarios.brief_text` read for callers outside `buildTurnContext`'s
+ * ORIENT step. Used by `dispatchEditGraph` (flag
+ * CEE_CONTEXT_BRIEF_ALL_SITES) to thread the persisted decision brief into
+ * the edit/repair LLM context — the V4 edit dispatch runs entirely outside
+ * `buildTurnContext` (see route-v2.ts), so, like
+ * {@link loadRecentConversationTurns}, it has no other route to this read.
+ *
+ * Lives here so the state-write-invariant pre-push guard stays satisfied
+ * (SessionStore imports are restricted to session/, commit.ts, and this
+ * module). Delegates to `SessionStore.loadGraphAndBriefText` (the one-round-
+ * trip scenarios read) and discards the graph.
+ *
+ * Graceful degradation: store-factory failure or read failure resolve to
+ * `null` (no brief) — an edit turn must never fail over a brief read.
+ */
+export async function loadScenarioBriefText(
+  scenarioId: string,
+  requestId: string,
+): Promise<string | null> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store) return null;
+  try {
+    const { briefText } = await store.loadGraphAndBriefText(scenarioId);
+    return briefText;
+  } catch (err) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      'loadScenarioBriefText degraded to null (edit-lane brief read failure)',
+    );
+    return null;
+  }
+}
+
+/**
  * V5 Signature Loop — STRICT variant of {@link loadMostRecentPendingActions}.
  *
  * Unlike the swallowing variant (which returns `[]` on any failure and so

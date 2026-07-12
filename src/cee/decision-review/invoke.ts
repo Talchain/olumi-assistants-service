@@ -26,6 +26,7 @@ import {
 } from '../../adapters/llm/router.js';
 import type { CallOpts } from '../../adapters/llm/types.js';
 import { extractJsonFromResponse } from '../../utils/json-extractor.js';
+import { emitContextBudget } from '../../orchestrator-v5/context/context-budget-telemetry.js';
 import {
   buildScienceClaimsSection,
   injectScienceClaimsSection,
@@ -396,6 +397,21 @@ export function buildDecisionReviewUserMessage(
   return sections.join('\n\n');
 }
 
+/**
+ * Context v2 S0: rendered char length of one `<TAG>…</TAG>` block inside the
+ * assembled user message (tags + body). 0 when the tag is absent. Pure
+ * measurement — never touches assembly.
+ */
+function taggedBlockChars(message: string, tag: string): number {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const start = message.indexOf(open);
+  if (start === -1) return 0;
+  const end = message.indexOf(close, start);
+  if (end === -1) return 0;
+  return end + close.length - start;
+}
+
 // ============================================================================
 // Single-shot invocation
 // ============================================================================
@@ -446,6 +462,34 @@ export async function invokeDecisionReview(
     },
     callOpts,
   );
+
+  // Context v2 S0 (ROADMAP 1.73, 03 §2): once per LLM call at this adapter
+  // boundary. Section chars are measured over the tag-delimited blocks the
+  // builder just assembled — no change to message assembly itself. The
+  // `graph_json` / `isl_results` / `brief` names line up with the 03 §1
+  // decision_review budget table (implemented later by the Program-C
+  // rewrite lane; S0 only measures).
+  emitContextBudget({
+    call_site: 'decision_review',
+    model: llmResult.model ?? null,
+    prompt_version: promptMeta.prompt_version != null ? String(promptMeta.prompt_version) : null,
+    prompt_hash: promptMeta.prompt_hash ?? null,
+    request_id: options.requestId,
+    scenario_id: null, // scenario identity is not part of this input contract
+    section_chars: {
+      brief: taggedBlockChars(userMessage, 'BRIEF'),
+      graph_json: taggedBlockChars(userMessage, 'GRAPH'),
+      isl_results: taggedBlockChars(userMessage, 'ISL_RESULTS'),
+      deterministic_coaching: taggedBlockChars(userMessage, 'DETERMINISTIC_COACHING'),
+      decision_context: taggedBlockChars(userMessage, 'DECISION_CONTEXT'),
+      flip_threshold_data: taggedBlockChars(userMessage, 'FLIP_THRESHOLD_DATA'),
+    },
+    total_chars: userMessage.length,
+    truncations: [],
+    summary_lag_turns: null, // no summary layer until S4
+    ui_narrowed: null,
+    usage: llmResult.usage,
+  });
 
   const extraction = extractJsonFromResponse(llmResult.content, {
     task: 'decision_review',

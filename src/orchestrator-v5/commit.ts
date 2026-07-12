@@ -55,6 +55,7 @@ import {
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
+import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
 import { getModelManagementService } from './model-management/index.js';
 import type { ModelManagementResult, VersionWriteOutcome } from './model-management/index.js';
@@ -214,12 +215,36 @@ export const CONVERSATION_TEXT_CAP = 2000;
 /**
  * Cap durable conversation text app-side. Returns `undefined` for nullish or
  * empty/whitespace-only input (→ persists NULL, never an empty string) and a
- * length-bounded string otherwise. Pure; no trimming of interior content.
+ * length-bounded string otherwise. No trimming of interior content.
+ *
+ * Context v2 S0 (ROADMAP 1.73): a cut here now emits `v5.context_truncation`
+ * — this was the platform's canonical SILENT slice (design pack 00 §broken
+ * seam 1). The persistence cap itself stays (storage bound, sane); only the
+ * observability changes. `disclosed` tracks CEE_CONTEXT_DISCLOSURE_V2 (S1):
+ * with the flag on, the pack projection marks the cut turn `truncated:true`
+ * (projectConversation's at-cap inference), so downstream LLMs can see it.
+ *
+ * Exported for direct unit coverage of the emit contract (S0 tests); the
+ * `section` names the durable column the cut applies to.
  */
-function capConversationText(text: string | undefined | null): string | undefined {
+export function capConversationText(
+  text: string | undefined | null,
+  section: 'user_message' | 'assistant_message',
+): string | undefined {
   if (text == null) return undefined;
   if (text.trim().length === 0) return undefined;
-  return text.length > CONVERSATION_TEXT_CAP ? text.slice(0, CONVERSATION_TEXT_CAP) : text;
+  if (text.length > CONVERSATION_TEXT_CAP) {
+    emitContextTruncation({
+      site: 'commit.capConversationText',
+      section,
+      original_chars: text.length,
+      kept_chars: CONVERSATION_TEXT_CAP,
+      strategy: 'hard_slice',
+      disclosed: config.features.contextDisclosureV2,
+    });
+    return text.slice(0, CONVERSATION_TEXT_CAP);
+  }
+  return text;
 }
 
 /**
@@ -844,7 +869,7 @@ export async function commitDirectAnswer(
   // NULL (system-event turns, blank answers, and the draft_graph path whose
   // provisional response carries empty assistant_text — its narrative is
   // reconstructable from the persisted graph in context).
-  const userMessage = capConversationText(metadata.userMessage);
+  const userMessage = capConversationText(metadata.userMessage, 'user_message');
   // F-HELD: derived from `responseForCommit` (not the raw input response) so
   // the durable copy includes the lapse notice / excludes suppressed chips'
   // context exactly as the wire will — stored copy == wire copy.
@@ -853,6 +878,7 @@ export async function commitDirectAnswer(
       responseForCommit.assistant_text,
       parseContentGraph(metadata.contentGraph),
     ),
+    'assistant_message',
   );
 
   // Track S 0.13c-4: persist-site intercept repair. This is the single chokepoint

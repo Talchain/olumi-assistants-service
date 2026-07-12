@@ -69,6 +69,7 @@ import { config } from '../../../config/index.js';
 import { hasReducedSamplesDisclosure } from '../../compose/claim-safety-cage.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
+import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { AnalysisNotReadyError } from './analysis-ready-core.js';
 import {
@@ -636,6 +637,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         },
       );
     }
+
+    // --- 4.4. Enrichment shadow validation (Context v2 S6, 02 §Seam 3) ---
+    // First CEE consumer of AnalysisEnrichmentSchema at the seam where the
+    // response later attaches to the fact as `response as Record<string,
+    // unknown>` (the untyped passthrough). Mode-gated (default 'off' → no
+    // parse); shadow/enforce emit v5.enrichment.schema_mismatch on failure
+    // and NEVER touch the turn — enforcement is a later stage behind the
+    // 02 §Seam 3 preconditions.
+    validateEnrichmentShadow(response as Record<string, unknown>, {
+      requestId: invocation.requestId,
+      scenarioId: args.scenario_id,
+    });
 
     // --- 4.5. Numeric integrity guard (Phase 2 workstream E) -------------
     // Reject NaN / Infinity / -Infinity in any numeric field anywhere in the

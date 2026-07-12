@@ -68,7 +68,9 @@ import {
   loadMostRecentPendingActions,
   loadPersistedGraphStrict,
   loadRecentConversationTurns,
+  loadScenarioBriefText,
 } from '../build-turn-context.js';
+import { projectBriefForEdit } from '../../orchestrator/context/serialise.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   appendLapseNotice,
@@ -1232,12 +1234,31 @@ export async function dispatchEditGraph(
   // conversation-history read.
   const priorConversationTurns = await loadRecentConversationTurns(payload.scenario_id, requestId);
   const { recent_turns: recentConversationSlice } = projectConversation(priorConversationTurns, false);
+  // Context v2 S2 (ROADMAP 1.73, 02 §Seam 1): thread the persisted decision
+  // brief into the edit context — edit/repair are the two turn-path LLM
+  // sites that receive NOTHING of the brief today. Flag-gated read
+  // (CEE_CONTEXT_BRIEF_ALL_SITES, default OFF → no store call at all);
+  // read failure degrades to no-brief — never fail an edit turn over a
+  // brief read (same posture as the conversation read above). Note the
+  // pack's "same scenario read that already supplies graph/analysis"
+  // phrasing does not hold at this dispatch (graph/analysis arrive on the
+  // REQUEST; only conversation turns are read) — this is the sibling read.
+  let editBriefSlice: ConversationContext['brief'] = null;
+  if (config.features.contextBriefAllSites) {
+    try {
+      const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
+      editBriefSlice = projectBriefForEdit(briefText);
+    } catch {
+      editBriefSlice = null; // helper already degrades; belt for test doubles
+    }
+  }
   const context: ConversationContext = {
     graph: parsedGraph,
     analysis_response: analysisState ? analysisIngressToV2Envelope(analysisState) : null,
     framing: { stage: mapStageToDecisionStage(payload.stage) },
     messages: conversationSliceToMessages(recentConversationSlice),
     scenario_id: payload.scenario_id,
+    ...(editBriefSlice ? { brief: editBriefSlice } : {}),
   };
 
   const adapter = getAdapter('edit_graph');

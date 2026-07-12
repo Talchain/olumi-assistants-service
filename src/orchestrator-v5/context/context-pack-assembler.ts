@@ -37,6 +37,7 @@ import type {
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
+import { emitContextTruncation } from './context-budget-telemetry.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import {
@@ -77,6 +78,24 @@ import {
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
 // five for token budget. Any trim beyond is caller's concern.
 export const CONTEXT_PACK_RECENT_TURNS_CAP = 5;
+
+/**
+ * Context v2 S1: mirror of commit.ts `CONVERSATION_TEXT_CAP` (the persist-
+ * time hard slice) used to infer per-turn `truncated` flags at projection —
+ * the original length is not persisted, so at-cap is the only sound signal.
+ * Declared locally (not imported) to keep this module free of a commit.ts
+ * import edge; equality is pinned by tests/unit/context-disclosure-v2.test.ts.
+ */
+export const PERSISTED_MESSAGE_CAP = 2000;
+
+/** Options for {@link projectConversation} (Context v2 S1). */
+export interface ProjectConversationOpts {
+  /**
+   * Render the S1 disclosure fields (`window`, per-turn `truncated`).
+   * Explicit value wins; defaults to CEE_CONTEXT_DISCLOSURE_V2.
+   */
+  readonly discloseWindow?: boolean;
+}
 
 export const CONTEXT_PACK_VERSION = '2.0' as const;
 
@@ -254,12 +273,27 @@ export interface ContextPackConversationTurn {
   readonly user_message: string | null;
   /** The final public assistant answer for this prior turn; null when none. */
   readonly assistant_message: string | null;
+  /**
+   * Context v2 S1 (CEE_CONTEXT_DISCLOSURE_V2, 02 §Disclosure): present-and-
+   * true when a message on this turn sits AT the persistence cap
+   * ({@link PERSISTED_MESSAGE_CAP}) and was therefore hard-sliced at commit
+   * time. ABSENT (never `false`) otherwise, and absent entirely with the
+   * flag off — key absence is the flag-off byte-identity guarantee.
+   */
+  readonly truncated?: true;
 }
 
 export interface ContextPackConversation {
   readonly recent_turns: readonly ContextPackConversationTurn[];
   readonly turn_count: number;
   readonly last_tool_used: string | null;
+  /**
+   * Context v2 S1 (CEE_CONTEXT_DISCLOSURE_V2, 02 §Disclosure fix 2): how
+   * many prior turns the window shows vs how many the read returned —
+   * discloses that history exists beyond the window. Absent with the flag
+   * off (byte-identity).
+   */
+  readonly window?: { readonly shown: number; readonly available: number };
   /**
    * Boolean flag indicating that the next user turn is expected to confirm
    * or dismiss a pending change. Diverges from spec §10:444, which defines
@@ -566,6 +600,16 @@ export function projectBrief(
   if (trimmed.length <= CONTEXT_PACK_BRIEF_CHAR_CAP) {
     return { text: trimmed, truncated: false, original_chars: trimmed.length };
   }
+  // Context v2 S0: the slice was already DISCLOSED in-pack (truncated +
+  // original_chars); it now also lands on the truncation telemetry stream.
+  emitContextTruncation({
+    site: 'context-pack-assembler.projectBrief',
+    section: 'brief',
+    original_chars: trimmed.length,
+    kept_chars: CONTEXT_PACK_BRIEF_CHAR_CAP,
+    strategy: 'hard_slice',
+    disclosed: true,
+  });
   return {
     text: trimmed.slice(0, CONTEXT_PACK_BRIEF_CHAR_CAP),
     truncated: true,
@@ -1282,7 +1326,15 @@ function isFiniteSensitivity(value: unknown): value is number {
 export function projectConversation(
   priorTurns: readonly SessionTurnWithContent[],
   pendingConfirmation: boolean,
+  opts?: ProjectConversationOpts,
 ): ContextPackConversation {
+  // Context v2 S1 (CEE_CONTEXT_DISCLOSURE_V2, 02 §Disclosure fix 2):
+  // explicit opts win; otherwise the flag decides. Flag-off output is
+  // KEY-IDENTICAL to pre-S1 (no `window`, no `truncated` keys) — the pack
+  // is JSON.stringified into the routing prompt, so absent keys are the
+  // byte-identity guarantee.
+  const discloseWindow = opts?.discloseWindow ?? config.features.contextDisclosureV2;
+
   // priorTurns arrives ordered by created_at DESC (most recent first) from
   // SessionStore.readRecent. We cap at five. `last_tool_used` is the most
   // recent handler invocation — scan the full prior_turns to find it even
@@ -1293,24 +1345,70 @@ export function projectConversation(
   // words of recent turns, not content-free stubs. This flows into the prompt
   // automatically via route-with-tool-use's `JSON.stringify(contextPack)` —
   // no prompt-template change needed. Null stays null.
-  const recent = priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP).map((turn) => ({
-    turn_id: turn.turn_id,
-    turn_class: turn.turn_class,
-    handler_id: turn.handler_id,
-    created_at: turn.created_at,
-    // `?? null`: content is optional on SessionTurnWithContent for fixture
-    // assignability; the DB read path always sets a string|null, so this only
-    // normalises legacy/test turns that omit the fields.
-    user_message: turn.user_message ?? null,
-    assistant_message: turn.assistant_message ?? null,
-  }));
+  const recent = priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP).map((turn) => {
+    const projected: ContextPackConversation['recent_turns'][number] = {
+      turn_id: turn.turn_id,
+      turn_class: turn.turn_class,
+      handler_id: turn.handler_id,
+      created_at: turn.created_at,
+      // `?? null`: content is optional on SessionTurnWithContent for fixture
+      // assignability; the DB read path always sets a string|null, so this only
+      // normalises legacy/test turns that omit the fields.
+      user_message: turn.user_message ?? null,
+      assistant_message: turn.assistant_message ?? null,
+    };
+    // S1 per-message disclosure: a message AT the persistence cap was (in
+    // all real cases) hard-sliced by commit.capConversationText — the
+    // original length is not persisted, so at-cap is the only sound
+    // inference (a naturally-exactly-2,000-char message false-positives;
+    // an actually-truncated one never false-negatives). Key added only
+    // when true AND disclosing — never a noisy `truncated:false`.
+    if (
+      discloseWindow &&
+      ((projected.user_message?.length ?? 0) >= PERSISTED_MESSAGE_CAP ||
+        (projected.assistant_message?.length ?? 0) >= PERSISTED_MESSAGE_CAP)
+    ) {
+      return { ...projected, truncated: true as const };
+    }
+    return projected;
+  });
 
   const lastTool = priorTurns.find((t) => t.turn_class === 'handler' && t.handler_id !== null);
 
-  return {
+  // Context v2 S0: the window slice becomes observable. Char accounting is
+  // over the projected conversation CONTENT (user/assistant message text) —
+  // the thing the LLM loses when a turn falls out of the window.
+  // `disclosed` tracks the in-pack reality: true only when S1's
+  // `{shown, available}` window disclosure is rendering (design-pack
+  // broken seam 1 until the flag flips).
+  if (priorTurns.length > CONTEXT_PACK_RECENT_TURNS_CAP) {
+    const contentChars = (turns: readonly SessionTurnWithContent[]): number =>
+      turns.reduce(
+        (sum, t) => sum + (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0),
+        0,
+      );
+    emitContextTruncation({
+      site: 'context-pack-assembler.projectConversation',
+      section: 'conversation',
+      original_chars: contentChars(priorTurns),
+      kept_chars: contentChars(priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP)),
+      strategy: 'window_slice',
+      disclosed: discloseWindow,
+    });
+  }
+
+  const base: ContextPackConversation = {
     recent_turns: recent,
     turn_count: priorTurns.length,
     last_tool_used: lastTool?.handler_id ?? null,
     pending_confirmation: pendingConfirmation,
+  };
+  if (!discloseWindow) return base;
+  // S1 window disclosure (02 §Disclosure fix 2): the LLM learns history
+  // exists beyond the window, so "earlier in this conversation" can be
+  // said honestly instead of hallucinating certainty.
+  return {
+    ...base,
+    window: { shown: recent.length, available: priorTurns.length },
   };
 }

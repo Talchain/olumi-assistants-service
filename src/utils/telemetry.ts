@@ -533,6 +533,29 @@ export const TelemetryEvents = {
   HandlerInvocation: "v5.handler_invocation",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
+  // Context Architecture v2 S0 "measure first" (ROADMAP 1.73; design pack
+  // 03-budgets-and-telemetry §2). Both are LOG-ONLY (no Datadog mapping —
+  // registered in debugOnlyEvents in the freeze test) and telemetry-additive:
+  // no flag, no behaviour change.
+  //   v5.context_budget      — once per LLM call: per-section char accounting
+  //                            + API usage tokens (ground truth) + measured
+  //                            chars_per_token. Emitted at the turn-executor
+  //                            routing seam and the edit/repair/review/draft
+  //                            adapter boundaries.
+  //   v5.context_truncation  — at the cut site the moment ANY content is
+  //                            dropped (truncateGraphJson, capConversationText,
+  //                            window slice, brief slice). A truncation event
+  //                            with disclosed:false is the pre-S1 baseline the
+  //                            disclosure ratchet later flips.
+  V5ContextBudget: "v5.context_budget",
+  V5ContextTruncation: "v5.context_truncation",
+  // Context Architecture v2 S6 (ROADMAP 1.73; design pack 02 §Seam 3).
+  // Shadow validation of the PLoT→CEE enrichment passthrough (the
+  // platform's known-open seam): emitted when CEE_ENRICHMENT_VALIDATION
+  // is shadow/enforce and AnalysisEnrichmentSchema.safeParse fails on a
+  // PLoT run response. Log-only; the turn proceeds unchanged (stage 1).
+  V5EnrichmentSchemaMismatch: "v5.enrichment.schema_mismatch",
+
   // V5 latency observability (Fix 4 — per-stage timings).
   // Always emitted to logs. The matching `_timings` block on the wire
   // response envelope is gated by TWO conditions (PR #182): the server

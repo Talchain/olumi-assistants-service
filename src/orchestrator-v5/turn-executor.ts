@@ -183,6 +183,7 @@ import {
   type ContextPack,
 } from './context/context-pack-assembler.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
+import { emitContextBudget } from './context/context-budget-telemetry.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 import {
   buildAnalysisFromPriorFacts,
@@ -242,6 +243,7 @@ import {
   ROUTING_PROMPT_SYSTEM_CHARS,
   RoutingError,
   routeWithToolUse,
+  buildUserMessage,
   type RoutingResult,
   type RoutingToolCallResult,
 } from './routing/route-with-tool-use.js';
@@ -5016,6 +5018,77 @@ export async function runTurnExecutor(
         // LLM call. Undefined when the flag was off or no thinking blocks
         // were emitted (see ChatWithToolsResult.reasoning jsdoc).
         capturedReasoning = routingResult.rawResult?.reasoning;
+        // Context v2 S0 (ROADMAP 1.73, 03 §2): per-call context accounting
+        // for the routing site — the ContextPackAssembled sibling, deferred
+        // to the moment the API `usage` block (ground truth) exists.
+        // `total_chars` is the EXACT embedded prompt: we re-run the pure
+        // buildUserMessage the router actually sends (2-space-indented
+        // llmFacing with display_* substituted for raw analysis/graph), so
+        // the headline number matches the wire, not a compact-pack proxy.
+        // `section_chars` are compact per-section sizes — a relative
+        // COMPOSITION signal (which section weighs most), NOT summing to
+        // total: the prompt serialises one indented blob, so per-section
+        // exactness is not derivable and the sum omits indentation/wrapper
+        // overhead by design. Telemetry-additive only; a fault here must
+        // never affect the turn.
+        try {
+          const packJsonChars = (v: unknown): number =>
+            v == null ? 0 : JSON.stringify(v).length;
+          // Compact per-section composition proxy (display_* mirror the
+          // prompt's projections; conversation/brief are embedded as-is).
+          const routingSectionChars: Record<string, number> = {
+            conversation: packJsonChars(contextPack.conversation),
+            brief: packJsonChars(contextPack.brief),
+            display_analysis: packJsonChars(contextPack.display_analysis),
+            display_graph: packJsonChars(contextPack.display_graph),
+          };
+          // Exact embedded prompt length (ground truth for budgeting).
+          const routingTotalChars = buildUserMessage(
+            contextPack,
+            payload.message,
+          ).length;
+          // `truncations` carries only records with EXACT numbers here (the
+          // brief slice discloses original_chars in-pack). The window slice
+          // is on the per-cut `v5.context_truncation` stream with exact
+          // chars — the pack only knows turn counts at this altitude.
+          const routingTruncations =
+            contextPack.brief?.truncated === true
+              ? [
+                  {
+                    section: 'brief',
+                    original_chars: contextPack.brief.original_chars,
+                    kept_chars: contextPack.brief.text.length,
+                    disclosed: true,
+                  },
+                ]
+              : [];
+          // S8u tolerance (02 Seam 4 [R8]): the UI's pre-narrowing marker
+          // rides INSIDE the analysis_state passthrough carrier. Absent on
+          // pre-S8u UIs → null (unknown), never fabricated.
+          const narrowingMarker = (
+            options.analysisState as Record<string, unknown> | null | undefined
+          )?.narrowing as Record<string, unknown> | undefined;
+          const servedPromptForBudget = getCachedRoutingPromptIdentity();
+          emitContextBudget({
+            call_site: 'routing',
+            model: routingResult.rawResult?.model ?? null,
+            prompt_version: String(servedPromptForBudget?.version ?? ROUTING_PROMPT_VERSION),
+            prompt_hash: servedPromptForBudget?.sent_hash ?? ROUTING_PROMPT_HASH,
+            request_id: requestId,
+            scenario_id: context.session_id,
+            section_chars: routingSectionChars,
+            total_chars: routingTotalChars,
+            truncations: routingTruncations,
+            summary_lag_turns: null, // no summary layer until S4
+            ui_narrowed:
+              narrowingMarker == null
+                ? null
+                : narrowingMarker.narrowed === true,
+            usage: routingResult.rawResult?.usage,
+          });
+        } catch {
+          // Accounting must never affect the turn.
+        }
         if (timingsEnabled) {
           turnTimings.routing_llm_ms = Date.now() - routingStartedAt;
           // Fix 4: mirror routing cache state from rawResult.usage so the

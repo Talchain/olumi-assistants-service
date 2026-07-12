@@ -874,7 +874,10 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
 // User message construction — ContextPack serialised for Sonnet
 // -----------------------------------------------------------------------
 
-function buildUserMessage(contextPack: ContextPack, message: string): string {
+// Exported for Context-v2 S0 budget measurement (turn-executor): the routing
+// call site measures the EXACT embedded prompt bytes by re-running this pure
+// builder, rather than approximating over a compact pack serialisation.
+export function buildUserMessage(contextPack: ContextPack, message: string): string {
   // Design principle: raw model values stay in structured state for
   // handlers, telemetry, freshness hashing, and edit_graph dispatch;
   // LLM-facing context uses decision-language projections only. Strip
