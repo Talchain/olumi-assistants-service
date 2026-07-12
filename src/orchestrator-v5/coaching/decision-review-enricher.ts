@@ -620,28 +620,41 @@ function readIslResults(
   // option_comparison: normalise outcome shape so the prompt always sees
   // nested outcome.{mean,p10,p90}. Both flat (outcome_mean / outcome_p10 /
   // outcome_p90) and nested input shapes are accepted.
+  //
+  // Source selection (ROADMAP 1.78 fix): the CURRENT live V2 envelope
+  // populates `enrichment.option_comparison` and leaves the legacy
+  // `enrichment.results` ABSENT (proven by tests/fixtures/cross-service/
+  // v5-turn.run-analysis.staging.json), so reading `results` alone fed the
+  // decision_review prompt an EMPTY slice on the live path. Mirror
+  // readResultsArraySources' shape tolerance — current shape primary,
+  // legacy `results` fallback only when the current source is absent/empty
+  // after object filtering — WITHOUT pooling the two sources, which could
+  // double-count the same option.
+  const currentEntries = Array.isArray(enrichment.option_comparison)
+    ? filterObjectEntries(enrichment.option_comparison)
+    : [];
+  const legacyEntries = Array.isArray(enrichment.results)
+    ? filterObjectEntries(enrichment.results)
+    : [];
+  const optionComparisonSource = currentEntries.length > 0 ? currentEntries : legacyEntries;
   const optionComparison: Record<string, unknown>[] = [];
-  if (Array.isArray(enrichment.results)) {
-    for (const raw of enrichment.results) {
-      const r = readRecord(raw);
-      if (!r) continue;
-      const outcomeNested = readRecord(r.outcome);
-      const mean = readNumber(r.outcome_mean) ?? readNumber(outcomeNested?.mean);
-      const p10 = readNumber(r.outcome_p10) ?? readNumber(outcomeNested?.p10);
-      const p90 = readNumber(r.outcome_p90) ?? readNumber(outcomeNested?.p90);
-      optionComparison.push({
-        option_id: typeof r.option_id === 'string' ? r.option_id : null,
-        option_label: (typeof r.option_label === 'string' && r.option_label)
-          ? r.option_label
-          : (typeof r.label === 'string' ? r.label : null),
-        win_probability: typeof r.win_probability === 'number' ? r.win_probability : null,
-        outcome: {
-          mean,
-          p10,
-          p90,
-        },
-      });
-    }
+  for (const r of optionComparisonSource) {
+    const outcomeNested = readRecord(r.outcome);
+    const mean = readNumber(r.outcome_mean) ?? readNumber(outcomeNested?.mean);
+    const p10 = readNumber(r.outcome_p10) ?? readNumber(outcomeNested?.p10);
+    const p90 = readNumber(r.outcome_p90) ?? readNumber(outcomeNested?.p90);
+    optionComparison.push({
+      option_id: typeof r.option_id === 'string' ? r.option_id : null,
+      option_label: (typeof r.option_label === 'string' && r.option_label)
+        ? r.option_label
+        : (typeof r.label === 'string' ? r.label : null),
+      win_probability: typeof r.win_probability === 'number' ? r.win_probability : null,
+      outcome: {
+        mean,
+        p10,
+        p90,
+      },
+    });
   }
 
   // robustness: copy the recommendation_stability / overall_confidence
