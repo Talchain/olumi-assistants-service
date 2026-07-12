@@ -89,4 +89,35 @@ describe('computeAbVerdict', () => {
     expect(v.low_confidence).toBe(true); // only 1 run per side
     expect(find(v, 'PQ4-chip-correctness').measurable).toBe(false);
   });
+
+  // FIX 3 (PQ5 false-PASS): the SAFETY guard aggregates by WORST-run (any-hit),
+  // not mean. An intermittent leak (1 of 3 reruns) gives mean 0.333 — under the
+  // 0.5 floor, so it would NOT gate (the false-PASS). Worst-run = 1 must gate.
+  it('gates on an INTERMITTENT safety-guard hit via worst-run aggregation (1 of 3 runs) [fix]', () => {
+    const baseline = [run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 })];
+    const candidate = [run({ 'PQ5-guard-cleanliness': 1 }), run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 })];
+    const v = computeAbVerdict(baseline, candidate);
+    // worst-run 1, NOT mean 0.333 and NOT median 0 — distinguishes the fix.
+    expect(find(v, 'PQ5-guard-cleanliness').candidate).toBe(1);
+    expect(find(v, 'PQ5-guard-cleanliness').regressed).toBe(true);
+    expect(find(v, 'PQ5-guard-cleanliness').gating).toBe(true);
+    expect(v.overall).toBe('worse');
+  });
+
+  it('does NOT gate the safety guard when no rerun leaks (worst-run 0)', () => {
+    const baseline = [run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 })];
+    const candidate = [run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 })];
+    const v = computeAbVerdict(baseline, candidate);
+    expect(find(v, 'PQ5-guard-cleanliness').candidate).toBe(0);
+    expect(find(v, 'PQ5-guard-cleanliness').regressed).toBe(false);
+  });
+
+  it('a safety-guard IMPROVEMENT (candidate cleaner than baseline) reads as improved', () => {
+    // Baseline leaks in its worst run; candidate is clean across all runs.
+    const baseline = [run({ 'PQ5-guard-cleanliness': 1 }), run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 })];
+    const candidate = [run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 }), run({ 'PQ5-guard-cleanliness': 0 })];
+    const v = computeAbVerdict(baseline, candidate);
+    expect(find(v, 'PQ5-guard-cleanliness').baseline).toBe(1); // worst-run
+    expect(find(v, 'PQ5-guard-cleanliness').improved).toBe(true);
+  });
 });

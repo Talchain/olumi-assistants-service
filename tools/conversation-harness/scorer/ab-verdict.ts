@@ -12,8 +12,10 @@
  *
  * Flakiness handling (live-model nondeterminism):
  *   - Pass N>=3 run dirs per side (BASELINE_DIRS / CANDIDATE_DIRS). Flaky dims
- *     (PQ1..PQ4, PQ6) aggregate by MEDIAN across the side's runs; stable dims
- *     (PQ5) by MEAN. A single run per side is allowed but flagged low-confidence.
+ *     (PQ1..PQ4, PQ6) aggregate by MEDIAN across the side's runs; the SAFETY
+ *     guard (PQ5) aggregates by WORST-run (any-hit) so an intermittent leak in
+ *     even one rerun still gates — never averaged away. A single run per side is
+ *     allowed but flagged low-confidence.
  *   - A dim is only called improved/regressed when |candidate - baseline| clears
  *     a per-dim NOISE threshold; smaller moves are "flat". Thresholds are chosen
  *     to sit above typical rerun spread and are recorded in the artifact.
@@ -87,12 +89,31 @@ function mean(xs: number[]): number {
   return xs.reduce((a, b) => a + b, 0) / xs.length;
 }
 
-/** Aggregate a dim's value across a side's runs: median for flaky, mean for
- * stable; null if every run was non-measurable. Rounded to 3 dp. */
-function aggregate(values: (number | null)[], flaky: boolean): number | null {
+type AggMode = 'median' | 'mean' | 'worst';
+
+/** Aggregation mode for a dim across a side's reruns.
+ *   - SAFETY guard (PQ5) -> 'worst' (any-hit): a hit in even ONE rerun is
+ *     disqualifying and must NOT be averaged below the gating threshold. Detected
+ *     by the explicit `safety` flag, falling back to the `gating && !flaky`
+ *     property for older scores.json that predate the flag.
+ *   - other flaky dims (PQ1–PQ4, PQ6) -> 'median' (robust to a single outlier rerun)
+ *   - other stable dims -> 'mean' */
+function aggModeFor(meta: PromptDimScore): AggMode {
+  const isSafety = meta.safety === true || (meta.gating && !meta.flaky);
+  if (isSafety) return 'worst';
+  return meta.flaky ? 'median' : 'mean';
+}
+
+/** Aggregate a dim's value across a side's runs per `mode`; null if every run was
+ * non-measurable. Rounded to 3 dp. For 'worst', the direction picks the losing
+ * extreme — max for a lower-better guard (more hits = worse), min for higher-better. */
+function aggregate(values: (number | null)[], mode: AggMode, direction: PromptDimDirection): number | null {
   const present = values.filter((v): v is number => v != null);
   if (present.length === 0) return null;
-  const v = flaky ? median(present) : mean(present);
+  let v: number;
+  if (mode === 'worst') v = direction === 'higher-better' ? Math.min(...present) : Math.max(...present);
+  else if (mode === 'median') v = median(present);
+  else v = mean(present);
   return Number(v.toFixed(3));
 }
 
@@ -106,8 +127,9 @@ export function computeAbVerdict(
   const dims: AbDimDelta[] = template.map((meta) => {
     const bVals = baselineRuns.map((run) => run.find((d) => d.dim === meta.dim)?.value ?? null);
     const cVals = candidateRuns.map((run) => run.find((d) => d.dim === meta.dim)?.value ?? null);
-    const baseline = aggregate(bVals, meta.flaky);
-    const candidate = aggregate(cVals, meta.flaky);
+    const mode = aggModeFor(meta);
+    const baseline = aggregate(bVals, mode, meta.direction);
+    const candidate = aggregate(cVals, mode, meta.direction);
     const threshold = NOISE_THRESHOLD[meta.dim] ?? 0;
     const measurable = baseline != null && candidate != null;
     const delta = measurable ? Number((candidate! - baseline!).toFixed(3)) : null;

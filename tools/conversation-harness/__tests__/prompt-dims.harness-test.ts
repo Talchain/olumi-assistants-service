@@ -150,6 +150,28 @@ describe('PQ3 grounding (higher-better)', () => {
     expect(d.value).toBe(1);
     expect((d.details as any).traceableNumberFraction).toBe(1);
   });
+
+  // FIX 4 (PQ3 grounding scope): a fabricated NON-% number ("£100k") cannot be
+  // traced against the %-only payload surface, so when payload is present it must
+  // NOT read as grounded. Pre-fix nonPctNumbers counted unconditionally -> the
+  // £100k-only turn was grounded (false grounding). Non-gating dim, but the
+  // fabrication signal must be honest.
+  it('does NOT count an untraceable non-% number as grounding when payload exists [fix]', () => {
+    const surfaces = { G1: surf({ payloadPercentages: [78, 18], winPctByLabel: { 'Option A': 78 }, optionLabels: ['Option A'] }) };
+    // Cites £100k (fabricated, unverifiable), names no option, no traceable %.
+    const d = pqGrounding([row({ turn: 'G1', assistantText: 'We could save £100k by choosing this.' })], [], surfaces);
+    expect(d.value).toBe(0);
+    const per = (d.details as any).perTurn.find((p: any) => p.turn === 'G1');
+    expect(per.grounded).toBe(false);
+    expect(per.untraceableNonPctNumbers).toBeGreaterThanOrEqual(1);
+  });
+
+  it('still counts a non-% number as grounding on a NO-payload (clarify) turn [pin]', () => {
+    // No payload surface -> the lenient clarify fallback still credits a specific
+    // number; fix 4 only tightens the payload-present path.
+    const d = pqGrounding([row({ turn: 'G1', assistantText: 'A budget of £100k changes the picture.' })], []);
+    expect((d.details as any).perTurn.find((p: any) => p.turn === 'G1').grounded).toBe(true);
+  });
 });
 
 describe('PQ4 chip-correctness (higher-better)', () => {
@@ -216,6 +238,46 @@ describe('PQ6 coherence (lower-better, gating)', () => {
     const surfaces = { T1: surf({ optionLabels: ['Option A', 'Option B'], winPctByLabel: { 'Option A': 80, 'Option B': 20 }, leadingOptionLabel: 'Option A' }) };
     const d = pqCoherence([row({ turn: 'T1', assistantText: 'Option A wins about 80% of the time.' })], surfaces);
     expect((d.details as any).contradictions.some((c: any) => c.kind === 'number-disagrees-with-payload')).toBe(false);
+  });
+
+  const hasKind = (d: any, kind: string) => (d.details as any).contradictions.some((c: any) => c.kind === kind);
+
+  // FIX 1 (PQ6(d) false-WORSE): a % is a win-% claim only when its sentence
+  // signals a WIN/PROBABILITY (cue tested with the option's own name stripped),
+  // and a % matching a real non-win payload figure (a percentile) is grounded.
+  it('does NOT flag a NON-win % (risk reduction) as a win-% contradiction [fix]', () => {
+    const surfaces = { T1: surf({ optionLabels: ['Tech Lead', 'Ship Now'], winPctByLabel: { 'Tech Lead': 70, 'Ship Now': 30 }, leadingOptionLabel: 'Tech Lead' }) };
+    // 40% is a risk reduction, not a win-%. (Option name "Tech Lead" contains a
+    // lead-word, so the cue must ignore the name itself.)
+    const d = pqCoherence([row({ turn: 'T1', assistantText: 'The Tech Lead cuts risk by 40%.' })], surfaces);
+    expect(hasKind(d, 'number-disagrees-with-payload')).toBe(false);
+  });
+
+  it('does NOT flag a cited PERCENTILE quoted in a win sentence [fix]', () => {
+    // 92% is a p90 percentile present in the payload; "best choice" is a win cue.
+    const surfaces = { T1: surf({ optionLabels: ['Option A', 'Option B'], winPctByLabel: { 'Option A': 78, 'Option B': 22 }, leadingOptionLabel: 'Option A', payloadPercentages: [78, 22, 92] }) };
+    const d = pqCoherence([row({ turn: 'T1', assistantText: 'Option A is the best choice, with a p90 of 92%.' })], surfaces);
+    expect(hasKind(d, 'number-disagrees-with-payload')).toBe(false);
+  });
+
+  it('STILL flags a genuine wrong win-% in a win sentence (fabricated 50 vs payload 80) [pin]', () => {
+    const surfaces = { T1: surf({ optionLabels: ['Option A', 'Option B'], winPctByLabel: { 'Option A': 80, 'Option B': 20 }, leadingOptionLabel: 'Option A' }) };
+    const d = pqCoherence([row({ turn: 'T1', assistantText: 'Option A wins roughly 50% of the time.' })], surfaces);
+    expect(hasKind(d, 'number-disagrees-with-payload')).toBe(true);
+  });
+
+  // FIX 2 (PQ6(c) false-WORSE): lead-sentence matching is negation-aware.
+  it('does NOT flag a NEGATED win-claim that names a non-leader [fix]', () => {
+    const surfaces = { T1: surf({ leadingOptionLabel: 'Hire One', optionLabels: ['Hire One', 'Hire Two'], winPctByLabel: { 'Hire One': 70, 'Hire Two': 30 } }) };
+    // Names a non-leader but NEGATES the claim -> consistent with the blocks.
+    const d = pqCoherence([row({ turn: 'T1', assistantText: 'Hire Two is not the best choice here.' })], surfaces);
+    expect(hasKind(d, 'win-claim-contradicts-blocks')).toBe(false);
+  });
+
+  it('STILL flags the NON-negated wrong winner naming a non-leader [pin]', () => {
+    const surfaces = { T1: surf({ leadingOptionLabel: 'Hire One', optionLabels: ['Hire One', 'Hire Two'], winPctByLabel: { 'Hire One': 70, 'Hire Two': 30 } }) };
+    const d = pqCoherence([row({ turn: 'T1', assistantText: 'Hire Two is the best choice here.' })], surfaces);
+    expect(hasKind(d, 'win-claim-contradicts-blocks')).toBe(true);
   });
 });
 

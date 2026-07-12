@@ -229,8 +229,9 @@ Reads the `prompt_dims` from each side's `scores.json`, diffs per dim, and write
 `no-change` / `inconclusive`. Live-model nondeterminism is handled explicitly:
 
 - **N≥3 reruns per side.** Flaky dims (PQ1–PQ4, PQ6) aggregate by **median** across
-  a side's runs; the stable dim (PQ5) by mean. One run per side is allowed but the
-  artifact is stamped `low_confidence`.
+  a side's runs; the **safety** dim (PQ5) aggregates by **worst-run (any-hit)** — a
+  guard hit in even one rerun gates and is never averaged below the noise floor.
+  One run per side is allowed but the artifact is stamped `low_confidence`.
 - **Noise floor.** A dim is only called improved/regressed when
   `|candidate − baseline|` clears a per-dim threshold (recorded in the artifact);
   smaller moves are `flat`.
@@ -344,9 +345,24 @@ Prompt A/B (1.70 v1):
   contradiction fire only when a sentence names exactly one option); they catch the
   clear cases and will miss subtly-hedged contradictions — expand as real misses
   appear. The numeric tolerance (±3 pts on win-% attribution) is a starting value.
+  - **False-WORSE hardening (review-driven):** PQ6(d) compares a prose % to the
+    win-% only when the sentence signals a WIN/PROBABILITY claim (cue tested with
+    the option's own name stripped, so an option named "Tech Lead"/"Best Plan"
+    doesn't self-trigger) AND the % isn't a non-win payload figure (a cited
+    percentile is grounded, not a wrong win-%). PQ6(c) lead-sentence matching is
+    negation-aware ("X is NOT the best choice" no longer false-fires). *Residual:*
+    a compound sentence that mixes a genuine win cue with a non-win % (e.g. "A wins
+    the sprint, cutting cost 30%") can still be compared — sentence-level cues are
+    a heuristic; tighten to clause scope if real misses appear.
 - PQ3 grounding traceability includes percentiles in the payload figure set
   (lenient by design — see "grounding vs attribution" above); if fabrication
   detection needs to be sharper, restrict `payloadPercentages` to the win-% set.
+  - **Non-% scope (review-driven):** `traceableNumberFraction` is a **%-only**
+    fabrication detector. A non-% number (£100k, 3×) cannot be traced against the
+    %-only payload surface, so when payload is present it no longer counts as
+    grounding (`untraceableNonPctNumbers` in the per-turn details); **do not read a
+    non-% figure as verified grounding.** True numeric tracing would need raw
+    payload magnitudes surfaced in `TurnSurfaces` — a v1 extension.
 - The **LLM-judge is opt-in and was NOT run live in this lane** (needs credentials
   + live calls); its pure logic is self-tested and it is not wired into the default
   `ab-verdict`. Wiring it into the verdict as an additional (non-gating) signal is a
