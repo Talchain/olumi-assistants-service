@@ -12,7 +12,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { maintainSpy } = vi.hoisted(() => ({ maintainSpy: vi.fn(async () => undefined) }));
+const { maintainSpy } = vi.hoisted(() => ({
+  maintainSpy: vi.fn(async (_arg: Record<string, unknown>) => undefined),
+}));
 
 vi.mock('../rolling-summary/capture.js', () => ({
   maintainRollingSummaryForCommit: maintainSpy,
@@ -35,6 +37,7 @@ function meta() {
     scenario_id: SCENARIO_ID,
     turn_id: TURN_ID,
     turn_class: 'direct_answer' as const,
+    handler_id: null,
     request_hash: 'sha256:test',
     llm_calls_used: 0,
     duration_ms: 42,

@@ -34,6 +34,7 @@ import {
   projectBrief,
   projectConversation,
 } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
+import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 import { capConversationText, CONVERSATION_TEXT_CAP } from '../../src/orchestrator-v5/commit.js';
 import type { ConversationContext } from '../../src/orchestrator/types.js';
 import type { GraphV3T } from '../../src/schemas/cee-v3.js';
@@ -50,8 +51,8 @@ afterEach(() => {
 
 function eventsNamed(name: string): Record<string, unknown>[] {
   return emitSpy.mock.calls
-    .filter((c) => c[0] === name)
-    .map((c) => c[1] as Record<string, unknown>);
+    .filter((c: readonly unknown[]) => c[0] === name)
+    .map((c: readonly unknown[]) => c[1] as Record<string, unknown>);
 }
 
 // ---------------------------------------------------------------------------
@@ -367,11 +368,18 @@ describe('cut site: brief slice (projectBrief)', () => {
 // Cut site 4: window slice (context-pack-assembler projectConversation)
 // ---------------------------------------------------------------------------
 
-function turnFixture(i: number) {
+function turnFixture(i: number): SessionTurnWithContent {
   return {
+    id: `row_${i}`,
+    scenario_id: 'scenario_fixture',
+    user_id: null,
     turn_id: `turn_${i}`,
     turn_class: 'handler',
     handler_id: 'run_analysis',
+    request_hash: 'sha256:test',
+    response_emitted: true,
+    llm_calls_used: 0,
+    duration_ms: 0,
     created_at: new Date(2026, 0, 1, 0, i).toISOString(),
     user_message: `question ${i}`,
     assistant_message: `answer ${i}`,

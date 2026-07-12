@@ -29,6 +29,7 @@ import {
   projectConversation,
   PERSISTED_MESSAGE_CAP,
 } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
+import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 import { ContextPackSchema } from '../../src/orchestrator-v5/context/context-pack-schema.js';
 import { CONVERSATION_TEXT_CAP } from '../../src/orchestrator-v5/commit.js';
 import { _resetConfigCache } from '../../src/config/index.js';
@@ -78,11 +79,18 @@ function editContextWith(graph: GraphV3T | null): ConversationContext {
   };
 }
 
-function turnFixture(i: number, userMessage?: string) {
+function turnFixture(i: number, userMessage?: string): SessionTurnWithContent {
   return {
+    id: `row_${i}`,
+    scenario_id: 'scenario_fixture',
+    user_id: null,
     turn_id: `turn_${i}`,
     turn_class: 'handler',
     handler_id: 'run_analysis',
+    request_hash: 'sha256:test',
+    response_emitted: true,
+    llm_calls_used: 0,
+    duration_ms: 0,
     created_at: new Date(2026, 0, 1, 0, i).toISOString(),
     user_message: userMessage ?? `question ${i}`,
     assistant_message: `answer ${i}`,
@@ -120,9 +128,9 @@ describe('S1 graph disclosure (serialise.ts, CEE_CONTEXT_DISCLOSURE_V2)', () => 
 
     // The cut-site event flips to disclosed:true.
     const cuts = emitSpy.mock.calls
-      .filter((c) => c[0] === TelemetryEvents.V5ContextTruncation)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((e) => e.section === 'graph_json');
+      .filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5ContextTruncation)
+      .map((c: readonly unknown[]) => c[1] as Record<string, unknown>)
+      .filter((e: Record<string, unknown>) => e.section === 'graph_json');
     expect(cuts).toHaveLength(1);
     expect(cuts[0].disclosed).toBe(true);
   });
@@ -154,9 +162,9 @@ describe('S1 graph disclosure (serialise.ts, CEE_CONTEXT_DISCLOSURE_V2)', () => 
     expect(out).toBe(legacy);
 
     const cuts = emitSpy.mock.calls
-      .filter((c) => c[0] === TelemetryEvents.V5ContextTruncation)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((e) => e.section === 'graph_json');
+      .filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5ContextTruncation)
+      .map((c: readonly unknown[]) => c[1] as Record<string, unknown>)
+      .filter((e: Record<string, unknown>) => e.section === 'graph_json');
     expect(cuts).toHaveLength(1);
     expect(cuts[0].disclosed).toBe(false);
   });
@@ -180,8 +188,8 @@ describe('S1 window disclosure (projectConversation, CEE_CONTEXT_DISCLOSURE_V2)'
     expect(projected.window).toEqual({ shown: 5, available: 9 });
 
     const cuts = emitSpy.mock.calls
-      .filter((c) => c[0] === TelemetryEvents.V5ContextTruncation)
-      .map((c) => c[1] as Record<string, unknown>);
+      .filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5ContextTruncation)
+      .map((c: readonly unknown[]) => c[1] as Record<string, unknown>);
     expect(cuts).toHaveLength(1);
     expect(cuts[0].disclosed).toBe(true);
   });
