@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import * as invokeMod from '../../../cee/decision-review/invoke.js';
+import * as decomposeMod from '../../../cee/decision-review/decompose.js';
 import type { ModelResolution } from '../../../adapters/llm/router.js';
 import * as turnDebugMod from '../../debug/turn-debug-store.js';
 import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
+import { config, _resetConfigCache } from '../../../config/index.js';
 
 /**
  * Fixture resolution returned alongside the mocked invoke result. Matches
@@ -1624,5 +1626,78 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
     );
     expect(failed).toHaveLength(1);
     expect(failed[0].data.reason).toBe('shape_extraction_failed');
+  });
+});
+
+/**
+ * ROADMAP 1.77 (B1) — CEE_DECISION_REVIEW_DECOMPOSE flag branch at the
+ * enricher. The dedicated flag selects monolith-vs-decomposed; flag-off is
+ * byte-identical to today (the enricher invokes the gpt-4.1 monolith and never
+ * touches the decomposed composer). This is the integration-level proof of
+ * 07-REVIEW R4.
+ */
+describe('enricher — CEE_DECISION_REVIEW_DECOMPOSE flag branch (B1)', () => {
+  const RESULT = {
+    output: { narrative_summary: 'x', story_headlines: { 'opt-1': 'a' } },
+    raw: '{}',
+    model: 'm',
+    provider: 'p',
+    llm_latency_ms: 1,
+    input_tokens: 1,
+    output_tokens: 1,
+    prompt_version: 'v',
+    resolution: MOCK_RESOLUTION,
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    _resetConfigCache();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    _resetConfigCache();
+  });
+
+  it('flag OFF (default) → invokes the MONOLITH, never the decomposed composer', async () => {
+    expect(config.cee.decisionReviewDecompose).toBe(false);
+    const monolith = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(RESULT);
+    const decomposed = vi
+      .spyOn(decomposeMod, 'invokeDecomposedDecisionReview')
+      .mockResolvedValue(RESULT);
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment(), leading_option_id: 'opt-1' })],
+      requestId: 'req-flag-off',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    expect(monolith).toHaveBeenCalledTimes(1);
+    expect(decomposed).not.toHaveBeenCalled();
+  });
+
+  it('flag ON → invokes the DECOMPOSED composer, not the monolith directly', async () => {
+    vi.stubEnv('CEE_DECISION_REVIEW_DECOMPOSE', 'true');
+    _resetConfigCache();
+    expect(config.cee.decisionReviewDecompose).toBe(true);
+
+    const monolith = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(RESULT);
+    const decomposed = vi
+      .spyOn(decomposeMod, 'invokeDecomposedDecisionReview')
+      .mockResolvedValue(RESULT);
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment(), leading_option_id: 'opt-1' })],
+      requestId: 'req-flag-on',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    expect(decomposed).toHaveBeenCalledTimes(1);
+    expect(monolith).not.toHaveBeenCalled();
   });
 });

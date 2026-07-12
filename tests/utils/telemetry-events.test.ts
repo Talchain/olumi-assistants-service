@@ -492,6 +492,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5CoachingEmptyAnswerRecovered: "v5.coaching.empty_answer_recovered",
         V5CoachingAnswerSource: "v5.coaching.answer_source",
         V5DecisionReviewDegraded: "v5.decision_review_degraded",
+        // Neuro-symbolic B1 (ROADMAP 1.77) — decomposition outcome (log-only).
+        V5DecisionReviewDecomposed: "v5.decision_review.decomposed",
         V5DecisionReviewFailed: "v5.decision_review.failed",
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
         V5DecisionReviewSkipped: "v5.decision_review.skipped",
@@ -1135,6 +1137,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // v1 consumes them, not Datadog).
         TelemetryEvents.V5SummaryUpdated,
         TelemetryEvents.V5SummaryLag,
+        // Neuro-symbolic B1 — decomposition outcome: log-only (fallback-rate
+        // is a harness A/B metric, not a Datadog surface).
+        TelemetryEvents.V5DecisionReviewDecomposed,
         TelemetryEvents.ValidatorOutcome,
         TelemetryEvents.RecoveryResponse,
         TelemetryEvents.HandlerInvocation,
@@ -1934,6 +1939,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Context Architecture v2 S4 — rolling conversation summary.
         "v5.summary.updated",
         "v5.summary.lag",
+        // Neuro-symbolic B1 (ROADMAP 1.77) — decision_review decomposition
+        // outcome (decomposed vs monolith-fallback + fallback_reason).
+        // Deliberate frozen-registry addition per the registry discipline.
+        "v5.decision_review.decomposed",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
