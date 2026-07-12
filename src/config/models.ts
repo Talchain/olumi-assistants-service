@@ -257,16 +257,32 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
   // ============================================================
   // Anthropic Claude 3.5 Family
   // ============================================================
+  // RETIRED by Anthropic 2026-02-19 (API returns 404 not_found). Entry kept
+  // for historical cost tracking per repo convention; disabled so nothing
+  // resolves to it. Replacement: claude-haiku-4-5 (below).
   "claude-3-5-haiku-20241022": {
     id: "claude-3-5-haiku-20241022",
     provider: "anthropic",
     tier: "fast",
-    enabled: true,
+    enabled: false,
     maxTokens: 8192,
     costPer1kTokens: 0.25,
     averageLatencyMs: 500,
     qualityScore: 0.78,
-    description: "Claude 3.5 Haiku - fastest Anthropic model",
+    description: "Claude 3.5 Haiku - RETIRED 2026-02-19; use claude-haiku-4-5",
+  },
+  // Haiku 4.5 — the current fast tier (B1 decomposition sub-calls + the S4
+  // rolling summariser default after the 2026-07-13 retired-id fix).
+  "claude-haiku-4-5": {
+    id: "claude-haiku-4-5",
+    provider: "anthropic",
+    tier: "fast",
+    enabled: true,
+    maxTokens: 8192,
+    costPer1kTokens: 1.0,
+    averageLatencyMs: 450,
+    qualityScore: 0.85,
+    description: "Claude Haiku 4.5 - fastest current Anthropic model",
   },
 
   // ============================================================
@@ -545,6 +561,7 @@ export interface ModelValidationSummary {
  * This list is checked at startup to warn about deprecated models.
  */
 const KNOWN_DEPRECATED_MODELS: Record<string, string> = {
+  "claude-3-5-haiku-20241022": "Retired by Anthropic 2026-02-19 (404 not_found) - use claude-haiku-4-5",
   "claude-3-5-sonnet-20241022": "Sunset by Anthropic - use claude-sonnet-4-20250514",
   "claude-3-opus-20240229": "Sunset by Anthropic - use claude-opus-4-5-20251101",
   "claude-3-sonnet-20240229": "Sunset by Anthropic - use claude-sonnet-4-20250514",

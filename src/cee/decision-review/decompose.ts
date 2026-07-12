@@ -58,7 +58,7 @@ import {
  * established (models.ts:260). Overridable via CEE_MODEL_DECISION_REVIEW_HAIKU.
  * Mirrors the CEE_MODEL_SUMMARY resolution precedent (summariser.ts).
  */
-export const DEFAULT_DECOMPOSE_MODEL = 'claude-3-5-haiku-20241022';
+export const DEFAULT_DECOMPOSE_MODEL = 'claude-haiku-4-5';
 
 /** Resolve the decomposed sub-call model: env override, else the haiku default. */
 export function resolveDecomposeModel(): string {

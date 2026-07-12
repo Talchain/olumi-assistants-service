@@ -410,7 +410,7 @@ describe('CEE_DECISION_REVIEW_DECOMPOSE flag', () => {
 
   it('resolves the haiku default model when no override is set', () => {
     expect(config.cee.models.decision_review_haiku).toBeUndefined();
-    expect(DEFAULT_DECOMPOSE_MODEL).toBe('claude-3-5-haiku-20241022');
+    expect(DEFAULT_DECOMPOSE_MODEL).toBe('claude-haiku-4-5');
   });
 
   it('reads CEE_DECISION_REVIEW_DECOMPOSE=true when set', () => {

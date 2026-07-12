@@ -121,11 +121,11 @@ export function getAnthropicModels(): ProviderModel[] {
     // Claude 4.5 Family
     { id: 'claude-opus-4-5-20251101', provider: 'anthropic' },
     { id: 'claude-sonnet-4-5-20250929', provider: 'anthropic' },
+    { id: 'claude-haiku-4-5', provider: 'anthropic' },
     // Claude 4 Family
     { id: 'claude-opus-4-20250514', provider: 'anthropic' },
     { id: 'claude-sonnet-4-20250514', provider: 'anthropic' },
-    // Claude 3.5 Family
-    { id: 'claude-3-5-haiku-20241022', provider: 'anthropic' },
+    // Note: claude-3-5-haiku-20241022 retired by Anthropic 2026-02-19 (404) — use claude-haiku-4-5
     // Note: claude-3-5-sonnet-20241022 is deprecated (sunset by Anthropic)
   ];
 }

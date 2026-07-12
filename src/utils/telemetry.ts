@@ -1872,7 +1872,12 @@ const ANTHROPIC_PRICING = {
     input_per_1k: 0.015,   // $15 per million input tokens
     output_per_1k: 0.075,  // $75 per million output tokens
   },
-  // Claude 3.5 family
+  // Claude Haiku 4.5 — current fast tier (replacement for the retired 3.5 Haiku)
+  "claude-haiku-4-5": {
+    input_per_1k: 0.001,   // $1 per million input tokens
+    output_per_1k: 0.005,  // $5 per million output tokens
+  },
+  // Claude 3.5 family (RETIRED by Anthropic 2026-02-19; kept for historical cost tracking)
   "claude-3-5-haiku-20241022": {
     input_per_1k: 0.0008,  // $0.80 per million input tokens
     output_per_1k: 0.004,  // $4 per million output tokens
