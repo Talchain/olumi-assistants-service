@@ -3,6 +3,7 @@ import fp from "fastify-plugin";
 import { env } from "node:process";
 import { getRequestId } from "../utils/request-id.js";
 import { safeLog } from "../utils/redaction.js";
+import { isClientAbortError } from "../utils/errors.js";
 
 /**
  * Observability Plugin
@@ -67,6 +68,15 @@ async function observabilityPlugin(fastify: FastifyInstance) {
 
   // Log uncaught errors in request lifecycle
   fastify.addHook("onError", async (request: FastifyRequest, _reply: FastifyReply, error: Error) => {
+    // ROADMAP 1.16i — a client abort is not a server error. The single
+    // warn-class `client_aborted` line is emitted by the central error
+    // handler (src/server.ts setErrorHandler); logging "Request error"
+    // here too would re-create the multi-line error storm this fix
+    // removes. Genuine errors are untouched below.
+    if (isClientAbortError(error)) {
+      return;
+    }
+
     const requestId = getRequestId(request);
     const duration = Date.now() - ((request as any).startTime || Date.now());
 

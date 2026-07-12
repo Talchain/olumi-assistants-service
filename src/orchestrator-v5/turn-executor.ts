@@ -6577,6 +6577,11 @@ export async function runTurnExecutor(
         requestId,
         scenarioId: context.session_id,
         answerText: sanitised.output,
+        // ROADMAP 1.16j — chip-sameness guard (see helper doc comment).
+        // The wrapper path previously bypassed 1.20(b) entirely: the
+        // identical review-card chip was re-offered on all 6 post-analysis
+        // turns in the 11 Jul manual test (edf2a4d9).
+        recentlyOfferedChipIds: recentlyOfferedChipIds(),
       });
       const coachComposedChips = coachWrapper.fired
         ? [...coachWrapper.chips, ...coachChips]
@@ -6706,6 +6711,9 @@ export async function runTurnExecutor(
         requestId,
         scenarioId: context.session_id,
         answerText: sanitised.output,
+        // ROADMAP 1.16j — chip-sameness guard (see helper doc comment);
+        // same threading as the coach-path wrapper call above.
+        recentlyOfferedChipIds: recentlyOfferedChipIds(),
       });
       const converseComposedChips = converseWrapper.fired
         ? [...converseWrapper.chips, ...converseChips]

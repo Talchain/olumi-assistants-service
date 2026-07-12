@@ -96,6 +96,25 @@ export interface PostAnalysisWrapperInput {
   readonly requestId: string;
   readonly scenarioId: string;
   readonly answerText: string;
+  /**
+   * ROADMAP 1.16j — 1.20(b) chip-sameness guard for the wrapper path.
+   * Chip ids offered on the IMMEDIATELY PRIOR turn; the call site
+   * (turn-executor) derives this from `context.most_recent_pending_actions`
+   * via the same memoised `recentlyOfferedChipIds()` helper the
+   * `generateChips` call sites read — one authority, one window (N=1
+   * prior turn, undecremented-TTL recency signal; see the FIX 3/F11 doc
+   * comment on that helper). A generated chip whose id is in this set is
+   * suppressed during card selection so a later review card can fill the
+   * freed MAX_CHIPS slot (an alternative card over an identical repeat);
+   * when every candidate is suppressed the wrapper ships an honest empty
+   * set (`fired: false`). Suppression is recorded via the guard's own
+   * existing `v5.chips.recently_offered_suppressed` event. Optional +
+   * additive: omitted → zero behaviour change (mirrors
+   * `ChipGeneratorInput.recentlyOfferedChipIds`). The 11 Jul manual test
+   * (edf2a4d9) showed the wrapper bypassing the guard entirely — the
+   * identical chip re-offered on all 6 post-analysis turns.
+   */
+  readonly recentlyOfferedChipIds?: ReadonlySet<string>;
 }
 
 export interface PostAnalysisWrapperResult {
@@ -180,6 +199,16 @@ export function generatePostAnalysisCoaching(
   }
 
   if (input.freshness === 'stale') {
+    // ROADMAP 1.16j — the rerun chip is subject to the same 1.20(b)
+    // guard as every other chip: offered on the immediately-prior turn
+    // → honest empty set, recorded via the guard's own event.
+    if (input.recentlyOfferedChipIds?.has(STALE_RERUN_CHIP.id)) {
+      emit(TelemetryEvents.V5ChipsRecentlyOfferedSuppressed, {
+        suppressed_ids: [STALE_RERUN_CHIP.id],
+        survived_count: 0,
+      });
+      return { chips: [], fired: false };
+    }
     return {
       chips: [STALE_RERUN_CHIP],
       fired: true,
@@ -193,8 +222,26 @@ export function generatePostAnalysisCoaching(
     return diagnosticSkip(input, 'no_review_cards');
   }
 
-  const generation = generateChipsFromCards(reviewCards);
+  const generation = generateChipsFromCards(reviewCards, input.recentlyOfferedChipIds);
+  // ROADMAP 1.16j — suppression record. Same event + payload shape as
+  // chip-generator.ts's excludeRecentlyOfferedChips (the 1.20(b) guard
+  // this wrapper previously bypassed); fires whether or not any chip
+  // survived, so ops can see exactly which repeat offers were withheld.
+  if (generation.suppressedRecentlyOfferedIds.length > 0) {
+    emit(TelemetryEvents.V5ChipsRecentlyOfferedSuppressed, {
+      suppressed_ids: [...generation.suppressedRecentlyOfferedIds],
+      survived_count: generation.chips.length,
+    });
+  }
   if (generation.chips.length === 0) {
+    // Guard-empty — every candidate chip was offered on the immediately-
+    // prior turn. An honest empty set beats an identical repeat
+    // (1.20(b) convention). NOT a RecoverySkipped: the wrapper did not
+    // fail and the producer did not regress — the guard held; the
+    // V5ChipsRecentlyOfferedSuppressed event above is the record.
+    if (generation.suppressedRecentlyOfferedIds.length > 0) {
+      return { chips: [], fired: false };
+    }
     // Terminal skip — single event, accurate semantics.
     //   - cards existed but every one was unmappable / had no usable
     //     prose / leaked tokens → unsupported_chip_actions
@@ -227,6 +274,15 @@ export function generatePostAnalysisCoaching(
 
   // Fact-equivalent payload travels on the recovered event so the
   // ledger does not have to carry an unschemaed fact_type.
+  //
+  // NAMING CAUTION (1.16j): `v5.post_analysis.direct_answer_recovered` is
+  // the SUCCESS telemetry of the post-analysis chip wrapper — "recovered"
+  // means the analyse-stage direct_answer gained structured chips it
+  // would otherwise lack. It is NOT an empty-answer salvage (that is
+  // `v5.coaching.empty_answer_recovered` / V5CoachingEmptyAnswerRecovered).
+  // Conflating the two caused a real misdiagnosis in the 11 Jul manual
+  // test. The name is frozen in the telemetry registry
+  // (deliberate-update-only) — do not "fix" this by renaming.
   const answerHash = createHash('sha256').update(input.answerText).digest('hex');
   emit(TelemetryEvents.PostAnalysisDirectAnswerRecovered, {
     request_id: input.requestId,
@@ -292,14 +348,22 @@ interface GenerationResult {
   readonly chips: readonly SuggestedAction[];
   readonly selectedCardIds: readonly string[];
   readonly unsupportedCount: number;
+  /**
+   * ROADMAP 1.16j — chip ids that WOULD have been offered but were
+   * suppressed because they were offered on the immediately-prior turn
+   * (1.20(b) sameness guard). Deduplicated; does not overlap `chips`.
+   */
+  readonly suppressedRecentlyOfferedIds: readonly string[];
 }
 
 function generateChipsFromCards(
   cards: ReadonlyArray<ReviewCard>,
+  recentlyOfferedChipIds?: ReadonlySet<string>,
 ): GenerationResult {
   const chips: SuggestedAction[] = [];
   const selectedCardIds: string[] = [];
   const seen = new Set<string>();
+  const suppressedRecentlyOffered = new Set<string>();
   let unsupportedCount = 0;
 
   for (const card of cards) {
@@ -308,6 +372,16 @@ function generateChipsFromCards(
     const built = buildChipFromCard(card);
     if (!built) {
       unsupportedCount += 1;
+      continue;
+    }
+
+    // ROADMAP 1.16j — 1.20(b) chip-sameness guard, applied during
+    // selection (not as a post-filter) so a later review card can fill
+    // the freed MAX_CHIPS slot: an alternative card over an identical
+    // repeat. Key is chip.id — the same key the generateChips guard
+    // filters on (chip-generator.ts excludeRecentlyOfferedChips).
+    if (recentlyOfferedChipIds?.has(built.chip.id)) {
+      suppressedRecentlyOffered.add(built.chip.id);
       continue;
     }
 
@@ -320,7 +394,12 @@ function generateChipsFromCards(
     }
   }
 
-  return { chips, selectedCardIds, unsupportedCount };
+  return {
+    chips,
+    selectedCardIds,
+    unsupportedCount,
+    suppressedRecentlyOfferedIds: [...suppressedRecentlyOffered],
+  };
 }
 
 interface BuiltChip {
