@@ -8,6 +8,7 @@
  */
 
 import OpenAI from "openai";
+import { FALLBACK_ANTHROPIC_MODEL } from "./model-fallback.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
@@ -69,7 +70,7 @@ function getExtractionModel(provider: "openai" | "anthropic", modelOverride?: st
     return config.cee.models.draft;
   }
   // Provider defaults
-  return provider === "openai" ? "gpt-4o-mini" : "claude-3-5-sonnet-20241022";
+  return provider === "openai" ? "gpt-4o-mini" : FALLBACK_ANTHROPIC_MODEL;
 }
 
 // ============================================================================

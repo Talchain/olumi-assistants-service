@@ -29,6 +29,10 @@ import {
 } from './shared-schemas.js';
 import { extractZodIssues } from '../../schemas/llmExtraction.js';
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from '../../cee/draft/anthropic-graph-schema.js';
+
+export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
+import { resolveAnthropicModel } from "./model-fallback.js";
+
 // enforceAnthropicSchemaCompliance removed from runtime — schemas are compliant by construction.
 // The function is retained in anthropic-schema-compliance.ts as a test-only utility.
 
@@ -1158,7 +1162,7 @@ export async function suggestOptionsWithAnthropic(args: {
   model?: string;
 }): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
   const prompt = await buildSuggestPrompt(args);
-  const model = args.model || "claude-3-5-sonnet-20241022";
+  const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('suggest_options') ?? 2048;
   const suggestPromptMeta = getSystemPromptMeta('suggest_options');
 
@@ -1489,7 +1493,7 @@ export async function repairGraphWithAnthropic(
   opts?: { signal?: AbortSignal; timeoutMs?: number }
 ): Promise<RepairGraphResult> {
   const prompt = await buildRepairPrompt(args);
-  const model = args.model || "claude-3-5-sonnet-20241022";
+  const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('repair_graph') ?? 4096;
   const repairPromptMeta = getSystemPromptMeta('repair_graph');
 
@@ -1839,7 +1843,7 @@ export async function clarifyBriefWithAnthropic(
   args: ClarifyArgs
 ): Promise<{ questions: Array<{ question: string; choices?: string[]; why_we_ask: string; impacts_draft: string }>; confidence: number; should_continue: boolean; usage: UsageMetrics }> {
   const prompt = await buildClarifyPrompt(args);
-  const model = args.model || "claude-3-5-sonnet-20241022";
+  const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 2048;
   const clarifyPromptMeta = getSystemPromptMeta('clarify_brief');
 
@@ -2056,7 +2060,7 @@ export async function critiqueGraphWithAnthropic(
   args: CritiqueArgs
 ): Promise<{ issues: Array<{ level: "BLOCKER" | "IMPROVEMENT" | "OBSERVATION"; note: string; target?: string }>; suggested_fixes: string[]; overall_quality?: "poor" | "fair" | "good" | "excellent"; usage: UsageMetrics }> {
   const prompt = await buildCritiquePrompt(args);
-  const model = args.model || "claude-3-5-sonnet-20241022";
+  const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('critique_graph') ?? 2048;
   const critiquePromptMeta = getSystemPromptMeta('critique_graph');
 
@@ -2204,7 +2208,7 @@ export async function critiqueGraphWithAnthropic(
 export async function explainDiffWithAnthropic(
   args: { patch: any; brief?: string; graph_summary?: { node_count: number; edge_count: number }; model?: string }
 ): Promise<{ rationales: Array<{ target: string; why: string; provenance_source?: string }>; usage: UsageMetrics }> {
-  const model = args.model || "claude-3-5-sonnet-20241022";
+  const model = resolveAnthropicModel(args.model);
   // No specific config key for explain_diff, use default
   const maxTokens = 2048;
 
@@ -2388,7 +2392,7 @@ interface ChatWithAnthropicArgs {
 export async function chatWithAnthropic(
   args: ChatWithAnthropicArgs
 ): Promise<ChatResult> {
-  const model = args.model || "claude-3-5-sonnet-20241022";
+  const model = resolveAnthropicModel(args.model);
   const thinkingRequested = args.thinking?.type === 'enabled';
   const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'chat');
   // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
@@ -2652,7 +2656,7 @@ function buildStrictAnthropicTools(
 export async function chatWithToolsAnthropic(
   args: ChatWithToolsAnthropicArgs
 ): Promise<ChatWithToolsResult> {
-  const model = args.model || "claude-3-5-sonnet-20241022";
+  const model = resolveAnthropicModel(args.model);
   const thinkingRequested = args.thinking?.type === 'enabled';
   const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'chat_with_tools');
   // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
@@ -2938,7 +2942,7 @@ export async function chatWithToolsAnthropic(
 export async function* streamChatWithToolsAnthropic(
   args: ChatWithToolsAnthropicArgs & { signal?: AbortSignal },
 ): AsyncGenerator<ChatWithToolsStreamEvent> {
-  const model = args.model || "claude-3-5-sonnet-20241022";
+  const model = resolveAnthropicModel(args.model);
   const thinkingRequested = args.thinking?.type === 'enabled';
   const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'stream_chat_with_tools');
   const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
@@ -3255,8 +3259,7 @@ export class AnthropicAdapter implements LLMAdapter {
   readonly model: string;
 
   constructor(model?: string) {
-    // Default to Claude 3 Haiku for cost-effectiveness
-    this.model = model || config.llm.model || 'claude-3-haiku-20240307';
+    this.model = resolveAnthropicModel(model);
   }
 
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
