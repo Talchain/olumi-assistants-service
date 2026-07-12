@@ -104,7 +104,7 @@ afterEach(() => {
 });
 
 function lagEmits(): unknown[][] {
-  return emitSpy.mock.calls.filter((c) => c[0] === TelemetryEvents.V5SummaryLag);
+  return emitSpy.mock.calls.filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5SummaryLag);
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ describe('loadConversationSummaryForInjection — inject renders the block', () 
   it('stale summary (lag ≥ windowDepth) → disclosed in-band + v5.summary.lag emitted', async () => {
     // Watermark T1; window shows 3 newer turns; windowDepth 3 ⇒ lag 3 ≥ 3 ⇒ stale.
     const newer1 = { turn_id: 'dddddddd-4444-4444-8444-444444444444', created_at: '2026-07-10T10:03:00.000Z' };
-    const summary = summaryFixture({});
+    const summary = summaryFixture();
     const staleSummary: RollingSummary = {
       ...summary,
       updated_turn_id: T1.turn_id,

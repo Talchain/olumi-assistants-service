@@ -28,6 +28,7 @@ import { assembleContextPack } from '../../src/orchestrator-v5/context/context-p
 import type { ContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { ContextPackConversationSummary } from '../../src/orchestrator-v5/rolling-summary/inject.js';
+import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 
 // ---------------------------------------------------------------------------
 // Fixture — MUST stay byte-for-byte in sync with the golden probe that
@@ -49,16 +50,35 @@ function baselinePack(): ContextPack {
     payload: PAYLOAD,
     priorTurns: [
       {
+        // Base-field completion (review fixup): projectConversation reads ONLY
+        // turn_id/turn_class/handler_id/created_at/user_message/assistant_message
+        // (context-pack-assembler), so the added fields are inert — the golden
+        // bytes are unchanged. 'coach' is serialised into the prompt and pinned
+        // by the sha256 golden — the VALUE must not change (byte-preserving cast).
+        id: 'row-2',
+        scenario_id: 'scn-golden',
+        user_id: null,
+        request_hash: 'sha256:test',
+        response_emitted: true,
+        llm_calls_used: 0,
+        duration_ms: 0,
         turn_id: 'turn-2',
-        turn_class: 'coach',
+        turn_class: 'coach' as SessionTurnWithContent['turn_class'],
         handler_id: null,
         created_at: '2026-07-10T10:01:00.000Z',
         user_message: 'Second question',
         assistant_message: 'Second answer',
       },
       {
+        id: 'row-1',
+        scenario_id: 'scn-golden',
+        user_id: null,
+        request_hash: 'sha256:test',
+        response_emitted: true,
+        llm_calls_used: 0,
+        duration_ms: 0,
         turn_id: 'turn-1',
-        turn_class: 'coach',
+        turn_class: 'coach' as SessionTurnWithContent['turn_class'],
         handler_id: null,
         created_at: '2026-07-10T10:00:00.000Z',
         user_message: 'First question',
