@@ -6,11 +6,14 @@
  * the frame. TOTALITY: any malformed/throwing/unknown input resolves to a
  * CLASSIFIED verdict, never an exception.
  *
- * Verdict policy (fail-closed; §3b/§6 PENDING → held; Paul 2026-07-03):
- *  - rename_node  → would_apply-eligible (R6 non-downgrade; the ONLY would_apply case)
+ * Verdict policy (fail-closed; §6 signed off for TUNABLES by the D-S ruling —
+ * ROADMAP §D, Paul 2026-07-12; structural doctrine unchanged):
+ *  - rename_node  → would_apply-eligible (R6 non-downgrade)
+ *  - update_node/edge_field → would_apply-eligible (D-S tunable auto-apply:
+ *    candidate-build + R6 readiness parity, mirroring rename_node; a build
+ *    failure holds/rejects fail-closed, a readiness downgrade holds)
  *  - add_option   → always held (divergence split; NEVER un-held here)
- *  - add_node/add_edge         → held STRUCTURAL_APPLY_HELD (§6 pending)
- *  - update_node/edge_field     → held TUNABLE_APPLY_HELD (§6 pending; no tunable auto-apply)
+ *  - add_node/add_edge         → held STRUCTURAL_APPLY_HELD (propose-confirm)
  *  - remove_node/remove_edge    → held REMOVE_UNCONFIRMED (destructive)
  *  - flag_uncertainty/clarification → clarify_required (never mutate)
  *
@@ -27,6 +30,8 @@ import {
   buildAddNodeCandidate,
   buildRenameCandidate,
   buildAddOptionCandidate,
+  buildUpdateEdgeFieldCandidate,
+  buildUpdateNodeFieldCandidate,
   currentGraphIsParseable,
   graphHasNodeId,
   graphHasEdge,
@@ -53,7 +58,6 @@ import {
   ENGINE_CLAIM_IN_TEXT,
   READINESS_DOWNGRADE,
   STRUCTURAL_APPLY_HELD,
-  TUNABLE_APPLY_HELD,
   REMOVE_UNCONFIRMED,
   CLASSIFY_FAILED,
   type MutationReasonCode,
@@ -220,8 +224,10 @@ export function refereeMutation(
   const mutation_class = classifyMutation(kind);
 
   try {
-    // R2 — frame / stale gate (consumes the frame; never re-derives).
-    const gate = evaluateFrameGate(env.base_graph_hash, frame);
+    // R2 — frame / stale gate (consumes the frame; never re-derives). The
+    // mutation class rides along for the D-S tunable freshness relaxation
+    // (frame-gate.ts) — hash/readability semantics are class-independent.
+    const gate = evaluateFrameGate(env.base_graph_hash, frame, mutation_class);
     const base_hash_match = gate.baseHashMatch;
     const meta = { kind, candidate_id, mutation_class, base_hash_match } as const;
 
@@ -366,12 +372,49 @@ export function refereeMutation(
         };
 
       case 'update_node_field':
-      case 'update_edge_field':
+      case 'update_edge_field': {
+        // D-S ruling (ROADMAP §D, Paul 2026-07-12): tunable value edits are
+        // would_apply-eligible via candidate-build + R6 readiness parity,
+        // mirroring the rename_node precedent above. The pre-D-S posture
+        // (unconditional held TUNABLE_APPLY_HELD, "§3b/§6 pending") is
+        // retired for these two kinds; the reason code stays registered for
+        // historical pendings and the held_proposal wire vocabulary.
+        const built =
+          env.kind === 'update_node_field'
+            ? buildUpdateNodeFieldCandidate(currentGraph, {
+                node_id: env.payload.node_id,
+                field: env.payload.field,
+                to: env.payload.to,
+              })
+            : buildUpdateEdgeFieldCandidate(currentGraph, {
+                from_node: env.payload.from_node,
+                to_node: env.payload.to_node,
+                field: env.payload.field,
+                to: env.payload.to,
+              });
+        if (!built.candidate) {
+          // R5 invariant violation → rejected; any other build error → held
+          // (fail-closed — never auto-apply past a failed build).
+          const code = built.error?.code;
+          if (code === GRAPH_INVARIANT_VIOLATED) {
+            return { ...meta, verdict: 'rejected', blocker: built.error };
+          }
+          return { ...meta, verdict: 'held', blocker: built.error };
+        }
+        const rv = representableVerdict(assessCandidate(currentGraph), assessCandidate(built.candidate));
+        if (rv.verdict === 'would_apply') {
+          return { ...meta, verdict: 'would_apply', candidate: built.candidate };
+        }
+        if (rv.verdict === 'clarify_required') {
+          return { ...meta, verdict: 'clarify_required', candidate: built.candidate };
+        }
         return {
           ...meta,
           verdict: 'held',
-          blocker: { code: TUNABLE_APPLY_HELD, readable: 'Tunable mutation held: §3b/§6 doctrine pending; no tunable auto-apply until sign-off.' },
+          candidate: built.candidate,
+          blocker: { code: READINESS_DOWNGRADE, readable: 'This candidate would reduce the graph’s analysis-readiness.' },
         };
+      }
 
       case 'remove_node':
       case 'remove_edge':
@@ -424,15 +467,17 @@ function batchRejected(code: MutationReasonCode, readable: string): RefereeVerdi
  * non-advancing envelope degrades to the pre-fix judgment for later slots):
  *  - `rejected` / `stale` verdicts never advance: the mutation would not land
  *    under any mode, so its entities never materialise;
- *  - a built candidate (rename_node / add_option) IS the applied view — adopt
- *    it (candidates are exposed as deep clones; no aliasing);
+ *  - a built candidate (rename_node / add_option / update_node_field /
+ *    update_edge_field since D-S) IS the applied view — adopt it (candidates
+ *    are exposed as deep clones; no aliasing). update_* change no entity
+ *    set, so adopting their candidates only propagates VALUES;
  *  - add_node / add_edge that reached STRUCTURAL_APPLY_HELD (i.e. passed
  *    R1–R4 against the current view) are applied through the same
  *    `applyAndValidateMutation` seam the candidate builders use, so the
  *    working view stays GraphV3-validated;
- *  - update_* change no entity set; remove_* are held-unconfirmed and
- *    deliberately NOT subtracted (conservative: later references to a
- *    to-be-removed entity keep the pre-fix judgment);
+ *  - remove_* are held-unconfirmed and deliberately NOT subtracted
+ *    (conservative: later references to a to-be-removed entity keep the
+ *    pre-fix judgment);
  *  - the FRAME is never advanced — R2 keeps comparing every envelope's
  *    base_graph_hash against the pre-edit frame hash (anti-rederivation).
  */

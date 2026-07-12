@@ -66,7 +66,8 @@ export const MUTATION_VERDICTS = [
 
 export type MutationVerdict = (typeof MUTATION_VERDICTS)[number];
 
-/** Mechanical structural/tunable taxonomy (§6 doctrine PENDING → tunables stay held). */
+/** Mechanical structural/tunable taxonomy. D-S (ROADMAP §D, Paul 2026-07-12):
+ *  tunables auto-apply (would_apply-eligible); structural stays propose-confirm. */
 export type MutationClass = 'structural' | 'tunable' | 'non_mutating';
 
 export interface MutationBlocker {

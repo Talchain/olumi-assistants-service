@@ -76,6 +76,15 @@ const FIELD_OP = {
   value: { description: 'Quarterly budget' },
 };
 
+// D-S (ROADMAP §D, Paul 2026-07-12): tunables auto-apply, so a hold-side
+// pending now needs a STRUCTURAL op in the batch. The hold/confirm machinery
+// under pin here is class-independent.
+const STRUCT_OP = {
+  op: 'add_node',
+  path: 'fac_new',
+  value: { id: 'fac_new', kind: 'factor', label: 'New factor' },
+};
+
 function gateInput(
   overrides: Partial<Parameters<typeof evaluateEditGraphMutations>[0]> = {},
 ) {
@@ -147,11 +156,14 @@ describe('hold-side pending payload (gate)', () => {
   });
 
   it('oversize batch degrades to the decline posture (no operations key, commit-safe)', () => {
+    // (op switched tunable → structural per D-S: a tunable no longer holds,
+    // so an oversize TUNABLE batch simply auto-applies; the degrade path
+    // under pin belongs to the held classes.)
     const bloated = 'x'.repeat(GM_HELD_OPERATIONS_MAX_JSON_CHARS + 1);
     const d = evaluateEditGraphMutations(
       gateInput({
         operations: [
-          { op: 'update_node', path: 'f-spend', value: { description: bloated } },
+          { op: 'add_node', path: 'fac_bloat', value: { id: 'fac_bloat', kind: 'factor', label: bloated } },
         ],
       }),
     );
@@ -234,8 +246,11 @@ describe('readGmHeldResume', () => {
 
 describe('executeGmHeldResume', () => {
   it('propose→hold→confirm→apply loop: a gate-emitted pending executes and preserves rich top-level fields', () => {
-    // HOLD: the live gate holds a tunable edit and embeds the batch.
-    const held = evaluateEditGraphMutations(gateInput());
+    // HOLD: the live gate holds a MIXED tunable+structural batch WHOLESALE
+    // (D-S boundary: pre-D-S a lone tunable held; post-D-S the structural
+    // sibling governs and the WHOLE batch — tunable included — waits for
+    // the confirm; no partial apply) and embeds the batch.
+    const held = evaluateEditGraphMutations(gateInput({ operations: [FIELD_OP, STRUCT_OP] }));
     expect(held.governing).toBe('held');
     const pending = held.pendingActions![0]!;
     // CONFIRM: read the payload back off the (parse-valid) pending.
@@ -252,13 +267,19 @@ describe('executeGmHeldResume', () => {
       (n) => n.id === 'f-spend',
     );
     expect(factor?.description).toBe('Quarterly budget');
+    // The structural sibling applied in the SAME confirm (whole batch).
+    expect(
+      (outcome.mutatedGraph.nodes as Array<Record<string, unknown>>).some(
+        (n) => n.id === 'fac_new',
+      ),
+    ).toBe(true);
     // Rich top-level fields survive (persisted-shape merge, no V3 strip).
     expect((outcome.mutatedGraph as Record<string, unknown>).goal_node_id).toBe('g-profit');
     expect((outcome.mutatedGraph as Record<string, unknown>).schema_version).toBe('v3');
     // DL-7 receipt.
     expect(outcome.fact.fact_type).toBe('edit_graph');
     expect(outcome.fact.result.status).toBe('applied');
-    expect(outcome.fact.result.operations_count).toBe(1);
+    expect(outcome.fact.result.operations_count).toBe(2);
     expect(outcome.fact.noop).toBe(false);
   });
 
@@ -270,9 +291,21 @@ describe('executeGmHeldResume', () => {
     expect(outcome).toEqual({ status: 'referee_blocked', governing: 'rejected' });
   });
 
-  it('a "yes" never overrides staleness: freshness=stale re-referees stale → referee_blocked', () => {
-    const outcome = executeGmHeldResume(executeInput({ freshness: 'stale' }));
+  it('a "yes" never overrides staleness: STRUCTURAL batch + freshness=stale re-referees stale → referee_blocked', () => {
+    // (op switched tunable → structural per D-S: the R2 relaxation makes a
+    // stale-freshness TUNABLE legitimately executable — it would not even
+    // hold at dispatch — so the staleness override pin belongs to the
+    // structural class. The unknown-freshness pin below still covers
+    // tunables: 'unknown' fails closed for every class.)
+    const outcome = executeGmHeldResume(
+      executeInput({ operations: [STRUCT_OP] as never, freshness: 'stale' }),
+    );
     expect(outcome).toEqual({ status: 'referee_blocked', governing: 'stale' });
+  });
+
+  it('D-S: a confirmed TUNABLE on a stale-freshness frame executes (R2 relaxation applies at confirm-time re-referee too)', () => {
+    const outcome = executeGmHeldResume(executeInput({ freshness: 'stale' }));
+    expect(outcome.status).toBe('executed');
   });
 
   it('unknown freshness fails closed (frame gate → stale → declined)', () => {

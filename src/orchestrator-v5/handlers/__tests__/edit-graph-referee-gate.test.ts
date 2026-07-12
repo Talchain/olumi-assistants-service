@@ -67,6 +67,14 @@ function hashOf(graph: unknown): string {
 
 const RENAME_OP = { op: 'update_node', path: 'f-spend', value: { label: 'Ad spend' } };
 const FIELD_OP = { op: 'update_node', path: 'f-spend', value: { description: 'Quarterly budget' } };
+// D-S (ROADMAP §D, Paul 2026-07-12): tunable ops now would_apply, so the
+// held-machinery pins below use a STRUCTURAL op (add_node, new id) — the
+// propose-confirm class post-D-S.
+const STRUCT_OP = {
+  op: 'add_node',
+  path: 'fac_new',
+  value: { id: 'fac_new', kind: 'factor', label: 'New factor' },
+};
 const REMOVE_OP = { op: 'remove_node', path: 'f-reach' };
 const UNKNOWN_OP = { op: 'exotic_future_op', path: 'x' };
 const NON_MUTATING_OP = {
@@ -129,14 +137,36 @@ describe('live verdict routing', () => {
     expect(d.pendingActions).toBeNull();
   });
 
-  it('tunable field update → held with a REAL parse-valid pending + confirm chip', () => {
+  it('tunable field update → PROCEED, no block, no pending (D-S tunable auto-apply — ROADMAP §D, Paul 2026-07-12; pre-D-S pin: held TUNABLE_APPLY_HELD with pending)', () => {
     const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP] }));
+    expect(d.governing).toBe('proceed');
+    expect(d.blockApply).toBe(false);
+    // Honest receipt comes from the EXISTING applied path: the gate leaves
+    // the V4 applied narration + rerun chip untouched (assistantText null =
+    // no copy swap; the F3 four-state guard class in edit-graph.ts owns the
+    // applied vocabulary).
+    expect(d.assistantText).toBeNull();
+    expect(d.pendingActions).toBeNull();
+    expect(d.verdictCounts.would_apply).toBe(1);
+  });
+
+  it('MIXED tunable+structural batch → held WHOLESALE (D-S boundary: no partial apply around a held structural)', () => {
+    const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP, STRUCT_OP] }));
+    expect(d.governing).toBe('held');
+    expect(d.blockApply).toBe(true);
+    expect(d.verdictCounts.would_apply).toBe(1);
+    expect(d.verdictCounts.held).toBe(1);
+  });
+
+  it('structural change → held with a REAL parse-valid pending + confirm chip (propose-confirm unchanged by D-S)', () => {
+    const d = evaluateEditGraphMutations(baseInput({ operations: [STRUCT_OP] }));
     expect(d.governing).toBe('held');
     expect(d.blockApply).toBe(true);
     // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — doctrine (a): the
     // held ask NAMES the change it is holding, keeping the swept
     // consent framing ("Nothing in the model moves until you confirm").
-    expect(d.assistantText).toContain("update 'Marketing spend'");
+    // D-O consent naming unchanged by D-S.
+    expect(d.assistantText).toContain("add 'New factor'");
     expect(d.assistantText).toContain('Nothing in the model moves until you confirm');
     expect(findSuccessClaimHit(d.assistantText!)).toBeNull();
     expect(findForbiddenPhraseHit(d.assistantText!)).toBeNull();
@@ -150,13 +180,13 @@ describe('live verdict routing', () => {
     // Chip copy names its subject (consent-clarity), so a chip click /
     // typed reply resolves to THIS hold via exact-match, never a bare
     // 'Yes' colliding with other live consents.
-    expect(d.suggestedActions![0]!.label).toBe("Update 'Marketing spend'");
-    expect(d.suggestedActions![0]!.message).toBe("Yes, update 'Marketing spend'.");
+    expect(d.suggestedActions![0]!.label).toBe("Add 'New factor'");
+    expect(d.suggestedActions![0]!.message).toBe("Yes, add 'New factor'.");
     expect(findForbiddenPhraseHit(d.suggestedActions![0]!.label)).toBeNull();
     expect(d.publicReason).toMatchObject({
       source: 'graph_management',
       verdict: 'held',
-      blocker_code: 'TUNABLE_APPLY_HELD',
+      blocker_code: 'STRUCTURAL_APPLY_HELD',
       base_hash_match: true,
     });
   });
@@ -168,7 +198,9 @@ describe('live verdict routing', () => {
     // NOTE the budget only counts TURN-EXECUTOR-committed turns — edit/
     // draft-classified commits thread no priorPendingActions and wipe live
     // holds outright (known residual; see GM_HELD_PENDING_TURN_TTL doc).
-    const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP] }));
+    // (op switched FIELD_OP → STRUCT_OP: D-S un-holds tunables; the TTL
+    // machinery under pin is class-independent.)
+    const d = evaluateEditGraphMutations(baseInput({ operations: [STRUCT_OP] }));
     expect(d.governing).toBe('held');
     const pending = d.pendingActions![0]!;
     expect(GM_HELD_PENDING_TURN_TTL).toBe(4);
@@ -178,7 +210,9 @@ describe('live verdict routing', () => {
   });
 
   it('the GENERIC synthesis path still declines the held pending (lane 34: only the dedicated live-mode held-execute branch may apply it)', () => {
-    const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP] }));
+    // (op switched FIELD_OP → STRUCT_OP per D-S; the synthesis-allowlist pin
+    // is class-independent.)
+    const d = evaluateEditGraphMutations(baseInput({ operations: [STRUCT_OP] }));
     const pending = d.pendingActions![0]!;
     const decision = decideProposedChangeSynthesis({
       pending,
@@ -195,7 +229,7 @@ describe('live verdict routing', () => {
     expect(decision).toEqual({ status: 'invalid', reason: 'unknown_handler_id' });
   });
 
-  it('base-hash divergence → stale with the rerun affordance', () => {
+  it('base-hash divergence → stale with the rerun affordance (TUNABLE op — D-S leaves CAS semantics untouched)', () => {
     const d = evaluateEditGraphMutations(
       baseInput({ operations: [FIELD_OP], baseGraphHash: 'divergent-hash' }),
     );
@@ -206,15 +240,29 @@ describe('live verdict routing', () => {
     expect(d.publicReason).toMatchObject({ verdict: 'stale', blocker_code: 'BASE_HASH_DIVERGED' });
   });
 
-  it('not-fresh analysis (pre-edit freshness=stale) → stale (frame gate fails closed)', () => {
+  it('TUNABLE on a stale-freshness frame (hash matching) → PROCEED (D-S R2 relaxation: consecutive tunable tweaks; pre-D-S pin: stale ANALYSIS_NOT_FRESH)', () => {
     const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP], freshness: 'stale' }));
+    expect(d.governing).toBe('proceed');
+    expect(d.blockApply).toBe(false);
+  });
+
+  it('TUNABLE on an UNKNOWN-freshness frame → stale (D-S relaxation stops at stale; unknown authority still fails closed)', () => {
+    const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP], freshness: 'unknown' }));
+    expect(d.governing).toBe('stale');
+    expect(d.publicReason).toMatchObject({ blocker_code: 'ANALYSIS_NOT_FRESH' });
+  });
+
+  it('STRUCTURAL on a stale-freshness frame → stale (frame gate still fails closed outside the tunable class)', () => {
+    const d = evaluateEditGraphMutations(baseInput({ operations: [STRUCT_OP], freshness: 'stale' }));
     expect(d.governing).toBe('stale');
     expect(d.publicReason).toMatchObject({ blocker_code: 'ANALYSIS_NOT_FRESH' });
   });
 
   it('integrity failure (id collision) governs as rejected over a held sibling', () => {
+    // (sibling switched FIELD_OP → STRUCT_OP per D-S so it still HOLDS;
+    // rejected would also govern over a would_apply tunable.)
     const d = evaluateEditGraphMutations(
-      baseInput({ operations: [NON_MUTATING_OP, FIELD_OP] }),
+      baseInput({ operations: [NON_MUTATING_OP, STRUCT_OP] }),
     );
     expect(d.governing).toBe('rejected');
     expect(d.blockApply).toBe(true);
@@ -237,7 +285,7 @@ describe('live verdict routing', () => {
     expect(d.pendingActions).toHaveLength(1);
   });
 
-  it('unreadable frame (null hash) → held WITHOUT a pending (parse-valid pendings need a graph hash)', () => {
+  it('unreadable frame (null hash) → held WITHOUT a pending (parse-valid pendings need a graph hash) — class-independent, tunables included (D-S does not relax readability)', () => {
     const d = evaluateEditGraphMutations(
       baseInput({ operations: [FIELD_OP], currentGraphHash: null, baseGraphHash: null }),
     );
@@ -252,9 +300,9 @@ describe('live verdict routing', () => {
 
 describe('shadow mode never blocks', () => {
   it.each([
-    ['held', [FIELD_OP]],
+    ['held', [STRUCT_OP]], // structural (D-S: tunables no longer hold)
     ['rejected', [UNKNOWN_OP]],
-    ['stale', [FIELD_OP]],
+    ['stale', [FIELD_OP]], // hash-diverged tunable still stales (CAS untouched)
   ] as const)('%s verdict mix → blockApply=false, no copy, no pendings', (label, ops) => {
     const d = evaluateEditGraphMutations(
       baseInput({
@@ -270,19 +318,22 @@ describe('shadow mode never blocks', () => {
   });
 
   it('emits exactly one registered v5.candidate_mutation.<verdict> event per envelope', () => {
+    // (second expected event flipped Held → WouldApply per D-S tunable
+    // auto-apply; the per-envelope emit contract itself is unchanged.)
     evaluateEditGraphMutations(baseInput({ mode: 'shadow', operations: [RENAME_OP, FIELD_OP] }));
     const names = emitSpy.mock.calls.map((c: readonly unknown[]) => c[0]);
     expect(names).toEqual([
       telemetry.TelemetryEvents.V5CandidateMutationWouldApply,
-      telemetry.TelemetryEvents.V5CandidateMutationHeld,
+      telemetry.TelemetryEvents.V5CandidateMutationWouldApply,
     ]);
     for (const name of names) {
       expect(telemetry.VALID_EVENT_NAMES.has(name as string)).toBe(true);
     }
-    // Redaction: closed enums / booleans / ids only — never payload values.
-    const heldPayload = emitSpy.mock.calls[1]![1] as Record<string, unknown>;
-    expect(heldPayload).toMatchObject({
-      verdict: 'held',
+    // Redaction: closed enums / booleans / ids only — never payload values
+    // (the would_apply event must not leak the candidate or field values).
+    const fieldPayload = emitSpy.mock.calls[1]![1] as Record<string, unknown>;
+    expect(fieldPayload).toMatchObject({
+      verdict: 'would_apply',
       kind: 'update_node_field',
       mode: 'shadow',
       dispatch_path: 'edit_graph',
@@ -290,7 +341,7 @@ describe('shadow mode never blocks', () => {
       scenario_id: 'scn-gate',
       turn_id: 'turn-gate',
     });
-    expect(JSON.stringify(heldPayload)).not.toContain('Quarterly budget');
+    expect(JSON.stringify(fieldPayload)).not.toContain('Quarterly budget');
   });
 });
 
@@ -298,9 +349,15 @@ describe('shadow mode never blocks', () => {
 
 describe('held handle determinism', () => {
   it('same scenario + target → same gmh_ ref (newer offer supersedes via carry-forward same-key rule)', () => {
-    const a = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP] }));
+    // (ops switched to STRUCTURAL adds per D-S — tunables no longer mint
+    // held pendings; the supersession keying under pin is class-independent.)
+    const a = evaluateEditGraphMutations(baseInput({ operations: [STRUCT_OP] }));
     const b = evaluateEditGraphMutations(
-      baseInput({ operations: [{ op: 'update_node', path: 'f-spend', value: { description: 'Different content' } }] }),
+      baseInput({
+        operations: [
+          { op: 'add_node', path: 'fac_new', value: { id: 'fac_new', kind: 'factor', label: 'Different label' } },
+        ],
+      }),
     );
     expect(a.pendingActions![0]!.chip_id).toBe(b.pendingActions![0]!.chip_id);
     expect(a.pendingActions![0]!.chip_id).toMatch(/^gmh_[0-9a-f]{12}$/);
