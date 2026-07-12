@@ -50,7 +50,7 @@ import { validateModelsAtStartup, getEnabledModelsSummary } from "./config/model
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
-import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode } from "./utils/errors.js";
+import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode, isClientAbortError } from "./utils/errors.js";
 import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
 import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
@@ -511,6 +511,30 @@ await app.register(rateLimit, {
 // Centralized error handler: structured error.v1 responses with request_id
 // Layer 3 guarantee: every error response has a non-empty JSON body.
 app.setErrorHandler((error, request, reply) => {
+  // ROADMAP 1.16i (CEE half) — client aborts are not server errors. One
+  // aborted browser request used to produce four error-class log lines and
+  // a false 5xx metric increment for a 500 that never reached any client
+  // (the socket was already gone). Short-circuit BEFORE toErrorV1 so its
+  // "Internal server error occurred" copy never fires: ONE warn-class line
+  // with the distinct `client_aborted` class, NO incrementErrorCount, and
+  // the reply finalised as 499 (client closed request) — nothing is
+  // deliverable on a dead socket, and a non-5xx status keeps the
+  // observability onResponse access-log line out of the error class too.
+  // Genuine errors fall through to the existing path byte-unchanged.
+  if (isClientAbortError(error)) {
+    app.log.warn(
+      {
+        event: "client_aborted",
+        request_id: getRequestId(request),
+        method: request.method,
+        url: request.url,
+        error_code: (error as NodeJS.ErrnoException)?.code ?? null,
+      },
+      "Client aborted request mid-flight — reply undeliverable, not a server error",
+    );
+    return reply.status(499).send();
+  }
+
   let errorV1: ReturnType<typeof toErrorV1>;
   try {
     errorV1 = toErrorV1(error, request);

@@ -214,6 +214,37 @@ export function toErrorV1(error: unknown, requestOrOptions?: FastifyRequest | To
 }
 
 /**
+ * ROADMAP 1.16i (CEE half) — client-abort classifier.
+ *
+ * One aborted browser request used to produce FOUR error-class log lines
+ * and a false 5xx metric increment (onError "Request error" → toErrorV1
+ * "Internal server error occurred" → "[INTERNAL] Internal server error" +
+ * incrementErrorCount → onResponse "Request completed with server error"),
+ * for a 500 that never reached any client — the socket was already gone.
+ *
+ * True only for the error shapes a client disconnect produces mid-request
+ * or mid-reply:
+ *   - code `ERR_STREAM_PREMATURE_CLOSE` (Node stream pipeline: socket
+ *     closed while the reply was streaming)
+ *   - code `ECONNABORTED` (request torn down while the body was read)
+ *   - exact message "premature close" / "request aborted" (the same
+ *     conditions surfaced without a code)
+ *
+ * Deliberately narrow: message checks are exact-match (lowercased), NOT
+ * substring — a genuine error that merely mentions an abort phrase keeps
+ * today's error-class handling. `ECONNRESET` is deliberately NOT
+ * classified here: it can be a genuine network failure and was not part
+ * of the verified defect evidence.
+ */
+export function isClientAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === 'ERR_STREAM_PREMATURE_CLOSE' || code === 'ECONNABORTED') return true;
+  const message = error.message.trim().toLowerCase();
+  return message === 'premature close' || message === 'request aborted';
+}
+
+/**
  * Get HTTP status code for error code
  */
 export function getStatusCodeForErrorCode(code: ErrorCode): number {

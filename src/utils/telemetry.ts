@@ -1510,10 +1510,19 @@ export const TelemetryEvents = {
   V5PostDraftCoachingSourceSelected: "v5.post_draft_coaching.source_selected",
 
   // V5 Phase 2 workstream A — post-analysis coaching wrapper fired.
-  // Emitted when an analyse-stage direct_answer with a fresh
-  // run_analysis fact yields ≥1 review-card-derived chip and a
-  // post_analysis_coaching fact is committed. Payload:
-  // { request_id, session_id, chip_count, selected_card_count }.
+  // SUCCESS telemetry of the post-analysis chip wrapper: an analyse-stage
+  // direct_answer with a fresh run_analysis fact yielded ≥1
+  // review-card-derived chip. NOT an empty-answer salvage — that is
+  // v5.coaching.empty_answer_recovered (V5CoachingEmptyAnswerRecovered);
+  // conflating the two caused a real misdiagnosis in the 11 Jul manual
+  // test (1.16j). No fact is committed — recovery state travels on this
+  // event only (see post-analysis-wrapper.ts's result doc comment; the
+  // earlier version of this comment predated the P0 fix that dropped the
+  // persisted fact). Name is frozen (deliberate-update-only registry) —
+  // clarity lives in this comment and at the emit site, not in a rename.
+  // Payload: { request_id, session_id, chip_count, selected_card_count,
+  //   answer_text_hash, generated_chip_ids, selected_review_card_ids,
+  //   freshness_at_response }.
   PostAnalysisDirectAnswerRecovered: "v5.post_analysis.direct_answer_recovered",
   // Companion to ...Recovered: emitted when the wrapper's trigger
   // conditions fail (or unsupported card_types are filtered out).
