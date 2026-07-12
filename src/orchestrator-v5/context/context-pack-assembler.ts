@@ -40,6 +40,7 @@ import { log } from '../../utils/telemetry.js';
 import { emitContextTruncation } from './context-budget-telemetry.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
+import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
 import {
   formatAnalysisForContext,
   type DisplaySafeAnalysis,
@@ -367,6 +368,25 @@ export interface ContextPack {
   readonly display_graph: DisplaySafeGraph;
   readonly conversation: ContextPackConversation;
   /**
+   * Context v2 S4-INJECT (ROADMAP 1.73; design pack 01 §2, 04 §3): the
+   * rolling conversation summary, projected by the injector
+   * (`rolling-summary/inject.ts`) from `scenarios.rolling_summary`.
+   * Present ONLY when CEE_ROLLING_SUMMARY = 'inject' AND a stored summary
+   * exists for the scenario; ABSENT otherwise — key absence is the
+   * off/maintain byte-identity guarantee at the prompt seam.
+   *
+   * Adjacent to `conversation` here (01 §2); in the SERIALISED routing
+   * prompt `buildUserMessage` re-appends it after the ground-truth
+   * `analysis`/`graph` sections so the LLM reads it BELOW structured state
+   * (04 §3.1 — facts beat summary), alongside the code-owned precedence
+   * instruction.
+   *
+   * NOTE: `conversation_summary` also names a V4 prompt-zones registry
+   * entry (src/orchestrator/prompt-zones/*) — unrelated; grep/telemetry
+   * key on this V5 pack path.
+   */
+  readonly conversation_summary?: ContextPackConversationSummary;
+  /**
    * Curated summary of the most recent successful mutations from
    * `prior_facts`, in newest-first order. Capped at three entries with
    * each summary truncated to 80 chars. Non-mutation facts and noop
@@ -536,6 +556,16 @@ export interface AssembleContextPackInput {
    * freshness was derived → the field is absent → flag-off byte-identity.
    */
   readonly coachingContext?: CoachingStatePack;
+  /**
+   * Context v2 S4-INJECT: the pre-projected rolling-summary section, built
+   * by `loadConversationSummaryForInjection` (rolling-summary/inject.ts) in
+   * the turn-executor — the loader owns the flag gate, the store read, the
+   * lag computation, and the staleness disclosure; the assembler stays
+   * synchronous and only places the section. Omitted (undefined) when the
+   * flag is below 'inject' or no stored summary exists → the field is
+   * absent → off/maintain byte-identity.
+   */
+  readonly conversationSummary?: ContextPackConversationSummary;
 }
 
 /**
@@ -715,6 +745,13 @@ export function assembleContextPackWithSummary(
     // unchanged for handlers, freshness hashing, telemetry.
     display_graph: formatGraphForContext(projectedGraph),
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
+    // Context v2 S4-INJECT: placed adjacent to `conversation` (01 §2).
+    // Conditional spread — when the caller supplies nothing the key is
+    // ABSENT (never null/undefined-valued), preserving off/maintain
+    // byte-identity of the serialised pack.
+    ...(input.conversationSummary !== undefined
+      ? { conversation_summary: input.conversationSummary }
+      : {}),
     recent_changes: projectRecentChanges(input.priorFacts),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,

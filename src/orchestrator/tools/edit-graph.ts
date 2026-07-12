@@ -1923,7 +1923,7 @@ export async function handleEditGraph(
       section_chars: serialisedContext.sectionChars,
       total_chars: contextSection.length,
       truncations: serialisedContext.truncations,
-      summary_lag_turns: null, // no summary layer until S4
+      summary_lag_turns: null, // S4-inject is routing-only; this site has no summary layer yet
       ui_narrowed: null, // narrowing marker is a routing-ingress concern
       usage: chatResult.usage,
     });

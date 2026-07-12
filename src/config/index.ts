@@ -652,11 +652,15 @@ const ConfigSchema = z.object({
     //              turn path (fire-and-forget, monotonic write), but NOTHING
     //              consumes them — no prompt sees a summary. Lets a week of real
     //              summaries be inspected before any prompt injects one.
-    //   'inject'  : the summary additionally enters the routing/edit prompts —
-    //              the S4 INJECTION FOLLOW-UP wires this; it gates on D-G2/D-G4
-    //              ratification + the harness 1.70 continuity scenario. Until
-    //              that lands, 'inject' behaves like 'maintain' (maintainer on;
-    //              no injection code present yet).
+    //   'inject'  : the summary additionally enters the ROUTING prompt — the
+    //              turn-executor loads scenarios.rolling_summary at assembly
+    //              (rolling-summary/inject.ts) and the pack carries a
+    //              `conversation_summary` section + the code-owned
+    //              facts-beat-summary instruction (route-with-tool-use.ts),
+    //              staleness-disclosed per 01 §4. FLIP GATES: D-G2/D-G4
+    //              ratification + the harness 1.70 continuity scenario
+    //              (05 §S4). The edit-serialiser injection is a follow-up;
+    //              'inject' currently changes the routing prompt only.
     // Unrecognised values fall back to 'off'. Ships dark: not in render*.yaml,
     // AND the backing migration (20260712120000_v5_rolling_summary.sql) is a
     // DRAFT — the RPCs do not exist on staging until Paul executes it, so a
