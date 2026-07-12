@@ -1,0 +1,5 @@
+{
+  "assistant_text": "That depends on your appetite for risk. Would you rather hire the tech lead now, or wait and hire two developers next quarter?",
+  "suggested_actions": [],
+  "_diagnostic_trace": { "exit_path": "coach" }
+}
