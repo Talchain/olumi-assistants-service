@@ -38,14 +38,19 @@ config import (store factory picks `file`), restores them before `listen()`
 ```
 runner.mjs               v0 journey runner (persistence, L0 hooks, manifest,
                          conditional consent turns, concurrent duplicates)
+prompt-eval.sh           turnkey prompt A/B (1.70 v1): build baseline + candidate
+                         stores, boot both arms, drive N paired reruns, verdict
 l0-snapshot.mjs          L0 DB ground-truth snapshot (turns/facts/graph-sha/brief/decision_records)
 config-manifest.mjs      per-run config snapshot (served prompt sent_hash, deploy SHAs, flags)
-scorer/dims.ts           property-based dims (pure, self-tested)
+scorer/dims.ts           v0 property-based dims (pure, self-tested)
+scorer/prompt-dims.ts    prompt-quality dims (1.70 v1): comparable scalars for A/B
 scorer/score-run.ts      per-run scorer — imports PRODUCTION guards from src/ (never copies)
+scorer/ab-verdict.ts     A/B verdict (1.70 v1): baseline vs candidate deltas + call
 scorer/localize.ts       localization reporter v0
 journeys/                journey-v2 + frozen journeys (proven) + scenarios s1–s5 (new)
 fixtures/                frozen-graph.json + frozen-brief.txt (deterministic analysed state)
-arm/                     hermetic-arm boot: boot-arm.sh, pms-file-shim.mjs, build-stores.py
+arm/                     hermetic-arm boot: boot-arm.sh, pms-file-shim.mjs, build-stores.py,
+                         make-candidate-store.mjs (A/B swap primitive — pure JSON patch)
 staging/                 seed-frozen-scenario.py, delete-scenarios.py (reserved-id denylist)
 legacy/                  proven run-arm.sh / run-frozen-arm.sh (path-adjusted, reference)
 __tests__/               scorer self-tests (*.harness-test.ts — see Gates)
@@ -140,6 +145,98 @@ Scenario journeys: `s1` edit-tweak loop · `s2` add-factor multi-turn ·
 `s3` option-question probe · `s4` post-draft framing (fresh scenario — omit
 `--scenario`) · `s5` rapid re-click (`--l0` required for D10).
 
+## Prompt A/B evaluation (ROADMAP 1.70 v1)
+
+The instrument for finding a better prompt on **evidence**: swap ONE PMS prompt
+candidate into the hermetic arm, drive a fixed scenario set against both the
+current (baseline) prompt and the candidate on the **same** frozen graph / seed /
+flags, score prompt-quality dims, and emit a per-dim baseline-vs-candidate
+verdict artifact. It builds on the v0 substrate — same runner, same run-dir
+capture, same production guards imported from `src/`. It writes ZERO to PMS and
+promotes NOTHING; it produces the evidence the orchestrator promotes on.
+
+### The swap (fair-A/B primitive)
+
+`arm/make-candidate-store.mjs` derives a candidate store from an already-built
+baseline (`stores/staging-mirror.json`) by a **pure JSON patch** — it replaces
+exactly one task's served content with the candidate file and leaves every other
+byte identical. That byte-identical baseline is the only fair basis for an A/B;
+deriving the candidate by patch (rather than re-fetching staging) also needs no
+Supabase creds and cannot drift mid-experiment. The task matches by store key OR
+`taskId`, so `orchestrator_default`, `decision_review`, `clarify_brief`, … all
+resolve. It prints the expected on-wire `prompt_hash` so you can confirm the
+candidate is actually being served against the run `manifest.json` `sent_hash`.
+
+### Prompt-quality dims (`scorer/prompt-dims.ts`)
+
+Where the v0 dims answer "does this run pass?", these yield a **comparable scalar
+with a direction** so `ab-verdict.ts` can diff baseline vs candidate. Same rule as
+v0: property-based, NEVER exact-text. `value = null` = not measurable this run
+(excluded from the call, never scored as good).
+
+| Dim | Direction | Catches | Gating? |
+|---|---|---|---|
+| PQ1 brevity-density | lower-better | verbosity — mean coach-turn words (+ sentence length, bullet ratio) | no |
+| PQ2 question-asking | **neutral** | question count / post-draft framing question (good for clarify, bad for terse coach — reported, not scored) | no |
+| PQ3 grounding | higher-better | coaching that cites specific numbers / named graph options vs generic prose | no |
+| PQ4 chip-correctness | higher-better | chips present on either/or + enumerated question turns; identical-repeat penalty (details) | no |
+| PQ5 guard-cleanliness | lower-better | forbidden phrase / success claim / held-science / mutation-language / structural-success hits (the imported `src/` guards) | **yes** |
+| PQ6 coherence | lower-better | cross-surface contradiction: says "done" while a proposal is still held; claims a mutation then asks to apply; names a winner the analysis blocks contradict | **yes** |
+
+A **gating** regression (PQ5 or PQ6) caps the overall verdict at *worse* no matter
+how many other dims improved — introducing a forbidden phrase, or making the coach
+name the wrong winner, is disqualifying. `score-run.ts` emits these as the
+`prompt_dims` block of `scores.json`.
+
+### Verdict + flakiness (`scorer/ab-verdict.ts`)
+
+Reads the `prompt_dims` from each side's `scores.json`, diffs per dim, and writes
+`ab-verdict.json` + `ab-verdict.md` with `better` / `worse` / `mixed` /
+`no-change` / `inconclusive`. Live-model nondeterminism is handled explicitly:
+
+- **N≥3 reruns per side.** Flaky dims (PQ1–PQ4, PQ6) aggregate by **median** across
+  a side's runs; the stable dim (PQ5) by mean. One run per side is allowed but the
+  artifact is stamped `low_confidence`.
+- **Noise floor.** A dim is only called improved/regressed when
+  `|candidate − baseline|` clears a per-dim threshold (recorded in the artifact);
+  smaller moves are `flat`.
+- **Gating + neutral** as above: PQ5/PQ6 regressions gate; PQ2 is reported, never
+  scored.
+
+### Turnkey command (hermetic arm)
+
+```bash
+cd tools/conversation-harness
+# baseline store once (staging-mirror; needs .env.staging.local creds), then:
+OLUMI_ASSIST_KEY=<assist key> ./prompt-eval.sh \
+  --task decision_review \
+  --candidate candidates/decision_review.v43.txt \
+  --journey journeys/s3-option-question-probe.json \
+  --reruns 3
+# -> runs/ab-decision_review/ab-verdict.md  (per-dim deltas + overall call)
+```
+
+`prompt-eval.sh` does all six steps: build baseline store → derive candidate store
+→ boot both arms (`--base-port` / `--cand-port`) → drive `--reruns` paired journeys
+(a fresh frozen scenario per side/rerun when the journey needs seeding) → score
+each → verdict → clean up seeded scenarios. `clarify_brief` is A/B'd the same way
+with a clarify-shaped journey (e.g. `s4-post-draft-framing.json`).
+
+### Manual / step-by-step (same primitives)
+
+```bash
+python3 arm/build-stores.py --out stores/staging-mirror.json
+node arm/make-candidate-store.mjs --baseline stores/staging-mirror.json \
+  --task decision_review --candidate candidates/decision_review.v43.txt \
+  --out stores/cand-decision_review.json
+STORE=$PWD/stores/staging-mirror.json      PORT=3103 ./arm/boot-arm.sh $PWD/arm-base.log &
+STORE=$PWD/stores/cand-decision_review.json PORT=3113 ./arm/boot-arm.sh $PWD/arm-cand.log &
+# ... seed a scenario per side, run runner.mjs against :3103 and :3113, score each ...
+BASELINE_DIRS=runs/base-1,runs/base-2,runs/base-3 \
+CANDIDATE_DIRS=runs/cand-1,runs/cand-2,runs/cand-3 \
+  pnpm exec tsx scorer/ab-verdict.ts
+```
+
 ## Staging-mode discipline (when you must)
 
 1. **Quiesce**: no open canvas tab on a harness scenario — a live UI tab
@@ -172,10 +269,22 @@ script here.
   build/typecheck gate (verified).
 - `test:required` DOES collect `tools/**` test globs, so the self-tests are
   named `*.harness-test.ts` (not collected by `**/*.{test,spec}.*`) and run via
-  their own config — deliberately NOT wired into the required gate in this PR:
+  their own config — deliberately NOT wired into the required gate:
   ```bash
   pnpm exec vitest run --config tools/conversation-harness/vitest.config.ts
   ```
+- **Test-file naming is load-bearing — do NOT create `*.test.ts` / `*.spec.ts`
+  under this directory.** The repo-root required gate (`vitest.required.config.ts`)
+  collects the default `**/*.{test,spec}.*` glob and does **not** exclude
+  `tools/conversation-harness/**` (unlike `tools/graph-evaluator/**`, which is
+  package-excluded there). A stray `*.test.ts` here would be pulled into the
+  product gate — where it would import `src/` guards and try to reach live
+  services. This lane is path-restricted to `tools/conversation-harness/**`, so
+  the convention is enforced from inside the harness rather than by editing the
+  root config: `__tests__/no-stray-test-files.harness-test.ts` FAILS the local
+  suite if any `*.test.ts` / `*.spec.ts` appears here. If a repo-root-gate test is
+  ever genuinely wanted, add an explicit path exclusion to
+  `vitest.required.config.ts` from a lane that owns the repo root.
 
 ## Residuals for v1
 
@@ -189,3 +298,17 @@ script here.
 - Substage-timing shape in `_diagnostic_trace` is read defensively
   (`substage_timings` | `timings`); confirm the emitted key once a traced arm
   run is captured and pin it.
+
+Prompt A/B (1.70 v1):
+- The overall better/worse/mixed call is a **v1 heuristic** (gating dims +
+  count-of-scored-dims); it is decision support for the orchestrator, not an
+  auto-promoter. Per-dim deltas are the primary evidence.
+- Noise thresholds in `ab-verdict.ts` (`NOISE_THRESHOLD`) are seeded from
+  judgement, not yet from a measured rerun-spread distribution — tighten them
+  once a few real N≥3 arm A/Bs are captured.
+- PQ6 coherence proxies are deliberately **conservative** (win-claim contradiction
+  fires only when a lead sentence names exactly one option); it catches the clear
+  cases and will miss subtly-hedged contradictions — expand as real misses appear.
+- The prompt-eval pipeline (`score-run` → `ab-verdict`) is proven end-to-end on the
+  redacted sample run; a **live hermetic-arm A/B** additionally needs
+  `staging-parity.env` + a built store and was not run in the build lane.

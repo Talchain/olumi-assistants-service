@@ -1,0 +1,92 @@
+/**
+ * Self-test for the A/B verdict (scorer/ab-verdict.ts). Synthetic per-side
+ * PromptDimScore[][] -> expected per-dim deltas + overall call, incl. the gating
+ * and flaky-median rules. Pure — no I/O.
+ *
+ * Run: pnpm exec vitest run --config tools/conversation-harness/vitest.config.ts
+ */
+import { describe, expect, it } from 'vitest';
+import { computeAbVerdict, NOISE_THRESHOLD } from '../scorer/ab-verdict.js';
+import type { PromptDimScore, PromptDimDirection } from '../scorer/prompt-dims.js';
+
+type Meta = { direction: PromptDimDirection; gating: boolean; flaky: boolean; unit: string };
+const META: Record<string, Meta> = {
+  'PQ1-brevity-density': { direction: 'lower-better', gating: false, flaky: true, unit: 'words' },
+  'PQ2-question-asking': { direction: 'neutral', gating: false, flaky: true, unit: 'q/turn' },
+  'PQ3-grounding': { direction: 'higher-better', gating: false, flaky: true, unit: 'fraction' },
+  'PQ4-chip-correctness': { direction: 'higher-better', gating: false, flaky: true, unit: 'fraction' },
+  'PQ5-guard-cleanliness': { direction: 'lower-better', gating: true, flaky: false, unit: 'hits' },
+  'PQ6-coherence': { direction: 'lower-better', gating: true, flaky: true, unit: 'contradictions' },
+};
+
+function dim(name: string, value: number | null): PromptDimScore {
+  return { dim: name, label: name, ...META[name], value, details: {}, notes: [] };
+}
+
+/** One run = the six dims with the given values. */
+function run(values: Partial<Record<string, number | null>>): PromptDimScore[] {
+  return Object.keys(META).map((name) => dim(name, name in values ? (values[name] as number | null) : 0));
+}
+
+const find = (v: ReturnType<typeof computeAbVerdict>, dimName: string) => v.dims.find((d) => d.dim === dimName)!;
+
+describe('computeAbVerdict', () => {
+  it('calls a clean improvement "better"', () => {
+    const baseline = [run({ 'PQ3-grounding': 0.4 })];
+    const candidate = [run({ 'PQ3-grounding': 0.8 })];
+    const v = computeAbVerdict(baseline, candidate);
+    expect(v.overall).toBe('better');
+    expect(find(v, 'PQ3-grounding').improved).toBe(true);
+  });
+
+  it('a gating regression (guard hit introduced) forces "worse" even with other gains', () => {
+    const baseline = [run({ 'PQ3-grounding': 0.4, 'PQ5-guard-cleanliness': 0 })];
+    const candidate = [run({ 'PQ3-grounding': 0.9, 'PQ5-guard-cleanliness': 2 })];
+    const v = computeAbVerdict(baseline, candidate);
+    expect(v.overall).toBe('worse');
+    expect(v.reason).toContain('PQ5-guard-cleanliness');
+    expect(find(v, 'PQ5-guard-cleanliness').regressed).toBe(true);
+    expect(find(v, 'PQ5-guard-cleanliness').gating).toBe(true);
+  });
+
+  it('mixes when one dim improves and another (non-gating) regresses', () => {
+    const baseline = [run({ 'PQ3-grounding': 0.4, 'PQ4-chip-correctness': 0.9 })];
+    const candidate = [run({ 'PQ3-grounding': 0.9, 'PQ4-chip-correctness': 0.4 })];
+    expect(computeAbVerdict(baseline, candidate).overall).toBe('mixed');
+  });
+
+  it('treats sub-threshold moves as flat -> no-change', () => {
+    const baseline = [run({ 'PQ3-grounding': 0.5 })];
+    const candidate = [run({ 'PQ3-grounding': 0.5 + NOISE_THRESHOLD['PQ3-grounding'] / 2 })];
+    const v = computeAbVerdict(baseline, candidate);
+    expect(v.overall).toBe('no-change');
+    expect(find(v, 'PQ3-grounding').flat).toBe(true);
+  });
+
+  it('ignores the neutral dim in the overall call', () => {
+    const baseline = [run({ 'PQ2-question-asking': 0 })];
+    const candidate = [run({ 'PQ2-question-asking': 5 })];
+    const v = computeAbVerdict(baseline, candidate);
+    expect(v.overall).toBe('no-change'); // PQ2 delta is huge but neutral
+    expect(find(v, 'PQ2-question-asking').improved).toBe(false);
+    expect(find(v, 'PQ2-question-asking').regressed).toBe(false);
+  });
+
+  it('aggregates flaky dims by MEDIAN across reruns (an outlier run does not swing it)', () => {
+    // grounding baseline median 0.4; candidate runs [0.9, 0.85, 0.1] -> median 0.85 (outlier 0.1 ignored)
+    const baseline = [run({ 'PQ3-grounding': 0.4 }), run({ 'PQ3-grounding': 0.4 }), run({ 'PQ3-grounding': 0.4 })];
+    const candidate = [run({ 'PQ3-grounding': 0.9 }), run({ 'PQ3-grounding': 0.85 }), run({ 'PQ3-grounding': 0.1 })];
+    const v = computeAbVerdict(baseline, candidate);
+    expect(find(v, 'PQ3-grounding').candidate).toBe(0.85);
+    expect(v.overall).toBe('better');
+    expect(v.low_confidence).toBe(false);
+  });
+
+  it('flags low confidence and excludes unmeasurable dims', () => {
+    const baseline = [run({ 'PQ4-chip-correctness': null })];
+    const candidate = [run({ 'PQ4-chip-correctness': null })];
+    const v = computeAbVerdict(baseline, candidate);
+    expect(v.low_confidence).toBe(true); // only 1 run per side
+    expect(find(v, 'PQ4-chip-correctness').measurable).toBe(false);
+  });
+});

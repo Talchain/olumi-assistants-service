@@ -36,6 +36,12 @@ import {
   type L0Snap,
   type DimResult,
 } from './dims.js';
+import {
+  runPromptDims,
+  surfacesFromWire,
+  type PromptDimScore,
+  type TurnSurfaces,
+} from './prompt-dims.js';
 
 const GENERIC_MARKERS = [
   /\bconsider your assumptions\b/i,
@@ -124,7 +130,14 @@ function metricsFor(turnId: string, wire: any, message: string, row: TurnRow, la
   };
 }
 
-function loadNewLayout(runDir: string): { rows: TurnRow[]; scored: ScoredRow[] } {
+interface LoadedRun {
+  rows: TurnRow[];
+  scored: ScoredRow[];
+  surfacesByTurn: Record<string, TurnSurfaces>;
+  graphLabels: string[];
+}
+
+function loadNewLayout(runDir: string): LoadedRun {
   const journey = readJson(join(runDir, 'journey.json'));
   const turnsDir = join(runDir, 'turns');
   const onDisk = new Set(readdirSync(turnsDir));
@@ -144,18 +157,20 @@ function loadNewLayout(runDir: string): { rows: TurnRow[]; scored: ScoredRow[] }
   const labels = draftLabels(loaded.map((t) => t.wire));
   const rows: TurnRow[] = [];
   const scored: ScoredRow[] = [];
+  const surfacesByTurn: Record<string, TurnSurfaces> = {};
   for (const { id, meta, wire } of loaded) {
     const row = rowFromWire(id, wire, meta);
     // Attach the production-guard hits to the dim row too — dimD11 aggregates
     // them; without this D11 is (honestly) UNMEASURABLE.
     row.guardHits = guardHitsFor(row.assistantText);
     rows.push(row);
+    surfacesByTurn[id] = surfacesFromWire(wire);
     scored.push(metricsFor(id, wire, meta.message ?? '', row, labels));
   }
-  return { rows, scored };
+  return { rows, scored, surfacesByTurn, graphLabels: labels };
 }
 
-function loadLegacyLayout(runDir: string): { rows: TurnRow[]; scored: ScoredRow[] } {
+function loadLegacyLayout(runDir: string): LoadedRun {
   const msgByTurn: Record<string, string> = {};
   try {
     for (const l of readFileSync(join(runDir, 'run-log.txt'), 'utf-8').split('\n')) {
@@ -172,6 +187,7 @@ function loadLegacyLayout(runDir: string): { rows: TurnRow[]; scored: ScoredRow[
   const labels = draftLabels(loaded.map((t) => t.wire));
   const rows: TurnRow[] = [];
   const scored: ScoredRow[] = [];
+  const surfacesByTurn: Record<string, TurnSurfaces> = {};
   for (const { turn, wire } of loaded) {
     if (wire == null) {
       scored.push({ turn, message: msgByTurn[turn] ?? '', http_ok: false });
@@ -180,9 +196,10 @@ function loadLegacyLayout(runDir: string): { rows: TurnRow[]; scored: ScoredRow[
     const row = rowFromWire(turn, wire, { http_status: 200 });
     row.guardHits = guardHitsFor(row.assistantText);
     rows.push(row);
+    surfacesByTurn[turn] = surfacesFromWire(wire);
     scored.push(metricsFor(turn, wire, msgByTurn[turn] ?? '', row, labels));
   }
-  return { rows, scored };
+  return { rows, scored, surfacesByTurn, graphLabels: labels };
 }
 
 function loadL0(runDir: string): L0Snap[] {
@@ -195,16 +212,24 @@ function loadL0(runDir: string): L0Snap[] {
     .filter((s): s is L0Snap => s != null);
 }
 
-function scoreRun(runDir: string): { scored: ScoredRow[]; dims: DimResult[] } {
+function scoreRun(runDir: string): { scored: ScoredRow[]; dims: DimResult[]; promptDims: PromptDimScore[] } {
   const isNew = existsSync(join(runDir, 'turns'));
-  const { rows, scored } = isNew ? loadNewLayout(runDir) : loadLegacyLayout(runDir);
+  const { rows, scored, surfacesByTurn, graphLabels } = isNew ? loadNewLayout(runDir) : loadLegacyLayout(runDir);
   const dims = runAllDims(rows, loadL0(runDir));
+  // Prompt-quality dims (ROADMAP 1.70 v1): comparable scalars for A/B, consumed
+  // by ab-verdict.ts. PQ5/PQ6 read the guardHits attached above (src/ guards).
+  const promptDims = runPromptDims(rows, { surfacesByTurn, graphLabels });
 
   writeFileSync(
     join(runDir, 'scores.json'),
-    JSON.stringify({ generated_at: new Date().toISOString(), layout: isNew ? 'v0' : 'legacy', rows: scored, dims }, null, 2),
+    JSON.stringify(
+      { generated_at: new Date().toISOString(), layout: isNew ? 'v0' : 'legacy', rows: scored, dims, prompt_dims: promptDims },
+      null,
+      2,
+    ),
   );
 
+  const fmtVal = (v: number | null) => (v == null ? '—' : String(v));
   const md = [
     '| Turn | class | words | bullets | ? | forbidden | mut-lang | chips | wall-ms |',
     '|---|---|---|---|---|---|---|---|---|',
@@ -216,11 +241,18 @@ function scoreRun(runDir: string): { scored: ScoredRow[]; dims: DimResult[] } {
     '| Dim | verdict | note |',
     '|---|---|---|',
     ...dims.map((d) => `| ${d.dim} | ${d.verdict.toUpperCase()} | ${d.notes[0] ?? ''} |`),
+    '',
+    '| Prompt dim | dir | value | note |',
+    '|---|---|---|---|',
+    ...promptDims.map(
+      (d) =>
+        `| ${d.dim} | ${d.direction === 'higher-better' ? '↑' : d.direction === 'lower-better' ? '↓' : '~'} | ${fmtVal(d.value)} ${d.unit} | ${d.notes[0] ?? ''} |`,
+    ),
   ].join('\n');
   writeFileSync(join(runDir, 'scores.md'), md);
   console.log(md);
   console.log(`\nrows: ${scored.length}  (${runDir})`);
-  return { scored, dims };
+  return { scored, dims, promptDims };
 }
 
 // ---- entrypoint ----
