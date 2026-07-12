@@ -9,6 +9,9 @@
  * assembled user message — diagnostics live on the input object only.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildInvokeInputForTests } from '../decision-review-enricher.js';
 import { buildDecisionReviewUserMessage } from '../../../cee/decision-review/invoke.js';
 
@@ -382,5 +385,143 @@ describe('decision-review-enricher — edge cases', () => {
     const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
     expect(input.runner_up).toBeNull();
     expect(input._meta?.margin).toBeNull();
+  });
+});
+
+// ============================================================================
+// isl_results.option_comparison — envelope-shape coverage (ROADMAP 1.78)
+//
+// The CURRENT live V2 envelope populates `enrichment.option_comparison` and
+// leaves the legacy `enrichment.results` ABSENT (proven by the REAL staging
+// capture below). readIslResults must therefore build the prompt's
+// isl_results.option_comparison from BOTH sources — current shape primary,
+// legacy `results` fallback — mirroring readResultsArraySources' tolerance
+// WITHOUT pooling the two (pooling would double-count the same option).
+// ============================================================================
+
+describe('decision-review-enricher — isl_results.option_comparison envelope shapes (1.78)', () => {
+  // REAL staging capture: blocks[0].enrichment carries the full persisted
+  // PLoT envelope with `results` ABSENT and `option_comparison` populated.
+  // Provenance: tests/fixtures/cross-service/*.metadata.json. Never hand-edit.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const fixturePath = join(
+    here, '..', '..', '..', '..',
+    'tests', 'fixtures', 'cross-service', 'v5-turn.run-analysis.staging.json',
+  );
+
+  function loadStagingEnrichment(): Record<string, unknown> {
+    const turn = JSON.parse(readFileSync(fixturePath, 'utf-8')) as {
+      blocks: Array<Record<string, unknown>>;
+    };
+    const block = turn.blocks.find((b) => b.type === 'analysis_result');
+    if (!block) throw new Error('fixture: no analysis_result block');
+    const enrichment = block.enrichment as Record<string, unknown>;
+    if (!enrichment) throw new Error('fixture: no enrichment on analysis_result block');
+    return enrichment;
+  }
+
+  it('REAL staging capture: option_comparison is read from the CURRENT envelope shape (results absent)', () => {
+    const enrichment = loadStagingEnrichment();
+
+    // Pin the fixture facts this test's proof rests on: the live envelope
+    // has NO legacy `results` array and 4 option_comparison entries.
+    expect(enrichment.results).toBeUndefined();
+    const fxOc = enrichment.option_comparison as Array<Record<string, unknown>>;
+    expect(fxOc).toHaveLength(4);
+
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_hire_local');
+    expect(input).not.toBeNull();
+    if (!input) throw new Error('unreachable');
+
+    // THE 1.78 BUG: this was [] on the live path — the decision_review
+    // prompt coached without per-option win_probability / outcome numbers.
+    const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
+    expect(oc).toHaveLength(4);
+
+    // Every fixture option survives with the normalised prompt shape,
+    // values copied verbatim from the capture (no fabrication, no reshaping
+    // beyond flat→nested outcome normalisation).
+    for (const fx of fxOc) {
+      const got = oc.find((r) => r.option_id === fx.option_id);
+      expect(got).toBeDefined();
+      if (!got) throw new Error('unreachable');
+      expect(got.option_label).toBe(fx.option_label);
+      expect(got.win_probability).toBe(fx.win_probability);
+      const fxOutcome = fx.outcome as Record<string, unknown>;
+      expect(got.outcome).toEqual({
+        mean: fxOutcome.mean,
+        p10: fxOutcome.p10,
+        p90: fxOutcome.p90,
+      });
+      // Output shape stays byte-identical to the pre-fix contract: exactly
+      // option_id / option_label / win_probability / outcome{mean,p10,p90}.
+      expect(Object.keys(got).sort()).toEqual(
+        ['option_id', 'option_label', 'outcome', 'win_probability'],
+      );
+    }
+  });
+
+  it('legacy-only envelope (results present, option_comparison absent) still populates — fallback preserved', () => {
+    // makePopulatedEnrichment() is exactly the legacy shape: results[]
+    // present, no top-level option_comparison.
+    const enrichment = makePopulatedEnrichment();
+    expect(enrichment.option_comparison).toBeUndefined();
+
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
+    expect(oc).toHaveLength(2);
+    expect(oc.map((r) => r.option_id).sort()).toEqual(['opt_hire', 'opt_partner']);
+  });
+
+  it('both sources present: prefers the current shape, never double-counts', () => {
+    const enrichment = makePopulatedEnrichment();
+    // Same two options also present as a CURRENT option_comparison, with
+    // deliberately different numbers so provenance is observable.
+    enrichment.option_comparison = [
+      {
+        option_id: 'opt_partner',
+        option_label: 'Engage Offshore Partner',
+        win_probability: 0.51,
+        outcome: { mean: 1_300_000, p10: 990_000, p90: 1_600_000 },
+      },
+      {
+        option_id: 'opt_hire',
+        option_label: 'Hire Two Senior Engineers Locally',
+        win_probability: 0.22,
+        outcome: { mean: 1_050_000, p10: 840_000, p90: 1_300_000 },
+      },
+    ];
+
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
+    // 2 entries, not 4 — the legacy `results` copies must NOT be pooled in.
+    expect(oc).toHaveLength(2);
+    const partner = oc.find((r) => r.option_id === 'opt_partner') as Record<string, unknown>;
+    // Values come from the CURRENT source (0.51 / 1.3M), not legacy (0.48 / 1.24M).
+    expect(partner.win_probability).toBe(0.51);
+    expect((partner.outcome as Record<string, unknown>).mean).toBe(1_300_000);
+  });
+
+  it('current shape present but EMPTY: falls back to legacy results', () => {
+    const enrichment = makePopulatedEnrichment();
+    enrichment.option_comparison = [];
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
+    expect(oc).toHaveLength(2);
+  });
+
+  it('both sources absent: option_comparison stays [] (no fabrication)', () => {
+    const enrichment = makePopulatedEnrichment();
+    delete enrichment.results;
+    // Keep a winner source so buildInvokeInput still returns an input:
+    // decision_brief.options is the third published shape.
+    enrichment.decision_brief = {
+      options: [
+        { option_id: 'opt_partner', label: 'Engage Offshore Partner', win_probability: 0.48, rank: 1 },
+        { option_id: 'opt_hire', label: 'Hire Two Senior Engineers Locally', win_probability: 0.25, rank: 2 },
+      ],
+    };
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    expect(input.isl_results.option_comparison).toEqual([]);
   });
 });
