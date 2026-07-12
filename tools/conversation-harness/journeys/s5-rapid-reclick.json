@@ -1,0 +1,9 @@
+{
+  "comment": "S5 rapid re-click — duplicate run_analysis mid-flight with a FRESH client turn_id (concurrent_duplicate: runner fires the duplicate ~400ms after the primary; neither aborts the run on non-2xx, the duplicate's status IS the measurement). D10-api asserts a single fact-commit set via L0 diff — on the frozen graph a true double execution is payload-sha identical (deterministic analysis), so a double commit is unambiguous. CEE #430 (client-abort log reclassification) landed at this branch's base: the dim MEASURES current behaviour, it does not assume pre-#430 behaviour. Run with --l0 or D10 is honestly UNMEASURABLE.",
+  "requires_seeded_scenario": true,
+  "dims": ["D10", "D8"],
+  "turns": [
+    { "id": "S5A0", "stage": "analyse", "message": "Run the analysis", "turn_class_hint": "run_analysis" },
+    { "id": "S5R1", "stage": "analyse", "message": "Rerun the analysis", "turn_class_hint": "run_analysis", "concurrent_duplicate": true }
+  ]
+}
