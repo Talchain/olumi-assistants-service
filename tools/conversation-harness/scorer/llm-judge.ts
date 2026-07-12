@@ -130,10 +130,14 @@ export function judgeDelta(baseline: JudgeAggregate, candidate: JudgeAggregate):
  * Isolated so the pure logic above stays testable without the SDK. */
 export async function judgeMessage(assistantText: string, opts: { reruns?: number; graphFacts?: string } = {}): Promise<JudgeScores[]> {
   const reruns = opts.reruns ?? 3;
-  // Dynamic import so this module loads without the SDK installed (and so this
-  // file typechecks in isolation, outside the repo's node_modules resolution).
-  // @ts-ignore — optional runtime dep, resolved from the repo's node_modules
-  const mod: any = await import('@anthropic-ai/sdk').catch(() => {
+  // Dynamic import via a variable specifier so this module loads (and lints/
+  // typechecks) without the SDK statically resolvable — the optional runtime
+  // dep resolves from the repo's node_modules at call time. Deliberately no
+  // ts-suppression comment: the ignore directive is lint-banned, and the
+  // expect-error directive would itself error in-repo where the import
+  // resolves cleanly.
+  const sdkSpecifier = '@anthropic-ai/sdk';
+  const mod: any = await import(sdkSpecifier).catch(() => {
     throw new Error('@anthropic-ai/sdk not resolvable — run from the repo with deps installed');
   });
   const Anthropic = mod.default ?? mod.Anthropic;
