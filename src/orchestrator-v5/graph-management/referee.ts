@@ -368,7 +368,7 @@ export function refereeMutation(
         return {
           ...meta,
           verdict: 'held',
-          blocker: { code: STRUCTURAL_APPLY_HELD, readable: 'Structural mutation held: §6 structural-vs-tunable doctrine is pending sign-off.' },
+          blocker: { code: STRUCTURAL_APPLY_HELD, readable: 'Structural changes are proposed first — confirm to apply.' },
         };
 
       case 'update_node_field':
