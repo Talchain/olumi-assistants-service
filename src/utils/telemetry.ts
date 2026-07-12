@@ -928,6 +928,23 @@ export const TelemetryEvents = {
   // this event is a regression and the contract test should fail.
   V5DecisionReviewCompleted: "v5.decision_review.completed",
 
+  // ROADMAP 1.77 (B1 neuro-symbolic experiment). Fires once per auto-fired
+  // decision_review when the decomposed path (CEE_DECISION_REVIEW_DECOMPOSE=
+  // true) ran, recording the outcome of the 4-parallel-haiku fan-out +
+  // deterministic composition + composed-consistency check. Mutually
+  // exclusive per request_id with the shape of `completed`/`failed` only in
+  // that this event describes the DECOMPOSITION decision, not the attach:
+  // it says whether the composed review was shipped (`composed`) or the
+  // composer fell back to the gpt-4.1 monolith (`fell_back`), and — on
+  // fallback — the machine reason. The enricher still emits the usual
+  // `completed`/`failed` for the attach lifecycle downstream of this.
+  //
+  // Privacy contract: `request_id` / `scenario_id` are routing-key strings;
+  // `outcome` and `fallback_reason` are bounded enum strings (no prose, no
+  // labels, no IDs, no brief text). Every other field is a finite number or
+  // boolean (fragment success counts, violation count, wall-clock ms).
+  V5DecisionReviewDecomposed: "v5.decision_review.decomposed",
+
   // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
   // events cover the graphState resolution outcomes for an edit-intent turn,
   // so the routing-contract invariant (edit intent → mutation OR clarification

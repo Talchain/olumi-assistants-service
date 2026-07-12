@@ -26,6 +26,7 @@ import {
   type DecisionReviewInvokeInput,
   type DecisionReviewMeta,
 } from '../../cee/decision-review/invoke.js';
+import { invokeDecomposedDecisionReview } from '../../cee/decision-review/decompose.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
@@ -162,7 +163,15 @@ export async function enrichRunAnalysisWithDecisionReview(
 
   const startedAt = Date.now();
   try {
-    const result = await invokeDecisionReview(invokeInput, {
+    // ROADMAP 1.77 (B1). Dedicated decomposed-vs-monolith selector. Flag-off
+    // (default) is BYTE-IDENTICAL to today: the single gpt-4.1 monolith. Flag-on
+    // routes to the 4-parallel-haiku composer, which itself falls back to the
+    // monolith on any composed-inconsistency — both paths return the identical
+    // DecisionReviewInvokeResult shape, so everything below is unchanged.
+    const invoke = config.cee.decisionReviewDecompose
+      ? invokeDecomposedDecisionReview
+      : invokeDecisionReview;
+    const result = await invoke(invokeInput, {
       requestId: input.requestId,
       timeoutMs: DECISION_REVIEW_TIMEOUT_MS,
       signal: childAbort.signal,

@@ -736,6 +736,18 @@ const ConfigSchema = z.object({
     // callback/timeout layer here, so FIX 1's budget work does not apply
     // to this path). Env: V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW.
     runAnalysisAwaitDecisionReview: booleanString.default(false),
+    // ROADMAP 1.77 (B1 neuro-symbolic experiment). Dedicated decomposed-vs-
+    // monolith code-path selector for the auto-fired decision_review — NOT the
+    // await gate above (that is latency-only), NOT model-routing precedence
+    // (that swaps a model string, not the call count). When false (default),
+    // the enricher invokes the single gpt-4.1 monolith (`invokeDecisionReview`)
+    // byte-for-byte as today. When true, it invokes the 4-parallel-haiku
+    // composer (`invokeDecomposedDecisionReview`), which itself FALLS BACK to
+    // the monolith on any composed-consistency failure or load-bearing
+    // fragment loss — so a self-contradictory review is never shipped.
+    // Flip gates on harness A/B quality evidence + Paul (07-REVIEW R3), never
+    // by accident. Env: CEE_DECISION_REVIEW_DECOMPOSE.
+    decisionReviewDecompose: booleanString.default(false),
     optionsFeatureVersion: z.string().optional(),
     explainFeatureVersion: z.string().optional(),
     evidenceHelperFeatureVersion: z.string().optional(),
@@ -828,6 +840,13 @@ const ConfigSchema = z.object({
       validation: z.string().optional(),
       extraction: z.string().optional(), // Model for LLM-first factor/constraint extraction
       decision_review: z.string().optional(), // Model for decision review
+      // ROADMAP 1.77 (B1). Model for the 4 decomposed decision_review haiku
+      // sub-calls (R1 headline / R2 driver / R3 fragility / R4 calibration).
+      // Only consumed when CEE_DECISION_REVIEW_DECOMPOSE=true; the monolith
+      // path continues to use `decision_review` above. Resolves to the haiku
+      // registry entry by default (CEE_MODEL_SUMMARY precedent, S4).
+      // Env: CEE_MODEL_DECISION_REVIEW_HAIKU.
+      decision_review_haiku: z.string().optional(),
       orchestrator: z.string().optional(), // Model for orchestrator Phase 3 + tool-calling
       edit_graph: z.string().optional(), // Model for edit_graph tool handler
       m2_review: z.string().optional(), // Model for V6 dual-draft M2 graph review (CEE_MODEL_M2_REVIEW; recommended claude-opus-4-8 at activation)
@@ -843,6 +862,10 @@ const ConfigSchema = z.object({
       validation: z.coerce.number().int().positive().optional(),
       extraction: z.coerce.number().int().positive().optional(), // Max tokens for LLM-first extraction
       decision_review: z.coerce.number().int().positive().optional(), // Max tokens for decision review
+      // ROADMAP 1.77 (B1). Per-sub-call max tokens for the decomposed haiku
+      // review (each of R1-R4). The composer defaults to 1500 when unset.
+      // Env: CEE_MAX_TOKENS_DECISION_REVIEW_HAIKU.
+      decision_review_haiku: z.coerce.number().int().positive().optional(),
       orchestrator: z.coerce.number().int().positive().optional(), // Max tokens for orchestrator Phase 3
       edit_graph: z.coerce.number().int().positive().optional(), // Max tokens for edit_graph tool
       m2_review: z.coerce.number().int().positive().optional(), // Max tokens for V6 dual-draft M2 review (default 4096 in m2-review.ts)
@@ -1445,6 +1468,7 @@ function parseConfig(): Config {
         validation: env.CEE_MODEL_VALIDATION,
         extraction: env.CEE_MODEL_EXTRACTION,
         decision_review: env.CEE_MODEL_DECISION_REVIEW,
+        decision_review_haiku: env.CEE_MODEL_DECISION_REVIEW_HAIKU,
         orchestrator: env.CEE_MODEL_ORCHESTRATOR,
         edit_graph: env.CEE_MODEL_EDIT_GRAPH,
         m2_review: env.CEE_MODEL_M2_REVIEW,
@@ -1459,6 +1483,7 @@ function parseConfig(): Config {
         critique: env.CEE_MAX_TOKENS_CRITIQUE,
         validation: env.CEE_MAX_TOKENS_VALIDATION,
         decision_review: env.CEE_MAX_TOKENS_DECISION_REVIEW,
+        decision_review_haiku: env.CEE_MAX_TOKENS_DECISION_REVIEW_HAIKU,
         orchestrator: env.CEE_MAX_TOKENS_ORCHESTRATOR,
         edit_graph: env.CEE_MAX_TOKENS_EDIT_GRAPH,
         m2_review: env.CEE_MAX_TOKENS_M2_REVIEW,
@@ -1527,6 +1552,7 @@ function parseConfig(): Config {
       postFlightValidatorEnabled: env.CEE_POST_FLIGHT_VALIDATOR_ENABLED,
       guidedIntakeEnabled: env.CEE_GUIDED_INTAKE_ENABLED,
       modelVersionsEnabled: env.CEE_MODEL_VERSIONS_ENABLED,
+      decisionReviewDecompose: env.CEE_DECISION_REVIEW_DECOMPOSE,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,
