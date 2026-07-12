@@ -607,6 +607,20 @@ const ConfigSchema = z.object({
     // flip, so enablement waits on the harness A/B (05 §S1). Ships dark:
     // not declared in render*.yaml.
     contextDisclosureV2: booleanString.default(false),
+    // CEE_CONTEXT_BRIEF_ALL_SITES — Context Architecture v2 S2 (ROADMAP
+    // 1.73, design pack 02 §Seam 1): thread the persisted decision brief
+    // (`scenarios.brief_text`) into the edit/repair LLM context — the two
+    // turn-path sites that today receive NOTHING of the brief. When true,
+    // dispatchEditGraph reads the brief (one extra scenarios read, degrade-
+    // to-absent on failure) and the edit-context serialiser renders a
+    // `## Decision Brief` section: first 1,000 chars, truncation disclosed
+    // (edit needs decision framing to resolve "the hire option" style
+    // referents, not the full narrative — 02 §Seam 1 sizes table).
+    // Repair inherits automatically (same contextSection). Default OFF;
+    // flag-off = no read, no section, byte-identical prompts (pinned by
+    // tests/unit/edit-context-brief.test.ts). Ships dark: not declared in
+    // render*.yaml.
+    contextBriefAllSites: booleanString.default(false),
   }),
 
   // Prompt Cache Configuration
@@ -1226,6 +1240,7 @@ function parseConfig(): Config {
       heldProposalEmit: env.CEE_HELD_PROPOSAL_EMIT,
       decisionRecordCapture: env.CEE_DECISION_RECORD_CAPTURE,
       contextDisclosureV2: env.CEE_CONTEXT_DISCLOSURE_V2,
+      contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

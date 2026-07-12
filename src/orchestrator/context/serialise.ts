@@ -224,6 +224,50 @@ export function renderRecentConversationForEditWithMeta(
 }
 
 // ============================================================================
+// Edit-lane brief projection (Context v2 S2, 02 §Seam 1)
+// ============================================================================
+
+/**
+ * Char cap for the edit/repair brief slice. 02 §Seam 1 sizes table: edit
+ * needs decision framing to resolve "the hire option" style referents, not
+ * the full narrative — 1,000 chars ≈ +250 tok, negligible against the
+ * measured 20.4s edit call. First-N of the same normalised text the
+ * routing pack slices (routing keeps its own 2,000-char cap).
+ */
+export const EDIT_CONTEXT_BRIEF_CHAR_CAP = 1000;
+
+/**
+ * Project `scenarios.brief_text` to the edit-lane slice — the exact
+ * ContextPackBriefSchema disclosure shape ({text, truncated,
+ * original_chars}), at the edit cap. Returns null for nullish/blank input
+ * (never an empty section). Emits `v5.context_truncation` at the cut —
+ * DISCLOSED, because the rendered section carries the disclosure line.
+ */
+export function projectBriefForEdit(
+  briefText: string | null | undefined,
+): { text: string; truncated: boolean; original_chars: number } | null {
+  if (briefText == null) return null;
+  const trimmed = briefText.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length <= EDIT_CONTEXT_BRIEF_CHAR_CAP) {
+    return { text: trimmed, truncated: false, original_chars: trimmed.length };
+  }
+  emitContextTruncation({
+    site: 'serialise.projectBriefForEdit',
+    section: 'brief',
+    original_chars: trimmed.length,
+    kept_chars: EDIT_CONTEXT_BRIEF_CHAR_CAP,
+    strategy: 'hard_slice',
+    disclosed: true,
+  });
+  return {
+    text: trimmed.slice(0, EDIT_CONTEXT_BRIEF_CHAR_CAP),
+    truncated: true,
+    original_chars: trimmed.length,
+  };
+}
+
+// ============================================================================
 // Edit Context Serialisation (for edit_graph LLM prompt)
 // ============================================================================
 
@@ -285,6 +329,7 @@ export function serialiseEditContextForLLMWithMeta(
 ): SerialisedEditContext {
   const discloseTruncations =
     opts?.discloseTruncations ?? config.features.contextDisclosureV2;
+  const briefSlice = context.brief ?? null;
   const sections: string[] = [];
   const sectionChars: Record<string, number> = {};
   const truncations: ContextTruncationRecord[] = [];
@@ -299,6 +344,30 @@ export function serialiseEditContextForLLMWithMeta(
     const after = sections.join('\n\n').length;
     if (after > before) sectionChars[name] = after - before;
   };
+
+  // Decision brief (Context v2 S2, 02 §Seam 1): placed FIRST — it is the
+  // decision frame the rest of the context hangs off. Presence is gated
+  // upstream (dispatchEditGraph populates `context.brief` only under
+  // CEE_CONTEXT_BRIEF_ALL_SITES), so a flag-off render is byte-identical.
+  // Truncation is disclosed in-section, mirroring the routing pack's
+  // {truncated, original_chars} discipline.
+  if (briefSlice && briefSlice.text.length > 0) {
+    measure('brief', () => {
+      sections.push('## Decision Brief');
+      if (briefSlice.truncated) {
+        sections.push(
+          `(brief truncated: showing ${briefSlice.text.length} of ${briefSlice.original_chars} chars)`,
+        );
+        truncations.push({
+          section: 'brief',
+          original_chars: briefSlice.original_chars,
+          kept_chars: briefSlice.text.length,
+          disclosed: true,
+        });
+      }
+      sections.push(briefSlice.text);
+    });
+  }
 
   // Graph section (always present — handler validates graph exists before calling)
   if (context.graph) {
