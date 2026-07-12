@@ -204,8 +204,7 @@ describe('emitContextBudget (v5.context_budget)', () => {
         prompt_hash: null,
         request_id: 'req_3',
         scenario_id: null,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        section_chars: { graph_json: Number.NaN as any },
+        section_chars: { graph_json: Number.NaN },
         total_chars: Number.NaN,
         truncations: [],
         summary_lag_turns: null,
