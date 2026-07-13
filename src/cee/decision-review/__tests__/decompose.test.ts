@@ -603,6 +603,48 @@ describe('checkComposedConsistency — winner semantics (PQ6 port)', () => {
 });
 
 // ============================================================================
+// Winner SEMANTICS — WIN_CUE false-positive fix (M5, Codex r2 pre-merge review)
+// ============================================================================
+//
+// The wrong-winner FATAL fired on legitimate per-dimension / historical /
+// attention sentences that merely MENTION the runner-up alongside a win-cue
+// verb, even when Option A is correctly crowned overall. Each spurious fatal
+// burned a paid monolith fallback on a coherent review. The FATAL is now
+// restricted to OVERALL-crowning claims. RED-first: against the pre-fix WIN_CUE
+// every one of these four narratives fired a wrong-winner fatal.
+describe('checkComposedConsistency — WIN_CUE false-positive fix (M5)', () => {
+  // Each narrative crowns the true winner (Option A) OVERALL, then mentions the
+  // runner-up (Option B) in a NON-crowning per-dimension / historical /
+  // attention clause. None of these is a wrong-winner claim.
+  const nonCrowningNarratives: Array<[string, string]> = [
+    ['per-dimension win', 'Option A is the stronger overall choice and should be chosen. Option B wins on cost.'],
+    ['action recommendation', 'Option A leads overall and should be chosen. We recommend validating Option B pricing assumptions.'],
+    ['historical framing', 'Option A is the clear leader and should be chosen. Option B was ahead in early estimates.'],
+    ['attention / objection', 'Option A is recommended overall. The strongest objection concerns Option B costs.'],
+  ];
+
+  for (const [label, narrative] of nonCrowningNarratives) {
+    it(`consistent: ${label} sentence about the runner-up does not false-fire`, () => {
+      const r1 = goodR1();
+      r1.narrative_summary = narrative;
+      const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
+      const res = checkComposedConsistency(composed, ctxFor());
+      expect(res.fatal.join(' ')).not.toMatch(/wrong-winner/i);
+      expect(res.consistent).toBe(true);
+    });
+  }
+
+  it('FATAL still fires on a genuine OVERALL crowning of the runner-up (check not gutted)', () => {
+    const r1 = goodR1();
+    r1.narrative_summary = 'Option B is the better choice overall and should be chosen.';
+    const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctxFor());
+    expect(res.consistent).toBe(false);
+    expect(res.fatal.join(' ')).toMatch(/wrong-winner/i);
+  });
+});
+
+// ============================================================================
 // Config flag — dedicated, default OFF (07-REVIEW R4)
 // ============================================================================
 

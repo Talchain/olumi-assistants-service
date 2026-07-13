@@ -454,6 +454,47 @@ const WIN_CUE =
  */
 const WIN_NEGATION_CUE = /\b(?:not|never|unlikely|rather than|instead of|far from|unlike|no longer)\b|n['’]t\b/i;
 
+/**
+ * Disqualifiers that restrict the wrong-winner FATAL to OVERALL-crowning claims
+ * (M5, Codex r2 pre-merge review). The bare WIN_CUE fired on legitimate
+ * per-dimension / historical / attention sentences that merely MENTION the
+ * runner-up alongside a win-cue verb — e.g. "Option B wins on cost.",
+ * "We recommend validating Option B pricing assumptions", "Option B was ahead
+ * in early estimates", "The strongest objection concerns Option B costs" — even
+ * when Option A is correctly crowned overall elsewhere. Each spurious fatal
+ * burns a paid monolith fallback on a coherent review (and poisons the B1 rerun
+ * fallback<10% criterion). We prefer to UNDER-fire here (the presence check +
+ * the shape/number-grounding checks remain the safety net); the true overall
+ * crownings ("Option B is the better choice", "the clear leader … should be
+ * chosen") carry none of these qualifiers and still fire.
+ *
+ *  - DIMENSION: a win-cue scoped to one dimension via "… on/in/for <noun>"
+ *    ("wins on cost", "ahead in early estimates") — a per-dimension win, not an
+ *    overall verdict.
+ *  - HISTORICAL: past-tense / provisional-history framing ("was ahead",
+ *    "early estimates", "initially", "previously") — describes a prior state,
+ *    not the current crowning.
+ *  - ATTENTION: the sentence is about scrutinising / validating / objecting to
+ *    an option ("recommend validating", "the strongest objection", "assumptions"),
+ *    not crowning it.
+ */
+const DIMENSION_QUALIFIER_CUE =
+  /\b(?:wins?|won|winning|ahead|leads?|leading|strongest|stronger|scores?|beats?|outperforms?|better)\b[^.!?]*?\b(?:on|in|for|at|regarding|when it comes to|in terms of|with respect to)\b\s+\S/i;
+const HISTORICAL_QUALIFIER_CUE =
+  /\b(?:was|were|had been|has been|used to|previously|initially|earlier|early|originally|formerly|at first|estimates?|estimated)\b/i;
+const ATTENTION_QUALIFIER_CUE =
+  /\b(?:validat\w*|investigat\w*|assumptions?|objections?|concerns?|caveats?|scrutin\w*|audit\w*|re-?examin\w*|reservations?|doubts?|worries|weakness\w*)\b/i;
+
+/** True when a win-cue sentence is a per-dimension / historical / attention
+ *  claim rather than an OVERALL crowning of the named option. */
+function isNonCrowningWinSentence(sentence: string): boolean {
+  return (
+    DIMENSION_QUALIFIER_CUE.test(sentence) ||
+    HISTORICAL_QUALIFIER_CUE.test(sentence) ||
+    ATTENTION_QUALIFIER_CUE.test(sentence)
+  );
+}
+
 function sentenceList(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+|\n+/)
@@ -462,9 +503,11 @@ function sentenceList(text: string): string[] {
 }
 
 /**
- * Labels the narrative claims as LEADER that are NOT the authoritative
- * winner. Negation-aware; conservative single-name rule (a lead sentence
- * naming zero or 2+ options is skipped, never guessed at).
+ * Labels the narrative claims as OVERALL LEADER that are NOT the authoritative
+ * winner. Negation-aware; qualifier-aware (per-dimension / historical /
+ * attention sentences are skipped — see {@link isNonCrowningWinSentence});
+ * conservative single-name rule (a lead sentence naming zero or 2+ options is
+ * skipped, never guessed at).
  */
 function claimedNonWinnerLeaders(
   narrative: string,
@@ -476,6 +519,9 @@ function claimedNonWinnerLeaders(
   for (const sentence of sentenceList(narrative)) {
     if (!WIN_CUE.test(sentence)) continue;
     if (WIN_NEGATION_CUE.test(sentence)) continue;
+    // Only OVERALL crownings are wrong-winner candidates; a per-dimension /
+    // historical / attention sentence that merely names the runner-up is not.
+    if (isNonCrowningWinSentence(sentence)) continue;
     const lower = sentence.toLowerCase();
     const named = optionLabels.filter((l) => l.length > 2 && lower.includes(l.toLowerCase()));
     if (named.length === 1 && named[0]!.toLowerCase() !== winnerLabel.toLowerCase()) {

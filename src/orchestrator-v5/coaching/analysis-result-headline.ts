@@ -289,11 +289,13 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const { enrichment, leading_option_id, status_kind, interventionControlledFactorIds } = input;
 
   // Same-source resolution: the winner label, winner probability, and
-  // runner-up probability ALL come from the SAME source array (one of
-  // results[], option_comparison[], decision_brief.options[] in priority
-  // order). This guards against the round-2 cross-source mixing risk —
-  // a clean label from one source paired with stale or inconsistent
-  // probability maths from another.
+  // runner-up probability ALL come from the SAME source array — one of
+  // option_comparison[], results[], decision_brief.options[] (and the nested
+  // results-object shapes) in the shared CURRENT-first precedence order (see
+  // readOptionResultSources). This guards against the round-2 cross-source
+  // mixing risk — a clean label from one source paired with stale or
+  // inconsistent probability maths from another — and keeps the headline's
+  // winner identical to the review/coach surfaces on the same envelope.
   const winner = resolveWinner(enrichment, leading_option_id);
   if (winner === null) {
     // No source produced a winner with a clean label AND a finite

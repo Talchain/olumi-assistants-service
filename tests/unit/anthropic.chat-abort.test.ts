@@ -44,6 +44,7 @@ vi.mock("../../src/adapters/llm/prompt-loader.js", () => ({
 }));
 
 import { chatWithAnthropic } from "../../src/adapters/llm/anthropic.js";
+import { UpstreamTimeoutError } from "../../src/adapters/llm/errors.js";
 
 function abortError(): Error {
   const err = new Error("Request was aborted.");
@@ -130,5 +131,57 @@ describe("chatWithAnthropic — external abort signal", () => {
         timeoutMs: 50,
       }),
     ).rejects.toThrow(/timed out/i);
+  });
+
+  // M2 (Codex r2 pre-merge review): the external-abort branch must carry the
+  // repo-canonical `pre_aborted` timeoutPhase — the discriminator m2-review.ts
+  // and parse.ts key on to tell a client disconnect from an upstream timeout.
+  it("an external abort is typed UpstreamTimeoutError with timeoutPhase 'pre_aborted'", async () => {
+    mockCreate.mockImplementation(
+      (_body: unknown, options: { signal: AbortSignal }) => {
+        if (options.signal.aborted) return Promise.reject(abortError());
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(abortError()), { once: true });
+        });
+      },
+    );
+
+    const client = new AbortController();
+    client.abort();
+    try {
+      await chatWithAnthropic({
+        system: "s",
+        userMessage: "u",
+        model: "claude-haiku-4-5",
+        timeoutMs: 30_000,
+        signal: client.signal,
+      });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpstreamTimeoutError);
+      expect((err as UpstreamTimeoutError).timeoutPhase).toBe("pre_aborted");
+    }
+  });
+
+  it("a genuine timeout (no external signal) keeps timeoutPhase 'body'", async () => {
+    mockCreate.mockImplementation(
+      (_body: unknown, options: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(abortError()), { once: true });
+        }),
+    );
+
+    try {
+      await chatWithAnthropic({
+        system: "s",
+        userMessage: "u",
+        model: "claude-haiku-4-5",
+        timeoutMs: 50,
+      });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpstreamTimeoutError);
+      expect((err as UpstreamTimeoutError).timeoutPhase).toBe("body");
+    }
   });
 });

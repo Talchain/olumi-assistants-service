@@ -2595,15 +2595,22 @@ export async function chatWithAnthropic(
         // Distinguish a caller-initiated abort from a genuine timeout so
         // operators don't read client disconnects as upstream slowness.
         const isExternalAbort = externalSignal?.aborted === true;
+        // M2 (Codex r2 pre-merge review): a client/external abort must carry
+        // the repo-canonical `pre_aborted` phase — the SAME discriminator the
+        // downstream classifiers key on (m2-review.ts, parse.ts) and that every
+        // other adapter abort site already uses. Tagging it `body` made a
+        // client disconnect indistinguishable from a genuine upstream timeout.
+        // A real timeout keeps `body`.
+        const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
         log.error(
-          { timeout_ms: timeoutMs, elapsed_ms: elapsedMs, external_abort: isExternalAbort },
+          { timeout_ms: timeoutMs, elapsed_ms: elapsedMs, external_abort: isExternalAbort, phase },
           isExternalAbort ? "Anthropic chat call aborted by external signal" : "Anthropic chat call timed out"
         );
         throw new UpstreamTimeoutError(
           isExternalAbort ? "Anthropic chat aborted by external signal" : "Anthropic chat timed out",
           "anthropic",
           "chat",
-          "body",
+          phase,
           elapsedMs,
           error
         );
@@ -3420,7 +3427,10 @@ export class AnthropicAdapter implements LLMAdapter {
       timeoutMs: opts.timeoutMs,
       // CallOpts.signal was previously dropped here — callers that forwarded
       // an abort signal through adapter.chat() got no cancellation at all.
-      signal: opts.signal,
+      // Minor (Codex r2 review): honour the legacy `abortSignal` alias too, for
+      // contract parity with every other forwarding site (draftGraph/repairGraph
+      // + the two chatWithTools sites all use `opts.signal ?? opts.abortSignal`).
+      signal: opts.signal ?? opts.abortSignal,
       thinking: args.thinking,
       outputSchema: args.outputSchema,
       structuredOutputsUserReminder: args.structuredOutputsUserReminder,

@@ -1532,6 +1532,21 @@ ${brief}
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
+    // M3 (Codex r2 pre-merge review): OpenAIAdapter.chat previously DROPPED
+    // CallOpts.signal, so an abort during a chat call (e.g. the decomposed
+    // decision_review monolith fallback on the default gpt-4.1 route) never
+    // cancelled the in-flight request — decompose.ts's "monolith honours
+    // options.signal" claim was false. Wire the external signal to the request
+    // abort controller exactly like draftGraph/repairGraph do.
+    const externalSignal = opts.signal ?? opts.abortSignal;
+    let onExternalAbort: (() => void) | undefined;
+    if (externalSignal && !externalSignal.aborted) {
+      onExternalAbort = () => abortController.abort();
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    } else if (externalSignal?.aborted) {
+      abortController.abort();
+    }
+
     try {
       const apiClient = getClient();
       const modelParams = buildModelParams(this.model, temperature, { maxTokens });
@@ -1561,6 +1576,9 @@ ${brief}
       );
 
       clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       const latencyMs = Date.now() - startTime;
 
       const content = response.choices[0]?.message?.content;
@@ -1593,17 +1611,27 @@ ${brief}
       };
     } catch (error: unknown) {
       clearTimeout(timeoutId);
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       const elapsedMs = Date.now() - startTime;
 
       if (error instanceof Error) {
         // V04: Throw typed UpstreamTimeoutError for timeout classification
         if (error.name === "AbortError" || abortController.signal.aborted) {
-          log.error({ timeout_ms: timeoutMs, elapsed_ms: elapsedMs }, "OpenAI chat call timed out");
+          // M3: distinguish an external/client abort from a genuine timeout so
+          // the repo-canonical `pre_aborted` phase reaches the classifiers.
+          const isExternalAbort = externalSignal?.aborted === true;
+          const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
+          log.error(
+            { timeout_ms: timeoutMs, elapsed_ms: elapsedMs, external_abort: isExternalAbort, phase },
+            isExternalAbort ? "OpenAI chat call aborted by external signal" : "OpenAI chat call timed out"
+          );
           throw new UpstreamTimeoutError(
-            "OpenAI chat timed out",
+            isExternalAbort ? "OpenAI chat aborted by external signal" : "OpenAI chat timed out",
             "openai",
             "chat",
-            "body",
+            phase,
             elapsedMs,
             error
           );

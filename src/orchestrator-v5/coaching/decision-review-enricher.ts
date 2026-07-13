@@ -39,6 +39,12 @@ import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
 import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels.js';
+// M1 (Codex r2 pre-merge review): the option-result source precedence is now
+// single-sourced so all four winner-derivation surfaces agree current-first.
+// `readResultsArraySources` is re-exported below (as the shared reader) so this
+// module's existing consumers — including analysis-result-headline — keep their
+// import stable.
+import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 
 import type { DecisionReviewOutput } from './types.js';
@@ -358,10 +364,13 @@ function buildInvokeInput(
   // leader. Returning at the first matching source guarantees we honour
   // PLoT's declared winner whenever ANY source carries it.
   //
-  // Source ordering for the null-leader case (no declared winner):
-  // pick the first non-empty source's highest-probability entry. We
-  // deliberately do NOT pool entries across sources for the null-leader
-  // case — that would mix shapes and could double-count the same option.
+  // Source ordering for the null-leader case (no declared winner): WALK the
+  // sources current-first and take the first that yields a highest-probability
+  // winner. We deliberately do NOT pool entries across sources — that would mix
+  // shapes and could double-count the same option. (M1 minor: the previous
+  // `sources[0]` shortcut silently coerced to no_winner / a thin-current 0%
+  // when the current source had entries but none carried a usable
+  // win_probability, even though a richer legacy source could supply one.)
   const sources = readResultsArraySources(enrichment);
   if (sources.length === 0) return null;
 
@@ -378,8 +387,14 @@ function buildInvokeInput(
       }
     }
   } else {
-    chosenSource = sources[0]!;
-    winner = selectWinner(chosenSource, null);
+    for (const source of sources) {
+      const w = selectWinner(source, null);
+      if (w !== null) {
+        winner = w;
+        chosenSource = source;
+        break;
+      }
+    }
   }
 
   if (winner === null || chosenSource === null) return null;
@@ -432,66 +447,24 @@ function buildInvokeInput(
 
 /**
  * Read all option-level results sources from the PLoT V2 enrichment payload,
- * in priority order.
+ * in current-first priority order.
  *
- * The envelope shape evolved across PLoT versions and the V5 enricher must
- * accept all three published shapes without weakening the `no_winner` skip
- * guarantee for genuinely missing data:
+ * M1 (Codex r2 pre-merge review): this is now a thin re-export of the shared
+ * {@link readOptionResultSources} single-source reader so ALL FOUR
+ * winner-derivation surfaces (this enricher, analysis-result-headline's
+ * resolveWinner, analysis-compact's getResultsArray, analysis-state's
+ * getOptionResultCandidates) share ONE precedence and can never disagree on a
+ * both-present-conflicting envelope. See option-result-source.ts for the full
+ * precedence + shape documentation. The name is kept so this module's existing
+ * consumers (headline + contract tests) import it unchanged.
  *
- *   1. `enrichment.option_comparison[]` — current PLoT V2 (verified on
- *                                         staging build `2e6e0be`); entries
- *                                         carry both `option_id`/`id` and
- *                                         `option_label`/`label` + a nested
- *                                         `outcome.{mean,p10,p50,p90,…}`.
- *   2. `enrichment.results[]`         — legacy shape (kept for backwards
- *                                       compatibility; pre-2026 envelopes).
- *   3. `enrichment.decision_brief.options[]` — leaner brief-shape with
- *                                              `option_id`, `label`,
- *                                              `win_probability`, `rank`.
- *
- * Priority is CURRENT-first with legacy fallback (#437 residual, fixed in
- * the decompose-hardening lane): winner selection previously walked the
- * LEGACY `results` array first while `readIslResults` built the prompt's
- * option_comparison slice CURRENT-first — on a both-present-conflicting
- * envelope the DECISION_CONTEXT winner and the OPTION_COMPARISON table
- * disagreed inside one prompt. Both readers now share this precedence
- * (`resolveWinner` in analysis-result-headline inherits it too, keeping the
- * headline consistent with the review on the same envelope).
- *
- * Returns every non-empty source as a separate array; the caller
- * (`buildInvokeInput`) walks them in order until one can match
- * `leading_option_id`. This avoids the trap where (e.g.) the current
- * `enrichment.option_comparison` is non-empty but truncated, while the
- * legacy `enrichment.results` contains the declared leader — the
- * walker honours PLoT's declared winner whenever ANY source carries it.
- *
- * `projectOptionAsWinner` was already shape-tolerant (`option_id || id`,
- * `option_label || label`, nested or flat `outcome.mean`), so all three
- * source shapes feed into the same projector unchanged.
- *
- * Returns `[]` only when all three sources are absent or empty.
+ * The caller (`buildInvokeInput`) walks the returned sources in order until one
+ * can match `leading_option_id`, honouring PLoT's declared winner whenever ANY
+ * source carries it. `projectOptionAsWinner` is shape-tolerant (`option_id ||
+ * id`, `option_label || label`, nested or flat `outcome.mean`), so every source
+ * shape feeds into the same projector unchanged.
  */
-export function readResultsArraySources(
-  enrichment: Record<string, unknown>,
-): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
-  const sources: Array<ReadonlyArray<Record<string, unknown>>> = [];
-  const optionComparison = enrichment.option_comparison;
-  if (Array.isArray(optionComparison) && optionComparison.length > 0) {
-    const entries = filterObjectEntries(optionComparison);
-    if (entries.length > 0) sources.push(entries);
-  }
-  const legacy = enrichment.results;
-  if (Array.isArray(legacy) && legacy.length > 0) {
-    const entries = filterObjectEntries(legacy);
-    if (entries.length > 0) sources.push(entries);
-  }
-  const briefOptions = readRecord(enrichment.decision_brief)?.options;
-  if (Array.isArray(briefOptions) && briefOptions.length > 0) {
-    const entries = filterObjectEntries(briefOptions);
-    if (entries.length > 0) sources.push(entries);
-  }
-  return sources;
-}
+export const readResultsArraySources = readOptionResultSources;
 
 
 function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<string, unknown>> {
