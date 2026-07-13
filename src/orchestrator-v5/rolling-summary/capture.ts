@@ -114,12 +114,24 @@ function toSummariserTurn(t: MaintainerTurn): SummariserTurn {
 // Semantics: at most ONE pass in flight per scenario. Arrivals during a
 // flight coalesce into at most ONE rerun (latest-wins — each pass re-reads
 // the full persisted history, so a single rerun absorbs every commit that
-// landed during the flight; intermediate args carry no information the
-// re-read does not).
+// landed during the flight for everything derivable from history).
+//
+// EXCEPTION (MINOR-1): the deterministic-floor inputs briefText/goalLabel are
+// NOT derivable from history — they arrive only on the turn that carries them
+// (see the invariant note at buildDeterministicFloor's callers). Latest-wins
+// must therefore MERGE them (preserve the last non-null value), not overwrite
+// a brief-carrying commit's value with a later brief-less commit's null; else
+// the rerun would summarise without the brief the coalesced-away commit
+// carried.
 // ---------------------------------------------------------------------------
 
 interface SingleFlightEntry {
   rerun: MaintainRollingSummaryArgs | null;
+  /** Carried floor inputs — the last non-null briefText/goalLabel seen across
+   *  the in-flight pass and every coalesced arrival (MINOR-1). Not re-readable
+   *  from history, so preserved rather than dropped by latest-wins. */
+  carriedBriefText: string | null | undefined;
+  carriedGoalLabel: string | null | undefined;
 }
 
 const inFlightByScenario = new Map<string, SingleFlightEntry>();
@@ -140,18 +152,29 @@ export async function maintainRollingSummaryForCommit(
 ): Promise<void> {
   const existing = inFlightByScenario.get(args.scenarioId);
   if (existing !== undefined) {
-    // Latest-wins: absorb this commit into the (single) pending rerun. The
-    // rerun re-reads full history, so nothing is lost by dropping the
-    // intermediate args. No telemetry event: the rerun's own
-    // v5.summary.updated is the durable record of the coalesced work.
-    existing.rerun = args;
+    // Latest-wins for everything history re-derives; MERGE the floor inputs
+    // (MINOR-1): keep the last non-null briefText/goalLabel so a brief-less
+    // commit coalescing over a brief-carrying pass does not drop the brief.
+    // No telemetry event: the rerun's own v5.summary.updated is the durable
+    // record of the coalesced work.
+    if (args.briefText != null) existing.carriedBriefText = args.briefText;
+    if (args.goalLabel != null) existing.carriedGoalLabel = args.goalLabel;
+    existing.rerun = {
+      ...args,
+      briefText: args.briefText ?? existing.carriedBriefText,
+      goalLabel: args.goalLabel ?? existing.carriedGoalLabel,
+    };
     log.debug(
       { scenario_id: args.scenarioId, turn_id: args.turnId },
       'RollingSummary — maintainer pass already in flight; commit coalesced into one rerun',
     );
     return;
   }
-  const entry: SingleFlightEntry = { rerun: null };
+  const entry: SingleFlightEntry = {
+    rerun: null,
+    carriedBriefText: args.briefText,
+    carriedGoalLabel: args.goalLabel,
+  };
   inFlightByScenario.set(args.scenarioId, entry);
   try {
     await runMaintainPass(args);

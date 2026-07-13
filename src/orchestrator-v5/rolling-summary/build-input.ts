@@ -63,10 +63,20 @@ export interface SummariserInput {
 
 /**
  * Regenerate (rather than incrementally update) when: no prior summary, the
- * turn count hits the N-turn horizon, or the stored schema version is stale.
+ * prior is a deterministic FLOOR, the turn count hits the N-turn horizon, or
+ * the stored schema version is stale.
+ *
+ * FLOOR ⇒ REGEN (M1): a floor absorbed NO conversation history (brief/goal
+ * only) and its watermark is the newest turn at floor-write time. Building
+ * incrementally on it would show only the turns AFTER that watermark and
+ * strand every pre-floor turn's content out of the summary until the next
+ * horizon regen — a maintain-path memory hole. Forcing a full-history regen
+ * makes the floor a transient placeholder the next pass fully rebuilds from
+ * ground truth (and keeps re-trying regen while the floor persists).
  */
 export function shouldRegenerate(turnCount: number, prior: RollingSummary | null): boolean {
   if (prior === null) return true;
+  if (prior.generator === 'floor') return true;
   if (prior.schema_version !== SUMMARY_SCHEMA_VERSION) return true;
   return turnCount > 0 && turnCount % SUMMARY_REGEN_INTERVAL === 0;
 }

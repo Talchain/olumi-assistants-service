@@ -21,8 +21,21 @@
 --   sibling of the watermark turn, stranding that turn's content out of the
 --   summary permanently. Signatures are UNCHANGED (the tiebreak keys are read
 --   from p_summary, which already carries them), so the rollback file needs
---   no change. JS reference of this exact clause: FakeMonotonicStore in
+--   no change. JS APPROXIMATION of this clause (NOT a byte-identical port —
+--   see the divergence note there): FakeMonotonicStore in
 --   src/orchestrator-v5/rolling-summary/__tests__/maintainer.test.ts.
+--
+-- ⚠ DRAFT AMENDED AGAIN 2026-07-13 (pre-execution — still never run anywhere;
+--   PR #442 round-2 review MINOR-3): the RS001 shape guard now also validates
+--   the PRIMARY composite key `updated_turn_created_at` INSIDE p_summary — it
+--   previously type-checked only the two tiebreak keys (updated_turn_id,
+--   version), leaving the read-side Zod parse and the injector to trust an
+--   unchecked JSONB timestamp. The guard now asserts it is a JSON string, is
+--   castable to timestamptz, and EQUALS the separate p_updated_turn_created_at
+--   monotonic-key param (the store passes the same value for both; a
+--   divergence would persist a summary whose watermark disagrees with the key
+--   it was ordered by). Signature UNCHANGED — rollback file still matches, no
+--   rollback change required.
 --
 -- Target: Staging Supabase
 -- Date authored: 2026-07-12
@@ -145,10 +158,11 @@ BEGIN
   -- Value-level shape guard (RS001). The summary is read back into a
   -- .strict()-style Zod parse and injected into an LLM prompt; a malformed
   -- singleton would be silently un-injectable. Enforce object-ness + the
-  -- required top-level key-set, and the types of the two composite-guard
-  -- tiebreak keys (they are compared below, so a wrong type must be refused,
-  -- not coerced). (Deep slot validation is the app-layer parse; this is the
-  -- DB backstop, mirroring the decision_records guard posture.)
+  -- required top-level key-set, and the types of the PRIMARY composite key
+  -- (updated_turn_created_at) plus the two tiebreak keys (updated_turn_id,
+  -- version) — they are all compared/ordered below, so a wrong type must be
+  -- refused, not coerced. (Deep slot validation is the app-layer parse; this
+  -- is the DB backstop, mirroring the decision_records guard posture.)
   IF p_summary IS NULL OR jsonb_typeof(p_summary) <> 'object'
      OR NOT (p_summary ? 'text')
      OR NOT (p_summary ? 'slots')
@@ -158,6 +172,7 @@ BEGIN
      OR NOT (p_summary ? 'generator')
      OR jsonb_typeof(p_summary->'slots') <> 'array'
      OR jsonb_typeof(p_summary->'updated_turn_id') <> 'string'
+     OR jsonb_typeof(p_summary->'updated_turn_created_at') <> 'string'
      OR jsonb_typeof(p_summary->'version') <> 'number' THEN
     RAISE EXCEPTION 'upsert_rolling_summary: p_summary is malformed (missing required keys or wrong types)'
       USING ERRCODE = 'RS001';
@@ -166,6 +181,25 @@ BEGIN
     RAISE EXCEPTION 'upsert_rolling_summary: p_updated_turn_created_at must be a finite timestamptz'
       USING ERRCODE = 'RS001';
   END IF;
+  -- PRIMARY composite key consistency (RS001 — MINOR-3): the read-side Zod
+  -- parse and the injector trust p_summary.updated_turn_created_at, while the
+  -- monotonic guard below orders on the separate p_updated_turn_created_at
+  -- param. The store passes the SAME value for both; enforce that here so a
+  -- malformed/mismatched write cannot persist a summary whose stored watermark
+  -- disagrees with the key it was ordered by. A non-castable timestamp string
+  -- (invalid_datetime_format / datetime_field_overflow) is refused as RS001,
+  -- not surfaced as a raw 22007.
+  BEGIN
+    IF (p_summary->>'updated_turn_created_at')::timestamptz
+         IS DISTINCT FROM p_updated_turn_created_at THEN
+      RAISE EXCEPTION 'upsert_rolling_summary: p_summary.updated_turn_created_at does not match p_updated_turn_created_at'
+        USING ERRCODE = 'RS001';
+    END IF;
+  EXCEPTION
+    WHEN invalid_datetime_format OR datetime_field_overflow THEN
+      RAISE EXCEPTION 'upsert_rolling_summary: p_summary.updated_turn_created_at is not a valid timestamptz'
+        USING ERRCODE = 'RS001';
+  END;
 
   -- Row lock: serialise concurrent summariser writes per scenario so the
   -- read-compare-write below is race-free within one instance; the WHERE

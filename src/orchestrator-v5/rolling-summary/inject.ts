@@ -97,6 +97,12 @@ export function buildConversationSummarySection(
   windowDepth: number,
 ): ContextPackConversationSummary {
   const bySlot = new Map(summary.slots.map((b) => [b.slot, b] as const));
+  // FLOOR honesty (M1): a generator:'floor' summary absorbed NO conversation
+  // history — it is the brief/goal seed. Its empty non-FRAME slots must read
+  // "(none captured yet)" (nothing processed) rather than the bare "(none)" a
+  // real summary uses to mean "the summariser looked and found none". The bare
+  // form on a floor is a coverage claim it never earned.
+  const emptyMarker = summary.generator === 'floor' ? '(none captured yet)' : '(none)';
   const lines: string[] = [];
   for (const slot of ROLLING_SUMMARY_SLOTS) {
     const entries = bySlot.get(slot)?.entries ?? [];
@@ -105,7 +111,7 @@ export function buildConversationSummarySection(
         ? entries.map((e) => `${e.text}${stampFor(e.source_turn_ids)}`).join(' ')
         : slot === 'FRAME'
           ? ''
-          : '(none)';
+          : emptyMarker;
     lines.push(`${ROLLING_SUMMARY_SLOT_LABELS[slot]}: ${rendered}`);
   }
   // Honest-partiality disclosure (Codex r2 fix 4a): the injected block
@@ -181,6 +187,34 @@ export async function loadConversationSummaryForInjection(
     if (summary === null) return NO_INJECTION;
 
     const lag = computeSummaryLag(summary, args.windowTurnsNewestFirst);
+
+    // ------------------------------------------------------------------
+    // FLOOR guard (M1 / Codex r2 blocker 1). A generator:'floor' summary is
+    // the deterministic seed written when the FIRST-ever maintenance pass hit
+    // a parse-reject or model error with no prior to keep. It absorbed NO
+    // conversation history — only the brief/goal-derived FRAME. Its watermark
+    // is stamped at the newest turn (the DB monotonic guard needs a finite,
+    // ordered key; a null watermark would violate RS001 + the composite CAS),
+    // so the memory-hole guard below would see lag≈0 + covered and render the
+    // empty slots as bare "(none)" — a coverage claim the floor never earned
+    // (the exact lying-coverage class fix 1 removes). Render the FRAME
+    // (legitimately brief-derived; buildConversationSummarySection marks the
+    // empty slots "(none captured yet)" for a floor) but DISCLOSE that the
+    // conversation is not yet summarised, and emit v5.summary.lag refused:true
+    // so a stuck summariser (a floor that persists) is loud in telemetry.
+    // ------------------------------------------------------------------
+    if (summary.generator === 'floor') {
+      emitSummaryLag(args, summary, lag, true);
+      const base = buildConversationSummarySection(summary, lag, args.windowDepth);
+      return {
+        section: {
+          ...base,
+          stale: true,
+          note: '(conversation summary not yet generated: the decision frame above is drawn from the brief; nothing else has been captured yet — recent turns are shown verbatim in the conversation section and any earlier turns are NOT yet summarised)',
+        },
+        lagTurns: lag,
+      };
+    }
 
     // ------------------------------------------------------------------
     // MEMORY-HOLE guard (Codex r2 blocker 1). The window turns are the

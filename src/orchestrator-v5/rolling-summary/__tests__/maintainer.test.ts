@@ -25,6 +25,7 @@ import {
   SUMMARY_FULL_HISTORY_READ_LIMIT,
 } from '../capture.js';
 import type { ConversationHistoryReader, MaintainerTurn } from '../capture.js';
+import { buildDeterministicFloor } from '../deterministic-floor.js';
 import type { RollingSummaryStorePort, UpsertRollingSummaryOutcome } from '../store-adapter.js';
 import type { SummariserModel } from '../summariser.js';
 import { SUMMARY_SCHEMA_VERSION } from '../summary-types.js';
@@ -81,14 +82,31 @@ class RecordingStore implements RollingSummaryStorePort {
 }
 
 /**
- * A JS reference implementation of the SQL monotonic WHERE clause —
- * COMPOSITE (created_at, turn_id, version), mirroring the amended DRAFT
- * migration (Codex r2 fix 3): the store permits same-timestamp turns and
- * totally orders them (created_at, turn_id), so a timestamp-only guard
- * would no-op the write that absorbs a same-timestamp sibling, stranding
- * that turn's content forever. `version` breaks the tie when the watermark
- * turn itself is unchanged (a later pass that absorbed a smaller-id
- * sibling under the same watermark).
+ * A JS APPROXIMATION of the SQL monotonic WHERE clause — COMPOSITE
+ * (created_at, turn_id, version), mirroring the amended DRAFT migration
+ * (Codex r2 fix 3): the store permits same-timestamp turns and totally orders
+ * them (created_at, turn_id), so a timestamp-only guard would no-op the write
+ * that absorbs a same-timestamp sibling, stranding that turn's content
+ * forever. `version` breaks the tie when the watermark turn itself is
+ * unchanged (a later pass that absorbed a smaller-id sibling under the same
+ * watermark).
+ *
+ * FIDELITY / KNOWN DIVERGENCES (MINOR-2 — do not overclaim): this is a
+ * behavioural approximation valid for the domain the session store actually
+ * emits, NOT a byte-identical port of Postgres semantics. Specifically:
+ *   - Timestamps compare as RAW ISO STRINGS (below), which equals the SQL
+ *     timestamptz ordering ONLY for same-precision, normalized-ISO-UTC values
+ *     (the store's `created_at` column). It does NOT reproduce timestamptz
+ *     µs precision across mixed-precision strings; the earlier Date.parse form
+ *     was strictly worse (it truncated µs to ms, turning a µs-ordered pair
+ *     into a false tie that fell through to the turn_id branch).
+ *   - turn_id compares by JS code unit, which equals C-collation byte order
+ *     for the ASCII (uuid-style) turn ids in use — but NOT an arbitrary DB
+ *     collation.
+ *   - It models ONLY the monotonic no-op ({applied:false, regressed:true}).
+ *     It does NOT model the RS001 shape guard or the 22007 bad-cast surface
+ *     the live function raises on a malformed p_summary.
+ * The live guard is verified only once Paul executes the migration.
  */
 class FakeMonotonicStore implements RollingSummaryStorePort {
   stored: RollingSummary | null = null;
@@ -96,18 +114,27 @@ class FakeMonotonicStore implements RollingSummaryStorePort {
     return this.stored;
   }
   async upsertSummary(_id: string, s: RollingSummary): Promise<UpsertRollingSummaryOutcome> {
-    const applied =
-      this.stored === null ||
-      Date.parse(s.updated_turn_created_at) > Date.parse(this.stored.updated_turn_created_at) ||
-      (Date.parse(s.updated_turn_created_at) === Date.parse(this.stored.updated_turn_created_at) &&
-        (s.updated_turn_id > this.stored.updated_turn_id ||
-          (s.updated_turn_id === this.stored.updated_turn_id && s.version > this.stored.version)));
+    const applied = this.stored === null || isStrictlyGreaterComposite(s, this.stored);
     if (applied) {
       this.stored = s;
       return { applied: true, regressed: false, current_watermark: s.updated_turn_created_at };
     }
     return { applied: false, regressed: true, current_watermark: this.stored!.updated_turn_created_at };
   }
+}
+
+/** Strict lexicographic tuple compare (created_at, turn_id, version) mirroring
+ *  the SQL composite guard's "strictly greater" predicate. See the fidelity
+ *  note on FakeMonotonicStore for the domain in which raw-string timestamp
+ *  compare equals the live timestamptz ordering. */
+function isStrictlyGreaterComposite(a: RollingSummary, b: RollingSummary): boolean {
+  if (a.updated_turn_created_at !== b.updated_turn_created_at) {
+    return a.updated_turn_created_at > b.updated_turn_created_at;
+  }
+  if (a.updated_turn_id !== b.updated_turn_id) {
+    return a.updated_turn_id > b.updated_turn_id;
+  }
+  return a.version > b.version;
 }
 
 function emitSpy() {
@@ -469,5 +496,89 @@ describe('FakeMonotonicStore — composite (created_at, turn_id, version) guard'
     await store.upsertSummary(SCENARIO, base({}));
     const outcome = await store.upsertSummary(SCENARIO, base({}));
     expect(outcome).toMatchObject({ applied: false, regressed: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M1 — a stored FLOOR is never an incremental base. The floor absorbed NO
+// history (brief/goal only). Building incrementally on it (its watermark is
+// the newest turn) would only show turns AFTER the floor and strand every
+// pre-floor turn's content out of the summary until the next horizon regen —
+// a maintain-path memory hole. shouldRegenerate must treat a floor prior as
+// REGEN so the next pass re-reads and absorbs the FULL conversation.
+// ---------------------------------------------------------------------------
+
+describe('maintainRollingSummaryForCommit — a floor prior forces a full regen (M1)', () => {
+  it('the next pass regenerates from FULL history (re-reads pre-floor turns), writes generator regen', async () => {
+    const floorPrior = buildDeterministicFloor({
+      briefText: 'Decide HQ.',
+      goalLabel: null,
+      // Floor was stamped at turn-1 (the only turn at first-ever failure).
+      watermark: { turn_id: 'turn-1', created_at: mkTurn(1).created_at },
+      version: 1,
+      latestUserMessage: 'keep the Berlin office',
+    });
+    const store = new RecordingStore(floorPrior);
+    const summarise = vi.fn(async (_userMessage: string) => ({ text: VALID }));
+    const model: SummariserModel = { summarise };
+    await maintainRollingSummaryForCommit({
+      scenarioId: SCENARIO,
+      turnId: 'turn-3',
+      persistedRowId: 'row-3',
+      historyReader: historyReader([mkTurn(3), mkTurn(2), mkTurn(1)]),
+      summaryStore: store,
+      model,
+    });
+    const input = summarise.mock.calls[0]![0];
+    // A REGEN over the full history — NOT an incremental that only shows the
+    // post-floor turns. Pre-floor turn-1's content IS re-read.
+    expect(input).toContain('## Full conversation (oldest first)');
+    expect(input).toContain('user 1');
+    const written = store.upsertSummary.mock.calls[0]![1];
+    expect(written.generator).toBe('regen');
+    expect(written.updated_turn_id).toBe('turn-3');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MINOR-1 — latest-wins coalescing must PRESERVE briefText. The brief arrives
+// only on the brief-carrying turn and is NOT re-readable from history; a later
+// commit (no brief) coalescing over the brief-carrying pass must still
+// summarise WITH the brief (contradicts the pre-fix capture.ts:117 invariant).
+// ---------------------------------------------------------------------------
+
+describe('maintainRollingSummaryForCommit — coalescing preserves briefText (MINOR-1)', () => {
+  it('a brief-less commit coalescing over a brief-carrying pass keeps the brief in the rerun', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const inputs: string[] = [];
+    let calls = 0;
+    const summarise = vi.fn(async (userMessage: string) => {
+      inputs.push(userMessage);
+      calls += 1;
+      if (calls === 1) await gate; // hold the first (brief-carrying) pass in flight
+      return { text: VALID };
+    });
+    const model: SummariserModel = { summarise };
+    const store = new RecordingStore(null);
+    const mk = (turn: string, briefText?: string | null) =>
+      maintainRollingSummaryForCommit({
+        scenarioId: SCENARIO,
+        turnId: turn,
+        persistedRowId: `row-${turn}`,
+        historyReader: historyReader([mkTurn(2), mkTurn(1)]),
+        summaryStore: store,
+        model,
+        briefText,
+      });
+    const p1 = mk('turn-1', 'KEEP-BERLIN-BRIEF'); // brief-carrying turn, held in flight
+    const p2 = mk('turn-2', undefined); // later commit, NO brief → coalesces
+    await p2; // the coalesced caller returns immediately
+    release();
+    await p1;
+    expect(calls).toBe(2); // first pass + one coalesced rerun
+    // The rerun MUST still carry the brief text even though its own commit
+    // (turn-2) had none.
+    expect(inputs[1]).toContain('KEEP-BERLIN-BRIEF');
   });
 });

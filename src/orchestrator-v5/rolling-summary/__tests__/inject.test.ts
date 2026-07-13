@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as telemetry from '../../../utils/telemetry.js';
 import { TelemetryEvents } from '../../../utils/telemetry.js';
 
+import { buildDeterministicFloor } from '../deterministic-floor.js';
 import {
   buildConversationSummarySection,
   loadConversationSummaryForInjection,
@@ -437,6 +438,91 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
     expect(outcome.section!.text).toContain('DECISION FRAME');
     expect(outcome.section!.stale).toBe(false);
     expect(outcome.section!.note).toBeUndefined();
+    expect(lagEmits()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FLOOR honesty (M1 / Codex r2 blocker 1): a generator:'floor' summary is the
+// deterministic seed written on the FIRST-ever maintenance pass when a
+// parse-reject / model error hit with no prior to keep. It absorbed NO
+// conversation history — only the brief/goal-derived FRAME. Its watermark is
+// stamped at the newest turn (the DB monotonic guard needs a finite, ordered
+// key), so the lag/coverage machinery computes lag≈0 + covered and — pre-fix —
+// renders the empty CONSTRAINTS/RESOLVED/OPEN slots as bare "(none)", a
+// coverage claim the floor never earned (the exact lying-coverage class fix 1
+// removes). The injector must render the FRAME but mark the empty slots
+// "(none captured yet)" and disclose the not-yet-summarised state — never a
+// bare "(none)" coverage claim.
+// ---------------------------------------------------------------------------
+
+describe('loadConversationSummaryForInjection — floor honesty (M1)', () => {
+  function floorFixture(): RollingSummary {
+    return buildDeterministicFloor({
+      briefText: 'Choosing an HQ city for the new office. Budget is tight.',
+      goalLabel: 'Pick HQ',
+      // Newest turn watermark — exactly what writeFloor stamps.
+      watermark: { turn_id: T2.turn_id, created_at: T2.created_at },
+      version: 1,
+      latestUserMessage: null,
+    });
+  }
+
+  it('injects the FRAME but NEVER a bare "(none)" coverage claim (first-ever maintenance, parse reject)', async () => {
+    const store = storeReturning(floorFixture());
+    const outcome = await loadConversationSummaryForInjection({
+      flag: 'inject',
+      scenarioId: 'scn-1',
+      requestId: 'req-floor',
+      // Watermark T2 covered, lag 0 — pre-fix this sailed past the memory-hole
+      // guard and rendered bare "(none)".
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    const section = outcome.section;
+    expect(section).not.toBeNull();
+    // FRAME (brief-derived) still rides along — it is legitimately known.
+    expect(section!.text).toContain('DECISION FRAME');
+    // The empty slots must be HONEST: "not captured yet", never a bare
+    // "(none)" that reads as "the summariser processed the conversation and
+    // found none".
+    expect(section!.text).toContain('(none captured yet)');
+    expect(section!.text).not.toContain('(none)');
+    // The not-yet-summarised state is disclosed in-band.
+    expect(section!.stale).toBe(true);
+    expect(section!.note).toBeDefined();
+    expect(section!.note!.toLowerCase()).toContain('not yet');
+    // A persistent floor means a stuck summariser — it must be loud.
+    const lag = lagEmits();
+    expect(lag).toHaveLength(1);
+    expect(lag[0]![1]).toMatchObject({ scenario_id: 'scn-1', refused: true });
+  });
+
+  it('a real (non-floor) summary with the same empty shape still renders bare "(none)" (no over-reach)', async () => {
+    // Guardrail: the honesty rewrite is scoped to floors. A genuine
+    // incremental/regen summary that legitimately found no constraints keeps
+    // the terse "(none)" — that IS an earned coverage statement.
+    const realEmpty: RollingSummary = {
+      ...summaryFixture(),
+      slots: [
+        { slot: 'FRAME', entries: [{ text: 'Choosing a supplier.', source_turn_ids: [] }] },
+        { slot: 'CONSTRAINTS', entries: [] },
+        { slot: 'RESOLVED', entries: [] },
+        { slot: 'OPEN', entries: [] },
+      ],
+    };
+    const store = storeReturning(realEmpty);
+    const outcome = await loadConversationSummaryForInjection({
+      flag: 'inject',
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    expect(outcome.section!.text).toContain('CONSTRAINTS & PREFERENCES: (none)');
+    expect(outcome.section!.text).not.toContain('(none captured yet)');
+    expect(outcome.section!.stale).toBe(false);
     expect(lagEmits()).toHaveLength(0);
   });
 });

@@ -12,9 +12,12 @@
 -- scenarios and created two SECURITY DEFINER RPCs. No existing column, row,
 -- policy, or function was modified, so rollback is self-contained.
 --
--- 2026-07-13 note: the forward DRAFT was amended pre-execution (composite
--- monotonic guard — Codex r2 fix 3). Function SIGNATURES are unchanged, so
--- the DROP statements below still match; no rollback change required.
+-- 2026-07-13 note: the forward DRAFT was amended pre-execution twice
+-- (composite monotonic guard — Codex r2 fix 3; then the RS001 shape guard
+-- extended to validate the primary composite key updated_turn_created_at —
+-- PR #442 round-2 review MINOR-3). Both are function-BODY only; the
+-- SIGNATURES are unchanged, so the DROP statements below still match and no
+-- rollback change is required.
 --
 -- ⚠️  DATA NOTE: rolling_summary is DERIVED, disposable state — it is
 --     regenerated from the persisted turn history on the next summariser
