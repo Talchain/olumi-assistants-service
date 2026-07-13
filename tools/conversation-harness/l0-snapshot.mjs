@@ -54,6 +54,33 @@ export function sha256Canonical(value) {
   return createHash('sha256').update(JSON.stringify(sortKeys(value))).digest('hex');
 }
 
+/**
+ * VOLATILE payload fields (C9): per-request timestamps and correlation ids that
+ * differ between two executions of the SAME semantic commit. A double-commit's
+ * payloads are identical EXCEPT for these — hashing them verbatim made the
+ * D10 payload-sha compare blind to real double executions. Deep-stripped
+ * before hashing; the raw payload is untouched in DB.
+ */
+const VOLATILE_KEY_PATTERN =
+  /(^|_)(computed_at|created_at|updated_at|captured_at|generated_at|completed_at|started_at|timestamp)$|^(request_id|trace_id|correlation_id|span_id|turn_id|run_id|v5_conversation_turn_id|idempotency_key)$/i;
+
+export function stripVolatile(v) {
+  if (Array.isArray(v)) return v.map(stripVolatile);
+  if (v && typeof v === 'object') {
+    return Object.fromEntries(
+      Object.entries(v)
+        .filter(([k]) => !VOLATILE_KEY_PATTERN.test(k))
+        .map(([k, val]) => [k, stripVolatile(val)]),
+    );
+  }
+  return v;
+}
+
+/** Volatile-normalised payload hash — the D10 double-commit identity. */
+export function sha256Semantic(value) {
+  return sha256Canonical(stripVolatile(value));
+}
+
 function makeRest(supabaseUrl, serviceKey) {
   return async function rest(pathQuery) {
     try {
@@ -100,7 +127,11 @@ export async function captureL0Snapshot({ scenarioId, lastN = 10, envFile } = {}
           noop: f.noop,
           created_at: f.created_at,
           fact_type: f.payload?.fact_type ?? null,
-          payload_sha256: sha256Canonical(f.payload ?? null),
+          // SEMANTIC identity (C9): volatile fields (computed_at, request ids…)
+          // stripped before hashing so two executions of the same commit hash
+          // identically. Raw hash kept alongside for forensics.
+          payload_sha256: sha256Semantic(f.payload ?? null),
+          payload_sha256_raw: sha256Canonical(f.payload ?? null),
         }))
       : facts;
   }

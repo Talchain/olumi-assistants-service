@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { captureL0Snapshot } from './l0-snapshot.mjs';
 import { buildConfigManifest } from './config-manifest.mjs';
+import { prepareRunDir } from './run-dir.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -68,8 +69,9 @@ if (journey.requires_seeded_scenario && !args.scenario) {
 const scenarioId = args.scenario ?? randomUUID();
 
 const runDir = resolve(args.out ?? join(HERE, 'runs'), arm);
-mkdirSync(join(runDir, 'turns'), { recursive: true });
-if (wantL0) mkdirSync(join(runDir, 'l0'), { recursive: true });
+// CLEAN start (C-hygiene): a reused arm dir keeps stale turn dirs from a prior
+// journey and score-run.ts would score them — prepare = guarded wipe + skeleton.
+prepareRunDir(runDir, { wantL0 });
 // Self-containment: the scorer reads journey metadata (only_if / edit_intent /
 // class hints) from the run dir, not from a path that may later change.
 copyFileSync(journeyPath, join(runDir, 'journey.json'));

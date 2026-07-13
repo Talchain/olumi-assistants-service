@@ -22,8 +22,9 @@
  *   LLM_JUDGE=1 BASELINE_DIR=runs/base CANDIDATE_DIR=runs/cand \
  *     pnpm exec tsx tools/conversation-harness/scorer/llm-judge.ts
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { surfacesFromWire, type TurnSurfaces } from './prompt-dims.js';
 
 export const JUDGE_CRITERIA = ['specificity', 'actionability', 'coaching_depth', 'no_generic_filler'] as const;
 export type JudgeCriterion = (typeof JUDGE_CRITERIA)[number];
@@ -153,12 +154,78 @@ export async function judgeMessage(assistantText: string, opts: { reruns?: numbe
   return scores;
 }
 
-/** Read per-turn assistant text from a scored run dir (scores.json rows). */
-function turnsFromRun(runDir: string): { turn: string; text: string }[] {
+/** Render the turn's PAYLOAD facts for the judge prompt (judge grounding fix):
+ * without them the judge cannot tell cited-from-payload specificity from
+ * FABRICATED specificity — a candidate that invents "78%" reads as more
+ * specific than one that honestly says "the analysis is still pending". Pure. */
+export function factsFromSurfaces(s: TurnSurfaces | null | undefined): string | null {
+  if (!s) return null;
+  const lines: string[] = [];
+  if (s.optionLabels.length > 0) {
+    const opts = s.optionLabels.map((l) => {
+      const pct = s.winPctByLabel[l];
+      return pct != null ? `${l} (win ${pct}%)` : l;
+    });
+    lines.push(`Options: ${opts.join(', ')}.`);
+  }
+  if (s.leadingOptionLabel) lines.push(`Leading option per the analysis: ${s.leadingOptionLabel}.`);
+  if (s.payloadPercentages.length > 0) {
+    lines.push(`Every percentage present in the analysis payload: ${[...s.payloadPercentages].sort((a, b) => a - b).join(', ')}.`);
+  }
+  if (s.hasHeldProposal) lines.push('A proposed change is HELD awaiting user consent (NOT applied).');
+  if (lines.length === 0) return null;
+  lines.push('Specificity should be judged against these facts — a number or claim NOT traceable to them is fabricated, not specific.');
+  return lines.join('\n');
+}
+
+export interface JudgeTurn {
+  turn: string;
+  text: string;
+  graphFacts: string | null;
+}
+
+/** Read per-turn assistant text + payload facts from a scored run dir:
+ * coach turns from scores.json rows, facts from the SAME run's wire captures
+ * (turns/<id>/wire.json — new layout; <TURN>.json — legacy). */
+export function turnsFromRun(runDir: string): JudgeTurn[] {
   const parsed = JSON.parse(readFileSync(join(runDir, 'scores.json'), 'utf-8')) as { rows?: { turn: string; text?: string; turn_class_hint?: string | null }[] };
+  const wireFor = (turn: string): unknown => {
+    for (const p of [join(runDir, 'turns', turn, 'wire.json'), join(runDir, `${turn}.json`)]) {
+      if (existsSync(p)) {
+        try {
+          return JSON.parse(readFileSync(p, 'utf-8'));
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
+  };
   return (parsed.rows ?? [])
     .filter((r) => (r.turn_class_hint ?? '') === 'coach' && (r.text ?? '').trim().length > 0)
-    .map((r) => ({ turn: r.turn, text: String(r.text) }));
+    .map((r) => {
+      const wire = wireFor(r.turn);
+      return { turn: r.turn, text: String(r.text), graphFacts: wire ? factsFromSurfaces(surfacesFromWire(wire)) : null };
+    });
+}
+
+/** Pair corresponding turns across the two sides by turn id (same journey ->
+ * same ids), baseline order. Only PAIRED turns are judged — judging a turn
+ * that exists on one side only (an aborted run) skews the side means. Pure. */
+export function pairTurns(
+  base: JudgeTurn[],
+  cand: JudgeTurn[],
+): { pairs: { turn: string; base: JudgeTurn; cand: JudgeTurn }[]; unpairedBase: string[]; unpairedCand: string[] } {
+  const candByTurn = new Map(cand.map((t) => [t.turn, t]));
+  const pairs = base
+    .filter((b) => candByTurn.has(b.turn))
+    .map((b) => ({ turn: b.turn, base: b, cand: candByTurn.get(b.turn)! }));
+  const paired = new Set(pairs.map((p) => p.turn));
+  return {
+    pairs,
+    unpairedBase: base.filter((b) => !paired.has(b.turn)).map((b) => b.turn),
+    unpairedCand: cand.filter((c) => !paired.has(c.turn)).map((c) => c.turn),
+  };
 }
 
 // ---------- entrypoint ----------
@@ -175,13 +242,35 @@ if (isMain) {
   const run = async () => {
     const baseTurns = turnsFromRun(baselineDir);
     const candTurns = turnsFromRun(candidateDir);
+    // Judge grounding + pairing fixes: (1) only turns present on BOTH sides are
+    // judged, so the side means compare like with like; (2) each side of a pair
+    // is judged WITH that side's own payload facts threaded into the prompt, so
+    // fabricated specificity is penalised instead of rewarded.
+    const { pairs, unpairedBase, unpairedCand } = pairTurns(baseTurns, candTurns);
+    if (pairs.length === 0) throw new Error('no PAIRED coach turns across the two sides — judge would compare unlike turns');
+    if (unpairedBase.length || unpairedCand.length) {
+      console.log(`llm-judge: skipping unpaired turns — baseline [${unpairedBase.join(', ')}] candidate [${unpairedCand.join(', ')}]`);
+    }
     const baseScores: JudgeScores[] = [];
     const candScores: JudgeScores[] = [];
-    for (const t of baseTurns) baseScores.push(...(await judgeMessage(t.text, { reruns })));
-    for (const t of candTurns) candScores.push(...(await judgeMessage(t.text, { reruns })));
+    for (const p of pairs) {
+      baseScores.push(...(await judgeMessage(p.base.text, { reruns, graphFacts: p.base.graphFacts ?? undefined })));
+      candScores.push(...(await judgeMessage(p.cand.text, { reruns, graphFacts: p.cand.graphFacts ?? undefined })));
+    }
     if (baseScores.length === 0 || candScores.length === 0) throw new Error('no coach turns scored on one/both sides');
     const delta = judgeDelta(aggregateJudge(baseScores), aggregateJudge(candScores));
-    const out = { generated_at: new Date().toISOString(), model: JUDGE_MODEL, reruns, baseline_dir: baselineDir, candidate_dir: candidateDir, ...delta };
+    const out = {
+      generated_at: new Date().toISOString(),
+      model: JUDGE_MODEL,
+      reruns,
+      baseline_dir: baselineDir,
+      candidate_dir: candidateDir,
+      paired_turns: pairs.map((p) => p.turn),
+      unpaired_baseline_turns: unpairedBase,
+      unpaired_candidate_turns: unpairedCand,
+      grounded_with_payload_facts: pairs.filter((p) => p.base.graphFacts != null || p.cand.graphFacts != null).length,
+      ...delta,
+    };
     writeFileSync(join(candidateDir, 'llm-judge.json'), JSON.stringify(out, null, 2));
     console.log(`LLM-judge (${JUDGE_MODEL}): ${delta.call.toUpperCase()}  overall Δ${delta.overall.delta} -> ${join(candidateDir, 'llm-judge.json')}`);
     for (const d of delta.perCriterion) console.log(`  ${d.criterion}: ${d.baseline} -> ${d.candidate} (Δ${d.delta}${d.aboveNoise ? '' : ', within noise'})`);

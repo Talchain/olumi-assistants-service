@@ -86,14 +86,14 @@ so historical workstream runs remain scoreable.
 
 | Dim | What it measures | Verdict mode |
 |---|---|---|
-| D1 chip-no-repeat | chip id+label set Jaccard vs previous K=3 turns | pass/fail, flaky (N=3 majority) |
-| D2 chip-presence-per-question-class | either/or + enumerated-choice regex on `assistant_text` → ≥2 `suggested_actions` on the SAME envelope | pass/fail, flaky |
+| D1 chip-no-repeat | SEMANTIC chip set (normalised label + action family — ids excluded, regenerated ids can't evade) Jaccard vs previous K=3 turns; fails on the FIRST unwanted repeat; repeated PURE consent sets (apply/cancel while held) are reported, not failed | pass/fail, flaky (N=3 majority) |
+| D2 chip-presence-per-question-class | either/or + enumerated-choice regex on `assistant_text` → ≥2 `suggested_actions` on the SAME envelope **bound to the STATED alternatives** (each extracted alternative needs a chip with ≥1 shared content token; falls back to the count floor when alternatives aren't extractable) | pass/fail, flaky |
 | D3 question budget | `?` count per turn class | **BASELINE-LOG** until 2.47(b) lands budgets |
 | D4 brevity (kept) | words vs ~130 budget on coach turns | advisory |
 | D8 latency budgets | wall_clock_ms vs coach≤30s / edit≤25s / run_analysis≤25s / draft≤75s; slowest substages from trace | **ADVISORY** |
 | D9 consent friction | consent turns + seconds from edit-intent to applied-in-DB (L0 graph-sha series) | **LOG** — the tunable-auto-apply lane is changing consent counts; measure, don't assume |
-| D10-api re-click safety | duplicate run_analysis mid-flight → single fact-commit set via L0 diff (frozen graph ⇒ double-execution is payload-sha identical) | pass/fail |
-| D11 production guards (kept) | forbidden phrases, success claims, held-science vocabulary, mutation language, structural success claims | pass/fail |
+| D10-api re-click safety | duplicate run_analysis mid-flight → single fact-commit set via L0 diff; payload shas are VOLATILE-NORMALISED (computed_at / request ids stripped before hashing) AND the window must add ≤1 analysis-class fact (count assertion — sha-divergent double executions can't evade) | pass/fail |
+| D11 production guards (kept) | forbidden phrases, success claims, held-science vocabulary, mutation language, structural success claims — mutation/structural claims CONDITIONED on turn class + the L0 mutation oracle: a proven applied-edit receipt is excused (disclosed in details), a claim with no commit still fails. With NO L0 oracle (no `--l0`), an edit-flow receipt is excused ONLY when a `held_proposal` / apply-consent chip makes it legitimately ambiguous (and PQ6 re-catches it); a BARE unverifiable receipt FIRES (fail-closed) | pass/fail |
 
 Guard modules are **imported from `src/`** (`compose/forbidden-user-facing-phrases.ts`,
 `routing/mutation-language.ts`) — never copied; copies drift (the workstream's
@@ -182,7 +182,7 @@ v0: property-based, NEVER exact-text. `value = null` = not measurable this run
 | PQ2 question-asking | **neutral** | question count / post-draft framing question (good for clarify, bad for terse coach — reported, not scored) | no |
 | PQ3 grounding | higher-better | coaching whose claims **trace to the analysis payload** — a cited % must match a real win-% / percentile (±1); a fabricated number is not grounding (`traceableNumberFraction` in details is the fabrication detector) | no |
 | PQ4 chip-correctness | higher-better | chips present on either/or + enumerated question turns; identical-repeat penalty (details) | no |
-| PQ5 guard-cleanliness | lower-better | forbidden phrase / success claim / held-science / mutation-language / structural-success hits (the imported `src/` guards) | **yes** |
+| PQ5 guard-cleanliness | lower-better | forbidden phrase / success claim / held-science / mutation-language / structural-success VIOLATIONS (the imported `src/` guards, turn-class + L0-outcome conditioned — a proven applied-edit receipt is excused, disclosed in `excusedReceipts`; with NO oracle a receipt is excused only when a `held_proposal`/apply-consent chip makes it ambiguous, else it FIRES fail-closed) | **yes** |
 | PQ6 coherence | lower-better | cross-surface / cross-fragment contradiction: says "done" while a proposal is still held; claims a mutation then asks to apply; names a winner the blocks contradict; **a prose % attributed to an option that disagrees with that option's payload win-%** | **yes** |
 
 A **gating** regression (PQ5 or PQ6) caps the overall verdict at *worse* no matter
@@ -222,21 +222,40 @@ The prompt-building, response parsing, and mean/variance aggregation are pure an
 self-tested; only the thin model-call wrapper needs credentials (`ANTHROPIC_API_KEY`
 or an `ant` profile).
 
+**Grounding + pairing (judge-honesty fixes):** each judged message is scored WITH
+the turn's own payload facts (options, win-%, leading option, HELD state —
+rendered by `factsFromSurfaces` from the run's wire captures) threaded into the
+judge prompt, so fabricated specificity is penalised instead of rewarded; and only
+turns present on BOTH sides are judged (`pairTurns` — corresponding-turn pairing),
+so an aborted side can't skew the comparison. `llm-judge.json` records
+`paired_turns`, the unpaired leftovers, and `grounded_with_payload_facts`.
+
 ### Verdict + flakiness (`scorer/ab-verdict.ts`)
 
 Reads the `prompt_dims` from each side's `scores.json`, diffs per dim, and writes
 `ab-verdict.json` + `ab-verdict.md` with `better` / `worse` / `mixed` /
 `no-change` / `inconclusive`. Live-model nondeterminism is handled explicitly:
 
-- **N≥3 reruns per side.** Flaky dims (PQ1–PQ4, PQ6) aggregate by **median** across
-  a side's runs; the **safety** dim (PQ5) aggregates by **worst-run (any-hit)** — a
-  guard hit in even one rerun gates and is never averaged below the noise floor.
-  One run per side is allowed but the artifact is stamped `low_confidence`.
+- **N≥3 reruns per side.** Flaky quality dims (PQ1–PQ4, OPS-*) aggregate by **median**
+  across a side's runs; the **safety** dims (PQ5 guard-cleanliness, PQ6 coherence)
+  aggregate by **worst-run (any-hit / any-contradiction)** — a guard hit or a
+  contradiction in even one rerun gates and is never averaged (or medianed) below
+  the noise floor. The worst-run mode is derived from the dim's **own** safety
+  semantics (and either side's `safety` flag), NOT solely the baseline template —
+  so a REUSED pre-flag baseline artifact can't silently force median and disable
+  the worst-run gate. One run per side is allowed but the artifact is stamped
+  `low_confidence`.
 - **Noise floor.** A dim is only called improved/regressed when
   `|candidate − baseline|` clears a per-dim threshold (recorded in the artifact);
   smaller moves are `flat`.
 - **Gating + neutral** as above: PQ5/PQ6 regressions gate; PQ2 is reported, never
   scored.
+- **OPS promotion criteria.** The verdict ALSO scores three lower-better ops dims
+  derived from each run's own rows: `OPS-latency-median` (wall-clock ms),
+  `OPS-cost-tokens` (total LLM tokens in+out), `OPS-fallback-rate` (fraction of
+  turns whose trace shows fallback engagement). Null-honest: absent signals are
+  excluded, never read as 0 — the B1 experiment showed a candidate can win on
+  PQ dims while silently regressing all three.
 
 ### Turnkey command (hermetic arm)
 
@@ -248,10 +267,16 @@ OLUMI_ASSIST_KEY=<assist key> ./prompt-eval.sh \
   --candidate candidates/decision_review.v43.txt \
   --journey journeys/s3-option-question-probe.json \
   --reruns 3
-# -> runs/ab-decision_review/ab-verdict.md  (per-dim deltas + overall call)
+# -> runs/eval-decision_review-<timestamp>-<pid>/ab-decision_review/ab-verdict.md
 ```
 
-`prompt-eval.sh` does all six steps: build baseline store → derive candidate store
+Each eval gets a UNIQUE `runs/eval-<task>-<timestamp>-<pid>/` tree (stale turn dirs
+from a previous eval can never leak into scoring), and the baseline store is
+age-gated: rebuilt when older than `BASELINE_MAX_AGE_HOURS` (default 24) or when
+`--refresh-baseline` is passed, parse-verified, and its sha256 + mtime recorded in
+`baseline-store.txt` beside the runs.
+
+`prompt-eval.sh` does all six steps: refresh/verify baseline store → derive candidate store
 → boot both arms (`--base-port` / `--cand-port`) → drive `--reruns` paired journeys
 (a fresh frozen scenario per side/rerun when the journey needs seeding) → score
 each → verdict → clean up seeded scenarios. `clarify_brief` is A/B'd the same way

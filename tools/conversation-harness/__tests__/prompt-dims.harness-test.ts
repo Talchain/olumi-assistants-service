@@ -9,7 +9,7 @@
  *   pnpm exec vitest run --config tools/conversation-harness/vitest.config.ts
  */
 import { describe, expect, it } from 'vitest';
-import type { TurnRow } from '../scorer/dims.js';
+import { rowFromWire, type TurnRow } from '../scorer/dims.js';
 import {
   pqBrevityDensity,
   pqChipCorrectness,
@@ -62,10 +62,12 @@ function surf(partial: Partial<TurnSurfaces>): TurnSurfaces {
 }
 
 describe('surfacesFromWire', () => {
-  it('lifts held_proposal, win probabilities and the leading option label', () => {
+  it('lifts held_proposal (blocks[] entry), win probabilities and the leading option label', () => {
     const s = surfacesFromWire({
-      held_proposal: { id: 'p1' },
       blocks: [
+        // Real wire shape: a held_proposal is a blocks[] entry (NOT a top-level
+        // field) — src/orchestrator-v5/compose/held-proposal.ts.
+        { type: 'held_proposal', proposal_id: 'p1', confirm_action_id: 'c1', mutation_class: 'structural' },
         {
           type: 'analysis_result',
           leading_option_id: 'opt_a',
@@ -91,6 +93,22 @@ describe('surfacesFromWire', () => {
     const s = surfacesFromWire({ blocks: [{ type: 'analysis_result', win_probabilities: { X: 0.3, Y: 0.7 } }] });
     expect(s.hasHeldProposal).toBe(false);
     expect(s.leadingOptionLabel).toBe('Y');
+  });
+
+  // MINOR fix (wrong-location held_proposal reader): the detector reads a
+  // blocks[] {type:'held_proposal'} entry (the REAL wire shape), NOT a
+  // top-level `held_proposal` field. The old top-level reader was dead-false on
+  // every real run, silently disabling PQ6(a) + the FIX-1 held-excusal branch.
+  it('detects a held_proposal from a blocks[] entry with NO top-level field [fix]', () => {
+    const wire = { blocks: [{ type: 'held_proposal', proposal_id: 'p1' }] };
+    expect(surfacesFromWire(wire).hasHeldProposal).toBe(true);
+    expect(rowFromWire('E1', wire, {}).heldProposal).toBe(true);
+  });
+
+  it('does NOT treat a bare top-level held_proposal field (a shape the wire never emits) as held [fix]', () => {
+    const wire = { held_proposal: { id: 'p1' } }; // no blocks[] held entry
+    expect(surfacesFromWire(wire).hasHeldProposal).toBe(false);
+    expect(rowFromWire('E1', wire, {}).heldProposal).toBe(false);
   });
 });
 
@@ -204,11 +222,103 @@ describe('PQ5 guard-cleanliness (lower-better, gating)', () => {
     const noHits = pqGuardCleanliness([row({ turn: 'T1', guardHits: undefined })]);
     expect(noHits.value).toBeNull();
   });
+
+  // PQ5 turn-awareness fix: mutation/success language was counted on EVERY
+  // turn — a legitimate applied-edit receipt ("I've set X to 40%") false-failed
+  // the SAFETY gate. Condition on turn class + the L0 outcome oracle.
+  it('does NOT count a legitimate applied-edit receipt (edit turn, L0 commit proven) [fix]', () => {
+    const receipt = row({
+      turn: 'E1',
+      turnClassHint: 'edit',
+      guardHits: { ...CLEAN_GUARDS, mutationLanguage: true, structuralSuccessClaim: true },
+      mutationCommitted: true,
+    });
+    const d = pqGuardCleanliness([receipt]);
+    expect(d.value).toBe(0);
+    expect((d.details as any).excusedReceipts).toHaveLength(1);
+  });
+
+  it('STILL counts mutation language on a NON-edit answer [pin]', () => {
+    const coach = row({ turn: 'K1', turnClassHint: 'coach', guardHits: { ...CLEAN_GUARDS, mutationLanguage: true } });
+    expect(pqGuardCleanliness([coach]).value).toBe(1);
+  });
+
+  it('STILL counts a structural success claim when L0 proves NO mutation committed [pin]', () => {
+    const falseClaim = row({
+      turn: 'E1',
+      turnClassHint: 'edit',
+      guardHits: { ...CLEAN_GUARDS, structuralSuccessClaim: true },
+      mutationCommitted: false,
+    });
+    expect(pqGuardCleanliness([falseClaim]).value).toBe(1);
+  });
+
+  // FIX-1 (null-oracle excusal was fail-OPEN on the SAFETY gate): a no-oracle
+  // edit-flow receipt is excused ONLY when consent/held evidence makes it
+  // ambiguous (and PQ6 re-catches it). A BARE receipt — no held_proposal, no
+  // consent chip, only the journey's onlyIf scheduling hint — is unverifiable
+  // AND uncaught by PQ6, so PQ5 must FIRE (matching base). onlyIf is a harness
+  // scheduling gate, NOT a wire surface, so it is not consent evidence.
+  it('FIRES on a BARE no-oracle edit-flow receipt (no held_proposal, no consent chip) — onlyIf is not consent evidence [fix FIX-1]', () => {
+    const bare = row({
+      turn: 'C1',
+      turnClassHint: 'edit',
+      onlyIf: 'consent_requested',
+      guardHits: { ...CLEAN_GUARDS, mutationLanguage: true },
+      // no mutationCommitted (run without --l0); no chips; no heldProposal
+    });
+    const d = pqGuardCleanliness([bare]);
+    expect(d.value).toBe(1);
+    expect((d.details as any).excusedReceipts).toHaveLength(0);
+  });
+
+  it('excuses a no-oracle edit-flow receipt when a held_proposal is present (noted; PQ6 guards the held case) [fix FIX-1]', () => {
+    const held = row({
+      turn: 'C1',
+      turnClassHint: 'edit',
+      onlyIf: 'consent_requested',
+      heldProposal: true,
+      guardHits: { ...CLEAN_GUARDS, mutationLanguage: true },
+    });
+    const d = pqGuardCleanliness([held]);
+    expect(d.value).toBe(0);
+    expect(JSON.stringify((d.details as any).excusedReceipts)).toContain('UNVERIFIED');
+  });
+
+  it('excuses a no-oracle mutation-language receipt when an apply consent chip is present [fix FIX-1]', () => {
+    const consent = row({
+      turn: 'C1',
+      turnClassHint: 'edit',
+      chips: [{ id: 'apply', label: 'Apply the change' }],
+      guardHits: { ...CLEAN_GUARDS, mutationLanguage: true },
+    });
+    expect(pqGuardCleanliness([consent]).value).toBe(0);
+  });
 });
 
 describe('PQ6 coherence (lower-better, gating)', () => {
+  // PQ6 worst-run fix: contradictions are disqualifying, so the dim must carry
+  // the SAFETY flag — ab-verdict aggregates safety dims by WORST-run instead of
+  // medianing an intermittent contradiction away.
+  it('is a SAFETY dim (worst-run aggregation in ab-verdict) [fix]', () => {
+    const d = pqCoherence([row({ turn: 'T1' })], {});
+    expect(d.safety).toBe(true);
+    expect(d.gating).toBe(true);
+  });
+
   it('flags a success claim while a proposal is still held', () => {
     const surfaces = { T1: surf({ hasHeldProposal: true }) };
+    const d = pqCoherence([row({ turn: 'T1', guardHits: { ...CLEAN_GUARDS, structuralSuccessClaim: true } })], surfaces);
+    expect(d.value).toBe(1);
+    expect((d.details as any).contradictions[0].kind).toBe('success-claim-with-held-proposal');
+  });
+
+  // MINOR fix, END-TO-END through surfacesFromWire: PQ6(a) must fire from a REAL
+  // held_proposal BLOCK wire (not the dead top-level shape). Proves the detector
+  // chain (wire blocks[] -> hasHeldProposal -> PQ6(a)) is alive on real runs.
+  it('PQ6(a) fires from a real held_proposal BLOCK wire via surfacesFromWire [fix]', () => {
+    const wire = { blocks: [{ type: 'held_proposal', proposal_id: 'p1', confirm_action_id: 'c1', mutation_class: 'structural' }] };
+    const surfaces = { T1: surfacesFromWire(wire) };
     const d = pqCoherence([row({ turn: 'T1', guardHits: { ...CLEAN_GUARDS, structuralSuccessClaim: true } })], surfaces);
     expect(d.value).toBe(1);
     expect((d.details as any).contradictions[0].kind).toBe('success-claim-with-held-proposal');

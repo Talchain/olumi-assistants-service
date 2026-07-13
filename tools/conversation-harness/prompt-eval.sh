@@ -31,7 +31,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 TASK=""; CANDIDATE=""; JOURNEY=""; RERUNS=3; BASE_PORT=3103; CAND_PORT=3113
-L0=""; KEEP_ARMS=""; STORE_DIR="$DIR/stores"; RUNS_DIR="$DIR/runs"
+L0=""; KEEP_ARMS=""; REFRESH_BASELINE=""; STORE_DIR="$DIR/stores"
 while [ $# -gt 0 ]; do
   case "$1" in
     --task) TASK="$2"; shift 2;;
@@ -42,13 +42,21 @@ while [ $# -gt 0 ]; do
     --cand-port) CAND_PORT="$2"; shift 2;;
     --l0) L0="--l0"; shift;;
     --keep-arms) KEEP_ARMS=1; shift;;
+    --refresh-baseline) REFRESH_BASELINE=1; shift;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
 [ -n "$TASK" ] && [ -n "$CANDIDATE" ] && [ -n "$JOURNEY" ] || {
-  echo "usage: OLUMI_ASSIST_KEY=<key> ./prompt-eval.sh --task <id> --candidate <file> --journey <journey.json> [--reruns 3] [--base-port 3103] [--cand-port 3113] [--l0] [--keep-arms]" >&2
+  echo "usage: OLUMI_ASSIST_KEY=<key> ./prompt-eval.sh --task <id> --candidate <file> --journey <journey.json> [--reruns 3] [--base-port 3103] [--cand-port 3113] [--l0] [--keep-arms] [--refresh-baseline]" >&2
   exit 2
 }
+
+# UNIQUE run dirs per eval (C-hygiene): reusing runs/base-N across evals left
+# stale turn dirs a prior journey wrote — and the scorer's defensive loader
+# scores any extra on-disk turn dir. One eval = one fresh runs/eval-* tree.
+EVAL_ID="$(date +%Y%m%d-%H%M%S)-$$"
+RUNS_DIR="$DIR/runs/eval-${TASK}-${EVAL_ID}"
+mkdir -p "$RUNS_DIR"
 : "${OLUMI_ASSIST_KEY:?set OLUMI_ASSIST_KEY (or ASSIST_API_KEY) for the runner}"
 [ -f "$CANDIDATE" ] || { echo "candidate file not found: $CANDIDATE" >&2; exit 2; }
 
@@ -73,9 +81,37 @@ wait_for_boot() { # $1 = logfile
   echo "arm did not boot within 60s — see $1" >&2; tail -20 "$1" >&2; exit 1
 }
 
-echo "== 1/6 baseline store =="
-[ -f "$BASE_STORE" ] || python3 arm/build-stores.py --out "$BASE_STORE"
-echo "baseline store: $BASE_STORE"
+echo "== 1/6 baseline store (refresh/verify) =="
+# BASELINE REFRESH/VERIFY (hygiene fix): a silently-reused stale staging-mirror
+# invalidates the A/B — the "baseline" stops being the served baseline. Rebuild
+# when forced (--refresh-baseline) or older than BASELINE_MAX_AGE_HOURS
+# (default 24), and always record sha256 + age into the eval dir as evidence.
+BASELINE_MAX_AGE_HOURS="${BASELINE_MAX_AGE_HOURS:-24}"
+if [ -f "$BASE_STORE" ] && [ -z "$REFRESH_BASELINE" ]; then
+  AGE_H=$(python3 -c "import os,sys,time; print(int((time.time()-os.path.getmtime(sys.argv[1]))//3600))" "$BASE_STORE")
+  if [ "$AGE_H" -ge "$BASELINE_MAX_AGE_HOURS" ]; then
+    echo "baseline store is ${AGE_H}h old (>= ${BASELINE_MAX_AGE_HOURS}h) — rebuilding from PMS"
+    python3 arm/build-stores.py --out "$BASE_STORE"
+  else
+    echo "reusing baseline store (${AGE_H}h old, < ${BASELINE_MAX_AGE_HOURS}h)"
+  fi
+else
+  [ -n "$REFRESH_BASELINE" ] && echo "--refresh-baseline: rebuilding from PMS"
+  python3 arm/build-stores.py --out "$BASE_STORE"
+fi
+# Verify: parseable JSON + record identity (sha256 + mtime) with the evidence.
+python3 - "$BASE_STORE" "$RUNS_DIR/baseline-store.txt" <<'PY'
+import hashlib, json, os, sys, time
+store, out = sys.argv[1], sys.argv[2]
+with open(store, 'rb') as f:
+    raw = f.read()
+json.loads(raw)  # hard-fail on a corrupt store
+sha = hashlib.sha256(raw).hexdigest()
+mtime = time.strftime('%Y-%m-%dT%H:%M:%S%z', time.localtime(os.path.getmtime(store)))
+line = f"baseline store: {store}\nsha256: {sha}\nmtime: {mtime}\n"
+open(out, 'w').write(line)
+print(line, end='')
+PY
 
 echo "== 2/6 candidate store (swap $TASK) =="
 node arm/make-candidate-store.mjs --baseline "$BASE_STORE" --task "$TASK" --candidate "$CANDIDATE" --out "$CAND_STORE"

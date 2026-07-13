@@ -22,6 +22,10 @@
 export interface ChipRef {
   id: string;
   label: string;
+  /** Action family carried on the wire chip (e.g. "apply_edit"), when present.
+   * Part of the D1 SEMANTIC repeat key — ids are regenerated per turn and must
+   * not be part of repeat identity. */
+  action?: string | null;
 }
 
 export interface TurnRow {
@@ -44,6 +48,17 @@ export interface TurnRow {
     mutationLanguage: boolean;
     structuralSuccessClaim: boolean;
   };
+  /** L0 mutation oracle for THIS turn's window: true = the scenario graph sha
+   * changed across the turn (a mutation committed in DB), false = L0 present
+   * and the sha did NOT change, null/undefined = no L0 oracle for this turn.
+   * Attached by attachMutationOutcomes (called from score-run.ts). */
+  mutationCommitted?: boolean | null;
+  /** Wire held_proposal presence — a staged (not-yet-applied) change on THIS
+   * turn's envelope, detected via wireHasHeldProposal (a blocks[] entry of type
+   * 'held_proposal', the same detector as TurnSurfaces.hasHeldProposal) so
+   * guardViolations can decide (with the chips) whether an applied-edit receipt
+   * is legitimately ambiguous. Absent/undefined => no held proposal. */
+  heldProposal?: boolean;
 }
 
 export interface L0HandlerFact {
@@ -88,6 +103,20 @@ export interface TurnMeta {
   duplicate_of?: string | null;
 }
 
+/** True when the wire carries a held proposal — a `blocks[]` entry of
+ * `{ type: 'held_proposal' }` (the REAL wire shape emitted by
+ * src/orchestrator-v5/compose/held-proposal.ts). It is NOT a top-level
+ * `held_proposal` field — that shape never exists on the wire, and reading it
+ * made hasHeldProposal / heldProposal dead-false on every real run, silently
+ * disabling PQ6(a) success-claim-with-held-proposal AND the FIX-1 held-excusal
+ * branch. Single source of truth so rowFromWire (row) and surfacesFromWire
+ * (surface) stay in lockstep. */
+export function wireHasHeldProposal(wire: unknown): boolean {
+  const w = (wire ?? {}) as Record<string, unknown>;
+  const blocks = Array.isArray(w.blocks) ? (w.blocks as unknown[]) : [];
+  return blocks.some((b) => (b as Record<string, unknown> | null)?.type === 'held_proposal');
+}
+
 export function rowFromWire(turnId: string, wire: unknown, meta: TurnMeta = {}): TurnRow {
   const w = (wire ?? {}) as Record<string, unknown>;
   const chipsRaw = Array.isArray(w.suggested_actions) ? (w.suggested_actions as unknown[]) : [];
@@ -106,12 +135,20 @@ export function rowFromWire(turnId: string, wire: unknown, meta: TurnMeta = {}):
     assistantText: typeof w.assistant_text === 'string' ? w.assistant_text : '',
     chips: chipsRaw.map((c) => {
       const chip = (c ?? {}) as Record<string, unknown>;
-      return { id: String(chip.id ?? ''), label: String(chip.label ?? '') };
+      return {
+        id: String(chip.id ?? ''),
+        label: String(chip.label ?? ''),
+        action: chip.action != null ? String(chip.action) : null,
+      };
     }),
     substageTimings:
       timingsRaw && typeof timingsRaw === 'object' && !Array.isArray(timingsRaw)
         ? (timingsRaw as Record<string, number>)
         : null,
+    // Same detector as surfacesFromWire.hasHeldProposal (wireHasHeldProposal) —
+    // scans blocks[] for a held_proposal entry, kept in lockstep so PQ5 (row)
+    // and PQ6 (surface) agree.
+    heldProposal: wireHasHeldProposal(w),
   };
 }
 
@@ -123,6 +160,146 @@ function chipKey(c: ChipRef): string {
 
 export function chipSet(row: TurnRow): Set<string> {
   return new Set(row.chips.map(chipKey));
+}
+
+/** SEMANTIC chip identity (C11): normalised label + action family, NO id — a
+ * regenerated id on an otherwise identical chip must not evade repeat
+ * detection. Label normalisation: lowercase, punctuation stripped, whitespace
+ * collapsed. */
+export function chipSemanticKey(c: ChipRef): string {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  return `${norm(c.label)}|${norm(String(c.action ?? ''))}`;
+}
+
+export function chipSemanticSet(row: TurnRow): Set<string> {
+  return new Set(row.chips.map(chipSemanticKey));
+}
+
+/** Consent-family chips (apply/confirm/cancel…) legitimately PERSIST while a
+ * proposal is held — a repeated consent set is a WANTED repeat, not a loop.
+ * Property-based, mirrors runner.mjs consent detection. */
+const CONSENT_FAMILY = /\b(apply|confirm|approve|go ahead|yes|cancel|dismiss|discard|keep|reject)\b/i;
+
+export function isConsentChipSet(row: TurnRow): boolean {
+  return row.chips.length > 0 && row.chips.every((c) => CONSENT_FAMILY.test(`${c.id} ${c.label} ${c.action ?? ''}`));
+}
+
+/** ANY apply-side consent chip (apply/confirm/approve/go ahead/yes) — a chip
+ * offering to APPLY a pending edit. Deliberately the APPLY subset (not the
+ * cancel/dismiss family): a lone "Cancel" chip does not make an "I updated X"
+ * receipt honest. Tested on `id + label` with the SAME regex as PQ6(b)
+ * asksConsent (prompt-dims.ts CONSENT_CHIP) so hasConsentChip ⊆ asksConsent —
+ * i.e. any no-oracle receipt the guard excuses on a consent chip here is ALWAYS
+ * re-caught by the PQ6 coherence gate (action is excluded to stay in lockstep;
+ * an action-only consent signal therefore fails closed). */
+const CONSENT_APPLY_CHIP = /\b(apply|confirm|approve|go ahead|yes)\b/i;
+
+export function hasConsentChip(row: TurnRow): boolean {
+  return row.chips.some((c) => CONSENT_APPLY_CHIP.test(`${c.id} ${c.label}`));
+}
+
+// ---------- L0 mutation oracle + guard conditioning (C10 / PQ5 turn-awareness) ----------
+
+/** Edit-flow turns: an edit-class turn, an explicit edit intent, or a consent
+ * turn ("yes, apply") — the turns whose assistant text may legitimately be an
+ * applied-edit RECEIPT. */
+export function isEditFlowTurn(row: TurnRow): boolean {
+  return (row.turnClassHint ?? '') === 'edit' || row.editIntent || row.onlyIf === 'consent_requested';
+}
+
+/** Attach the per-turn L0 mutation outcome to each row (TurnRow.mutationCommitted).
+ *
+ * Oracle: the runner snapshots L0 after every executed turn with label
+ * `NN-<turnId>` (plus `00-baseline`). For a row, committed = the graph sha of
+ * its own post-turn snapshot differs from the immediately preceding snapshot's
+ * sha (ordered by captured_at). Missing snapshot / missing shas -> null
+ * (never guessed). Duplicate-capture rows (-dup) have no own snapshot -> null. */
+export function attachMutationOutcomes(rows: TurnRow[], snaps: L0Snap[]): void {
+  const usable = (snaps ?? []).filter((s) => s && !s.__error);
+  if (usable.length === 0) return; // leave undefined — no oracle at all
+  const ordered = [...usable].sort((a, b) => (a.captured_at ?? '').localeCompare(b.captured_at ?? ''));
+  for (const row of rows) {
+    const idx = ordered.findIndex((s) => typeof s.label === 'string' && s.label.endsWith(`-${row.turn}`));
+    if (idx <= 0) {
+      row.mutationCommitted = null; // no own snapshot, or nothing before it to diff against
+      continue;
+    }
+    const after = graphSha(ordered[idx]);
+    const before = graphSha(ordered[idx - 1]);
+    row.mutationCommitted = after != null && before != null ? after !== before : null;
+  }
+}
+
+export interface GuardViolationView {
+  forbidden: string | null;
+  successClaim: string | null;
+  heldScience: boolean;
+  /** Conditioned: raw hit minus excused applied-edit receipts. */
+  mutationLanguage: boolean;
+  /** Conditioned: raw hit minus turns where the L0 oracle proves a commit. */
+  structuralSuccessClaim: boolean;
+  /** Human-readable excusals (raw hit present but NOT a violation). */
+  excused: string[];
+}
+
+/** Turn-class + L0-outcome conditioning of the raw production-guard hits
+ * (C10 / PQ5 turn-awareness):
+ *   - mutationLanguage — wrong on NON-edit answers; on an edit-flow turn a
+ *     receipt is legitimate iff the L0 diff shows the mutation COMMITTED.
+ *   - structuralSuccessClaim — wrong only when NO mutation committed (L0 oracle).
+ *
+ * No-oracle handling (FIX-1, fail-closed): with committed==null an edit-flow
+ * receipt is excused ONLY when consent/held evidence on the same envelope makes
+ * it legitimately ambiguous — a held_proposal (staged change) or an apply-side
+ * consent chip. That is exactly the case PQ6 re-catches: (a) structural-success
+ * + held_proposal, (b) mutation-language + asksConsent (held OR consent chip),
+ * so excusing here never hides a hit — PQ6 still gates it. With NEITHER, a bare
+ * "Done — I updated X" is both unverifiable AND uncaught by PQ6, so the guard
+ * must FIRE (matching base, where these hits counted unconditionally).
+ * mutationLanguage excuses on held OR consent chip (PQ6(b)); structuralSuccess
+ * excuses on held ONLY (PQ6(a) keys off held_proposal). A non-edit-flow hit
+ * always stands. Raw hits stay untouched on the row; dims aggregate THIS view. */
+export function guardViolations(row: TurnRow): GuardViolationView | null {
+  const g = row.guardHits;
+  if (!g) return null;
+  const excused: string[] = [];
+  const committed = row.mutationCommitted;
+  const editFlow = isEditFlowTurn(row);
+  const held = row.heldProposal === true;
+  const consentChip = hasConsentChip(row);
+  let mutationLanguage = g.mutationLanguage;
+  let structuralSuccessClaim = g.structuralSuccessClaim;
+  if (mutationLanguage) {
+    if (committed === true) {
+      mutationLanguage = false;
+      excused.push('mutationLanguage: applied-mutation receipt (L0 graph sha changed this turn)');
+    } else if (committed == null && editFlow && (held || consentChip)) {
+      mutationLanguage = false;
+      excused.push('mutationLanguage: edit-flow receipt UNVERIFIED (no L0 oracle) but held_proposal/consent chip present — held-claim case still gated by PQ6(b)');
+    }
+  }
+  if (structuralSuccessClaim) {
+    if (committed === true) {
+      structuralSuccessClaim = false;
+      excused.push('structuralSuccessClaim: mutation committed (L0 graph sha changed this turn)');
+    } else if (committed == null && editFlow && held) {
+      structuralSuccessClaim = false;
+      excused.push('structuralSuccessClaim: edit-flow receipt UNVERIFIED (no L0 oracle) but held_proposal present — held case still gated by PQ6(a)');
+    }
+  }
+  return {
+    forbidden: g.forbidden,
+    successClaim: g.successClaim,
+    heldScience: g.heldScience,
+    mutationLanguage,
+    structuralSuccessClaim,
+    excused,
+  };
 }
 
 export function jaccard(a: Set<string>, b: Set<string>): number {
@@ -166,17 +343,17 @@ function activeRows(rows: TurnRow[]): TurnRow[] {
 
 export function dimD1ChipNoRepeat(rows: TurnRow[], k = 3): DimResult {
   const active = activeRows(rows);
-  const perTurn: { turn: string; maxSimilarity: number; repeatOf: string | null }[] = [];
+  const perTurn: { turn: string; maxSimilarity: number; repeatOf: string | null; consentSet: boolean }[] = [];
   for (let i = 0; i < active.length; i += 1) {
-    const cur = chipSet(active[i]);
+    const cur = chipSemanticSet(active[i]);
     if (cur.size === 0) {
-      perTurn.push({ turn: active[i].turn, maxSimilarity: 0, repeatOf: null });
+      perTurn.push({ turn: active[i].turn, maxSimilarity: 0, repeatOf: null, consentSet: false });
       continue;
     }
     let max = 0;
     let repeatOf: string | null = null;
     for (let j = Math.max(0, i - k); j < i; j += 1) {
-      const prev = chipSet(active[j]);
+      const prev = chipSemanticSet(active[j]);
       if (prev.size === 0) continue;
       const sim = jaccard(cur, prev);
       if (sim > max) {
@@ -184,16 +361,32 @@ export function dimD1ChipNoRepeat(rows: TurnRow[], k = 3): DimResult {
         repeatOf = active[j].turn;
       }
     }
-    perTurn.push({ turn: active[i].turn, maxSimilarity: Number(max.toFixed(3)), repeatOf: max >= 1 ? repeatOf : null });
+    perTurn.push({
+      turn: active[i].turn,
+      maxSimilarity: Number(max.toFixed(3)),
+      repeatOf: max >= 1 ? repeatOf : null,
+      consentSet: isConsentChipSet(active[i]),
+    });
   }
   const identicalRepeats = perTurn.filter((t) => t.maxSimilarity >= 1);
+  // C11: consent sets (apply/confirm/cancel…) legitimately persist while a
+  // proposal is held — a repeated PURE consent set is reported, not failed.
+  const consentRepeats = identicalRepeats.filter((t) => t.consentSet);
+  const unwantedRepeats = identicalRepeats.filter((t) => !t.consentSet);
   return {
     dim: 'D1-chip-no-repeat',
-    verdict: identicalRepeats.length >= 2 ? 'fail' : 'pass',
+    verdict: unwantedRepeats.length >= 1 ? 'fail' : 'pass',
     flaky: true,
-    details: { k, perTurn, identicalRepeats: identicalRepeats.map((t) => t.turn) },
+    details: {
+      k,
+      perTurn,
+      identicalRepeats: identicalRepeats.map((t) => t.turn),
+      unwantedRepeats: unwantedRepeats.map((t) => t.turn),
+      consentRepeats: consentRepeats.map((t) => t.turn),
+    },
     notes: [
-      'fail = 2+ turns whose chip id+label set is IDENTICAL (Jaccard 1.0) to a non-empty set within the previous K turns',
+      'fail = the FIRST turn whose SEMANTIC chip set (normalised label + action family, ids EXCLUDED — regenerated ids cannot evade) is identical (Jaccard 1.0) to a non-empty set within the previous K turns (C11)',
+      'a repeated PURE consent set (apply/confirm/cancel family) is a WANTED repeat while a proposal is held — reported in consentRepeats, not failed',
       'base includes the 1.16j post-analysis chip-sameness fix — this dim verifies it holds in conversation',
     ],
   };
@@ -201,26 +394,82 @@ export function dimD1ChipNoRepeat(rows: TurnRow[], k = 3): DimResult {
 
 // ---------- D2 chip-presence-per-question-class ----------
 
+/** Tokens that carry no alternative-identifying content (question scaffolding). */
+const ALT_STOPWORDS = new Set([
+  'would', 'could', 'should', 'your', 'with', 'that', 'this', 'than', 'them', 'they',
+  'what', 'which', 'whether', 'prefer', 'rather', 'choose', 'pick', 'want', 'like',
+  'option', 'options', 'either', 'instead', 'going', 'about', 'more', 'into', 'from',
+  'have', 'take', 'make', 'keep', 'move',
+]);
+
+function contentTokens(s: string): string[] {
+  return s
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((t) => t.length > 3 && !ALT_STOPWORDS.has(t));
+}
+
+/** Extract the STATED alternatives a choice question offers (C12).
+ *   - either/or: the clauses either side of the first " or " in each either-or
+ *     question sentence, leading cue phrases stripped.
+ *   - enumerated: the numbered / bulleted list items in the text.
+ * Property-based and conservative: returns [] when nothing extractable, and the
+ * dim then falls back to the chip-count floor (never a silent pass on a parse
+ * failure). */
+export function extractStatedAlternatives(text: string, q: QuestionClass): string[] {
+  const alts: string[] = [];
+  if (q.eitherOr) {
+    for (const sent of q.sentences) {
+      if (!/\bor\b/i.test(sent)) continue;
+      const parts = sent.replace(/\?+$/, '').split(/\bor\b/i);
+      if (parts.length < 2) continue;
+      for (const part of parts) {
+        // Strip leading question scaffolding ("Would you prefer to", "either").
+        const cleaned = part
+          .replace(/^[\s,;:—-]+/, '')
+          .replace(/^(?:would|do|should|could)\s+you\s+(?:prefer|rather|want|like|choose|pick|go\s+with)?\s*(?:to\s+)?/i, '')
+          .replace(/^(?:either|rather|prefer(?:ring)?|choose|pick|go\s+with|which\s+is\s+better[,:]?)\s+/i, '')
+          .trim();
+        if (contentTokens(cleaned).length > 0) alts.push(cleaned);
+      }
+    }
+  }
+  if (q.enumerated) {
+    for (const line of text.split('\n')) {
+      const m = line.match(/^\s*(?:\d+[.)]|[-*])\s+(\S.*)$/);
+      if (m && contentTokens(m[1]).length > 0) alts.push(m[1].trim());
+    }
+  }
+  return alts;
+}
+
 export function dimD2ChipPresence(rows: TurnRow[]): DimResult {
   const qualifying = activeRows(rows)
     .map((r) => ({ row: r, q: classifyQuestion(r.assistantText) }))
     .filter(({ q }) => q.eitherOr || q.enumerated);
   const perTurn = qualifying.map(({ row, q }) => {
-    const chipTokens = new Set(
-      row.chips.flatMap((c) => c.label.toLowerCase().split(/\W+/).filter((t) => t.length > 3)),
-    );
-    const questionTokens = q.sentences
-      .join(' ')
-      .toLowerCase()
-      .split(/\W+/)
-      .filter((t) => t.length > 3);
-    const overlap = questionTokens.filter((t) => chipTokens.has(t)).length;
+    const chipTokenSets = row.chips.map((c) => new Set(contentTokens(`${c.label} ${c.action ?? ''}`)));
+    // C12: bind the chips to the STATED alternatives — each alternative the
+    // question offers must be reachable via a chip that semantically overlaps
+    // it (>=1 shared content token). chipCount>=2 alone is NOT correctness.
+    const alternatives = extractStatedAlternatives(row.assistantText, q).slice(0, 4);
+    const coverage = alternatives.map((alt) => {
+      const altTokens = contentTokens(alt);
+      const covered = chipTokenSets.some((chip) => altTokens.some((t) => chip.has(t)));
+      return { alternative: alt, covered };
+    });
+    const uncovered = coverage.filter((c) => !c.covered).map((c) => c.alternative);
+    const bindable = alternatives.length >= 2;
+    const ok = row.chips.length >= 2 && (!bindable || uncovered.length === 0);
     return {
       turn: row.turn,
       class: q.eitherOr ? 'either-or' : 'enumerated',
       chipCount: row.chips.length,
-      ok: row.chips.length >= 2,
-      labelOverlapTokens: overlap,
+      alternatives,
+      coverage,
+      uncoveredAlternatives: uncovered,
+      bindable,
+      ok,
     };
   });
   const failures = perTurn.filter((t) => !t.ok);
@@ -231,7 +480,8 @@ export function dimD2ChipPresence(rows: TurnRow[]): DimResult {
     details: { qualifyingTurns: perTurn, failures: failures.map((t) => t.turn) },
     notes: [
       'qualifying turn = assistant_text poses an either/or or enumerated-choice question (regex class, not exact text)',
-      'fail = a qualifying turn whose SAME envelope carries <2 suggested_actions; label-token overlap is advisory',
+      'fail = a qualifying turn whose SAME envelope carries <2 suggested_actions, OR (C12) whose chips do not cover every STATED alternative (>=1 shared content token per alternative) when >=2 alternatives are extractable',
+      'when the alternatives cannot be extracted (bindable=false) the dim falls back to the chip-count floor — a parse failure is never a silent pass on binding',
       qualifying.length === 0 ? 'no qualifying question turns in this run — logged, not passed' : '',
     ].filter(Boolean),
   };
@@ -421,18 +671,26 @@ export function dimD10ReclickSafety(rows: TurnRow[], snaps: L0Snap[]): DimResult
   const newFacts = factsOf(afterSnap).filter(
     (f) => !beforeKeys.has(`${f.v5_conversation_turn_id}|${f.payload_sha256}`),
   );
-  // Double-commit signature: the SAME fact content (fact_type + payload sha)
-  // committed 2+ times among the new facts. On a frozen graph a true double
-  // execution is payload-sha identical (deterministic analysis).
+  // Double-commit signature #1: the SAME fact content (fact_type + payload sha)
+  // committed 2+ times among the new facts. l0-snapshot.mjs hashes the payload
+  // with VOLATILE fields (computed_at, request ids…) stripped (C9), so a true
+  // double execution matches even when per-request timestamps differ.
   const byContent = new Map<string, number>();
   for (const f of newFacts) {
     const key = `${f.fact_type}|${f.payload_sha256}`;
     byContent.set(key, (byContent.get(key) ?? 0) + 1);
   }
   const doubleCommits = [...byContent.entries()].filter(([, n]) => n >= 2);
+  // Double-commit signature #2 (C9 count assertion): the duplicate window must
+  // commit at most ONE new semantic ANALYSIS fact — 2+ analysis-class commits
+  // is a double execution even when residual volatile/nondeterministic payload
+  // fields make the shas differ (older snapshots, unnormalised fields).
+  const analysisFacts = newFacts.filter((f) => /analysis/i.test(`${f.fact_type ?? ''} ${f.action_type ?? ''}`));
+  const analysisFactCount = analysisFacts.length;
+  const failed = doubleCommits.length > 0 || analysisFactCount >= 2;
   return {
     dim: 'D10-reclick-safety',
-    verdict: doubleCommits.length > 0 ? 'fail' : 'pass',
+    verdict: failed ? 'fail' : 'pass',
     flaky: false,
     details: {
       dupTurn: dupRow.turn,
@@ -440,10 +698,11 @@ export function dimD10ReclickSafety(rows: TurnRow[], snaps: L0Snap[]): DimResult
       dupHttpStatus: dupRow.httpStatus,
       newFactCount: newFacts.length,
       newFactTypes: newFacts.map((f) => f.fact_type),
+      analysisFactCount,
       doubleCommits: doubleCommits.map(([k, n]) => ({ content: k, commits: n })),
     },
     notes: [
-      'fail = identical (fact_type, payload_sha256) committed 2+ times across the duplicate window (L0 diff)',
+      'fail = identical (fact_type, volatile-normalised payload_sha256) committed 2+ times across the duplicate window (L0 diff), OR 2+ new ANALYSIS-class facts in the window (count assertion — sha-divergent double executions cannot evade)',
       'CEE #430 client-abort reclassification landed at this base — this dim MEASURES the current behaviour',
     ],
   };
@@ -462,24 +721,32 @@ export function dimD11ProductionGuards(rows: TurnRow[]): DimResult {
       notes: [],
     };
   }
-  const hits = scored
-    .map((r) => ({
-      turn: r.turn,
-      forbidden: r.guardHits!.forbidden,
-      successClaim: r.guardHits!.successClaim,
-      heldScience: r.guardHits!.heldScience,
-      mutationLanguage: r.guardHits!.mutationLanguage,
-      structuralSuccessClaim: r.guardHits!.structuralSuccessClaim,
+  // C10: aggregate the turn-class + L0-outcome CONDITIONED view — a legitimate
+  // applied-edit receipt ("I've set X to 40%" after the L0 diff proves the
+  // commit) is not a violation. Raw hits stay on the row; excusals disclosed.
+  const views = scored.map((r) => ({ turn: r.turn, v: guardViolations(r)! }));
+  const hits = views
+    .map(({ turn, v }) => ({
+      turn,
+      forbidden: v.forbidden,
+      successClaim: v.successClaim,
+      heldScience: v.heldScience,
+      mutationLanguage: v.mutationLanguage,
+      structuralSuccessClaim: v.structuralSuccessClaim,
     }))
     .filter(
       (h) => h.forbidden || h.successClaim || h.heldScience || h.mutationLanguage || h.structuralSuccessClaim,
     );
+  const excused = views.filter(({ v }) => v.excused.length > 0).map(({ turn, v }) => ({ turn, excused: v.excused }));
   return {
     dim: 'D11-production-guards',
     verdict: hits.length > 0 ? 'fail' : 'pass',
     flaky: false,
-    details: { turnsScored: scored.length, hits },
-    notes: ['guards are the PRODUCTION modules imported from src/ (forbidden phrases, success claims, held-science vocabulary, mutation language, structural success claims)'],
+    details: { turnsScored: scored.length, hits, excusedReceipts: excused },
+    notes: [
+      'guards are the PRODUCTION modules imported from src/ (forbidden phrases, success claims, held-science vocabulary, mutation language, structural success claims)',
+      'mutation-language / structural-success-claim hits are CONDITIONED on turn class + the L0 mutation oracle (C10): an applied-edit receipt with a proven commit is excused (details.excusedReceipts), a claim with NO commit still fails',
+    ],
   };
 }
 

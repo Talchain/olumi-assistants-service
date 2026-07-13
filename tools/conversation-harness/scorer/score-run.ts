@@ -32,6 +32,7 @@ import {
   rowFromWire,
   runAllDims,
   aggregateFlakyDims,
+  attachMutationOutcomes,
   type TurnRow,
   type L0Snap,
   type DimResult,
@@ -85,6 +86,36 @@ interface ScoredRow extends Record<string, unknown> {
   turn: string;
 }
 
+/** Null-honest per-turn LLM token totals for the OPS cost dim (FIX-2).
+ *
+ * A turn's llm_calls can EXIST but carry no usage object — an aborted / streamed
+ * fragment (#441), or a synthetic routing call whose trace entry has no token
+ * fields. Summing `input_tokens ?? 0` over those yields 0 (a NUMBER), which
+ * opsFromRows then counts as a real measurement: an arm with MISSING token data
+ * ranks "cheaper" and can spuriously flip the verdict to promote.
+ *
+ * Fix: a token direction is null unless AT LEAST ONE call carries a usage figure
+ * for it (a numeric `input_tokens`/`output_tokens`, flat or under `usage`). This
+ * distinguishes "no usage present" (null → excluded from the cost comparison)
+ * from "usage present and zero" (a real 0 → kept). Only usage-bearing calls are
+ * summed, so a mix of usage-bearing + usageless calls still totals honestly. */
+export function llmTokenTotals(llmCalls: unknown[]): { input: number | null; output: number | null } {
+  const pick = (key: 'input_tokens' | 'output_tokens'): number | null => {
+    const present = (llmCalls ?? [])
+      .map((c) => {
+        const call = (c ?? {}) as Record<string, unknown>;
+        const flat = call[key];
+        if (typeof flat === 'number') return flat;
+        const usage = (call.usage ?? {}) as Record<string, unknown>;
+        const nested = usage[key];
+        return typeof nested === 'number' ? nested : null;
+      })
+      .filter((v): v is number => v != null);
+    return present.length ? present.reduce((a, b) => a + b, 0) : null;
+  };
+  return { input: pick('input_tokens'), output: pick('output_tokens') };
+}
+
 /** Draft-graph labels ground `labels_named` against THIS run's own captures
  * (Monte-Carlo/draft variance — proven-scorer behaviour, kept). Frozen runs
  * have no draft turn; grounding is skipped, not crashed. */
@@ -95,10 +126,11 @@ function draftLabels(wires: any[]): string[] {
     .filter((s: string) => s.length > 2);
 }
 
-function metricsFor(turnId: string, wire: any, message: string, row: TurnRow, labels: string[]): ScoredRow {
+export function buildScoredRow(turnId: string, wire: any, message: string, row: TurnRow, labels: string[]): ScoredRow {
   const text: string = wire?.assistant_text ?? '';
   const dt = wire?._diagnostic_trace ?? {};
   const llmCalls: any[] = dt.llm_calls ?? [];
+  const tokens = llmTokenTotals(llmCalls);
   const lines = text.split('\n');
   return {
     turn: turnId,
@@ -121,10 +153,20 @@ function metricsFor(turnId: string, wire: any, message: string, row: TurnRow, la
     numbers_cited: (text.match(/\b\d+(?:\.\d+)?%?|\b£[\d,]+/g) ?? []).slice(0, 12),
     generic_marker: GENERIC_MARKERS.some((r) => r.test(text)),
     ...(row.guardHits ?? guardHitsFor(text)),
+    // L0 mutation oracle for this turn (true/false/null) — the PQ5/D11
+    // turn-aware guard conditioning reads TurnRow.mutationCommitted; surfaced
+    // here so the evidence artifact shows WHY a receipt was excused.
+    mutation_committed: row.mutationCommitted ?? null,
     chips: row.chips.map((c) => c.label),
     chip_count: row.chips.length,
     wall_clock_ms: row.wallClockMs,
     llm_latency_ms: llmCalls.reduce((a: number, c: any) => a + (c.latency_ms ?? 0), 0) || null,
+    // OPS inputs for ab-verdict.ts (opsFromRows): token cost + fallback
+    // engagement, null-honest when the diagnostic trace carries no usage figures
+    // (FIX-2: usageless llm_calls -> null, NOT 0 — see llmTokenTotals).
+    llm_tokens_in: tokens.input,
+    llm_tokens_out: tokens.output,
+    fallback_engaged: Array.isArray(dt.fallback_trace) ? dt.fallback_trace.length > 0 : null,
     draft_display_values: draftDisplayValues(wire),
     text,
   };
@@ -165,7 +207,7 @@ function loadNewLayout(runDir: string): LoadedRun {
     row.guardHits = guardHitsFor(row.assistantText);
     rows.push(row);
     surfacesByTurn[id] = surfacesFromWire(wire);
-    scored.push(metricsFor(id, wire, meta.message ?? '', row, labels));
+    scored.push(buildScoredRow(id, wire, meta.message ?? '', row, labels));
   }
   return { rows, scored, surfacesByTurn, graphLabels: labels };
 }
@@ -197,7 +239,7 @@ function loadLegacyLayout(runDir: string): LoadedRun {
     row.guardHits = guardHitsFor(row.assistantText);
     rows.push(row);
     surfacesByTurn[turn] = surfacesFromWire(wire);
-    scored.push(metricsFor(turn, wire, msgByTurn[turn] ?? '', row, labels));
+    scored.push(buildScoredRow(turn, wire, msgByTurn[turn] ?? '', row, labels));
   }
   return { rows, scored, surfacesByTurn, graphLabels: labels };
 }
@@ -215,7 +257,15 @@ function loadL0(runDir: string): L0Snap[] {
 function scoreRun(runDir: string): { scored: ScoredRow[]; dims: DimResult[]; promptDims: PromptDimScore[] } {
   const isNew = existsSync(join(runDir, 'turns'));
   const { rows, scored, surfacesByTurn, graphLabels } = isNew ? loadNewLayout(runDir) : loadLegacyLayout(runDir);
-  const dims = runAllDims(rows, loadL0(runDir));
+  const l0 = loadL0(runDir);
+  // L0 mutation oracle BEFORE any guard aggregation: PQ5/D11 condition the
+  // mutation-language / structural-success-claim hits on it (C10).
+  attachMutationOutcomes(rows, l0);
+  for (const row of rows) {
+    const s = scored.find((x) => x.turn === row.turn);
+    if (s) s.mutation_committed = row.mutationCommitted ?? null;
+  }
+  const dims = runAllDims(rows, l0);
   // Prompt-quality dims (ROADMAP 1.70 v1): comparable scalars for A/B, consumed
   // by ab-verdict.ts. PQ5/PQ6 read the guardHits attached above (src/ guards).
   const promptDims = runPromptDims(rows, { surfacesByTurn, graphLabels });
@@ -256,21 +306,27 @@ function scoreRun(runDir: string): { scored: ScoredRow[]; dims: DimResult[]; pro
 }
 
 // ---- entrypoint ----
-const rerunDirs = (process.env.RERUN_DIRS ?? '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+// Guarded so importing this module (e.g. the score-run.harness-test.ts self-test
+// that exercises buildScoredRow / llmTokenTotals) does not run the CLI or throw
+// on a missing RUN_DIR. Mirrors ab-verdict.ts's isMain guard.
+const isMain = process.argv[1] != null && /score-run\.(ts|js|mjs)$/.test(process.argv[1]);
+if (isMain) {
+  const rerunDirs = (process.env.RERUN_DIRS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-if (rerunDirs.length > 1) {
-  const perRun = rerunDirs.map((d) => scoreRun(d).dims);
-  const aggregated = aggregateFlakyDims(perRun);
-  writeFileSync(
-    join(rerunDirs[0], 'scores-aggregate.json'),
-    JSON.stringify({ generated_at: new Date().toISOString(), runs: rerunDirs, dims: aggregated }, null, 2),
-  );
-  console.log(`\naggregate over ${rerunDirs.length} runs -> ${join(rerunDirs[0], 'scores-aggregate.json')}`);
-} else {
-  const RUN = process.env.RUN_DIR ?? rerunDirs[0];
-  if (!RUN) throw new Error('set RUN_DIR=<runs/arm dir> (or RERUN_DIRS=a,b,c)');
-  scoreRun(RUN);
+  if (rerunDirs.length > 1) {
+    const perRun = rerunDirs.map((d) => scoreRun(d).dims);
+    const aggregated = aggregateFlakyDims(perRun);
+    writeFileSync(
+      join(rerunDirs[0], 'scores-aggregate.json'),
+      JSON.stringify({ generated_at: new Date().toISOString(), runs: rerunDirs, dims: aggregated }, null, 2),
+    );
+    console.log(`\naggregate over ${rerunDirs.length} runs -> ${join(rerunDirs[0], 'scores-aggregate.json')}`);
+  } else {
+    const RUN = process.env.RUN_DIR ?? rerunDirs[0];
+    if (!RUN) throw new Error('set RUN_DIR=<runs/arm dir> (or RERUN_DIRS=a,b,c)');
+    scoreRun(RUN);
+  }
 }
