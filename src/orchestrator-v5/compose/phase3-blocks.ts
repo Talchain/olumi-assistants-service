@@ -144,8 +144,46 @@ function isLeverFactor(
  * Minimum lever-label length used for the NAMING scan below. A 1–2 char label
  * (an unlabelled or degenerate node) would over-match arbitrary prose, so it is
  * ignored for detection — structural membership (`isLeverFactor`) is unaffected.
+ * The length is measured on the NORMALISED, punctuation-stripped label so a
+ * label like `"C#"` (one letter after normalisation) is treated as too short.
  */
 const LEVER_LABEL_MIN_LEN = 3;
+
+/**
+ * Finding 5 (over-suppression): generic single-word lever labels that collide
+ * with ordinary decision prose. A lever whose WHOLE label normalises to just
+ * one of these bare words ("Cost", "Time") cannot be distinguished from
+ * incidental use of the word in a NON-lever assumption ("Implementation cost
+ * estimates are uncertain"), so the free-text NAME scan refuses to suppress on
+ * such a label alone — stronger identity (a multi-word phrase, or a distinctive
+ * single word) is required. This is a fail-closed choice: err toward keeping an
+ * honest surface over silently dropping it on a weak-identity match. STRUCTURAL
+ * factor_id suppression (`isLeverFactor`, used by the evidence surfaces) is
+ * unaffected — this guard only tempers label-based detection in free text.
+ */
+const GENERIC_LEVER_TOKENS: ReadonlySet<string> = new Set([
+  'cost', 'costs', 'time', 'price', 'prices', 'value', 'values', 'risk',
+  'risks', 'quality', 'revenue', 'budget', 'scope', 'speed', 'effort',
+  'resource', 'resources', 'team', 'size', 'rate', 'growth', 'demand',
+  'supply', 'margin', 'profit', 'sales', 'people', 'timeline', 'timelines',
+]);
+
+/**
+ * Finding 5 (under-suppression + Unicode): normalise a label / free-text body
+ * for whole-phrase matching. NFKC folds Unicode compatibility forms (curly
+ * apostrophes, full-width chars, non-breaking spaces); lower-casing folds case;
+ * every run of non-letter/non-number is collapsed to a single space so
+ * punctuation cannot block a match — `"Time-to-market"` and `"Time to market"`
+ * both normalise to `"time to market"`. Result is trimmed; interior words are
+ * single-space separated.
+ */
+function normaliseForPhraseMatch(s: string): string {
+  return s
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
 
 /**
  * Doctrine D-U F2 (assumption surface): resolve the option-set LEVER factor_ids
@@ -167,17 +205,24 @@ function collectLeverLabels(
     const ref = lookup.get(id.trim());
     if (ref === undefined || ref.kind !== 'factor') continue;
     const label = ref.label.trim();
-    if (label.length >= LEVER_LABEL_MIN_LEN) labels.push(label);
+    // Length is measured on the NORMALISED form so a punctuation-only or 1–2
+    // letter label ("C#", "AI") is dropped from the naming scan.
+    if (normaliseForPhraseMatch(label).length >= LEVER_LABEL_MIN_LEN) {
+      labels.push(label);
+    }
   }
   return labels;
 }
 
 /**
- * Whole-phrase, case-insensitive, whitespace-normalised containment with
- * alphanumeric word boundaries on BOTH ends. Scans every occurrence so a first
- * boundary-failing hit cannot mask a later valid one. A bare shared token must
- * NOT match — on live staging the lever "Equity Offered to CTO" and a non-lever
- * assumption both contain "CTO", so a token match would over-suppress.
+ * Whole-phrase containment with letter/number word boundaries on BOTH ends.
+ * Both arguments are expected to be pre-normalised via `normaliseForPhraseMatch`
+ * (so only Unicode letters/numbers and single spaces remain). Scans every
+ * occurrence so a first boundary-failing hit cannot mask a later valid one. A
+ * bare shared token must NOT match — on live staging the lever "Equity Offered
+ * to CTO" and a non-lever assumption both contain "CTO", so a token match would
+ * over-suppress. Boundaries use the Unicode letter/number classes so accented
+ * words ("café") are bounded correctly.
  */
 function containsWholePhrase(haystack: string, needle: string): boolean {
   if (needle.length === 0) return false;
@@ -188,27 +233,39 @@ function containsWholePhrase(haystack: string, needle: string): boolean {
     const before = at === 0 ? '' : haystack[at - 1]!;
     const afterIdx = at + needle.length;
     const after = afterIdx >= haystack.length ? '' : haystack[afterIdx]!;
-    const boundedBefore = before === '' || !/[a-z0-9]/.test(before);
-    const boundedAfter = after === '' || !/[a-z0-9]/.test(after);
+    const boundedBefore = before === '' || !/[\p{L}\p{N}]/u.test(before);
+    const boundedAfter = after === '' || !/[\p{L}\p{N}]/u.test(after);
     if (boundedBefore && boundedAfter) return true;
     from = at + 1;
   }
 }
 
 /**
- * Doctrine D-U F2: does this free-text assumption NAME an option-set lever? True
- * when the assumption body contains a lever's whole label as a bounded phrase.
- * Empty label set (the default) ⇒ never suppresses (byte-identical). Display-
- * only: no producer value is read; membership is the structural lever set.
+ * Doctrine D-U F2: does this free-text prose NAME an option-set lever? True when
+ * the body contains a lever's whole label as a bounded phrase (after Unicode +
+ * punctuation normalisation, so "Time-to-market" matches "Time to market").
+ * Empty label set (the default) ⇒ never suppresses (byte-identical). A bare
+ * generic single-word label ("Cost") is skipped (Finding 5 over-suppression) —
+ * stronger identity is required. Display-only: no producer value is read;
+ * membership is the structural lever set. Used across every free-text
+ * decision-review surface (narrative, pre-mortem, scenario, assumption,
+ * calibration) so a lever is never NAMED as an uncertainty on any of them.
  */
-function assumptionNamesLever(
+function proseNamesLever(
   text: string,
   leverLabels: readonly string[],
 ): boolean {
   if (leverLabels.length === 0) return false;
-  const hay = text.toLowerCase().replace(/\s+/g, ' ');
+  const hay = normaliseForPhraseMatch(text);
+  if (hay.length === 0) return false;
   for (const label of leverLabels) {
-    const needle = label.toLowerCase().replace(/\s+/g, ' ');
+    const needle = normaliseForPhraseMatch(label);
+    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
+    // Finding 5: a bare generic single word ("cost") over-matches ordinary
+    // decision prose. Require a multi-word (space-containing) phrase before
+    // suppressing on a generic token — a distinctive single word ("Kubernetes")
+    // still suppresses.
+    if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
     if (containsWholePhrase(hay, needle)) return true;
   }
   return false;
@@ -451,13 +508,18 @@ export function buildReviewCardBlocks(
   const dr = readDecisionReview(fact);
   if (dr === null) return [];
   const blocks: ReviewCardBlock[] = [];
+  // Doctrine D-U F2 / Finding 1: lever labels for EVERY free-text surface
+  // (structural membership resolved to labels via the shared lookup). Computed
+  // once and threaded into the free-text builders so a lever is never NAMED as
+  // an uncertainty on any of them. Empty ⇒ suppress nothing (byte-identical).
+  const leverLabels = collectLeverLabels(interventionControlledFactorIds, lookup);
 
-  // narrative (rank 1)
-  const narrative = buildNarrativeCard(dr, ctx);
+  // narrative (rank 1) — free-text prose; Finding 1 lever-naming guard applies.
+  const narrative = buildNarrativeCard(dr, ctx, leverLabels);
   if (narrative !== null) blocks.push(narrative);
 
-  // pre_mortem (rank 2) — optional in the LLM output
-  const preMortem = buildPreMortemCard(dr, lookup, ctx);
+  // pre_mortem (rank 2) — optional in the LLM output; free-text failure prose.
+  const preMortem = buildPreMortemCard(dr, lookup, ctx, leverLabels);
   if (preMortem !== null) blocks.push(preMortem);
 
   // flip_threshold (rank 3) — one per entry; within-kind sub-rank by order
@@ -483,16 +545,11 @@ export function buildReviewCardBlocks(
   // assumption (rank 7) — one per key_assumptions string. D-U F2: a
   // free-text assumption that NAMES an option-set lever is dropped (the
   // channel stays open; non-lever assumptions still ship).
-  blocks.push(
-    ...buildAssumptionCards(
-      dr,
-      ctx,
-      collectLeverLabels(interventionControlledFactorIds, lookup),
-    ),
-  );
+  blocks.push(...buildAssumptionCards(dr, ctx, leverLabels));
 
-  // scenario_context (rank 8) — one per edge
-  blocks.push(...buildScenarioContextCards(dr, lookup, ctx));
+  // scenario_context (rank 8) — one per edge; free-text trigger/consequence
+  // prose gets the Finding 1 lever-naming guard.
+  blocks.push(...buildScenarioContextCards(dr, lookup, ctx, leverLabels));
 
   return blocks;
 }
@@ -514,9 +571,11 @@ export function buildCoachingBlocks(
   const dr = readDecisionReview(fact);
   if (dr === null) return [];
   const blocks: CoachingBlock[] = [];
-  // Doctrine D-U F2: lever labels for the free-text assumption_check surface
-  // (structural membership resolved to labels via the shared lookup). Empty ⇒
-  // suppress nothing; the calibration_prompt branch below is unaffected.
+  // Doctrine D-U F2 / Finding 1: lever labels for the free-text coaching
+  // surfaces (structural membership resolved to labels via the shared lookup).
+  // Empty ⇒ suppress nothing. Threaded into BOTH the assumption_check and the
+  // calibration_prompt branches so a lever is never NAMED as an assumption to
+  // confirm nor as a calibration question to answer.
   const leverLabels = collectLeverLabels(interventionControlledFactorIds, lookup);
 
   // assumption_check — one per key_assumptions entry, ranked by order.
@@ -528,7 +587,7 @@ export function buildCoachingBlocks(
       if (text.length === 0) continue;
       // Doctrine D-U F2: never NAME an option-set lever as an assumption to
       // confirm. Skip before the index bump so survivors stay contiguous.
-      if (assumptionNamesLever(text, leverLabels)) continue;
+      if (proseNamesLever(text, leverLabels)) continue;
       idx++;
       const candidate = {
         ...commonMetadata('coach:assumption', String(idx), ctx),
@@ -564,6 +623,11 @@ export function buildCoachingBlocks(
       const question = typeof e.question === 'string' ? e.question.trim() : '';
       const principle = typeof e.principle === 'string' ? e.principle.trim() : '';
       if (question.length === 0) continue;
+      // Doctrine D-U F2 / Finding 1: a calibration question that NAMES an
+      // option-set lever is dropped — a lever is a decision variable being SET,
+      // not an uncertainty to calibrate. Skip before the index bump so
+      // survivors stay contiguous (empty labels ⇒ suppress nothing).
+      if (proseNamesLever(question, leverLabels)) continue;
       idx++;
       const titleText = principle.length > 0
         ? `${principle} prompt`
@@ -774,10 +838,24 @@ export function buildStaleRerunCoachingBlock(
 function buildNarrativeCard(
   dr: Record<string, unknown>,
   ctx: BlockBuildCtx,
+  leverLabels: readonly string[] = [],
 ): ReviewCardBlock | null {
   if (typeof dr.narrative_summary !== 'string') return null;
-  const body = truncate(dr.narrative_summary.trim(), BODY_MAX);
+  const summary = dr.narrative_summary.trim();
+  const body = truncate(summary, BODY_MAX);
   if (body.length === 0) return null;
+  // Doctrine D-U F2 / Finding 1: drop the narrative when it NAMES an option-set
+  // lever as an uncertainty. Scan the FULL summary (pre-truncation) so a lever
+  // named past the length cap is still caught. Empty labels ⇒ no suppression.
+  if (proseNamesLever(summary, leverLabels)) {
+    emitDrop({
+      block_type: 'review_card',
+      kind: 'narrative',
+      reason: 'lever_named',
+      field: 'narrative_summary',
+    });
+    return null;
+  }
   const candidate = {
     ...commonMetadata('review:narrative', '', ctx),
     type: 'review_card' as const,
@@ -802,6 +880,7 @@ function buildPreMortemCard(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
+  leverLabels: readonly string[] = [],
 ): ReviewCardBlock | null {
   const pm = readRecord(dr.pre_mortem);
   if (pm === null) return null;
@@ -809,6 +888,17 @@ function buildPreMortemCard(
     ? pm.failure_scenario.trim()
     : '';
   if (failure.length === 0) return null;
+  // Doctrine D-U F2 / Finding 1: drop the pre-mortem when its failure prose
+  // NAMES an option-set lever as an uncertainty. Empty labels ⇒ no suppression.
+  if (proseNamesLever(failure, leverLabels)) {
+    emitDrop({
+      block_type: 'review_card',
+      kind: 'pre_mortem',
+      reason: 'lever_named',
+      field: 'failure_scenario',
+    });
+    return null;
+  }
   const grounded = Array.isArray(pm.grounded_in) ? pm.grounded_in : [];
   // Round-3 review correction: when `grounded_in` was provided but EVERY
   // entry misses canonical lookup, drop the block. Emitting with
@@ -1068,7 +1158,7 @@ function buildAssumptionCards(
     // not a load-bearing UNCERTAINTY to confirm — never NAME it as an
     // assumption to check. Skip before the index/rank bump so surviving
     // non-lever assumptions stay contiguous (empty labels ⇒ suppress nothing).
-    if (assumptionNamesLever(text, leverLabels)) continue;
+    if (proseNamesLever(text, leverLabels)) continue;
     idx++;
     const candidate = {
       ...commonMetadata('review:assumption', String(idx), ctx),
@@ -1097,6 +1187,7 @@ function buildScenarioContextCards(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
+  leverLabels: readonly string[] = [],
 ): readonly ReviewCardBlock[] {
   const contexts = readRecord(dr.scenario_contexts);
   if (contexts === null) return [];
@@ -1112,6 +1203,19 @@ function buildScenarioContextCards(
       ? entry.consequence.trim()
       : '';
     if (trigger.length === 0 || consequence.length === 0) continue;
+    // Doctrine D-U F2 / Finding 1: skip a scenario whose free-text trigger /
+    // consequence NAMES an option-set lever as an uncertainty. Skip before the
+    // index bump so surviving scenarios keep contiguous ranks (empty labels ⇒
+    // no suppression).
+    if (proseNamesLever(`${trigger} ${consequence}`, leverLabels)) {
+      emitDrop({
+        block_type: 'review_card',
+        kind: 'scenario_context',
+        reason: 'lever_named',
+        field: 'scenario_contexts',
+      });
+      continue;
+    }
     // Round-3 review correction: drop when the LLM-keyed edge isn't in
     // the canonical graph lookup. The Record key IS the edge claim;
     // emitting with `target_refs: []` would publish a "scenario about
