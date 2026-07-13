@@ -450,7 +450,25 @@ export function checkCoachingOutput(
   // State-conditional rules: only when the analysis is not safe to present as
   // current. When state IS fresh + usable, directional advice and result
   // presentation are allowed — ordinary coaching is never degraded.
-  if (isStateUnsafe(pack)) {
+  //
+  // These rules protect the integrity of an EXISTING analysis RESULT — they
+  // stop the model presenting a stale / unknown / blocked / unusable result as
+  // though it were current. They are meaningful ONLY when a successful analysis
+  // actually exists. PRE-ANALYSIS (no successful run_analysis fact —
+  // `!analysis_present` / freshness 'none') there is no result to misrepresent:
+  // ordinary early-conversation coaching legitimately weighs the options, names
+  // the risks, and echoes the user's own numbers ("your ~3% churn"). Degrading
+  // that here produced the conversational dead-end where a genuine coaching
+  // answer — the model WAS invoked (converse/coach path) — was clobbered by the
+  // canned "No analysis has been run… run the analysis?" nudge
+  // (behavioural-retest T1/T2). So gate the state-conditional rules on a result
+  // actually existing. The always-unsafe rules above still fire pre-analysis,
+  // so a fabricated evidence / confidence / mutation / value claim is still
+  // caught by construction; a user who explicitly asks to explain a not-yet-run
+  // analysis is still nudged by the explanation handler / no-analysis guard,
+  // which is a different code path, not this post-check.
+  const analysisResultExists = pack.analysis_present && pack.freshness !== 'none';
+  if (analysisResultExists && isStateUnsafe(pack)) {
     if (
       isDirectionalOptionAdvice(text) ||
       (labelDet !== null && isLabelDirectionalAdvice(text, labelDet))

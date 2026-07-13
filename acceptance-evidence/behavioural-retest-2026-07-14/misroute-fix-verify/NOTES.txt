@@ -1,0 +1,101 @@
+CONVERSATIONAL MISROUTE / DEAD-END — VERIFIED MECHANISM + FIX
+Build under verification: 2cda423b4 (same as the behavioural re-test SCORECARD).
+Branch: claude-cee/fix-conversational-misroute-deadend  (base: staging)
+
+────────────────────────────────────────────────────────────────────────
+1. WHAT REPRODUCED (pre-fix, deployed staging build 2cda423)
+────────────────────────────────────────────────────────────────────────
+Fresh disposable guest scenario, browser Origin, POST /proxy/v5/turn:
+  T0 draft  -> full 18-node graph (prefix-staging-T0-draft.json)
+  T1 "Right now SMB is ~400 customers ... my gut says enterprise ..."
+       -> "No analysis has been run on your model yet. Your model has 4
+           options set up and is ready to analyse. Would you like me to
+           run the analysis?"  + chip_action_rerun_analysis  (~32s)
+  T2 "What am I missing here? What are the biggest risks ...?"
+       -> IDENTICAL canned text + chip_action_rerun_analysis  (~29s)
+  T3 control (an explicit "walk me through a framework" question)
+       -> DIFFERENT canned text via the no-analysis GUARD
+          ("Run analysis first and I'll walk you through the result.")
+          + chip_action_run_analysis, and it returned in ~2.2s.
+Bug confirmed real and general (T1 and T2, two very different turn shapes).
+
+────────────────────────────────────────────────────────────────────────
+2. CORRECTED MECHANISM (the SCORECARD's claim was wrong on TWO points)
+────────────────────────────────────────────────────────────────────────
+SCORECARD claimed: the classifier misrouted to the analysis-EXPLANATION
+handler (explain_results), which dead-ended on the no-analysis precondition,
+and "llm_calls: [] — the model was never invoked".
+
+Both are refuted by the evidence:
+
+(a) THE MODEL WAS INVOKED.  `_diagnostic_trace.llm_calls` is populated ONLY
+    on the draft_graph exit path (see T0, which shows the real draft LLM
+    call).  For turn_executor exits, route-v2.ts builds a MINIMAL trace
+    (buildMinimalV5DiagnosticTrace) WITHOUT threading turnTimings
+    (route-v2.ts ~line 424), so llm_calls is STRUCTURALLY ALWAYS [] and
+    substage_timings is always just {finalisation_ms} — regardless of
+    whether the router ran.  So llm_calls:[] proves nothing here.  The ~30s
+    latency on T1/T2 (vs the 2.2s purely-deterministic T3 guard) shows the
+    routing + coach/converse LLM DID run.
+
+(b) IT WAS NOT the explain_results handler.  That handler's precondition
+    chip is chip_action_run_analysis (executableChip → "Run analysis").
+    T1/T2 carried chip_action_rerun_analysis / "Re-run analysis" /
+    "Re-run the analysis." — which is RERUN_ACTION, emitted ONLY by
+    buildCoachingDegradeResponse (coaching-output-postcheck).
+
+Actual mechanism: the router returned a coach/converse turn, the LLM
+produced a genuine coaching answer, and then the COACHING-OUTPUT
+POST-CHECK degraded it to the canned "no analysis" nudge —
+  turn-executor.ts applyCoachingOutputGuard (~L969, called at L6738/L6865)
+  -> checkCoachingOutput() fired a STATE-CONDITIONAL violation
+     (confident_advice_under_unsafe_state / stale_presented_as_fresh)
+     purely because freshness === 'none' (isStateUnsafe true pre-analysis)
+  -> buildCoachingDegradeResponse() (coaching-output-postcheck.ts:672-692)
+     -> buildAnalysisAbsentTemplate + RERUN_ACTION.
+The user's real coaching answer was thrown away.  This is proven end-to-end
+with a mocked router in
+  src/orchestrator-v5/__tests__/turn-executor-coaching-postcheck.integration.test.ts
+(the pre-fix version asserted exactly this degrade under freshness 'none').
+
+────────────────────────────────────────────────────────────────────────
+3. THE FIX (minimal; src/orchestrator-v5/coaching/coaching-output-postcheck.ts)
+────────────────────────────────────────────────────────────────────────
+The state-conditional rules exist to stop the model presenting an EXISTING
+analysis RESULT (stale / unknown / blocked / unusable) as if it were
+current.  Pre-analysis there is NO result to misrepresent, so they were
+mis-firing on ordinary coaching that weighs options or echoes the user's own
+numbers.  Gate them on a result actually existing:
+
+    const analysisResultExists = pack.analysis_present && pack.freshness !== 'none';
+    if (analysisResultExists && isStateUnsafe(pack)) { ...directional/result rules... }
+
+Preserved:
+  - ALL always-unsafe rules still fire pre-analysis (internal-field exposure,
+    invented mutation-success, value-change narration, unsupported
+    evidence/confidence claims) — a fabricated CLAIM is still caught.
+  - Post-analysis stale/unknown/blocked/unusable directional-advice and
+    result-presentation degrades are UNCHANGED (unit tests still green).
+  - The legitimate "you asked to explain an analysis that hasn't run yet"
+    nudge is a DIFFERENT code path (explain_results handler / no-analysis
+    guard) and is untouched.
+
+────────────────────────────────────────────────────────────────────────
+4. POST-FIX VERIFICATION
+────────────────────────────────────────────────────────────────────────
+  - RED-first: the pass-through tests fail on the unfixed build, pass after.
+  - postfix-executor-and-unit-tests.txt: 62/62 green, incl. the integration
+    test driving the REAL turn-executor (mocked router) — the model's
+    coaching answer now ships verbatim for a pre-analysis directional turn,
+    no v5.coaching.output_postcheck telemetry; "I updated Pricing" still
+    degrades (always-on rule).
+  - Gates: pnpm typecheck:src PASS; eslint changed files PASS;
+    controlled-factor-authority scan 16/16; required-config suite over
+    coaching + turn-executor + compose = 154 files / 2988 tests PASS.
+
+TRUE STAGING RE-VERIFY is deploy-gated: this branch is not merged/deployed,
+so re-sending T1/T2 to cee-staging cannot exercise the fix yet.  After the
+PR merges to staging, re-run the T1/T2 wire and confirm the assistant_text
+ENGAGES the message (real coaching) rather than the canned nudge.  NOTE:
+llm_calls will STILL read [] on staging (the trace artifact in §2a) — the
+correct success signal is the assistant_text content, NOT llm_calls.

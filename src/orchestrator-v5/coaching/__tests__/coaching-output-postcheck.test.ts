@@ -125,13 +125,12 @@ describe('checkCoachingOutput — confident advice under unsafe state', () => {
     );
   });
 
-  it('no-analysis state + "you should choose X" degrades', () => {
-    expectViolation(
-      checkCoachingOutput('You should choose Option A.', NONE),
-      'confident_advice_under_unsafe_state',
-    );
-  });
-
+  // Behavioural-retest T1/T2 dead-end fix: the state-conditional rules protect
+  // the integrity of an EXISTING analysis result. Pre-analysis (NONE) there is
+  // no result to misrepresent, so directional coaching is legitimate and must
+  // reach the user rather than being clobbered by the canned no-analysis nudge.
+  // The pre-analysis pass-through is asserted in its own describe block below;
+  // the unsafe-state degrade coverage here uses states where a result exists.
   it('blocked state + recommendation degrades', () => {
     expectViolation(
       checkCoachingOutput('I’d recommend Option C.', BLOCKED),
@@ -222,6 +221,76 @@ describe('checkCoachingOutput — stale results presented as fresh', () => {
         STALE,
       ),
     ).toEqual({ safe: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-analysis coaching reaches the user (behavioural-retest T1/T2 dead-end fix)
+//
+// The reported bug: on early conversational turns BEFORE any analysis has run,
+// a genuine coaching answer (the LLM WAS invoked, converse/coach path) was
+// degraded by this post-check into the canned "No analysis has been run… run
+// the analysis?" dead-end, because the state-conditional rules fired purely on
+// freshness === 'none'. The state-conditional rules protect an EXISTING
+// analysis result; pre-analysis there is no result to misrepresent, so the
+// coaching must pass through. The always-unsafe rules (below) still fire.
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — pre-analysis coaching reaches the user (T1/T2 fix)', () => {
+  it('NONE + directional option advice is ALLOWED (no result to misrepresent)', () => {
+    // Previously degraded to confident_advice_under_unsafe_state; the model's
+    // real coaching answer must now reach the user.
+    expect(checkCoachingOutput('You should choose Option A.', NONE)).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput(
+        'Honestly, given your churn, the enterprise option looks like the riskier bet — '
+          + "I'd lean towards testing it through the hybrid option first.",
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expect(checkCoachingOutput('Option A is the stronger option here.', NONE)).toEqual({
+      safe: true,
+    });
+  });
+
+  it('NONE + coaching that echoes the user’s own numbers is ALLOWED', () => {
+    // T1 shape: the user gave "3% monthly churn"; good coaching reflects it.
+    // RESULT_PRESENTATION over-fired on the bare "%"; pre-analysis it must pass.
+    expect(
+      checkCoachingOutput(
+        'Your ~3% monthly churn is the number I would watch most — it compounds fast.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput(
+        "Enterprise leads to longer sales cycles, which is the risk you're not weighing.",
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('NONE + "biggest risks you’re missing" coaching is ALLOWED (T2 shape)', () => {
+    expect(
+      checkCoachingOutput(
+        "The biggest risk you're not thinking about is team strain: moving upmarket "
+          + 'stretches your 3 customer-success people across heavier enterprise support.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('NONE still degrades genuinely fabricated claims via the always-unsafe rules', () => {
+    // The fix does NOT open the always-unsafe rules pre-analysis: an invented
+    // mutation-success claim on a coaching turn is still false by construction.
+    expectViolation(
+      checkCoachingOutput("I've updated the model to add a churn factor.", NONE),
+      'invented_mutation_success',
+    );
+    expectViolation(
+      checkCoachingOutput('I set churn to 5% for you.', NONE),
+      'value_change_narration',
+    );
   });
 });
 
