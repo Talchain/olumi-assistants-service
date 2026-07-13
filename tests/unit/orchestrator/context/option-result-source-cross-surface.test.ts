@@ -149,6 +149,17 @@ interface MatrixCell {
   // compact + state (highest-probability) expectations.
   readonly highestWinnerId: string;
   readonly highestWinnerProb: number;
+  /**
+   * Doctrine D-W (ROADMAP 2.52): the DECLARED leader trails the raw-odds
+   * argmax by a NON-marginal gap (> 10pp), so `buildAnalysisResultHeadline`
+   * suppresses the user-facing one-liner to the neutral locked-template floor
+   * (null) rather than assert a false "currently leads" for an option that is
+   * behind on raw odds. The enricher (coaching context) still names the
+   * declared leader; only the user-facing headline goes silent. See the D-W
+   * builder test in analysis-result-headline.test.ts ("leader trails by a
+   * NON-marginal gap → neutral floor"). Absent ⇒ headline names the leader.
+   */
+  readonly headlineNeutralFloor?: boolean;
 }
 
 const MATRIX: readonly MatrixCell[] = [
@@ -156,14 +167,18 @@ const MATRIX: readonly MatrixCell[] = [
   { name: 'thin-current, leader=highest (opt-a)', envelope: thinCurrentEnvelope, leader: 'opt-a',
     leaderWinnerId: 'opt-a', leaderWinnerProb: 0.66, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
   { name: 'thin-current, leader=OTHER (opt-b)', envelope: thinCurrentEnvelope, leader: 'opt-b',
-    leaderWinnerId: 'opt-b', leaderWinnerProb: 0.34, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
+    leaderWinnerId: 'opt-b', leaderWinnerProb: 0.34, highestWinnerId: 'opt-a', highestWinnerProb: 0.66,
+    // opt-b @ 0.34 trails the opt-a argmax @ 0.66 by 32pp (non-marginal) → D-W floor.
+    headlineNeutralFloor: true },
   { name: 'thin-current, leader=null', envelope: thinCurrentEnvelope, leader: null,
     leaderWinnerId: 'opt-a', leaderWinnerProb: 0.66, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
   // Both-present-conflicting (walked source = current option_comparison; highest = opt-a @ 0.72).
   { name: 'both-conflicting, leader=highest (opt-a)', envelope: conflictingEnvelope, leader: 'opt-a',
     leaderWinnerId: 'opt-a', leaderWinnerProb: 0.72, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
   { name: 'both-conflicting, leader=OTHER (opt-b)', envelope: conflictingEnvelope, leader: 'opt-b',
-    leaderWinnerId: 'opt-b', leaderWinnerProb: 0.28, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
+    leaderWinnerId: 'opt-b', leaderWinnerProb: 0.28, highestWinnerId: 'opt-a', highestWinnerProb: 0.72,
+    // opt-b @ 0.28 trails the opt-a argmax @ 0.72 by 44pp (non-marginal) → D-W floor.
+    headlineNeutralFloor: true },
   { name: 'both-conflicting, leader=null', envelope: conflictingEnvelope, leader: null,
     leaderWinnerId: 'opt-a', leaderWinnerProb: 0.72, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
 ];
@@ -181,14 +196,26 @@ describe('MAJOR-A — winner-consistency matrix (no phantom 0%, no cross-selecto
       expect(invoke!.winner.win_probability).toBe(cell.leaderWinnerProb);
       expect(invoke!.winner.win_probability).toBeGreaterThan(0); // never a phantom winner
 
-      // headline (leader-honouring): names the SAME option as the enricher.
+      // headline (leader-honouring): names the SAME option as the enricher —
+      // EXCEPT where Doctrine D-W (ROADMAP 2.52) suppresses it. When the
+      // declared leader trails the raw-odds argmax by a NON-marginal gap
+      // (> 10pp), the user-facing headline must NOT claim the trailing option
+      // "currently leads"; it falls to the neutral locked-template floor
+      // (null). The enricher above still names the declared leader for the
+      // coaching context — only the user-facing headline goes silent. (Ratified
+      // + covered by the D-W builder test in analysis-result-headline.test.ts,
+      // "leader trails by a NON-marginal gap → neutral floor".)
       const headline = buildAnalysisResultHeadline({
         enrichment: env,
         leading_option_id: cell.leader ?? '',
         status_kind: 'ok',
       });
-      expect(headline).not.toBeNull();
-      expect(headline!.startsWith(LABEL_OF[cell.leaderWinnerId]!)).toBe(true);
+      if (cell.headlineNeutralFloor) {
+        expect(headline).toBeNull();
+      } else {
+        expect(headline).not.toBeNull();
+        expect(headline!.startsWith(LABEL_OF[cell.leaderWinnerId]!)).toBe(true);
+      }
 
       // compact (highest-probability): real prob, never phantom 0%.
       const compact = compactAnalysis(env as unknown as V2RunResponseEnvelope);

@@ -174,6 +174,19 @@ const SC_PROBABILITY_EPSILON = 1e-9;
  */
 const MIN_LEAD_MARGIN = 0.05;
 
+/**
+ * Doctrine D-W (ROADMAP 2.52): maximum raw-odds gap (in whole percentage
+ * points) between the runner-up and the DECLARED leader for the honest
+ * leader-trails disambiguation copy to describe the runner-up as "marginally
+ * better". PLoT recommends the declared leader for robustness/stability
+ * reasons; that override is credible only across a SMALL raw-odds gap, so
+ * "marginally" stays truthful within this bound. A wider gap is not marginal —
+ * the copy is suppressed (neutral locked-template floor) rather than assert a
+ * false "marginally" or a false "currently leads". 10pp mirrors the
+ * `comfortable` margin-bucket ceiling used elsewhere in this file.
+ */
+const MARGINAL_RAW_ODDS_GAP_PP = 10;
+
 const PARTIAL_SUFFIX =
   ' The run was flagged as partial — treat as provisional.';
 const UNKNOWN_SUFFIX =
@@ -227,7 +240,7 @@ export interface AnalysisResultHeadlineInput {
  * because of soft confidence (with no usable margin / driver / fragility)
  * or because a length cap forced an A/B/C/D/NT/SC candidate to be dropped.
  */
-export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | 'NT' | 'SC' | null;
+export type HeadlineCase = 'A' | 'B' | 'C' | 'D' | 'E' | 'NT' | 'SC' | 'LT' | null;
 
 /**
  * Locked reason class for telemetry. Always present on the descriptor
@@ -352,6 +365,57 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // "<N> percentage points".
   const marginText = marginPointsText(winner);
   const marginFragment = marginText !== null ? ` by ${marginText}` : '';
+
+  // Doctrine D-W (ROADMAP 2.52): the DECLARED leader (PLoT's leading_option_id)
+  // is NOT the highest raw win_probability — a runner-up strictly edges it on
+  // raw odds. PLoT can put an option forward OVERALL for robustness/stability
+  // reasons even when a rival has marginally better raw odds. Be honest: name
+  // the option that leads overall AND disclose the runner-up's better raw
+  // probability. NEVER a bare "currently leads" (the declared leader does not
+  // lead on raw odds) and never the bland locked template that silently drops
+  // the disambiguation. This branch OWNS every leader-trails case: it is
+  // entered only when the runner-up's probability is STRICTLY greater than the
+  // declared leader's, which cannot happen when leader == argmax (the
+  // production run path, where leading_option_id IS the argmax) — so it is
+  // byte-identical there and fires only on the genuine declared-leader-≠-argmax
+  // residual. Copy/display ONLY: it reads two already-validated probabilities
+  // to gate and to name a label; it changes, derives, and emits NO producer
+  // number. (Wording note: Paul's ruled copy phrased this "recommended
+  // overall"; the run_analysis wire's claim-safety cage bans "recommended" at
+  // three layers — the headline forbidden-vocab, the validation-registry
+  // allowlist, AND the turn-executor egress FORBIDDEN_USER_FACING_PHRASES guard
+  // which REPLACES the whole response on a hit. "leads overall" preserves the
+  // ruled MEANING within that cage without weakening the egress guard, which is
+  // out of scope for a copy-only change.)
+  if (
+    winner.runnerUpProb !== null &&
+    winner.runnerUpProb > winner.winnerProb
+  ) {
+    const rawGapPp = Math.round((winner.runnerUpProb - winner.winnerProb) * 100);
+    // "marginally better" must be truthful: only a small raw-odds gap, and only
+    // when the runner-up label is safe to name. A sub-1pp gap is effectively a
+    // tie (not "better"); a gap beyond the marginal bound is not "marginal".
+    // In every other leader-trails case return the neutral locked-template
+    // floor (null) so we never assert a false "marginally" or a false lead.
+    if (
+      winner.runnerUpLabel !== null &&
+      rawGapPp >= 1 &&
+      rawGapPp <= MARGINAL_RAW_ODDS_GAP_PP
+    ) {
+      const disambig =
+        `${winnerLabel} leads overall, though ${winner.runnerUpLabel} has marginally better raw probability.${suffix}`;
+      if (disambig.length <= lengthCap) {
+        return {
+          text: disambig,
+          descriptor: buildDescriptor('LT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+    }
+    return {
+      text: null,
+      descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
+    };
+  }
 
   // Stronger cases only fire when probability/margin gates pass.
   if (hasMeaningfulLead(winner)) {
@@ -678,6 +742,15 @@ interface ResolvedWinner {
    */
   readonly runnerUpProb: number | null;
   /**
+   * Doctrine D-W (ROADMAP 2.52): the sanitised label of the runner-up entry
+   * (the SAME-source non-winner option that carries {@link runnerUpProb}), or
+   * null when there is no usable runner-up or its label is unsanitisable. Used
+   * ONLY by the leader-trails-argmax disambiguation copy (Doctrine D-W) — never
+   * a producer value, purely the display label of the option with the best
+   * OTHER raw odds.
+   */
+  readonly runnerUpLabel: string | null;
+  /**
    * Mission B (provisional_doctrine_v0): number of NON-winner entries in
    * the SAME accepted source with a finite win_probability strictly below
    * {@link ELIMINATED_WIN_PROBABILITY_CEILING} (i.e. effectively
@@ -739,6 +812,8 @@ function resolveWinner(
     const winnerProb = winnerRaw!.win_probability as number;
 
     let runnerUpProb: number | null = null;
+    let runnerUpRaw: Record<string, unknown> | null = null;
+    let runnerUpId = '';
     let eliminatedCount = 0;
     for (const raw of source) {
       const rId =
@@ -748,10 +823,25 @@ function resolveWinner(
       if (rId === winner.id) continue;
       if (!isUsableWinProbability(raw.win_probability)) continue;
       const p = raw.win_probability as number;
-      if (runnerUpProb === null || p > runnerUpProb) runnerUpProb = p;
+      if (runnerUpProb === null || p > runnerUpProb) {
+        runnerUpProb = p;
+        runnerUpRaw = raw;
+        runnerUpId = rId;
+      }
       if (p < ELIMINATED_WIN_PROBABILITY_CEILING) eliminatedCount += 1;
     }
-    return { label: cleanedLabel, winnerProb, runnerUpProb, eliminatedCount };
+    // D-W: sanitise the runner-up's label for the leader-trails copy. A
+    // missing / ID-shaped runner-up label yields null (the copy branch then
+    // stays silent rather than leak an ID). Display-only; no producer read.
+    let runnerUpLabel: string | null = null;
+    if (runnerUpRaw !== null) {
+      const rawRunnerUpLabel =
+        (typeof runnerUpRaw.option_label === 'string' && runnerUpRaw.option_label) ||
+        (typeof runnerUpRaw.label === 'string' && runnerUpRaw.label) ||
+        '';
+      runnerUpLabel = sanitiseLabel(rawRunnerUpLabel, runnerUpId);
+    }
+    return { label: cleanedLabel, winnerProb, runnerUpProb, runnerUpLabel, eliminatedCount };
   }
   return null;
 }
@@ -1263,6 +1353,14 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   new RegExp(
     `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${TAIL_PATTERN}$`,
   ),
+  // Doctrine D-W (ROADMAP 2.52): leader-trails-argmax honest disambiguation —
+  // "{leader} leads overall, though {runner-up} has marginally better raw
+  // probability." Two lazy label slots; surrounding tokens pinned. Contains no
+  // banned vocabulary, so the ordinary forbidden-vocab / ID / decimal defences
+  // (applied after the grammar match) still bite on a leaky slot.
+  new RegExp(
+    `^.+? leads overall, though .+? has marginally better raw probability\\.${TAIL_PATTERN}$`,
+  ),
   // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
   // MUST stay last — the trailing `\\.${TAIL_PATTERN}$` anchor is
   // strictly less specific than the other cases and would not match their
@@ -1279,6 +1377,7 @@ function matchesHeadlineGrammar(text: string): boolean {
   }
   return false;
 }
+
 
 /**
  * Returns true when `text` is a string the run_analysis handler is

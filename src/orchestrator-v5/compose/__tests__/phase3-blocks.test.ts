@@ -1652,3 +1652,111 @@ describe('Round-4 realistic graph shape — edges under graph.edges', () => {
     expect(blocks.filter((b) => b.card_kind === 'scenario_context')).toHaveLength(0);
   });
 });
+
+// ============================================================================
+// Doctrine D-U F2 (ROADMAP): critique/coaching must NOT name an option-set
+// LEVER as a thing to "investigate / gather evidence on". A factor that a
+// decision option intervenes on is a decision variable being SET, not an
+// uncertain external factor to strengthen evidence about. The intervention-
+// controlled (union-lever) set is threaded into the evidence surfaces so a
+// lever-identity factor is dropped from the "investigate this" naming — the
+// critique CHANNEL stays open (non-lever gaps still ship). Suppression is
+// display-only: no producer number is read or changed.
+// ============================================================================
+describe('D-U F2 lever-identity filter on evidence "investigate this" surfaces', () => {
+  function evidenceFactWithLever(): RunAnalysisHandlerFact {
+    return makeFact({
+      decisionReview: {
+        evidence_enhancements: {
+          fac_delivery_risk: {
+            specific_action: 'Pull on-time delivery rate from the last two releases.',
+            rationale: 'Delivery rate is the largest variance driver here.',
+            evidence_type: 'internal_data',
+            decision_hygiene: 'Estimate first, then look at data.',
+          },
+          fac_cost_overrun: {
+            specific_action: 'Talk to the finance team about historical overruns.',
+            rationale: 'Cost variance is the second-largest driver.',
+            evidence_type: 'expert_input',
+            decision_hygiene: 'Assign someone to argue the cost will not overrun.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorSensitivity: [
+        { factor_id: 'fac_delivery_risk', confidence: 0.2 },
+        { factor_id: 'fac_cost_overrun', confidence: 0.6 },
+      ],
+    });
+  }
+
+  it('buildEvidenceBlocks drops the lever-named block, keeps the non-lever block', () => {
+    const fact = evidenceFactWithLever();
+    // fac_delivery_risk is a lever (an option intervenes on it).
+    const levers = new Set(['fac_delivery_risk']);
+    const blocks = buildEvidenceBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      buildFactorConfidenceLookup(fact),
+      CTX,
+      levers,
+    );
+    expect(blocks.map((b) => b.factor_ref.id)).toEqual(['fac_cost_overrun']);
+    // channel preserved: the surviving non-lever block re-ranks to priority 1.
+    expect(blocks[0].priority_rank).toBe(1);
+  });
+
+  it('buildEvidenceBlocks without a lever set is unchanged (both named)', () => {
+    const fact = evidenceFactWithLever();
+    const blocks = buildEvidenceBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      buildFactorConfidenceLookup(fact),
+      CTX,
+    );
+    expect(blocks.map((b) => b.factor_ref.id)).toEqual([
+      'fac_delivery_risk',
+      'fac_cost_overrun',
+    ]);
+  });
+
+  it('evidence_priority card skips a lever top entry and promotes the next non-lever gap', () => {
+    const fact = evidenceFactWithLever();
+    const levers = new Set(['fac_delivery_risk']);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      levers,
+    );
+    const ep = blocks.find((b) => b.card_kind === 'evidence_priority');
+    expect(ep).toBeDefined();
+    expect(ep?.target_refs[0].id).toBe('fac_cost_overrun');
+    // The lever must never be NAMED as the highest-leverage evidence gap.
+    expect(ep?.title).not.toContain('Delivery risk');
+  });
+
+  it('evidence_priority card is dropped when the only gap is a lever (channel stays honest)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        evidence_enhancements: {
+          fac_delivery_risk: {
+            specific_action: 'Pull on-time delivery rate.',
+            rationale: 'Delivery rate is the largest variance driver here.',
+            evidence_type: 'internal_data',
+            decision_hygiene: 'Estimate first, then look at data.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+    });
+    const blocks = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_delivery_risk']),
+    );
+    expect(blocks.find((b) => b.card_kind === 'evidence_priority')).toBeUndefined();
+  });
+});

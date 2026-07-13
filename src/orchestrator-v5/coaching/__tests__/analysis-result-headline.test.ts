@@ -8,6 +8,7 @@ import {
   MAX_HEADLINE_CHARS,
 } from '../analysis-result-headline.js';
 import { RUN_ANALYSIS_ASSISTANT_TEMPLATES } from '../../tools/handlers/run-analysis.js';
+import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
 
 const HIRING_FULL: Record<string, unknown> = {
   results: [
@@ -1588,7 +1589,11 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
     );
   });
 
-  it('designated leader not actually ahead (margin <= 0) -> null (locked template), no false lead', () => {
+  it('designated leader not actually ahead (margin <= 0) -> Doctrine D-W honest disambiguation, no false lead', () => {
+    // Superseded by Doctrine D-W (ROADMAP 2.52): the declared leader (opt_a,
+    // 0.40) trails the raw-odds argmax (opt_b, 0.45) by a marginal 5pp. Instead
+    // of the bland locked template (the pre-D-W null), emit the honest copy —
+    // still NO false "currently leads", now with the recommendation disclosed.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.40 },
@@ -1600,7 +1605,11 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe(
+      'Option A leads overall, though Option B has marginally better raw probability.',
+    );
+    expect(out).not.toContain('currently leads');
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
   it('near-tie (<=1pp) with a label too long for the tied sentence returns null, not the Case E confident floor', () => {
@@ -2238,5 +2247,107 @@ describe('samples_reduced suffix (seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY
     expect(RUN_ANALYSIS_LOCKED_TEMPLATES.has(template)).toBe(true);
     expect(isAllowedRunAnalysisAssistantText(template)).toBe(true);
     expect(RUN_ANALYSIS_ASSISTANT_TEMPLATES.REDUCED_SAMPLES).toBe(template);
+  });
+});
+
+// ============================================================================
+// Doctrine D-W (ROADMAP 2.52): declared leader ≠ argmax raw win_probability.
+// PLoT can recommend an option for robustness/stability reasons even when a
+// rival edges it on RAW win probability. The honest copy must name the
+// recommended option AND disclose the runner-up's marginally-better raw odds —
+// never a false "currently leads" and never the bland locked template that
+// silently drops the disambiguation. Fires ONLY when the declared leader is
+// present + usable AND a runner-up's win_probability is STRICTLY higher (leader
+// ≠ argmax) AND the raw-odds gap is small enough that "marginally" is truthful.
+// Copy/display only — no producer number is read, changed, or emitted.
+// ============================================================================
+describe('D-W leader-trails-argmax honest disambiguation copy', () => {
+  // opt_a is the raw-odds leader (0.55) but opt_b is the DECLARED leader (0.45)
+  // — a 10 percentage-point raw-odds gap PLoT's recommendation overrides.
+  const LEADER_TRAILS: Record<string, unknown> = {
+    results: [
+      { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
+      { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.45 },
+    ],
+  };
+
+  it('names the recommended option AND the runner-up with better raw odds (sign-correct)', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: LEADER_TRAILS,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    expect(out).toBe(
+      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.',
+    );
+    // SIGN GUARD (anti sign-inversion, ref 77a4d577f): the runner-up — the
+    // higher raw-probability option — is the one credited with "better raw
+    // probability"; the trailing declared leader must NEVER be.
+    expect(out).toContain('Hire One Senior Technical Lead has marginally better raw probability');
+    expect(out).not.toContain('Defer Hiring has marginally better raw probability');
+    // Never a false "currently leads" for a leader that trails on raw odds.
+    expect(out).not.toContain('currently leads');
+    expect(isAllowedRunAnalysisAssistantText(out)).toBe(true);
+    expect(out!.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
+  });
+
+  it('leader == argmax → unchanged (branch does not fire; normal lead copy)', () => {
+    // opt_a is BOTH the declared leader and the raw-odds argmax → the honest
+    // disambiguation must NOT fire; the ordinary "currently leads" copy stands.
+    const out = buildAnalysisResultHeadline({
+      enrichment: LEADER_TRAILS,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toContain('currently leads');
+    expect(out).not.toContain('leads overall');
+  });
+
+  it('leader trails by a NON-marginal gap → no false "marginally"/"leads" claim (neutral floor)', () => {
+    const WIDE_GAP: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.72 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.28 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment: WIDE_GAP,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    // A 44pp gap is not "marginal" — never claim it is, and never assert the
+    // trailing leader "currently leads". Fall back to the neutral locked
+    // template (null from the builder).
+    expect(out).toBeNull();
+  });
+
+  it('the disambiguation sentence is accepted by the registry allowlist', () => {
+    const sanctioned =
+      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.';
+    expect(isAllowedRunAnalysisAssistantText(sanctioned)).toBe(true);
+    // Defence-in-depth still bites: an internal id in a slot is rejected.
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'opt_b leads overall, though opt_a has marginally better raw probability.',
+      ),
+    ).toBe(false);
+  });
+
+  it('the disambiguation copy survives the turn-executor egress forbidden-phrase guard', () => {
+    // The run_analysis summary becomes response.assistant_text, which the
+    // finaliser sweeps against FORBIDDEN_USER_FACING_PHRASES and REPLACES the
+    // whole response on a hit. The chosen wording ("leads overall") must carry
+    // NO banned phrase — a regression to "recommended overall" would be swapped
+    // out at egress and never reach the user.
+    const sanctioned =
+      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.';
+    expect(findForbiddenPhraseHit(sanctioned)).toBeNull();
+    // The banned literal Paul ruled would be swapped at egress — pin the reason
+    // the surface-adapted wording is used instead.
+    expect(
+      findForbiddenPhraseHit(
+        'Defer Hiring is recommended overall, though X has marginally better raw probability.',
+      ),
+    ).not.toBeNull();
   });
 });

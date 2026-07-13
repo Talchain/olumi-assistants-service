@@ -80,6 +80,15 @@ export interface ScanResult {
  *   - run-analysis.ts:662 snapshot projection (persisted-derived: the snapshot
  *     is loaded via the scenario reader, so both alternatives come from the
  *     saved model)
+ *
+ * Extended for D-U F2 (#444, critique-lever display filter):
+ *   - compose.ts:595 Phase 3 lever-union rebuild (persisted-derived: the shared
+ *     `rebuildPhase3BlocksFresh` helper reads the lever union from its
+ *     `rawPersistedGraphForLevers` parameter, which BOTH production callers
+ *     thread from the saved model — the hash-gated persisted snapshot on the
+ *     current-turn branch (`fallbackForFact`, fails closed to `undefined` on
+ *     hash divergence) and the FRESH-verdict persisted graph on the prior-fact
+ *     branch. Display/copy-only: an empty set ⇒ no suppression, byte-identical)
  */
 export const AUTHORITY_ALLOWLIST: Readonly<
   Record<string, { readonly count: number; readonly allowedArgs: readonly string[] }>
@@ -95,6 +104,10 @@ export const AUTHORITY_ALLOWLIST: Readonly<
   'orchestrator-v5/tools/handlers/run-analysis.ts': {
     count: 1,
     allowedArgs: ['snapshot.rawPersistedGraph ?? { options: snapshot.options }'],
+  },
+  'orchestrator-v5/compose.ts': {
+    count: 1,
+    allowedArgs: ['rawPersistedGraphForLevers'],
   },
 };
 

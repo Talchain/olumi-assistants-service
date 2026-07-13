@@ -29,6 +29,7 @@ import {
   type GraphNodeLookup,
 } from './compose/phase3-blocks.js';
 import { buildRecommendedOptionUiDirective } from './compose/ui-directive.js';
+import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 export interface ComposeInput {
   assistant_text: string;
@@ -265,7 +266,17 @@ function buildBlocksFromFacts(
         // Review F2 — build the lookup ONCE per fact and share it between
         // the Phase 3 rebuild and the ui_directive builder.
         const lookup = buildGraphNodeLookup(fact, fallbackForFact);
-        const freshBlocks = rebuildPhase3BlocksFresh(fact, graphHash, lookup);
+        // D-U F2: reuse the SAME hash-gated raw-snapshot the lookup trusts as
+        // the lever-union authority — when the snapshot hash diverges from the
+        // fact's, we fail closed (undefined ⇒ empty set ⇒ no suppression),
+        // mirroring the lookup's identity-over-availability stance.
+        const freshBlocks = rebuildPhase3BlocksFresh(
+          fact,
+          graphHash,
+          lookup,
+          'fresh',
+          fallbackForFact,
+        );
         blocks.push(...freshBlocks);
 
         // R4 CEE-half slice 1 — flag-gated deterministic ui_directive
@@ -566,6 +577,7 @@ function rebuildPhase3BlocksFresh(
   graphHash: string,
   lookup: GraphNodeLookup,
   freshness: 'fresh' | 'stale' = 'fresh',
+  rawPersistedGraphForLevers?: unknown,
 ): OlumiResponse['blocks'] {
   const ctx: BlockBuildCtx = {
     created_at: new Date().toISOString(),
@@ -573,10 +585,23 @@ function rebuildPhase3BlocksFresh(
     freshness,
   };
   const confidenceLookup = buildFactorConfidenceLookup(fact);
+  // Doctrine D-U F2: the option-set LEVER union (structural factor_ids an
+  // option intervenes on) is read from the raw (un-projected) SAVED model — the
+  // persisted graph the pipeline already holds, threaded by both callers as the
+  // hash-gated persisted snapshot (current-turn branch) or the FRESH-verdict
+  // persisted graph (prior-fact branch); the enrichment / ContextPack
+  // projection strips intervention bundles, so the projected form must NOT be
+  // the authority. Persisted-first per the controlled-factor-authority guard —
+  // the compose.ts allowlist entry documents this provenance. Absent /
+  // unthreaded graph ⇒ empty set ⇒ no suppression (byte-identical). Threaded
+  // into the evidence "investigate this" surfaces so a lever is never NAMED as
+  // a gap to gather evidence about.
+  const interventionControlledFactorIds =
+    collectInterventionControlledFactorIds(rawPersistedGraphForLevers);
   return [
-    ...buildReviewCardBlocks(fact, lookup, ctx),
+    ...buildReviewCardBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...buildCoachingBlocks(fact, lookup, ctx),
-    ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx),
+    ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx, interventionControlledFactorIds),
   ];
 }
 
@@ -699,7 +724,15 @@ function buildLifecycleBlocksFromPrior(
   // (review F1 applies to the current-turn branch only, where the handler
   // performs its own execution-time read).
   const lookup = buildGraphNodeLookup(priorFact, persistedGraph);
-  const phase3Blocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash, lookup);
+  // D-U F2: FRESH verdict already proved the persisted graph is identity-
+  // consistent with the source fact, so it is a safe lever-union authority.
+  const phase3Blocks = rebuildPhase3BlocksFresh(
+    priorFact,
+    sourceGraphHash,
+    lookup,
+    'fresh',
+    persistedGraph,
+  );
   const freshBlocks: OlumiResponse['blocks'] = [analysisResultBlock, ...phase3Blocks];
   emitLifecycle(lifecycle, {
     lifecycle_state: 'emitted_fresh',

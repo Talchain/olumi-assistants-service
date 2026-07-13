@@ -115,6 +115,32 @@ const TECHNIQUE_MAX = 300;
 const RAW_DECIMAL_RE = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
 
 // ============================================================================
+// Doctrine D-U F2 — option-set lever suppression on "investigate this" surfaces
+// ============================================================================
+
+/**
+ * Shared empty set for the default (no-lever-set) call — keeps the
+ * lever-unaware callers byte-identical and avoids allocating a set per call.
+ */
+const EMPTY_FACTOR_ID_SET: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Doctrine D-U F2: is this evidence-gap factor an option-set LEVER? Authority
+ * is STRUCTURAL `factor_id` membership in the intervention-controlled (union-
+ * lever) set only — never the label (labels collide) — mirroring
+ * `intervention-controlled-drivers.isInterventionControlledDriver`. An empty
+ * set (the default) suppresses nothing, so lever-unaware callers are unchanged.
+ */
+function isLeverFactor(
+  factorId: string,
+  interventionControlledFactorIds: ReadonlySet<string>,
+): boolean {
+  if (interventionControlledFactorIds.size === 0) return false;
+  const id = factorId.trim();
+  return id.length > 0 && interventionControlledFactorIds.has(id);
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -346,6 +372,7 @@ export function buildReviewCardBlocks(
   fact: RunAnalysisHandlerFact,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
+  interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
 ): readonly ReviewCardBlock[] {
   const dr = readDecisionReview(fact);
   if (dr === null) return [];
@@ -371,7 +398,12 @@ export function buildReviewCardBlocks(
 
   // evidence_priority (rank 6) — top-1 of evidence_enhancements; the rest
   // ride as EvidenceBlocks (not ReviewCards). One review card per fact.
-  const evidencePriority = buildEvidencePriorityCard(dr, lookup, ctx);
+  const evidencePriority = buildEvidencePriorityCard(
+    dr,
+    lookup,
+    ctx,
+    interventionControlledFactorIds,
+  );
   if (evidencePriority !== null) blocks.push(evidencePriority);
 
   // assumption (rank 7) — one per key_assumptions string
@@ -491,6 +523,7 @@ export function buildEvidenceBlocks(
   lookup: GraphNodeLookup,
   confidenceLookup: ReadonlyMap<string, 'high' | 'medium' | 'low'>,
   ctx: BlockBuildCtx,
+  interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
 ): readonly EvidenceBlock[] {
   const dr = readDecisionReview(fact);
   if (dr === null) return [];
@@ -502,6 +535,13 @@ export function buildEvidenceBlocks(
   for (const [factorId, rawEntry] of Object.entries(enhancements)) {
     const entry = readRecord(rawEntry);
     if (entry === null) continue;
+
+    // Doctrine D-U F2: an option-set LEVER is a decision variable, not an
+    // uncertain factor to gather evidence about — never NAME it in an
+    // "investigate / strengthen this evidence" block. Drop the entry (the
+    // channel stays open: non-lever gaps below still ship and re-rank). No
+    // producer value is read; membership is structural factor_id only.
+    if (isLeverFactor(factorId, interventionControlledFactorIds)) continue;
 
     const factorRef = lookup.get(factorId);
     if (factorRef === undefined || factorRef.kind !== 'factor') {
@@ -876,6 +916,7 @@ function buildEvidencePriorityCard(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
+  interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
 ): ReviewCardBlock | null {
   const enhancements = readRecord(dr.evidence_enhancements);
   if (enhancements === null) return null;
@@ -885,6 +926,11 @@ function buildEvidencePriorityCard(
   for (const [factorId, rawEntry] of entries) {
     const entry = readRecord(rawEntry);
     if (entry === null) continue;
+
+    // Doctrine D-U F2: never crown an option-set LEVER as the highest-leverage
+    // "evidence gap to strengthen". Skip it and let the next non-lever gap take
+    // the card (channel preserved); if none remains, no card is emitted.
+    if (isLeverFactor(factorId, interventionControlledFactorIds)) continue;
     const rationale = typeof entry.rationale === 'string'
       ? entry.rationale.trim()
       : '';
