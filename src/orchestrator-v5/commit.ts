@@ -1086,6 +1086,9 @@ export async function commitDirectAnswer(
   // commit-rolling-summary-hook.test.ts). The summariser reads the FULL
   // persisted history via the store's readRecent (unclamped) and writes only
   // scenarios.rolling_summary via a MONOTONIC RPC (out-of-order writes no-op).
+  // Concurrent commits for one scenario do NOT stampede: the maintainer is
+  // per-scenario single-flight with latest-wins coalescing (Codex r2 fix 4b),
+  // so a burst of commits runs one pass plus at most one rerun.
   if (config.features.rollingSummary !== 'off') {
     void maintainRollingSummaryForCommit({
       scenarioId: metadata.scenario_id,

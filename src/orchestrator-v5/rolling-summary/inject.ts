@@ -20,6 +20,12 @@
  *    — the block still injects (degraded beats absent) but carries an IN-BAND
  *    staleness note, and `v5.summary.lag` (pre-registered with the maintain
  *    half) fires so an outage is loud.
+ *  - NEVER a lying coverage claim (Codex r2 blocker 1): the staleness note's
+ *    "the latest N turns are shown verbatim" is asserted ONLY when the
+ *    watermark is provably covered by the window AND the gap fits inside the
+ *    verbatim slice. Otherwise turns exist that are in NEITHER the summary
+ *    NOR the prompt — the four-slot block is REFUSED and a disclosed-absence
+ *    note injects instead (`v5.summary.lag` fires with refused:true).
  *  - READ-ONLY: the injector never writes (04 §3.4 — no layer writes to
  *    another; memory can be wrong, it cannot corrupt ground truth).
  *
@@ -39,11 +45,12 @@
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
+import { HISTORY_CAP_DISCLOSURE } from './assemble.js';
 import { getRollingSummaryStore } from './index.js';
-import { computeSummaryLag, isSummaryStale } from './lag.js';
+import { computeSummaryLag, isSummaryStale, isWatermarkCovered } from './lag.js';
 import type { LagTurn } from './lag.js';
-import { ROLLING_SUMMARY_SLOTS } from './summary-types.js';
-import type { RollingSummary, RollingSummarySlot } from './summary-types.js';
+import { ROLLING_SUMMARY_SLOT_LABELS, ROLLING_SUMMARY_SLOTS } from './summary-types.js';
+import type { RollingSummary } from './summary-types.js';
 import type { RollingSummaryStorePort } from './store-adapter.js';
 
 // ---------------------------------------------------------------------------
@@ -54,7 +61,9 @@ import type { RollingSummaryStorePort } from './store-adapter.js';
 export interface ContextPackConversationSummary {
   /** The four-slot block (FRAME / CONSTRAINTS / RESOLVED / OPEN) with
    *  `[t:xxxxxxxx]` provenance stamps riding along. Doctrine P text (04
-   *  §3.3): the summariser is forbidden raw floats, so this block is too. */
+   *  §3.3): the summariser is forbidden raw floats, so this block is too.
+   *  EMPTY on a memory-hole refusal (Codex r2 blocker 1) — the withheld
+   *  block is replaced by the disclosed-absence `note`. */
   readonly text: string;
   /** The watermark turn — the newest committed turn the summary absorbed. */
   readonly current_to_turn_id: string;
@@ -69,14 +78,6 @@ export interface ContextPackConversationSummary {
 // ---------------------------------------------------------------------------
 // Pure rendering
 // ---------------------------------------------------------------------------
-
-/** Same labels assemble.ts renders into the stored text — one vocabulary. */
-const SLOT_LABEL: Record<RollingSummarySlot, string> = {
-  FRAME: 'DECISION FRAME',
-  CONSTRAINTS: 'CONSTRAINTS & PREFERENCES',
-  RESOLVED: 'RESOLVED',
-  OPEN: 'OPEN',
-};
 
 function stampFor(sourceTurnIds: readonly string[]): string {
   if (sourceTurnIds.length === 0) return '';
@@ -105,8 +106,12 @@ export function buildConversationSummarySection(
         : slot === 'FRAME'
           ? ''
           : '(none)';
-    lines.push(`${SLOT_LABEL[slot]}: ${rendered}`);
+    lines.push(`${ROLLING_SUMMARY_SLOT_LABELS[slot]}: ${rendered}`);
   }
+  // Honest-partiality disclosure (Codex r2 fix 4a): the injected block
+  // renders from slots, so the stored-text cap note must be re-rendered
+  // here or it would silently drop out of the prompt.
+  if (summary.history_capped === true) lines.push(HISTORY_CAP_DISCLOSURE);
   const stale = isSummaryStale(lagTurns, windowDepth);
   return {
     text: lines.join('\n'),
@@ -176,9 +181,45 @@ export async function loadConversationSummaryForInjection(
     if (summary === null) return NO_INJECTION;
 
     const lag = computeSummaryLag(summary, args.windowTurnsNewestFirst);
+
+    // ------------------------------------------------------------------
+    // MEMORY-HOLE guard (Codex r2 blocker 1). The window turns are the
+    // persisted-history hot read (newest-first, ≤ the session read window,
+    // typically 20); the pack shows only the newest `windowDepth` of them
+    // verbatim. The stale-disclosure claim "the latest N turns are shown
+    // verbatim" is TRUE only when (a) the watermark is provably covered by
+    // the window (watermark turn or an older turn visible — otherwise the
+    // true gap may extend arbitrarily past the window) AND (b) the gap fits
+    // inside the verbatim slice. Otherwise turns exist that are in NEITHER
+    // the summary NOR the prompt: REFUSE the four-slot block and inject a
+    // disclosed-absence note instead (honesty doctrine — a disclosed
+    // absence beats a lying coverage claim).
+    // ------------------------------------------------------------------
+    const covered = isWatermarkCovered(summary, args.windowTurnsNewestFirst);
+    const verbatimCount = Math.min(args.windowDepth, args.windowTurnsNewestFirst.length);
+    if (!covered || lag > verbatimCount) {
+      emitSummaryLag(args, summary, lag, true);
+      const gapLowerBound = Math.max(lag, args.windowTurnsNewestFirst.length);
+      const gapPhrase = covered
+        ? `${lag} turns out of date`
+        : gapLowerBound > 0
+          ? `at least ${gapLowerBound} turns out of date (coverage unverifiable)`
+          : 'out of date by an unverifiable number of turns';
+      return {
+        section: {
+          text: '',
+          current_to_turn_id: summary.updated_turn_id,
+          lag_turns: lag,
+          stale: true,
+          note: `(conversation summary withheld: it is ${gapPhrase} and only the latest ${verbatimCount} turns are shown verbatim in the conversation section — turns in between are NOT shown; do not assume knowledge of earlier turns)`,
+        },
+        lagTurns: lag,
+      };
+    }
+
     const section = buildConversationSummarySection(summary, lag, args.windowDepth);
     if (section.stale) {
-      emitSummaryLag(args, summary, lag);
+      emitSummaryLag(args, summary, lag, false);
     }
     return { section, lagTurns: lag };
   } catch (err) {
@@ -195,11 +236,14 @@ export async function loadConversationSummaryForInjection(
 }
 
 /** Content-free staleness signal (frozen-registry member v5.summary.lag,
- *  pre-registered with the maintain half). Never throws. */
+ *  pre-registered with the maintain half). `refused` distinguishes the
+ *  memory-hole refusal (block withheld) from the disclosed-stale injection.
+ *  Never throws. */
 function emitSummaryLag(
   args: SummaryInjectionArgs,
   summary: RollingSummary,
   lag: number,
+  refused: boolean,
 ): void {
   try {
     emit(TelemetryEvents.V5SummaryLag, {
@@ -209,6 +253,7 @@ function emitSummaryLag(
       window_depth: args.windowDepth,
       watermark_turn_id: summary.updated_turn_id,
       summary_version: summary.version,
+      refused,
     });
   } catch (emitErr) {
     log.debug(

@@ -13,7 +13,12 @@
  * lives ONLY in slots[].entries[].source_turn_ids (the harness fidelity dim).
  */
 
-import { ROLLING_SUMMARY_SLOTS, SUMMARY_SCHEMA_VERSION } from './summary-types.js';
+import {
+  ROLLING_SUMMARY_SLOT_LABELS,
+  ROLLING_SUMMARY_SLOTS,
+  SUMMARY_FULL_HISTORY_READ_LIMIT,
+  SUMMARY_SCHEMA_VERSION,
+} from './summary-types.js';
 import type {
   RollingSummary,
   RollingSummaryGenerator,
@@ -22,12 +27,11 @@ import type {
 } from './summary-types.js';
 import type { ParsedSummarySlot } from './parse-summary.js';
 
-const SLOT_LABEL: Record<RollingSummarySlot, string> = {
-  FRAME: 'DECISION FRAME',
-  CONSTRAINTS: 'CONSTRAINTS & PREFERENCES',
-  RESOLVED: 'RESOLVED',
-  OPEN: 'OPEN',
-};
+/** In-band honest-partiality disclosure appended to the stored text when the
+ *  maintainer's full-history read filled its cap (Codex r2 fix 4a). Rendered
+ *  identically by the injector from `history_capped` so the disclosure
+ *  survives into the prompt. */
+export const HISTORY_CAP_DISCLOSURE = `(note: derived from the most recent ${SUMMARY_FULL_HISTORY_READ_LIMIT} turns only — earlier turns were not re-read)`;
 
 function resolveRefs(
   refs: readonly string[],
@@ -51,8 +55,12 @@ export function assembleSummaryFromParsed(args: {
   readonly watermark: { turn_id: string; created_at: string };
   readonly version: number;
   readonly generator: RollingSummaryGenerator;
+  /** Codex r2 fix 4a: true when the maintainer's full-history read filled
+   *  its cap — the summary discloses its own partiality (stored marker +
+   *  in-text note) instead of claiming silent completeness. */
+  readonly historyCapped?: boolean;
 }): RollingSummary {
-  const { parsedSlots, ordinalMap, watermark, version, generator } = args;
+  const { parsedSlots, ordinalMap, watermark, version, generator, historyCapped } = args;
   const bySlot = new Map<RollingSummarySlot, ParsedSummarySlot>();
   for (const p of parsedSlots) bySlot.set(p.slot, p);
 
@@ -65,12 +73,13 @@ export function assembleSummaryFromParsed(args: {
     // FRAME always renders (it is required); the other slots render their text
     // or a "(none)" marker so the injected block is stable and complete.
     const rendered = text.length > 0 ? text : slot === 'FRAME' ? '' : '(none)';
-    textLines.push(`${SLOT_LABEL[slot]}: ${rendered}`);
+    textLines.push(`${ROLLING_SUMMARY_SLOT_LABELS[slot]}: ${rendered}`);
     slots.push({
       slot,
       entries: text.length > 0 ? [{ text, source_turn_ids }] : [],
     });
   }
+  if (historyCapped === true) textLines.push(HISTORY_CAP_DISCLOSURE);
 
   return {
     text: textLines.join('\n'),
@@ -80,5 +89,8 @@ export function assembleSummaryFromParsed(args: {
     version,
     generator,
     schema_version: SUMMARY_SCHEMA_VERSION,
+    // Conditional spread: the key is ABSENT when the read was complete
+    // (byte-stable stored JSONB for the common case).
+    ...(historyCapped === true ? { history_capped: true } : {}),
   };
 }

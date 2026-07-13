@@ -12,6 +12,10 @@
 -- scenarios and created two SECURITY DEFINER RPCs. No existing column, row,
 -- policy, or function was modified, so rollback is self-contained.
 --
+-- 2026-07-13 note: the forward DRAFT was amended pre-execution (composite
+-- monotonic guard — Codex r2 fix 3). Function SIGNATURES are unchanged, so
+-- the DROP statements below still match; no rollback change required.
+--
 -- ⚠️  DATA NOTE: rolling_summary is DERIVED, disposable state — it is
 --     regenerated from the persisted turn history on the next summariser
 --     pass. Dropping the column loses nothing that cannot be rebuilt. It is

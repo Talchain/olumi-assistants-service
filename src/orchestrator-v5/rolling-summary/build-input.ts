@@ -17,15 +17,19 @@
  *    turns retrievable exactly) — so even a degraded regen re-reads the ground
  *    truth behind every standing slot entry, never the slot text alone.
  *
- * Turn ordinals: shown turns are labelled t1..tK (t1 = oldest SHOWN). The
- * model cites them in `[tN]` stamps; resolveProvenance (parse-summary consumer,
- * in the maintainer) maps ordinals → real turn ids via `ordinalMap`. Refs the
- * model invents that aren't in the map are dropped — stored source_turn_ids are
- * therefore ALWAYS real and resolvable (incremental carried-content provenance
- * is lossy by design and re-anchored at the next regen).
+ * Turn ordinals: in INCREMENTAL mode the prior summary's cited turns are
+ * labelled first (t1..tJ — provenance carry: carried entries render with
+ * their stamps so the model can echo them and the maintainer resolves them
+ * back to real ids), then shown turns continue tJ+1..tK (oldest SHOWN first).
+ * In REGEN mode ordinals label shown turns only (full history re-anchors).
+ * The model cites them in `[tN]` stamps; resolveProvenance (parse-summary
+ * consumer, in the maintainer) maps ordinals → real turn ids via `ordinalMap`.
+ * Refs the model invents that aren't in the map are dropped — stored
+ * source_turn_ids are therefore ALWAYS real and resolvable.
  */
 
 import {
+  ROLLING_SUMMARY_SLOT_LABELS,
   SUMMARY_INPUT_TAIL_TURNS,
   SUMMARY_REGEN_INPUT_CHAR_BUDGET,
   SUMMARY_REGEN_INTERVAL,
@@ -115,9 +119,43 @@ function selectRegenTurns(
   return { shown, capped: true };
 }
 
-function renderPriorSummaryBlock(prior: RollingSummary | null): string {
+/**
+ * Render the prior summary for the incremental input. When `ordinalByTurnId`
+ * assigns ordinals to the prior's cited turns, entries render WITH their
+ * `[tN]` stamps (provenance carry — the model echoes the stamp on entries it
+ * carries forward, so `resolveProvenance` keeps the real turn ids across
+ * incremental rounds instead of silently dropping them until the next regen).
+ * With no citations to carry, the stored prompt-ready text renders unchanged.
+ */
+function renderPriorSummaryBlock(
+  prior: RollingSummary | null,
+  ordinalByTurnId?: ReadonlyMap<string, string>,
+): string {
   if (prior === null) return '';
-  return ['## Prior summary (update it — do not simply restate it)', prior.text, ''].join('\n');
+  const header = '## Prior summary (update it — do not simply restate it)';
+  if (!ordinalByTurnId || ordinalByTurnId.size === 0) {
+    return [header, prior.text, ''].join('\n');
+  }
+  const carryNote =
+    '(citation labels like [t1] below refer to the earlier turns they came from — keep them on entries you carry forward)';
+  const lines: string[] = [];
+  for (const block of prior.slots) {
+    const rendered =
+      block.entries.length > 0
+        ? block.entries
+            .map((e) => {
+              const ords = e.source_turn_ids
+                .map((id) => ordinalByTurnId.get(id))
+                .filter((o): o is string => o !== undefined);
+              return ords.length > 0 ? `${e.text} [${ords.join(', ')}]` : e.text;
+            })
+            .join(' ')
+        : block.slot === 'FRAME'
+          ? ''
+          : '(none)';
+    lines.push(`${ROLLING_SUMMARY_SLOT_LABELS[block.slot]}: ${rendered}`);
+  }
+  return [header, carryNote, lines.join('\n'), ''].join('\n');
 }
 
 /**
@@ -152,25 +190,60 @@ export function buildSummariserInput(args: {
     shown = sel.shown;
     capped = sel.capped;
   } else {
-    // Incremental: the turns after the prior watermark. If the prior watermark
+    // Incremental: the turns after the prior watermark under the store's
+    // COMPOSITE total order (created_at, turn_id) — NOT created_at alone
+    // (Codex r2 fix 3). The store permits same-timestamp turns; a `>` on the
+    // timestamp alone permanently skips a same-timestamp sibling of the
+    // watermark turn. Conservative at ties (mirrors lag.ts): a turn sharing
+    // the watermark's created_at that is not the watermark turn itself is
+    // treated as unabsorbed — over-showing is safe (the summariser dedups),
+    // under-showing is the memory hole. An unparseable created_at is also
+    // shown (cannot be placed → assume unabsorbed). If the prior watermark
     // is unknown/absent, fall back to the single newest turn (still bounded).
     const watermarkMs = priorSummary ? Date.parse(priorSummary.updated_turn_created_at) : NaN;
     const after = Number.isFinite(watermarkMs)
-      ? chronologicalTurns.filter((t) => Date.parse(t.created_at) > watermarkMs)
+      ? chronologicalTurns.filter((t) => {
+          const ts = Date.parse(t.created_at);
+          if (!Number.isFinite(ts)) return true;
+          if (ts > watermarkMs) return true;
+          return ts === watermarkMs && t.turn_id !== priorSummary!.updated_turn_id;
+        })
       : [];
     shown = after.length > 0 ? after : [watermarkTurn];
   }
 
   const ordinalMap = new Map<string, { turn_id: string; created_at: string }>();
+
+  // Provenance carry (incremental only): assign ordinals to the prior
+  // summary's cited turns FIRST, so carried entries keep resolvable stamps
+  // (regen re-anchors from the real turns instead). created_at is looked up
+  // from the read history when available; resolution needs only the id.
+  const carriedOrdinalByTurnId = new Map<string, string>();
+  if (mode === 'incremental' && priorSummary !== null) {
+    const createdAtById = new Map(chronologicalTurns.map((t) => [t.turn_id, t.created_at]));
+    for (const block of priorSummary.slots) {
+      for (const entry of block.entries) {
+        for (const id of entry.source_turn_ids) {
+          if (carriedOrdinalByTurnId.has(id)) continue;
+          const ordinal = `t${carriedOrdinalByTurnId.size + 1}`;
+          carriedOrdinalByTurnId.set(id, ordinal);
+          ordinalMap.set(ordinal, { turn_id: id, created_at: createdAtById.get(id) ?? '' });
+        }
+      }
+    }
+  }
+
   const renderedTurns: string[] = [];
   shown.forEach((t, i) => {
-    const ordinal = `t${i + 1}`;
+    const ordinal = `t${carriedOrdinalByTurnId.size + i + 1}`;
     ordinalMap.set(ordinal, { turn_id: t.turn_id, created_at: t.created_at });
     renderedTurns.push(renderTurn(ordinal, t));
   });
 
   const sections: string[] = [];
-  if (mode === 'incremental') sections.push(renderPriorSummaryBlock(priorSummary));
+  if (mode === 'incremental') {
+    sections.push(renderPriorSummaryBlock(priorSummary, carriedOrdinalByTurnId));
+  }
   if (briefText && briefText.trim().length > 0) {
     sections.push(['## Decision brief (background)', briefText.trim(), ''].join('\n'));
   }

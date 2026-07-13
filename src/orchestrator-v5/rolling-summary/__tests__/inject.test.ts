@@ -209,7 +209,9 @@ describe('loadConversationSummaryForInjection — inject renders the block', () 
   });
 
   it('stale summary (lag ≥ windowDepth) → disclosed in-band + v5.summary.lag emitted', async () => {
-    // Watermark T1; window shows 3 newer turns; windowDepth 3 ⇒ lag 3 ≥ 3 ⇒ stale.
+    // Watermark T1; window shows 3 newer turns PLUS the watermark turn itself
+    // (coverage verified), windowDepth 3 ⇒ lag 3 ≥ 3 ⇒ stale — but every
+    // missing turn IS verbatim-visible, so the block injects with disclosure.
     const newer1 = { turn_id: 'dddddddd-4444-4444-8444-444444444444', created_at: '2026-07-10T10:03:00.000Z' };
     const summary = summaryFixture();
     const staleSummary: RollingSummary = {
@@ -222,7 +224,7 @@ describe('loadConversationSummaryForInjection — inject renders the block', () 
       flag: 'inject',
       scenarioId: 'scn-1',
       requestId: 'req-9',
-      windowTurnsNewestFirst: [newer1, T3, T2],
+      windowTurnsNewestFirst: [newer1, T3, T2, T1],
       windowDepth: 3,
       summaryStore: store,
     });
@@ -292,6 +294,17 @@ describe('buildConversationSummarySection — rendering rules', () => {
     expect(section.stale).toBe(false);
   });
 
+  it('renders an honest partiality note when the summary was built from capped history', () => {
+    const summary: RollingSummary = {
+      ...summaryFixture(),
+      history_capped: true,
+    };
+    const section = buildConversationSummarySection(summary, 0, 5);
+    expect(section.text).toContain('most recent');
+    expect(section.text).toContain('1000');
+    expect(section.text.toLowerCase()).toContain('earlier turns');
+  });
+
   it('multiple entries in one slot each carry their own stamps', () => {
     const summary: RollingSummary = {
       ...summaryFixture(),
@@ -312,5 +325,118 @@ describe('buildConversationSummarySection — rendering rules', () => {
     expect(section.text).toContain(
       'CONSTRAINTS & PREFERENCES: Keep Maria. [t:aaaaaaaa] Budget under $120k. [t:cccccccc]',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MEMORY-HOLE guard (Codex r2 blocker 1): the injector must never claim the
+// unabsorbed turns are "shown verbatim" when they are not. The window the
+// injector receives is the persisted-history hot read (newest-first, ≤ the
+// session read window); the pack shows only the newest `windowDepth` of it
+// verbatim. When the summary's watermark is not provably covered by the
+// window, or the gap exceeds the verbatim count, injection is REFUSED: no
+// four-slot block, a disclosed absence note instead (honesty doctrine — a
+// disclosed absence beats a lying claim).
+// ---------------------------------------------------------------------------
+
+describe('loadConversationSummaryForInjection — memory-hole guard (true gap)', () => {
+  /** n turns strictly newer than the fixture watermark T2, newest-first. */
+  function newerTurns(n: number): { turn_id: string; created_at: string }[] {
+    const out: { turn_id: string; created_at: string }[] = [];
+    for (let i = n; i >= 1; i--) {
+      out.push({
+        turn_id: `eeeeee${String(i).padStart(2, '0')}-5555-4555-8555-555555555555`,
+        created_at: new Date(Date.parse(T2.created_at) + i * 60_000).toISOString(),
+      });
+    }
+    return out;
+  }
+
+  it('REFUSES a 20-behind summary: no four-slot text, no lag-5 verbatim claim', async () => {
+    // Watermark T2; the 20-deep window holds 20 newer turns; watermark not
+    // covered. Old behaviour: inject with lag 20 claiming "the latest 20 turns
+    // are shown verbatim" while the pack shows only 5 — a lie about the 15
+    // turns that are NOWHERE. New behaviour: refuse + absence note.
+    const store = storeReturning(summaryFixture());
+    const outcome = await loadConversationSummaryForInjection({
+      flag: 'inject',
+      scenarioId: 'scn-1',
+      requestId: 'req-hole',
+      windowTurnsNewestFirst: newerTurns(20),
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    const section = outcome.section;
+    expect(section).not.toBeNull();
+    // The four-slot block must NOT inject.
+    expect(section!.text).not.toContain('DECISION FRAME');
+    expect(section!.text).not.toContain('CONSTRAINTS');
+    // The absence is disclosed, and the note never claims the missing turns
+    // are shown verbatim.
+    expect(section!.stale).toBe(true);
+    expect(section!.note).toBeDefined();
+    expect(section!.note!.toLowerCase()).toContain('withheld');
+    expect(section!.note!.toLowerCase()).toContain('not shown');
+    // The staleness signal fires, marked as a refusal.
+    const lag = lagEmits();
+    expect(lag).toHaveLength(1);
+    expect(lag[0]![1]).toMatchObject({ scenario_id: 'scn-1', refused: true });
+  });
+
+  it('REFUSES when the gap exceeds verbatim coverage even though the watermark is visible', async () => {
+    // Watermark T2 covered by the window (T2 present), but 7 newer turns exist
+    // and only 5 are verbatim → 2 turns are neither summarised nor shown.
+    const store = storeReturning(summaryFixture());
+    const window = [...newerTurns(7), T2, T1];
+    const outcome = await loadConversationSummaryForInjection({
+      flag: 'inject',
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: window,
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    expect(outcome.lagTurns).toBe(7);
+    const section = outcome.section;
+    expect(section).not.toBeNull();
+    expect(section!.text).not.toContain('DECISION FRAME');
+    expect(section!.stale).toBe(true);
+    expect(section!.note).toContain('7');
+    expect(section!.note!.toLowerCase()).toContain('not shown');
+    expect(lagEmits()).toHaveLength(1);
+    expect(lagEmits()[0]![1]).toMatchObject({ refused: true });
+  });
+
+  it('REFUSES when a summary exists but the window is empty (coverage unverifiable)', async () => {
+    const store = storeReturning(summaryFixture());
+    const outcome = await loadConversationSummaryForInjection({
+      flag: 'inject',
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [],
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    const section = outcome.section;
+    expect(section).not.toBeNull();
+    expect(section!.text).not.toContain('DECISION FRAME');
+    expect(section!.stale).toBe(true);
+    expect(section!.note!.toLowerCase()).toContain('withheld');
+  });
+
+  it('still injects when the gap is fully verbatim-covered (no false refusal)', async () => {
+    // Watermark T2, 3 newer turns, all within the 5-verbatim window, watermark
+    // visible → lag 3 < depth 5 → normal injection, no note, no lag event.
+    const store = storeReturning(summaryFixture());
+    const outcome = await loadConversationSummaryForInjection({
+      flag: 'inject',
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [...newerTurns(3), T2, T1],
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    expect(outcome.lagTurns).toBe(3);
+    expect(outcome.section!.text).toContain('DECISION FRAME');
+    expect(outcome.section!.stale).toBe(false);
+    expect(outcome.section!.note).toBeUndefined();
+    expect(lagEmits()).toHaveLength(0);
   });
 });

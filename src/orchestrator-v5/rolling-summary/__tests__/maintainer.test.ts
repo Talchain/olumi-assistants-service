@@ -19,6 +19,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import * as telemetry from '../../../utils/telemetry.js';
+import * as capture from '../capture.js';
 import {
   maintainRollingSummaryForCommit,
   SUMMARY_FULL_HISTORY_READ_LIMIT,
@@ -79,16 +80,29 @@ class RecordingStore implements RollingSummaryStorePort {
   ) {}
 }
 
-/** A JS reference implementation of the SQL monotonic WHERE clause. */
+/**
+ * A JS reference implementation of the SQL monotonic WHERE clause —
+ * COMPOSITE (created_at, turn_id, version), mirroring the amended DRAFT
+ * migration (Codex r2 fix 3): the store permits same-timestamp turns and
+ * totally orders them (created_at, turn_id), so a timestamp-only guard
+ * would no-op the write that absorbs a same-timestamp sibling, stranding
+ * that turn's content forever. `version` breaks the tie when the watermark
+ * turn itself is unchanged (a later pass that absorbed a smaller-id
+ * sibling under the same watermark).
+ */
 class FakeMonotonicStore implements RollingSummaryStorePort {
   stored: RollingSummary | null = null;
   async loadSummary(): Promise<RollingSummary | null> {
     return this.stored;
   }
   async upsertSummary(_id: string, s: RollingSummary): Promise<UpsertRollingSummaryOutcome> {
-    const storedMs = this.stored ? Date.parse(this.stored.updated_turn_created_at) : -Infinity;
-    const newMs = Date.parse(s.updated_turn_created_at);
-    if (newMs > storedMs) {
+    const applied =
+      this.stored === null ||
+      Date.parse(s.updated_turn_created_at) > Date.parse(this.stored.updated_turn_created_at) ||
+      (Date.parse(s.updated_turn_created_at) === Date.parse(this.stored.updated_turn_created_at) &&
+        (s.updated_turn_id > this.stored.updated_turn_id ||
+          (s.updated_turn_id === this.stored.updated_turn_id && s.version > this.stored.version)));
+    if (applied) {
       this.stored = s;
       return { applied: true, regressed: false, current_watermark: s.updated_turn_created_at };
     }
@@ -105,7 +119,11 @@ function updatedEvents(spy: ReturnType<typeof emitSpy>) {
     .map((c) => c[1] as Record<string, unknown>);
 }
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  // Guarded call: exists once the single-flight fix lands (RED-first).
+  capture.resetRollingSummarySingleFlightForTests?.();
+});
 
 describe('maintainRollingSummaryForCommit', () => {
   it('writes a parsed summary and reports applied', async () => {
@@ -247,5 +265,209 @@ describe('maintainRollingSummaryForCommit', () => {
     });
     expect(model.summarise).not.toHaveBeenCalled();
     expect(updatedEvents(spy)[0]!.status).toBe('no_turns');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex r2 blocker 2 — SILENT SLOT ERASURE: a summariser response that drops
+// one of the four slots must be rejected (kept-prior), never accepted with
+// the missing slot rendered "(none)" over prior memory.
+// ---------------------------------------------------------------------------
+
+describe('maintainRollingSummaryForCommit — slot completeness', () => {
+  it('a 3-slot response KEEPS the prior summary (no write, rejected_kept_prior)', async () => {
+    const spy = emitSpy();
+    const prior: RollingSummary = {
+      text: 'DECISION FRAME: prior.\nCONSTRAINTS & PREFERENCES: Keep Berlin.\nRESOLVED: (none)\nOPEN: (none)',
+      slots: [
+        { slot: 'FRAME', entries: [{ text: 'prior.', source_turn_ids: [] }] },
+        { slot: 'CONSTRAINTS', entries: [{ text: 'Keep Berlin.', source_turn_ids: ['turn-1'] }] },
+        { slot: 'RESOLVED', entries: [] },
+        { slot: 'OPEN', entries: [] },
+      ],
+      updated_turn_id: 'turn-2',
+      updated_turn_created_at: mkTurn(2).created_at,
+      version: 1,
+      generator: 'regen',
+      schema_version: SUMMARY_SCHEMA_VERSION,
+    };
+    const store = new RecordingStore(prior);
+    // Missing CONSTRAINTS — pre-fix this was ACCEPTED and assemble.ts wrote
+    // CONSTRAINTS as "(none)", erasing "Keep Berlin." from memory.
+    const threeSlots = ['DECISION FRAME: Choosing an HQ.', 'RESOLVED: (none)', 'OPEN: (none)'].join('\n');
+    await maintainRollingSummaryForCommit({
+      scenarioId: SCENARIO,
+      turnId: 'turn-3',
+      persistedRowId: 'row-3',
+      historyReader: historyReader([mkTurn(3), mkTurn(2)]),
+      summaryStore: store,
+      model: fakeModel(threeSlots),
+    });
+    expect(store.upsertSummary).not.toHaveBeenCalled();
+    expect(updatedEvents(spy)[0]!.status).toBe('rejected_kept_prior');
+    expect(updatedEvents(spy)[0]!.reject_reason).toBe('missing_slot');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex r2 fix 4a — HISTORY-CAP HONESTY: when the full-history read fills the
+// cap, the "full history" is not full; the stored summary must say so rather
+// than claim silent completeness.
+// ---------------------------------------------------------------------------
+
+describe('maintainRollingSummaryForCommit — history-cap honesty', () => {
+  it('a read that fills the cap marks the summary history_capped with an in-text disclosure', async () => {
+    const turns: MaintainerTurn[] = [];
+    for (let n = SUMMARY_FULL_HISTORY_READ_LIMIT; n >= 1; n--) turns.push(mkTurn(n, 'u'));
+    const store = new RecordingStore(null);
+    await maintainRollingSummaryForCommit({
+      scenarioId: SCENARIO,
+      turnId: `turn-${SUMMARY_FULL_HISTORY_READ_LIMIT}`,
+      persistedRowId: 'row-x',
+      historyReader: historyReader(turns),
+      summaryStore: store,
+      model: fakeModel(VALID),
+    });
+    expect(store.upsertSummary).toHaveBeenCalledOnce();
+    const written = store.upsertSummary.mock.calls[0]![1];
+    expect(written.history_capped).toBe(true);
+    expect(written.text).toContain(String(SUMMARY_FULL_HISTORY_READ_LIMIT));
+    expect(written.text.toLowerCase()).toContain('earlier turns');
+  });
+
+  it('an uncapped read stores no history_capped marker (byte-stable)', async () => {
+    const store = new RecordingStore(null);
+    await maintainRollingSummaryForCommit({
+      scenarioId: SCENARIO,
+      turnId: 'turn-3',
+      persistedRowId: 'row-3',
+      historyReader: historyReader([mkTurn(3), mkTurn(2), mkTurn(1)]),
+      summaryStore: store,
+      model: fakeModel(VALID),
+    });
+    const written = store.upsertSummary.mock.calls[0]![1];
+    expect('history_capped' in written).toBe(false);
+    expect(written.text.toLowerCase()).not.toContain('most recent');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex r2 fix 4b — SINGLE-FLIGHT / COALESCING: commit.ts fires one
+// independent job per commit; concurrent commits for one scenario must not
+// stampede the model/store. In-process per-scenario single-flight with
+// latest-wins coalescing (the monotonic write already prevents regressions —
+// this is waste + race pressure).
+// ---------------------------------------------------------------------------
+
+describe('maintainRollingSummaryForCommit — per-scenario single-flight', () => {
+  function gatedModel() {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    let active = 0;
+    let maxActive = 0;
+    let calls = 0;
+    const model: SummariserModel = {
+      summarise: vi.fn(async () => {
+        calls += 1;
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await gate;
+        active -= 1;
+        return { text: VALID };
+      }),
+    };
+    return { model, release, stats: () => ({ maxActive, calls }) };
+  }
+
+  it('three concurrent commits for one scenario → one in-flight pass + ONE coalesced rerun', async () => {
+    const { model, release, stats } = gatedModel();
+    const store = new RecordingStore(null);
+    const mk = (turn: string) =>
+      maintainRollingSummaryForCommit({
+        scenarioId: SCENARIO,
+        turnId: turn,
+        persistedRowId: `row-${turn}`,
+        historyReader: historyReader([mkTurn(3), mkTurn(2), mkTurn(1)]),
+        summaryStore: store,
+        model,
+      });
+    const p1 = mk('turn-1');
+    const p2 = mk('turn-2');
+    const p3 = mk('turn-3');
+    // Let the coalesced callers return while the first pass is still gated.
+    await Promise.all([p2, p3]);
+    release();
+    await p1;
+    const s = stats();
+    expect(s.maxActive).toBe(1); // never two concurrent passes per scenario
+    expect(s.calls).toBe(2); // first pass + ONE coalesced rerun (latest-wins)
+  });
+
+  it('different scenarios are NOT serialised against each other', async () => {
+    const { model, release, stats } = gatedModel();
+    const store = new RecordingStore(null);
+    const mk = (scenario: string) =>
+      maintainRollingSummaryForCommit({
+        scenarioId: scenario,
+        turnId: 'turn-1',
+        persistedRowId: 'row-1',
+        historyReader: historyReader([mkTurn(1)]),
+        summaryStore: store,
+        model,
+      });
+    const pa = mk('scenario-A');
+    const pb = mk('scenario-B');
+    // Both scenarios should reach the model concurrently.
+    await vi.waitFor(() => expect(stats().maxActive).toBe(2));
+    release();
+    await Promise.all([pa, pb]);
+    expect(stats().calls).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex r2 fix 3 — COMPOSITE WATERMARK reference semantics (the JS mirror of
+// the amended DRAFT SQL guard; the live guard is verified once Paul executes
+// the migration).
+// ---------------------------------------------------------------------------
+
+describe('FakeMonotonicStore — composite (created_at, turn_id, version) guard', () => {
+  const base = (over: Partial<RollingSummary>): RollingSummary => ({
+    text: 'x',
+    slots: [],
+    updated_turn_id: 'turn-5',
+    updated_turn_created_at: mkTurn(5).created_at,
+    version: 2,
+    generator: 'incremental',
+    schema_version: SUMMARY_SCHEMA_VERSION,
+    ...over,
+  });
+
+  it('same timestamp + same watermark turn + higher version → APPLIES (sibling absorbed)', async () => {
+    const store = new FakeMonotonicStore();
+    await store.upsertSummary(SCENARIO, base({ text: 'before sibling' }));
+    const outcome = await store.upsertSummary(
+      SCENARIO,
+      base({ text: 'after sibling', version: 3 }),
+    );
+    expect(outcome.applied).toBe(true);
+    expect(store.stored!.text).toBe('after sibling');
+  });
+
+  it('same timestamp + lexicographically newer watermark turn → APPLIES', async () => {
+    const store = new FakeMonotonicStore();
+    await store.upsertSummary(SCENARIO, base({}));
+    const outcome = await store.upsertSummary(
+      SCENARIO,
+      base({ updated_turn_id: 'turn-6', version: 3 }),
+    );
+    expect(outcome.applied).toBe(true);
+  });
+
+  it('identical composite (retry of the same write) → no-op', async () => {
+    const store = new FakeMonotonicStore();
+    await store.upsertSummary(SCENARIO, base({}));
+    const outcome = await store.upsertSummary(SCENARIO, base({}));
+    expect(outcome).toMatchObject({ applied: false, regressed: true });
   });
 });
