@@ -140,9 +140,15 @@ function selectRegenTurns(
  *
  * A turn is already absorbed (and therefore safe to drop from the re-read)
  * when a REAL prior summary (generator !== 'floor') covered it — i.e. it is at
- * or before that prior's watermark under the store's total order. A FLOOR
- * absorbed no conversation history, and an absent prior absorbed nothing, so in
- * both cases every turn is treated as fresh. Walk oldest-first: skip the
+ * or before that prior's watermark under the store's total order. The store's
+ * order is COMPOSITE (created_at, turn_id), so a timestamp comparison alone
+ * cannot place a same-millisecond sibling; conservative at ties (mirrors the
+ * incremental path and lag.ts): a turn sharing the prior watermark's
+ * created_at that is NOT the watermark turn itself is treated as UNABSORBED —
+ * treating it as absorbed would let the watermark advance past a cap-dropped
+ * sibling the model never saw. A FLOOR absorbed no conversation history, and
+ * an absent prior absorbed nothing, so in both cases every turn is treated as
+ * fresh. Walk oldest-first: skip the
  * pre-absorbed prefix, then stop at the first UNABSORBED dropped turn; the
  * watermark is the newest included/absorbed turn before it. If the very first
  * unabsorbed turn is itself dropped, no honest advance is possible → null (the
@@ -156,15 +162,19 @@ function cappedRegenWatermark(
   prior: RollingSummary | null,
 ): { turn_id: string; created_at: string } | null {
   const shownIds = new Set(shown.map((t) => t.turn_id));
-  const priorAbsorbedMs =
-    prior !== null && prior.generator !== 'floor'
-      ? Date.parse(prior.updated_turn_created_at)
-      : NaN;
+  const realPrior = prior !== null && prior.generator !== 'floor' ? prior : null;
+  const priorAbsorbedMs = realPrior ? Date.parse(realPrior.updated_turn_created_at) : NaN;
   let newestHonest: SummariserTurn | null = null;
   for (const t of chronological) {
     const ts = Date.parse(t.created_at);
+    // Composite-order tie rule (mirrors incremental + lag.ts): at the prior
+    // watermark's exact millisecond, only the watermark turn ITSELF is
+    // absorbed — a same-ms sibling is unabsorbed (conservative at ties).
     const alreadyAbsorbed =
-      Number.isFinite(priorAbsorbedMs) && Number.isFinite(ts) && ts <= priorAbsorbedMs;
+      Number.isFinite(priorAbsorbedMs) &&
+      Number.isFinite(ts) &&
+      (ts < priorAbsorbedMs ||
+        (ts === priorAbsorbedMs && t.turn_id === realPrior?.updated_turn_id));
     if (alreadyAbsorbed) {
       // Pre-absorbed by a real prior summary — safe to drop; keep it as the
       // running boundary candidate so an all-absorbed prefix still yields the
