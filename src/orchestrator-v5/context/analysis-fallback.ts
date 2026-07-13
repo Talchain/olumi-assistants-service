@@ -511,9 +511,13 @@ export function buildAnalysisFromPriorFacts(
     enrichment && typeof enrichment === 'object' && !Array.isArray(enrichment)
       ? (enrichment as Record<string, unknown>)
       : null;
+  // D-W (round-5): thread PLoT's declared winner so compactAnalysis names the
+  // same option the enricher/headline do (not merely the highest-probability).
+  const leadingOptionId =
+    typeof result.leading_option_id === 'string' ? result.leading_option_id : null;
   const fromEnrichment =
     enrichmentRecord !== null
-      ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope)
+      ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope, undefined, leadingOptionId)
       : null;
   if (enrichmentRecord !== null && fromEnrichment !== null) {
     if (fromEnrichment.options.length > 0) {
@@ -524,13 +528,18 @@ export function buildAnalysisFromPriorFacts(
           ? { ...o, option_label: labelMap.get(o.option_id)! }
           : o,
       );
-      const winner = relabelled[0]
-        ? {
-            option_id: relabelled[0].option_id,
-            option_label: relabelled[0].option_label,
-            win_probability: relabelled[0].win_probability,
-          }
-        : fromEnrichment.winner;
+      // D-W: use compactAnalysis's DECLARED winner (not relabelled[0], the
+      // highest-probability option), relabelled from the current graph.
+      const declaredWinnerId = fromEnrichment.winner.option_id;
+      const relabelledWinner = relabelled.find((o) => o.option_id === declaredWinnerId);
+      const winner = {
+        option_id: fromEnrichment.winner.option_id,
+        option_label:
+          labelMap.get(declaredWinnerId)
+          ?? relabelledWinner?.option_label
+          ?? fromEnrichment.winner.option_label,
+        win_probability: fromEnrichment.winner.win_probability,
+      };
 
       // compactAnalysis only walks per-option `results[].factor_sensitivity`
       // and per-option results[].robustness.fragile_edges. On staging both

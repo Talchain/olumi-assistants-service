@@ -22,6 +22,7 @@ import { describe, it, expect } from 'vitest';
 import {
   readOptionResultSources,
   winnerOptionResultSource,
+  selectDeclaredWinner,
 } from '../../../../src/orchestrator/context/option-result-source.js';
 import { compactAnalysis } from '../../../../src/orchestrator/context/analysis-compact.js';
 import { getOptionResultCandidates } from '../../../../src/orchestrator/analysis-state.js';
@@ -109,17 +110,17 @@ describe('M1 — single-sourced current-first winner across all four surfaces', 
 });
 
 // ============================================================================
-// Round-4 MAJOR-A — FULL winner-consistency MATRIX across all four selectors.
-//
+// Round-5 (Doctrine D-W) — FULL winner-consistency MATRIX. Under D-W EVERY
+// surface honours the DECLARED winner (leading_option_id) when it carries a
+// usable win_probability, else the highest-usable option. So on EVERY cell of
 // {thin-current, both-present-conflicting} × {leader=highest, leader=OTHER,
-// leader=null}. Every selector WALKS past a source without a usable
-// win_probability (shared predicate), so NONE emits a phantom 0% winner. The
-// leader-honouring pair (enricher + headline) name the declared leader with its
-// REAL probability from the walked-to source; the highest-probability pair
-// (compact + state) name the highest option — coinciding when leader=highest or
-// leader=null. RED pre-fix: the enricher's leader-present branch broke at the
-// thin source[0] and emitted the leader @ 0% (production path), disagreeing with
-// the walking headline/compact/state.
+// leader=null}, ALL FOUR surfaces (enricher, headline, compact, state) name the
+// SAME option + probability.
+//
+// RED pre-round-5: on the leader=OTHER cells, compact + state named the
+// highest-probability option (opt-a) while the enricher/headline named the
+// declared leader (opt-b) — a cross-surface identity split. Now they all name
+// the leader.
 // ============================================================================
 
 // THIN-CURRENT: option_comparison carries id/label but NO win_probability;
@@ -143,72 +144,67 @@ interface MatrixCell {
   readonly name: string;
   readonly envelope: () => Record<string, unknown>;
   readonly leader: string | null;
-  // enricher + headline (leader-honouring) expectations.
-  readonly leaderWinnerId: string;
-  readonly leaderWinnerProb: number;
-  // compact + state (highest-probability) expectations.
-  readonly highestWinnerId: string;
-  readonly highestWinnerProb: number;
+  // Under D-W ALL FOUR surfaces name this option + probability.
+  readonly winnerId: string;
+  readonly winnerProb: number;
 }
 
 const MATRIX: readonly MatrixCell[] = [
   // Thin-current (walked source = results; highest = opt-a @ 0.66).
-  { name: 'thin-current, leader=highest (opt-a)', envelope: thinCurrentEnvelope, leader: 'opt-a',
-    leaderWinnerId: 'opt-a', leaderWinnerProb: 0.66, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
-  { name: 'thin-current, leader=OTHER (opt-b)', envelope: thinCurrentEnvelope, leader: 'opt-b',
-    leaderWinnerId: 'opt-b', leaderWinnerProb: 0.34, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
-  { name: 'thin-current, leader=null', envelope: thinCurrentEnvelope, leader: null,
-    leaderWinnerId: 'opt-a', leaderWinnerProb: 0.66, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
+  { name: 'thin-current, leader=highest (opt-a)', envelope: thinCurrentEnvelope, leader: 'opt-a', winnerId: 'opt-a', winnerProb: 0.66 },
+  { name: 'thin-current, leader=OTHER (opt-b)', envelope: thinCurrentEnvelope, leader: 'opt-b', winnerId: 'opt-b', winnerProb: 0.34 },
+  { name: 'thin-current, leader=null', envelope: thinCurrentEnvelope, leader: null, winnerId: 'opt-a', winnerProb: 0.66 },
   // Both-present-conflicting (walked source = current option_comparison; highest = opt-a @ 0.72).
-  { name: 'both-conflicting, leader=highest (opt-a)', envelope: conflictingEnvelope, leader: 'opt-a',
-    leaderWinnerId: 'opt-a', leaderWinnerProb: 0.72, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
-  { name: 'both-conflicting, leader=OTHER (opt-b)', envelope: conflictingEnvelope, leader: 'opt-b',
-    leaderWinnerId: 'opt-b', leaderWinnerProb: 0.28, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
-  { name: 'both-conflicting, leader=null', envelope: conflictingEnvelope, leader: null,
-    leaderWinnerId: 'opt-a', leaderWinnerProb: 0.72, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
+  { name: 'both-conflicting, leader=highest (opt-a)', envelope: conflictingEnvelope, leader: 'opt-a', winnerId: 'opt-a', winnerProb: 0.72 },
+  { name: 'both-conflicting, leader=OTHER (opt-b)', envelope: conflictingEnvelope, leader: 'opt-b', winnerId: 'opt-b', winnerProb: 0.28 },
+  { name: 'both-conflicting, leader=null', envelope: conflictingEnvelope, leader: null, winnerId: 'opt-a', winnerProb: 0.72 },
 ];
 
-describe('MAJOR-A — winner-consistency matrix (no phantom 0%, no cross-selector divergence)', () => {
+describe('D-W — winner-consistency matrix (ALL FOUR surfaces name the declared winner)', () => {
   for (const cell of MATRIX) {
     it(cell.name, () => {
       const env = cell.envelope();
 
-      // enricher (leader-honouring, production path). RED pre-fix on the
-      // thin-current leader-present cells: winner @ 0% instead of the real prob.
+      // 1. enricher (already leader-aware). Never a phantom 0% winner.
       const invoke = buildInvokeInputForTests('We must decide on pricing.', env, cell.leader);
       expect(invoke).not.toBeNull();
-      expect(invoke!.winner.id).toBe(cell.leaderWinnerId);
-      expect(invoke!.winner.win_probability).toBe(cell.leaderWinnerProb);
-      expect(invoke!.winner.win_probability).toBeGreaterThan(0); // never a phantom winner
+      expect(invoke!.winner.id).toBe(cell.winnerId);
+      expect(invoke!.winner.win_probability).toBe(cell.winnerProb);
+      expect(invoke!.winner.win_probability).toBeGreaterThan(0);
 
-      // headline (leader-honouring): names the SAME option as the enricher.
+      // 2. headline (already leader-aware): names the SAME option.
       const headline = buildAnalysisResultHeadline({
         enrichment: env,
         leading_option_id: cell.leader ?? '',
         status_kind: 'ok',
       });
       expect(headline).not.toBeNull();
-      expect(headline!.startsWith(LABEL_OF[cell.leaderWinnerId]!)).toBe(true);
+      expect(headline!.startsWith(LABEL_OF[cell.winnerId]!)).toBe(true);
 
-      // compact (highest-probability): real prob, never phantom 0%.
-      const compact = compactAnalysis(env as unknown as V2RunResponseEnvelope);
+      // 3. compact — NOW leader-aware (D-W). RED pre-round-5 on leader=OTHER
+      //    (named the highest-probability opt-a instead of the declared opt-b).
+      const compact = compactAnalysis(env as unknown as V2RunResponseEnvelope, undefined, cell.leader);
       expect(compact).not.toBeNull();
-      expect(compact!.winner.option_id).toBe(cell.highestWinnerId);
-      expect(compact!.winner.win_probability).toBe(cell.highestWinnerProb);
+      expect(compact!.winner.option_id).toBe(cell.winnerId);
+      expect(compact!.winner.win_probability).toBe(cell.winnerProb);
 
-      // state (highest-probability): its candidate source is the walked-to one.
-      const candidates = getOptionResultCandidates(env as unknown as V2RunResponseEnvelope);
-      expect(winnerOf(candidates)).toBe(cell.highestWinnerId);
-      const highestEntry = candidates.find(
-        (c) => (c as Record<string, unknown>).option_id === cell.highestWinnerId,
+      // 4. state — NOW leader-aware (D-W). Its candidate source carries the
+      //    declared winner, and the shared selector names it.
+      const stateWinner = selectDeclaredWinner(env, cell.leader);
+      expect(stateWinner).not.toBeNull();
+      expect(stateWinner!.optionId).toBe(cell.winnerId);
+      expect(stateWinner!.winProbability).toBe(cell.winnerProb);
+      const candidates = getOptionResultCandidates(env as unknown as V2RunResponseEnvelope, cell.leader);
+      const winnerEntry = candidates.find(
+        (c) => (c as Record<string, unknown>).option_id === cell.winnerId,
       ) as Record<string, unknown>;
-      expect(highestEntry.win_probability).toBe(cell.highestWinnerProb);
+      expect(winnerEntry).toBeDefined();
+      expect(winnerEntry.win_probability).toBe(cell.winnerProb);
 
-      // When the leader IS the highest (or absent), all four coincide exactly.
-      if (cell.leaderWinnerId === cell.highestWinnerId) {
-        expect(invoke!.winner.id).toBe(compact!.winner.option_id);
-        expect(invoke!.winner.win_probability).toBe(compact!.winner.win_probability);
-      }
+      // All four coincide EXACTLY (identity + probability) — the D-W invariant.
+      expect(compact!.winner.option_id).toBe(invoke!.winner.id);
+      expect(compact!.winner.win_probability).toBe(invoke!.winner.win_probability);
+      expect(stateWinner!.optionId).toBe(invoke!.winner.id);
     });
   }
 });

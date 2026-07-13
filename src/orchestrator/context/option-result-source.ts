@@ -165,3 +165,85 @@ export function winnerOptionResultSource(
   }
   return sources[0] ?? [];
 }
+
+/** The option_id of an entry (`option_id` preferred, then `id`). */
+function optionIdOf(r: Record<string, unknown>): string {
+  return (typeof r.option_id === 'string' && r.option_id)
+    || (typeof r.id === 'string' && r.id)
+    || '';
+}
+
+/** The single winning option (id + probability + the source it came from). */
+export interface DeclaredWinner {
+  readonly optionId: string;
+  readonly winProbability: number;
+  /** The walked-to source array the winner was selected from. */
+  readonly source: ReadonlyArray<Record<string, unknown>>;
+}
+
+/**
+ * Doctrine D-W (Paul-ratified, round-5): the ONE leader-aware winner selector
+ * every winner-identity surface uses so they can never disagree on ANY envelope
+ * shape.
+ *
+ * Rule: honour PLoT's DECLARED winner (`leadingOptionId`) when it is present AND
+ * the declared option carries a {@link isUsableWinProbability} win_probability —
+ * walking current-first to the source that has it. Otherwise (no leader, OR the
+ * declared option has no usable win_probability in ANY source) fall back to the
+ * highest-usable-probability option, walking to the first source that carries
+ * one. Returns null only when NO source carries any usable win_probability.
+ *
+ * This is byte-identical in logic to the enricher's leader-present walk
+ * (`selectWinner` inside `buildInvokeInput`) and the headline `resolveWinner`
+ * for the valid-envelope cases — with ONE deliberate exception noted for
+ * transparency: when the declared leader is present but has NO usable
+ * win_probability anywhere, this selector (used by compact + state) falls back
+ * to highest-usable per D-W, whereas the ENRICHER intentionally skips with
+ * `no_winner` (its Phase 3A honesty guard: never invoke the paid decision_review
+ * on a broken envelope). That edge is a data-integrity case, never a valid
+ * envelope, and is not part of the winner-consistency matrix.
+ */
+export function selectDeclaredWinner(
+  envelope: Record<string, unknown>,
+  leadingOptionId: string | null,
+): DeclaredWinner | null {
+  const sources = readOptionResultSources(envelope);
+  const id = typeof leadingOptionId === 'string' ? leadingOptionId.trim() : '';
+
+  // Declared leader present + usable somewhere → honour it (current-first walk).
+  if (id.length > 0) {
+    for (const source of sources) {
+      const entry = source.find(
+        (r) => optionIdOf(r) === id && isUsableWinProbability(r.win_probability),
+      );
+      if (entry) {
+        return { optionId: id, winProbability: entry.win_probability as number, source };
+      }
+    }
+    // else: leader has no usable probability anywhere → highest-usable fallback.
+  }
+
+  // No leader (or leader unusable): highest-usable, walking to the first source
+  // that carries one. Tiebreak by option_id lexicographic ascending — the SAME
+  // deterministic tiebreak analysis-compact's deriveWinner uses, so ties resolve
+  // identically across surfaces regardless of source order.
+  for (const source of sources) {
+    let best: Record<string, unknown> | null = null;
+    let bestProb = -Infinity;
+    let bestId = '';
+    for (const r of source) {
+      if (!isUsableWinProbability(r.win_probability)) continue;
+      const p = r.win_probability as number;
+      const rid = optionIdOf(r);
+      if (best === null || p > bestProb || (p === bestProb && rid.localeCompare(bestId) < 0)) {
+        best = r;
+        bestProb = p;
+        bestId = rid;
+      }
+    }
+    if (best !== null) {
+      return { optionId: bestId, winProbability: bestProb, source };
+    }
+  }
+  return null;
+}

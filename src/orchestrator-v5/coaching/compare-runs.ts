@@ -118,10 +118,14 @@ export function deriveRerunReadiness(
 export function projectRunFact(
   fact: HandlerFact,
 ): AnalysisResponseSummary | null {
-  const result = (fact as { result?: { enrichment?: unknown } }).result;
+  const result = (fact as { result?: { enrichment?: unknown; leading_option_id?: unknown } }).result;
   const enrichment = result?.enrichment;
   if (!enrichment) return null;
-  return compactAnalysis(enrichment as V2RunResponseEnvelope);
+  // D-W (round-5): honour PLoT's declared winner so the comparator diffs the
+  // same option the enricher/headline name.
+  const leadingOptionId =
+    typeof result?.leading_option_id === 'string' ? result.leading_option_id : null;
+  return compactAnalysis(enrichment as V2RunResponseEnvelope, undefined, leadingOptionId);
 }
 
 function normaliseLabel(label: string): string {

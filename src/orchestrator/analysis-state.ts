@@ -1,6 +1,6 @@
 import type { ConversationContext, DecisionStage, V2RunResponseEnvelope } from "./types.js";
 import { log } from "../utils/telemetry.js";
-import { winnerOptionResultSource } from "./context/option-result-source.js";
+import { winnerOptionResultSource, selectDeclaredWinner } from "./context/option-result-source.js";
 
 function hasConfiguredInterventions(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
@@ -9,22 +9,28 @@ function hasConfiguredInterventions(value: unknown): boolean {
 }
 
 /**
- * Option-result candidate array for this envelope, in CURRENT-first precedence
- * with a WALK to the first source carrying a usable (finite, [0,1])
- * win_probability (shared {@link winnerOptionResultSource} +
- * isUsableWinProbability predicate).
+ * Option-result candidate array for this envelope — the walked-to source under
+ * Doctrine D-W (round-5). When `leadingOptionId` is supplied AND that option
+ * carries a usable win_probability, the candidate source is the one carrying the
+ * declared winner (via the shared {@link selectDeclaredWinner}); otherwise it is
+ * the highest-usable source, walking past any thin / out-of-range source (shared
+ * with analysis-compact, the enricher, and headline so no winner surface
+ * diverges).
  *
- * This selects the candidate SOURCE (used here for existence / status
- * inference, NOT to surface a winner identity to the user — see
- * hasValidOptionResults / normalizeAnalysisEnvelope). M1 / round-3/4:
- * single-sourced with analysis-compact, the decision-review enricher, and
- * analysis-result-headline so the source precedence + walk never diverge; the
- * thin-current envelope is skipped for the richer results[] rather than
- * regressing to a phantom 0% winner (the round-2 plain first-non-empty read did
- * regress it). Exported so the cross-surface agreement test can pin it.
+ * PRODUCTION callers (hasValidOptionResults, normalizeAnalysisEnvelope) do
+ * existence / status inference and pass NO leader → highest-usable, byte-identical
+ * to before. The `leadingOptionId` param is threaded so a winner-identity
+ * consumer (and the cross-surface agreement test) can pin the declared winner.
  */
-export function getOptionResultCandidates(response: V2RunResponseEnvelope): unknown[] {
-  const candidates = winnerOptionResultSource(response as Record<string, unknown>);
+export function getOptionResultCandidates(
+  response: V2RunResponseEnvelope,
+  leadingOptionId: string | null = null,
+): unknown[] {
+  const leader =
+    typeof leadingOptionId === 'string' && leadingOptionId.length > 0 ? leadingOptionId : null;
+  const candidates =
+    selectDeclaredWinner(response as Record<string, unknown>, leader)?.source
+    ?? winnerOptionResultSource(response as Record<string, unknown>);
 
   // Log unexpected shape for diagnostics: `results` is present but no
   // recognised option array could be extracted from it (or the envelope).

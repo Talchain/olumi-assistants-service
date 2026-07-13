@@ -537,15 +537,24 @@ function highestWinProbability(
 ): Record<string, unknown> | null {
   let best: Record<string, unknown> | null = null;
   let bestProb = -Infinity;
+  let bestId = '';
   for (const r of results) {
     // Round-4 review MAJOR-A: gate on the SHARED usable-probability predicate
     // (finite AND in [0,1]) so the null-leader + runner-up paths skip a thin /
     // out-of-range source exactly like the other selectors.
     if (!isUsableWinProbability(r.win_probability)) continue;
     const p = r.win_probability;
-    if (p > bestProb) {
+    // Round-5 (D-W): lexicographic option_id tiebreak on equal probability, the
+    // SAME deterministic tiebreak selectDeclaredWinner / deriveWinner use, so a
+    // tie resolves identically across all winner surfaces regardless of order.
+    const rid =
+      (typeof r.option_id === 'string' && r.option_id) ||
+      (typeof r.id === 'string' && r.id) ||
+      '';
+    if (best === null || p > bestProb || (p === bestProb && rid.localeCompare(bestId) < 0)) {
       best = r;
       bestProb = p;
+      bestId = rid;
     }
   }
   return best;
