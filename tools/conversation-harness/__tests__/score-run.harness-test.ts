@@ -50,9 +50,22 @@ describe('llmTokenTotals (FIX-2 null-honest tokens)', () => {
     expect(llmTokenTotals([{ usage: { input_tokens: 300, output_tokens: 40 } }])).toEqual({ input: 300, output: 40 });
   });
 
-  it('sums only the usage-bearing calls when mixed with usageless ones', () => {
+  it('is UNKNOWN (null) when ANY cost-bearing call is unmeasured — partial measurement is not a comparable total (FIX-2b / Codex finding 2)', () => {
+    // Codex repro: one measured 100/20 call + one call with NO usage data. The
+    // old FIX-2 summed only the measured subset (100/20), a NUMBER that then
+    // flows into opsFromRows as a real, cheaper-looking cost — a partial total
+    // is not a total. Honest answer: UNKNOWN, so the turn is excluded from the
+    // OPS cost comparison rather than falsely ranking a candidate cheaper.
     const mixed = [{ input_tokens: 100, output_tokens: 20 }, { role: 'routing', latency_ms: 5 }];
-    expect(llmTokenTotals(mixed)).toEqual({ input: 100, output: 20 });
+    expect(llmTokenTotals(mixed)).toEqual({ input: null, output: null });
+  });
+
+  it('is UNKNOWN when one direction is measured on every call but the other is not', () => {
+    // input measured on both calls, output missing on the second -> input still
+    // unknown because that second call is a cost-bearing call we could not fully
+    // measure; a turn's cost is only comparable when EVERY call is measured.
+    const partial = [{ input_tokens: 100, output_tokens: 20 }, { input_tokens: 50 }];
+    expect(llmTokenTotals(partial)).toEqual({ input: null, output: null });
   });
 });
 
