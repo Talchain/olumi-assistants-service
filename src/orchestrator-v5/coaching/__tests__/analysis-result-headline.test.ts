@@ -2321,6 +2321,65 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
     expect(out).toBeNull();
   });
 
+  // Finding 7 (D-W unrounded gate): the marginal-gap gate must read the TRUE
+  // raw-odds gap, not the gap rounded to whole percentage points. Rounding
+  // admitted a sub-1pp gap that rounds UP to 1pp and a >10pp gap that rounds
+  // DOWN to 10pp — both false "marginally better" claims.
+  it('leader trails by a sub-1pp gap that ROUNDS to 1pp → tie, neutral floor (no false marginal claim)', () => {
+    // 0.55 − 0.5449 = 0.51pp. The buggy gate rounds this to 1pp and emits the
+    // "marginally better" copy; the true gap is a tie, so the honest output is
+    // the neutral locked-template floor (null).
+    const NEAR_TIE: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.5449 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment: NEAR_TIE,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('leader trails by a >10pp gap that ROUNDS to 10pp → not marginal, neutral floor', () => {
+    // 0.55 − 0.4451 = 10.49pp. The buggy gate rounds this to 10pp and emits the
+    // "marginally better" copy; >10pp is beyond the marginal bound, so the
+    // honest output is the neutral locked-template floor (null).
+    const OVER_MARGIN: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.4451 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment: OVER_MARGIN,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('leader trails by exactly 10pp → still marginal (float-noise must not exclude the bound)', () => {
+    // 0.55 − 0.45 evaluates to 0.10000000000000003 in IEEE-754; the epsilon in
+    // the gate keeps this on-bound case inside the marginal window.
+    const EXACT_BOUND: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.45 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment: EXACT_BOUND,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    expect(out).toBe(
+      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.',
+    );
+  });
+
   it('the disambiguation sentence is accepted by the registry allowlist', () => {
     const sanctioned =
       'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.';

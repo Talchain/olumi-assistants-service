@@ -187,6 +187,24 @@ const MIN_LEAD_MARGIN = 0.05;
  */
 const MARGINAL_RAW_ODDS_GAP_PP = 10;
 
+/**
+ * Doctrine D-W: minimum raw-odds gap (probability-space) below which the
+ * runner-up is a TIE with the declared leader, not "marginally better". A gap
+ * under 1pp is effectively no difference, so the copy is suppressed. Kept in
+ * probability space (0.01 = 1pp) because the gate compares the UNROUNDED gap —
+ * see the branch below for why rounding to whole percentage points was wrong.
+ */
+const MIN_MARGINAL_RAW_ODDS_GAP = 0.01;
+
+/**
+ * IEEE-754 tolerance for the raw-odds gap gate. The gap is a difference of two
+ * doubles, so an exactly-on-bound value (e.g. `0.55 − 0.45` evaluates to
+ * `0.10000000000000003`, just over 0.10) must not be excluded by
+ * floating-point noise. This epsilon is far smaller than the sub-pp resolution
+ * the gate needs (it never admits a gap that rounds to a different pp bucket).
+ */
+const RAW_ODDS_GAP_FLOAT_EPSILON = 1e-9;
+
 const PARTIAL_SUFFIX =
   ' The run was flagged as partial — treat as provisional.';
 const UNKNOWN_SUFFIX =
@@ -391,16 +409,24 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     winner.runnerUpProb !== null &&
     winner.runnerUpProb > winner.winnerProb
   ) {
-    const rawGapPp = Math.round((winner.runnerUpProb - winner.winnerProb) * 100);
     // "marginally better" must be truthful: only a small raw-odds gap, and only
     // when the runner-up label is safe to name. A sub-1pp gap is effectively a
     // tie (not "better"); a gap beyond the marginal bound is not "marginal".
     // In every other leader-trails case return the neutral locked-template
     // floor (null) so we never assert a false "marginally" or a false lead.
+    //
+    // Gate on the UNROUNDED gap. Rounding the gap to whole percentage points
+    // (the prior `Math.round(gap * 100)` bug) admitted BOTH boundaries: a
+    // sub-1pp gap that rounds UP to 1pp (0.55 vs 0.5449 → 0.51pp, a tie) and a
+    // >10pp gap that rounds DOWN to 10pp (0.55 vs 0.4451 → 10.49pp, not
+    // marginal). Compare the true difference against [0.01, 0.10]; the epsilon
+    // absorbs IEEE-754 noise so an exactly-10pp gap still qualifies. Rounding is
+    // for presentation only (and this copy names no number, so none is needed).
+    const rawGap = winner.runnerUpProb - winner.winnerProb;
     if (
       winner.runnerUpLabel !== null &&
-      rawGapPp >= 1 &&
-      rawGapPp <= MARGINAL_RAW_ODDS_GAP_PP
+      rawGap >= MIN_MARGINAL_RAW_ODDS_GAP - RAW_ODDS_GAP_FLOAT_EPSILON &&
+      rawGap <= MARGINAL_RAW_ODDS_GAP_PP / 100 + RAW_ODDS_GAP_FLOAT_EPSILON
     ) {
       const disambig =
         `${winnerLabel} leads overall, though ${winner.runnerUpLabel} has marginally better raw probability.${suffix}`;

@@ -1840,3 +1840,186 @@ describe('D-U F2 lever-identity filter on assumption "confirm this" surfaces', (
     expect(coaching).toEqual([...ASSUMPTIONS]);
   });
 });
+
+// ============================================================================
+// Finding 5 (Codex): the free-text lever matcher UNDER- and OVER-suppresses.
+//   (a) UNDER: "Time-to-market" (hyphenated lever label) fails to match the
+//       spaced prose "Time to market" because punctuation was not normalised.
+//   (b) OVER: the generic single-word label "Cost" suppresses a NON-lever
+//       assumption ("Implementation cost estimates are uncertain") that merely
+//       uses the word — a bare generic token must require stronger identity.
+// Structural factor_id suppression is unaffected; only the free-text NAME scan
+// is corrected. Fail-closed: err toward keeping an honest surface.
+// ============================================================================
+describe('Finding 5 — free-text lever matcher normalisation', () => {
+  const TTM_FACTOR = { id: 'fac_ttm', label: 'Time-to-market', kind: 'factor' };
+  const COST_FACTOR = { id: 'fac_cost', label: 'Cost', kind: 'factor' };
+
+  it('UNDER-suppress fix: hyphenated lever label "Time-to-market" matches spaced prose "Time to market"', () => {
+    const fact = makeFact({
+      decisionReview: {
+        key_assumptions: [
+          'Time to market is correctly estimated.', // names the lever (punctuation differs) → drop
+          'Market conditions persist through the launch window.', // non-lever → ship
+        ],
+      },
+      graphNodes: [TTM_FACTOR],
+    });
+    const bodies = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_ttm']),
+    )
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    expect(bodies).toEqual(['Market conditions persist through the launch window.']);
+  });
+
+  it('OVER-suppress fix: generic single-word lever "Cost" does NOT drop a non-lever assumption using the word', () => {
+    const fact = makeFact({
+      decisionReview: {
+        key_assumptions: ['Implementation cost estimates are uncertain.'],
+      },
+      graphNodes: [COST_FACTOR],
+    });
+    const bodies = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_cost']),
+    )
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    expect(bodies).toEqual(['Implementation cost estimates are uncertain.']);
+  });
+
+  it('a distinctive single-word lever label still suppresses (generic guard is narrow)', () => {
+    const KUBERNETES = { id: 'fac_k8s', label: 'Kubernetes', kind: 'factor' };
+    const fact = makeFact({
+      decisionReview: {
+        key_assumptions: ['Kubernetes is the right platform for this workload.'],
+      },
+      graphNodes: [KUBERNETES],
+    });
+    const bodies = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_k8s']),
+    )
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    expect(bodies).toEqual([]); // distinctive token → suppressed
+  });
+});
+
+// ============================================================================
+// Finding 1 (Codex): the D-U lever-naming guard must cover EVERY free-text
+// decision-review surface — narrative, pre-mortem, scenario, and calibration
+// question — not just the evidence + assumption surfaces (#444/#445). A lever
+// named as an uncertainty on any of these leaks the same D-U integrity defect.
+// Display/suppression only: no producer number is read; a suppressed item is
+// ABSENT, and non-lever items on the same channel still ship.
+// ============================================================================
+describe('Finding 1 — lever-naming guard on all free-text surfaces', () => {
+  const LEVERS = new Set(['fac_delivery_risk']); // label "Delivery risk"
+
+  it('narrative naming the lever is dropped; a non-lever narrative ships', () => {
+    const named = makeFact({
+      decisionReview: {
+        narrative_summary: 'The outcome hinges on Delivery risk, which stays deeply uncertain.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    expect(
+      buildReviewCardBlocks(named, buildGraphNodeLookup(named), CTX, LEVERS)
+        .find((b) => b.card_kind === 'narrative'),
+    ).toBeUndefined();
+
+    const clean = makeFact({
+      decisionReview: {
+        narrative_summary: 'The outcome hinges on market timing, which stays uncertain.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    expect(
+      buildReviewCardBlocks(clean, buildGraphNodeLookup(clean), CTX, LEVERS)
+        .find((b) => b.card_kind === 'narrative'),
+    ).toBeDefined();
+  });
+
+  it('pre_mortem whose failure prose names the lever is dropped', () => {
+    const fact = makeFact({
+      decisionReview: {
+        pre_mortem: { failure_scenario: 'The project fails because Delivery risk was mismanaged.' },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    expect(
+      buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
+        .find((b) => b.card_kind === 'pre_mortem'),
+    ).toBeUndefined();
+  });
+
+  it('scenario_context whose trigger/consequence names the lever is skipped', () => {
+    const fact = makeFact({
+      decisionReview: {
+        scenario_contexts: {
+          edge_delivery_goal: {
+            trigger_description: 'If Delivery risk spikes',
+            consequence: 'the launch slips badly.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    expect(
+      buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
+        .find((b) => b.card_kind === 'scenario_context'),
+    ).toBeUndefined();
+  });
+
+  it('calibration_prompt question naming the lever is dropped; non-lever prompts ship', () => {
+    const fact = makeFact({
+      decisionReview: {
+        decision_quality_prompts: [
+          { question: 'How confident are you about Delivery risk?', principle: 'Calibration' },
+          { question: 'Have you considered the base rate?', principle: 'Base rates' },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const bodies = buildCoachingBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
+      .filter((b) => b.coaching_kind === 'calibration_prompt')
+      .map((b) => b.body);
+    expect(bodies).toEqual(['Have you considered the base rate?']);
+  });
+
+  it('without a lever set every free-text surface ships (byte-identical)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'The outcome hinges on Delivery risk, which stays deeply uncertain.',
+        pre_mortem: { failure_scenario: 'The project fails because Delivery risk was mismanaged.' },
+        scenario_contexts: {
+          edge_delivery_goal: {
+            trigger_description: 'If Delivery risk spikes',
+            consequence: 'the launch slips badly.',
+          },
+        },
+        decision_quality_prompts: [
+          { question: 'How confident are you about Delivery risk?', principle: 'Calibration' },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const lookup = buildGraphNodeLookup(fact);
+    const cards = buildReviewCardBlocks(fact, lookup, CTX); // no lever set
+    expect(cards.find((b) => b.card_kind === 'narrative')).toBeDefined();
+    expect(cards.find((b) => b.card_kind === 'pre_mortem')).toBeDefined();
+    expect(cards.find((b) => b.card_kind === 'scenario_context')).toBeDefined();
+    const cal = buildCoachingBlocks(fact, lookup, CTX)
+      .filter((b) => b.coaching_kind === 'calibration_prompt');
+    expect(cal).toHaveLength(1);
+  });
+});
