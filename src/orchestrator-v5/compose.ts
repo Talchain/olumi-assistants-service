@@ -577,7 +577,7 @@ function rebuildPhase3BlocksFresh(
   graphHash: string,
   lookup: GraphNodeLookup,
   freshness: 'fresh' | 'stale' = 'fresh',
-  rawGraphForLevers?: unknown,
+  rawPersistedGraphForLevers?: unknown,
 ): OlumiResponse['blocks'] {
   const ctx: BlockBuildCtx = {
     created_at: new Date().toISOString(),
@@ -586,13 +586,18 @@ function rebuildPhase3BlocksFresh(
   };
   const confidenceLookup = buildFactorConfidenceLookup(fact);
   // Doctrine D-U F2: the option-set LEVER union (structural factor_ids an
-  // option intervenes on) is read from the RAW turn graph — the enrichment /
-  // ContextPack projection strips intervention bundles, so it must NOT be the
-  // authority. Absent / unthreaded graph ⇒ empty set ⇒ no suppression
-  // (byte-identical). Threaded into the evidence "investigate this" surfaces so
-  // a lever is never NAMED as a gap to gather evidence about.
+  // option intervenes on) is read from the raw (un-projected) SAVED model — the
+  // persisted graph the pipeline already holds, threaded by both callers as the
+  // hash-gated persisted snapshot (current-turn branch) or the FRESH-verdict
+  // persisted graph (prior-fact branch); the enrichment / ContextPack
+  // projection strips intervention bundles, so the projected form must NOT be
+  // the authority. Persisted-first per the controlled-factor-authority guard —
+  // the compose.ts allowlist entry documents this provenance. Absent /
+  // unthreaded graph ⇒ empty set ⇒ no suppression (byte-identical). Threaded
+  // into the evidence "investigate this" surfaces so a lever is never NAMED as
+  // a gap to gather evidence about.
   const interventionControlledFactorIds =
-    collectInterventionControlledFactorIds(rawGraphForLevers);
+    collectInterventionControlledFactorIds(rawPersistedGraphForLevers);
   return [
     ...buildReviewCardBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...buildCoachingBlocks(fact, lookup, ctx),
