@@ -468,20 +468,30 @@ const WIN_NEGATION_CUE = /\b(?:not|never|unlikely|rather than|instead of|far fro
  * crownings ("Option B is the better choice", "the clear leader … should be
  * chosen") carry none of these qualifiers and still fire.
  *
- *  - DIMENSION: a win-cue scoped to one dimension via "… on/in/for <noun>"
- *    ("wins on cost", "ahead in early estimates") — a per-dimension win, not an
- *    overall verdict.
- *  - HISTORICAL: past-tense / provisional-history framing ("was ahead",
- *    "early estimates", "initially", "previously") — describes a prior state,
- *    not the current crowning.
+ *  - DIMENSION: a win-cue scoped to one dimension via "… on/in terms of <noun>"
+ *    ("wins on cost") — a per-dimension win, not an overall verdict.
+ *  - HISTORICAL: genuine past-tense framing ("was ahead", "initially",
+ *    "previously") — describes a prior state, not the current crowning.
  *  - ATTENTION: the sentence is about scrutinising / validating / objecting to
  *    an option ("recommend validating", "the strongest objection", "assumptions"),
  *    not crowning it.
+ *
+ * Round-3 review MAJOR-2 — these three were narrowed to stop over-suppressing
+ * present-tense crownings (err toward FIRING the FATAL; the monolith fallback is
+ * the safety net):
+ *  - `estimates`/`estimated`/`early` REMOVED from HISTORICAL — a decision review
+ *    is built ON estimated values, so "the estimates favour Option B, which
+ *    should be chosen" is a present-tense crowning, not history. Genuine history
+ *    ("was ahead in early estimates") is still caught by `was`.
+ *  - DIMENSION dropped the bare prepositions `in`/`for`/`at` (which appear in
+ *    plain overall crownings like "the better choice for us") and now requires a
+ *    clear dimensional marker: `on` or an explicit "in terms of / when it comes
+ *    to / with respect to / regarding" phrase.
  */
 const DIMENSION_QUALIFIER_CUE =
-  /\b(?:wins?|won|winning|ahead|leads?|leading|strongest|stronger|scores?|beats?|outperforms?|better)\b[^.!?]*?\b(?:on|in|for|at|regarding|when it comes to|in terms of|with respect to)\b\s+\S/i;
+  /\b(?:wins?|won|winning|ahead|leads?|leading|strongest|stronger|scores?|beats?|outperforms?|better)\b[^.!?]*?\b(?:on|regarding|when it comes to|in terms of|with respect to)\b\s+\S/i;
 const HISTORICAL_QUALIFIER_CUE =
-  /\b(?:was|were|had been|has been|used to|previously|initially|earlier|early|originally|formerly|at first|estimates?|estimated)\b/i;
+  /\b(?:was|were|had been|used to|previously|initially|earlier|originally|formerly|at first)\b/i;
 const ATTENTION_QUALIFIER_CUE =
   /\b(?:validat\w*|investigat\w*|assumptions?|objections?|concerns?|caveats?|scrutin\w*|audit\w*|re-?examin\w*|reservations?|doubts?|worries|weakness\w*)\b/i;
 

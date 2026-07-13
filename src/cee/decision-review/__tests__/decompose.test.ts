@@ -642,6 +642,31 @@ describe('checkComposedConsistency — WIN_CUE false-positive fix (M5)', () => {
     expect(res.consistent).toBe(false);
     expect(res.fatal.join(' ')).toMatch(/wrong-winner/i);
   });
+
+  // Round-3 review MAJOR-2: the disqualifiers over-suppressed present-tense
+  // crownings. RED against the pre-fix cues (`estimates` in HISTORICAL and the
+  // bare `for`/`in` prepositions in DIMENSION suppressed these wrong-winner
+  // crownings). Narrative names the CORRECT winner (Option A) in one sentence so
+  // the presence check passes, then CROWNS the runner-up in another.
+  it('FATAL: an estimates-based present-tense crowning of the runner-up still fires', () => {
+    const r1 = goodR1();
+    r1.narrative_summary =
+      'Option A is the recommended overall choice. The estimates favour Option B; it should be chosen.';
+    const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctxFor());
+    expect(res.consistent).toBe(false);
+    expect(res.fatal.join(' ')).toMatch(/wrong-winner/i);
+  });
+
+  it('FATAL: a preposition-containing overall crowning of the runner-up still fires', () => {
+    const r1 = goodR1();
+    r1.narrative_summary =
+      'Option A leads on the evidence. Overall, Option B is the better choice for us and should be chosen.';
+    const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctxFor());
+    expect(res.consistent).toBe(false);
+    expect(res.fatal.join(' ')).toMatch(/wrong-winner/i);
+  });
 });
 
 // ============================================================================

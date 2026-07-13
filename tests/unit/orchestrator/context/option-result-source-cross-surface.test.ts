@@ -21,7 +21,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   readOptionResultSources,
-  firstOptionResultSource,
+  winnerOptionResultSource,
 } from '../../../../src/orchestrator/context/option-result-source.js';
 import { compactAnalysis } from '../../../../src/orchestrator/context/analysis-compact.js';
 import { getOptionResultCandidates } from '../../../../src/orchestrator/analysis-state.js';
@@ -68,7 +68,9 @@ describe('M1 — single-sourced current-first winner across all four surfaces', 
     expect(sources.length).toBe(2);
     // sources[0] is the current option_comparison (Option A at 0.72).
     expect(sources[0]![0]!.win_probability).toBe(0.72);
-    expect(firstOptionResultSource(conflictingEnvelope())[0]!.win_probability).toBe(0.72);
+    // Both sources carry win_probability, so the walking winner source is the
+    // current option_comparison (fresh beats stale).
+    expect(winnerOptionResultSource(conflictingEnvelope())[0]!.win_probability).toBe(0.72);
   });
 
   it('all four surfaces name Option A (current), never the stale legacy Option B', () => {
@@ -104,23 +106,61 @@ describe('M1 — single-sourced current-first winner across all four surfaces', 
     expect(headline!.startsWith('Option B')).toBe(false);
   });
 
-  it('null-leader case WALKS sources: a thin current source falls through to a richer one', () => {
-    // Current `option_comparison` has entries but NONE carry a usable
-    // win_probability; the legacy `results` does. With no declared leader the
-    // enricher must WALK to the legacy source rather than coerce to no_winner.
-    const env: Record<string, unknown> = {
+  // Round-3 MAJOR-1: a THIN-CURRENT envelope. The current `option_comparison`
+  // has entries with id/label but NO win_probability, while the legacy
+  // `results` carries it. All four winner surfaces must WALK past the thin
+  // current source and land on results[] (Option A, 0.66) — a plain
+  // first-non-empty read kept the thin source and coerced compact/state to a 0%
+  // winner (the exact M1-target envelope class the earlier fixup regressed).
+  function thinCurrentEnvelope(): Record<string, unknown> {
+    return {
       option_comparison: [
         { option_id: 'opt-a', option_label: 'Option A' },
         { option_id: 'opt-b', option_label: 'Option B' },
       ],
       results: [
-        { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.66 },
-        { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.34 },
+        { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.66, outcome: { mean: 100 } },
+        { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.34, outcome: { mean: 90 } },
       ],
     };
+  }
+
+  it('thin-current: the shared winner source WALKS to results[] (0.66), not the thin option_comparison', () => {
+    const src = winnerOptionResultSource(thinCurrentEnvelope());
+    expect(winnerOf(src)).toBe('opt-a');
+    const optA = src.find((c) => c.option_id === 'opt-a') as Record<string, unknown>;
+    expect(optA.win_probability).toBe(0.66);
+  });
+
+  it('thin-current: all four surfaces name results[] Option A at 0.66 (compact + state must not regress to 0%)', () => {
+    const env = thinCurrentEnvelope();
+
+    // 1. analysis-compact — pre-fix kept the thin option_comparison and emitted
+    //    a 0% winner; must now walk to results[] (0.66).
+    const compact = compactAnalysis(env as unknown as V2RunResponseEnvelope);
+    expect(compact).not.toBeNull();
+    expect(compact!.winner.option_id).toBe('opt-a');
+    expect(compact!.winner.win_probability).toBe(0.66);
+
+    // 2. analysis-state — pre-fix returned the thin source (no usable winner).
+    const candidates = getOptionResultCandidates(env as unknown as V2RunResponseEnvelope);
+    expect(winnerOf(candidates)).toBe('opt-a');
+    const optA = candidates.find((c) => (c as Record<string, unknown>).option_id === 'opt-a') as Record<string, unknown>;
+    expect(optA.win_probability).toBe(0.66);
+
+    // 3. decision-review enricher (already walked — regression guard).
     const invoke = buildInvokeInputForTests('brief', env, null);
     expect(invoke).not.toBeNull();
     expect(invoke!.winner.id).toBe('opt-a');
     expect(invoke!.winner.win_probability).toBe(0.66);
+
+    // 4. analysis-result-headline (already walked — regression guard).
+    const headline = buildAnalysisResultHeadline({
+      enrichment: env,
+      leading_option_id: '',
+      status_kind: 'ok',
+    });
+    expect(headline).not.toBeNull();
+    expect(headline!.startsWith('Option A')).toBe(true);
   });
 });

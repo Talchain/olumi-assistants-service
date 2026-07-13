@@ -1,6 +1,6 @@
 import type { ConversationContext, DecisionStage, V2RunResponseEnvelope } from "./types.js";
 import { log } from "../utils/telemetry.js";
-import { firstOptionResultSource } from "./context/option-result-source.js";
+import { winnerOptionResultSource } from "./context/option-result-source.js";
 
 function hasConfiguredInterventions(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
@@ -9,18 +9,21 @@ function hasConfiguredInterventions(value: unknown): boolean {
 }
 
 /**
- * Option-result candidate array for this envelope, in CURRENT-first precedence.
+ * Option-result candidate array for this envelope, in CURRENT-first precedence
+ * with a WALK to the first source carrying a usable win_probability.
  *
- * M1 (Codex r2 pre-merge review): source precedence is single-sourced via
- * {@link firstOptionResultSource} — the SAME reader analysis-compact's
- * getResultsArray, the decision-review enricher, and analysis-result-headline
- * now share, so all four winner-derivation surfaces agree. Previously this
- * took `results` FIRST (legacy) while the enricher/headline took
- * `option_comparison` first, so a both-present-conflicting envelope produced
- * disagreeing winners. Exported so the cross-surface agreement test can pin it.
+ * M1 + round-3 MAJOR-1: source precedence + walk are single-sourced via
+ * {@link winnerOptionResultSource} — the SAME winner reader analysis-compact,
+ * the decision-review enricher, and analysis-result-headline now share, so all
+ * four winner surfaces agree on BOTH the both-present-conflicting envelope
+ * (current beats stale legacy) AND the thin-current envelope (a current source
+ * lacking win_probability is skipped for the richer results[]). Previously this
+ * took `results` FIRST (legacy); the earlier fixup's plain first-non-empty read
+ * regressed the thin-current case to a 0% winner. Exported so the cross-surface
+ * agreement test can pin it.
  */
 export function getOptionResultCandidates(response: V2RunResponseEnvelope): unknown[] {
-  const candidates = firstOptionResultSource(response as Record<string, unknown>);
+  const candidates = winnerOptionResultSource(response as Record<string, unknown>);
 
   // Log unexpected shape for diagnostics: `results` is present but no
   // recognised option array could be extracted from it (or the envelope).

@@ -11,7 +11,7 @@
 import type { V2RunResponseEnvelope } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
-import { firstOptionResultSource } from "./option-result-source.js";
+import { winnerOptionResultSource } from "./option-result-source.js";
 
 // ============================================================================
 // Output Types
@@ -129,8 +129,9 @@ function isOptionResult(r: unknown): r is OptionResult {
  *
  * DISTINCT from the WINNER source (M1, Codex r2 pre-merge review). The winner /
  * options projection in {@link compactAnalysis} is single-sourced current-first
- * via {@link firstOptionResultSource} (`option_comparison` beats the legacy
- * `results` copy). This reader is a SEPARATE concern: the per-option
+ * via {@link winnerOptionResultSource} (`option_comparison` beats the legacy
+ * `results` copy, walking past a thin-current source that lacks win_probability).
+ * This reader is a SEPARATE concern: the per-option
  * aggregation functions (top_drivers, flip_thresholds, fragile_edges,
  * constraint_tensions) read the nested per-option `factor_sensitivity`,
  * `robustness`, and `constraint_probabilities` — data that lives in the
@@ -239,7 +240,11 @@ function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {
     }
   }
 
-  // Fallback: robustness.overall_robustness on first option's result
+  // Fallback: robustness.overall_robustness on first option's result.
+  // Reads the per-option analysis reader (getResultsArray, results-first) — this
+  // is per-option robustness data (which lives in the results[] shape alongside
+  // factor_sensitivity), NOT the winner, so it is correct-by-design that this
+  // does not use the current-first winner source (round-3 review minor).
   const results = getResultsArray(response);
   const firstResult = results[0];
   if (firstResult && typeof firstResult === 'object') {
@@ -615,16 +620,18 @@ export function compactAnalysis(
       : 'ok';
     if (status === 'blocked' || status === 'failed') return null;
 
-    // Extract options + WINNER from the single-sourced current-first reader
-    // (M1, Codex r2 pre-merge review): `option_comparison` (current PLoT V2)
-    // beats the legacy `results` copy, so compactAnalysis names the SAME winner
-    // as the decision-review enricher, analysis-result-headline, and
-    // analysis-state on a both-present-conflicting envelope. (Per-option driver
-    // / flip / fragility aggregation below is a SEPARATE concern — see
-    // getResultsArray, which stays results-first because the per-option
-    // factor_sensitivity/robustness shape lives in `results`, not in the
-    // identity-only live option_comparison.)
-    const results = [...firstOptionResultSource(response as Record<string, unknown>)];
+    // Extract options + WINNER from the single-sourced WALKING current-first
+    // reader (M1 + round-3 MAJOR-1): `option_comparison` (current PLoT V2) beats
+    // the legacy `results` copy, BUT a thin-current source lacking win_probability
+    // is skipped so the winner falls through to the source that carries one —
+    // exactly like the enricher/headline walk. So compactAnalysis names the SAME
+    // winner as the decision-review enricher, analysis-result-headline, and
+    // analysis-state on both the conflicting AND the thin-current envelope.
+    // (Per-option driver / flip / fragility aggregation below is a SEPARATE
+    // concern — see getResultsArray, which stays results-first because the
+    // per-option factor_sensitivity/robustness shape lives in `results`, not in
+    // the identity-only live option_comparison.)
+    const results = [...winnerOptionResultSource(response as Record<string, unknown>)];
     const options: OptionSummary[] = results
       .filter(isOptionResult)
       .filter((r) => {
