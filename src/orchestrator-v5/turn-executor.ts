@@ -1467,7 +1467,12 @@ export async function runTurnExecutor(
       // construction, no RPC; byte-identity pinned by test), 'inject'
       // performs ONE read and degrades to "no block" on any failure (never
       // a turn failure). Lag/staleness (01 §4) is computed against the same
-      // prior turns the pack's verbatim window projects from.
+      // prior turns the pack's verbatim window projects from — the FULL hot
+      // read (≤ SESSION_READ_WINDOW_TURNS, default 20), NOT the 5-turn pack
+      // slice; that surplus is what lets the loader's memory-hole guard
+      // (Codex r2 blocker 1) verify watermark coverage and REFUSE the block
+      // (disclosed-absence note) when unabsorbed turns fall outside the
+      // verbatim slice.
       const summaryInjection = await loadConversationSummaryForInjection({
         flag: config.features.rollingSummary,
         scenarioId: context.session_id,

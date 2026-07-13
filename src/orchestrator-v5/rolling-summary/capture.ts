@@ -17,8 +17,16 @@
  *    persisted turn history (readRecent with a large explicit limit — unclamped),
  *    never the 20-turn hot-path window and never a summary-of-summary.
  *  - REJECT-AND-KEEP-PRIOR: a summariser emitting outside the four-slot schema
- *    is rejected; the prior summary is kept (or the deterministic floor seeded
- *    when there is no prior) — never a garbage write.
+ *    (including ANY missing slot — Codex r2 blocker 2) is rejected; the prior
+ *    summary is kept (or the deterministic floor seeded when there is no
+ *    prior) — never a garbage write, never silent slot erasure.
+ *  - SINGLE-FLIGHT + COALESCING (Codex r2 fix 4b): at most one pass in flight
+ *    per scenario; commits landing mid-flight coalesce into one rerun
+ *    (latest-wins — each pass re-reads full history). In-process only; the
+ *    cross-instance guarantee remains the DB monotonic guard.
+ *  - HONEST HISTORY CAP (Codex r2 fix 4a): a full-history read that fills
+ *    SUMMARY_FULL_HISTORY_READ_LIMIT marks the stored summary history_capped
+ *    and the text discloses the partiality — no silent truncation.
  */
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
@@ -32,11 +40,17 @@ import { parseSummaryOutput } from './parse-summary.js';
 import type { SummariserModel } from './summariser.js';
 import type { RollingSummaryStorePort } from './store-adapter.js';
 
+import { SUMMARY_FULL_HISTORY_READ_LIMIT } from './summary-types.js';
+
 /** Read the full persisted history off the hot-path window. readRecent is
  *  unclamped (verified); a large limit is effectively "full history" for any
  *  real product session, and the regen path deliberately does NOT inherit the
- *  default-20 read window (01 §2 / R1). */
-export const SUMMARY_FULL_HISTORY_READ_LIMIT = 1000;
+ *  default-20 read window (01 §2 / R1). When a read FILLS the limit the
+ *  history may be partial — the stored summary is marked `history_capped`
+ *  and its text discloses the partiality (Codex r2 fix 4a). The constant
+ *  lives in summary-types.ts (assemble.ts renders the number); re-exported
+ *  here for existing importers. */
+export { SUMMARY_FULL_HISTORY_READ_LIMIT };
 
 /** Minimal structural slice of a persisted turn the maintainer needs — a
  *  superset-compatible view of SessionTurnWithContent (snake_case content
@@ -87,13 +101,97 @@ function toSummariserTurn(t: MaintainerTurn): SummariserTurn {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Per-scenario single-flight + latest-wins coalescing (Codex r2 fix 4b).
+//
+// commit.ts fires one independent job per commit; without coalescing, N
+// near-simultaneous commits for one scenario stampede N full-history reads +
+// N model calls racing the same singleton row (the monotonic write already
+// prevents REGRESSION — this bounds waste and race pressure). In-process
+// scope is acceptable per the design pack: cross-instance safety rests on
+// the DB guard, not on this map.
+//
+// Semantics: at most ONE pass in flight per scenario. Arrivals during a
+// flight coalesce into at most ONE rerun (latest-wins — each pass re-reads
+// the full persisted history, so a single rerun absorbs every commit that
+// landed during the flight for everything derivable from history).
+//
+// EXCEPTION (MINOR-1): the deterministic-floor inputs briefText/goalLabel are
+// NOT derivable from history — they arrive only on the turn that carries them
+// (see the invariant note at buildDeterministicFloor's callers). Latest-wins
+// must therefore MERGE them (preserve the last non-null value), not overwrite
+// a brief-carrying commit's value with a later brief-less commit's null; else
+// the rerun would summarise without the brief the coalesced-away commit
+// carried.
+// ---------------------------------------------------------------------------
+
+interface SingleFlightEntry {
+  rerun: MaintainRollingSummaryArgs | null;
+  /** Carried floor inputs — the last non-null briefText/goalLabel seen across
+   *  the in-flight pass and every coalesced arrival (MINOR-1). Not re-readable
+   *  from history, so preserved rather than dropped by latest-wins. */
+  carriedBriefText: string | null | undefined;
+  carriedGoalLabel: string | null | undefined;
+}
+
+const inFlightByScenario = new Map<string, SingleFlightEntry>();
+
+/** Test-only: clear the single-flight registry between cases. */
+export function resetRollingSummarySingleFlightForTests(): void {
+  inFlightByScenario.clear();
+}
+
 /**
  * Maintain the rolling summary after a successful commit. Fire-and-forget:
- * callers `void` the promise; every path is non-throwing.
+ * callers `void` the promise; every path is non-throwing. Per-scenario
+ * single-flight: a call that arrives while a pass is in flight for the same
+ * scenario returns immediately after scheduling ONE coalesced rerun.
  */
 export async function maintainRollingSummaryForCommit(
   args: MaintainRollingSummaryArgs,
 ): Promise<void> {
+  const existing = inFlightByScenario.get(args.scenarioId);
+  if (existing !== undefined) {
+    // Latest-wins for everything history re-derives; MERGE the floor inputs
+    // (MINOR-1): keep the last non-null briefText/goalLabel so a brief-less
+    // commit coalescing over a brief-carrying pass does not drop the brief.
+    // No telemetry event: the rerun's own v5.summary.updated is the durable
+    // record of the coalesced work.
+    if (args.briefText != null) existing.carriedBriefText = args.briefText;
+    if (args.goalLabel != null) existing.carriedGoalLabel = args.goalLabel;
+    existing.rerun = {
+      ...args,
+      briefText: args.briefText ?? existing.carriedBriefText,
+      goalLabel: args.goalLabel ?? existing.carriedGoalLabel,
+    };
+    log.debug(
+      { scenario_id: args.scenarioId, turn_id: args.turnId },
+      'RollingSummary — maintainer pass already in flight; commit coalesced into one rerun',
+    );
+    return;
+  }
+  const entry: SingleFlightEntry = {
+    rerun: null,
+    carriedBriefText: args.briefText,
+    carriedGoalLabel: args.goalLabel,
+  };
+  inFlightByScenario.set(args.scenarioId, entry);
+  try {
+    await runMaintainPass(args);
+    // Drain: at most one rerun per completed pass; a commit landing during
+    // the rerun re-arms it (bounded by arrival rate, never a queue).
+    while (entry.rerun !== null) {
+      const next = entry.rerun;
+      entry.rerun = null;
+      await runMaintainPass(next);
+    }
+  } finally {
+    inFlightByScenario.delete(args.scenarioId);
+  }
+}
+
+/** One maintenance pass (the pre-single-flight body). Non-throwing. */
+async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> {
   const startedAt = Date.now();
   try {
     const store = args.summaryStore ?? getRollingSummaryStore();
@@ -107,6 +205,10 @@ export async function maintainRollingSummaryForCommit(
       args.scenarioId,
       SUMMARY_FULL_HISTORY_READ_LIMIT,
     );
+    // Honest partiality (Codex r2 fix 4a): a read that FILLS the limit may
+    // have truncated older history — the stored summary must say so (marker
+    // + in-text disclosure), never claim silent completeness.
+    const historyCapped = newestFirst.length >= SUMMARY_FULL_HISTORY_READ_LIMIT;
     const chronologicalTurns: SummariserTurn[] = [...newestFirst].reverse().map(toSummariserTurn);
     if (chronologicalTurns.length === 0) {
       emitUpdated(args, { status: 'no_turns', duration_ms: Date.now() - startedAt });
@@ -206,6 +308,7 @@ export async function maintainRollingSummaryForCommit(
       watermark: input.watermark,
       version,
       generator: mode,
+      historyCapped,
     });
     const outcome = await store.upsertSummary(args.scenarioId, summary);
     emitUpdated(args, {
@@ -215,6 +318,7 @@ export async function maintainRollingSummaryForCommit(
       duration_ms: Date.now() - startedAt,
       chars: summary.text.length,
       capped_fallback: input.cappedFallback,
+      history_capped: historyCapped,
       usage,
     });
   } catch (err) {
@@ -272,6 +376,7 @@ function emitUpdated(
     readonly duration_ms: number;
     readonly chars?: number;
     readonly capped_fallback?: boolean;
+    readonly history_capped?: boolean;
     readonly reject_reason?: string;
     readonly error_name?: string;
     readonly usage?: { input_tokens?: number; output_tokens?: number };
@@ -288,6 +393,7 @@ function emitUpdated(
       duration_ms: fields.duration_ms,
       chars: fields.chars ?? null,
       capped_fallback: fields.capped_fallback ?? null,
+      history_capped: fields.history_capped ?? null,
       reject_reason: fields.reject_reason ?? null,
       error_name: fields.error_name ?? null,
       input_tokens: fields.usage?.input_tokens ?? null,

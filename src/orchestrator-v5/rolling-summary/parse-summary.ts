@@ -41,6 +41,7 @@ const PROVENANCE_RE = /\[\s*(t\d+(?:\s*,\s*t\d+)*)\s*\]/gi;
 export type SummaryParseReject =
   | 'empty'
   | 'missing_frame'
+  | 'missing_slot'
   | 'unknown_label'
   | 'content_before_label'
   | 'over_cap'
@@ -82,9 +83,13 @@ function extractRefs(text: string): { clean: string; refs: string[] } {
 }
 
 /**
- * Parse the summariser's raw text into four slots, or reject. STRICT: FRAME
- * must be present; every non-blank line must belong to a known slot; no slot
- * may appear twice; total length must be within the hard cap.
+ * Parse the summariser's raw text into four slots, or reject. STRICT: ALL
+ * FOUR slots must be present exactly once (Codex r2 blocker 2 — a response
+ * missing CONSTRAINTS/RESOLVED/OPEN previously parsed OK and the missing
+ * slots were stored as "(none)", silently erasing prior memory; now ANY
+ * missing slot rejects and the maintainer keeps the prior summary); every
+ * non-blank line must belong to a known slot; no slot may appear twice;
+ * total length must be within the hard cap.
  */
 export function parseSummaryOutput(raw: string): ParseSummaryResult {
   if (raw.trim().length === 0) return { ok: false, reason: 'empty' };
@@ -112,6 +117,14 @@ export function parseSummaryOutput(raw: string): ParseSummaryResult {
   }
 
   if (!acc.has('FRAME')) return { ok: false, reason: 'missing_frame' };
+
+  // ALL FOUR slots, exactly once each ('duplicate_slot' above catches twice;
+  // this catches absence). A slot the model dropped is NOT "(none)" — "(none)"
+  // is an explicit model statement; absence is a schema violation that would
+  // overwrite prior memory with nothing.
+  for (const slot of ROLLING_SUMMARY_SLOTS) {
+    if (!acc.has(slot)) return { ok: false, reason: 'missing_slot' };
+  }
 
   // Only the four known slots may exist — matchLabel already guarantees this,
   // but assert the invariant explicitly for the reader.

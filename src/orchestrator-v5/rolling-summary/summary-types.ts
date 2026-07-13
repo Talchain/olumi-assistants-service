@@ -31,6 +31,16 @@ import { z } from 'zod';
 export const ROLLING_SUMMARY_SLOTS = ['FRAME', 'CONSTRAINTS', 'RESOLVED', 'OPEN'] as const;
 export type RollingSummarySlot = (typeof ROLLING_SUMMARY_SLOTS)[number];
 
+/** Canonical render labels for the four slots — ONE vocabulary shared by the
+ *  stored-text renderer (assemble.ts), the injector (inject.ts), and the
+ *  incremental prior-summary rendering (build-input.ts). */
+export const ROLLING_SUMMARY_SLOT_LABELS: Record<RollingSummarySlot, string> = {
+  FRAME: 'DECISION FRAME',
+  CONSTRAINTS: 'CONSTRAINTS & PREFERENCES',
+  RESOLVED: 'RESOLVED',
+  OPEN: 'OPEN',
+};
+
 // ---------------------------------------------------------------------------
 // Bounds & cadence constants (all revisable by measurement, not by wire change).
 // ---------------------------------------------------------------------------
@@ -56,6 +66,15 @@ export const SUMMARY_REGEN_INPUT_CHAR_BUDGET = 200_000;
 
 /** The verbatim tail kept in the capped-input fallback (01 §2). */
 export const SUMMARY_INPUT_TAIL_TURNS = 20;
+
+/** The maintainer's full-history read limit (readRecent is unclamped; this
+ *  bounds one pass's read). When a read FILLS this limit the "full history"
+ *  may be partial — the maintainer then marks the stored summary
+ *  `history_capped` and the rendered text discloses the partiality in-band
+ *  (Codex r2 fix 4a: no silent partiality). Lives here (not capture.ts) so
+ *  assemble.ts can render the number without a circular import; capture.ts
+ *  re-exports it for compatibility. */
+export const SUMMARY_FULL_HISTORY_READ_LIMIT = 1000;
 
 /** Shape version of the stored JSONB (NOT the monotonic `version` counter).
  *  A stored summary whose schema_version differs forces a regen. */
@@ -99,6 +118,13 @@ export interface RollingSummary {
   readonly generator: RollingSummaryGenerator;
   /** Stored shape version (SUMMARY_SCHEMA_VERSION). */
   readonly schema_version: number;
+  /** Honest-partiality marker (Codex r2 fix 4a): present-and-true when the
+   *  maintainer's full-history read FILLED SUMMARY_FULL_HISTORY_READ_LIMIT,
+   *  so the "full history" behind this summary may be partial. The rendered
+   *  text (stored and injected) discloses it in-band. ABSENT (not false)
+   *  when the read was complete — byte-stable stored shape for the common
+   *  case, and tolerated by the read parse as optional. */
+  readonly history_capped?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +153,7 @@ export const RollingSummarySchema = z.object({
   version: z.number(),
   generator: z.enum(['regen', 'incremental', 'floor']),
   schema_version: z.number().default(0),
+  history_capped: z.boolean().optional(),
 });
 
 export function parseStoredRollingSummary(raw: unknown): RollingSummary | null {

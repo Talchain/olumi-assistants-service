@@ -11,6 +11,32 @@
 --   error as a RollingSummaryStoreError, which the fire-and-forget maintainer
 --   logs and swallows — never a turn failure, never silent corruption.
 --
+-- ⚠ DRAFT AMENDED 2026-07-13 (pre-execution — file never run anywhere, so
+--   in-place amendment is safe; Codex round-2 fix 3): the monotonic guard is
+--   now COMPOSITE (updated_turn_created_at, updated_turn_id, version) instead
+--   of the timestamp alone. The session store permits same-timestamp turns
+--   and totally orders them (created_at, turn_id) — see readRecent's
+--   deterministic tiebreak in session/supabase-store.ts — so a timestamp-only
+--   `<` guard would silently no-op the write that absorbs a same-timestamp
+--   sibling of the watermark turn, stranding that turn's content out of the
+--   summary permanently. Signatures are UNCHANGED (the tiebreak keys are read
+--   from p_summary, which already carries them), so the rollback file needs
+--   no change. JS APPROXIMATION of this clause (NOT a byte-identical port —
+--   see the divergence note there): FakeMonotonicStore in
+--   src/orchestrator-v5/rolling-summary/__tests__/maintainer.test.ts.
+--
+-- ⚠ DRAFT AMENDED AGAIN 2026-07-13 (pre-execution — still never run anywhere;
+--   PR #442 round-2 review MINOR-3): the RS001 shape guard now also validates
+--   the PRIMARY composite key `updated_turn_created_at` INSIDE p_summary — it
+--   previously type-checked only the two tiebreak keys (updated_turn_id,
+--   version), leaving the read-side Zod parse and the injector to trust an
+--   unchecked JSONB timestamp. The guard now asserts it is a JSON string, is
+--   castable to timestamptz, and EQUALS the separate p_updated_turn_created_at
+--   monotonic-key param (the store passes the same value for both; a
+--   divergence would persist a summary whose watermark disagrees with the key
+--   it was ordered by). Signature UNCHANGED — rollback file still matches, no
+--   rollback change required.
+--
 -- Target: Staging Supabase
 -- Date authored: 2026-07-12
 -- Date executed: (pending — Paul-gated batch)
@@ -35,12 +61,19 @@
 --      maintainer reads the prior summary to build the incremental input; the
 --      injector — S4 follow-up — reads it to compute summary_lag and inject).
 --
--- WATERMARK (the monotonic key): rolling_summary->>'updated_turn_created_at'
---   — the created_at (timestamptz) of the newest conversation turn the summary
---   has absorbed. Turn created_at is monotonic per scenario (append order), so
---   "strictly newer watermark" == "covers strictly more of the conversation".
---   updated_turn_id is stored alongside for provenance/debug; the ORDER guard
---   is on the timestamp (id is a client string, not orderable in SQL).
+-- WATERMARK (the monotonic key, COMPOSITE): the guard orders on
+--   (updated_turn_created_at, updated_turn_id, version) — timestamp first;
+--   at a timestamp tie, updated_turn_id text order breaks it (matching the
+--   session store's readRecent tiebreak `ORDER BY created_at DESC, turn_id
+--   DESC`, so "greater turn_id at equal created_at" == "later in the store's
+--   total order"); at a full watermark tie, the app-side monotonic `version`
+--   counter breaks it (a later pass that absorbed a same-timestamp SIBLING
+--   of an unchanged watermark turn — the sibling-absorption write MUST land).
+--   "Strictly greater composite" == "covers strictly more of the
+--   conversation". Collation note: turn ids are ASCII (uuid-style client
+--   strings), so text comparison here, PostgREST ordering, and JS string
+--   comparison agree on the range in use; the tiebreak only ever decides
+--   same-timestamp siblings.
 --
 -- DOCTRINE (design pack 04 §3.4 — "no layer writes to another"): this RPC
 --   writes ONLY scenarios.rolling_summary. It never touches graph, brief_text,
@@ -115,14 +148,21 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
   v_stored_watermark TIMESTAMPTZ;
+  v_stored_turn_id   TEXT;
+  v_stored_version   BIGINT;
+  v_new_turn_id      TEXT;
+  v_new_version      BIGINT;
   v_found            BOOLEAN;
   v_applied          BOOLEAN := false;
 BEGIN
   -- Value-level shape guard (RS001). The summary is read back into a
   -- .strict()-style Zod parse and injected into an LLM prompt; a malformed
   -- singleton would be silently un-injectable. Enforce object-ness + the
-  -- required top-level key-set. (Deep slot validation is the app-layer parse;
-  -- this is the DB backstop, mirroring the decision_records guard posture.)
+  -- required top-level key-set, and the types of the PRIMARY composite key
+  -- (updated_turn_created_at) plus the two tiebreak keys (updated_turn_id,
+  -- version) — they are all compared/ordered below, so a wrong type must be
+  -- refused, not coerced. (Deep slot validation is the app-layer parse; this
+  -- is the DB backstop, mirroring the decision_records guard posture.)
   IF p_summary IS NULL OR jsonb_typeof(p_summary) <> 'object'
      OR NOT (p_summary ? 'text')
      OR NOT (p_summary ? 'slots')
@@ -130,7 +170,10 @@ BEGIN
      OR NOT (p_summary ? 'updated_turn_created_at')
      OR NOT (p_summary ? 'version')
      OR NOT (p_summary ? 'generator')
-     OR jsonb_typeof(p_summary->'slots') <> 'array' THEN
+     OR jsonb_typeof(p_summary->'slots') <> 'array'
+     OR jsonb_typeof(p_summary->'updated_turn_id') <> 'string'
+     OR jsonb_typeof(p_summary->'updated_turn_created_at') <> 'string'
+     OR jsonb_typeof(p_summary->'version') <> 'number' THEN
     RAISE EXCEPTION 'upsert_rolling_summary: p_summary is malformed (missing required keys or wrong types)'
       USING ERRCODE = 'RS001';
   END IF;
@@ -138,12 +181,33 @@ BEGIN
     RAISE EXCEPTION 'upsert_rolling_summary: p_updated_turn_created_at must be a finite timestamptz'
       USING ERRCODE = 'RS001';
   END IF;
+  -- PRIMARY composite key consistency (RS001 — MINOR-3): the read-side Zod
+  -- parse and the injector trust p_summary.updated_turn_created_at, while the
+  -- monotonic guard below orders on the separate p_updated_turn_created_at
+  -- param. The store passes the SAME value for both; enforce that here so a
+  -- malformed/mismatched write cannot persist a summary whose stored watermark
+  -- disagrees with the key it was ordered by. A non-castable timestamp string
+  -- (invalid_datetime_format / datetime_field_overflow) is refused as RS001,
+  -- not surfaced as a raw 22007.
+  BEGIN
+    IF (p_summary->>'updated_turn_created_at')::timestamptz
+         IS DISTINCT FROM p_updated_turn_created_at THEN
+      RAISE EXCEPTION 'upsert_rolling_summary: p_summary.updated_turn_created_at does not match p_updated_turn_created_at'
+        USING ERRCODE = 'RS001';
+    END IF;
+  EXCEPTION
+    WHEN invalid_datetime_format OR datetime_field_overflow THEN
+      RAISE EXCEPTION 'upsert_rolling_summary: p_summary.updated_turn_created_at is not a valid timestamptz'
+        USING ERRCODE = 'RS001';
+  END;
 
   -- Row lock: serialise concurrent summariser writes per scenario so the
   -- read-compare-write below is race-free within one instance; the WHERE
   -- predicate itself is what protects across instances.
-  SELECT (rolling_summary->>'updated_turn_created_at')::timestamptz
-    INTO v_stored_watermark
+  SELECT (rolling_summary->>'updated_turn_created_at')::timestamptz,
+         COALESCE(rolling_summary->>'updated_turn_id', ''),
+         COALESCE((rolling_summary->>'version')::bigint, 0)
+    INTO v_stored_watermark, v_stored_turn_id, v_stored_version
     FROM public.scenarios
     WHERE id = p_scenario_id
     FOR UPDATE;
@@ -156,10 +220,21 @@ BEGIN
     RETURN jsonb_build_object('applied', false, 'regressed', false, 'current_watermark', NULL);
   END IF;
 
-  -- MONOTONIC guard: apply ONLY when strictly newer than what is stored
-  -- (or nothing is stored). Equal or older watermark ⇒ silent no-op. This is
-  -- the single line the whole R4 safety argument rests on.
-  IF v_stored_watermark IS NULL OR v_stored_watermark < p_updated_turn_created_at THEN
+  -- MONOTONIC guard, COMPOSITE (created_at, turn_id, version) — Codex r2
+  -- fix 3: apply ONLY when the composite is strictly greater than what is
+  -- stored (or nothing is stored). An identical composite (a retried write)
+  -- or an older one ⇒ silent no-op. The turn_id tiebreak lets a summary
+  -- watermarked at a same-timestamp LATER sibling land; the version tiebreak
+  -- lets a later pass that absorbed a same-timestamp EARLIER sibling (same
+  -- watermark turn, higher app-side version counter) land. This predicate is
+  -- what the whole R4 safety argument rests on.
+  v_new_turn_id := p_summary->>'updated_turn_id';
+  v_new_version := (p_summary->>'version')::bigint;
+  IF v_stored_watermark IS NULL
+     OR v_stored_watermark < p_updated_turn_created_at
+     OR (v_stored_watermark = p_updated_turn_created_at
+         AND (v_stored_turn_id < v_new_turn_id
+              OR (v_stored_turn_id = v_new_turn_id AND v_stored_version < v_new_version))) THEN
     UPDATE public.scenarios
       SET rolling_summary = p_summary,
           updated_at      = now()

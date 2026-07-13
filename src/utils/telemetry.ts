@@ -562,14 +562,26 @@ export const TelemetryEvents = {
   //   v5.summary.updated — one per commit-seam maintainer pass: status
   //                        (applied/regressed/rejected_kept_prior/floor/…),
   //                        generator (regen/incremental/floor), duration_ms,
-  //                        chars, capped_fallback. `regressed` is the R4
-  //                        monotonic no-op — an out-of-order/stale write that
-  //                        the DB guard refused (NOT an error).
+  //                        chars, capped_fallback, history_capped (Codex r2
+  //                        fix 4a — the full-history read filled its limit;
+  //                        the stored summary discloses the partiality).
+  //                        `regressed` is the R4 monotonic no-op — an
+  //                        out-of-order/stale write that the DB guard refused
+  //                        (NOT an error). Passes are per-scenario
+  //                        single-flight (fix 4b): commits landing mid-pass
+  //                        coalesce into ONE rerun, so a burst emits one
+  //                        event per EXECUTED pass, not per commit.
   //   v5.summary.lag     — the staleness-invariant signal (01 §4): emitted when
   //                        summary_lag_turns exceeds the verbatim-window bound,
   //                        so a summariser outage is loud + disclosed. Emitted
   //                        by the injector at assembly time (S4 injection
   //                        follow-up); registered here with the maintainer.
+  //                        `refused` (Codex r2 blocker 1): true = memory-hole
+  //                        refusal — the watermark was not provably covered
+  //                        by the window (or the gap exceeded the verbatim
+  //                        slice), so the four-slot block was WITHHELD and a
+  //                        disclosed-absence note injected instead;
+  //                        false = disclosed-stale injection.
   V5SummaryUpdated: "v5.summary.updated",
   V5SummaryLag: "v5.summary.lag",
 

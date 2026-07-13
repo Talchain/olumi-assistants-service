@@ -77,3 +77,28 @@ export function computeSummaryLag(
 export function isSummaryStale(lag: number, windowDepth: number): boolean {
   return lag >= windowDepth;
 }
+
+/**
+ * Memory-hole guard input (Codex r2 blocker 1): is the summary's watermark
+ * PROVABLY covered by the window — i.e. does the window contain the watermark
+ * turn itself, or any turn strictly older than it? Only then is the lag
+ * computed over the window the TRUE gap; when every window turn is newer than
+ * the watermark the true gap may extend arbitrarily past the window and any
+ * "the missing turns are shown verbatim" claim would be unverifiable.
+ * Conservative at ties (mirrors computeSummaryLag): a same-timestamp
+ * non-watermark sibling proves nothing. An unparseable watermark is never
+ * covered (the summary cannot be trusted to cover anything).
+ */
+export function isWatermarkCovered(
+  summary: RollingSummary,
+  windowTurnsNewestFirst: readonly LagTurn[],
+): boolean {
+  const watermark = Date.parse(summary.updated_turn_created_at);
+  if (!Number.isFinite(watermark)) return false;
+  for (const turn of windowTurnsNewestFirst) {
+    if (turn.turn_id === summary.updated_turn_id) return true;
+    const ts = Date.parse(turn.created_at);
+    if (Number.isFinite(ts) && ts < watermark) return true;
+  }
+  return false;
+}
