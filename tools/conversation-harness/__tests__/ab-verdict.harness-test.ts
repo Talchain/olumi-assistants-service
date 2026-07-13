@@ -6,8 +6,10 @@
  * Run: pnpm exec vitest run --config tools/conversation-harness/vitest.config.ts
  */
 import { describe, expect, it } from 'vitest';
-import { computeAbVerdict, NOISE_THRESHOLD } from '../scorer/ab-verdict.js';
+import { computeAbVerdict, NOISE_THRESHOLD, opsFromRows, type OpsMetrics } from '../scorer/ab-verdict.js';
+import { pqCoherence, type TurnSurfaces } from '../scorer/prompt-dims.js';
 import type { PromptDimScore, PromptDimDirection } from '../scorer/prompt-dims.js';
+import type { TurnRow } from '../scorer/dims.js';
 
 type Meta = { direction: PromptDimDirection; gating: boolean; flaky: boolean; unit: string };
 const META: Record<string, Meta> = {
@@ -119,5 +121,144 @@ describe('computeAbVerdict', () => {
     const v = computeAbVerdict(baseline, candidate);
     expect(find(v, 'PQ5-guard-cleanliness').baseline).toBe(1); // worst-run
     expect(find(v, 'PQ5-guard-cleanliness').improved).toBe(true);
+  });
+});
+
+// PQ6 worst-run fix, pinned END-TO-END through the REAL producer: dims built by
+// pqCoherence (not hand-written metas), so the safety flag must travel
+// producer -> scores.json shape -> ab-verdict worst-run aggregation.
+describe('PQ6 coherence is worst-run aggregated (any-run contradiction gates) [fix]', () => {
+  const trow = (partial: Partial<TurnRow> & { turn: string }): TurnRow => ({
+    turnClassHint: 'coach',
+    editIntent: false,
+    onlyIf: null,
+    skipped: false,
+    duplicateOf: null,
+    httpStatus: 200,
+    startedAt: null,
+    wallClockMs: null,
+    assistantText: '',
+    chips: [],
+    substageTimings: null,
+    guardHits: { forbidden: null, successClaim: null, heldScience: false, mutationLanguage: false, structuralSuccessClaim: false },
+    ...partial,
+  });
+  const heldSurface: Record<string, TurnSurfaces> = {
+    T1: {
+      hasHeldProposal: true,
+      winProbabilities: null,
+      leadingOptionLabel: null,
+      optionLabels: [],
+      winPctByLabel: {},
+      payloadPercentages: [],
+    },
+  };
+  /** One run's PQ6 dim: contradictory (success claim while held) or clean. */
+  const pq6Run = (contradictory: boolean): PromptDimScore[] => [
+    pqCoherence(
+      [
+        trow({
+          turn: 'T1',
+          guardHits: {
+            forbidden: null,
+            successClaim: null,
+            heldScience: false,
+            mutationLanguage: false,
+            structuralSuccessClaim: contradictory,
+          },
+        }),
+      ],
+      heldSurface,
+    ),
+  ];
+
+  it('a contradiction in 1 of 3 candidate reruns forces WORSE (never medianed away)', () => {
+    const baseline = [pq6Run(false), pq6Run(false), pq6Run(false)];
+    const candidate = [pq6Run(true), pq6Run(false), pq6Run(false)];
+    const v = computeAbVerdict(baseline, candidate);
+    const pq6 = find(v, 'PQ6-coherence');
+    // worst-run 1, NOT median 0 — distinguishes the fix from the old behaviour.
+    expect(pq6.candidate).toBe(1);
+    expect(pq6.regressed).toBe(true);
+    expect(v.overall).toBe('worse');
+  });
+
+  it('clean candidate reruns still read flat', () => {
+    const v = computeAbVerdict([pq6Run(false), pq6Run(false), pq6Run(false)], [pq6Run(false), pq6Run(false), pq6Run(false)]);
+    expect(find(v, 'PQ6-coherence').flat).toBe(true);
+  });
+});
+
+// OPS promotion criteria fix: ab-verdict must ALSO evaluate latency medians,
+// token cost, and fallback-engagement — the B1 experiment showed a candidate
+// can "win" on PQ dims while regressing all three unexamined.
+describe('OPS metrics in the verdict [fix]', () => {
+  const opsRow = (wall: number | null, tin: number | null, tout: number | null, fb: boolean | null, skipped = false) => ({
+    turn: 'T',
+    skipped,
+    wall_clock_ms: wall,
+    llm_tokens_in: tin,
+    llm_tokens_out: tout,
+    fallback_engaged: fb,
+  });
+
+  it('opsFromRows derives latency median, total tokens, and fallback rate (null-honest)', () => {
+    const ops = opsFromRows([
+      opsRow(10_000, 1000, 200, false),
+      opsRow(20_000, 2000, 300, true),
+      opsRow(30_000, null, null, null),
+      opsRow(99_999, 9999, 9999, true, true), // skipped — excluded
+    ]);
+    expect(ops.latencyMedianMs).toBe(20_000);
+    expect(ops.totalTokens).toBe(3500);
+    expect(ops.fallbackRate).toBe(0.5); // of the 2 rows with a known fallback signal
+  });
+
+  it('opsFromRows is null across the board when the rows carry no signals (old artifacts)', () => {
+    const ops = opsFromRows([{ turn: 'T', skipped: false }]);
+    expect(ops.latencyMedianMs).toBeNull();
+    expect(ops.totalTokens).toBeNull();
+    expect(ops.fallbackRate).toBeNull();
+  });
+
+  const OPS = (latency: number, tokens: number, fallback: number): OpsMetrics => ({
+    latencyMedianMs: latency,
+    totalTokens: tokens,
+    fallbackRate: fallback,
+  });
+
+  it('a beyond-noise latency regression makes the verdict WORSE', () => {
+    const baseline = [run({}), run({}), run({})];
+    const candidate = [run({}), run({}), run({})];
+    const v = computeAbVerdict(baseline, candidate, {
+      baselineOps: [OPS(10_000, 20_000, 0), OPS(10_000, 20_000, 0), OPS(10_000, 20_000, 0)],
+      candidateOps: [OPS(16_000, 20_000, 0), OPS(16_000, 20_000, 0), OPS(16_000, 20_000, 0)],
+    });
+    const lat = find(v, 'OPS-latency-median');
+    expect(lat.regressed).toBe(true);
+    expect(v.overall).toBe('worse');
+    // cost + fallback present and flat
+    expect(find(v, 'OPS-cost-tokens').flat).toBe(true);
+    expect(find(v, 'OPS-fallback-rate').flat).toBe(true);
+  });
+
+  it('cost and fallback regressions are scored too', () => {
+    const mk = (tokens: number, fb: number) => [OPS(10_000, tokens, fb), OPS(10_000, tokens, fb), OPS(10_000, tokens, fb)];
+    const v = computeAbVerdict([run({}), run({}), run({})], [run({}), run({}), run({})], {
+      baselineOps: mk(20_000, 0),
+      candidateOps: mk(40_000, 0.5),
+    });
+    expect(find(v, 'OPS-cost-tokens').regressed).toBe(true);
+    expect(find(v, 'OPS-fallback-rate').regressed).toBe(true);
+    expect(v.overall).toBe('worse');
+  });
+
+  it('missing ops (old scores.json) are excluded, never treated as 0', () => {
+    const v = computeAbVerdict([run({})], [run({})], {
+      baselineOps: [null],
+      candidateOps: [null],
+    });
+    expect(find(v, 'OPS-latency-median').measurable).toBe(false);
+    expect(find(v, 'OPS-cost-tokens').measurable).toBe(false);
   });
 });

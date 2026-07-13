@@ -32,6 +32,7 @@ import {
   rowFromWire,
   runAllDims,
   aggregateFlakyDims,
+  attachMutationOutcomes,
   type TurnRow,
   type L0Snap,
   type DimResult,
@@ -121,10 +122,19 @@ function metricsFor(turnId: string, wire: any, message: string, row: TurnRow, la
     numbers_cited: (text.match(/\b\d+(?:\.\d+)?%?|\b£[\d,]+/g) ?? []).slice(0, 12),
     generic_marker: GENERIC_MARKERS.some((r) => r.test(text)),
     ...(row.guardHits ?? guardHitsFor(text)),
+    // L0 mutation oracle for this turn (true/false/null) — the PQ5/D11
+    // turn-aware guard conditioning reads TurnRow.mutationCommitted; surfaced
+    // here so the evidence artifact shows WHY a receipt was excused.
+    mutation_committed: row.mutationCommitted ?? null,
     chips: row.chips.map((c) => c.label),
     chip_count: row.chips.length,
     wall_clock_ms: row.wallClockMs,
     llm_latency_ms: llmCalls.reduce((a: number, c: any) => a + (c.latency_ms ?? 0), 0) || null,
+    // OPS inputs for ab-verdict.ts (opsFromRows): token cost + fallback
+    // engagement, null-honest when the diagnostic trace carries no signal.
+    llm_tokens_in: llmCalls.length ? llmCalls.reduce((a: number, c: any) => a + (c.input_tokens ?? 0), 0) : null,
+    llm_tokens_out: llmCalls.length ? llmCalls.reduce((a: number, c: any) => a + (c.output_tokens ?? 0), 0) : null,
+    fallback_engaged: Array.isArray(dt.fallback_trace) ? dt.fallback_trace.length > 0 : null,
     draft_display_values: draftDisplayValues(wire),
     text,
   };
@@ -215,7 +225,15 @@ function loadL0(runDir: string): L0Snap[] {
 function scoreRun(runDir: string): { scored: ScoredRow[]; dims: DimResult[]; promptDims: PromptDimScore[] } {
   const isNew = existsSync(join(runDir, 'turns'));
   const { rows, scored, surfacesByTurn, graphLabels } = isNew ? loadNewLayout(runDir) : loadLegacyLayout(runDir);
-  const dims = runAllDims(rows, loadL0(runDir));
+  const l0 = loadL0(runDir);
+  // L0 mutation oracle BEFORE any guard aggregation: PQ5/D11 condition the
+  // mutation-language / structural-success-claim hits on it (C10).
+  attachMutationOutcomes(rows, l0);
+  for (const row of rows) {
+    const s = scored.find((x) => x.turn === row.turn);
+    if (s) s.mutation_committed = row.mutationCommitted ?? null;
+  }
+  const dims = runAllDims(rows, l0);
   // Prompt-quality dims (ROADMAP 1.70 v1): comparable scalars for A/B, consumed
   // by ab-verdict.ts. PQ5/PQ6 read the guardHits attached above (src/ guards).
   const promptDims = runPromptDims(rows, { surfacesByTurn, graphLabels });

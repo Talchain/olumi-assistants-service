@@ -11,9 +11,10 @@
  * dependency (the production guards behind PQ5/PQ6) lives in score-run.ts.
  *
  * Flakiness handling (live-model nondeterminism):
- *   - Pass N>=3 run dirs per side (BASELINE_DIRS / CANDIDATE_DIRS). Flaky dims
- *     (PQ1..PQ4, PQ6) aggregate by MEDIAN across the side's runs; the SAFETY
- *     guard (PQ5) aggregates by WORST-run (any-hit) so an intermittent leak in
+ *   - Pass N>=3 run dirs per side (BASELINE_DIRS / CANDIDATE_DIRS). Flaky
+ *     QUALITY dims (PQ1..PQ4) aggregate by MEDIAN across the side's runs; the
+ *     SAFETY dims (PQ5 guard-cleanliness, PQ6 coherence) aggregate by WORST-run
+ *     (any-hit / any-contradiction) so an intermittent leak or contradiction in
  *     even one rerun still gates — never averaged away. A single run per side is
  *     allowed but flagged low-confidence.
  *   - A dim is only called improved/regressed when |candidate - baseline| clears
@@ -45,7 +46,72 @@ export const NOISE_THRESHOLD: Record<string, number> = {
   'PQ4-chip-correctness': 0.15, // fraction
   'PQ5-guard-cleanliness': 0.5, // hits
   'PQ6-coherence': 0.5, // contradictions
+  // OPS promotion criteria (the B1 experiment exposed these as missing from the
+  // verdict): a prompt that wins on quality but doubles latency / token cost or
+  // starts engaging fallbacks is NOT promotable unexamined.
+  'OPS-latency-median': 2500, // ms per turn (median)
+  'OPS-cost-tokens': 5000, // total LLM tokens per run (in+out)
+  'OPS-fallback-rate': 0.15, // fraction of turns engaging a fallback
 };
+
+// ---------- OPS metrics (latency / cost / fallback-engagement) ----------
+
+/** Per-run operational metrics, derived from the scores.json rows that
+ * score-run.ts writes. All null-honest: a metric absent from the rows (old
+ * artifacts, no diagnostic trace) is null and excluded — never treated as 0. */
+export interface OpsMetrics {
+  /** Median wall-clock ms across executed turns. */
+  latencyMedianMs: number | null;
+  /** Total LLM tokens (input+output) across the run — the cost proxy. */
+  totalTokens: number | null;
+  /** Fraction of measurable turns whose diagnostic trace shows fallback engagement. */
+  fallbackRate: number | null;
+}
+
+/** Row fields consumed: wall_clock_ms, llm_tokens_in/out, fallback_engaged
+ * (all written by score-run.ts at this base; absent on older scores.json). */
+export function opsFromRows(rows: Record<string, unknown>[]): OpsMetrics {
+  const active = (rows ?? []).filter((r) => !r.skipped);
+  const wall = active.map((r) => r.wall_clock_ms).filter((v): v is number => typeof v === 'number');
+  const tokens = active
+    .map((r) => {
+      const tin = r.llm_tokens_in;
+      const tout = r.llm_tokens_out;
+      if (typeof tin !== 'number' && typeof tout !== 'number') return null;
+      return (typeof tin === 'number' ? tin : 0) + (typeof tout === 'number' ? tout : 0);
+    })
+    .filter((v): v is number => v != null);
+  const fallbackKnown = active.map((r) => r.fallback_engaged).filter((v): v is boolean => typeof v === 'boolean');
+  return {
+    latencyMedianMs: wall.length ? Number(median(wall).toFixed(0)) : null,
+    totalTokens: tokens.length ? tokens.reduce((a, b) => a + b, 0) : null,
+    fallbackRate: fallbackKnown.length
+      ? Number((fallbackKnown.filter(Boolean).length / fallbackKnown.length).toFixed(3))
+      : null,
+  };
+}
+
+/** Synthesize the OPS dims for one run so they flow through the SAME delta /
+ * threshold / aggregation machinery as the PQ dims. Lower-better, non-gating,
+ * flaky (live-model + infra variance -> median across reruns). */
+export function opsDimsForRun(ops: OpsMetrics | null | undefined): PromptDimScore[] {
+  const mk = (dim: string, label: string, value: number | null, unit: string): PromptDimScore => ({
+    dim,
+    label,
+    direction: 'lower-better',
+    gating: false,
+    flaky: true,
+    value,
+    unit,
+    details: {},
+    notes: [],
+  });
+  return [
+    mk('OPS-latency-median', 'Latency (median wall-clock per turn)', ops?.latencyMedianMs ?? null, 'ms'),
+    mk('OPS-cost-tokens', 'Cost (total LLM tokens, in+out)', ops?.totalTokens ?? null, 'tokens'),
+    mk('OPS-fallback-rate', 'Fallback engagement (fraction of turns)', ops?.fallbackRate ?? null, 'fraction'),
+  ];
+}
 
 export type AbOverall = 'better' | 'worse' | 'mixed' | 'no-change' | 'inconclusive';
 
@@ -92,11 +158,13 @@ function mean(xs: number[]): number {
 type AggMode = 'median' | 'mean' | 'worst';
 
 /** Aggregation mode for a dim across a side's reruns.
- *   - SAFETY guard (PQ5) -> 'worst' (any-hit): a hit in even ONE rerun is
- *     disqualifying and must NOT be averaged below the gating threshold. Detected
- *     by the explicit `safety` flag, falling back to the `gating && !flaky`
- *     property for older scores.json that predate the flag.
- *   - other flaky dims (PQ1–PQ4, PQ6) -> 'median' (robust to a single outlier rerun)
+ *   - SAFETY dims (PQ5 guard-cleanliness, PQ6 coherence) -> 'worst' (any-hit /
+ *     any-contradiction): a hit in even ONE rerun is disqualifying and must NOT
+ *     be averaged below the gating threshold. Detected by the explicit `safety`
+ *     flag, falling back to the `gating && !flaky` property for older
+ *     scores.json that predate the flag (covers PQ5 only — pre-fix PQ6
+ *     artifacts lack the flag and should be re-scored).
+ *   - other flaky dims (PQ1–PQ4, OPS-*) -> 'median' (robust to a single outlier rerun)
  *   - other stable dims -> 'mean' */
 function aggModeFor(meta: PromptDimScore): AggMode {
   const isSafety = meta.safety === true || (meta.gating && !meta.flaky);
@@ -117,11 +185,19 @@ function aggregate(values: (number | null)[], mode: AggMode, direction: PromptDi
   return Number(v.toFixed(3));
 }
 
-/** Given per-side arrays of PromptDimScore[] (one per run), produce the verdict. */
+/** Given per-side arrays of PromptDimScore[] (one per run), produce the verdict.
+ * `opts.baselineOps` / `opts.candidateOps` (one OpsMetrics per run, same order)
+ * fold latency / cost / fallback-engagement into the verdict as scored
+ * lower-better dims — the promotion criteria PQ-dims alone were missing. */
 export function computeAbVerdict(
   baselineRuns: PromptDimScore[][],
   candidateRuns: PromptDimScore[][],
+  opts: { baselineOps?: (OpsMetrics | null)[]; candidateOps?: (OpsMetrics | null)[] } = {},
 ): AbVerdict {
+  const withOps = (runs: PromptDimScore[][], ops?: (OpsMetrics | null)[]): PromptDimScore[][] =>
+    ops == null ? runs : runs.map((run, i) => [...run, ...opsDimsForRun(ops[i])]);
+  baselineRuns = withOps(baselineRuns, opts.baselineOps);
+  candidateRuns = withOps(candidateRuns, opts.candidateOps);
   // Dim order/metadata from the first run that has any dims.
   const template = (baselineRuns.find((r) => r.length) ?? candidateRuns.find((r) => r.length) ?? []) as PromptDimScore[];
   const dims: AbDimDelta[] = template.map((meta) => {
@@ -214,9 +290,9 @@ export function computeAbVerdict(
 
 // ---------- I/O ----------
 
-function loadPromptDims(runDir: string): PromptDimScore[] {
+function loadScores(runDir: string): { promptDims: PromptDimScore[]; ops: OpsMetrics | null } {
   const path = join(runDir, 'scores.json');
-  let parsed: { prompt_dims?: PromptDimScore[] };
+  let parsed: { prompt_dims?: PromptDimScore[]; rows?: Record<string, unknown>[] };
   try {
     parsed = JSON.parse(readFileSync(path, 'utf-8'));
   } catch (err) {
@@ -225,7 +301,9 @@ function loadPromptDims(runDir: string): PromptDimScore[] {
   if (!Array.isArray(parsed.prompt_dims)) {
     throw new Error(`${path} has no prompt_dims block — re-run score-run.ts (this build emits it)`);
   }
-  return parsed.prompt_dims;
+  // OPS metrics from the same artifact's rows; null-honest on older layouts.
+  const ops = Array.isArray(parsed.rows) ? opsFromRows(parsed.rows) : null;
+  return { promptDims: parsed.prompt_dims, ops };
 }
 
 function arrow(d: AbDimDelta): string {
@@ -245,7 +323,7 @@ export function renderMd(v: AbVerdict, baselineDirs: string[], candidateDirs: st
     '',
     `- baseline: ${baselineDirs.join(', ')} (${v.baseline_run_count} run${v.baseline_run_count === 1 ? '' : 's'})`,
     `- candidate: ${candidateDirs.join(', ')} (${v.candidate_run_count} run${v.candidate_run_count === 1 ? '' : 's'})`,
-    v.low_confidence ? '- ⚠️ LOW CONFIDENCE: fewer than 3 runs per side — flaky dims (PQ1–PQ4, PQ6) need N≥3 for a stable median.' : '',
+    v.low_confidence ? '- ⚠️ LOW CONFIDENCE: fewer than 3 runs per side — flaky dims (PQ1–PQ4, OPS-*) need N≥3 for a stable median.' : '',
     '',
     '| Dim | dir | baseline | candidate | Δ | thr | call |',
     '|---|---|---|---|---|---|---|',
@@ -254,7 +332,7 @@ export function renderMd(v: AbVerdict, baselineDirs: string[], candidateDirs: st
         `| ${d.dim} | ${d.direction === 'higher-better' ? '↑' : d.direction === 'lower-better' ? '↓' : '~'} | ${fmt(d.baseline)} | ${fmt(d.candidate)} | ${fmt(d.delta)} | ${d.threshold} | ${arrow(d)} |`,
     ),
     '',
-    '_↑ dir = higher is better; ↓ dir = lower is better; ~ = neutral (reported, not scored). Gating dims (PQ5, PQ6): a regression caps the verdict at worse._',
+    '_↑ dir = higher is better; ↓ dir = lower is better; ~ = neutral (reported, not scored). Gating dims (PQ5, PQ6): a regression caps the verdict at worse. OPS dims (latency median / token cost / fallback rate) are scored lower-better from the runs\' own rows — promotion criteria, not quality dims._',
   ];
   return lines.filter((l) => l !== '').join('\n') + '\n';
 }
@@ -273,9 +351,13 @@ if (isMain) {
   if (baselineDirs.length === 0 || candidateDirs.length === 0) {
     throw new Error('set BASELINE_DIR(S) and CANDIDATE_DIR(S) — comma-separated for N>=3 reruns per side');
   }
-  const baselineRuns = baselineDirs.map(loadPromptDims);
-  const candidateRuns = candidateDirs.map(loadPromptDims);
-  const verdict = computeAbVerdict(baselineRuns, candidateRuns);
+  const baselineScores = baselineDirs.map(loadScores);
+  const candidateScores = candidateDirs.map(loadScores);
+  const verdict = computeAbVerdict(
+    baselineScores.map((s) => s.promptDims),
+    candidateScores.map((s) => s.promptDims),
+    { baselineOps: baselineScores.map((s) => s.ops), candidateOps: candidateScores.map((s) => s.ops) },
+  );
   const outDir = process.env.AB_OUT ?? candidateDirs[0];
   writeFileSync(join(outDir, 'ab-verdict.json'), JSON.stringify({ ...verdict, baseline_dirs: baselineDirs, candidate_dirs: candidateDirs }, null, 2));
   const md = renderMd(verdict, baselineDirs, candidateDirs);
