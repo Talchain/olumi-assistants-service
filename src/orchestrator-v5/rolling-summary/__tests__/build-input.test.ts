@@ -79,6 +79,40 @@ describe('buildSummariserInput — composite watermark (same-timestamp sibling)'
   });
 });
 
+describe('buildSummariserInput — capped-regen watermark same-ms tiebreak', () => {
+  it('a char-cap-dropped same-ms sibling of the prior watermark is UNABSORBED — the watermark must not advance past it', () => {
+    // Prior watermark = w at TS. Sibling s shares w's exact millisecond but
+    // sorts AFTER it under the store's composite (created_at, turn_id) order,
+    // so s was never absorbed. The 20 huge newer turns blow the summariser
+    // input char budget: the capped fallback keeps only the verbatim tail
+    // (the 20 newer turns) and DROPS w and s. A `ts <= priorAbsorbedMs` test
+    // treats s as pre-absorbed and walks on to the newest shown turn —
+    // advancing the watermark past history the model never saw (the same-ms
+    // variant of the Codex finding 4 memory hole). The conservative rule
+    // (mirrors the incremental path and lag.ts): same ms + different turn_id
+    // ⇒ unabsorbed ⇒ the walk stops and the watermark stays at w.
+    const w = turn('turn-a-watermark', TS);
+    const s = turn('turn-b-sibling', TS, 'same-ms dropped sibling');
+    const big = 'z'.repeat(10_100);
+    const newer: SummariserTurn[] = [];
+    for (let i = 1; i <= 20; i++) {
+      newer.push(turn(`turn-n${String(i).padStart(2, '0')}`, new Date(Date.parse(TS_LATER) + i * 1000).toISOString(), big));
+    }
+    const input = buildSummariserInput({
+      mode: 'regen',
+      priorSummary: priorWith({ watermarkId: w.turn_id, watermarkTs: TS }),
+      chronologicalTurns: [w, s, ...newer],
+    });
+    // The scenario must actually engage the capped fallback (guards the test
+    // against budget-constant drift) and must have dropped s from the input.
+    expect(input.cappedFallback).toBe(true);
+    expect([...input.ordinalMap.values()].map((v) => v.turn_id)).not.toContain(s.turn_id);
+    // Watermark honesty: stays at the prior boundary w — NOT s (never shown
+    // to any model), NOT the newest turn (which would strand s forever).
+    expect(input.watermark).toEqual({ turn_id: w.turn_id, created_at: w.created_at });
+  });
+});
+
 describe('buildSummariserInput — incremental provenance carry', () => {
   it('prior-cited turns receive ordinals and the prior block renders their stamps', () => {
     const cited = turn('turn-old-cited', '2026-07-10T09:00:00.000Z');
