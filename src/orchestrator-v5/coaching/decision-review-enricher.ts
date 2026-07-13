@@ -26,7 +26,10 @@ import {
   type DecisionReviewInvokeInput,
   type DecisionReviewMeta,
 } from '../../cee/decision-review/invoke.js';
-import { invokeDecomposedDecisionReview } from '../../cee/decision-review/decompose.js';
+import {
+  invokeDecomposedDecisionReview,
+  DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
+} from '../../cee/decision-review/decompose.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
@@ -146,13 +149,25 @@ export async function enrichRunAnalysisWithDecisionReview(
   } else {
     input.signal.addEventListener('abort', onOuterAbort, { once: true });
   }
-  const hardTimer = setTimeout(() => childAbort.abort(new Error('decision_review timeout')), DECISION_REVIEW_TIMEOUT_MS);
+  // Hard-abort budget: on the monolith path this is exactly
+  // DECISION_REVIEW_TIMEOUT_MS (unchanged). On the decomposed path the
+  // fallback's disclosed minimum window is provisioned on top — otherwise the
+  // decompose module's fallback floor would be dead letter: this timer would
+  // abort the monolith fallback at the very moment it was granted its floor.
+  // Flag-off behaviour is byte-identical (the reserve is 0).
+  const hardBudgetMs = resolveDecisionReviewHardBudgetMs(config.cee.decisionReviewDecompose);
+  const hardTimer = setTimeout(() => childAbort.abort(new Error('decision_review timeout')), hardBudgetMs);
 
   emit(TelemetryEvents.V5DecisionReviewInvoked, {
     request_id: input.requestId,
     scenario_id: input.scenarioId,
     brief_hash: invokeInput.brief_hash,
     timeout_ms: DECISION_REVIEW_TIMEOUT_MS,
+    // Additive (decompose-hardening lane): the ACTUAL hard-abort budget —
+    // equals timeout_ms on the monolith path; timeout_ms + the disclosed
+    // fallback floor on the decomposed path. Keeps wall-clock dashboards
+    // honest when a decomposed run legitimately exceeds timeout_ms.
+    hard_budget_ms: hardBudgetMs,
     // Change A diagnostic context: lets operators correlate an `invoked`
     // event to the same `brief_length` they'd see on a sibling `skipped`
     // event, without needing to grep two events for the same request_id.
@@ -304,6 +319,20 @@ export async function enrichRunAnalysisWithDecisionReview(
 
 
 /**
+ * Hard-abort budget for the decision_review auto-fire. Monolith path (flag
+ * off): DECISION_REVIEW_TIMEOUT_MS exactly — byte-identical to the historical
+ * behaviour. Decomposed path (flag on): the disclosed fallback floor
+ * (DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS) is reserved on top, so a fan-out that
+ * spends most of the shared deadline before falling back still leaves the
+ * monolith fallback a minimum viable window instead of a guaranteed abort.
+ */
+export function resolveDecisionReviewHardBudgetMs(decomposeEnabled: boolean): number {
+  return decomposeEnabled
+    ? DECISION_REVIEW_TIMEOUT_MS + DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS
+    : DECISION_REVIEW_TIMEOUT_MS;
+}
+
+/**
  * Exported for contract testing — exercises the full enrichment-to-invoke-input
  * projection without round-tripping through the LLM call. The runtime invocation
  * path (`enrichRunAnalysisWithDecisionReview` above) is the only production caller.
@@ -409,22 +438,31 @@ function buildInvokeInput(
  * accept all three published shapes without weakening the `no_winner` skip
  * guarantee for genuinely missing data:
  *
- *   1. `enrichment.results[]`         — legacy shape (kept for backwards
- *                                       compatibility; pre-2026 envelopes).
- *   2. `enrichment.option_comparison[]` — current PLoT V2 (verified on
+ *   1. `enrichment.option_comparison[]` — current PLoT V2 (verified on
  *                                         staging build `2e6e0be`); entries
  *                                         carry both `option_id`/`id` and
  *                                         `option_label`/`label` + a nested
  *                                         `outcome.{mean,p10,p50,p90,…}`.
+ *   2. `enrichment.results[]`         — legacy shape (kept for backwards
+ *                                       compatibility; pre-2026 envelopes).
  *   3. `enrichment.decision_brief.options[]` — leaner brief-shape with
  *                                              `option_id`, `label`,
  *                                              `win_probability`, `rank`.
  *
+ * Priority is CURRENT-first with legacy fallback (#437 residual, fixed in
+ * the decompose-hardening lane): winner selection previously walked the
+ * LEGACY `results` array first while `readIslResults` built the prompt's
+ * option_comparison slice CURRENT-first — on a both-present-conflicting
+ * envelope the DECISION_CONTEXT winner and the OPTION_COMPARISON table
+ * disagreed inside one prompt. Both readers now share this precedence
+ * (`resolveWinner` in analysis-result-headline inherits it too, keeping the
+ * headline consistent with the review on the same envelope).
+ *
  * Returns every non-empty source as a separate array; the caller
  * (`buildInvokeInput`) walks them in order until one can match
- * `leading_option_id`. This avoids the trap where (e.g.) a legacy
- * `enrichment.results` is non-empty but truncated, while the current
- * `enrichment.option_comparison` contains the declared leader — the
+ * `leading_option_id`. This avoids the trap where (e.g.) the current
+ * `enrichment.option_comparison` is non-empty but truncated, while the
+ * legacy `enrichment.results` contains the declared leader — the
  * walker honours PLoT's declared winner whenever ANY source carries it.
  *
  * `projectOptionAsWinner` was already shape-tolerant (`option_id || id`,
@@ -437,14 +475,14 @@ export function readResultsArraySources(
   enrichment: Record<string, unknown>,
 ): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
   const sources: Array<ReadonlyArray<Record<string, unknown>>> = [];
-  const legacy = enrichment.results;
-  if (Array.isArray(legacy) && legacy.length > 0) {
-    const entries = filterObjectEntries(legacy);
-    if (entries.length > 0) sources.push(entries);
-  }
   const optionComparison = enrichment.option_comparison;
   if (Array.isArray(optionComparison) && optionComparison.length > 0) {
     const entries = filterObjectEntries(optionComparison);
+    if (entries.length > 0) sources.push(entries);
+  }
+  const legacy = enrichment.results;
+  if (Array.isArray(legacy) && legacy.length > 0) {
+    const entries = filterObjectEntries(legacy);
     if (entries.length > 0) sources.push(entries);
   }
   const briefOptions = readRecord(enrichment.decision_brief)?.options;

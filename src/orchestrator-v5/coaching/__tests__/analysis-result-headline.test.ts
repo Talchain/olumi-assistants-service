@@ -778,15 +778,17 @@ describe('resolveWinner — same-source label + probability invariant', () => {
 
   it('runner-up probability comes from the same source as the winner', () => {
     // The first accepted source provides BOTH probabilities together.
-    // The second source has mismatched numbers — a near-tie that would
-    // otherwise gate out the lead via the margin guard. The headline
-    // must use the first source's numbers (62% / 38%, margin 24pp).
+    // (Priority is CURRENT-first since the decompose-hardening lane:
+    // option_comparison is walked before legacy results.) The second
+    // source has mismatched numbers — a near-tie that would otherwise
+    // gate out the lead via the margin guard. The headline must use
+    // the first source's numbers (62% / 38%, margin 24pp).
     const enrichment: Record<string, unknown> = {
-      results: [
+      option_comparison: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.62 },
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.38 },
       ],
-      option_comparison: [
+      results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.50 },
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.49 },
       ],
@@ -809,13 +811,14 @@ describe('resolveWinner — same-source label + probability invariant', () => {
     // cherry-pick a later source's wider margin — that would be a
     // different form of cross-source mixing on the maths side. Pins
     // "first acceptable source wins" so the guards apply to a single
-    // coherent set of numbers.
+    // coherent set of numbers. (First source = option_comparison since
+    // the current-first reorder in the decompose-hardening lane.)
     const enrichment: Record<string, unknown> = {
-      results: [
+      option_comparison: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.41 },
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.40 },
       ],
-      option_comparison: [
+      results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.80 },
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.20 },
       ],
@@ -825,8 +828,9 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // Near-tie effectively-tied output (1pp). Crucially the 80% from
-    // option_comparison must NOT leak — the same-source invariant still holds.
+    // Near-tie effectively-tied output (1pp). Crucially the 80% from the
+    // later legacy results source must NOT leak — the same-source invariant
+    // still holds.
     expect(out).toBe('Hire X is currently only fractionally ahead, so the options are effectively tied.');
     expect(out).not.toContain('80%');
     expect(out).not.toMatch(/\d+%/);

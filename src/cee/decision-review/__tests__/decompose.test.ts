@@ -40,6 +40,8 @@ import {
   composeFragments,
   checkComposedConsistency,
   invokeDecomposedDecisionReview,
+  resolveDecomposeFallbackBudget,
+  DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
   DEFAULT_DECOMPOSE_MODEL,
 } from '../decompose.js';
 import { performShapeCheck } from '../shape-check.js';
@@ -390,6 +392,213 @@ describe('invokeDecomposedDecisionReview — orchestration', () => {
     const res = await invokeDecomposedDecisionReview(baseInput(), { requestId: 'r', timeoutMs: 15000 });
     expect(invokeMonolithMock).toHaveBeenCalledTimes(1);
     expect((res.output as Record<string, unknown>).narrative_summary).toBe('MONOLITH');
+  });
+});
+
+// ============================================================================
+// Cancellation + shared deadline (Codex r2 blocker 3)
+// ============================================================================
+
+describe('invokeDecomposedDecisionReview — cancellation (Codex r2 blocker 3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetConfigCache();
+    invokeMonolithMock.mockResolvedValue({
+      output: { narrative_summary: 'MONOLITH', produced_at: 'x' },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 1, input_tokens: 1, output_tokens: 1,
+      prompt_version: 'v11',
+      resolution: { task: 'decision_review', resolved_model: 'gpt-4.1', resolution_source: 'task_default', provider: 'openai' },
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('client abort mid-fan-out aborts all four sub-requests and never launches the fallback', async () => {
+    const seenSignals: (AbortSignal | undefined)[] = [];
+    chatWithAnthropicMock.mockImplementation((args: { signal?: AbortSignal }) => {
+      seenSignals.push(args.signal);
+      return new Promise((resolve, reject) => {
+        if (args.signal?.aborted) return reject(new Error('request aborted'));
+        args.signal?.addEventListener('abort', () => reject(new Error('request aborted')), { once: true });
+        // Escape hatch so a regression (signal not forwarded) fails the
+        // assertions below instead of hanging the suite forever.
+        setTimeout(() => reject(new Error('no-signal-escape')), 2_000);
+      });
+    });
+    const client = new AbortController();
+    const promise = invokeDecomposedDecisionReview(baseInput(), {
+      requestId: 'r', timeoutMs: 15_000, signal: client.signal,
+    });
+    await vi.waitFor(() => expect(chatWithAnthropicMock).toHaveBeenCalledTimes(4));
+    client.abort();
+    await expect(promise).rejects.toThrow(/abort/i);
+    // Every sub-request received the abort signal and was cancelled — no
+    // orphaned paid calls left running after the client hung up.
+    expect(seenSignals).toHaveLength(4);
+    for (const s of seenSignals) {
+      expect(s).toBeDefined();
+      expect(s!.aborted).toBe(true);
+    }
+    // And no fallback was billed for a response nobody is waiting for.
+    expect(invokeMonolithMock).not.toHaveBeenCalled();
+  });
+
+  it('the first fatal sub-call failure cancels the sibling requests instead of waiting them out', async () => {
+    const siblingOutcomes: string[] = [];
+    chatWithAnthropicMock.mockImplementation((args: { system: string; signal?: AbortSignal }) => {
+      if (args.system.includes('biggest evidence gaps')) {
+        // R2 fails fatally, immediately.
+        return Promise.reject(new Error('haiku exploded'));
+      }
+      return new Promise((resolve, reject) => {
+        args.signal?.addEventListener(
+          'abort',
+          () => { siblingOutcomes.push('aborted'); reject(new Error('request aborted')); },
+          { once: true },
+        );
+        // A straggler that would otherwise run to completion (and be paid for).
+        setTimeout(() => {
+          siblingOutcomes.push('ran-to-completion');
+          resolve({
+            content: JSON.stringify(goodR1()),
+            usage: { input_tokens: 1, output_tokens: 1 },
+            model: DEFAULT_DECOMPOSE_MODEL,
+            latencyMs: 5,
+          });
+        }, 300);
+      });
+    });
+    const res = await invokeDecomposedDecisionReview(baseInput(), { requestId: 'r', timeoutMs: 15_000 });
+    expect(invokeMonolithMock).toHaveBeenCalledTimes(1);
+    expect((res.output as Record<string, unknown>).narrative_summary).toBe('MONOLITH');
+    // The three siblings were cancelled the moment the fatal failure landed —
+    // none of them ran to completion after the fallback decision was made.
+    expect(siblingOutcomes).toEqual(['aborted', 'aborted', 'aborted']);
+  });
+
+  it('an already-aborted signal fires no sub-calls and no fallback', async () => {
+    const client = new AbortController();
+    client.abort();
+    await expect(
+      invokeDecomposedDecisionReview(baseInput(), { requestId: 'r', timeoutMs: 15_000, signal: client.signal }),
+    ).rejects.toThrow(/abort/i);
+    expect(chatWithAnthropicMock).not.toHaveBeenCalled();
+    expect(invokeMonolithMock).not.toHaveBeenCalled();
+  });
+
+  it('resolveDecomposeFallbackBudget: remaining-time clock with a disclosed floor', () => {
+    // Plenty left: fallback gets exactly what remains.
+    expect(resolveDecomposeFallbackBudget(15_000, 1_000)).toEqual({ timeoutMs: 14_000, floorEngaged: false });
+    // Near-exhausted: floored at the minimum viable window, disclosed.
+    expect(resolveDecomposeFallbackBudget(15_000, 14_000)).toEqual({
+      timeoutMs: DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
+      floorEngaged: true,
+    });
+    // Overrun: never negative, still the floor.
+    expect(resolveDecomposeFallbackBudget(15_000, 20_000)).toEqual({
+      timeoutMs: DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
+      floorEngaged: true,
+    });
+    // Small original budget: the floor is capped at the original budget —
+    // the fallback never gets MORE than the caller ever allowed.
+    expect(resolveDecomposeFallbackBudget(5_000, 4_900)).toEqual({ timeoutMs: 5_000, floorEngaged: true });
+  });
+
+  it('the fallback inherits the REMAINING shared budget, not a fresh full clock', async () => {
+    chatWithAnthropicMock.mockImplementation(
+      () => new Promise((_resolve, reject) => { setTimeout(() => reject(new Error('slice failed')), 25); }),
+    );
+    await invokeDecomposedDecisionReview(baseInput(), { requestId: 'r', timeoutMs: 15_000 });
+    expect(invokeMonolithMock).toHaveBeenCalledTimes(1);
+    const fbOptions = invokeMonolithMock.mock.calls[0]![1] as { timeoutMs: number };
+    // ≥25ms elapsed in the fan-out — the fallback gets what REMAINS of the one
+    // shared deadline (floored at a sane minimum), never the original budget
+    // stacked on top of the time already spent.
+    expect(fbOptions.timeoutMs).toBeLessThanOrEqual(15_000 - 20);
+    expect(fbOptions.timeoutMs).toBeGreaterThanOrEqual(8_000);
+  });
+});
+
+// ============================================================================
+// Authoritative-intersect grounding — empty is NEVER open (Codex r2)
+// ============================================================================
+
+describe('checkComposedConsistency — empty authoritative set means empty allowed set', () => {
+  it('with NO authoritative evidence gaps, fragment evidence keys are dropped, not passed through', () => {
+    const base = baseInput();
+    const input = { ...base, deterministic_coaching: { ...base.deterministic_coaching, evidence_gaps: [] } };
+    const { ctx } = buildSlices(input);
+    const composed = composeFragments(goodR1(), goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctx);
+    expect(res.output.evidence_enhancements).toEqual({});
+    expect(res.repaired.join(' ')).toMatch(/orphan factor_id "fac-1"/);
+  });
+
+  it('with NO authoritative fragile edges, fragment scenario keys are dropped, not passed through', () => {
+    const base = baseInput();
+    const input = { ...base, isl_results: { ...base.isl_results, fragile_edges: [] } };
+    const { ctx } = buildSlices(input);
+    const composed = composeFragments(goodR1(), goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctx);
+    expect(res.output.scenario_contexts).toEqual({});
+    expect(res.repaired.join(' ')).toMatch(/orphan edge_id "edge-1"/);
+  });
+
+  it('with NO authoritative flip data, fragment flip_thresholds are dropped, not passed through', () => {
+    const { flip_threshold_data: _dropped, ...input } = baseInput();
+    const { ctx } = buildSlices(input);
+    const composed = composeFragments(goodR1(), goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctx);
+    expect(res.output.flip_thresholds).toEqual([]);
+    expect(res.repaired.join(' ')).toMatch(/flip_thresholds dropped/);
+  });
+
+  it('with NO authoritative options, fragment story_headline keys are dropped, not passed through', () => {
+    const base = baseInput();
+    const input = { ...base, isl_results: { ...base.isl_results, option_comparison: [] } };
+    const { ctx } = buildSlices(input);
+    const composed = composeFragments(goodR1(), goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctx);
+    expect(res.output.story_headlines).toEqual({});
+    expect(res.repaired.join(' ')).toMatch(/orphan option_id/);
+  });
+});
+
+// ============================================================================
+// Winner SEMANTICS — win-cue + option-name, negation-aware (not bare substring)
+// ============================================================================
+
+describe('checkComposedConsistency — winner semantics (PQ6 port)', () => {
+  it('FATAL: a narrative that NAMES the winner but crowns the runner-up (substring presence is not enough)', () => {
+    const r1 = goodR1();
+    // The old substring check passes this: "Option A" IS present. But the
+    // win-cue sentence crowns Option B — a wrong-winner claim.
+    r1.narrative_summary =
+      'Option B is the clear leader and should be chosen. Option A remains a credible alternative.';
+    const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctxFor());
+    expect(res.consistent).toBe(false);
+    expect(res.fatal.join(' ')).toMatch(/wrong-winner/i);
+  });
+
+  it('consistent: a NEGATED lead sentence about the runner-up does not false-fire', () => {
+    const r1 = goodR1();
+    r1.narrative_summary =
+      'Option B is not the leader here. Option A leads on demand strength and stability.';
+    const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctxFor());
+    expect(res.consistent).toBe(true);
+    expect(res.fatal).toEqual([]);
+  });
+
+  it('consistent: a lead sentence naming BOTH options is skipped (conservative rule)', () => {
+    const r1 = goodR1();
+    r1.narrative_summary = 'Option A leads Option B on every dimension that matters.';
+    const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctxFor());
+    expect(res.consistent).toBe(true);
+    expect(res.fatal).toEqual([]);
   });
 });
 
