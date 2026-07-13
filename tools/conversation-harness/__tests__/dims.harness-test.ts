@@ -197,8 +197,11 @@ describe('D2 chip-presence-per-question-class', () => {
     expect((d.details as any).qualifyingTurns[0].uncoveredAlternatives).toEqual([]);
   });
 
-  it('falls back to the chip-count floor when alternatives are not extractable (never a silent pass on binding)', () => {
+  it('does NOT pass a qualifying question when alternatives are not extractable — unmeasurable, not a silent pass (Codex finding 6)', () => {
     // Enumerated-class via "which of the two options" with no parsable list.
+    // The chip-count floor is met (>=2 chips) but the chips cannot be bound to
+    // the stated alternatives, so binding correctness is UNMEASURABLE. A green
+    // pass here would bless any two chips regardless of relevance.
     const r = row({
       turn: 'Q1',
       assistantText: 'Which of the two options fits your budget?',
@@ -208,8 +211,31 @@ describe('D2 chip-presence-per-question-class', () => {
       ],
     });
     const d = dimD2ChipPresence([r]);
-    expect((d.details as any).qualifyingTurns[0].bindable).toBe(false);
-    expect(d.verdict).toBe('pass'); // floor only — binding not claimable
+    const per = (d.details as any).qualifyingTurns[0];
+    expect(per.bindable).toBe(false);
+    expect(per.status).toBe('unmeasurable');
+    expect(d.verdict).not.toBe('pass'); // binding not claimable -> not a silent pass
+    expect(d.verdict).toBe('unmeasurable'); // never reported green
+  });
+
+  it('does NOT pass a short either/or ("A or B") whose chips are unrelated to the choice (Codex finding 6 exact repro)', () => {
+    // "Would you prefer A or B?" with chips "Read more"/"Try again": the stated
+    // alternatives (A, B) are dropped by the >3-char content-token filter, so no
+    // alternatives extract, bindable=false, and the OLD code passed on the chip
+    // floor alone — blessing two entirely unrelated chips. Must not pass.
+    const r = row({
+      turn: 'Q1',
+      assistantText: 'Would you prefer A or B?',
+      chips: [
+        { id: 'g1', label: 'Read more' },
+        { id: 'g2', label: 'Try again' },
+      ],
+    });
+    const d = dimD2ChipPresence([r]);
+    const per = (d.details as any).qualifyingTurns[0];
+    expect(per.class).toBe('either-or');
+    expect(per.bindable).toBe(false);
+    expect(d.verdict).not.toBe('pass');
   });
 });
 

@@ -460,7 +460,24 @@ export function dimD2ChipPresence(rows: TurnRow[]): DimResult {
     });
     const uncovered = coverage.filter((c) => !c.covered).map((c) => c.alternative);
     const bindable = alternatives.length >= 2;
-    const ok = row.chips.length >= 2 && (!bindable || uncovered.length === 0);
+    // C12 + Codex finding 6. Three honest outcomes, NOT a binary pass:
+    //   - fail        : chip-count floor unmet (a choice question with <2 chips),
+    //                   OR chips fail to cover an extracted stated alternative.
+    //   - unmeasurable: floor met but the stated alternatives could not be
+    //                   extracted to bind against (bindable=false). Binding
+    //                   correctness is UNKNOWN here — passing on the chip floor
+    //                   alone would bless any two chips regardless of relevance
+    //                   ("Would you prefer A or B?" + "Read more"/"Try again").
+    //   - pass        : floor met, alternatives extracted, and every one is
+    //                   covered by a chip.
+    const floorMet = row.chips.length >= 2;
+    const status: 'pass' | 'fail' | 'unmeasurable' = !floorMet
+      ? 'fail'
+      : !bindable
+        ? 'unmeasurable'
+        : uncovered.length === 0
+          ? 'pass'
+          : 'fail';
     return {
       turn: row.turn,
       class: q.eitherOr ? 'either-or' : 'enumerated',
@@ -469,19 +486,38 @@ export function dimD2ChipPresence(rows: TurnRow[]): DimResult {
       coverage,
       uncoveredAlternatives: uncovered,
       bindable,
-      ok,
+      status,
+      ok: status === 'pass',
     };
   });
-  const failures = perTurn.filter((t) => !t.ok);
+  const failures = perTurn.filter((t) => t.status === 'fail');
+  const passes = perTurn.filter((t) => t.status === 'pass');
+  const unmeasurable = perTurn.filter((t) => t.status === 'unmeasurable');
+  // fail dominates; otherwise a verdict of pass requires at least one MEASURED
+  // pass — a run whose qualifying turns are ALL unbindable is 'unmeasurable'
+  // (never reported green), not a silent pass on the chip-count floor (Codex
+  // finding 6). No qualifying turns at all stays the benign 'log'.
+  const verdict: DimResult['verdict'] =
+    qualifying.length === 0
+      ? 'log'
+      : failures.length > 0
+        ? 'fail'
+        : passes.length > 0
+          ? 'pass'
+          : 'unmeasurable';
   return {
     dim: 'D2-chip-presence-per-question-class',
-    verdict: qualifying.length === 0 ? 'log' : failures.length > 0 ? 'fail' : 'pass',
+    verdict,
     flaky: true,
-    details: { qualifyingTurns: perTurn, failures: failures.map((t) => t.turn) },
+    details: {
+      qualifyingTurns: perTurn,
+      failures: failures.map((t) => t.turn),
+      unmeasurable: unmeasurable.map((t) => t.turn),
+    },
     notes: [
       'qualifying turn = assistant_text poses an either/or or enumerated-choice question (regex class, not exact text)',
       'fail = a qualifying turn whose SAME envelope carries <2 suggested_actions, OR (C12) whose chips do not cover every STATED alternative (>=1 shared content token per alternative) when >=2 alternatives are extractable',
-      'when the alternatives cannot be extracted (bindable=false) the dim falls back to the chip-count floor — a parse failure is never a silent pass on binding',
+      'when the alternatives cannot be extracted (bindable=false) the turn is UNMEASURABLE for binding — it does NOT pass on the chip-count floor alone (a parse failure is never a silent pass on binding, Codex finding 6); a run whose qualifying turns are all unmeasurable reports the unmeasurable verdict, never green',
       qualifying.length === 0 ? 'no qualifying question turns in this run — logged, not passed' : '',
     ].filter(Boolean),
   };

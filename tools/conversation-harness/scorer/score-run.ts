@@ -86,7 +86,7 @@ interface ScoredRow extends Record<string, unknown> {
   turn: string;
 }
 
-/** Null-honest per-turn LLM token totals for the OPS cost dim (FIX-2).
+/** Null-honest per-turn LLM token totals for the OPS cost dim (FIX-2 / FIX-2b).
  *
  * A turn's llm_calls can EXIST but carry no usage object — an aborted / streamed
  * fragment (#441), or a synthetic routing call whose trace entry has no token
@@ -94,26 +94,44 @@ interface ScoredRow extends Record<string, unknown> {
  * opsFromRows then counts as a real measurement: an arm with MISSING token data
  * ranks "cheaper" and can spuriously flip the verdict to promote.
  *
- * Fix: a token direction is null unless AT LEAST ONE call carries a usage figure
- * for it (a numeric `input_tokens`/`output_tokens`, flat or under `usage`). This
- * distinguishes "no usage present" (null → excluded from the cost comparison)
- * from "usage present and zero" (a real 0 → kept). Only usage-bearing calls are
- * summed, so a mix of usage-bearing + usageless calls still totals honestly. */
+ * FIX-2 nulled a total only when EVERY call was usageless. That was not enough:
+ * a turn with one measured 100/20 call + one usageless call still summed the
+ * measured subset (100/20) — a PARTIAL total that opsFromRows then treats as a
+ * real, cheaper-looking cost while the unmeasured call's cost is unconstrained.
+ * A partial measurement is not a comparable total (Codex finding 2).
+ *
+ * FIX-2b: a turn's token total is UNKNOWN (both directions null) unless EVERY
+ * cost-bearing call is FULLY measured — i.e. every llm_call carries a numeric
+ * `input_tokens` AND `output_tokens` (flat or under `usage`). Then, and only
+ * then, the directions are the honest sums across all calls. This keeps a real
+ * 0 (usage present and zero) while excluding any turn whose cost we cannot fully
+ * account for from the OPS cost comparison — never ranking a candidate cheaper
+ * on missing data. The two directions move together (null-as-a-pair) so a turn
+ * with a partially-reported call cannot leak a half-counted total downstream. */
 export function llmTokenTotals(llmCalls: unknown[]): { input: number | null; output: number | null } {
-  const pick = (key: 'input_tokens' | 'output_tokens'): number | null => {
-    const present = (llmCalls ?? [])
-      .map((c) => {
-        const call = (c ?? {}) as Record<string, unknown>;
-        const flat = call[key];
-        if (typeof flat === 'number') return flat;
-        const usage = (call.usage ?? {}) as Record<string, unknown>;
-        const nested = usage[key];
-        return typeof nested === 'number' ? nested : null;
-      })
-      .filter((v): v is number => v != null);
-    return present.length ? present.reduce((a, b) => a + b, 0) : null;
+  const UNKNOWN = { input: null, output: null } as const;
+  const calls = llmCalls ?? [];
+  if (calls.length === 0) return { ...UNKNOWN };
+  const numericField = (call: Record<string, unknown>, key: 'input_tokens' | 'output_tokens'): number | null => {
+    const flat = call[key];
+    if (typeof flat === 'number') return flat;
+    const usage = (call.usage ?? {}) as Record<string, unknown>;
+    const nested = usage[key];
+    return typeof nested === 'number' ? nested : null;
   };
-  return { input: pick('input_tokens'), output: pick('output_tokens') };
+  let inSum = 0;
+  let outSum = 0;
+  for (const c of calls) {
+    const call = (c ?? {}) as Record<string, unknown>;
+    const tin = numericField(call, 'input_tokens');
+    const tout = numericField(call, 'output_tokens');
+    // Any call not fully measured makes the whole turn's cost UNKNOWN — a
+    // cost-bearing call we cannot account for is not summed away as if free.
+    if (tin == null || tout == null) return { ...UNKNOWN };
+    inSum += tin;
+    outSum += tout;
+  }
+  return { input: inSum, output: outSum };
 }
 
 /** Draft-graph labels ground `labels_named` against THIS run's own captures
