@@ -594,13 +594,14 @@ function rebuildPhase3BlocksFresh(
   // the authority. Persisted-first per the controlled-factor-authority guard —
   // the compose.ts allowlist entry documents this provenance. Absent /
   // unthreaded graph ⇒ empty set ⇒ no suppression (byte-identical). Threaded
-  // into the evidence "investigate this" surfaces so a lever is never NAMED as
-  // a gap to gather evidence about.
+  // into the evidence "investigate this" surfaces AND the free-text assumption
+  // "confirm this" surfaces (review-card + coaching) so a lever is never NAMED
+  // as a gap to gather evidence about or an assumption to confirm.
   const interventionControlledFactorIds =
     collectInterventionControlledFactorIds(rawPersistedGraphForLevers);
   return [
     ...buildReviewCardBlocks(fact, lookup, ctx, interventionControlledFactorIds),
-    ...buildCoachingBlocks(fact, lookup, ctx),
+    ...buildCoachingBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx, interventionControlledFactorIds),
   ];
 }

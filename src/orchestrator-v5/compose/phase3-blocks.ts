@@ -140,6 +140,80 @@ function isLeverFactor(
   return id.length > 0 && interventionControlledFactorIds.has(id);
 }
 
+/**
+ * Minimum lever-label length used for the NAMING scan below. A 1–2 char label
+ * (an unlabelled or degenerate node) would over-match arbitrary prose, so it is
+ * ignored for detection — structural membership (`isLeverFactor`) is unaffected.
+ */
+const LEVER_LABEL_MIN_LEN = 3;
+
+/**
+ * Doctrine D-U F2 (assumption surface): resolve the option-set LEVER factor_ids
+ * to their canonical graph LABELS. The `key_assumptions` / `assumption_check`
+ * surface is FREE TEXT the enrichment emits with NO factor_id, so a lever can
+ * only be detected there by the NAME it is given — the label. MEMBERSHIP stays
+ * STRUCTURAL (factor_id in the union set, resolved via the same lookup every
+ * builder trusts); the label is used ONLY to find the naming, never to decide
+ * lever membership. Empty set / unresolved / too-short labels ⇒ no labels ⇒
+ * suppress nothing. No producer number is read.
+ */
+function collectLeverLabels(
+  interventionControlledFactorIds: ReadonlySet<string>,
+  lookup: GraphNodeLookup,
+): readonly string[] {
+  if (interventionControlledFactorIds.size === 0) return [];
+  const labels: string[] = [];
+  for (const id of interventionControlledFactorIds) {
+    const ref = lookup.get(id.trim());
+    if (ref === undefined || ref.kind !== 'factor') continue;
+    const label = ref.label.trim();
+    if (label.length >= LEVER_LABEL_MIN_LEN) labels.push(label);
+  }
+  return labels;
+}
+
+/**
+ * Whole-phrase, case-insensitive, whitespace-normalised containment with
+ * alphanumeric word boundaries on BOTH ends. Scans every occurrence so a first
+ * boundary-failing hit cannot mask a later valid one. A bare shared token must
+ * NOT match — on live staging the lever "Equity Offered to CTO" and a non-lever
+ * assumption both contain "CTO", so a token match would over-suppress.
+ */
+function containsWholePhrase(haystack: string, needle: string): boolean {
+  if (needle.length === 0) return false;
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) return false;
+    const before = at === 0 ? '' : haystack[at - 1]!;
+    const afterIdx = at + needle.length;
+    const after = afterIdx >= haystack.length ? '' : haystack[afterIdx]!;
+    const boundedBefore = before === '' || !/[a-z0-9]/.test(before);
+    const boundedAfter = after === '' || !/[a-z0-9]/.test(after);
+    if (boundedBefore && boundedAfter) return true;
+    from = at + 1;
+  }
+}
+
+/**
+ * Doctrine D-U F2: does this free-text assumption NAME an option-set lever? True
+ * when the assumption body contains a lever's whole label as a bounded phrase.
+ * Empty label set (the default) ⇒ never suppresses (byte-identical). Display-
+ * only: no producer value is read; membership is the structural lever set.
+ */
+function assumptionNamesLever(
+  text: string,
+  leverLabels: readonly string[],
+): boolean {
+  if (leverLabels.length === 0) return false;
+  const hay = text.toLowerCase().replace(/\s+/g, ' ');
+  for (const label of leverLabels) {
+    const needle = label.toLowerCase().replace(/\s+/g, ' ');
+    if (containsWholePhrase(hay, needle)) return true;
+  }
+  return false;
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -406,8 +480,16 @@ export function buildReviewCardBlocks(
   );
   if (evidencePriority !== null) blocks.push(evidencePriority);
 
-  // assumption (rank 7) — one per key_assumptions string
-  blocks.push(...buildAssumptionCards(dr, ctx));
+  // assumption (rank 7) — one per key_assumptions string. D-U F2: a
+  // free-text assumption that NAMES an option-set lever is dropped (the
+  // channel stays open; non-lever assumptions still ship).
+  blocks.push(
+    ...buildAssumptionCards(
+      dr,
+      ctx,
+      collectLeverLabels(interventionControlledFactorIds, lookup),
+    ),
+  );
 
   // scenario_context (rank 8) — one per edge
   blocks.push(...buildScenarioContextCards(dr, lookup, ctx));
@@ -425,12 +507,17 @@ export function buildReviewCardBlocks(
  */
 export function buildCoachingBlocks(
   fact: RunAnalysisHandlerFact,
-  _lookup: GraphNodeLookup,
+  lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
+  interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
 ): readonly CoachingBlock[] {
   const dr = readDecisionReview(fact);
   if (dr === null) return [];
   const blocks: CoachingBlock[] = [];
+  // Doctrine D-U F2: lever labels for the free-text assumption_check surface
+  // (structural membership resolved to labels via the shared lookup). Empty ⇒
+  // suppress nothing; the calibration_prompt branch below is unaffected.
+  const leverLabels = collectLeverLabels(interventionControlledFactorIds, lookup);
 
   // assumption_check — one per key_assumptions entry, ranked by order.
   if (Array.isArray(dr.key_assumptions)) {
@@ -439,6 +526,9 @@ export function buildCoachingBlocks(
       if (typeof raw !== 'string') continue;
       const text = raw.trim();
       if (text.length === 0) continue;
+      // Doctrine D-U F2: never NAME an option-set lever as an assumption to
+      // confirm. Skip before the index bump so survivors stay contiguous.
+      if (assumptionNamesLever(text, leverLabels)) continue;
       idx++;
       const candidate = {
         ...commonMetadata('coach:assumption', String(idx), ctx),
@@ -965,6 +1055,7 @@ function buildEvidencePriorityCard(
 function buildAssumptionCards(
   dr: Record<string, unknown>,
   ctx: BlockBuildCtx,
+  leverLabels: readonly string[] = [],
 ): readonly ReviewCardBlock[] {
   if (!Array.isArray(dr.key_assumptions)) return [];
   const out: ReviewCardBlock[] = [];
@@ -973,6 +1064,11 @@ function buildAssumptionCards(
     if (typeof raw !== 'string') continue;
     const text = raw.trim();
     if (text.length === 0) continue;
+    // Doctrine D-U F2: an option-set LEVER is a decision variable being SET,
+    // not a load-bearing UNCERTAINTY to confirm — never NAME it as an
+    // assumption to check. Skip before the index/rank bump so surviving
+    // non-lever assumptions stay contiguous (empty labels ⇒ suppress nothing).
+    if (assumptionNamesLever(text, leverLabels)) continue;
     idx++;
     const candidate = {
       ...commonMetadata('review:assumption', String(idx), ctx),

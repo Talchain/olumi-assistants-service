@@ -1760,3 +1760,83 @@ describe('D-U F2 lever-identity filter on evidence "investigate this" surfaces',
     expect(blocks.find((b) => b.card_kind === 'evidence_priority')).toBeUndefined();
   });
 });
+
+// ============================================================================
+// Doctrine D-U F2 (assumption surface, PR #444 residual): the SAME ruling one
+// surface further. `key_assumptions` prose is emitted as FREE TEXT with no
+// factor_id, yet it still NAMES option-set levers — e.g. "Equity Offered to CTO
+// has a direct relationship with their decision to accept" (action=confirm_
+// factor) on live staging. A lever is a decision variable being SET, not a
+// load-bearing UNCERTAINTY to confirm, so it must not be named as an assumption
+// to check. Membership stays STRUCTURAL (factor_id in the union set, resolved
+// to its label via the same lookup); the label is used ONLY to detect the
+// naming in the free text. Whole-phrase boundary match — a shared bare token
+// (the live "CTO" collision) must NOT over-suppress a non-lever assumption.
+// Channel stays open (non-lever assumptions still ship); empty set ⇒ unchanged.
+// ============================================================================
+describe('D-U F2 lever-identity filter on assumption "confirm this" surfaces', () => {
+  // fac_delivery_risk (label "Delivery risk") is the lever; fac_cost_overrun
+  // (label "Cost overrun risk") is a NON-lever factor — it must still ship.
+  const ASSUMPTIONS = [
+    'Delivery risk is understood and controlled by the chosen option.', // lever → drop
+    'Cost overrun risk is accurately estimated.', // non-lever factor → ship
+    'Delivery timelines stay predictable through the launch window.', // token-only "Delivery", NOT the whole lever phrase → ship
+    'Market conditions persist through the launch window.', // no factor named → ship
+  ] as const;
+
+  function assumptionFact(): RunAnalysisHandlerFact {
+    return makeFact({
+      decisionReview: { key_assumptions: [...ASSUMPTIONS] },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+  }
+
+  it('buildReviewCardBlocks drops the lever-named assumption card, keeps every non-lever assumption', () => {
+    const fact = assumptionFact();
+    const blocks = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_delivery_risk']),
+    );
+    const bodies = blocks
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    expect(bodies).toEqual([
+      'Cost overrun risk is accurately estimated.',
+      'Delivery timelines stay predictable through the launch window.',
+      'Market conditions persist through the launch window.',
+    ]);
+  });
+
+  it('buildCoachingBlocks drops the lever-named assumption_check, keeps every non-lever one', () => {
+    const fact = assumptionFact();
+    const blocks = buildCoachingBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_delivery_risk']),
+    );
+    const bodies = blocks
+      .filter((b) => b.coaching_kind === 'assumption_check')
+      .map((b) => b.body);
+    expect(bodies).toEqual([
+      'Cost overrun risk is accurately estimated.',
+      'Delivery timelines stay predictable through the launch window.',
+      'Market conditions persist through the launch window.',
+    ]);
+  });
+
+  it('without a lever set both surfaces are byte-identical (every assumption ships)', () => {
+    const fact = assumptionFact();
+    const lookup = buildGraphNodeLookup(fact);
+    const review = buildReviewCardBlocks(fact, lookup, CTX)
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    const coaching = buildCoachingBlocks(fact, lookup, CTX)
+      .filter((b) => b.coaching_kind === 'assumption_check')
+      .map((b) => b.body);
+    expect(review).toEqual([...ASSUMPTIONS]);
+    expect(coaching).toEqual([...ASSUMPTIONS]);
+  });
+});
