@@ -27,6 +27,7 @@ import {
   jaccard,
   classifyQuestion,
   guardViolations,
+  wireHasHeldProposal,
 } from './dims.js';
 
 export type PromptDimDirection = 'higher-better' | 'lower-better' | 'neutral';
@@ -113,7 +114,11 @@ export function surfacesFromWire(wire: unknown): TurnSurfaces {
     }
   }
   return {
-    hasHeldProposal: w.held_proposal != null && w.held_proposal !== false,
+    // Held proposal is a blocks[] entry {type:'held_proposal'} on the real wire
+    // (src/orchestrator-v5/compose/held-proposal.ts), NOT a top-level field —
+    // shared detector with rowFromWire so PQ6(a) and the FIX-1 held-excusal stay
+    // alive and in sync.
+    hasHeldProposal: wireHasHeldProposal(w),
     winProbabilities,
     leadingOptionLabel,
     optionLabels,

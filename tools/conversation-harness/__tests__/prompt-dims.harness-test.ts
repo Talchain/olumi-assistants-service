@@ -9,7 +9,7 @@
  *   pnpm exec vitest run --config tools/conversation-harness/vitest.config.ts
  */
 import { describe, expect, it } from 'vitest';
-import type { TurnRow } from '../scorer/dims.js';
+import { rowFromWire, type TurnRow } from '../scorer/dims.js';
 import {
   pqBrevityDensity,
   pqChipCorrectness,
@@ -62,10 +62,12 @@ function surf(partial: Partial<TurnSurfaces>): TurnSurfaces {
 }
 
 describe('surfacesFromWire', () => {
-  it('lifts held_proposal, win probabilities and the leading option label', () => {
+  it('lifts held_proposal (blocks[] entry), win probabilities and the leading option label', () => {
     const s = surfacesFromWire({
-      held_proposal: { id: 'p1' },
       blocks: [
+        // Real wire shape: a held_proposal is a blocks[] entry (NOT a top-level
+        // field) — src/orchestrator-v5/compose/held-proposal.ts.
+        { type: 'held_proposal', proposal_id: 'p1', confirm_action_id: 'c1', mutation_class: 'structural' },
         {
           type: 'analysis_result',
           leading_option_id: 'opt_a',
@@ -91,6 +93,22 @@ describe('surfacesFromWire', () => {
     const s = surfacesFromWire({ blocks: [{ type: 'analysis_result', win_probabilities: { X: 0.3, Y: 0.7 } }] });
     expect(s.hasHeldProposal).toBe(false);
     expect(s.leadingOptionLabel).toBe('Y');
+  });
+
+  // MINOR fix (wrong-location held_proposal reader): the detector reads a
+  // blocks[] {type:'held_proposal'} entry (the REAL wire shape), NOT a
+  // top-level `held_proposal` field. The old top-level reader was dead-false on
+  // every real run, silently disabling PQ6(a) + the FIX-1 held-excusal branch.
+  it('detects a held_proposal from a blocks[] entry with NO top-level field [fix]', () => {
+    const wire = { blocks: [{ type: 'held_proposal', proposal_id: 'p1' }] };
+    expect(surfacesFromWire(wire).hasHeldProposal).toBe(true);
+    expect(rowFromWire('E1', wire, {}).heldProposal).toBe(true);
+  });
+
+  it('does NOT treat a bare top-level held_proposal field (a shape the wire never emits) as held [fix]', () => {
+    const wire = { held_proposal: { id: 'p1' } }; // no blocks[] held entry
+    expect(surfacesFromWire(wire).hasHeldProposal).toBe(false);
+    expect(rowFromWire('E1', wire, {}).heldProposal).toBe(false);
   });
 });
 
@@ -290,6 +308,17 @@ describe('PQ6 coherence (lower-better, gating)', () => {
 
   it('flags a success claim while a proposal is still held', () => {
     const surfaces = { T1: surf({ hasHeldProposal: true }) };
+    const d = pqCoherence([row({ turn: 'T1', guardHits: { ...CLEAN_GUARDS, structuralSuccessClaim: true } })], surfaces);
+    expect(d.value).toBe(1);
+    expect((d.details as any).contradictions[0].kind).toBe('success-claim-with-held-proposal');
+  });
+
+  // MINOR fix, END-TO-END through surfacesFromWire: PQ6(a) must fire from a REAL
+  // held_proposal BLOCK wire (not the dead top-level shape). Proves the detector
+  // chain (wire blocks[] -> hasHeldProposal -> PQ6(a)) is alive on real runs.
+  it('PQ6(a) fires from a real held_proposal BLOCK wire via surfacesFromWire [fix]', () => {
+    const wire = { blocks: [{ type: 'held_proposal', proposal_id: 'p1', confirm_action_id: 'c1', mutation_class: 'structural' }] };
+    const surfaces = { T1: surfacesFromWire(wire) };
     const d = pqCoherence([row({ turn: 'T1', guardHits: { ...CLEAN_GUARDS, structuralSuccessClaim: true } })], surfaces);
     expect(d.value).toBe(1);
     expect((d.details as any).contradictions[0].kind).toBe('success-claim-with-held-proposal');

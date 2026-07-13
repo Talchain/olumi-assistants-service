@@ -54,9 +54,10 @@ export interface TurnRow {
    * Attached by attachMutationOutcomes (called from score-run.ts). */
   mutationCommitted?: boolean | null;
   /** Wire held_proposal presence — a staged (not-yet-applied) change on THIS
-   * turn's envelope. Read off the same wire field as TurnSurfaces.hasHeldProposal
-   * so guardViolations can decide (with the chips) whether an applied-edit
-   * receipt is legitimately ambiguous. Absent/undefined => no held proposal. */
+   * turn's envelope, detected via wireHasHeldProposal (a blocks[] entry of type
+   * 'held_proposal', the same detector as TurnSurfaces.hasHeldProposal) so
+   * guardViolations can decide (with the chips) whether an applied-edit receipt
+   * is legitimately ambiguous. Absent/undefined => no held proposal. */
   heldProposal?: boolean;
 }
 
@@ -102,6 +103,20 @@ export interface TurnMeta {
   duplicate_of?: string | null;
 }
 
+/** True when the wire carries a held proposal — a `blocks[]` entry of
+ * `{ type: 'held_proposal' }` (the REAL wire shape emitted by
+ * src/orchestrator-v5/compose/held-proposal.ts). It is NOT a top-level
+ * `held_proposal` field — that shape never exists on the wire, and reading it
+ * made hasHeldProposal / heldProposal dead-false on every real run, silently
+ * disabling PQ6(a) success-claim-with-held-proposal AND the FIX-1 held-excusal
+ * branch. Single source of truth so rowFromWire (row) and surfacesFromWire
+ * (surface) stay in lockstep. */
+export function wireHasHeldProposal(wire: unknown): boolean {
+  const w = (wire ?? {}) as Record<string, unknown>;
+  const blocks = Array.isArray(w.blocks) ? (w.blocks as unknown[]) : [];
+  return blocks.some((b) => (b as Record<string, unknown> | null)?.type === 'held_proposal');
+}
+
 export function rowFromWire(turnId: string, wire: unknown, meta: TurnMeta = {}): TurnRow {
   const w = (wire ?? {}) as Record<string, unknown>;
   const chipsRaw = Array.isArray(w.suggested_actions) ? (w.suggested_actions as unknown[]) : [];
@@ -130,9 +145,10 @@ export function rowFromWire(turnId: string, wire: unknown, meta: TurnMeta = {}):
       timingsRaw && typeof timingsRaw === 'object' && !Array.isArray(timingsRaw)
         ? (timingsRaw as Record<string, number>)
         : null,
-    // Same predicate as surfacesFromWire.hasHeldProposal — one wire field, two
-    // readers, kept in lockstep so PQ5 (row) and PQ6 (surface) agree.
-    heldProposal: w.held_proposal != null && w.held_proposal !== false,
+    // Same detector as surfacesFromWire.hasHeldProposal (wireHasHeldProposal) —
+    // scans blocks[] for a held_proposal entry, kept in lockstep so PQ5 (row)
+    // and PQ6 (surface) agree.
+    heldProposal: wireHasHeldProposal(w),
   };
 }
 
