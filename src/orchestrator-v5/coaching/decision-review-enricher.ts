@@ -302,6 +302,28 @@ export async function enrichRunAnalysisWithDecisionReview(
     });
     return next;
   } catch (err) {
+    // D-T orphaned-commit class (Codex finding 3). Distinguish an OUTER /
+    // client turn-budget abort from an ordinary enrichment failure. When the
+    // outer signal has aborted, the LLM call was cancelled because the whole
+    // turn's deadline expired — this is NOT a recoverable enrichment failure
+    // to degrade past. Degrading here (returning the original facts) lets the
+    // executor compose + commit a LATE / orphaned turn past the client's
+    // deadline. Re-throw so the executor stops before compose/commit and
+    // classifies the turn as TURN_BUDGET_EXCEEDED. The INTERNAL hard-timer
+    // abort (outer signal NOT aborted) still degrades to thin content below —
+    // that is the intended decision_review timeout behaviour.
+    if (input.signal.aborted) {
+      emit(TelemetryEvents.V5DecisionReviewFailed, {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        reason: 'outer_turn_budget_aborted',
+        duration_ms: Date.now() - startedAt,
+        brief_present: true,
+        brief_length: briefLength,
+        leading_option_present: leadingOptionPresent,
+      });
+      throw err;
+    }
     emit(TelemetryEvents.V5DecisionReviewFailed, {
       request_id: input.requestId,
       scenario_id: input.scenarioId,

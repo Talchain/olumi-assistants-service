@@ -6182,6 +6182,16 @@ export async function runTurnExecutor(
               brief: resolvedBrief,
             });
           } catch (err) {
+            // D-T orphaned-commit guard (Codex finding 3). The enricher
+            // re-throws (rather than degrading) when the OUTER turn budget
+            // aborted mid-review. That is not an "escaped safety net" bug to
+            // patch over with a thin-content commit — it means the turn
+            // deadline expired. Route to BUDGET_EXCEEDED so no late / orphaned
+            // commit happens, instead of degrading and falling through to
+            // compose/commit.
+            if (turnAbort.signal.aborted) {
+              return translateExecuteError(err);
+            }
             log.error(
               {
                 request_id: requestId,
@@ -6198,6 +6208,22 @@ export async function runTurnExecutor(
             });
             handlerFactsForCommit = patchRunAnalysisDecisionReviewNull(
               handlerOutcome.handler_facts,
+            );
+          }
+          // D-T orphaned-commit guard (Codex finding 3) — race sibling of the
+          // catch above. The enricher can also RETURN NORMALLY (no throw) just
+          // as the OUTER turn budget aborts: run_analysis finished right before
+          // turn_ms and the outer timer fired while decision_review was
+          // mid-call, so `turnAbort` is now aborted but no exception surfaced.
+          // Re-check here — before STEP 4 CONFIRM / compose / commitTurn — so a
+          // commit past the client's deadline (a late / orphaned COMMIT) never
+          // happens. Scoped to the flag-on run_analysis path so the flag-off
+          // default stays byte-identical. `translateExecuteError` classifies an
+          // aborted turn as TURN_BUDGET_EXCEEDED and returns via finalizeRun
+          // without committing.
+          if (turnAbort.signal.aborted) {
+            return translateExecuteError(
+              new Error('turn budget exceeded during decision_review enrichment'),
             );
           }
         }
