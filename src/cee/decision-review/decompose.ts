@@ -468,28 +468,41 @@ const WIN_NEGATION_CUE = /\b(?:not|never|unlikely|rather than|instead of|far fro
  * crownings ("Option B is the better choice", "the clear leader … should be
  * chosen") carry none of these qualifiers and still fire.
  *
- *  - DIMENSION: a win-cue scoped to one dimension via "… on/in terms of <noun>"
- *    ("wins on cost") — a per-dimension win, not an overall verdict.
+ *  - DIMENSION: a win-cue scoped to one dimension via a preposition + a BARE
+ *    dimension noun ("wins on cost", "wins in cost", "ahead at speed") or an
+ *    explicit dimensional phrase ("in terms of X") — a per-dimension win, not an
+ *    overall verdict.
  *  - HISTORICAL: genuine past-tense framing ("was ahead", "initially",
  *    "previously") — describes a prior state, not the current crowning.
  *  - ATTENTION: the sentence is about scrutinising / validating / objecting to
  *    an option ("recommend validating", "the strongest objection", "assumptions"),
  *    not crowning it.
  *
- * Round-3 review MAJOR-2 — these three were narrowed to stop over-suppressing
- * present-tense crownings (err toward FIRING the FATAL; the monolith fallback is
- * the safety net):
- *  - `estimates`/`estimated`/`early` REMOVED from HISTORICAL — a decision review
- *    is built ON estimated values, so "the estimates favour Option B, which
- *    should be chosen" is a present-tense crowning, not history. Genuine history
- *    ("was ahead in early estimates") is still caught by `was`.
- *  - DIMENSION dropped the bare prepositions `in`/`for`/`at` (which appear in
- *    plain overall crownings like "the better choice for us") and now requires a
- *    clear dimensional marker: `on` or an explicit "in terms of / when it comes
- *    to / with respect to / regarding" phrase.
+ * REGEX BRITTLENESS (known limitation): this is a heuristic on a heuristic. It is
+ * inherently a trade-off — narrowing to stop over-suppression can re-open the
+ * false-positive class and vice-versa. We accept residual imprecision at the
+ * margins and err toward FIRING the FATAL (the gpt-4.1 monolith fallback is the
+ * safety net for a spurious fatal; a MISSED wrong-winner is caught by the
+ * presence + shape/number-grounding checks). Do not chase completeness here.
+ *
+ * Round-3/4 review MAJOR-2/B — narrowing history to stop over-suppressing
+ * present-tense crownings, and re-adding in/at to DIMENSION with a noun gate:
+ *  - HISTORICAL dropped `estimates`/`estimated`/`early` AND `has been` (4 tokens;
+ *    the round-3 note documented only the first three — recorded here). A
+ *    decision review is built ON estimated values, so "the estimates favour
+ *    Option B, which should be chosen" is a present-tense crowning, not history;
+ *    "has been the leader … should be chosen" is likewise present-relevant.
+ *    Genuine history ("was ahead in early estimates") is still caught by `was`.
+ *  - DIMENSION re-adds `in`/`at` (round-3 dropping them re-opened "wins in cost"
+ *    as a false FATAL) but ONLY before a BARE dimension noun: a negative
+ *    lookahead excludes determiners / pronouns / temporals, so "wins in cost"
+ *    (per-dimension → suppress) is distinguished from "leads in this decision" /
+ *    "the better choice for us" (overall crowning → FIRE). `for` is deliberately
+ *    NOT a dimensional preposition — it heads overall crownings far more often
+ *    than dimensions.
  */
 const DIMENSION_QUALIFIER_CUE =
-  /\b(?:wins?|won|winning|ahead|leads?|leading|strongest|stronger|scores?|beats?|outperforms?|better)\b[^.!?]*?\b(?:on|regarding|when it comes to|in terms of|with respect to)\b\s+\S/i;
+  /\b(?:wins?|won|winning|ahead|leads?|leading|strongest|stronger|scores?|beats?|outperforms?|better)\b[^.!?]*?(?:\b(?:on|in|at)\s+(?!the\b|a\b|an\b|this\b|that\b|these\b|those\b|our\b|your\b|their\b|his\b|her\b|its\b|my\b|us\b|it\b|them\b|me\b|you\b|him\b|now\b|today\b|present\b|current\b)[a-z]|\bin terms of\b|\bwhen it comes to\b|\bwith respect to\b|\bregarding\b)/i;
 const HISTORICAL_QUALIFIER_CUE =
   /\b(?:was|were|had been|used to|previously|initially|earlier|originally|formerly|at first)\b/i;
 const ATTENTION_QUALIFIER_CUE =

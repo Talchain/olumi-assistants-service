@@ -106,61 +106,109 @@ describe('M1 — single-sourced current-first winner across all four surfaces', 
     expect(headline!.startsWith('Option B')).toBe(false);
   });
 
-  // Round-3 MAJOR-1: a THIN-CURRENT envelope. The current `option_comparison`
-  // has entries with id/label but NO win_probability, while the legacy
-  // `results` carries it. All four winner surfaces must WALK past the thin
-  // current source and land on results[] (Option A, 0.66) — a plain
-  // first-non-empty read kept the thin source and coerced compact/state to a 0%
-  // winner (the exact M1-target envelope class the earlier fixup regressed).
-  function thinCurrentEnvelope(): Record<string, unknown> {
-    return {
-      option_comparison: [
-        { option_id: 'opt-a', option_label: 'Option A' },
-        { option_id: 'opt-b', option_label: 'Option B' },
-      ],
-      results: [
-        { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.66, outcome: { mean: 100 } },
-        { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.34, outcome: { mean: 90 } },
-      ],
-    };
-  }
+});
 
-  it('thin-current: the shared winner source WALKS to results[] (0.66), not the thin option_comparison', () => {
-    const src = winnerOptionResultSource(thinCurrentEnvelope());
-    expect(winnerOf(src)).toBe('opt-a');
-    const optA = src.find((c) => c.option_id === 'opt-a') as Record<string, unknown>;
-    expect(optA.win_probability).toBe(0.66);
-  });
+// ============================================================================
+// Round-4 MAJOR-A — FULL winner-consistency MATRIX across all four selectors.
+//
+// {thin-current, both-present-conflicting} × {leader=highest, leader=OTHER,
+// leader=null}. Every selector WALKS past a source without a usable
+// win_probability (shared predicate), so NONE emits a phantom 0% winner. The
+// leader-honouring pair (enricher + headline) name the declared leader with its
+// REAL probability from the walked-to source; the highest-probability pair
+// (compact + state) name the highest option — coinciding when leader=highest or
+// leader=null. RED pre-fix: the enricher's leader-present branch broke at the
+// thin source[0] and emitted the leader @ 0% (production path), disagreeing with
+// the walking headline/compact/state.
+// ============================================================================
 
-  it('thin-current: all four surfaces name results[] Option A at 0.66 (compact + state must not regress to 0%)', () => {
-    const env = thinCurrentEnvelope();
+// THIN-CURRENT: option_comparison carries id/label but NO win_probability;
+// results[] carries it. Walked-to source for every selector = results[].
+function thinCurrentEnvelope(): Record<string, unknown> {
+  return {
+    option_comparison: [
+      { option_id: 'opt-a', option_label: 'Option A' },
+      { option_id: 'opt-b', option_label: 'Option B' },
+    ],
+    results: [
+      { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.66, outcome: { mean: 100 } },
+      { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.34, outcome: { mean: 90 } },
+    ],
+  };
+}
 
-    // 1. analysis-compact — pre-fix kept the thin option_comparison and emitted
-    //    a 0% winner; must now walk to results[] (0.66).
-    const compact = compactAnalysis(env as unknown as V2RunResponseEnvelope);
-    expect(compact).not.toBeNull();
-    expect(compact!.winner.option_id).toBe('opt-a');
-    expect(compact!.winner.win_probability).toBe(0.66);
+const LABEL_OF: Record<string, string> = { 'opt-a': 'Option A', 'opt-b': 'Option B' };
 
-    // 2. analysis-state — pre-fix returned the thin source (no usable winner).
-    const candidates = getOptionResultCandidates(env as unknown as V2RunResponseEnvelope);
-    expect(winnerOf(candidates)).toBe('opt-a');
-    const optA = candidates.find((c) => (c as Record<string, unknown>).option_id === 'opt-a') as Record<string, unknown>;
-    expect(optA.win_probability).toBe(0.66);
+interface MatrixCell {
+  readonly name: string;
+  readonly envelope: () => Record<string, unknown>;
+  readonly leader: string | null;
+  // enricher + headline (leader-honouring) expectations.
+  readonly leaderWinnerId: string;
+  readonly leaderWinnerProb: number;
+  // compact + state (highest-probability) expectations.
+  readonly highestWinnerId: string;
+  readonly highestWinnerProb: number;
+}
 
-    // 3. decision-review enricher (already walked — regression guard).
-    const invoke = buildInvokeInputForTests('brief', env, null);
-    expect(invoke).not.toBeNull();
-    expect(invoke!.winner.id).toBe('opt-a');
-    expect(invoke!.winner.win_probability).toBe(0.66);
+const MATRIX: readonly MatrixCell[] = [
+  // Thin-current (walked source = results; highest = opt-a @ 0.66).
+  { name: 'thin-current, leader=highest (opt-a)', envelope: thinCurrentEnvelope, leader: 'opt-a',
+    leaderWinnerId: 'opt-a', leaderWinnerProb: 0.66, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
+  { name: 'thin-current, leader=OTHER (opt-b)', envelope: thinCurrentEnvelope, leader: 'opt-b',
+    leaderWinnerId: 'opt-b', leaderWinnerProb: 0.34, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
+  { name: 'thin-current, leader=null', envelope: thinCurrentEnvelope, leader: null,
+    leaderWinnerId: 'opt-a', leaderWinnerProb: 0.66, highestWinnerId: 'opt-a', highestWinnerProb: 0.66 },
+  // Both-present-conflicting (walked source = current option_comparison; highest = opt-a @ 0.72).
+  { name: 'both-conflicting, leader=highest (opt-a)', envelope: conflictingEnvelope, leader: 'opt-a',
+    leaderWinnerId: 'opt-a', leaderWinnerProb: 0.72, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
+  { name: 'both-conflicting, leader=OTHER (opt-b)', envelope: conflictingEnvelope, leader: 'opt-b',
+    leaderWinnerId: 'opt-b', leaderWinnerProb: 0.28, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
+  { name: 'both-conflicting, leader=null', envelope: conflictingEnvelope, leader: null,
+    leaderWinnerId: 'opt-a', leaderWinnerProb: 0.72, highestWinnerId: 'opt-a', highestWinnerProb: 0.72 },
+];
 
-    // 4. analysis-result-headline (already walked — regression guard).
-    const headline = buildAnalysisResultHeadline({
-      enrichment: env,
-      leading_option_id: '',
-      status_kind: 'ok',
+describe('MAJOR-A — winner-consistency matrix (no phantom 0%, no cross-selector divergence)', () => {
+  for (const cell of MATRIX) {
+    it(cell.name, () => {
+      const env = cell.envelope();
+
+      // enricher (leader-honouring, production path). RED pre-fix on the
+      // thin-current leader-present cells: winner @ 0% instead of the real prob.
+      const invoke = buildInvokeInputForTests('We must decide on pricing.', env, cell.leader);
+      expect(invoke).not.toBeNull();
+      expect(invoke!.winner.id).toBe(cell.leaderWinnerId);
+      expect(invoke!.winner.win_probability).toBe(cell.leaderWinnerProb);
+      expect(invoke!.winner.win_probability).toBeGreaterThan(0); // never a phantom winner
+
+      // headline (leader-honouring): names the SAME option as the enricher.
+      const headline = buildAnalysisResultHeadline({
+        enrichment: env,
+        leading_option_id: cell.leader ?? '',
+        status_kind: 'ok',
+      });
+      expect(headline).not.toBeNull();
+      expect(headline!.startsWith(LABEL_OF[cell.leaderWinnerId]!)).toBe(true);
+
+      // compact (highest-probability): real prob, never phantom 0%.
+      const compact = compactAnalysis(env as unknown as V2RunResponseEnvelope);
+      expect(compact).not.toBeNull();
+      expect(compact!.winner.option_id).toBe(cell.highestWinnerId);
+      expect(compact!.winner.win_probability).toBe(cell.highestWinnerProb);
+
+      // state (highest-probability): its candidate source is the walked-to one.
+      const candidates = getOptionResultCandidates(env as unknown as V2RunResponseEnvelope);
+      expect(winnerOf(candidates)).toBe(cell.highestWinnerId);
+      const highestEntry = candidates.find(
+        (c) => (c as Record<string, unknown>).option_id === cell.highestWinnerId,
+      ) as Record<string, unknown>;
+      expect(highestEntry.win_probability).toBe(cell.highestWinnerProb);
+
+      // When the leader IS the highest (or absent), all four coincide exactly.
+      if (cell.leaderWinnerId === cell.highestWinnerId) {
+        expect(invoke!.winner.id).toBe(compact!.winner.option_id);
+        expect(invoke!.winner.win_probability).toBe(compact!.winner.win_probability);
+      }
     });
-    expect(headline).not.toBeNull();
-    expect(headline!.startsWith('Option A')).toBe(true);
-  });
+  }
 });

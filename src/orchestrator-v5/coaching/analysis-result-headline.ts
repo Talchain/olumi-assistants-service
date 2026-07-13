@@ -47,6 +47,7 @@ import {
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
+import { isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
 import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
 // Two-argument label guard relocated to the lean context module (single
 // source of truth, shared with the projection layer). Distinct from the
@@ -730,8 +731,12 @@ function resolveWinner(
         '';
       return rId === winner.id;
     });
-    const winnerProb = winnerRaw ? readNumber(winnerRaw.win_probability) : null;
-    if (winnerProb === null || winnerProb < 0 || winnerProb > 1) continue;
+    // Round-4 review MAJOR-A: per-source acceptance keys on the SINGLE shared
+    // predicate (finite AND in [0,1]) — identical to winnerOptionResultSource
+    // and the enricher selectWinner, so degenerate envelopes can't diverge.
+    // (Preserves the out-of-range fallback: a stray 1.5 is not "usable".)
+    if (!isUsableWinProbability(winnerRaw?.win_probability)) continue;
+    const winnerProb = winnerRaw!.win_probability as number;
 
     let runnerUpProb: number | null = null;
     let eliminatedCount = 0;
@@ -741,8 +746,8 @@ function resolveWinner(
         (typeof raw.id === 'string' && raw.id) ||
         '';
       if (rId === winner.id) continue;
-      const p = readNumber(raw.win_probability);
-      if (p === null || p < 0 || p > 1) continue;
+      if (!isUsableWinProbability(raw.win_probability)) continue;
+      const p = raw.win_probability as number;
       if (runnerUpProb === null || p > runnerUpProb) runnerUpProb = p;
       if (p < ELIMINATED_WIN_PROBABILITY_CEILING) eliminatedCount += 1;
     }

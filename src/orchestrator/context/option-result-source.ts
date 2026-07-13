@@ -15,15 +15,29 @@
  * explanations / chips named the stale legacy one.
  *
  * This module is the ONE ordered-source reader all four winner surfaces
- * consume. Agreement requires BOTH the same precedence AND the same WALK
- * semantics: {@link winnerOptionResultSource} (used by compact + state) and the
- * enricher/headline loops all SKIP a source that cannot supply a usable
- * win_probability and fall through to the next. A plain first-non-empty read
- * would NOT agree — on a thin-CURRENT envelope (option_comparison entries with
- * id/label but NO win_probability, while results[] carries win_probability) it
- * would keep the thin source and coerce the winner to 0%, while the walking
- * enricher/headline correctly land on results[]. Round-3 review MAJOR-1: the
- * walk is the invariant, not merely the ordering.
+ * consume. Consistency requires BOTH the same precedence AND the same WALK
+ * semantics keyed on ONE shared predicate: {@link winnerOptionResultSource}
+ * (compact + state), the headline `resolveWinner`, and the enricher
+ * `selectWinner`/`highestWinProbability` all SKIP a source that cannot supply a
+ * {@link isUsableWinProbability} winner and fall through to the next. A plain
+ * first-non-empty read would NOT agree — on a thin-CURRENT envelope
+ * (option_comparison entries with id/label but NO win_probability, while
+ * results[] carries win_probability) it keeps the thin source and coerces the
+ * winner to 0%. Round-3/4 review: the walk (on the shared predicate) is the
+ * invariant, not merely the ordering.
+ *
+ * STRATEGY SPLIT (pre-existing, intentional — documented so it is not mistaken
+ * for a bug): the enricher and headline honour PLoT's declared
+ * `leading_option_id` (id-match, walking to the source that carries it), while
+ * compact + state pick the highest-probability option in the walked-to source
+ * (their `response` is the enrichment, which does not carry leading_option_id;
+ * the primary production path uses compact's analytical winner without leader
+ * reconciliation). When the declared leader IS the highest-probability option,
+ * or when there is no leader, all four name the same option; when the leader is
+ * deliberately NOT the highest, the leader-honouring pair and the
+ * highest-probability pair name different options — by design. What this walk
+ * guarantees for EVERY shape is that no surface emits a coerced 0% / phantom
+ * winner from a thin source.
  *
  * Precedence (current-first). `option_comparison` is the current PLoT V2 shape;
  * `results` is the legacy / UI-normalised copy that can carry a stale winner:
@@ -94,11 +108,28 @@ export function readOptionResultSources(
   return sources;
 }
 
-/** True when at least one entry carries a finite `win_probability`. */
+/**
+ * The SINGLE shared "usable win_probability" predicate (round-4 review
+ * MAJOR-A). A win_probability is usable iff it is a finite number in [0, 1] —
+ * a valid probability. ALL winner-identity selectors key on THIS one predicate
+ * so they can never diverge on a degenerate envelope:
+ *   - `winnerOptionResultSource` (below, via hasUsableWinProbability),
+ *   - the headline `resolveWinner` per-source acceptance,
+ *   - the enricher `selectWinner` (leader-matched entry) and
+ *     `highestWinProbability` (null-leader + runner-up).
+ * The [0,1] bound (not merely finite) is deliberate: it preserves the headline's
+ * out-of-range fallback — a stray 1.5 "probability" is rejected, never rendered
+ * as "150%". The re-review flagged that winnerOptionResultSource's old
+ * finite-only predicate was NOT identical to the headline's finite+range check;
+ * this unifies them.
+ */
+export function isUsableWinProbability(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/** True when at least one entry carries a usable `win_probability`. */
 function hasUsableWinProbability(source: ReadonlyArray<Record<string, unknown>>): boolean {
-  return source.some(
-    (r) => typeof r.win_probability === 'number' && Number.isFinite(r.win_probability),
-  );
+  return source.some((r) => isUsableWinProbability(r.win_probability));
 }
 
 /**

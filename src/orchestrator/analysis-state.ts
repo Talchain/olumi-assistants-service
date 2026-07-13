@@ -10,17 +10,18 @@ function hasConfiguredInterventions(value: unknown): boolean {
 
 /**
  * Option-result candidate array for this envelope, in CURRENT-first precedence
- * with a WALK to the first source carrying a usable win_probability.
+ * with a WALK to the first source carrying a usable (finite, [0,1])
+ * win_probability (shared {@link winnerOptionResultSource} +
+ * isUsableWinProbability predicate).
  *
- * M1 + round-3 MAJOR-1: source precedence + walk are single-sourced via
- * {@link winnerOptionResultSource} — the SAME winner reader analysis-compact,
- * the decision-review enricher, and analysis-result-headline now share, so all
- * four winner surfaces agree on BOTH the both-present-conflicting envelope
- * (current beats stale legacy) AND the thin-current envelope (a current source
- * lacking win_probability is skipped for the richer results[]). Previously this
- * took `results` FIRST (legacy); the earlier fixup's plain first-non-empty read
- * regressed the thin-current case to a 0% winner. Exported so the cross-surface
- * agreement test can pin it.
+ * This selects the candidate SOURCE (used here for existence / status
+ * inference, NOT to surface a winner identity to the user — see
+ * hasValidOptionResults / normalizeAnalysisEnvelope). M1 / round-3/4:
+ * single-sourced with analysis-compact, the decision-review enricher, and
+ * analysis-result-headline so the source precedence + walk never diverge; the
+ * thin-current envelope is skipped for the richer results[] rather than
+ * regressing to a phantom 0% winner (the round-2 plain first-non-empty read did
+ * regress it). Exported so the cross-surface agreement test can pin it.
  */
 export function getOptionResultCandidates(response: V2RunResponseEnvelope): unknown[] {
   const candidates = winnerOptionResultSource(response as Record<string, unknown>);

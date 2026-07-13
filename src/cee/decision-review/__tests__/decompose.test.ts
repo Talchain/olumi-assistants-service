@@ -617,7 +617,11 @@ describe('checkComposedConsistency — WIN_CUE false-positive fix (M5)', () => {
   // runner-up (Option B) in a NON-crowning per-dimension / historical /
   // attention clause. None of these is a wrong-winner claim.
   const nonCrowningNarratives: Array<[string, string]> = [
-    ['per-dimension win', 'Option A is the stronger overall choice and should be chosen. Option B wins on cost.'],
+    ['per-dimension win (on)', 'Option A is the stronger overall choice and should be chosen. Option B wins on cost.'],
+    // Round-4 MAJOR-B: dropping bare `in`/`at` from DIMENSION in round-3 re-opened
+    // this class as a false FATAL. RED against round-3.
+    ['per-dimension win (in)', 'Option A is the stronger overall choice and should be chosen. Option B wins in cost.'],
+    ['per-dimension win (at)', 'Option A is the stronger overall choice and should be chosen. Option B is ahead at speed.'],
     ['action recommendation', 'Option A leads overall and should be chosen. We recommend validating Option B pricing assumptions.'],
     ['historical framing', 'Option A is the clear leader and should be chosen. Option B was ahead in early estimates.'],
     ['attention / objection', 'Option A is recommended overall. The strongest objection concerns Option B costs.'],
@@ -662,6 +666,19 @@ describe('checkComposedConsistency — WIN_CUE false-positive fix (M5)', () => {
     const r1 = goodR1();
     r1.narrative_summary =
       'Option A leads on the evidence. Overall, Option B is the better choice for us and should be chosen.';
+    const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
+    const res = checkComposedConsistency(composed, ctxFor());
+    expect(res.consistent).toBe(false);
+    expect(res.fatal.join(' ')).toMatch(/wrong-winner/i);
+  });
+
+  // Round-4 MAJOR-B: the DIMENSION noun-gate must NOT suppress an overall
+  // crowning that merely contains "in <determiner>" — "leads in this decision"
+  // is a verdict, not a per-dimension mention.
+  it('FATAL: an overall crowning containing "in this decision" still fires (noun-gate not over-broad)', () => {
+    const r1 = goodR1();
+    r1.narrative_summary =
+      'Option A is the recommended overall choice. Option B leads in this decision and should be chosen.';
     const composed = composeFragments(r1, goodR2(), goodR3(), goodR4());
     const res = checkComposedConsistency(composed, ctxFor());
     expect(res.consistent).toBe(false);

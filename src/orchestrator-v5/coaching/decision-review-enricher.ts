@@ -44,7 +44,10 @@ import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels
 // `readResultsArraySources` is re-exported below (as the shared reader) so this
 // module's existing consumers — including analysis-result-headline — keep their
 // import stable.
-import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import {
+  readOptionResultSources,
+  isUsableWinProbability,
+} from '../../orchestrator/context/option-result-source.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 
 import type { DecisionReviewOutput } from './types.js';
@@ -486,9 +489,16 @@ function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<stri
  * data-integrity issues; the enricher's `no_winner` skip is the honest
  * outcome for that case.
  *
- * When `leadingOptionId` is null or empty, the behaviour is unchanged:
- * fall back to the highest-probability entry (returns null if none of
- * the entries carry a usable win_probability).
+ * Round-4 review MAJOR-A: the leader-present branch also returns `null`
+ * when the leader-matched entry lacks a {@link isUsableWinProbability}
+ * win_probability, so the `buildInvokeInput` walk falls through to a richer
+ * source — exactly like headline `resolveWinner`. Previously it returned the
+ * thin leader with win_probability coerced to 0 (a phantom 0% winner) on a
+ * thin-current envelope, disagreeing with the walking headline/compact/state.
+ *
+ * When `leadingOptionId` is null or empty, fall back to the highest-USABLE
+ * -probability entry (returns null if none of the entries carry a usable
+ * win_probability).
  */
 export function selectWinner(
   results: ReadonlyArray<Record<string, unknown>>,
@@ -499,7 +509,9 @@ export function selectWinner(
     const byId = results.find(
       (r) => r.option_id === leadingOptionId || r.id === leadingOptionId,
     );
-    return byId ? projectOptionAsWinner(byId) : null;
+    return byId && isUsableWinProbability(byId.win_probability)
+      ? projectOptionAsWinner(byId)
+      : null;
   }
   const top = highestWinProbability(results);
   return top ? projectOptionAsWinner(top) : null;
@@ -526,8 +538,12 @@ function highestWinProbability(
   let best: Record<string, unknown> | null = null;
   let bestProb = -Infinity;
   for (const r of results) {
-    const p = readNumber(r.win_probability);
-    if (p !== null && p > bestProb) {
+    // Round-4 review MAJOR-A: gate on the SHARED usable-probability predicate
+    // (finite AND in [0,1]) so the null-leader + runner-up paths skip a thin /
+    // out-of-range source exactly like the other selectors.
+    if (!isUsableWinProbability(r.win_probability)) continue;
+    const p = r.win_probability;
+    if (p > bestProb) {
       best = r;
       bestProb = p;
     }

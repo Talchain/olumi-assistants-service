@@ -621,12 +621,16 @@ export function compactAnalysis(
     if (status === 'blocked' || status === 'failed') return null;
 
     // Extract options + WINNER from the single-sourced WALKING current-first
-    // reader (M1 + round-3 MAJOR-1): `option_comparison` (current PLoT V2) beats
-    // the legacy `results` copy, BUT a thin-current source lacking win_probability
-    // is skipped so the winner falls through to the source that carries one —
-    // exactly like the enricher/headline walk. So compactAnalysis names the SAME
-    // winner as the decision-review enricher, analysis-result-headline, and
-    // analysis-state on both the conflicting AND the thin-current envelope.
+    // reader (M1 / round-3/4): `option_comparison` (current PLoT V2) beats the
+    // legacy `results` copy, BUT a source lacking a usable (finite, [0,1])
+    // win_probability is skipped so the winner falls through to the source that
+    // carries one (shared isUsableWinProbability predicate) — never a phantom 0%
+    // winner. compact derives the winner as the highest-probability option in
+    // the walked-to source; the enricher/headline additionally honour PLoT's
+    // declared leading_option_id (a pre-existing, intentional strategy split —
+    // compact's `response` is the enrichment, which carries no leading_option_id,
+    // and the primary production path uses this analytical winner unreconciled).
+    // They coincide when the leader is the highest-probability option or absent.
     // (Per-option driver / flip / fragility aggregation below is a SEPARATE
     // concern — see getResultsArray, which stays results-first because the
     // per-option factor_sensitivity/robustness shape lives in `results`, not in
