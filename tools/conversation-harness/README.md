@@ -93,7 +93,7 @@ so historical workstream runs remain scoreable.
 | D8 latency budgets | wall_clock_ms vs coach≤30s / edit≤25s / run_analysis≤25s / draft≤75s; slowest substages from trace | **ADVISORY** |
 | D9 consent friction | consent turns + seconds from edit-intent to applied-in-DB (L0 graph-sha series) | **LOG** — the tunable-auto-apply lane is changing consent counts; measure, don't assume |
 | D10-api re-click safety | duplicate run_analysis mid-flight → single fact-commit set via L0 diff; payload shas are VOLATILE-NORMALISED (computed_at / request ids stripped before hashing) AND the window must add ≤1 analysis-class fact (count assertion — sha-divergent double executions can't evade) | pass/fail |
-| D11 production guards (kept) | forbidden phrases, success claims, held-science vocabulary, mutation language, structural success claims — mutation/structural claims CONDITIONED on turn class + the L0 mutation oracle: a proven applied-edit receipt is excused (disclosed in details), a claim with no commit still fails | pass/fail |
+| D11 production guards (kept) | forbidden phrases, success claims, held-science vocabulary, mutation language, structural success claims — mutation/structural claims CONDITIONED on turn class + the L0 mutation oracle: a proven applied-edit receipt is excused (disclosed in details), a claim with no commit still fails. With NO L0 oracle (no `--l0`), an edit-flow receipt is excused ONLY when a `held_proposal` / apply-consent chip makes it legitimately ambiguous (and PQ6 re-catches it); a BARE unverifiable receipt FIRES (fail-closed) | pass/fail |
 
 Guard modules are **imported from `src/`** (`compose/forbidden-user-facing-phrases.ts`,
 `routing/mutation-language.ts`) — never copied; copies drift (the workstream's
@@ -182,7 +182,7 @@ v0: property-based, NEVER exact-text. `value = null` = not measurable this run
 | PQ2 question-asking | **neutral** | question count / post-draft framing question (good for clarify, bad for terse coach — reported, not scored) | no |
 | PQ3 grounding | higher-better | coaching whose claims **trace to the analysis payload** — a cited % must match a real win-% / percentile (±1); a fabricated number is not grounding (`traceableNumberFraction` in details is the fabrication detector) | no |
 | PQ4 chip-correctness | higher-better | chips present on either/or + enumerated question turns; identical-repeat penalty (details) | no |
-| PQ5 guard-cleanliness | lower-better | forbidden phrase / success claim / held-science / mutation-language / structural-success VIOLATIONS (the imported `src/` guards, turn-class + L0-outcome conditioned — a proven applied-edit receipt is excused, disclosed in `excusedReceipts`) | **yes** |
+| PQ5 guard-cleanliness | lower-better | forbidden phrase / success claim / held-science / mutation-language / structural-success VIOLATIONS (the imported `src/` guards, turn-class + L0-outcome conditioned — a proven applied-edit receipt is excused, disclosed in `excusedReceipts`; with NO oracle a receipt is excused only when a `held_proposal`/apply-consent chip makes it ambiguous, else it FIRES fail-closed) | **yes** |
 | PQ6 coherence | lower-better | cross-surface / cross-fragment contradiction: says "done" while a proposal is still held; claims a mutation then asks to apply; names a winner the blocks contradict; **a prose % attributed to an option that disagrees with that option's payload win-%** | **yes** |
 
 A **gating** regression (PQ5 or PQ6) caps the overall verdict at *worse* no matter
@@ -240,7 +240,10 @@ Reads the `prompt_dims` from each side's `scores.json`, diffs per dim, and write
   across a side's runs; the **safety** dims (PQ5 guard-cleanliness, PQ6 coherence)
   aggregate by **worst-run (any-hit / any-contradiction)** — a guard hit or a
   contradiction in even one rerun gates and is never averaged (or medianed) below
-  the noise floor. One run per side is allowed but the artifact is stamped
+  the noise floor. The worst-run mode is derived from the dim's **own** safety
+  semantics (and either side's `safety` flag), NOT solely the baseline template —
+  so a REUSED pre-flag baseline artifact can't silently force median and disable
+  the worst-run gate. One run per side is allowed but the artifact is stamped
   `low_confidence`.
 - **Noise floor.** A dim is only called improved/regressed when
   `|candidate − baseline|` clears a per-dim threshold (recorded in the artifact);

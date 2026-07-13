@@ -235,17 +235,46 @@ describe('PQ5 guard-cleanliness (lower-better, gating)', () => {
     expect(pqGuardCleanliness([falseClaim]).value).toBe(1);
   });
 
-  it('excuses an edit-flow receipt with NO oracle (noted, PQ6 still guards the held case) [fix]', () => {
-    const unverified = row({
+  // FIX-1 (null-oracle excusal was fail-OPEN on the SAFETY gate): a no-oracle
+  // edit-flow receipt is excused ONLY when consent/held evidence makes it
+  // ambiguous (and PQ6 re-catches it). A BARE receipt — no held_proposal, no
+  // consent chip, only the journey's onlyIf scheduling hint — is unverifiable
+  // AND uncaught by PQ6, so PQ5 must FIRE (matching base). onlyIf is a harness
+  // scheduling gate, NOT a wire surface, so it is not consent evidence.
+  it('FIRES on a BARE no-oracle edit-flow receipt (no held_proposal, no consent chip) — onlyIf is not consent evidence [fix FIX-1]', () => {
+    const bare = row({
       turn: 'C1',
       turnClassHint: 'edit',
       onlyIf: 'consent_requested',
       guardHits: { ...CLEAN_GUARDS, mutationLanguage: true },
-      // no mutationCommitted — run without --l0
+      // no mutationCommitted (run without --l0); no chips; no heldProposal
     });
-    const d = pqGuardCleanliness([unverified]);
+    const d = pqGuardCleanliness([bare]);
+    expect(d.value).toBe(1);
+    expect((d.details as any).excusedReceipts).toHaveLength(0);
+  });
+
+  it('excuses a no-oracle edit-flow receipt when a held_proposal is present (noted; PQ6 guards the held case) [fix FIX-1]', () => {
+    const held = row({
+      turn: 'C1',
+      turnClassHint: 'edit',
+      onlyIf: 'consent_requested',
+      heldProposal: true,
+      guardHits: { ...CLEAN_GUARDS, mutationLanguage: true },
+    });
+    const d = pqGuardCleanliness([held]);
     expect(d.value).toBe(0);
     expect(JSON.stringify((d.details as any).excusedReceipts)).toContain('UNVERIFIED');
+  });
+
+  it('excuses a no-oracle mutation-language receipt when an apply consent chip is present [fix FIX-1]', () => {
+    const consent = row({
+      turn: 'C1',
+      turnClassHint: 'edit',
+      chips: [{ id: 'apply', label: 'Apply the change' }],
+      guardHits: { ...CLEAN_GUARDS, mutationLanguage: true },
+    });
+    expect(pqGuardCleanliness([consent]).value).toBe(0);
   });
 });
 

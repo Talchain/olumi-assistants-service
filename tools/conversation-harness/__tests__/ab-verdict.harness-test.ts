@@ -189,6 +189,40 @@ describe('PQ6 coherence is worst-run aggregated (any-run contradiction gates) [f
   });
 });
 
+// FIX-3 (gate-integrity): the cross-rerun aggregation MODE must be derived from
+// BOTH sides' metas + the dim's own safety semantics — NOT solely a possibly
+// stale baseline template. A REUSED pre-PR baseline artifact lacks the `safety`
+// flag; PQ6 is gating AND flaky, so the legacy `gating && !flaky` fallback misses
+// it and the old code medianed a 1-of-N candidate contradiction away, silently
+// disabling the very worst-run gate this PR adds.
+describe('FIX-3 safety aggregation mode is not disabled by a stale (pre-flag) baseline', () => {
+  // A candidate run whose PQ6 carries the PR-new safety flag (this PR's producer
+  // always emits it); baseline runs use the flagless `run()` helper (stale).
+  const candSafetyPq6 = (v: number): PromptDimScore[] =>
+    run({ 'PQ6-coherence': v }).map((d) => (d.dim === 'PQ6-coherence' ? { ...d, safety: true } : d));
+
+  it('gates on a 1-of-3 candidate PQ6 contradiction even when the reused baseline has NO safety flag', () => {
+    // Stale baseline: flagless PQ6, clean across all runs.
+    const baseline = [run({ 'PQ6-coherence': 0 }), run({ 'PQ6-coherence': 0 }), run({ 'PQ6-coherence': 0 })];
+    // Candidate: safety-flagged PQ6, one contradiction in 1 of 3 reruns.
+    const candidate = [candSafetyPq6(1), candSafetyPq6(0), candSafetyPq6(0)];
+    const v = computeAbVerdict(baseline, candidate);
+    const pq6 = find(v, 'PQ6-coherence');
+    // worst-run 1, NOT median 0 — the stale baseline must not force MEDIAN.
+    expect(pq6.candidate).toBe(1);
+    expect(pq6.regressed).toBe(true);
+    expect(v.overall).toBe('worse');
+    // ab-verdict.ts:262 minor — the reason surfaces the per-run basis (1 of 3).
+    expect(v.reason).toContain('candidate runs [1, 0, 0]');
+  });
+
+  it('a stale-flag PQ6 that is clean in every candidate rerun still reads flat', () => {
+    const baseline = [run({ 'PQ6-coherence': 0 }), run({ 'PQ6-coherence': 0 }), run({ 'PQ6-coherence': 0 })];
+    const candidate = [candSafetyPq6(0), candSafetyPq6(0), candSafetyPq6(0)];
+    expect(find(computeAbVerdict(baseline, candidate), 'PQ6-coherence').flat).toBe(true);
+  });
+});
+
 // OPS promotion criteria fix: ab-verdict must ALSO evaluate latency medians,
 // token cost, and fallback-engagement — the B1 experiment showed a candidate
 // can "win" on PQ dims while regressing all three unexamined.

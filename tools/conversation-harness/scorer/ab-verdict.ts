@@ -157,19 +157,37 @@ function mean(xs: number[]): number {
 
 type AggMode = 'median' | 'mean' | 'worst';
 
-/** Aggregation mode for a dim across a side's reruns.
+/** Dims whose safety semantics are intrinsic to the dimension, independent of
+ * any run's flags (FIX-3). These MUST aggregate by worst-run even when BOTH
+ * sides' artifacts predate the `safety` flag — the "derive from the dimension's
+ * own safety semantics" backstop. Kept in sync with prompt-dims.ts (the dims
+ * that set `safety: true`); ab-verdict already couples to these exact dim names
+ * via NOISE_THRESHOLD, so this is not new coupling. */
+const SAFETY_DIMS = new Set(['PQ5-guard-cleanliness', 'PQ6-coherence']);
+
+/** Whether a single side's dim meta signals a SAFETY dim: the explicit `safety`
+ * flag, or the legacy `gating && !flaky` property for older scores.json that
+ * predate the flag (covers PQ5; PQ6 is gating AND flaky, so the legacy property
+ * misses it — that gap is why a reused pre-flag PQ6 baseline silently disabled
+ * worst-run, FIX-3). */
+function metaIsSafety(meta?: PromptDimScore): boolean {
+  if (!meta) return false;
+  return meta.safety === true || (meta.gating && !meta.flaky);
+}
+
+/** Aggregation mode for a dim across a side's reruns — derived from BOTH sides'
+ * metas plus the dimension's own safety semantics, NOT solely a possibly-stale
+ * baseline template (FIX-3).
  *   - SAFETY dims (PQ5 guard-cleanliness, PQ6 coherence) -> 'worst' (any-hit /
  *     any-contradiction): a hit in even ONE rerun is disqualifying and must NOT
- *     be averaged below the gating threshold. Detected by the explicit `safety`
- *     flag, falling back to the `gating && !flaky` property for older
- *     scores.json that predate the flag (covers PQ5 only — pre-fix PQ6
- *     artifacts lack the flag and should be re-scored).
+ *     be averaged below the gating threshold. A reused pre-flag baseline (no
+ *     `safety` flag) must not be able to force MEDIAN and silently disable the
+ *     worst-run gate — hence the dim-name backstop and the either-side OR.
  *   - other flaky dims (PQ1–PQ4, OPS-*) -> 'median' (robust to a single outlier rerun)
  *   - other stable dims -> 'mean' */
-function aggModeFor(meta: PromptDimScore): AggMode {
-  const isSafety = meta.safety === true || (meta.gating && !meta.flaky);
-  if (isSafety) return 'worst';
-  return meta.flaky ? 'median' : 'mean';
+function aggModeForDim(dim: string, baselineMeta: PromptDimScore, candidateMeta?: PromptDimScore): AggMode {
+  if (SAFETY_DIMS.has(dim) || metaIsSafety(baselineMeta) || metaIsSafety(candidateMeta)) return 'worst';
+  return baselineMeta.flaky ? 'median' : 'mean';
 }
 
 /** Aggregate a dim's value across a side's runs per `mode`; null if every run was
@@ -200,10 +218,14 @@ export function computeAbVerdict(
   candidateRuns = withOps(candidateRuns, opts.candidateOps);
   // Dim order/metadata from the first run that has any dims.
   const template = (baselineRuns.find((r) => r.length) ?? candidateRuns.find((r) => r.length) ?? []) as PromptDimScore[];
+  // Candidate-side meta lookup so the aggregation mode is derived from BOTH
+  // sides, not just the (possibly stale, pre-`safety`-flag) baseline template.
+  const candidateTemplate = (candidateRuns.find((r) => r.length) ?? []) as PromptDimScore[];
+  const candMetaByDim = new Map(candidateTemplate.map((m) => [m.dim, m]));
   const dims: AbDimDelta[] = template.map((meta) => {
     const bVals = baselineRuns.map((run) => run.find((d) => d.dim === meta.dim)?.value ?? null);
     const cVals = candidateRuns.map((run) => run.find((d) => d.dim === meta.dim)?.value ?? null);
-    const mode = aggModeFor(meta);
+    const mode = aggModeForDim(meta.dim, meta, candMetaByDim.get(meta.dim));
     const baseline = aggregate(bVals, mode, meta.direction);
     const candidate = aggregate(cVals, mode, meta.direction);
     const threshold = NOISE_THRESHOLD[meta.dim] ?? 0;
@@ -260,7 +282,12 @@ export function computeAbVerdict(
     reason = 'no scored dim was measurable on both sides (need coach turns / guardHits / question turns)';
   } else if (gatingRegression) {
     overall = 'worse';
-    reason = `gating regression on ${gatingRegression.dim} (Δ${gatingRegression.delta}) — disqualifying regardless of other gains`;
+    // Surface the per-run BASIS (ab-verdict.ts:262 minor): a worst-run safety
+    // gate can rest on a single contradiction/hit in 1 of N reruns. Showing the
+    // candidate run spread makes "rested on 1 of N" explicit in ab-verdict.md
+    // rather than hiding behind the aggregated candidate value.
+    const runsStr = gatingRegression.candidateRuns.map((v) => (v == null ? '—' : v)).join(', ');
+    reason = `gating regression on ${gatingRegression.dim} (Δ${gatingRegression.delta}; candidate runs [${runsStr}]) — disqualifying regardless of other gains`;
   } else if (improvedCount > 0 && regressedCount === 0) {
     overall = 'better';
     reason = `${improvedCount} dim(s) improved, none regressed`;

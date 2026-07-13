@@ -53,6 +53,11 @@ export interface TurnRow {
    * and the sha did NOT change, null/undefined = no L0 oracle for this turn.
    * Attached by attachMutationOutcomes (called from score-run.ts). */
   mutationCommitted?: boolean | null;
+  /** Wire held_proposal presence — a staged (not-yet-applied) change on THIS
+   * turn's envelope. Read off the same wire field as TurnSurfaces.hasHeldProposal
+   * so guardViolations can decide (with the chips) whether an applied-edit
+   * receipt is legitimately ambiguous. Absent/undefined => no held proposal. */
+  heldProposal?: boolean;
 }
 
 export interface L0HandlerFact {
@@ -125,6 +130,9 @@ export function rowFromWire(turnId: string, wire: unknown, meta: TurnMeta = {}):
       timingsRaw && typeof timingsRaw === 'object' && !Array.isArray(timingsRaw)
         ? (timingsRaw as Record<string, number>)
         : null,
+    // Same predicate as surfacesFromWire.hasHeldProposal — one wire field, two
+    // readers, kept in lockstep so PQ5 (row) and PQ6 (surface) agree.
+    heldProposal: w.held_proposal != null && w.held_proposal !== false,
   };
 }
 
@@ -163,6 +171,20 @@ const CONSENT_FAMILY = /\b(apply|confirm|approve|go ahead|yes|cancel|dismiss|dis
 
 export function isConsentChipSet(row: TurnRow): boolean {
   return row.chips.length > 0 && row.chips.every((c) => CONSENT_FAMILY.test(`${c.id} ${c.label} ${c.action ?? ''}`));
+}
+
+/** ANY apply-side consent chip (apply/confirm/approve/go ahead/yes) — a chip
+ * offering to APPLY a pending edit. Deliberately the APPLY subset (not the
+ * cancel/dismiss family): a lone "Cancel" chip does not make an "I updated X"
+ * receipt honest. Tested on `id + label` with the SAME regex as PQ6(b)
+ * asksConsent (prompt-dims.ts CONSENT_CHIP) so hasConsentChip ⊆ asksConsent —
+ * i.e. any no-oracle receipt the guard excuses on a consent chip here is ALWAYS
+ * re-caught by the PQ6 coherence gate (action is excluded to stay in lockstep;
+ * an action-only consent signal therefore fails closed). */
+const CONSENT_APPLY_CHIP = /\b(apply|confirm|approve|go ahead|yes)\b/i;
+
+export function hasConsentChip(row: TurnRow): boolean {
+  return row.chips.some((c) => CONSENT_APPLY_CHIP.test(`${c.id} ${c.label}`));
 }
 
 // ---------- L0 mutation oracle + guard conditioning (C10 / PQ5 turn-awareness) ----------
@@ -213,36 +235,45 @@ export interface GuardViolationView {
  * (C10 / PQ5 turn-awareness):
  *   - mutationLanguage — wrong on NON-edit answers; on an edit-flow turn a
  *     receipt is legitimate iff the L0 diff shows the mutation COMMITTED.
- *     With no L0 oracle an edit-flow receipt is excused-with-note (the
- *     dangerous held-claim case is still caught by PQ6(a)/(b) via the wire
- *     surfaces); a non-edit-flow hit always stands.
- *   - structuralSuccessClaim — wrong only when NO mutation committed (L0
- *     oracle). Same no-oracle handling.
- * Raw hits stay untouched on the row; dims aggregate THIS view. */
+ *   - structuralSuccessClaim — wrong only when NO mutation committed (L0 oracle).
+ *
+ * No-oracle handling (FIX-1, fail-closed): with committed==null an edit-flow
+ * receipt is excused ONLY when consent/held evidence on the same envelope makes
+ * it legitimately ambiguous — a held_proposal (staged change) or an apply-side
+ * consent chip. That is exactly the case PQ6 re-catches: (a) structural-success
+ * + held_proposal, (b) mutation-language + asksConsent (held OR consent chip),
+ * so excusing here never hides a hit — PQ6 still gates it. With NEITHER, a bare
+ * "Done — I updated X" is both unverifiable AND uncaught by PQ6, so the guard
+ * must FIRE (matching base, where these hits counted unconditionally).
+ * mutationLanguage excuses on held OR consent chip (PQ6(b)); structuralSuccess
+ * excuses on held ONLY (PQ6(a) keys off held_proposal). A non-edit-flow hit
+ * always stands. Raw hits stay untouched on the row; dims aggregate THIS view. */
 export function guardViolations(row: TurnRow): GuardViolationView | null {
   const g = row.guardHits;
   if (!g) return null;
   const excused: string[] = [];
   const committed = row.mutationCommitted;
   const editFlow = isEditFlowTurn(row);
+  const held = row.heldProposal === true;
+  const consentChip = hasConsentChip(row);
   let mutationLanguage = g.mutationLanguage;
   let structuralSuccessClaim = g.structuralSuccessClaim;
   if (mutationLanguage) {
     if (committed === true) {
       mutationLanguage = false;
       excused.push('mutationLanguage: applied-mutation receipt (L0 graph sha changed this turn)');
-    } else if (committed == null && editFlow) {
+    } else if (committed == null && editFlow && (held || consentChip)) {
       mutationLanguage = false;
-      excused.push('mutationLanguage: edit-flow receipt UNVERIFIED (no L0 oracle) — held-claim case still gated by PQ6(b)');
+      excused.push('mutationLanguage: edit-flow receipt UNVERIFIED (no L0 oracle) but held_proposal/consent chip present — held-claim case still gated by PQ6(b)');
     }
   }
   if (structuralSuccessClaim) {
     if (committed === true) {
       structuralSuccessClaim = false;
       excused.push('structuralSuccessClaim: mutation committed (L0 graph sha changed this turn)');
-    } else if (committed == null && editFlow) {
+    } else if (committed == null && editFlow && held) {
       structuralSuccessClaim = false;
-      excused.push('structuralSuccessClaim: edit-flow receipt UNVERIFIED (no L0 oracle) — held case still gated by PQ6(a)');
+      excused.push('structuralSuccessClaim: edit-flow receipt UNVERIFIED (no L0 oracle) but held_proposal present — held case still gated by PQ6(a)');
     }
   }
   return {

@@ -436,6 +436,60 @@ describe('D11 production-guard aggregation', () => {
     const coach = row({ turn: 'K1', turnClassHint: 'coach', guardHits: { ...clean, mutationLanguage: true } });
     expect(dimD11ProductionGuards([coach]).verdict).toBe('fail');
   });
+
+  // FIX-1 (null-oracle excusal was fail-OPEN): with committed==null the excusal
+  // must apply ONLY when consent/held evidence makes the receipt legitimately
+  // ambiguous (and PQ6(a)/(b) can re-catch it). A BARE unverifiable success
+  // receipt — no held_proposal, no consent chip — must FIRE (matching base),
+  // because PQ6 cannot catch it either.
+  it('FIRES on a BARE unverifiable edit receipt: edit-flow, no L0 oracle, NO held_proposal, NO consent chip (fail-closed) [fix FIX-1]', () => {
+    const bareReceipt = row({
+      turn: 'E1',
+      turnClassHint: 'edit',
+      editIntent: true,
+      assistantText: 'Done — I have updated the edge weight to 0.4.',
+      guardHits: { ...clean, mutationLanguage: true, structuralSuccessClaim: true },
+      // mutationCommitted undefined == no L0 oracle (== null); chips []; heldProposal undefined
+    });
+    const d = dimD11ProductionGuards([bareReceipt]);
+    expect(d.verdict).toBe('fail');
+    expect((d.details as any).excusedReceipts).toHaveLength(0);
+  });
+
+  it('still EXCUSES a no-oracle edit receipt when a held_proposal makes it ambiguous (PQ6 gates it) [fix FIX-1]', () => {
+    const heldReceipt = row({
+      turn: 'E1',
+      turnClassHint: 'edit',
+      editIntent: true,
+      heldProposal: true,
+      guardHits: { ...clean, mutationLanguage: true, structuralSuccessClaim: true },
+    });
+    const d = dimD11ProductionGuards([heldReceipt]);
+    expect(d.verdict).toBe('pass');
+    expect((d.details as any).excusedReceipts).toHaveLength(1);
+  });
+
+  it('excuses a no-oracle MUTATION-LANGUAGE receipt when an apply consent chip is present (PQ6(b) gates it) [fix FIX-1]', () => {
+    const consentReceipt = row({
+      turn: 'C1',
+      turnClassHint: 'edit',
+      editIntent: true,
+      chips: [{ id: 'chip_apply', label: 'Apply the change' }],
+      guardHits: { ...clean, mutationLanguage: true },
+    });
+    expect(dimD11ProductionGuards([consentReceipt]).verdict).toBe('pass');
+  });
+
+  it('STILL fires a structural-success claim with ONLY a consent chip (no held_proposal) — PQ6(a) keys off held_proposal [fix FIX-1]', () => {
+    const structConsent = row({
+      turn: 'C2',
+      turnClassHint: 'edit',
+      editIntent: true,
+      chips: [{ id: 'chip_apply', label: 'Apply the change' }],
+      guardHits: { ...clean, structuralSuccessClaim: true },
+    });
+    expect(dimD11ProductionGuards([structConsent]).verdict).toBe('fail');
+  });
 });
 
 describe('aggregateFlakyDims (N=3 rerun majority)', () => {
