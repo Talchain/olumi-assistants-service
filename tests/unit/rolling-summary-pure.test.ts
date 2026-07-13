@@ -220,6 +220,65 @@ describe('buildSummariserInput — regeneration from FULL history (R1)', () => {
     expect(input.userMessage).not.toContain('msg 10 ');
   });
 
+  it('a char-capped regen that drops the OLDEST (unabsorbed) turns does NOT advance the watermark past them (Codex finding 4)', () => {
+    // 30 large turns exceed the input budget → capped fallback keeps only the
+    // verbatim tail (SUMMARY_INPUT_TAIL_TURNS = 20 → turns 11-30). With NO
+    // prior summary (nothing pre-absorbed) and no citations, turns 1-10 are
+    // DROPPED and were never seen by the model. Pre-fix the watermark still
+    // advanced to the newest turn (turn-30), silently marking the dropped
+    // turns 1-10 as absorbed — the next incremental pass would never re-read
+    // them (a maintain-path memory hole). Post-fix: with the oldest turn
+    // dropped there is no honestly-absorbed prefix, so the watermark is null
+    // and the maintainer keeps the prior rather than write a false-complete
+    // summary.
+    const big = 'z'.repeat(8000);
+    const turns: SummariserTurn[] = Array.from({ length: 30 }, (_, i) =>
+      turn(i + 1, { user: `msg ${i + 1} ${big}`, assistant: big }),
+    );
+    const total = turns.reduce(
+      (n, t) => n + (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0),
+      0,
+    );
+    expect(total).toBeGreaterThan(SUMMARY_REGEN_INPUT_CHAR_BUDGET);
+
+    const input = buildSummariserInput({ mode: 'regen', priorSummary: null, chronologicalTurns: turns });
+    expect(input.cappedFallback).toBe(true);
+    // The tail (turn 30) is shown; a dropped older turn (turn 5) is not.
+    expect(input.userMessage).toContain('msg 30 ');
+    expect(input.userMessage).not.toContain('msg 5 ');
+    // The watermark must NOT claim turn-30 absorbed — turns 1-10 were dropped.
+    expect(input.watermark).toBeNull();
+  });
+
+  it('a char-capped regen advances the watermark only up to the newest turn with no UNABSORBED dropped turn behind it (Codex finding 4)', () => {
+    // Steady state: a REAL prior summary already absorbed through turn-5. The
+    // capped regen keeps the tail (turns 11-30) but DROPS turns 6-10 — which
+    // sit ABOVE the prior watermark and were never absorbed. The watermark
+    // must cap at turn-5 (the prior-absorbed boundary), NOT advance to turn-30,
+    // so the next incremental pass still re-reads turns 6-10.
+    const big = 'z'.repeat(8000);
+    const turns: SummariserTurn[] = Array.from({ length: 30 }, (_, i) =>
+      turn(i + 1, { user: `msg ${i + 1} ${big}`, assistant: big }),
+    );
+    const prior: RollingSummary = {
+      text: 'DECISION FRAME: x',
+      slots: [
+        { slot: 'FRAME', entries: [{ text: 'x', source_turn_ids: [] }] },
+        { slot: 'CONSTRAINTS', entries: [] },
+        { slot: 'RESOLVED', entries: [] },
+        { slot: 'OPEN', entries: [] },
+      ],
+      updated_turn_id: 'turn-5',
+      updated_turn_created_at: turns[4]!.created_at,
+      version: 3,
+      generator: 'regen',
+      schema_version: SUMMARY_SCHEMA_VERSION,
+    };
+    const input = buildSummariserInput({ mode: 'regen', priorSummary: prior, chronologicalTurns: turns });
+    expect(input.cappedFallback).toBe(true);
+    expect(input.watermark?.turn_id).toBe('turn-5');
+  });
+
   it('incremental mode shows only the turns after the prior watermark', () => {
     const turns = Array.from({ length: 6 }, (_, i) => turn(i + 1));
     const prior: RollingSummary = {

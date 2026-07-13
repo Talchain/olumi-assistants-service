@@ -308,7 +308,14 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
       watermark: input.watermark,
       version,
       generator: mode,
-      historyCapped,
+      // Codex finding 4 — the in-text/stored partiality disclosure fires for
+      // EITHER cap type: a DB-read that filled the full-history limit
+      // (`historyCapped`) OR a summariser INPUT char-cap that dropped turns
+      // from the re-read (`input.cappedFallback`). Both mean "earlier turns
+      // were not re-read", so both must disclose rather than claim silent
+      // completeness. Telemetry below keeps the two causes DISTINCT
+      // (`history_capped` vs `capped_fallback`).
+      historyCapped: historyCapped || input.cappedFallback,
     });
     const outcome = await store.upsertSummary(args.scenarioId, summary);
     emitUpdated(args, {

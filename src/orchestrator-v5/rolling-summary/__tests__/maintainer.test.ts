@@ -362,6 +362,57 @@ describe('maintainRollingSummaryForCommit — history-cap honesty', () => {
     expect(written.text.toLowerCase()).toContain('earlier turns');
   });
 
+  it('a CHARACTER-capped regen discloses partiality and caps the watermark at the prior-absorbed boundary (Codex finding 4)', async () => {
+    // 30 large turns blow the summariser INPUT char budget (distinct from the
+    // DB-read cap): the regen keeps only the verbatim tail (turns 11-30) and
+    // DROPS turns 1-10. A REAL prior summary already absorbed through turn-5,
+    // so turns 6-10 are ABOVE the prior watermark, were dropped, and were
+    // never absorbed. Pre-fix: the summary advanced the watermark to turn-30
+    // (stranding 6-10) and stored NO history_capped marker (silent partiality).
+    const big = 'z'.repeat(8000);
+    const turns: MaintainerTurn[] = [];
+    for (let n = 30; n >= 1; n--) {
+      turns.push({
+        turn_id: `turn-${n}`,
+        created_at: new Date(1_700_000_000_000 + n * 1000).toISOString(),
+        user_message: `msg ${n} ${big}`,
+        assistant_message: big,
+      });
+    }
+    const prior: RollingSummary = {
+      text: 'DECISION FRAME: x\nCONSTRAINTS & PREFERENCES: (none)\nRESOLVED: (none)\nOPEN: (none)',
+      slots: [
+        { slot: 'FRAME', entries: [{ text: 'x', source_turn_ids: [] }] },
+        { slot: 'CONSTRAINTS', entries: [] },
+        { slot: 'RESOLVED', entries: [] },
+        { slot: 'OPEN', entries: [] },
+      ],
+      updated_turn_id: 'turn-5',
+      updated_turn_created_at: new Date(1_700_000_000_000 + 5 * 1000).toISOString(),
+      version: 3,
+      generator: 'regen',
+      schema_version: SUMMARY_SCHEMA_VERSION,
+    };
+    const store = new RecordingStore(prior);
+    await maintainRollingSummaryForCommit({
+      scenarioId: SCENARIO,
+      turnId: 'turn-30',
+      persistedRowId: 'row-30',
+      historyReader: historyReader(turns),
+      summaryStore: store,
+      model: fakeModel(VALID),
+    });
+    expect(store.upsertSummary).toHaveBeenCalledOnce();
+    const written = store.upsertSummary.mock.calls[0]![1];
+    // Honest partiality disclosure (char-cap, not just DB-read cap).
+    expect(written.history_capped).toBe(true);
+    expect(written.text.toLowerCase()).toContain('earlier turns');
+    // Watermark honesty: capped at the prior-absorbed boundary (turn-5), NOT
+    // advanced to the newest turn (turn-30) past the dropped turns 6-10.
+    expect(written.updated_turn_id).toBe('turn-5');
+    expect(written.updated_turn_id).not.toBe('turn-30');
+  });
+
   it('an uncapped read stores no history_capped marker (byte-stable)', async () => {
     const store = new RecordingStore(null);
     await maintainRollingSummaryForCommit({

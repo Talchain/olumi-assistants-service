@@ -130,6 +130,61 @@ function selectRegenTurns(
 }
 
 /**
+ * Codex finding 4 — the honest write watermark for a CHARACTER-capped regen.
+ *
+ * The scalar watermark means "every turn up to here is absorbed", and the
+ * next incremental pass only re-reads turns AFTER it. When the capped fallback
+ * drops turns, advancing the watermark to the newest turn would strand every
+ * dropped turn older than the tail. The honest watermark is the newest turn
+ * that has NO *unabsorbed* dropped turn behind it.
+ *
+ * A turn is already absorbed (and therefore safe to drop from the re-read)
+ * when a REAL prior summary (generator !== 'floor') covered it — i.e. it is at
+ * or before that prior's watermark under the store's total order. A FLOOR
+ * absorbed no conversation history, and an absent prior absorbed nothing, so in
+ * both cases every turn is treated as fresh. Walk oldest-first: skip the
+ * pre-absorbed prefix, then stop at the first UNABSORBED dropped turn; the
+ * watermark is the newest included/absorbed turn before it. If the very first
+ * unabsorbed turn is itself dropped, no honest advance is possible → null (the
+ * maintainer then keeps the prior summary rather than write a false-complete
+ * one). Cannot regress a real prior watermark: the pre-absorbed prefix always
+ * keeps it as a candidate, and the monotonic store guard no-ops any stale land.
+ */
+function cappedRegenWatermark(
+  chronological: readonly SummariserTurn[],
+  shown: readonly SummariserTurn[],
+  prior: RollingSummary | null,
+): { turn_id: string; created_at: string } | null {
+  const shownIds = new Set(shown.map((t) => t.turn_id));
+  const priorAbsorbedMs =
+    prior !== null && prior.generator !== 'floor'
+      ? Date.parse(prior.updated_turn_created_at)
+      : NaN;
+  let newestHonest: SummariserTurn | null = null;
+  for (const t of chronological) {
+    const ts = Date.parse(t.created_at);
+    const alreadyAbsorbed =
+      Number.isFinite(priorAbsorbedMs) && Number.isFinite(ts) && ts <= priorAbsorbedMs;
+    if (alreadyAbsorbed) {
+      // Pre-absorbed by a real prior summary — safe to drop; keep it as the
+      // running boundary candidate so an all-absorbed prefix still yields the
+      // prior watermark (never a regression).
+      newestHonest = t;
+      continue;
+    }
+    if (!shownIds.has(t.turn_id)) {
+      // First unabsorbed turn omitted from the re-read — the watermark must
+      // not advance to or past it.
+      break;
+    }
+    newestHonest = t;
+  }
+  return newestHonest === null
+    ? null
+    : { turn_id: newestHonest.turn_id, created_at: newestHonest.created_at };
+}
+
+/**
  * Render the prior summary for the incremental input. When `ordinalByTurnId`
  * assigns ordinals to the prior's cited turns, entries render WITH their
  * `[tN]` stamps (provenance carry — the model echoes the stamp on entries it
@@ -191,7 +246,10 @@ export function buildSummariserInput(args: {
   }
 
   const watermarkTurn = chronologicalTurns[chronologicalTurns.length - 1]!;
-  const watermark = { turn_id: watermarkTurn.turn_id, created_at: watermarkTurn.created_at };
+  let watermark: { turn_id: string; created_at: string } | null = {
+    turn_id: watermarkTurn.turn_id,
+    created_at: watermarkTurn.created_at,
+  };
 
   let shown: SummariserTurn[];
   let capped = false;
@@ -199,6 +257,19 @@ export function buildSummariserInput(args: {
     const sel = selectRegenTurns(chronologicalTurns, priorSummary);
     shown = sel.shown;
     capped = sel.capped;
+    if (capped) {
+      // Codex finding 4 — do NOT advance the absorbed watermark past omitted
+      // history. `selectRegenTurns` keeps the verbatim tail ∪ provenance-cited
+      // anchors and DROPS the remaining (older, non-anchored) turns from the
+      // model input. Advancing the scalar watermark to the newest turn would
+      // silently mark those dropped turns as absorbed — but the model never
+      // saw them, and the next INCREMENTAL pass only shows turns AFTER the
+      // watermark, so a dropped turn older than the tail is never re-read (a
+      // maintain-path memory hole). The disclosure (history_capped) is set by
+      // the maintainer when this fallback fires; the watermark must also stay
+      // honest.
+      watermark = cappedRegenWatermark(chronologicalTurns, shown, priorSummary);
+    }
   } else {
     // Incremental: the turns after the prior watermark under the store's
     // COMPOSITE total order (created_at, turn_id) — NOT created_at alone

@@ -157,6 +157,7 @@ function degradedEvent(): Event | undefined {
 // set to true. Default (flag false) is covered separately in
 // turn-executor-decision-review-fast-path.test.ts.
 let priorAwaitFlag: string | undefined;
+let priorTurnBudget: string | undefined;
 beforeEach(async () => {
   events = [];
   installSink();
@@ -164,6 +165,7 @@ beforeEach(async () => {
   // does not leak across the suite.
   mockSessionState.briefText = null;
   priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+  priorTurnBudget = process.env.TURN_BUDGET_MS;
   process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
   const { _resetConfigCache } = await import('../../config/index.js');
   _resetConfigCache();
@@ -174,6 +176,11 @@ afterEach(async () => {
     delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
   } else {
     process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+  }
+  if (priorTurnBudget === undefined) {
+    delete process.env.TURN_BUDGET_MS;
+  } else {
+    process.env.TURN_BUDGET_MS = priorTurnBudget;
   }
   const { _resetConfigCache } = await import('../../config/index.js');
   _resetConfigCache();
@@ -222,6 +229,49 @@ describe('TurnExecutor — decision_review enricher resilience', () => {
     expect(ev!.data.scenario_id).toBe(TEST_SCENARIO_ID);
     expect(ev!.data.request_id).toBe('req-degr');
     expect(ev!.data.reason).toBe('simulated enricher regression');
+  });
+
+  it('outer turn-budget abort DURING decision_review does NOT produce an orphaned commit (Codex finding 3 / D-T)', async () => {
+    // Reproduce Codex finding 3: run_analysis finishes just before turn_ms,
+    // the outer turn timer aborts WHILE the decision_review enricher is
+    // running, the enricher catches the abort and returns the original facts
+    // (its documented degrade-to-thin-content behaviour), and — pre-fix — the
+    // executor composes + calls commitTurn with NO further abort check,
+    // producing a LATE / orphaned COMMIT past the client's turn deadline.
+    //
+    // The mock stands in for the production enricher under an outer abort:
+    // it waits for the turn-budget signal to fire, then degrades to the
+    // input facts unchanged — exactly what the real catch does when the
+    // child abort (derived from input.signal) rejects the LLM call.
+    vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview').mockImplementation(
+      async (input) => {
+        await new Promise<void>((resolve) => {
+          if (input.signal.aborted) return resolve();
+          input.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return input.handlerFacts;
+      },
+    );
+    mockSessionState.briefText = 'A decision brief';
+    // Small outer budget so the turn timer fires while the enricher awaits.
+    process.env.TURN_BUDGET_MS = '150';
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-orphan-commit', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+    });
+
+    // The turn budget expired during review → NO commit may happen, and the
+    // turn must classify as TURN_BUDGET_EXCEEDED (not a silent success).
+    expect(result.telemetry.commit_performed).toBe(false);
+    expect(result.telemetry.failure_type).toBe('TURN_BUDGET_EXCEEDED');
   });
 
   it('happy path → no v5.decision_review_degraded event (no regression)', async () => {
