@@ -11,7 +11,7 @@
 import type { V2RunResponseEnvelope } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
-import { winnerOptionResultSource, selectDeclaredWinner } from "./option-result-source.js";
+import { winnerOptionResultSource } from "./option-result-source.js";
 
 // ============================================================================
 // Output Types
@@ -174,27 +174,6 @@ function deriveWinner(options: OptionSummary[]): AnalysisResponseSummary['winner
     option_label: first.option_label,
     win_probability: first.win_probability,
   };
-}
-
-/**
- * Margin of the DECLARED winner (Doctrine D-W): winner.win_probability minus the
- * highest win_probability among the OTHER options. Not `options[0] - options[1]`
- * — when the declared winner is not the highest-probability option, the margin is
- * measured from the winner, so it may be NEGATIVE. Null when there is no winner or
- * fewer than two options.
- */
-function computeDeclaredMargin(
-  winner: AnalysisResponseSummary['winner'] | null,
-  options: OptionSummary[],
-): number | null {
-  if (!winner || options.length < 2) return null;
-  let bestOther = -Infinity;
-  for (const o of options) {
-    if (o.option_id === winner.option_id) continue;
-    if (o.win_probability > bestOther) bestOther = o.win_probability;
-  }
-  if (!Number.isFinite(bestOther)) return null;
-  return winner.win_probability - bestOther;
 }
 
 /**
@@ -627,19 +606,10 @@ function deriveTopDrivers(
  * @param response - The full PLoT response envelope
  * @param graphNodeLabels - Optional map of node_id → label from the compact graph,
  *   used to resolve driver labels. If omitted, falls back to labels in the response.
- * @param leadingOptionId - Doctrine D-W (round-5): PLoT's DECLARED winner
- *   (`fact.result.leading_option_id`). When present AND it carries a usable
- *   win_probability, `.winner` is that option (matching the enricher/headline) —
- *   NOT necessarily the highest-probability one. `null`/absent falls back to the
- *   highest-usable option (the pre-D-W behaviour). `options[]` stays sorted by
- *   win_probability descending; `.winner` may therefore differ from `options[0]`,
- *   and `.margin`/`.margin_pp` are relative to the declared winner (see below) and
- *   may be negative when the declared winner is not the highest-probability one.
  */
 export function compactAnalysis(
   response: V2RunResponseEnvelope | null | undefined,
   graphNodeLabels?: Map<string, string>,
-  leadingOptionId: string | null = null,
 ): AnalysisResponseSummary | null {
   if (!response) return null;
 
@@ -650,24 +620,22 @@ export function compactAnalysis(
       : 'ok';
     if (status === 'blocked' || status === 'failed') return null;
 
-    // Extract options + WINNER via the single shared leader-aware selector
-    // (Doctrine D-W, round-5): honour PLoT's declared leading_option_id when it
-    // carries a usable win_probability (walking current-first past any thin /
-    // out-of-range source), else the highest-usable option — byte-identical to
-    // the enricher/headline, so compact names the SAME option as every other
-    // winner surface (including the leader≠highest case). Never a phantom 0%
-    // winner. Options are projected from the SAME walked-to source the winner
-    // came from. (Per-option driver / flip / fragility aggregation below is a
-    // SEPARATE concern — see getResultsArray, which stays results-first because
-    // the per-option factor_sensitivity/robustness shape lives in `results`, not
-    // in the identity-only live option_comparison.)
-    const declaredWinner = selectDeclaredWinner(
-      response as Record<string, unknown>,
-      typeof leadingOptionId === 'string' && leadingOptionId.length > 0 ? leadingOptionId : null,
-    );
-    const results = declaredWinner
-      ? [...declaredWinner.source]
-      : [...winnerOptionResultSource(response as Record<string, unknown>)];
+    // Extract options + WINNER from the single-sourced WALKING current-first
+    // reader (M1 / round-3/4): `option_comparison` (current PLoT V2) beats the
+    // legacy `results` copy, BUT a source lacking a usable (finite, [0,1])
+    // win_probability is skipped so the winner falls through to the source that
+    // carries one (shared isUsableWinProbability predicate) — never a phantom 0%
+    // winner. compact derives the winner as the highest-probability option in
+    // the walked-to source; the enricher/headline additionally honour PLoT's
+    // declared leading_option_id (a pre-existing, intentional strategy split —
+    // compact's `response` is the enrichment, which carries no leading_option_id,
+    // and the primary production path uses this analytical winner unreconciled).
+    // They coincide when the leader is the highest-probability option or absent.
+    // (Per-option driver / flip / fragility aggregation below is a SEPARATE
+    // concern — see getResultsArray, which stays results-first because the
+    // per-option factor_sensitivity/robustness shape lives in `results`, not in
+    // the identity-only live option_comparison.)
+    const results = [...winnerOptionResultSource(response as Record<string, unknown>)];
     const options: OptionSummary[] = results
       .filter(isOptionResult)
       .filter((r) => {
@@ -714,20 +682,7 @@ export function compactAnalysis(
         return a.option_id.localeCompare(b.option_id);
       });
 
-    // D-W winner: the declared winner (leader-aware) matched to its projected
-    // option for the label; falls back to highest-probability (deriveWinner)
-    // only when the selector found no usable winner at all.
-    let winner: AnalysisResponseSummary['winner'] | null;
-    if (declaredWinner) {
-      const winnerOption = options.find((o) => o.option_id === declaredWinner.optionId);
-      winner = {
-        option_id: declaredWinner.optionId,
-        option_label: winnerOption?.option_label ?? declaredWinner.optionId,
-        win_probability: declaredWinner.winProbability,
-      };
-    } else {
-      winner = deriveWinner(options);
-    }
+    const winner = deriveWinner(options);
     if (!winner) {
       // No valid options — can still return summary with empty winner
       log.warn({ result_count: results.length }, 'compactAnalysis: no valid options found');
@@ -756,13 +711,10 @@ export function compactAnalysis(
         }))
       : [];
 
-    // Margin (D-W, round-5): RELATIVE TO THE DECLARED WINNER —
-    // winner.win_probability minus the highest OTHER option's win_probability
-    // (not `options[0] - options[1]`, which would be wrong when the declared
-    // winner is not the highest-probability option). MAY BE NEGATIVE when the
-    // declared winner trails the field. Null when there is no winner or fewer
-    // than two options.
-    const margin = computeDeclaredMargin(winner, options);
+    // Margin: winner.win_probability - runner_up.win_probability
+    const margin = options.length >= 2
+      ? options[0].win_probability - options[1].win_probability
+      : null;
     // margin_pp: margin in percentage points, rounded to 1 dp. Pre-computed
     // upstream so the V5 assembler stays passthrough-only (F.6).
     const marginPp = margin === null
