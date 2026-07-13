@@ -26,7 +26,10 @@ import {
   type DecisionReviewInvokeInput,
   type DecisionReviewMeta,
 } from '../../cee/decision-review/invoke.js';
-import { invokeDecomposedDecisionReview } from '../../cee/decision-review/decompose.js';
+import {
+  invokeDecomposedDecisionReview,
+  DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
+} from '../../cee/decision-review/decompose.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
@@ -36,6 +39,15 @@ import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
 import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels.js';
+// M1 (Codex r2 pre-merge review): the option-result source precedence is now
+// single-sourced so all four winner-derivation surfaces agree current-first.
+// `readResultsArraySources` is re-exported below (as the shared reader) so this
+// module's existing consumers — including analysis-result-headline — keep their
+// import stable.
+import {
+  readOptionResultSources,
+  isUsableWinProbability,
+} from '../../orchestrator/context/option-result-source.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 
 import type { DecisionReviewOutput } from './types.js';
@@ -146,13 +158,25 @@ export async function enrichRunAnalysisWithDecisionReview(
   } else {
     input.signal.addEventListener('abort', onOuterAbort, { once: true });
   }
-  const hardTimer = setTimeout(() => childAbort.abort(new Error('decision_review timeout')), DECISION_REVIEW_TIMEOUT_MS);
+  // Hard-abort budget: on the monolith path this is exactly
+  // DECISION_REVIEW_TIMEOUT_MS (unchanged). On the decomposed path the
+  // fallback's disclosed minimum window is provisioned on top — otherwise the
+  // decompose module's fallback floor would be dead letter: this timer would
+  // abort the monolith fallback at the very moment it was granted its floor.
+  // Flag-off behaviour is byte-identical (the reserve is 0).
+  const hardBudgetMs = resolveDecisionReviewHardBudgetMs(config.cee.decisionReviewDecompose);
+  const hardTimer = setTimeout(() => childAbort.abort(new Error('decision_review timeout')), hardBudgetMs);
 
   emit(TelemetryEvents.V5DecisionReviewInvoked, {
     request_id: input.requestId,
     scenario_id: input.scenarioId,
     brief_hash: invokeInput.brief_hash,
     timeout_ms: DECISION_REVIEW_TIMEOUT_MS,
+    // Additive (decompose-hardening lane): the ACTUAL hard-abort budget —
+    // equals timeout_ms on the monolith path; timeout_ms + the disclosed
+    // fallback floor on the decomposed path. Keeps wall-clock dashboards
+    // honest when a decomposed run legitimately exceeds timeout_ms.
+    hard_budget_ms: hardBudgetMs,
     // Change A diagnostic context: lets operators correlate an `invoked`
     // event to the same `brief_length` they'd see on a sibling `skipped`
     // event, without needing to grep two events for the same request_id.
@@ -304,6 +328,20 @@ export async function enrichRunAnalysisWithDecisionReview(
 
 
 /**
+ * Hard-abort budget for the decision_review auto-fire. Monolith path (flag
+ * off): DECISION_REVIEW_TIMEOUT_MS exactly — byte-identical to the historical
+ * behaviour. Decomposed path (flag on): the disclosed fallback floor
+ * (DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS) is reserved on top, so a fan-out that
+ * spends most of the shared deadline before falling back still leaves the
+ * monolith fallback a minimum viable window instead of a guaranteed abort.
+ */
+export function resolveDecisionReviewHardBudgetMs(decomposeEnabled: boolean): number {
+  return decomposeEnabled
+    ? DECISION_REVIEW_TIMEOUT_MS + DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS
+    : DECISION_REVIEW_TIMEOUT_MS;
+}
+
+/**
  * Exported for contract testing — exercises the full enrichment-to-invoke-input
  * projection without round-tripping through the LLM call. The runtime invocation
  * path (`enrichRunAnalysisWithDecisionReview` above) is the only production caller.
@@ -329,10 +367,13 @@ function buildInvokeInput(
   // leader. Returning at the first matching source guarantees we honour
   // PLoT's declared winner whenever ANY source carries it.
   //
-  // Source ordering for the null-leader case (no declared winner):
-  // pick the first non-empty source's highest-probability entry. We
-  // deliberately do NOT pool entries across sources for the null-leader
-  // case — that would mix shapes and could double-count the same option.
+  // Source ordering for the null-leader case (no declared winner): WALK the
+  // sources current-first and take the first that yields a highest-probability
+  // winner. We deliberately do NOT pool entries across sources — that would mix
+  // shapes and could double-count the same option. (M1 minor: the previous
+  // `sources[0]` shortcut silently coerced to no_winner / a thin-current 0%
+  // when the current source had entries but none carried a usable
+  // win_probability, even though a richer legacy source could supply one.)
   const sources = readResultsArraySources(enrichment);
   if (sources.length === 0) return null;
 
@@ -349,8 +390,14 @@ function buildInvokeInput(
       }
     }
   } else {
-    chosenSource = sources[0]!;
-    winner = selectWinner(chosenSource, null);
+    for (const source of sources) {
+      const w = selectWinner(source, null);
+      if (w !== null) {
+        winner = w;
+        chosenSource = source;
+        break;
+      }
+    }
   }
 
   if (winner === null || chosenSource === null) return null;
@@ -403,57 +450,24 @@ function buildInvokeInput(
 
 /**
  * Read all option-level results sources from the PLoT V2 enrichment payload,
- * in priority order.
+ * in current-first priority order.
  *
- * The envelope shape evolved across PLoT versions and the V5 enricher must
- * accept all three published shapes without weakening the `no_winner` skip
- * guarantee for genuinely missing data:
+ * M1 (Codex r2 pre-merge review): this is now a thin re-export of the shared
+ * {@link readOptionResultSources} single-source reader so ALL FOUR
+ * winner-derivation surfaces (this enricher, analysis-result-headline's
+ * resolveWinner, analysis-compact's getResultsArray, analysis-state's
+ * getOptionResultCandidates) share ONE precedence and can never disagree on a
+ * both-present-conflicting envelope. See option-result-source.ts for the full
+ * precedence + shape documentation. The name is kept so this module's existing
+ * consumers (headline + contract tests) import it unchanged.
  *
- *   1. `enrichment.results[]`         — legacy shape (kept for backwards
- *                                       compatibility; pre-2026 envelopes).
- *   2. `enrichment.option_comparison[]` — current PLoT V2 (verified on
- *                                         staging build `2e6e0be`); entries
- *                                         carry both `option_id`/`id` and
- *                                         `option_label`/`label` + a nested
- *                                         `outcome.{mean,p10,p50,p90,…}`.
- *   3. `enrichment.decision_brief.options[]` — leaner brief-shape with
- *                                              `option_id`, `label`,
- *                                              `win_probability`, `rank`.
- *
- * Returns every non-empty source as a separate array; the caller
- * (`buildInvokeInput`) walks them in order until one can match
- * `leading_option_id`. This avoids the trap where (e.g.) a legacy
- * `enrichment.results` is non-empty but truncated, while the current
- * `enrichment.option_comparison` contains the declared leader — the
- * walker honours PLoT's declared winner whenever ANY source carries it.
- *
- * `projectOptionAsWinner` was already shape-tolerant (`option_id || id`,
- * `option_label || label`, nested or flat `outcome.mean`), so all three
- * source shapes feed into the same projector unchanged.
- *
- * Returns `[]` only when all three sources are absent or empty.
+ * The caller (`buildInvokeInput`) walks the returned sources in order until one
+ * can match `leading_option_id`, honouring PLoT's declared winner whenever ANY
+ * source carries it. `projectOptionAsWinner` is shape-tolerant (`option_id ||
+ * id`, `option_label || label`, nested or flat `outcome.mean`), so every source
+ * shape feeds into the same projector unchanged.
  */
-export function readResultsArraySources(
-  enrichment: Record<string, unknown>,
-): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
-  const sources: Array<ReadonlyArray<Record<string, unknown>>> = [];
-  const legacy = enrichment.results;
-  if (Array.isArray(legacy) && legacy.length > 0) {
-    const entries = filterObjectEntries(legacy);
-    if (entries.length > 0) sources.push(entries);
-  }
-  const optionComparison = enrichment.option_comparison;
-  if (Array.isArray(optionComparison) && optionComparison.length > 0) {
-    const entries = filterObjectEntries(optionComparison);
-    if (entries.length > 0) sources.push(entries);
-  }
-  const briefOptions = readRecord(enrichment.decision_brief)?.options;
-  if (Array.isArray(briefOptions) && briefOptions.length > 0) {
-    const entries = filterObjectEntries(briefOptions);
-    if (entries.length > 0) sources.push(entries);
-  }
-  return sources;
-}
+export const readResultsArraySources = readOptionResultSources;
 
 
 function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<string, unknown>> {
@@ -475,9 +489,16 @@ function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<stri
  * data-integrity issues; the enricher's `no_winner` skip is the honest
  * outcome for that case.
  *
- * When `leadingOptionId` is null or empty, the behaviour is unchanged:
- * fall back to the highest-probability entry (returns null if none of
- * the entries carry a usable win_probability).
+ * Round-4 review MAJOR-A: the leader-present branch also returns `null`
+ * when the leader-matched entry lacks a {@link isUsableWinProbability}
+ * win_probability, so the `buildInvokeInput` walk falls through to a richer
+ * source — exactly like headline `resolveWinner`. Previously it returned the
+ * thin leader with win_probability coerced to 0 (a phantom 0% winner) on a
+ * thin-current envelope, disagreeing with the walking headline/compact/state.
+ *
+ * When `leadingOptionId` is null or empty, fall back to the highest-USABLE
+ * -probability entry (returns null if none of the entries carry a usable
+ * win_probability).
  */
 export function selectWinner(
   results: ReadonlyArray<Record<string, unknown>>,
@@ -488,7 +509,9 @@ export function selectWinner(
     const byId = results.find(
       (r) => r.option_id === leadingOptionId || r.id === leadingOptionId,
     );
-    return byId ? projectOptionAsWinner(byId) : null;
+    return byId && isUsableWinProbability(byId.win_probability)
+      ? projectOptionAsWinner(byId)
+      : null;
   }
   const top = highestWinProbability(results);
   return top ? projectOptionAsWinner(top) : null;
@@ -515,8 +538,12 @@ function highestWinProbability(
   let best: Record<string, unknown> | null = null;
   let bestProb = -Infinity;
   for (const r of results) {
-    const p = readNumber(r.win_probability);
-    if (p !== null && p > bestProb) {
+    // Round-4 review MAJOR-A: gate on the SHARED usable-probability predicate
+    // (finite AND in [0,1]) so the null-leader + runner-up paths skip a thin /
+    // out-of-range source exactly like the other selectors.
+    if (!isUsableWinProbability(r.win_probability)) continue;
+    const p = r.win_probability;
+    if (p > bestProb) {
       best = r;
       bestProb = p;
     }

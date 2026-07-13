@@ -1,5 +1,6 @@
 import type { ConversationContext, DecisionStage, V2RunResponseEnvelope } from "./types.js";
 import { log } from "../utils/telemetry.js";
+import { winnerOptionResultSource } from "./context/option-result-source.js";
 
 function hasConfiguredInterventions(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
@@ -7,35 +8,39 @@ function hasConfiguredInterventions(value: unknown): boolean {
   return Object.keys(interventions).length > 0;
 }
 
-function getOptionResultCandidates(response: V2RunResponseEnvelope): unknown[] {
-  const r = response as Record<string, unknown>;
+/**
+ * Option-result candidate array for this envelope, in CURRENT-first precedence
+ * with a WALK to the first source carrying a usable (finite, [0,1])
+ * win_probability (shared {@link winnerOptionResultSource} +
+ * isUsableWinProbability predicate).
+ *
+ * This selects the candidate SOURCE (used here for existence / status
+ * inference, NOT to surface a winner identity to the user — see
+ * hasValidOptionResults / normalizeAnalysisEnvelope). M1 / round-3/4:
+ * single-sourced with analysis-compact, the decision-review enricher, and
+ * analysis-result-headline so the source precedence + walk never diverge; the
+ * thin-current envelope is skipped for the richer results[] rather than
+ * regressing to a phantom 0% winner (the round-2 plain first-non-empty read did
+ * regress it). Exported so the cross-surface agreement test can pin it.
+ */
+export function getOptionResultCandidates(response: V2RunResponseEnvelope): unknown[] {
+  const candidates = winnerOptionResultSource(response as Record<string, unknown>);
 
-  // PLoT /v2/run returns option_comparison; the UI normalizer copies it to results.
-  // Check results as array first
-  if (Array.isArray(r.results) && r.results.length > 0) return r.results;
-
-  // Check option_comparison as array
-  if (Array.isArray(r.option_comparison) && r.option_comparison.length > 0) return r.option_comparison;
-
-  // Check results as object with nested arrays (AnalysisInputsSummary shape or V2-nested)
-  if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
-    const nested = r.results as Record<string, unknown>;
-    if (Array.isArray(nested.option_comparison)) return nested.option_comparison;
-    if (Array.isArray(nested.options)) return nested.options;
-    if (Array.isArray(nested.option_results)) return nested.option_results;
+  // Log unexpected shape for diagnostics: `results` is present but no
+  // recognised option array could be extracted from it (or the envelope).
+  if (candidates.length === 0) {
+    const r = response as Record<string, unknown>;
+    if (r.results !== undefined && r.results !== null) {
+      log.warn({
+        event: 'analysis_state.unexpected_results_shape',
+        type: typeof r.results,
+        isArray: Array.isArray(r.results),
+        keys: r.results && typeof r.results === 'object' ? Object.keys(r.results as object) : null,
+      });
+    }
   }
 
-  // Log unexpected shape for diagnostics
-  if (r.results !== undefined && r.results !== null) {
-    log.warn({
-      event: 'analysis_state.unexpected_results_shape',
-      type: typeof r.results,
-      isArray: Array.isArray(r.results),
-      keys: r.results && typeof r.results === 'object' ? Object.keys(r.results as object) : null,
-    });
-  }
-
-  return [];
+  return [...candidates];
 }
 
 function hasValidOptionResults(response: V2RunResponseEnvelope): boolean {

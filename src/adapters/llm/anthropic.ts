@@ -2367,6 +2367,13 @@ interface ChatWithAnthropicArgs {
   maxTokens?: number;
   requestId?: string;
   timeoutMs?: number;
+  /**
+   * External abort signal (client disconnect / caller-side cancellation /
+   * sibling-cancel in fan-out callers). Wired into the internal timeout
+   * controller exactly like the draft_graph path: an external abort cancels
+   * the in-flight HTTP request — it does not merely abandon the promise.
+   */
+  signal?: AbortSignal;
   /** Extended thinking configuration. When enabled, temperature is forced to 1. */
   thinking?: ThinkingConfig;
   /**
@@ -2447,6 +2454,17 @@ export async function chatWithAnthropic(
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
+  // Wire the external abort signal (client disconnect / caller cancellation)
+  // into the internal controller — mirrors the draft_graph path above.
+  const externalSignal = args.signal;
+  let onExternalAbort: (() => void) | undefined;
+  if (externalSignal?.aborted) {
+    abortController.abort();
+  } else if (externalSignal) {
+    onExternalAbort = () => abortController.abort();
+    externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
+
   try {
     const apiClient = getClient();
 
@@ -2526,6 +2544,9 @@ export async function chatWithAnthropic(
     );
 
     clearTimeout(timeoutId);
+    if (externalSignal && onExternalAbort) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
     const latencyMs = Date.now() - startTime;
 
     // When thinking is enabled, Anthropic prepends thinking blocks before the text block.
@@ -2563,17 +2584,33 @@ export async function chatWithAnthropic(
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
+    if (externalSignal && onExternalAbort) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
     const elapsedMs = Date.now() - startTime;
 
     if (error instanceof Error) {
       // V04: Throw typed UpstreamTimeoutError for timeout classification
       if (error.name === "AbortError" || abortController.signal.aborted) {
-        log.error({ timeout_ms: timeoutMs, elapsed_ms: elapsedMs }, "Anthropic chat call timed out");
+        // Distinguish a caller-initiated abort from a genuine timeout so
+        // operators don't read client disconnects as upstream slowness.
+        const isExternalAbort = externalSignal?.aborted === true;
+        // M2 (Codex r2 pre-merge review): a client/external abort must carry
+        // the repo-canonical `pre_aborted` phase — the SAME discriminator the
+        // downstream classifiers key on (m2-review.ts, parse.ts) and that every
+        // other adapter abort site already uses. Tagging it `body` made a
+        // client disconnect indistinguishable from a genuine upstream timeout.
+        // A real timeout keeps `body`.
+        const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
+        log.error(
+          { timeout_ms: timeoutMs, elapsed_ms: elapsedMs, external_abort: isExternalAbort, phase },
+          isExternalAbort ? "Anthropic chat call aborted by external signal" : "Anthropic chat call timed out"
+        );
         throw new UpstreamTimeoutError(
-          "Anthropic chat timed out",
+          isExternalAbort ? "Anthropic chat aborted by external signal" : "Anthropic chat timed out",
           "anthropic",
           "chat",
-          "body",
+          phase,
           elapsedMs,
           error
         );
@@ -3388,6 +3425,12 @@ export class AnthropicAdapter implements LLMAdapter {
       maxTokens: args.maxTokens,
       requestId: opts.requestId,
       timeoutMs: opts.timeoutMs,
+      // CallOpts.signal was previously dropped here — callers that forwarded
+      // an abort signal through adapter.chat() got no cancellation at all.
+      // Minor (Codex r2 review): honour the legacy `abortSignal` alias too, for
+      // contract parity with every other forwarding site (draftGraph/repairGraph
+      // + the two chatWithTools sites all use `opts.signal ?? opts.abortSignal`).
+      signal: opts.signal ?? opts.abortSignal,
       thinking: args.thinking,
       outputSchema: args.outputSchema,
       structuredOutputsUserReminder: args.structuredOutputsUserReminder,

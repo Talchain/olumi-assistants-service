@@ -47,6 +47,7 @@ import {
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
+import { isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
 import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
 // Two-argument label guard relocated to the lean context module (single
 // source of truth, shared with the projection layer). Distinct from the
@@ -289,11 +290,13 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const { enrichment, leading_option_id, status_kind, interventionControlledFactorIds } = input;
 
   // Same-source resolution: the winner label, winner probability, and
-  // runner-up probability ALL come from the SAME source array (one of
-  // results[], option_comparison[], decision_brief.options[] in priority
-  // order). This guards against the round-2 cross-source mixing risk —
-  // a clean label from one source paired with stale or inconsistent
-  // probability maths from another.
+  // runner-up probability ALL come from the SAME source array — one of
+  // option_comparison[], results[], decision_brief.options[] (and the nested
+  // results-object shapes) in the shared CURRENT-first precedence order (see
+  // readOptionResultSources). This guards against the round-2 cross-source
+  // mixing risk — a clean label from one source paired with stale or
+  // inconsistent probability maths from another — and keeps the headline's
+  // winner identical to the review/coach surfaces on the same envelope.
   const winner = resolveWinner(enrichment, leading_option_id);
   if (winner === null) {
     // No source produced a winner with a clean label AND a finite
@@ -728,8 +731,12 @@ function resolveWinner(
         '';
       return rId === winner.id;
     });
-    const winnerProb = winnerRaw ? readNumber(winnerRaw.win_probability) : null;
-    if (winnerProb === null || winnerProb < 0 || winnerProb > 1) continue;
+    // Round-4 review MAJOR-A: per-source acceptance keys on the SINGLE shared
+    // predicate (finite AND in [0,1]) — identical to winnerOptionResultSource
+    // and the enricher selectWinner, so degenerate envelopes can't diverge.
+    // (Preserves the out-of-range fallback: a stray 1.5 is not "usable".)
+    if (!isUsableWinProbability(winnerRaw?.win_probability)) continue;
+    const winnerProb = winnerRaw!.win_probability as number;
 
     let runnerUpProb: number | null = null;
     let eliminatedCount = 0;
@@ -739,8 +746,8 @@ function resolveWinner(
         (typeof raw.id === 'string' && raw.id) ||
         '';
       if (rId === winner.id) continue;
-      const p = readNumber(raw.win_probability);
-      if (p === null || p < 0 || p > 1) continue;
+      if (!isUsableWinProbability(raw.win_probability)) continue;
+      const p = raw.win_probability as number;
       if (runnerUpProb === null || p > runnerUpProb) runnerUpProb = p;
       if (p < ELIMINATED_WIN_PROBABILITY_CEILING) eliminatedCount += 1;
     }

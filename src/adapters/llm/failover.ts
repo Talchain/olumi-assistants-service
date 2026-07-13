@@ -116,6 +116,20 @@ export class FailoverAdapter implements LLMAdapter {
       } catch (error) {
         errors.push({ provider: adapter.name, error });
 
+        // M4 (Codex r2 pre-merge review): a client / budget abort must NOT
+        // trigger a paid cross-provider failover. If the external signal fired,
+        // stop here and propagate the current error instead of billing the next
+        // provider for a response nobody is awaiting. (The last-adapter path
+        // below already stops; this guards the retry BETWEEN attempts.)
+        const externalSignal = opts.signal ?? opts.abortSignal;
+        if (externalSignal?.aborted && !isLastAdapter) {
+          log.warn(
+            { operation, from: adapter.name, request_id: opts.requestId },
+            "Client abort during failover — suppressing cross-provider retry"
+          );
+          throw error;
+        }
+
         if (isLastAdapter) {
           // All adapters exhausted - aggregate all errors for debuggability
           emit(TelemetryEvents.ProviderFailoverExhausted, {

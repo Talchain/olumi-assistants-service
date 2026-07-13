@@ -11,6 +11,7 @@
 import type { V2RunResponseEnvelope } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
+import { winnerOptionResultSource } from "./option-result-source.js";
 
 // ============================================================================
 // Output Types
@@ -124,9 +125,23 @@ function isOptionResult(r: unknown): r is OptionResult {
 }
 
 /**
- * Extract the option results array from a V2RunResponseEnvelope.
- * PLoT returns option data in `option_comparison[]`; the UI normalizer copies it to `results[]`.
- * Mirrors getOptionResultCandidates() in analysis-state.ts — both must stay in sync.
+ * Extract the PER-OPTION analysis-result array from a V2RunResponseEnvelope.
+ *
+ * DISTINCT from the WINNER source (M1, Codex r2 pre-merge review). The winner /
+ * options projection in {@link compactAnalysis} is single-sourced current-first
+ * via {@link winnerOptionResultSource} (`option_comparison` beats the legacy
+ * `results` copy, walking past a thin-current source that lacks win_probability).
+ * This reader is a SEPARATE concern: the per-option
+ * aggregation functions (top_drivers, flip_thresholds, fragile_edges,
+ * constraint_tensions) read the nested per-option `factor_sensitivity`,
+ * `robustness`, and `constraint_probabilities` — data that lives in the
+ * `results[]` shape and is ABSENT from the live top-level `option_comparison[]`
+ * entries (verified against tests/fixtures/cross-service/
+ * v5-turn.run-analysis.staging.json, whose option_comparison entries carry only
+ * option_id/label/outcome/win_probability). It therefore stays RESULTS-first so
+ * the per-option shape is never shadowed by the identity-only option_comparison.
+ * Do NOT "resync" this with the current-first winner source — they are
+ * deliberately different concerns.
  */
 function getResultsArray(response: V2RunResponseEnvelope): unknown[] {
   if (Array.isArray(response.results) && response.results.length > 0) return response.results;
@@ -225,7 +240,11 @@ function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {
     }
   }
 
-  // Fallback: robustness.overall_robustness on first option's result
+  // Fallback: robustness.overall_robustness on first option's result.
+  // Reads the per-option analysis reader (getResultsArray, results-first) — this
+  // is per-option robustness data (which lives in the results[] shape alongside
+  // factor_sensitivity), NOT the winner, so it is correct-by-design that this
+  // does not use the current-first winner source (round-3 review minor).
   const results = getResultsArray(response);
   const firstResult = results[0];
   if (firstResult && typeof firstResult === 'object') {
@@ -601,8 +620,22 @@ export function compactAnalysis(
       : 'ok';
     if (status === 'blocked' || status === 'failed') return null;
 
-    // Extract options — PLoT returns option_comparison[], not results[].
-    const results = getResultsArray(response);
+    // Extract options + WINNER from the single-sourced WALKING current-first
+    // reader (M1 / round-3/4): `option_comparison` (current PLoT V2) beats the
+    // legacy `results` copy, BUT a source lacking a usable (finite, [0,1])
+    // win_probability is skipped so the winner falls through to the source that
+    // carries one (shared isUsableWinProbability predicate) — never a phantom 0%
+    // winner. compact derives the winner as the highest-probability option in
+    // the walked-to source; the enricher/headline additionally honour PLoT's
+    // declared leading_option_id (a pre-existing, intentional strategy split —
+    // compact's `response` is the enrichment, which carries no leading_option_id,
+    // and the primary production path uses this analytical winner unreconciled).
+    // They coincide when the leader is the highest-probability option or absent.
+    // (Per-option driver / flip / fragility aggregation below is a SEPARATE
+    // concern — see getResultsArray, which stays results-first because the
+    // per-option factor_sensitivity/robustness shape lives in `results`, not in
+    // the identity-only live option_comparison.)
+    const results = [...winnerOptionResultSource(response as Record<string, unknown>)];
     const options: OptionSummary[] = results
       .filter(isOptionResult)
       .filter((r) => {

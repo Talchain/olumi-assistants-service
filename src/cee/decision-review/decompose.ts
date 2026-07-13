@@ -26,6 +26,14 @@
  *  - R6: the ~4x/cost arithmetic is an ESTIMATE — this module books nothing;
  *    the harness A/B on the live haiku tier is the measurement of record.
  *
+ * Cancellation contract (Codex r2 blocker 3): `options.signal` is forwarded
+ * to all four sub-calls; a client abort cancels every in-flight request and
+ * SUPPRESSES the monolith fallback (never bill a review nobody awaits). The
+ * first fatal sub-call failure cancels its siblings. Fan-out + fallback share
+ * ONE end-to-end deadline: the fallback gets the remaining budget, floored at
+ * DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS (disclosed via telemetry and provisioned
+ * by the enricher's hard-abort budget).
+ *
  * The module is import-safe: it never fires an LLM call at load time.
  */
 
@@ -71,6 +79,30 @@ const DEFAULT_DECOMPOSE_MAX_TOKENS = 1500;
 function resolveDecomposeMaxTokens(): number {
   const configured = config.cee.maxTokens.decision_review_haiku;
   return typeof configured === 'number' && configured > 0 ? configured : DEFAULT_DECOMPOSE_MAX_TOKENS;
+}
+
+/**
+ * Minimum viable window for the monolith fallback (Codex r2 blocker 3 / #436).
+ * The fan-out and the fallback share ONE end-to-end deadline
+ * (`options.timeoutMs` from the moment the fan-out starts) — the fallback gets
+ * what REMAINS of it, never a fresh full clock stacked on the time already
+ * spent. But a fallback that inherits a near-exhausted budget is a guaranteed
+ * second failure billed on top of the first, so it is floored at this value
+ * (capped at the original budget for small budgets). When the floor engages
+ * the shared deadline is knowingly exceeded by at most this amount — disclosed
+ * per-event via `fallback_budget_floor_engaged`, and provisioned for by the
+ * enricher's hard-abort budget (see `resolveDecisionReviewHardBudgetMs`).
+ */
+export const DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS = 8_000;
+
+/** Pure budget arithmetic for the monolith fallback — see the constant above. */
+export function resolveDecomposeFallbackBudget(
+  originalTimeoutMs: number,
+  elapsedMs: number,
+): { timeoutMs: number; floorEngaged: boolean } {
+  const remainingMs = Math.max(0, originalTimeoutMs - elapsedMs);
+  const floorMs = Math.min(DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS, originalTimeoutMs);
+  return { timeoutMs: Math.max(remainingMs, floorMs), floorEngaged: remainingMs < floorMs };
 }
 
 /** Light per-slice caps — each call gets a right-sized slice, never the monolith. */
@@ -121,6 +153,12 @@ interface Slices {
 /** Structural context the composer + consistency check need (not sent to the LLM). */
 interface DecomposeContext {
   readonly optionIds: readonly string[];
+  /**
+   * Every option label the narrative could plausibly name (option_comparison
+   * labels + winner + runner-up, case-insensitively deduped) — the corpus the
+   * winner-semantics check matches lead sentences against.
+   */
+  readonly optionLabels: readonly string[];
   readonly winnerLabel: string;
   readonly evidenceGapFactorIds: ReadonlySet<string>;
   readonly fragileEdgeIds: ReadonlySet<string>;
@@ -234,6 +272,17 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
   const optionIds = optionComparison
     .map((o) => readStr(o.option_id))
     .filter((s): s is string => s !== null);
+  const optionLabelsByLower = new Map<string, string>();
+  for (const label of [
+    ...optionComparison.map((o) => readStr(o.option_label)),
+    readStr(input.winner.label),
+    input.runner_up ? readStr(input.runner_up.label) : null,
+  ]) {
+    if (label !== null && !optionLabelsByLower.has(label.toLowerCase())) {
+      optionLabelsByLower.set(label.toLowerCase(), label);
+    }
+  }
+  const optionLabels = [...optionLabelsByLower.values()];
   const evidenceGapFactorIds = new Set(
     evidenceGaps.map((g) => readStr(g.factor_id)).filter((s): s is string => s !== null),
   );
@@ -308,6 +357,7 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
     slices: { r1, r2, r3, r4 },
     ctx: {
       optionIds,
+      optionLabels,
       winnerLabel: input.winner.label,
       evidenceGapFactorIds,
       fragileEdgeIds,
@@ -385,6 +435,125 @@ export function composeFragments(
 // Composed-consistency check (07-REVIEW R1) — the NEW guard
 // ============================================================================
 
+/**
+ * Win-cue for lead sentences — a sentence asserting some option is winning /
+ * leading / recommended. Adapted from the conversation-harness PQ6 LEAD_VERB
+ * plus the noun forms ("leader", "winner", "front-runner") a review narrative
+ * uses where chat prose uses verbs.
+ */
+const WIN_CUE =
+  /\b(ahead|lead(?:s|ing|er)?|front[- ]?runner|win(?:s|ner|ning)?|comes? out (?:ahead|on top)|out in front|strongest|recommend(?:ed)?|best (?:option|choice|bet)|top (?:choice|pick)|favou?red|preferred|should be chosen)\b/i;
+
+/**
+ * Negation of a win-claim ("Option B is NOT the leader") — a negated lead
+ * sentence names a non-leader but AGREES with the analysis, so it must not
+ * fire the wrong-winner fatal. Conservative on purpose (any negation cue
+ * suppresses the check for that sentence) — same trade the harness PQ6(c)
+ * fix made: a missed contradiction falls back to the presence check; a
+ * false fatal would burn a monolith call on a coherent review.
+ */
+const WIN_NEGATION_CUE = /\b(?:not|never|unlikely|rather than|instead of|far from|unlike|no longer)\b|n['’]t\b/i;
+
+/**
+ * Disqualifiers that restrict the wrong-winner FATAL to OVERALL-crowning claims
+ * (M5, Codex r2 pre-merge review). The bare WIN_CUE fired on legitimate
+ * per-dimension / historical / attention sentences that merely MENTION the
+ * runner-up alongside a win-cue verb — e.g. "Option B wins on cost.",
+ * "We recommend validating Option B pricing assumptions", "Option B was ahead
+ * in early estimates", "The strongest objection concerns Option B costs" — even
+ * when Option A is correctly crowned overall elsewhere. Each spurious fatal
+ * burns a paid monolith fallback on a coherent review (and poisons the B1 rerun
+ * fallback<10% criterion). We prefer to UNDER-fire here (the presence check +
+ * the shape/number-grounding checks remain the safety net); the true overall
+ * crownings ("Option B is the better choice", "the clear leader … should be
+ * chosen") carry none of these qualifiers and still fire.
+ *
+ *  - DIMENSION: a win-cue scoped to one dimension via a preposition + a BARE
+ *    dimension noun ("wins on cost", "wins in cost", "ahead at speed") or an
+ *    explicit dimensional phrase ("in terms of X") — a per-dimension win, not an
+ *    overall verdict.
+ *  - HISTORICAL: genuine past-tense framing ("was ahead", "initially",
+ *    "previously") — describes a prior state, not the current crowning.
+ *  - ATTENTION: the sentence is about scrutinising / validating / objecting to
+ *    an option ("recommend validating", "the strongest objection", "assumptions"),
+ *    not crowning it.
+ *
+ * REGEX BRITTLENESS (known limitation): this is a heuristic on a heuristic. It is
+ * inherently a trade-off — narrowing to stop over-suppression can re-open the
+ * false-positive class and vice-versa. We accept residual imprecision at the
+ * margins and err toward FIRING the FATAL (the gpt-4.1 monolith fallback is the
+ * safety net for a spurious fatal; a MISSED wrong-winner is caught by the
+ * presence + shape/number-grounding checks). Do not chase completeness here.
+ *
+ * Round-3/4 review MAJOR-2/B — narrowing history to stop over-suppressing
+ * present-tense crownings, and re-adding in/at to DIMENSION with a noun gate:
+ *  - HISTORICAL dropped `estimates`/`estimated`/`early` AND `has been` (4 tokens;
+ *    the round-3 note documented only the first three — recorded here). A
+ *    decision review is built ON estimated values, so "the estimates favour
+ *    Option B, which should be chosen" is a present-tense crowning, not history;
+ *    "has been the leader … should be chosen" is likewise present-relevant.
+ *    Genuine history ("was ahead in early estimates") is still caught by `was`.
+ *  - DIMENSION re-adds `in`/`at` (round-3 dropping them re-opened "wins in cost"
+ *    as a false FATAL) but ONLY before a BARE dimension noun: a negative
+ *    lookahead excludes determiners / pronouns / temporals, so "wins in cost"
+ *    (per-dimension → suppress) is distinguished from "leads in this decision" /
+ *    "the better choice for us" (overall crowning → FIRE). `for` is deliberately
+ *    NOT a dimensional preposition — it heads overall crownings far more often
+ *    than dimensions.
+ */
+const DIMENSION_QUALIFIER_CUE =
+  /\b(?:wins?|won|winning|ahead|leads?|leading|strongest|stronger|scores?|beats?|outperforms?|better)\b[^.!?]*?(?:\b(?:on|in|at)\s+(?!the\b|a\b|an\b|this\b|that\b|these\b|those\b|our\b|your\b|their\b|his\b|her\b|its\b|my\b|us\b|it\b|them\b|me\b|you\b|him\b|now\b|today\b|present\b|current\b)[a-z]|\bin terms of\b|\bwhen it comes to\b|\bwith respect to\b|\bregarding\b)/i;
+const HISTORICAL_QUALIFIER_CUE =
+  /\b(?:was|were|had been|used to|previously|initially|earlier|originally|formerly|at first)\b/i;
+const ATTENTION_QUALIFIER_CUE =
+  /\b(?:validat\w*|investigat\w*|assumptions?|objections?|concerns?|caveats?|scrutin\w*|audit\w*|re-?examin\w*|reservations?|doubts?|worries|weakness\w*)\b/i;
+
+/** True when a win-cue sentence is a per-dimension / historical / attention
+ *  claim rather than an OVERALL crowning of the named option. */
+function isNonCrowningWinSentence(sentence: string): boolean {
+  return (
+    DIMENSION_QUALIFIER_CUE.test(sentence) ||
+    HISTORICAL_QUALIFIER_CUE.test(sentence) ||
+    ATTENTION_QUALIFIER_CUE.test(sentence)
+  );
+}
+
+function sentenceList(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Labels the narrative claims as OVERALL LEADER that are NOT the authoritative
+ * winner. Negation-aware; qualifier-aware (per-dimension / historical /
+ * attention sentences are skipped — see {@link isNonCrowningWinSentence});
+ * conservative single-name rule (a lead sentence naming zero or 2+ options is
+ * skipped, never guessed at).
+ */
+function claimedNonWinnerLeaders(
+  narrative: string,
+  optionLabels: readonly string[],
+  winnerLabel: string,
+): string[] {
+  if (winnerLabel.length === 0 || optionLabels.length < 2) return [];
+  const wrong: string[] = [];
+  for (const sentence of sentenceList(narrative)) {
+    if (!WIN_CUE.test(sentence)) continue;
+    if (WIN_NEGATION_CUE.test(sentence)) continue;
+    // Only OVERALL crownings are wrong-winner candidates; a per-dimension /
+    // historical / attention sentence that merely names the runner-up is not.
+    if (isNonCrowningWinSentence(sentence)) continue;
+    const lower = sentence.toLowerCase();
+    const named = optionLabels.filter((l) => l.length > 2 && lower.includes(l.toLowerCase()));
+    if (named.length === 1 && named[0]!.toLowerCase() !== winnerLabel.toLowerCase()) {
+      wrong.push(named[0]!);
+    }
+  }
+  return wrong;
+}
+
 export interface ConsistencyResult {
   /** False → the composer must fall back to the monolith. */
   readonly consistent: boolean;
@@ -419,8 +588,14 @@ export function checkComposedConsistency(
   const out: Record<string, unknown> = JSON.parse(JSON.stringify(composed));
 
   // --- (a) Repairs: drop payload-orphan keys the monolith would never emit ---
+  //
+  // ALWAYS intersect with the authoritative ID set (Codex r2): an EMPTY
+  // authoritative set means an EMPTY allowed set, never an open filter. The
+  // previous size>0 guards skipped the intersection entirely when the payload
+  // carried no gaps/edges/flips — precisely the envelopes where every
+  // fragment-invented key is a fabrication.
   const storyHeadlines = readRecord(out.story_headlines);
-  if (storyHeadlines && ctx.optionIds.length > 0) {
+  if (storyHeadlines) {
     for (const key of Object.keys(storyHeadlines)) {
       if (!ctx.optionIds.includes(key)) {
         delete storyHeadlines[key];
@@ -429,7 +604,7 @@ export function checkComposedConsistency(
     }
   }
   const evidence = readRecord(out.evidence_enhancements);
-  if (evidence && ctx.evidenceGapFactorIds.size > 0) {
+  if (evidence) {
     for (const key of Object.keys(evidence)) {
       if (!ctx.evidenceGapFactorIds.has(key)) {
         delete evidence[key];
@@ -438,7 +613,7 @@ export function checkComposedConsistency(
     }
   }
   const scenarios = readRecord(out.scenario_contexts);
-  if (scenarios && ctx.fragileEdgeIds.size > 0) {
+  if (scenarios) {
     for (const key of Object.keys(scenarios)) {
       if (!ctx.fragileEdgeIds.has(key)) {
         delete scenarios[key];
@@ -450,7 +625,7 @@ export function checkComposedConsistency(
     const before = out.flip_thresholds.length;
     let flips = out.flip_thresholds.filter((f) => {
       const id = readStr(readRecord(f)?.factor_id);
-      return ctx.flipFactorIds.size === 0 || (id !== null && ctx.flipFactorIds.has(id));
+      return id !== null && ctx.flipFactorIds.has(id);
     });
     if (flips.length !== before) {
       repaired.push(`flip_thresholds dropped ${before - flips.length} orphan factor_id entr(y/ies)`);
@@ -477,6 +652,19 @@ export function checkComposedConsistency(
   const narrative = typeof out.narrative_summary === 'string' ? out.narrative_summary : '';
   if (ctx.winnerLabel.length > 0 && !narrative.toLowerCase().includes(ctx.winnerLabel.toLowerCase())) {
     fatal.push('narrative_summary does not name the winning option (possible wrong-winner headline)');
+  }
+  // Winner SEMANTICS (Codex r2): substring presence is not enough — a
+  // narrative can name the winner in passing while its win-cue sentence
+  // crowns a different option. Port of the harness PQ6(c) learnings:
+  // match lead sentences (win-cue), skip negated ones ("B is NOT the
+  // leader" is consistent), and flag only when a lead sentence names
+  // exactly ONE option and it is not the authoritative winner
+  // (conservative single-name rule — multi-name sentences like
+  // "A leads B" are skipped rather than guessed at).
+  for (const claimed of claimedNonWinnerLeaders(narrative, ctx.optionLabels, ctx.winnerLabel)) {
+    fatal.push(
+      `narrative_summary crowns "${claimed}" but the authoritative winner is "${ctx.winnerLabel}" (wrong-winner claim)`,
+    );
   }
 
   // Shape + number grounding via the production validator. `valid=false` covers
@@ -505,6 +693,8 @@ async function invokeOneSlice(
   model: string,
   maxTokens: number,
   options: InvokeDecisionReviewOptions,
+  signal: AbortSignal,
+  onFatalFailure: () => void,
 ): Promise<Fragment> {
   try {
     const res = await chatWithAnthropic({
@@ -515,6 +705,10 @@ async function invokeOneSlice(
       maxTokens,
       timeoutMs: options.timeoutMs,
       requestId: options.requestId,
+      // Codex r2 blocker 3: the abort signal is forwarded to every sub-call —
+      // a client abort (or a sibling-cancel) kills the in-flight HTTP request
+      // instead of leaving four paid haiku calls running to completion.
+      signal,
     });
     const extraction = extractJsonFromResponse(res.content, {
       task: 'decision_review',
@@ -525,6 +719,11 @@ async function invokeOneSlice(
       extraction.json && typeof extraction.json === 'object' && !Array.isArray(extraction.json)
         ? (extraction.json as Record<string, unknown>)
         : null;
+    if (json === null) {
+      // An unparseable fragment already guarantees the monolith fallback
+      // (succeeded < 4) — stop paying for the siblings immediately.
+      onFatalFailure();
+    }
     return {
       json,
       latencyMs: res.latencyMs,
@@ -536,6 +735,9 @@ async function invokeOneSlice(
       { request_id: options.requestId, err: err instanceof Error ? err.message : String(err) },
       'decomposed decision_review sub-call failed',
     );
+    // First fatal failure cancels the siblings (idempotent — a sibling that
+    // was itself cancelled lands here too and the repeat abort is a no-op).
+    onFatalFailure();
     return EMPTY_FRAGMENT;
   }
 }
@@ -558,18 +760,42 @@ export async function invokeDecomposedDecisionReview(
   const { slices, ctx } = buildSlices(input);
   const startedAt = Date.now();
 
+  // Client already gone before the fan-out: fire nothing, bill nothing.
+  if (options.signal?.aborted) {
+    emitAborted(options, 0, 0, 0, 0);
+    throw new Error('decomposed decision_review aborted before fan-out (client abort)');
+  }
+
+  // ONE shared controller for the fan-out. It aborts on (a) the client's
+  // signal — all four in-flight requests are cancelled together — or (b) the
+  // first fatal sub-call failure, so a doomed fan-out never waits for (or
+  // pays for) its stragglers before falling back.
+  const fanout = new AbortController();
+  const onClientAbort = () => fanout.abort();
+  options.signal?.addEventListener('abort', onClientAbort, { once: true });
+  const cancelSiblings = () => fanout.abort();
+
   const [f1, f2, f3, f4] = await Promise.all([
-    invokeOneSlice(DECOMPOSE_R1_HEADLINE_PROMPT, slices.r1, model, maxTokens, options),
-    invokeOneSlice(DECOMPOSE_R2_DRIVER_PROMPT, slices.r2, model, maxTokens, options),
-    invokeOneSlice(DECOMPOSE_R3_FRAGILITY_PROMPT, slices.r3, model, maxTokens, options),
-    invokeOneSlice(DECOMPOSE_R4_CALIBRATION_PROMPT, slices.r4, model, maxTokens, options),
-  ]);
+    invokeOneSlice(DECOMPOSE_R1_HEADLINE_PROMPT, slices.r1, model, maxTokens, options, fanout.signal, cancelSiblings),
+    invokeOneSlice(DECOMPOSE_R2_DRIVER_PROMPT, slices.r2, model, maxTokens, options, fanout.signal, cancelSiblings),
+    invokeOneSlice(DECOMPOSE_R3_FRAGILITY_PROMPT, slices.r3, model, maxTokens, options, fanout.signal, cancelSiblings),
+    invokeOneSlice(DECOMPOSE_R4_CALIBRATION_PROMPT, slices.r4, model, maxTokens, options, fanout.signal, cancelSiblings),
+  ]).finally(() => {
+    options.signal?.removeEventListener('abort', onClientAbort);
+  });
 
   const fragments = [f1, f2, f3, f4];
   const succeeded = fragments.filter((f) => f.json !== null).length;
   const wallMs = Date.now() - startedAt;
   const inputTokens = fragments.reduce((s, f) => s + f.inputTokens, 0);
   const outputTokens = fragments.reduce((s, f) => s + f.outputTokens, 0);
+
+  // Client abort during the fan-out: the sub-calls were just cancelled;
+  // launching the monolith now would bill a review nobody is waiting for.
+  if (options.signal?.aborted) {
+    emitAborted(options, succeeded, wallMs, inputTokens, outputTokens);
+    throw new Error('decomposed decision_review aborted mid-fan-out (client abort); fallback suppressed');
+  }
 
   // Any missing fragment → fall back. The A/B compares a COMPLETE decomposed
   // review against the monolith; a partial composition would poison the arm.
@@ -644,11 +870,36 @@ interface DecomposedTelemetry {
   readonly violations?: readonly string[];
 }
 
+/** Client abort: no composed review, no fallback — disclose and stop. */
+function emitAborted(
+  options: InvokeDecisionReviewOptions,
+  fragmentsSucceeded: number,
+  wallMs: number,
+  inputTokens: number,
+  outputTokens: number,
+): void {
+  emit(TelemetryEvents.V5DecisionReviewDecomposed, {
+    request_id: options.requestId,
+    outcome: 'aborted',
+    fallback_reason: 'client_abort',
+    fragments_succeeded: fragmentsSucceeded,
+    violation_count: 0,
+    wall_clock_ms: wallMs,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+  });
+}
+
 async function fallBackToMonolith(
   input: DecisionReviewInvokeInput,
   options: InvokeDecisionReviewOptions,
   tel: DecomposedTelemetry,
 ): Promise<DecisionReviewInvokeResult> {
+  // ONE shared end-to-end deadline: the fallback gets what remains of the
+  // budget the fan-out already spent from, floored at a disclosed minimum
+  // viable window (Codex r2 blocker 3 / #436 — a near-exhausted inherited
+  // budget made the fallback a guaranteed second failure).
+  const budget = resolveDecomposeFallbackBudget(options.timeoutMs, tel.wall_clock_ms);
   emit(TelemetryEvents.V5DecisionReviewDecomposed, {
     request_id: options.requestId,
     outcome: tel.outcome,
@@ -658,6 +909,8 @@ async function fallBackToMonolith(
     wall_clock_ms: tel.wall_clock_ms,
     input_tokens: tel.input_tokens,
     output_tokens: tel.output_tokens,
+    fallback_timeout_ms: budget.timeoutMs,
+    fallback_budget_floor_engaged: budget.floorEngaged,
   });
   if (tel.violations && tel.violations.length > 0) {
     log.info(
@@ -666,5 +919,5 @@ async function fallBackToMonolith(
     );
   }
   // The monolith honours `options.signal` and returns the canonical result shape.
-  return invokeDecisionReview(input, options);
+  return invokeDecisionReview(input, { ...options, timeoutMs: budget.timeoutMs });
 }

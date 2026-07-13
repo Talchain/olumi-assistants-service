@@ -851,30 +851,34 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     expect(callArg.winner.win_probability).toBeCloseTo(0.722);
   });
 
-  // Test 5d: cross-source walker — declared leader is in `results`
-  // first, so the walker stops there (priority-order preserved).
-  it('cross-source walker: leader present in results → adapter uses it without consulting later sources', async () => {
+  // Test 5d: cross-source walker — declared leader is in the CURRENT
+  // `option_comparison` (priority source since the decompose-hardening
+  // lane's current-first reorder), so the walker stops there without
+  // consulting the later legacy source.
+  it('cross-source walker: leader present in option_comparison → adapter uses it without consulting later sources', async () => {
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
-      leading_option_id: 'opt_legacy_match',
+      leading_option_id: 'opt_current_match',
       enrichment: {
-        results: [
-          { option_id: 'opt_legacy_match', option_label: 'Legacy Match', win_probability: 0.6 },
-          { option_id: 'opt_legacy_other', option_label: 'Legacy Other', win_probability: 0.4 },
-        ],
-        // option_comparison also contains an entry with the same ID but a
-        // DIFFERENT label. Priority must win → label from results, not
-        // from option_comparison.
         option_comparison: [
+          { option_id: 'opt_current_match', option_label: 'Current Match', win_probability: 0.6, outcome: { mean: 0.2 } },
+          { option_id: 'opt_current_other', option_label: 'Current Other', win_probability: 0.4, outcome: { mean: 0.1 } },
+        ],
+        // Legacy `results` also contains an entry with the same ID but a
+        // DIFFERENT label. Priority must win → label from option_comparison,
+        // not from the legacy source (this is the #437 winner-source
+        // alignment: the winner reads the SAME envelope the prompt's
+        // option_comparison slice reads).
+        results: [
           {
-            id: 'opt_legacy_match', option_id: 'opt_legacy_match',
+            id: 'opt_current_match', option_id: 'opt_current_match',
             label: 'WRONG: should NOT be picked from here',
             option_label: 'WRONG: should NOT be picked from here',
-            status: 'computed', outcome: { mean: 0.1 }, win_probability: 0.99,
+            status: 'computed', outcome_mean: 0.1, win_probability: 0.99,
           },
         ],
         graph: { nodes: [], edges: [] },
@@ -889,11 +893,11 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
-    // Winner came from `results` (priority) — label proves it; the
-    // option_comparison entry with a deliberately-wrong label was NOT
-    // consulted because the priority source matched first.
-    expect(callArg.winner.id).toBe('opt_legacy_match');
-    expect(callArg.winner.label).toBe('Legacy Match');
+    // Winner came from `option_comparison` (priority) — label proves it; the
+    // legacy entry with a deliberately-wrong label was NOT consulted because
+    // the priority source matched first.
+    expect(callArg.winner.id).toBe('opt_current_match');
+    expect(callArg.winner.label).toBe('Current Match');
     expect(callArg.winner.win_probability).toBeCloseTo(0.6);
   });
 

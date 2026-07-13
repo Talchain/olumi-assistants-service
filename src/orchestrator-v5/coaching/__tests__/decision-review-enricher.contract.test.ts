@@ -12,8 +12,13 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildInvokeInputForTests } from '../decision-review-enricher.js';
+import {
+  buildInvokeInputForTests,
+  resolveDecisionReviewHardBudgetMs,
+} from '../decision-review-enricher.js';
 import { buildDecisionReviewUserMessage } from '../../../cee/decision-review/invoke.js';
+import { DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS } from '../../../cee/decision-review/decompose.js';
+import { DECISION_REVIEW_TIMEOUT_MS } from '../../../config/timeouts.js';
 
 // ============================================================================
 // Populated synthetic fixture — mirrors a real staging run_analysis enrichment
@@ -523,5 +528,85 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
     };
     const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
     expect(input.isl_results.option_comparison).toEqual([]);
+  });
+});
+
+// ============================================================================
+// Winner-source precedence — current-first with legacy fallback (#437 residual,
+// Codex r2 blocker 3 companion fix). The winner walk and the isl_results
+// option_comparison slice must read the SAME envelope precedence: on a
+// both-present-conflicting envelope the two used to disagree (winner from
+// legacy `results`, comparison slice from current `option_comparison`).
+// ============================================================================
+
+describe('decision-review-enricher — winner-source precedence (current-first, legacy fallback)', () => {
+  function conflictingEnrichment(): Record<string, unknown> {
+    return {
+      graph: { nodes: [], edges: [] },
+      // Legacy envelope: STALE numbers for the same options.
+      results: [
+        { option_id: 'opt_partner', option_label: 'Engage Offshore Partner (stale)', win_probability: 0.41, outcome_mean: 1_000_000 },
+        { option_id: 'opt_hire', option_label: 'Hire Locally (stale)', win_probability: 0.39, outcome_mean: 900_000 },
+      ],
+      // Current envelope: the numbers the rest of the prompt (isl_results
+      // option_comparison slice) will carry.
+      option_comparison: [
+        { option_id: 'opt_partner', option_label: 'Engage Offshore Partner', win_probability: 0.72, outcome: { mean: 1_300_000, p10: 1_000_000, p90: 1_600_000 } },
+        { option_id: 'opt_hire', option_label: 'Hire Two Senior Engineers Locally', win_probability: 0.28, outcome: { mean: 950_000, p10: 700_000, p90: 1_200_000 } },
+      ],
+    };
+  }
+
+  it('both sources carry the leader with CONFLICTING numbers: winner comes from the CURRENT envelope', () => {
+    const input = buildInvokeInputForTests(BRIEF, conflictingEnrichment(), 'opt_partner')!;
+    expect(input).not.toBeNull();
+    // Winner numbers/label from option_comparison (current), NOT legacy results.
+    expect(input.winner.label).toBe('Engage Offshore Partner');
+    expect(input.winner.win_probability).toBe(0.72);
+    expect(input.winner.outcome_mean).toBe(1_300_000);
+    // Runner-up from the SAME (current) source — never mixed across envelopes.
+    expect(input.runner_up).not.toBeNull();
+    expect(input.runner_up!.win_probability).toBe(0.28);
+    // And the winner now AGREES with the option_comparison slice the prompt sees.
+    const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
+    const partner = oc.find((r) => r.option_id === 'opt_partner')!;
+    expect(partner.win_probability).toBe(input.winner.win_probability);
+  });
+
+  it('truncated CURRENT (leader missing) still falls back to legacy — the walk is preserved', () => {
+    const enrichment = conflictingEnrichment();
+    // Current envelope truncated: the declared leader is absent from it.
+    enrichment.option_comparison = [
+      { option_id: 'opt_hire', option_label: 'Hire Two Senior Engineers Locally', win_probability: 0.28, outcome: { mean: 950_000 } },
+    ];
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    expect(input).not.toBeNull();
+    // Leader rescued from the legacy source (walk-until-match unchanged).
+    expect(input.winner.label).toBe('Engage Offshore Partner (stale)');
+    expect(input.winner.win_probability).toBe(0.41);
+  });
+
+  it('null leader: the argmax is taken from the CURRENT source first', () => {
+    const input = buildInvokeInputForTests(BRIEF, conflictingEnrichment(), null)!;
+    expect(input).not.toBeNull();
+    expect(input.winner.win_probability).toBe(0.72);
+    expect(input.winner.label).toBe('Engage Offshore Partner');
+  });
+});
+
+// ============================================================================
+// Hard-abort budget — the decomposed fallback's floor is provisioned, the
+// monolith path is byte-identical (decompose-hardening lane).
+// ============================================================================
+
+describe('decision-review-enricher — hard-abort budget', () => {
+  it('flag OFF: exactly DECISION_REVIEW_TIMEOUT_MS (byte-identical monolith behaviour)', () => {
+    expect(resolveDecisionReviewHardBudgetMs(false)).toBe(DECISION_REVIEW_TIMEOUT_MS);
+  });
+
+  it('flag ON: the disclosed fallback floor is reserved on top of the shared deadline', () => {
+    expect(resolveDecisionReviewHardBudgetMs(true)).toBe(
+      DECISION_REVIEW_TIMEOUT_MS + DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
+    );
   });
 });
