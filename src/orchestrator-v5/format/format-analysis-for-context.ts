@@ -53,6 +53,17 @@ export interface DisplaySafeAnalysisOption {
    * Absent when the producer reported no outcome distribution.
    */
   readonly outcome_band?: string;
+  /**
+   * ROADMAP 2.54 (a) — honest explanation attached ONLY when the option's
+   * win probability renders as zero percent (raw value below
+   * {@link NEAR_ZERO_WIN_PROBABILITY_THRESHOLD}). An unexplained "0%" reads
+   * as a bug or a silent elimination (live papercut: behavioural re-test
+   * 2026-07-14, Hybrid at ~zero percent); the note states only what the
+   * analysis data supports — the option almost never came out best across
+   * the sampled runs — and explicitly forbids fabricating a causal reason.
+   * Display prose only: the `win_probability` string is untouched.
+   */
+  readonly win_probability_note?: string;
 }
 
 /**
@@ -69,6 +80,8 @@ export interface DisplaySafeRankedOption {
   readonly target_fit?: string;
   /** Lane 30 fix 3 — see {@link DisplaySafeAnalysisOption.outcome_band}. */
   readonly outcome_band?: string;
+  /** ROADMAP 2.54 (a) — see {@link DisplaySafeAnalysisOption.win_probability_note}. */
+  readonly win_probability_note?: string;
 }
 
 /** Lane 21 — banded tipping-risk entry. `risk` is decision-language prose. */
@@ -170,6 +183,20 @@ export interface DisplaySafeAnalysis {
   readonly tipping_points?: readonly DisplaySafeTippingPoint[];
   readonly fragile_edge_count?: string;
   readonly value_of_information?: readonly DisplaySafeEvidenceGap[];
+  /**
+   * ROADMAP 2.54 (b) — DISCLOSED VOI absence (never-silent, same doctrine
+   * as `goal_fit`). Present exactly when the banded VOI list is empty at
+   * assembly time: the silent gap was what let the LLM narrate sensitivity
+   * as "the highest value of information" while every delivered VOI was 0
+   * (live papercut, behavioural re-test 2026-07-14 §G). Three honest
+   * states: not scored, all effectively zero, or emptied by the D-U
+   * option-controlled-lever suppression. NEVER emitted when the list was
+   * merely dropped by the char-budget guard — that would be a false
+   * zero-VOI claim (the truncation_note discloses that case instead).
+   * Like `goal_fit`, this note is never dropped by the budget guard —
+   * VOI-claim truthfulness outranks breadth.
+   */
+  readonly value_of_information_note?: string;
   readonly goal_fit?: string;
   /**
    * Lane 30 fix 3 — analysis confidence prose from the producer's ordinal
@@ -237,6 +264,48 @@ export function outcomeBandPhrase(outcomeMean: number): string | null {
   return `${band} ${sign} modelled outcome`;
 }
 
+/**
+ * ROADMAP 2.54 (a) — the raw win probability below which the display
+ * percent rounds to "0%" (`Math.round(p * 100) === 0` ⇔ `p < 0.005`).
+ * The note fires on exactly the band that renders an unexplained zero.
+ */
+export const NEAR_ZERO_WIN_PROBABILITY_THRESHOLD = 0.005;
+
+/**
+ * ROADMAP 2.54 (a) — honest one-liner for a near-zero win probability
+ * (live papercut: behavioural re-test 2026-07-14 §G — an option at a tiny
+ * fraction of a percent rendered as an unexplained "0%" and read as a bug).
+ *
+ * Claim discipline: win probability IS the frequency of coming out best
+ * across the sampled simulation runs, so "almost never came out best" and
+ * "an alternative scored better in almost every sampled run" are
+ * definitionally supported. Anything beyond that (WHY it lost) is NOT in
+ * the data, so the note forbids inventing a reason. No digits — the
+ * display projection stays number-free outside the percent strings.
+ */
+export const NEAR_ZERO_WIN_PROBABILITY_NOTE =
+  'near-zero win probability: this option almost never came out best across the sampled ' +
+  'simulation runs — at least one alternative scored better in almost every sampled run. ' +
+  'That can mean it is consistently outperformed (for example reliably mid-ranked, so ' +
+  'rarely the single best) rather than broken; a near-zero win probability is a real ' +
+  'result, not an error. Do not invent a specific reason it lost — the analysis only ' +
+  'establishes that other options scored better on the sampled runs.';
+
+/**
+ * ROADMAP 2.54 (a) — true when the raw probability is valid and renders as
+ * zero percent. Invalid values (non-finite / out of range) never get the
+ * note: `formatProbability` renders "Not available" for those and a
+ * near-zero explanation would be a false claim.
+ */
+function isNearZeroWinProbability(probability: number): boolean {
+  return (
+    typeof probability === 'number' &&
+    Number.isFinite(probability) &&
+    probability >= 0 &&
+    probability < NEAR_ZERO_WIN_PROBABILITY_THRESHOLD
+  );
+}
+
 function formatOption(
   option: Pick<
     ContextPackAnalysisOption,
@@ -248,6 +317,11 @@ function formatOption(
   return {
     label: option.label,
     win_probability: formatProbability(option.probability, 'display'),
+    // ROADMAP 2.54 (a) — a "0%" render carries its honest explanation
+    // inline, next to the value it explains. Display prose only.
+    ...(isNearZeroWinProbability(option.probability)
+      ? { win_probability_note: NEAR_ZERO_WIN_PROBABILITY_NOTE }
+      : {}),
     // Lane 30 — target-fit percent string, only when the raw value is a
     // valid probability (an out-of-range value is dropped, never rendered
     // as a false percent).
@@ -320,6 +394,11 @@ function enforceDisplayAnalysisBudget(out: MutableDisplaySafeAnalysis): void {
 
   const drops: ReadonlyArray<{ name: string; present: () => boolean; drop: () => void }> = [
     {
+      // ROADMAP 2.54 (b): only the banded LIST is budget-droppable. The
+      // `value_of_information_note` is never set when the list exists (so
+      // a budget drop cannot leave a false "zero VOI" claim behind) and is
+      // never dropped when it does exist — like `goal_fit`, VOI-claim
+      // truthfulness outranks breadth.
       name: 'value_of_information',
       present: () => out.value_of_information !== undefined,
       drop: () => {
@@ -440,6 +519,48 @@ export function voiBandPhrase(voiScore: number): string | null {
   if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return null;
   return bandFromMagnitude(abs);
 }
+
+/**
+ * ROADMAP 2.54 (b) — the three DISCLOSED-absence lines for the VOI section.
+ * Shared instruction tail: forbid VOI superlatives, redirect to influence
+ * phrasing (the vocabulary `top_drivers` actually grounds). Claim
+ * discipline per line:
+ *
+ *  - NOT_SCORED: no evidence-gap signal reached this projection — "no
+ *    value-of-information scores are available" is unconditionally true.
+ *  - ALL_NEAR_ZERO: entries arrived but every score banded below the
+ *    shared noise floor (`NEAR_ZERO_INFLUENCE_THRESHOLD`) — exactly the
+ *    live scorecard shape (every delivered VOI was zero).
+ *  - LEVER_SUPPRESSED: the D-U option-controlled-lever suppression
+ *    (`filterLeverControlledFactorEntries`, structural #308-union
+ *    authority) emptied the section — options-set factors are not
+ *    independent uncertainties to investigate, and fail-closed drops
+ *    (unattributable entries while levers exist) are covered by the
+ *    "excluded by design" phrasing.
+ *
+ * No digits — the display projection stays number-free outside the percent
+ * strings.
+ */
+const VOI_NOTE_INSTRUCTION_TAIL =
+  'do not claim any factor carries the highest (or a high) value of information, and do ' +
+  'not present a sensitivity or influence ranking as a value-of-information ranking — ' +
+  'describe factors by their modelled influence instead';
+
+export const VOI_NOT_SCORED_NOTE =
+  'no value-of-information scores are available for this analysis — ' +
+  VOI_NOTE_INSTRUCTION_TAIL;
+
+export const VOI_ALL_NEAR_ZERO_NOTE =
+  'value of information is at or near zero for every factor available to investigate in ' +
+  'this analysis, so no factor stands out as worth investigating on value-of-information ' +
+  'grounds — ' +
+  VOI_NOTE_INSTRUCTION_TAIL;
+
+export const VOI_LEVER_SUPPRESSED_NOTE =
+  'no independently investigable factor carries a scored value of information in this ' +
+  'analysis (factors set directly by the options themselves are excluded by design — ' +
+  'they are choices, not uncertainties to investigate) — ' +
+  VOI_NOTE_INSTRUCTION_TAIL;
 
 const GOAL_FIT_BASIS_PHRASES: Readonly<Record<string, string>> = {
   modelled_outcome_distribution: 'goal fit was scored from the modelled outcome distribution',
@@ -602,12 +723,24 @@ export function formatAnalysisForContext(
   }
 
   // Banded VOI per evidence-gap factor (shared influence-band vocabulary);
-  // near-zero entries dropped as noise.
-  const gaps = (raw.evidence_gaps ?? [])
+  // near-zero entries dropped as noise. ROADMAP 2.54 (b): an empty result
+  // is now DISCLOSED, never silent — the silent gap let the LLM narrate
+  // sensitivity as "the highest value of information" while every
+  // delivered VOI was zero (behavioural re-test 2026-07-14 §G). Branch
+  // order: surviving raw entries (all near-zero) are the most precise
+  // fact even when lever suppression also fired upstream.
+  const rawGaps = raw.evidence_gaps ?? [];
+  const gaps = rawGaps
     .map(formatEvidenceGap)
     .filter((g): g is DisplaySafeEvidenceGap => g !== null);
   if (gaps.length > 0) {
     out.value_of_information = gaps;
+  } else if (rawGaps.length > 0) {
+    out.value_of_information_note = VOI_ALL_NEAR_ZERO_NOTE;
+  } else if (raw.evidence_gaps_lever_suppressed === true) {
+    out.value_of_information_note = VOI_LEVER_SUPPRESSED_NOTE;
+  } else {
+    out.value_of_information_note = VOI_NOT_SCORED_NOTE;
   }
 
   // Lane 30 — goal-fit prose. Three DISCLOSED states (never silent, so the

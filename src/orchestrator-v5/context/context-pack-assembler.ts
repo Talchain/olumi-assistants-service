@@ -223,6 +223,19 @@ export interface ContextPackAnalysis {
   readonly flip_thresholds?: readonly ContextPackAnalysisFlipThreshold[];
   readonly fragile_edge_count?: number;
   readonly evidence_gaps?: readonly ContextPackAnalysisEvidenceGap[];
+  /**
+   * ROADMAP 2.54 (b) — literal `true` when the Lane 30 (#369 audit P1)
+   * lever suppression removed at least one entry from `evidence_gaps`
+   * (including fail-closed drops of unattributable entries while levers
+   * exist). ABSENT otherwise (never `false`), matching the pack's
+   * key-absence style. Carries the suppression FACT to the display
+   * formatter so an emptied VOI section is disclosed honestly ("excluded
+   * by design — options-set factors are not uncertainties to investigate")
+   * rather than as "not scored". NOT a new lever-identity source: it is
+   * set exactly where `filterLeverControlledFactorEntries` (the reviewed
+   * #308-union structural authority) fires.
+   */
+  readonly evidence_gaps_lever_suppressed?: true;
   readonly goal_fit?: ContextPackAnalysisGoalFit | null;
   /**
    * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
@@ -1301,14 +1314,18 @@ function projectAnalysis(
   //    job. Lane 30 (#369 audit P1): filtered by the intervention-controlled
   //    set BEFORE factor_id is stripped — a lever must not surface as an
   //    evidence gap the user is invited to gather data on.
-  const evidenceGaps: ContextPackAnalysisEvidenceGap[] =
-    filterLeverControlledFactorEntries(
-      analysis.evidence_gaps ?? [],
-      controlledFactorIds,
-      'projectAnalysis.evidence_gaps',
-    )
-      .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
-      .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
+  const rawEvidenceGaps = analysis.evidence_gaps ?? [];
+  const keptEvidenceGaps = filterLeverControlledFactorEntries(
+    rawEvidenceGaps,
+    controlledFactorIds,
+    'projectAnalysis.evidence_gaps',
+  );
+  // ROADMAP 2.54 (b) — carry the suppression FACT (not a re-derivation) so
+  // the display formatter can disclose an emptied VOI section honestly.
+  const evidenceGapsLeverSuppressed = keptEvidenceGaps.length < rawEvidenceGaps.length;
+  const evidenceGaps: ContextPackAnalysisEvidenceGap[] = keptEvidenceGaps
+    .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
+    .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
   const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit
     ? { scored: analysis.goal_fit.scored, basis: analysis.goal_fit.basis }
     : null;
@@ -1341,6 +1358,9 @@ function projectAnalysis(
     flip_thresholds: flipThresholds,
     fragile_edge_count: fragileEdgeCount,
     evidence_gaps: evidenceGaps,
+    // ROADMAP 2.54 (b) — key absent (never `false`) when nothing was
+    // suppressed.
+    ...(evidenceGapsLeverSuppressed ? { evidence_gaps_lever_suppressed: true as const } : {}),
     goal_fit: goalFit,
     confidence_tier: confidenceTier,
   };
