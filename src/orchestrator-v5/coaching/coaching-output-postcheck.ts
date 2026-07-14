@@ -28,13 +28,21 @@
  *   - modal/future-bridged attribution — "the analysis will/would/should/…
  *     show X" — is EXCLUDED BY DESIGN (2026-07-14 live re-verify: the
  *     tense-blind bridge false-fired on ~43% of genuine pre-analysis answers;
- *     a modal bridge describes a future run, the honest coaching #450
- *     protects). The accepted-miss residue of that exclusion: the
- *     counterfactual completed form ("the analysis would have shown that X
- *     won") ships — it concedes no run happened, and the directional content
- *     it smuggles is the bare-comparative class above; a specific predicted
- *     NUMBER stays caught by arm (d) ("wins with N%" / attributed
- *     "N% probability") regardless of tense.
+ *     a modal bridge usually describes a future run, the honest coaching
+ *     #450 protects). The residue this exclusion ACCEPTS — shapes that fired
+ *     pre-exclusion and now ship (adversarial review of PR #451, executed
+ *     against both builds): modal + that-clause directional assertion ("the
+ *     analysis will show that X wins"); hedged-present claims ("our
+ *     simulation would suggest Enterprise"); modal-perfect with a listed
+ *     verb ("the analysis may/would have found that churn dominates");
+ *     capability framing ("the analysis can show us that X wins"). All are
+ *     directional-without-number — the bare-comparative class above — and a
+ *     specific NUMBER stays caught by arm (d) ("wins with N%" / attributed
+ *     "N% probability") regardless of tense. Re-catch the epistemic-perfect
+ *     sub-class ("may/might/could have <listed-verb>") only if observed
+ *     live, not pre-widened. (The counterfactual "would have shown that X
+ *     won" also ships, but that was a miss BEFORE this exclusion too —
+ *     "shown" is not a listed verb.)
  * The screened arms also accept hypothetical / offer / user-own-analysis
  * contexts by design (r3 FIX 4), which a determined paraphrase could exploit.
  *
