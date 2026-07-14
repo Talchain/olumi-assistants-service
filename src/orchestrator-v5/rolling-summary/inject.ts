@@ -69,7 +69,11 @@ export interface ContextPackConversationSummary {
   readonly current_to_turn_id: string;
   /** Committed turns after the watermark (01 §4). */
   readonly lag_turns: number;
-  /** True ⇔ the staleness invariant is violated (lag ≥ window depth). */
+  /** True ⇔ the staleness invariant is violated (lag ≥ window depth) — AND
+   *  forced true for a generator:'floor' summary regardless of lag
+   *  (1.73-pre b): a floor absorbed NO conversation history, so lag-derived
+   *  freshness is vacuous for it and the section always discloses itself as
+   *  degraded. */
   readonly stale: boolean;
   /** In-band staleness disclosure — present IFF stale (never silently stale). */
   readonly note?: string;
@@ -198,19 +202,28 @@ export async function loadConversationSummaryForInjection(
     // so the memory-hole guard below would see lag≈0 + covered and render the
     // empty slots as bare "(none)" — a coverage claim the floor never earned
     // (the exact lying-coverage class fix 1 removes). Render the FRAME
-    // (legitimately brief-derived; buildConversationSummarySection marks the
+    // (legitimately seed-derived; buildConversationSummarySection marks the
     // empty slots "(none captured yet)" for a floor) but DISCLOSE that the
-    // conversation is not yet summarised, and emit v5.summary.lag refused:true
-    // so a stuck summariser (a floor that persists) is loud in telemetry.
+    // conversation is not yet summarised, and emit v5.summary.lag with
+    // refused:false (the block IS injected — refused strictly means
+    // "withheld", 1.73-pre a) + generator:'floor', the disambiguator a
+    // consumer keys on so a stuck summariser (a floor that persists) stays
+    // loud without conflating it with a genuine memory-hole refusal.
+    //
+    // The note names the floor's whole source ladder (brief → goal →
+    // opening message → generic; see buildDeterministicFloor) rather than
+    // asserting "drawn from the brief" — the stored floor does not record
+    // which rung won, and most floors on brief-less scenarios are NOT
+    // brief-derived (1.73-pre b).
     // ------------------------------------------------------------------
     if (summary.generator === 'floor') {
-      emitSummaryLag(args, summary, lag, true);
+      emitSummaryLag(args, summary, lag, false);
       const base = buildConversationSummarySection(summary, lag, args.windowDepth);
       return {
         section: {
           ...base,
           stale: true,
-          note: '(conversation summary not yet generated: the decision frame above is drawn from the brief; nothing else has been captured yet — recent turns are shown verbatim in the conversation section and any earlier turns are NOT yet summarised)',
+          note: '(conversation summary not yet generated: the decision frame above is a deterministic seed from whichever was available of the decision brief, the goal, or the opening user message; nothing else has been captured yet — recent turns are shown verbatim in the conversation section and any earlier turns are NOT yet summarised)',
         },
         lagTurns: lag,
       };
@@ -270,9 +283,12 @@ export async function loadConversationSummaryForInjection(
 }
 
 /** Content-free staleness signal (frozen-registry member v5.summary.lag,
- *  pre-registered with the maintain half). `refused` distinguishes the
- *  memory-hole refusal (block withheld) from the disclosed-stale injection.
- *  Never throws. */
+ *  pre-registered with the maintain half). `refused` strictly means the
+ *  four-slot block was WITHHELD (memory-hole refusal); a floor placeholder
+ *  IS injected so it emits refused:false (1.73-pre a). `generator` carries
+ *  the stored summary's generator so consumers can segment without
+ *  overloading `refused`: a persistent generator:'floor' stream = stuck
+ *  summariser; refused:true = genuine memory hole. Never throws. */
 function emitSummaryLag(
   args: SummaryInjectionArgs,
   summary: RollingSummary,
@@ -288,6 +304,7 @@ function emitSummaryLag(
       watermark_turn_id: summary.updated_turn_id,
       summary_version: summary.version,
       refused,
+      generator: summary.generator,
     });
   } catch (emitErr) {
     log.debug(

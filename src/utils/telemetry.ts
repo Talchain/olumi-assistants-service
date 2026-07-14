@@ -587,12 +587,17 @@ export const TelemetryEvents = {
   //                        so a summariser outage is loud + disclosed. Emitted
   //                        by the injector at assembly time (S4 injection
   //                        follow-up); registered here with the maintainer.
-  //                        `refused` (Codex r2 blocker 1): true = memory-hole
-  //                        refusal — the watermark was not provably covered
-  //                        by the window (or the gap exceeded the verbatim
-  //                        slice), so the four-slot block was WITHHELD and a
-  //                        disclosed-absence note injected instead;
-  //                        false = disclosed-stale injection.
+  //                        `refused` (Codex r2 blocker 1; tightened 1.73-pre a):
+  //                        STRICTLY "the four-slot block was WITHHELD" — true
+  //                        only for the memory-hole refusal (watermark not
+  //                        provably covered by the window, or the gap exceeded
+  //                        the verbatim slice; a disclosed-absence note
+  //                        injected instead). false = the block WAS injected
+  //                        (disclosed-stale, or a floor placeholder).
+  //                        `generator` (1.73-pre a) carries the stored
+  //                        summary's generator (regen/incremental/floor) so a
+  //                        persistent-floor stream (stuck summariser) is
+  //                        segmentable without overloading `refused`.
   V5SummaryUpdated: "v5.summary.updated",
   V5SummaryLag: "v5.summary.lag",
 
