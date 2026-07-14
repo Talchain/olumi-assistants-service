@@ -38,6 +38,18 @@ const POST_REVIEW_HEADROOM_MS = 10_000;
 const DEFAULT_M2_MAX_TOKENS = 4096;
 
 /**
+ * Models the M2 lane has live-probed as structured-outputs-capable
+ * (2026-07-14, GA output_config, no beta header) that are deliberately kept
+ * OUT of the adapter's shared STRUCTURED_OUTPUTS_SUPPORTED_MODELS set:
+ * shared membership also switches strict tool calling on for every live
+ * /orchestrate/v2/turn (buildStrictAnthropicTools keys on set membership
+ * alone, no env gate) and flips the edit_graph/draft prompt-only fallbacks
+ * under CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. Threaded per-call via
+ * ChatArgs.structuredOutputsAdditionalModels so ONLY the M2 review opts in.
+ */
+const M2_STRUCTURED_OUTPUTS_CAPABLE_MODELS: readonly string[] = ['claude-sonnet-5'];
+
+/**
  * Coded sub-cause for `model_not_resolved` — safe to emit on telemetry
  * (bounded enum, config values only, no user content) so activation
  * dashboards can distinguish the three operator-actionable conditions:
@@ -174,6 +186,9 @@ export async function reviewDraftGraph(input: EnrichmentInput): Promise<M2Review
         temperature: 0,
         maxTokens: config.cee.maxTokens.m2_review ?? DEFAULT_M2_MAX_TOKENS,
         outputSchema: PROPOSALS_JSON_SCHEMA,
+        // M2-scoped structured-outputs capability for sonnet-5 (see the
+        // constant's comment) — the shared adapter allowlist is untouched.
+        structuredOutputsAdditionalModels: M2_STRUCTURED_OUTPUTS_CAPABLE_MODELS,
         // Explicit, not omitted: Sonnet 5 runs ADAPTIVE thinking when the
         // request has no `thinking` field. Measured offline (2026-07-14,
         // v1.0 candidate prompt, structured outputs): ~59-62s wall clock

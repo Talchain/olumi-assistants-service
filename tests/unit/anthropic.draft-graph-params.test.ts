@@ -612,13 +612,14 @@ describe("chatWithAnthropic — output_config.format contract", () => {
     expect(headers["anthropic-beta"]).toBeUndefined();
   });
 
-  it("sends output_config for claude-sonnet-5 (M2 review model — allowlist coverage)", async () => {
-    // The V6 dual-draft M2 review is structured-outputs-only by design (D2)
-    // and the Paul-adopted v0.4.3 baseline was measured ON Sonnet 5. Without
-    // sonnet-5 in STRUCTURED_OUTPUTS_SUPPORTED_MODELS the adapter silently
-    // falls back to prompt-only JSON — exactly the unconstrained-output churn
-    // the M2 model-resolution gate exists to prevent. Live-probed 2026-07-14:
-    // the GA output_config endpoint accepts claude-sonnet-5.
+  it("does NOT send output_config for claude-sonnet-5 without a per-call override (shared-allowlist live-safety pin)", async () => {
+    // claude-sonnet-5 is deliberately NOT in STRUCTURED_OUTPUTS_SUPPORTED_MODELS:
+    // that SHARED set also keys buildStrictAnthropicTools (strict tool calling,
+    // no env gate) for every live /orchestrate/v2/turn, and would flip the
+    // edit_graph/draft prompt-only fallbacks under
+    // CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. A bare chat call on sonnet-5 —
+    // which is exactly what edit_graph makes — must keep today's prompt-only
+    // fallback even with the env flag on.
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
@@ -635,10 +636,62 @@ describe("chatWithAnthropic — output_config.format contract", () => {
 
     expect(createSpy).toHaveBeenCalledOnce();
     const [body] = createSpy.mock.calls[0];
+    expect(body).not.toHaveProperty("output_config");
+    expect(body).not.toHaveProperty("output_format");
+  });
+
+  it("sends output_config for claude-sonnet-5 when the caller threads structuredOutputsAdditionalModels (M2 review scoped mechanism)", async () => {
+    // The V6 dual-draft M2 review is structured-outputs-only by design (D2)
+    // and the Paul-adopted v0.4.3 baseline was measured ON Sonnet 5.
+    // Live-probed 2026-07-14: the GA output_config endpoint accepts
+    // claude-sonnet-5. The capability is opted into PER CALL via
+    // structuredOutputsAdditionalModels — threaded from m2-review.ts — so
+    // ONLY the M2 call gets structured outputs on sonnet-5; the shared
+    // allowlist (and with it strict tool calling + the edit_graph/draft
+    // fallbacks) is untouched.
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const testSchema = { type: "object", properties: { foo: { type: "string" } }, required: ["foo"], additionalProperties: false };
+
+    await chatWithAnthropic({
+      system: "You are a test assistant.",
+      userMessage: "Test message",
+      model: "claude-sonnet-5",
+      outputSchema: testSchema,
+      structuredOutputsAdditionalModels: ["claude-sonnet-5"],
+    });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body] = createSpy.mock.calls[0];
     expect(body).toHaveProperty("output_config");
     expect(body.output_config.format.type).toBe("json_schema");
     // rejectsSamplingParams: no explicit temperature for sonnet-5.
     expect(body.temperature).toBeUndefined();
+  });
+
+  it("per-call override still requires CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true (env gate is not bypassed)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const testSchema = { type: "object", properties: { foo: { type: "string" } }, required: ["foo"], additionalProperties: false };
+
+    await chatWithAnthropic({
+      system: "You are a test assistant.",
+      userMessage: "Test message",
+      model: "claude-sonnet-5",
+      outputSchema: testSchema,
+      structuredOutputsAdditionalModels: ["claude-sonnet-5"],
+    });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body] = createSpy.mock.calls[0];
+    expect(body).not.toHaveProperty("output_config");
+    expect(body).not.toHaveProperty("output_format");
   });
 
   it("passes thinking {type:'disabled'} through to the API body, keeping structured outputs active", async () => {
@@ -660,6 +713,9 @@ describe("chatWithAnthropic — output_config.format contract", () => {
       model: "claude-sonnet-5",
       thinking: { type: "disabled" },
       outputSchema: testSchema,
+      // Mirrors the real M2 call: sonnet-5 structured outputs are opted into
+      // per-call, not via the shared allowlist.
+      structuredOutputsAdditionalModels: ["claude-sonnet-5"],
     });
 
     expect(createSpy).toHaveBeenCalledOnce();

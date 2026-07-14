@@ -452,12 +452,16 @@ export type UsageMetrics = {
 const STRUCTURED_OUTPUTS_SUPPORTED_MODELS = new Set([
   "claude-sonnet-4-5-20250929",
   "claude-sonnet-4-6",
-  // Live-probed 2026-07-14 (GA output_config, no beta header): sonnet-5
-  // accepts json_schema structured outputs. Needed by the V6 dual-draft M2
-  // review (CEE_MODEL_M2_REVIEW=claude-sonnet-5), which is structured-
-  // outputs-only by design (D2) — without this entry the adapter silently
-  // falls back to prompt-only JSON for the M2 call.
-  "claude-sonnet-5",
+  // claude-sonnet-5 is deliberately NOT in this SHARED set, even though it
+  // accepts GA structured outputs (live-probed 2026-07-14, output_config, no
+  // beta header). Membership here is consulted by buildStrictAnthropicTools
+  // with NO env gate, so listing sonnet-5 — the model staging serves for
+  // every live /orchestrate/v2/turn — would switch strict tool calling on
+  // for all live turns the moment it deploys (all M2 flags off), and would
+  // flip the edit_graph/draft prompt-only fallbacks whenever
+  // CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. The V6 dual-draft M2 review — the
+  // one call that needs sonnet-5 structured outputs — opts in per-call via
+  // ChatArgs.structuredOutputsAdditionalModels (src/cee/dual-draft/m2-review.ts).
   "claude-opus-4-6",
   "claude-opus-4-20250514",
   "claude-opus-4-5-20251101",
@@ -2394,6 +2398,15 @@ interface ChatWithAnthropicArgs {
    * See `ChatArgs.structuredOutputsUserReminder`.
    */
   structuredOutputsUserReminder?: string;
+  /**
+   * Per-call EXTENSION of the structured-outputs model allowlist — models the
+   * caller has verified as structured-outputs-capable, consulted for THIS
+   * call only. See `ChatArgs.structuredOutputsAdditionalModels` for why this
+   * exists (shared-set membership also keys strict tool calling with no env
+   * gate). Still subject to CEE_ANTHROPIC_STRUCTURED_OUTPUTS and the
+   * thinking-disabled requirement.
+   */
+  structuredOutputsAdditionalModels?: readonly string[];
 }
 
 /**
@@ -2419,13 +2432,23 @@ export async function chatWithAnthropic(
     : (thinkingEnabled ? 1 : (args.temperature ?? 0));
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
+  // Structured-outputs model capability = the shared allowlist OR the
+  // caller's per-call extension (structuredOutputsAdditionalModels). The
+  // per-call route exists so a single call site (V6 dual-draft M2 review)
+  // can use structured outputs on a model deliberately kept out of the
+  // shared set — shared membership also keys strict tool calling for every
+  // live turn (no env gate) and the edit_graph/draft fallback behaviour.
+  const structuredOutputsModelSupported =
+    STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model) ||
+    (args.structuredOutputsAdditionalModels?.includes(model) ?? false);
+
   // Structured Outputs — only active when schema provided, model supported, thinking disabled.
   // Mutable: set to false in the fallback path to prevent redundant attempts on retry.
   let useStructuredOutputs =
     !thinkingEnabled &&
     !!args.outputSchema &&
     config.cee.anthropicStructuredOutputs &&
-    STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model);
+    structuredOutputsModelSupported;
 
   if (args.outputSchema && thinkingEnabled) {
     log.info(
@@ -2433,7 +2456,7 @@ export async function chatWithAnthropic(
       "[Anthropic] Extended thinking enabled — structured outputs disabled (incompatible)"
     );
   }
-  if (args.outputSchema && !STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model)) {
+  if (args.outputSchema && !structuredOutputsModelSupported) {
     log.warn(
       { model },
       "[Anthropic] outputSchema provided but model not in structured outputs allowlist — falling back to prompt-only JSON"
@@ -3450,6 +3473,7 @@ export class AnthropicAdapter implements LLMAdapter {
       thinking: args.thinking,
       outputSchema: args.outputSchema,
       structuredOutputsUserReminder: args.structuredOutputsUserReminder,
+      structuredOutputsAdditionalModels: args.structuredOutputsAdditionalModels,
     });
   }
 

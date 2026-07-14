@@ -150,6 +150,21 @@ describe('reviewDraftGraph — model-resolution gate (activation ruling: inert +
     const [chatArgs] = chatMock.mock.calls[0] as [Record<string, unknown>];
     expect(chatArgs.thinking).toEqual({ type: 'disabled' });
   });
+
+  it('threads the M2-scoped structured-outputs override for claude-sonnet-5 (NOT the shared adapter allowlist)', async () => {
+    // claude-sonnet-5 is deliberately kept OUT of the adapter's shared
+    // STRUCTURED_OUTPUTS_SUPPORTED_MODELS set — shared membership also keys
+    // strict tool calling for every live /orchestrate/v2/turn (no env gate)
+    // and flips the edit_graph/draft prompt-only fallbacks. M2 is the ONE
+    // call that needs sonnet-5 structured outputs, so it opts in per-call via
+    // ChatArgs.structuredOutputsAdditionalModels. If this pin fails, the M2
+    // review has silently degraded to unconstrained prompt-only JSON.
+    okChat(JSON.stringify({ proposals: [] }));
+    await reviewDraftGraph(makeInput());
+    expect(chatMock).toHaveBeenCalledOnce();
+    const [chatArgs] = chatMock.mock.calls[0] as [Record<string, unknown>];
+    expect(chatArgs.structuredOutputsAdditionalModels).toContain('claude-sonnet-5');
+  });
 });
 
 describe('reviewDraftGraph — fail-closed and degrade paths', () => {
