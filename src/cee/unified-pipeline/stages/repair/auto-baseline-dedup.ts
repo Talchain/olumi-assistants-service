@@ -98,7 +98,7 @@ import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 const BASELINE_LABELS = new Set(["status quo", "baseline", "do nothing", "no change"]);
 const BASELINE_ID_SUFFIXES = ["_status_quo", "_baseline"];
 
-interface OptionLike {
+export interface OptionLike {
   readonly id?: string;
   readonly kind?: string;
   readonly label?: string;
@@ -106,13 +106,18 @@ interface OptionLike {
   // checked. The Anthropic adapter normalises one to the other at parse
   // time but downstream stages occasionally see either, so be permissive.
   readonly is_baseline?: boolean;
+  /** `extractionType` may live at the node level (repaired factors) or
+   *  under data — read by the graceful-dedup consumer to detect
+   *  from_brief-marked options. */
+  readonly extractionType?: string;
   readonly data?: {
     readonly is_baseline?: boolean;
     readonly interventions?: Record<string, unknown>;
+    readonly extractionType?: string;
   };
 }
 
-interface EdgeLike {
+export interface EdgeLike {
   readonly from?: string;
   readonly to?: string;
 }
@@ -121,8 +126,12 @@ interface EdgeLike {
  * Build a stable intervention signature matching the validator's
  * implementation at src/validators/graph-validator.ts:241-246. Two options
  * with the same signature will trigger OPTIONS_IDENTICAL.
+ *
+ * Exported for reuse by the OPTIONS_IDENTICAL graceful dedup
+ * (options-identical-graceful-dedup.ts) so both dedup substeps group by
+ * the SAME signature the validator uses.
  */
-function buildSignature(interventions: Record<string, unknown> | undefined): string | null {
+export function buildSignature(interventions: Record<string, unknown> | undefined): string | null {
   if (!interventions) return null;
   const entries: [string, number][] = [];
   for (const [factorId, raw] of Object.entries(interventions)) {
@@ -171,7 +180,7 @@ function buildSignature(interventions: Record<string, unknown> | undefined): str
  * because the Anthropic adapter normalisation occasionally leaves the
  * flag at one level or the other depending on schema version.
  */
-function isExplicitBaseline(o: OptionLike): boolean {
+export function isExplicitBaseline(o: OptionLike): boolean {
   return readIsBaseline(o) === true;
 }
 
@@ -186,7 +195,7 @@ function isExplicitBaseline(o: OptionLike): boolean {
  * Mirrors the heuristic logic in src/routes/assist.v1.graph-readiness.ts
  * to keep the classification vocabulary aligned across surfaces.
  */
-function looksHeuristicallyLikeBaseline(o: OptionLike): boolean {
+export function looksHeuristicallyLikeBaseline(o: OptionLike): boolean {
   if (readIsBaseline(o) === true) return false; // explicit flag wins; heuristic only relevant when flag absent
   const id = (o.id ?? "").toLowerCase();
   const label = (o.label ?? "").toLowerCase().trim();

@@ -165,6 +165,7 @@ export interface FactorCategoryInfo {
 export type ValidatorPhase =
   | "pre_sweep_diagnostic"
   | "post_sweep_authoritative"
+  | "post_options_identical_dedup"
   | "post_enforcement";
 
 export interface GraphValidationInput {

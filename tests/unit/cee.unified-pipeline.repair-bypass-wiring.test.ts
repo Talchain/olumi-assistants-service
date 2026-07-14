@@ -394,3 +394,111 @@ describe("runStageRepair — auto-baseline dedup ordering (PR #203)", () => {
     expect(runPlotValidationMock).toHaveBeenCalledTimes(1);
   });
 });
+
+// ROADMAP 2.53 mitigation rung 1: when the OPTIONS_IDENTICAL collision that
+// reaches the substep-1.5 bypass consists entirely of AI-inferred options
+// (no is_baseline flag, no baseline-shaped label — the exact observed
+// 2026-07-14 staging failure shape), the bypass drops the duplicate and the
+// pipeline CONTINUES instead of early-returning. This wiring test lets the
+// real bypass + graceful dedup run (only the sweep and downstream substeps
+// are mocked) and proves the draft proceeds to substep 2+.
+describe("runStageRepair — OPTIONS_IDENTICAL graceful dedup continuation (ROADMAP 2.53)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("AI-inferred duplicate pair + third distinct option → duplicate dropped, earlyReturn NOT set, pipeline continues", async () => {
+    runDeterministicSweepMock.mockImplementation(async (ctx: StageContext) => {
+      ctx.remainingViolations = [
+        {
+          code: "OPTIONS_IDENTICAL",
+          context: {
+            optionIds: ["opt_smb", "opt_hybrid"],
+            signature: "fac_enterprise_focus:0.0000|fac_smb_focus:1.0000",
+          },
+        },
+      ];
+      ctx.llmRepairNeeded = true;
+    });
+
+    const ctx = {
+      requestId: "req-graceful-dedup-wiring",
+      graph: {
+        nodes: [
+          { id: "decision_1", kind: "decision", label: "Enterprise vs SMB?" },
+          {
+            id: "opt_enterprise",
+            kind: "option",
+            label: "Focus on enterprise",
+            data: { interventions: { fac_enterprise_focus: 1, fac_smb_focus: 0 } },
+          },
+          {
+            id: "opt_smb",
+            kind: "option",
+            label: "Focus on SMB",
+            data: { interventions: { fac_enterprise_focus: 0, fac_smb_focus: 1 } },
+          },
+          {
+            id: "opt_hybrid",
+            kind: "option",
+            label: "Hybrid approach",
+            data: { interventions: { fac_enterprise_focus: 0, fac_smb_focus: 1 } },
+          },
+          {
+            id: "fac_enterprise_focus",
+            kind: "factor",
+            label: "Enterprise focus",
+            category: "controllable",
+            data: { value: 0.5, extractionType: "explicit", factor_type: "other", uncertainty_drivers: ["market"] },
+          },
+          {
+            id: "fac_smb_focus",
+            kind: "factor",
+            label: "SMB focus",
+            category: "controllable",
+            data: { value: 0.5, extractionType: "explicit", factor_type: "other", uncertainty_drivers: ["market"] },
+          },
+          { id: "outcome_1", kind: "outcome", label: "Revenue" },
+          { id: "goal_1", kind: "goal", label: "Grow revenue" },
+        ],
+        edges: [
+          { from: "decision_1", to: "opt_enterprise", strength_mean: 1, belief_exists: 1 },
+          { from: "decision_1", to: "opt_smb", strength_mean: 1, belief_exists: 1 },
+          { from: "decision_1", to: "opt_hybrid", strength_mean: 1, belief_exists: 1 },
+          { from: "opt_enterprise", to: "fac_enterprise_focus", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+          { from: "opt_smb", to: "fac_smb_focus", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+          { from: "opt_hybrid", to: "fac_smb_focus", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+          { from: "fac_enterprise_focus", to: "outcome_1", strength_mean: 0.8, belief_exists: 0.9 },
+          { from: "fac_smb_focus", to: "outcome_1", strength_mean: 0.8, belief_exists: 0.9 },
+          { from: "outcome_1", to: "goal_1", strength_mean: 0.9, belief_exists: 1 },
+        ],
+        version: "1.2",
+        meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+      },
+      pipelineOutcome: makeOutcome(),
+      remainingViolations: undefined,
+    } as unknown as StageContext;
+
+    await runStageRepair(ctx);
+
+    // The bypass did NOT early-return — the duplicate was dropped instead.
+    expect(ctx.earlyReturn).toBeUndefined();
+    const nodes = (ctx.graph as { nodes?: Array<{ id?: string; kind?: string }> }).nodes ?? [];
+    const optionIds = nodes.filter((n) => n.kind === "option").map((n) => n.id);
+    expect(optionIds).toEqual(["opt_enterprise", "opt_smb"]);
+    const edges = (ctx.graph as { edges?: Array<{ from?: string; to?: string }> }).edges ?? [];
+    expect(edges.some((e) => e.from === "opt_hybrid" || e.to === "opt_hybrid")).toBe(false);
+
+    // Pipeline CONTINUED: substeps after 1.5 all ran.
+    expect(runOrchestratorValidationMock).toHaveBeenCalledTimes(1);
+    expect(runPlotValidationMock).toHaveBeenCalledTimes(1);
+    expect(runEdgeStabilisationMock).toHaveBeenCalledTimes(1);
+    expect(runGoalMergeMock).toHaveBeenCalledTimes(1);
+    expect(runStructuralParseMock).toHaveBeenCalledTimes(1);
+
+    // Post-drop state was re-derived: no stale OPTIONS_IDENTICAL, and this
+    // fully-valid fixture needs no LLM repair.
+    expect((ctx.remainingViolations ?? []).map((v) => v.code)).not.toContain("OPTIONS_IDENTICAL");
+    expect(ctx.llmRepairNeeded).toBe(false);
+  });
+});
