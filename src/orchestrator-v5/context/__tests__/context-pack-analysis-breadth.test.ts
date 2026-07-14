@@ -343,6 +343,37 @@ describe('ContextPack tipping/VOI lever suppression (Lane 30, #369 audit P1)', (
     const parsed = ContextPackSchema.safeParse(pack);
     expect(parsed.success).toBe(true);
   });
+
+  // ROADMAP 2.54 (b) — the VOI-suppression FACT is carried on the raw
+  // projection so the display formatter can disclose it honestly (never a
+  // second lever-identity derivation — the flag is set exactly where the
+  // reviewed #308-union suppression fires).
+  it('flags evidence_gaps_lever_suppressed when the D-U suppression removed a VOI entry', () => {
+    const pack = assemble(
+      makeSummary({ evidence_gaps: EVIDENCE_GAPS }),
+      { interventionControlledFactorIds: CONTROLLED },
+    );
+    expect(pack.analysis?.evidence_gaps_lever_suppressed).toBe(true);
+    const parsed = ContextPackSchema.safeParse(pack);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('flags the suppression fact on the fail-closed (unattributable-entry) path too', () => {
+    const pack = assemble(
+      makeSummary({ evidence_gaps: [{ factor_label: 'Unidentified Gap', voi_score: 0.5 }] }),
+      { interventionControlledFactorIds: CONTROLLED },
+    );
+    expect(pack.analysis?.evidence_gaps).toEqual([]);
+    expect(pack.analysis?.evidence_gaps_lever_suppressed).toBe(true);
+  });
+
+  it('OMITS the flag entirely when nothing was suppressed (key absence, never false)', () => {
+    const untouched = assemble(makeSummary({ evidence_gaps: EVIDENCE_GAPS }));
+    expect(untouched.analysis).not.toHaveProperty('evidence_gaps_lever_suppressed');
+
+    const noGaps = assemble(makeSummary(), { interventionControlledFactorIds: CONTROLLED });
+    expect(noGaps.analysis).not.toHaveProperty('evidence_gaps_lever_suppressed');
+  });
 });
 
 // Lane 30 — per-option goal-fit carriage (raw projection). The display-safe

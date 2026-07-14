@@ -191,6 +191,11 @@ const ContextPackAnalysisSchema = z
       .array(ContextPackAnalysisEvidenceGapSchema)
       .readonly()
       .optional(),
+    // ROADMAP 2.54 (b) — literal `true` when the Lane 30 lever suppression
+    // removed at least one evidence-gap entry; ABSENT otherwise (never
+    // `false`), matching the pack's key-absence style (cf. conversation
+    // `truncated`).
+    evidence_gaps_lever_suppressed: z.literal(true).optional(),
     goal_fit: ContextPackAnalysisGoalFitSchema.nullable().optional(),
     /**
      * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
