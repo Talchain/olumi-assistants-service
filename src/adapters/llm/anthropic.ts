@@ -452,6 +452,12 @@ export type UsageMetrics = {
 const STRUCTURED_OUTPUTS_SUPPORTED_MODELS = new Set([
   "claude-sonnet-4-5-20250929",
   "claude-sonnet-4-6",
+  // Live-probed 2026-07-14 (GA output_config, no beta header): sonnet-5
+  // accepts json_schema structured outputs. Needed by the V6 dual-draft M2
+  // review (CEE_MODEL_M2_REVIEW=claude-sonnet-5), which is structured-
+  // outputs-only by design (D2) — without this entry the adapter silently
+  // falls back to prompt-only JSON for the M2 call.
+  "claude-sonnet-5",
   "claude-opus-4-6",
   "claude-opus-4-20250514",
   "claude-opus-4-5-20251101",
@@ -2496,7 +2502,17 @@ export async function chatWithAnthropic(
               },
             }
           : {}),
-        ...(thinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : {}),
+        // {type:'disabled'} must be transmitted, not dropped: models with
+        // ADAPTIVE thinking on by default (Sonnet 5) think unless the request
+        // explicitly disables it, and adaptive thinking is incompatible with
+        // tight caller budgets (the V6 dual-draft M2 review measured ~60s
+        // with adaptive thinking vs its 25s timeout). Live-probed 2026-07-14:
+        // the API accepts thinking:{type:'disabled'} alongside output_config.
+        ...(thinkingEnabled
+          ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } }
+          : args.thinking?.type === 'disabled'
+            ? { thinking: { type: 'disabled' } }
+            : {}),
       };
       const headers: Record<string, string> = {
         "Idempotency-Key": idempotencyKey,

@@ -612,6 +612,63 @@ describe("chatWithAnthropic — output_config.format contract", () => {
     expect(headers["anthropic-beta"]).toBeUndefined();
   });
 
+  it("sends output_config for claude-sonnet-5 (M2 review model — allowlist coverage)", async () => {
+    // The V6 dual-draft M2 review is structured-outputs-only by design (D2)
+    // and the Paul-adopted v0.4.3 baseline was measured ON Sonnet 5. Without
+    // sonnet-5 in STRUCTURED_OUTPUTS_SUPPORTED_MODELS the adapter silently
+    // falls back to prompt-only JSON — exactly the unconstrained-output churn
+    // the M2 model-resolution gate exists to prevent. Live-probed 2026-07-14:
+    // the GA output_config endpoint accepts claude-sonnet-5.
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const testSchema = { type: "object", properties: { foo: { type: "string" } }, required: ["foo"], additionalProperties: false };
+
+    await chatWithAnthropic({
+      system: "You are a test assistant.",
+      userMessage: "Test message",
+      model: "claude-sonnet-5",
+      outputSchema: testSchema,
+    });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body] = createSpy.mock.calls[0];
+    expect(body).toHaveProperty("output_config");
+    expect(body.output_config.format.type).toBe("json_schema");
+    // rejectsSamplingParams: no explicit temperature for sonnet-5.
+    expect(body.temperature).toBeUndefined();
+  });
+
+  it("passes thinking {type:'disabled'} through to the API body, keeping structured outputs active", async () => {
+    // Models with ADAPTIVE thinking on by default (Sonnet 5) think unless the
+    // request EXPLICITLY disables it — omitting the field is not neutral.
+    // ThinkingConfig has carried {type:'disabled'} since it was introduced,
+    // but the chat body builder silently dropped it. The V6 dual-draft M2
+    // review depends on this passthrough to fit its 25s timeout.
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const testSchema = { type: "object", properties: { foo: { type: "string" } }, required: ["foo"], additionalProperties: false };
+
+    await chatWithAnthropic({
+      system: "You are a test assistant.",
+      userMessage: "Test message",
+      model: "claude-sonnet-5",
+      thinking: { type: "disabled" },
+      outputSchema: testSchema,
+    });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body] = createSpy.mock.calls[0];
+    expect(body.thinking).toEqual({ type: "disabled" });
+    // Disabled thinking is NOT "thinking enabled": structured outputs stay on.
+    expect(body).toHaveProperty("output_config");
+  });
+
   it("does NOT send output_config when no outputSchema provided", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");

@@ -134,6 +134,22 @@ describe('reviewDraftGraph — model-resolution gate (activation ruling: inert +
     expect(res.kind).toBe('ok');
     expect(chatMock).toHaveBeenCalledOnce();
   });
+
+  it('explicitly disables extended thinking on the M2 call (25s budget protection)', async () => {
+    // Sonnet 5 runs ADAPTIVE thinking when the request omits `thinking`.
+    // Measured 2026-07-14 (offline sample run, v1.0 candidate, claude-sonnet-5,
+    // structured outputs): ~59-62s wall clock with ~2k thinking tokens —
+    // more than double M2_REVIEW_TIMEOUT_MS (25s), i.e. every live M2 call
+    // would degrade m2_timeout. With thinking: {type:'disabled'} (accepted by
+    // the API; thinking_tokens: 0) the same review completes in ~14-19s.
+    // M2 is a deterministic structured-outputs review; thinking is disabled
+    // by design, not merely for speed.
+    okChat(JSON.stringify({ proposals: [] }));
+    await reviewDraftGraph(makeInput());
+    expect(chatMock).toHaveBeenCalledOnce();
+    const [chatArgs] = chatMock.mock.calls[0] as [Record<string, unknown>];
+    expect(chatArgs.thinking).toEqual({ type: 'disabled' });
+  });
 });
 
 describe('reviewDraftGraph — fail-closed and degrade paths', () => {

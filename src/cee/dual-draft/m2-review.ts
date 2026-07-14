@@ -174,6 +174,14 @@ export async function reviewDraftGraph(input: EnrichmentInput): Promise<M2Review
         temperature: 0,
         maxTokens: config.cee.maxTokens.m2_review ?? DEFAULT_M2_MAX_TOKENS,
         outputSchema: PROPOSALS_JSON_SCHEMA,
+        // Explicit, not omitted: Sonnet 5 runs ADAPTIVE thinking when the
+        // request has no `thinking` field. Measured offline (2026-07-14,
+        // v1.0 candidate prompt, structured outputs): ~59-62s wall clock
+        // with adaptive thinking — more than double M2_REVIEW_TIMEOUT_MS,
+        // i.e. every live M2 call would degrade m2_timeout. M2 is a
+        // deterministic structured-outputs review; thinking is disabled by
+        // design.
+        thinking: { type: 'disabled' },
       },
       {
         requestId: input.requestId,
