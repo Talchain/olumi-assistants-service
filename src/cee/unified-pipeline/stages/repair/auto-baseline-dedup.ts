@@ -86,6 +86,7 @@
 
 import type { StageContext } from "../../types.js";
 import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
+import { readIsBaseline } from "../../../baseline-identity.js";
 
 // Heuristic baseline tokens — used ONLY by `looksHeuristicallyLikeBaseline`
 // (diagnostic-only path) so operators can see when the LLM produces an
@@ -205,41 +206,12 @@ export function looksHeuristicallyLikeBaseline(o: OptionLike): boolean {
   return BASELINE_ID_SUFFIXES.some((s) => id.endsWith(s));
 }
 
-/**
- * Read the effective is_baseline flag across BOTH surfaces.
- *
- * SPLIT-FIELD HARDENING (2026-07-14, rung-2 offline evidence): the draft
- * LLM sometimes emits `node.is_baseline: true` with `data.is_baseline:
- * false` on the same option (5/30 samples, both prompt versions). The old
- * data-first short-circuit let `data:false` MASK the explicit node-level
- * `true`, so the option was treated as non-explicit — the #203 dedup could
- * not absorb the status-quo collision and it fell through to the #452
- * heuristic decline → fail-fast 500 (live variant (b)). An EXPLICIT `true`
- * on EITHER surface therefore wins; everything else keeps the old
- * data-first semantics.
- *
- * Truth table (data.is_baseline × node.is_baseline → result):
- *
- *   data \ node │ true   false   absent
- *   ────────────┼──────────────────────
- *   true        │ true   true    true
- *   false       │ true*  false   false
- *   absent      │ true   false   undefined
- *
- *   (*) the ONLY changed cell — explicit true is no longer masked by the
- *       sibling surface's false. false/absent combinations are unchanged:
- *       explicit-false-only still reads false (never deletion-eligible),
- *       absent-both still reads undefined (heuristics' territory).
- *       Non-boolean junk on a surface is ignored, as before.
- */
-function readIsBaseline(o: OptionLike): boolean | undefined {
-  // Explicit true on either surface wins — never masked by the sibling
-  // surface's false.
-  if (o.data?.is_baseline === true || o.is_baseline === true) return true;
-  if (typeof o.data?.is_baseline === "boolean") return o.data.is_baseline;
-  if (typeof o.is_baseline === "boolean") return o.is_baseline;
-  return undefined;
-}
+// Effective is_baseline reader now lives in the shared
+// `src/cee/baseline-identity.ts` (SINGLE SOURCE OF TRUTH) so this dedup, the
+// schema-v3 DISPLAY/analysis-ready path, and any other baseline-identity
+// consumer reconcile the two flag surfaces identically (explicit `true` on
+// EITHER surface wins — the split-field truth table). See that module's
+// doc-block for the full table and the SPLIT-FIELD HARDENING rationale.
 
 export interface AutoBaselineDedupReport {
   readonly dropped_option_ids: readonly string[];

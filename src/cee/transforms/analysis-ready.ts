@@ -26,6 +26,7 @@ import type {
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
 import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
+import { readIsBaseline } from "../baseline-identity.js";
 
 // ============================================================================
 // Types
@@ -219,9 +220,14 @@ export function labelMatchesBaseline(label: string): boolean {
 }
 
 function detectBaselineOptionIndex(options: OptionV3T[]): number | null {
-  // Priority 1: LLM-provided flag
+  // Priority 1: LLM-provided flag. Read via the shared baseline-identity
+  // reader (SINGLE SOURCE OF TRUTH) so this path reconciles the flag
+  // identically to schema-v3 + auto-baseline-dedup. OptionV3T is already
+  // flattened to the node-level surface, so this collapses to the same
+  // `=== true` check — but going through the shared reader keeps every
+  // baseline decision on one truth table.
   for (let i = 0; i < options.length; i++) {
-    if (options[i].is_baseline === true) return i;
+    if (readIsBaseline({ is_baseline: options[i].is_baseline }) === true) return i;
   }
 
   // Priority 2: label keyword match
