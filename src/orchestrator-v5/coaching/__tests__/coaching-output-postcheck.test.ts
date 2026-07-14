@@ -505,6 +505,100 @@ describe('checkCoachingOutput — fabricated-result rule precision (review r3)',
 });
 
 // ---------------------------------------------------------------------------
+// Fabricated-result arm (a) — modal / future bridges are NOT fabrications
+// (live re-verify 2026-07-14, misroute-fix-live-reverify)
+//
+// LIVE-VERIFIED false positive on staging build 1489066: the tense/modality-
+// blind bridge clobbered ~43% of genuine PRE-analysis coaching answers (3/7
+// identical-input runs; server telemetry `fabricated_result_reference` at
+// freshness 'none', blocked false, answer_source=answer_text). "Running the
+// analysis will show whether…" matched noun + 1-word bridge ("will") +
+// `shows?`, and the conditional screen only inspects text BEFORE the match,
+// so the trailing "whether" never screened it. A modal-bridged attribution
+// describes a FUTURE run — exactly the honest pre-analysis coaching #450 set
+// out to protect. Completed-result attributions must still fire (pinned).
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — modal/future bridges are not fabricated results (live re-verify 2026-07-14)', () => {
+  it('the live-observed shape SHIPS: "the analysis will show whether…" pre-analysis', () => {
+    expect(
+      checkCoachingOutput(
+        'Running the analysis will show whether the deal-size gain outweighs the drags.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('modal bridges SHIP: would/should/gonna forms', () => {
+    for (const prose of [
+      'The analysis would tell us which option holds up under pressure.',
+      'The analysis would reveal where the model is most fragile.',
+      'The simulation should confirm whether churn dominates the outcome.',
+      'The simulation is gonna show which option holds up.',
+    ]) {
+      expect(checkCoachingOutput(prose, NONE), prose).toEqual({ safe: true });
+    }
+  });
+
+  it('"going to show" SHIPS (3-word bridge already exceeds arm (a)\'s ≤2-word bound)', () => {
+    expect(
+      checkCoachingOutput('The analysis is going to show which lever matters most.', NONE),
+    ).toEqual({ safe: true });
+  });
+
+  it('the existing "once" screen still holds alongside the modal exclusion', () => {
+    expect(
+      checkCoachingOutput(
+        'Once we run the simulation it will show how sensitive the outcome is.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('contracted "\'ll" SHIPS (modal class; the noun+whitespace shape never matched it)', () => {
+    // "analysis'll" — arm (a) requires whitespace after the result-noun, so the
+    // attached contraction never matched pre- or post-fix. Pinned so the shape
+    // stays consistent with the modal exclusion ("'ll" == "will").
+    expect(
+      checkCoachingOutput("The analysis'll show whether churn dominates.", NONE),
+    ).toEqual({ safe: true });
+  });
+
+  it('GREEN pins: completed-result attributions still DEGRADE', () => {
+    for (const prose of [
+      'The analysis shows Enterprise wins.',
+      'Our simulation found the SMB route is stronger.',
+      'The results indicate you should go upmarket.',
+    ]) {
+      expectViolation(checkCoachingOutput(prose, NONE), 'fabricated_result_reference');
+    }
+  });
+
+  it('a specific predicted NUMBER stays caught even in future tense (arm (d), independent of arm (a))', () => {
+    // "wins with 70%" is inherently result-claiming (unscreened arm), and the
+    // %-figure arm has same-sentence attribution ("analysis") — both catch it
+    // WITHOUT arm (a). Pinned so the modal exclusion cannot open this hole.
+    expectViolation(
+      checkCoachingOutput(
+        'The analysis will show that Enterprise wins with 70% probability.',
+        NONE,
+      ),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('accepted miss (documented): counterfactual "would have shown" SHIPS', () => {
+    // The modal bridge concedes no completed run exists; the directional
+    // content it smuggles is the bare-comparative accepted-miss class ("shown"
+    // is also not a listed verb). A specific number in the same shape stays
+    // caught by arm (d) — see the pin above.
+    expect(
+      checkCoachingOutput('The analysis would have shown that Enterprise won.', NONE),
+    ).toEqual({ safe: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // FAILED-run / FACT-LOSS blocked state still degrades (gate fix, review r2)
 //
 // `analysis_present` is false yet the state is blocked — the scenario/UI still
