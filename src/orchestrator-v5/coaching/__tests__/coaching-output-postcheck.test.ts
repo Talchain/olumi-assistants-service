@@ -347,15 +347,29 @@ describe('checkCoachingOutput — pre-analysis fabricated-result reference (revi
     );
   });
 
-  it('NONE + a fabricated result figure degrades (probability-anchored, not a bare %)', () => {
+  it('NONE + a fabricated result figure degrades (attribution-anchored, review r3)', () => {
+    // r3 FIX 1: the % arm requires same-sentence ATTRIBUTION (analysis/results/
+    // simulation/model run) — a bare "N% probability" is lexically
+    // indistinguishable from the user's own echoed framing, so it is now the
+    // user-echo class and SHIPS (accepted miss, documented in the module doc).
     expectViolation(
-      checkCoachingOutput('There is a 72% probability Enterprise is the right call.', NONE),
+      checkCoachingOutput('The analysis gives Enterprise a 72% chance.', NONE),
       'fabricated_result_reference',
     );
+    // "wins with N%" is inherently result-claiming — standalone arm, no
+    // attribution required.
     expectViolation(
       checkCoachingOutput('SMB wins with 68% here.', NONE),
       'fabricated_result_reference',
     );
+  });
+
+  it('NONE + a bare unattributed % figure SHIPS (r3 FIX 1 — user-echo class)', () => {
+    // Was DEGRADES in r2; the xhigh review confirmed this arm over-suppressed
+    // the user's own echoed framing, recreating the dead-end #450 fixes.
+    expect(
+      checkCoachingOutput('There is a 72% probability Enterprise is the right call.', NONE),
+    ).toEqual({ safe: true });
   });
 
   it('NONE + the user’s own echoed % SHIPS (no attribution, no result claim)', () => {
@@ -385,6 +399,108 @@ describe('checkCoachingOutput — pre-analysis fabricated-result reference (revi
     expect(
       checkCoachingOutput('The analysis shows Enterprise is stronger.', FRESH),
     ).toEqual({ safe: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fabricated-result rule precision (review r3, final regex round)
+//
+// The xhigh review confirmed 4 defects in the r2 rule, both directions:
+//   FIX 1 — the bare-% arm over-suppressed user-echoed framing;
+//   FIX 2 — verb alternation missed suggests/concludes/predicts/… ;
+//   FIX 3 — zero-gap adjacency missed "clearly shows" / "our analysis" /
+//           "the latest results";
+//   FIX 4 — no screen for hypothetical/offer contexts or the USER'S OWN
+//           analysis ("the analysis you shared").
+// Exact review strings below. Class limitation goes to phase ②.
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — fabricated-result rule precision (review r3)', () => {
+  it('FIX 1: user-echoed "% chance" framing SHIPS; attributed % and "wins with" DEGRADE', () => {
+    expect(
+      checkCoachingOutput(
+        'Working with that 30% chance of churn, enterprise is worth exploring',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expectViolation(
+      checkCoachingOutput('the analysis gives Enterprise a 72% chance', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('Enterprise wins with 68%', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('FIX 2: wider result-verbs degrade (suggests/concludes/predicts/…)', () => {
+    expectViolation(
+      checkCoachingOutput('The analysis suggests Enterprise is the winner', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('The simulation predicts SMB stays in front.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('The results confirm Enterprise as the stronger play.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('The analysis tells us Enterprise is the better route.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('FIX 3: bounded gaps degrade (adverb before verb; det + modifiers before noun)', () => {
+    expectViolation(
+      checkCoachingOutput('The analysis clearly shows Enterprise wins', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('According to our analysis, Enterprise is the stronger play.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('Based on the latest results, SMB stays ahead.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('FIX 4: hypothetical / offer context SHIPS (conditional before match, ?, run-offer)', () => {
+    expect(
+      checkCoachingOutput(
+        'If the analysis shows Enterprise ahead, we should double-check churn — want me to run it?',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput(
+        'Once the analysis shows how the options compare, we can pressure-test your churn worry.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('FIX 4: the USER’S OWN analysis SHIPS (attributed to the user, not a fabricated run)', () => {
+    expect(
+      checkCoachingOutput('Based on the analysis you shared, churn is the swing factor', NONE),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput('Your own analysis already points to churn as the weak spot.', NONE),
+    ).toEqual({ safe: true });
+  });
+
+  it('r3 screens do NOT blunt plain fabricated claims (regression pin)', () => {
+    // A declarative fabricated claim in a multi-sentence reply still degrades
+    // even when a NEIGHBOURING sentence is a question — screens are per-sentence.
+    expectViolation(
+      checkCoachingOutput(
+        'The analysis shows Enterprise is stronger. Shall we look at churn next?',
+        NONE,
+      ),
+      'fabricated_result_reference',
+    );
   });
 });
 

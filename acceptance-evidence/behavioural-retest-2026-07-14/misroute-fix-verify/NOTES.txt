@@ -146,3 +146,57 @@ R2 verification (all RED-first, then green):
   - Gates: typecheck:src PASS; eslint PASS; controlled-factor-authority 16/16;
     required suite over coaching + turn-executor + routing + compose =
     204 files / 4701 tests PASS.
+
+────────────────────────────────────────────────────────────────────────
+6. REVIEW R3 (final regex round) — fabricated-result rule precision
+────────────────────────────────────────────────────────────────────────
+xhigh code-review confirmed 4 defects in the r2 rule, both directions; all
+fixed in coaching-output-postcheck.ts (per-sentence evaluation now):
+
+FIX 1 (over-suppression — recreated the T1/T2 dead-end class): the bare
+  "N% (probability|chance|likelihood)" arm fired on the USER'S OWN echoed
+  framing. Now the % arm requires same-sentence ATTRIBUTION
+  (analysis|results|simulation|model run); "wins with N%" stays standalone
+  (inherently result-claiming). Deliberately flipped r2 case: "There is a
+  72% probability Enterprise is the right call." now SHIPS (user-echo class,
+  accepted miss — documented in the module doc).
+FIX 2 (false-negative verbs): verb alternation widened with suggests?|
+  concludes?|predicts?|estimates?|recommends?|confirms?|favou?rs?|tells (us|you).
+FIX 3 (false-negative adjacency): arm (a) allows ≤2 intervening words
+  noun→verb ("analysis clearly shows"); arm (b) allows (the|our|your|this|
+  that|my) + ≤2 modifiers before the noun ("according to our analysis",
+  "based on the latest results").
+FIX 4 (over-suppression screens, #418 negation-screen class): arms (a)/(b)
+  and the %-figure arm do NOT fire in hypothetical/offer contexts
+  (if|whether|once|when|after before the match; sentence ends '?'; contains
+  "want me to run"/"shall I run"/"I can run") or when the analysis is the
+  USER'S OWN ("the analysis you shared|ran|did", "your (own) analysis|
+  spreadsheet|numbers"). Arms (c) "(I|we) ran the …" and "wins with N%"
+  stay unscreened.
+FIX 5 (honesty in code): module doc now states plainly the pre-analysis rule
+  is BEST-EFFORT deterministic mitigation, not a guarantee; enumerates the
+  accepted-miss classes; cites the ROADMAP 1.81 dossier finding
+  (regex-disqualifier brittleness) and the phase-② semantic-check candidate.
+  The "this module is the guarantee" claim is now scoped to the
+  state-conditional rules only.
+
+Verdicts (r3-precision-tests.txt, all green; RED-first proven — 6 failures
+on the r2 code before implementation):
+  SHIPS:    "Working with that 30% chance of churn, enterprise is worth
+            exploring" · "There is a 72% probability …" (bare, unattributed)
+            · "If the analysis shows Enterprise ahead, … want me to run it?"
+            · "Once the analysis shows how the options compare, …"
+            · "Based on the analysis you shared, churn is the swing factor"
+            · "Your own analysis already points to churn …"
+  DEGRADES: "the analysis gives Enterprise a 72% chance" · "Enterprise wins
+            with 68%" · "The analysis suggests Enterprise is the winner"
+            · "The simulation predicts …" · "The results confirm …" · "The
+            analysis tells us …" · "The analysis clearly shows Enterprise
+            wins" · "According to our analysis, …" · "Based on the latest
+            results, …" · multi-sentence declarative claim next to a
+            question (screens are per-sentence).
+
+Gates: typecheck:src PASS · eslint PASS · forbidden-pattern ratchet PASS
+(every pattern == baseline) · controlled-factor-authority 16/16 · required
+suite over coaching + turn-executor + routing + compose = 4697 tests PASS.
+Gate + blocked-state fix and the none-state instruction from r2 untouched.
