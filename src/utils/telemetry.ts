@@ -107,6 +107,17 @@ export const TelemetryEvents = {
   // a fail-fast clarification-shaped CEE_GRAPH_INVALID instead.
   CeeOptionsIdenticalBypass: "cee.options_identical.pre_repair_bypass",
 
+  // Graceful-dedup variant of the above (ROADMAP 2.53 mitigation rung 1).
+  // Fires when the duplicate group that reached the bypass consisted
+  // entirely of AI-inferred options (no explicit is_baseline, no
+  // baseline-shaped label/id, no from_brief extraction marker) and >=2
+  // usable options remained after dropping the duplicate(s) — the draft
+  // CONTINUES instead of failing fast. The pre_repair_bypass event above
+  // keeps firing for the still-erroring residual, so the combined rate of
+  // the two events tracks the underlying LLM collision rate. See
+  // src/cee/unified-pipeline/stages/repair/options-identical-graceful-dedup.ts.
+  CeeOptionsIdenticalDroppedDuplicate: "cee.options_identical.dropped_duplicate",
+
   // Stage 4 Substep 0.9 — deterministic auto-baseline dedup. Fires when
   // the LLM-injected status-quo option (with explicit is_baseline=true)
   // duplicates an explicit option's intervention signature; drops the

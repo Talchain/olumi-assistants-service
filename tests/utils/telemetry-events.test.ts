@@ -578,6 +578,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeAutoBaselineDedupApplied: "cee.auto_baseline_dedup.applied",
         CeeAutoBaselineHeuristicOnlyCollision: "cee.auto_baseline_dedup.heuristic_only_collision",
         CeeOptionsIdenticalBypass: "cee.options_identical.pre_repair_bypass",
+        // ROADMAP 2.53 mitigation rung 1 — graceful dedup of AI-inferred
+        // duplicate options at the bypass; the draft continues instead of
+        // failing fast. Diagnostic-only (structured warn log is the
+        // operational signal; see debugOnlyEvents).
+        CeeOptionsIdenticalDroppedDuplicate: "cee.options_identical.dropped_duplicate",
         CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
         V5DecisionReviewCompleted: "v5.decision_review.completed",
         V5EditGraphAnalyticalQuestionSuppressed: "v5.edit_graph.analytical_question_suppressed",
@@ -1298,6 +1303,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.CeeAutoBaselineDedupApplied,
         TelemetryEvents.CeeAutoBaselineHeuristicOnlyCollision,
         TelemetryEvents.CeeOptionsIdenticalBypass,
+        // ROADMAP 2.53 mitigation rung 1 — dropped-duplicate variant of the
+        // bypass event; diagnostic-only, same posture as its siblings above.
+        TelemetryEvents.CeeOptionsIdenticalDroppedDuplicate,
         TelemetryEvents.CeeUnifiedPipelineStageTimings,
         TelemetryEvents.V5DecisionReviewCompleted,
         TelemetryEvents.V5EditGraphAnalyticalQuestionSuppressed,
@@ -1902,6 +1910,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.auto_baseline_dedup.applied",
         "cee.auto_baseline_dedup.heuristic_only_collision",
         "cee.options_identical.pre_repair_bypass",
+        // ROADMAP 2.53 mitigation rung 1 — graceful-dedup variant.
+        "cee.options_identical.dropped_duplicate",
         "cee.unified_pipeline.stage_timings",
         "v5.continuation.guard_applied",
         "v5.decision_review.completed",

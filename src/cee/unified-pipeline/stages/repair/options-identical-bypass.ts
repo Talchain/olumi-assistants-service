@@ -35,6 +35,7 @@
 import type { StageContext } from "../../types.js";
 import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
+import { attemptOptionsIdenticalGracefulDedup } from "./options-identical-graceful-dedup.js";
 
 const VIOLATION_CODE = "OPTIONS_IDENTICAL";
 
@@ -45,14 +46,32 @@ interface OptionsIdenticalContext {
 
 /**
  * Fail-fast gate for OPTIONS_IDENTICAL. Sets `ctx.earlyReturn` with a 400
- * CEE_GRAPH_INVALID envelope and returns true when the gate fires;
- * returns false otherwise (no side effects).
+ * CEE_GRAPH_INVALID envelope and returns true when the gate fires.
+ *
+ * Returns false when there is no OPTIONS_IDENTICAL violation (no side
+ * effects), OR when the graceful dedup resolved the collision by dropping
+ * AI-inferred duplicate option(s) (graph mutated, remainingViolations /
+ * llmRepairNeeded re-derived — see options-identical-graceful-dedup.ts;
+ * ROADMAP 2.53 mitigation rung 1). In the latter case the pipeline
+ * continues instead of failing the draft.
  */
 export function runOptionsIdenticalBypass(ctx: StageContext): boolean {
   const violation = (ctx.remainingViolations ?? []).find(
     (v) => v.code === VIOLATION_CODE,
   );
   if (!violation) return false;
+
+  // ROADMAP 2.53 mitigation rung 1: before failing the whole draft, try to
+  // resolve the collision by dropping AI-inferred duplicate option(s) —
+  // mirroring #203's doctrine (AI-generated duplicates are safe to drop;
+  // anything user-anchored is not). Strictly failure-path-only: this line
+  // is only reachable when the fail-fast error below would otherwise fire.
+  // On success the pipeline continues with the deduped graph and
+  // re-derived remainingViolations/llmRepairNeeded; on decline (null) the
+  // existing error path below runs byte-identically.
+  if (attemptOptionsIdenticalGracefulDedup(ctx)) {
+    return false;
+  }
 
   // Extract diagnostic detail from the validator's context (preserved by
   // deterministic-sweep step 9 into ctx.remainingViolations[i].context).
