@@ -36,6 +36,19 @@
  *      the model failed to differentiate is a genuine clarification case.
  *      (Exactly one from_brief option in a group is fine: it is KEPT and the
  *      AI-inferred duplicates are dropped.)
+ *   3b. (F4, label-distinctness floor) A colliding group would drop a member
+ *      whose LABEL differs from the survivor's. Guard 3 above depends on
+ *      isFromBriefMarked, which reads extractionType — but the draft prompt
+ *      emits extractionType on FACTOR nodes only and the V3 provenance
+ *      transform runs POST-repair, so option nodes carry no extractionType
+ *      here and Guard 3 is structurally inert. With no per-option brief
+ *      provenance reaching this stage, differently-LABELLED duplicates are
+ *      the only remaining signal that ≥2 user-traceable alternatives were
+ *      collapsed onto one signature (e.g. the model mis-drafts "Focus on
+ *      SMB" and "Hybrid approach" to identical interventions). Silently
+ *      dropping one would delete an option the user named, so DECLINE and
+ *      route to the typed clarification. Only genuine SAME-label collapses —
+ *      the model emitting the same option twice — are still deduped.
  *   4. Fewer than 2 option nodes would remain after the planned drops — a
  *      1-option decision graph is not a decision.
  *   5. The graph has no colliding groups at all (violation/graph mismatch —
@@ -111,6 +124,17 @@ function isFromBriefMarked(o: OptionLike): boolean {
   return et === "explicit" || et === "observed";
 }
 
+/**
+ * Normalise an option label for the F4 label-distinctness floor: trim and
+ * lowercase so that cosmetic case/whitespace differences do not read as two
+ * distinct user-named options. A missing/empty label normalises to "", so an
+ * unlabelled AI artefact still counts as same-label only against another
+ * unlabelled option.
+ */
+function normaliseLabel(label: string | undefined): string {
+  return (label ?? "").trim().toLowerCase();
+}
+
 export interface OptionsIdenticalDedupReport {
   readonly dropped_option_ids: readonly string[];
   readonly kept_option_ids: readonly string[];
@@ -171,6 +195,20 @@ export function attemptOptionsIdenticalGracefulDedup(
     // (group order == graph node order, because groups were built by
     // iterating graph nodes).
     const keeper = fromBrief[0] ?? group[0];
+
+    // Guard 3b (F4): label-distinctness floor. isFromBriefMarked is
+    // structurally inert on option nodes at the repair stage (extractionType
+    // lands on factors only; V3 provenance transform runs post-repair), so a
+    // differently-LABELLED duplicate is the only remaining signal that the
+    // model collapsed ≥2 user-named alternatives onto one signature. Decline
+    // rather than silently drop a user-traceable option; genuine same-label
+    // collapses (the model emitting one option twice) still dedupe.
+    const keeperLabel = normaliseLabel(keeper.label);
+    for (const opt of group) {
+      if (opt === keeper) continue;
+      if (normaliseLabel(opt.label) !== keeperLabel) return null;
+    }
+
     for (const opt of group) {
       if (opt === keeper) continue;
       // Every dropped option needs a real id so its edges can be removed.
