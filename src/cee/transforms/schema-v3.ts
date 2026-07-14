@@ -23,6 +23,7 @@ import { deriveEffectDirection } from "../../schemas/cee-v3.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
 import { isFactorData, isOptionData } from "./schema-v2.js";
+import { readIsBaseline } from "../baseline-identity.js";
 import {
   extractOptionsFromNodes,
   toOptionsV3,
@@ -817,7 +818,13 @@ export function transformResponseToV3(
     optionNodes.map((n) => {
       const dataBaseline = isOptionData(n.data) ? (n.data as any).is_baseline : undefined;
       const nodeBaseline = (n as any).is_baseline;
-      const resolved = dataBaseline ?? nodeBaseline;
+      // SINGLE SOURCE OF TRUTH (ROADMAP 2.55 / F3): reconcile the two flag
+      // surfaces via the shared reader so DISPLAY/analysis-ready agree with the
+      // #456 auto-baseline-dedup truth table. An explicit `true` on EITHER
+      // surface wins — the old `dataBaseline ?? nodeBaseline` let a split-field
+      // `data:false` MASK an explicit `node:true`, mis-rendering the status-quo
+      // option as "not the current arrangement".
+      const resolved = readIsBaseline({ is_baseline: nodeBaseline, data: { is_baseline: dataBaseline } });
       // Log when node-level fallback is used (data-level was undefined but node-level had a value)
       if (dataBaseline === undefined && nodeBaseline !== undefined) {
         log.debug({ event: 'cee.v3_transform.is_baseline_fallback', node_id: n.id, value: nodeBaseline }, 'cee.v3_transform.is_baseline_fallback');
