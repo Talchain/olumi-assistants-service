@@ -175,10 +175,12 @@ export function buildSignature(interventions: Record<string, unknown> | undefine
  * collision. Heuristic-only collisions flow to PR #202's OPTIONS_IDENTICAL
  * bypass, which emits a typed clarification the user can act on.
  *
- * Canonical read path per src/adapters/llm/anthropic.ts:852: prefer
- * `data.is_baseline`, fall back to node-level. Both surfaces are checked
- * because the Anthropic adapter normalisation occasionally leaves the
- * flag at one level or the other depending on schema version.
+ * Read path: an explicit `true` on EITHER surface (`data.is_baseline` or
+ * node-level `is_baseline`) qualifies — see `readIsBaseline`'s truth table.
+ * Both surfaces are checked because the Anthropic adapter normalisation
+ * occasionally leaves the flag at one level or the other depending on
+ * schema version, and the draft LLM has been measured emitting the two
+ * surfaces DISAGREEING (node:true + data:false) on the same option.
  */
 export function isExplicitBaseline(o: OptionLike): boolean {
   return readIsBaseline(o) === true;
@@ -203,7 +205,37 @@ export function looksHeuristicallyLikeBaseline(o: OptionLike): boolean {
   return BASELINE_ID_SUFFIXES.some((s) => id.endsWith(s));
 }
 
+/**
+ * Read the effective is_baseline flag across BOTH surfaces.
+ *
+ * SPLIT-FIELD HARDENING (2026-07-14, rung-2 offline evidence): the draft
+ * LLM sometimes emits `node.is_baseline: true` with `data.is_baseline:
+ * false` on the same option (5/30 samples, both prompt versions). The old
+ * data-first short-circuit let `data:false` MASK the explicit node-level
+ * `true`, so the option was treated as non-explicit — the #203 dedup could
+ * not absorb the status-quo collision and it fell through to the #452
+ * heuristic decline → fail-fast 500 (live variant (b)). An EXPLICIT `true`
+ * on EITHER surface therefore wins; everything else keeps the old
+ * data-first semantics.
+ *
+ * Truth table (data.is_baseline × node.is_baseline → result):
+ *
+ *   data \ node │ true   false   absent
+ *   ────────────┼──────────────────────
+ *   true        │ true   true    true
+ *   false       │ true*  false   false
+ *   absent      │ true   false   undefined
+ *
+ *   (*) the ONLY changed cell — explicit true is no longer masked by the
+ *       sibling surface's false. false/absent combinations are unchanged:
+ *       explicit-false-only still reads false (never deletion-eligible),
+ *       absent-both still reads undefined (heuristics' territory).
+ *       Non-boolean junk on a surface is ignored, as before.
+ */
 function readIsBaseline(o: OptionLike): boolean | undefined {
+  // Explicit true on either surface wins — never masked by the sibling
+  // surface's false.
+  if (o.data?.is_baseline === true || o.is_baseline === true) return true;
   if (typeof o.data?.is_baseline === "boolean") return o.data.is_baseline;
   if (typeof o.is_baseline === "boolean") return o.is_baseline;
   return undefined;
