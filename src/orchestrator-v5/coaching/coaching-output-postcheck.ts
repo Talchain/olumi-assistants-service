@@ -24,7 +24,25 @@
  *     over-suppression direction as the greater harm: it recreates the
  *     conversational dead-end #450 fixes);
  *   - paraphrased attribution via pronouns or novel verbs outside the
- *     alternations ("it points that way", "the numbers lean enterprise").
+ *     alternations ("it points that way", "the numbers lean enterprise");
+ *   - modal/future-bridged attribution — "the analysis will/would/should/…
+ *     show X" — is EXCLUDED BY DESIGN (2026-07-14 live re-verify: the
+ *     tense-blind bridge false-fired on ~43% of genuine pre-analysis answers;
+ *     a modal bridge usually describes a future run, the honest coaching
+ *     #450 protects). The residue this exclusion ACCEPTS — shapes that fired
+ *     pre-exclusion and now ship (adversarial review of PR #451, executed
+ *     against both builds): modal + that-clause directional assertion ("the
+ *     analysis will show that X wins"); hedged-present claims ("our
+ *     simulation would suggest Enterprise"); modal-perfect with a listed
+ *     verb ("the analysis may/would have found that churn dominates");
+ *     capability framing ("the analysis can show us that X wins"). All are
+ *     directional-without-number — the bare-comparative class above — and a
+ *     specific NUMBER stays caught by arm (d) ("wins with N%" / attributed
+ *     "N% probability") regardless of tense. Re-catch the epistemic-perfect
+ *     sub-class ("may/might/could have <listed-verb>") only if observed
+ *     live, not pre-widened. (The counterfactual "would have shown that X
+ *     won" also ships, but that was a miss BEFORE this exclusion too —
+ *     "shown" is not a listed verb.)
  * The screened arms also accept hypothetical / offer / user-own-analysis
  * contexts by design (r3 FIX 4), which a determined paraphrase could exploit.
  *
@@ -420,8 +438,10 @@ const STALENESS_SIGNAL_PATTERN =
  * class (best-effort, NOT a guarantee — see "Known limitations" in the module
  * doc). Arms, evaluated per SENTENCE (r3 precision round — final regex round;
  * further hardening is the phase-② semantic check):
- *   (a) result-noun → (≤2 intervening words) → result-verb — "the analysis
- *       [clearly] shows/suggests/predicts/… X" (SCREENED, see below);
+ *   (a) result-noun → (≤2 intervening NON-MODAL words) → result-verb — "the
+ *       analysis [clearly] shows/suggests/predicts/… X" (SCREENED, see below;
+ *       modal/future bridges — "the analysis will/would show…" — are excluded,
+ *       see MODAL_BRIDGE_WORD);
  *   (b) "according to / based on" + determiner + (≤2 modifiers) + result-noun
  *       — "according to our analysis", "based on the latest results"
  *       (SCREENED);
@@ -450,9 +470,33 @@ const FABRICATED_RESULT_VERB =
   '|suggests?|concludes?|predicts?|estimates?|recommends?|confirms?|favou?rs?' +
   '|tells\\s+(?:us|you))';
 
-/** (a) noun → ≤2 intervening words → verb. Lazy gap so the shortest bridge wins. */
+/**
+ * Modal / future auxiliaries excluded from arm (a)'s bridge (live re-verify
+ * 2026-07-14): a modal-bridged attribution — "the analysis will/would/should
+ * show whether…" — describes a FUTURE or hypothetical run, exactly the honest
+ * pre-analysis coaching #450 set out to protect, not a completed result. The
+ * tense-blind bridge clobbered ~43% of genuine pre-analysis answers on staging
+ * build 1489066 (the conditional screen only inspects text BEFORE the match,
+ * so a trailing "whether" never screened it). `gonna` rides along as the
+ * one-token colloquial "going to" ("going to show" itself already exceeds the
+ * ≤2-word bound). Contracted "'ll" needs no entry: `analysis'll` attaches to
+ * the noun token, and the noun→`\s+` shape means arm (a) never matched it —
+ * consistent with the exclusion ("'ll" == "will"). Deliberately NOT excluded
+ * (unobserved live; a separate sub-class for a future round if seen, not
+ * pre-widened): negated modal contractions ("the analysis won't/wouldn't
+ * show…" still fires arm (a)).
+ */
+const MODAL_BRIDGE_WORD =
+  '(?:will|would|should|could|can|may|might|shall|going|gonna)';
+
+/** (a) noun → ≤2 intervening NON-MODAL words → verb. Lazy gap so the shortest
+ *  bridge wins; each bridge word is lookahead-screened against
+ *  {@link MODAL_BRIDGE_WORD}, so completed-result attributions ("the analysis
+ *  [clearly] shows X") still fire while future/hypothetical ones ship. The
+ *  lookahead leaves the {0,2} word bound and the disjoint `[\w'’-]+`/`\s+`
+ *  chunking (no backtracking ambiguity) unchanged. */
 const FABRICATED_ATTRIBUTION_VERB_PATTERN = new RegExp(
-  `\\b${FABRICATED_RESULT_NOUN}\\s+(?:[\\w'’-]+\\s+){0,2}?${FABRICATED_RESULT_VERB}\\b`,
+  `\\b${FABRICATED_RESULT_NOUN}\\s+(?:(?!${MODAL_BRIDGE_WORD}\\b)[\\w'’-]+\\s+){0,2}?${FABRICATED_RESULT_VERB}\\b`,
   'i',
 );
 
