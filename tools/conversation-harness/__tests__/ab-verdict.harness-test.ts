@@ -236,16 +236,29 @@ describe('OPS metrics in the verdict [fix]', () => {
     fallback_engaged: fb,
   });
 
-  it('opsFromRows derives latency median, total tokens, and fallback rate (null-honest)', () => {
+  it('opsFromRows derives latency median and fallback rate independently of an unmeasured token turn (null-honest)', () => {
     const ops = opsFromRows([
       opsRow(10_000, 1000, 200, false),
       opsRow(20_000, 2000, 300, true),
-      opsRow(30_000, null, null, null),
+      opsRow(30_000, null, null, null), // ran, but token cost UNKNOWN
       opsRow(99_999, 9999, 9999, true, true), // skipped — excluded
     ]);
     expect(ops.latencyMedianMs).toBe(20_000);
-    expect(ops.totalTokens).toBe(3500);
     expect(ops.fallbackRate).toBe(0.5); // of the 2 rows with a known fallback signal
+    // Cost: one participating turn (30_000) is unmeasured, so the WHOLE run's
+    // cost is UNKNOWN — the honest 3500 subset-sum is NOT a comparable total
+    // (Codex finding 14). The old aggregation returned 3500 here, which let a
+    // less-measured arm rank cheaper and flip the G-COST gate.
+    expect(ops.totalTokens).toBeNull();
+  });
+
+  it('opsFromRows totals tokens only when EVERY participating turn is fully measured', () => {
+    const ops = opsFromRows([
+      opsRow(10_000, 1000, 200, false),
+      opsRow(20_000, 2000, 300, true),
+      opsRow(99_999, 9999, 9999, true, true), // skipped — excluded
+    ]);
+    expect(ops.totalTokens).toBe(3500);
   });
 
   it('opsFromRows is null across the board when the rows carry no signals (old artifacts)', () => {
@@ -253,6 +266,56 @@ describe('OPS metrics in the verdict [fix]', () => {
     expect(ops.latencyMedianMs).toBeNull();
     expect(ops.totalTokens).toBeNull();
     expect(ops.fallbackRate).toBeNull();
+  });
+
+  // Codex finding 14 / ROADMAP 2.61 — the core repro. A candidate run with a
+  // partially-measured cost ([120, unknown]) must NOT be totalled to 120 and
+  // ranked cheaper than a fully-measured comparator ([75, 75] = 150); the
+  // less-measured arm being "cheaper" is the dishonest aggregation that weakens
+  // the whole G-COST promotion gate.
+  it('a run with an unmeasured cost turn is UNMEASURABLE, not a smaller (cheaper-looking) total', () => {
+    const candidate = opsFromRows([
+      opsRow(10_000, 100, 20, false), // 120 tokens measured
+      opsRow(10_000, null, null, false), // cost-bearing but UNKNOWN
+    ]);
+    const comparator = opsFromRows([
+      opsRow(10_000, 50, 25, false), // 75
+      opsRow(10_000, 40, 35, false), // 75  -> 150 total, fully measured
+    ]);
+    expect(candidate.totalTokens).toBeNull(); // was 120 (RED) — the bug
+    expect(comparator.totalTokens).toBe(150);
+  });
+
+  it('an unmeasured candidate cost does NOT rank cheaper in the verdict (never a cost win)', () => {
+    // Candidate is less-measured; baseline is fully measured and genuinely
+    // higher-cost. The bug ranked the candidate cheaper (improved on cost); the
+    // fix makes the candidate cost unmeasurable so OPS-cost is excluded — the
+    // verdict must not report a cost improvement.
+    const candOps = opsFromRows([opsRow(10_000, 100, 20, false), opsRow(10_000, null, null, false)]);
+    const baseOps = opsFromRows([opsRow(10_000, 5000, 5000, false), opsRow(10_000, 5000, 5000, false)]);
+    const v = computeAbVerdict([run({}), run({}), run({})], [run({}), run({}), run({})], {
+      baselineOps: [baseOps, baseOps, baseOps],
+      candidateOps: [candOps, candOps, candOps],
+    });
+    const cost = find(v, 'OPS-cost-tokens');
+    expect(cost.measurable).toBe(false);
+    expect(cost.improved).toBe(false);
+    expect(v.overall).not.toBe('better');
+  });
+
+  it('green-pin: a fully-measured cheaper candidate still ranks as a cost improvement', () => {
+    const candOps = opsFromRows([opsRow(10_000, 5000, 5000, false), opsRow(10_000, 5000, 5000, false)]); // 20_000
+    const baseOps = opsFromRows([opsRow(10_000, 15_000, 15_000, false), opsRow(10_000, 15_000, 15_000, false)]); // 60_000
+    expect(candOps.totalTokens).toBe(20_000);
+    expect(baseOps.totalTokens).toBe(60_000);
+    const v = computeAbVerdict([run({}), run({}), run({})], [run({}), run({}), run({})], {
+      baselineOps: [baseOps, baseOps, baseOps],
+      candidateOps: [candOps, candOps, candOps],
+    });
+    const cost = find(v, 'OPS-cost-tokens');
+    expect(cost.measurable).toBe(true);
+    expect(cost.improved).toBe(true);
+    expect(v.overall).toBe('better');
   });
 
   const OPS = (latency: number, tokens: number, fallback: number): OpsMetrics => ({

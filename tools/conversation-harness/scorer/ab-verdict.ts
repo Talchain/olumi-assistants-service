@@ -73,22 +73,47 @@ export interface OpsMetrics {
 export function opsFromRows(rows: Record<string, unknown>[]): OpsMetrics {
   const active = (rows ?? []).filter((r) => !r.skipped);
   const wall = active.map((r) => r.wall_clock_ms).filter((v): v is number => typeof v === 'number');
-  const tokens = active
-    .map((r) => {
-      const tin = r.llm_tokens_in;
-      const tout = r.llm_tokens_out;
-      if (typeof tin !== 'number' && typeof tout !== 'number') return null;
-      return (typeof tin === 'number' ? tin : 0) + (typeof tout === 'number' ? tout : 0);
-    })
-    .filter((v): v is number => v != null);
   const fallbackKnown = active.map((r) => r.fallback_engaged).filter((v): v is boolean => typeof v === 'boolean');
   return {
     latencyMedianMs: wall.length ? Number(median(wall).toFixed(0)) : null,
-    totalTokens: tokens.length ? tokens.reduce((a, b) => a + b, 0) : null,
+    totalTokens: totalTokensFromRows(active),
     fallbackRate: fallbackKnown.length
       ? Number((fallbackKnown.filter(Boolean).length / fallbackKnown.length).toFixed(3))
       : null,
   };
+}
+
+/** A run's total token cost, or null if it cannot be honestly totalled
+ * (Codex finding 14 / ROADMAP 2.61).
+ *
+ * score-run.ts (llmTokenTotals) already null-honestly reports a turn's total as
+ * UNKNOWN when any of its cost-bearing llm_calls is unmeasured (aborted / streamed
+ * fragment / usageless routing call). The bug was here: the old aggregation
+ * FILTERED those unknown turns out and summed the rest, so a run [120, unknown]
+ * totalled 120 while a fully-measured comparator [75, 75] totalled 150 — the
+ * LESS-measured arm ranked CHEAPER and could flip the G-COST promotion gate.
+ *
+ * A partial run total is not a comparable total. A turn "participates" in cost
+ * accounting iff it carries token fields at all (new-layout scores.json always
+ * writes llm_tokens_in/out — number or explicit null; old artifacts omit them
+ * entirely and carry no cost signal). The whole run's cost is comparable ONLY
+ * when EVERY participating turn is FULLY measured (both directions numeric); if
+ * any is incomplete the run's cost is UNKNOWN (null), so a downstream cost
+ * comparison excludes it and never ranks it cheaper. Runs with no participating
+ * turn (old artifacts) stay null, exactly as before. */
+function totalTokensFromRows(active: Record<string, unknown>[]): number | null {
+  const participating = active.filter((r) => 'llm_tokens_in' in r || 'llm_tokens_out' in r);
+  if (participating.length === 0) return null;
+  let sum = 0;
+  for (const r of participating) {
+    const tin = r.llm_tokens_in;
+    const tout = r.llm_tokens_out;
+    // Require BOTH directions numeric (null-as-a-pair, per llmTokenTotals): a
+    // single unmeasured participating turn makes the whole run's cost UNKNOWN.
+    if (typeof tin !== 'number' || typeof tout !== 'number') return null;
+    sum += tin + tout;
+  }
+  return sum;
 }
 
 /** Synthesize the OPS dims for one run so they flow through the SAME delta /
