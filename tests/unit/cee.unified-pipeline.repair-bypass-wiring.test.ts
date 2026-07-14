@@ -441,7 +441,11 @@ describe("runStageRepair — OPTIONS_IDENTICAL graceful dedup continuation (ROAD
           {
             id: "opt_hybrid",
             kind: "option",
-            label: "Hybrid approach",
+            // F4: a genuine same-label collapse (identical label AND
+            // interventions to opt_smb) — the only shape the narrowed rescue
+            // still dedupes. A DISTINCT label here would (correctly) decline
+            // to the typed clarification instead.
+            label: "Focus on SMB",
             data: { interventions: { fac_enterprise_focus: 0, fac_smb_focus: 1 } },
           },
           {

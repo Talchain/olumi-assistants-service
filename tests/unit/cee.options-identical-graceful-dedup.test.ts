@@ -11,12 +11,24 @@
  *
  * FIX UNDER TEST (failure-path only): when the duplicate group that reaches
  * the bypass consists entirely of AI-inferred options (no explicit
- * is_baseline, no baseline-shaped label/id, no from_brief extraction marker),
- * drop the later-listed duplicate(s), keep the first, remove edges referencing
- * the dropped ids (the exact mechanism #203 uses), and let the draft continue
- * — but ONLY when >=2 usable options remain.
+ * is_baseline, no baseline-shaped label/id, no from_brief extraction marker)
+ * AND the colliding options share the survivor's LABEL, drop the later-listed
+ * duplicate(s), keep the first, remove edges referencing the dropped ids (the
+ * exact mechanism #203 uses), and let the draft continue — but ONLY when >=2
+ * usable options remain.
+ *
+ * F4 NARROWING (label-distinctness floor): Guard 3's from_brief check reads
+ * extractionType, which the draft prompt emits on FACTOR nodes only (the V3
+ * provenance transform runs post-repair), so it is structurally inert on
+ * option nodes here. With no per-option brief provenance reaching this stage,
+ * a duplicate group of differently-LABELLED options (e.g. "Focus on SMB" vs
+ * "Hybrid approach") is treated as ≥2 user-traceable alternatives the model
+ * collapsed onto one signature: the dedup now DECLINES and routes to the typed
+ * clarification instead of silently dropping a user-named option. Only genuine
+ * SAME-label collapses (the model emitting one option twice) still dedupe.
  *
  * GREEN-PINS (behaviour that must NOT change):
+ *  - a genuine same-label hybrid==pole collapse still dedupes and continues;
  *  - explicit is_baseline duplicate groups still take #203's doctrine
  *    (all-explicit groups keep today's fail-fast error);
  *  - heuristic-baseline-shaped duplicates (label "Status Quo" etc., no flag)
@@ -140,6 +152,59 @@ function makeObservedShapeGraph(): GraphT {
   } as unknown as GraphT;
 }
 
+/**
+ * Same-label variant: the model emits the SAME option twice — opt_hybrid
+ * carries opt_smb's exact label ("Focus on SMB") AND its interventions. This
+ * is the genuine duplicate the F4-narrowed rescue still absorbs (a same-label
+ * collapse carries no user-traceable content the drop would lose).
+ */
+function makeMatchingLabelGraph(): GraphT {
+  const graph = makeObservedShapeGraph() as any;
+  const hybrid = graph.nodes.find((n: any) => n.id === "opt_hybrid");
+  hybrid.label = "Focus on SMB"; // identical to opt_smb — a true same-label duplicate
+  return graph as GraphT;
+}
+
+/**
+ * A/B/C repro (the finding's canonical case): a brief names three distinct
+ * alternatives A, B, C. The model mis-drafts A and B to identical
+ * interventions ({fac_x:1}). Graph node order is B, A, C — so the pre-F4
+ * keeper=group[0] rule would keep B and silently drop A. All three options
+ * carry distinct labels and no baseline flag/marker.
+ */
+function makeABCReproGraph(): GraphT {
+  return {
+    version: "1",
+    default_seed: 42,
+    nodes: [
+      { id: "decision_1", kind: "decision", label: "Which path?" },
+      { id: "opt_b", kind: "option", label: "Option B", data: { interventions: { fac_x: 1 } } },
+      { id: "opt_a", kind: "option", label: "Option A", data: { interventions: { fac_x: 1 } } },
+      { id: "opt_c", kind: "option", label: "Option C", data: { interventions: { fac_x: 0 } } },
+      {
+        id: "fac_x",
+        kind: "factor",
+        label: "Factor X",
+        category: "controllable" as any,
+        data: { value: 0.5, extractionType: "explicit", factor_type: "other", uncertainty_drivers: ["m"] },
+      },
+      { id: "outcome_1", kind: "outcome", label: "Outcome" },
+      { id: "goal_1", kind: "goal", label: "Goal" },
+    ],
+    edges: [
+      { from: "decision_1", to: "opt_b", strength_mean: 1, belief_exists: 1 },
+      { from: "decision_1", to: "opt_a", strength_mean: 1, belief_exists: 1 },
+      { from: "decision_1", to: "opt_c", strength_mean: 1, belief_exists: 1 },
+      { from: "opt_b", to: "fac_x", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_a", to: "fac_x", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_c", to: "fac_x", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "fac_x", to: "outcome_1", strength_mean: 0.8, belief_exists: 0.9 },
+      { from: "outcome_1", to: "goal_1", strength_mean: 0.9, belief_exists: 1 },
+    ],
+    meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
+  } as unknown as GraphT;
+}
+
 const OBSERVED_SIGNATURE = "fac_enterprise_focus:0.0000|fac_smb_focus:1.0000";
 
 function observedViolation() {
@@ -176,8 +241,72 @@ describe("OPTIONS_IDENTICAL graceful dedup of AI-inferred duplicates (observed 2
     vi.clearAllMocks();
   });
 
-  it("RED→GREEN: drops the AI-inferred duplicate and continues instead of erroring", () => {
+  // ── RED: the F4 fix — differently-labelled duplicates must NOT be silently
+  //    deduped, they route to the typed clarification ────────────────────────
+
+  it("RED (F4): a distinct-label collision (SMB pole vs invented 'Hybrid approach') DECLINES to the typed clarification instead of silently dropping a user-named option", () => {
+    // The exact observed 2026-07-14 shape: opt_smb ('Focus on SMB') and
+    // opt_hybrid ('Hybrid approach') collapse onto one signature but carry
+    // DISTINCT user-visible labels. Pre-F4 this silently dropped opt_hybrid;
+    // post-F4 the label-distinctness floor declines and asks the user.
+    const before = JSON.stringify(makeObservedShapeGraph());
     const ctx = makeCtx();
+
+    const fired = runOptionsIdenticalBypass(ctx);
+
+    // Declined → today's fail-fast clarification path runs.
+    expect(fired).toBe(true);
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    const body = ctx.earlyReturn?.body as Record<string, unknown>;
+    expect(body.code).toBe("CEE_GRAPH_INVALID");
+    expect(body.reason).toBe("options_identical_unrepairable_by_llm");
+
+    // ZERO mutation: neither colliding option was dropped.
+    expect(JSON.stringify(ctx.graph)).toBe(before);
+    const ids = graphNodes(ctx).map((n) => n.id);
+    expect(ids).toContain("opt_smb");
+    expect(ids).toContain("opt_hybrid");
+
+    // The bypass (clarification) event fired, NOT the silent-drop event.
+    const eventNames = emitMock.mock.calls.map((c) => c[0] as string);
+    expect(eventNames).toContain(BYPASS_EVENT);
+    expect(eventNames).not.toContain(DROPPED_DUPLICATE_EVENT);
+  });
+
+  it("RED (F4, A/B/C repro): brief names A,B,C; A and B collide (order B,A,C) → the group is DECLINED and A is NOT silently dropped", () => {
+    // Three user-named alternatives; the model mis-drafts A and B to identical
+    // interventions. Graph order is B, A, C, so the pre-F4 keeper=group[0]
+    // rule would silently drop A (the later-listed member). The fix declines.
+    const graph = makeABCReproGraph();
+    const ctx = makeCtx({
+      graph,
+      remainingViolations: [
+        {
+          code: "OPTIONS_IDENTICAL",
+          message: "Options have identical intervention signatures: opt_b, opt_a",
+          context: { optionIds: ["opt_b", "opt_a"], signature: "fac_x:1.0000" },
+        },
+      ],
+    });
+
+    const fired = runOptionsIdenticalBypass(ctx);
+
+    expect(fired).toBe(true);
+    expect(ctx.earlyReturn?.statusCode).toBe(400);
+    // Neither A nor B was dropped — the user keeps both named options.
+    const ids = graphNodes(ctx).map((n) => n.id);
+    expect(ids).toContain("opt_a");
+    expect(ids).toContain("opt_b");
+    expect(ids).toContain("opt_c");
+    const eventNames = emitMock.mock.calls.map((c) => c[0] as string);
+    expect(eventNames).not.toContain(DROPPED_DUPLICATE_EVENT);
+  });
+
+  // ── GREEN-PIN: a genuine SAME-label collapse still dedupes (#452 rescue,
+  //    narrowed to matching labels) ─────────────────────────────────────────
+
+  it("GREEN-PIN (same-label): drops the AI-inferred duplicate and continues when the collision is a true same-label collapse", () => {
+    const ctx = makeCtx({ graph: makeMatchingLabelGraph() });
 
     const fired = runOptionsIdenticalBypass(ctx);
 
@@ -185,7 +314,7 @@ describe("OPTIONS_IDENTICAL graceful dedup of AI-inferred duplicates (observed 2
     expect(fired).toBe(false);
     expect(ctx.earlyReturn).toBeUndefined();
 
-    // The later-listed duplicate (the invented hybrid) is dropped; the
+    // The later-listed duplicate (the same-labelled clone) is dropped; the
     // first-listed colliding option (the SMB pole) and the distinct
     // enterprise pole survive.
     const ids = graphNodes(ctx).map((n) => n.id);
@@ -203,8 +332,8 @@ describe("OPTIONS_IDENTICAL graceful dedup of AI-inferred duplicates (observed 2
     expect(graphEdges(ctx).some((e) => e.from === "opt_smb" && e.to === "fac_smb_focus")).toBe(true);
   });
 
-  it("re-derives remainingViolations and llmRepairNeeded from the post-drop graph (no stale OPTIONS_IDENTICAL, no pointless LLM repair)", () => {
-    const ctx = makeCtx();
+  it("GREEN-PIN (same-label): re-derives remainingViolations and llmRepairNeeded from the post-drop graph (no stale OPTIONS_IDENTICAL, no pointless LLM repair)", () => {
+    const ctx = makeCtx({ graph: makeMatchingLabelGraph() });
 
     runOptionsIdenticalBypass(ctx);
 
@@ -215,8 +344,8 @@ describe("OPTIONS_IDENTICAL graceful dedup of AI-inferred duplicates (observed 2
     expect(ctx.llmRepairNeeded).toBe(false);
   });
 
-  it("emits the dropped_duplicate telemetry variant (not the bypass event) and records an observable trace", () => {
-    const ctx = makeCtx();
+  it("GREEN-PIN (same-label): emits the dropped_duplicate telemetry variant (not the bypass event) and records an observable trace", () => {
+    const ctx = makeCtx({ graph: makeMatchingLabelGraph() });
 
     runOptionsIdenticalBypass(ctx);
 
@@ -239,10 +368,12 @@ describe("OPTIONS_IDENTICAL graceful dedup of AI-inferred duplicates (observed 2
     expect(trace.options_identical_dedup?.kept_option_ids).toEqual(["opt_smb"]);
   });
 
-  it("keeps a from_brief-marked option over an earlier-listed AI-inferred duplicate", () => {
-    const graph = makeObservedShapeGraph() as any;
-    // Reorder: hybrid (AI-inferred) listed BEFORE smb; smb carries a
-    // from_brief extraction marker. The from_brief option must survive.
+  it("GREEN-PIN (same-label): keeps a from_brief-marked option over an earlier-listed AI-inferred duplicate", () => {
+    const graph = makeMatchingLabelGraph() as any;
+    // Reorder: hybrid (AI-inferred, same label as smb) listed BEFORE smb; smb
+    // carries a from_brief extraction marker. The from_brief option must
+    // survive. (Same-label so the F4 label-distinctness floor does not fire —
+    // this pins the from_brief keeper preference on a genuine duplicate.)
     const byId = new Map(graph.nodes.map((n: any) => [n.id, n]));
     const smb: any = byId.get("opt_smb");
     smb.data.extractionType = "explicit";
@@ -301,7 +432,9 @@ describe("OPTIONS_IDENTICAL graceful dedup of AI-inferred duplicates (observed 2
   });
 
   it("GREEN-PIN: a 2-option graph that collides entirely (drop would leave 1 option) still fails fast", () => {
-    const graph = makeObservedShapeGraph() as any;
+    // Same-label collapse so the F4 label-distinctness floor does NOT pre-empt
+    // Guard 4 — this test pins the <2-remaining guard specifically.
+    const graph = makeMatchingLabelGraph() as any;
     // Remove the distinct enterprise option: only the colliding pair remains.
     graph.nodes = graph.nodes.filter((n: any) => n.id !== "opt_enterprise");
     graph.edges = graph.edges.filter(
