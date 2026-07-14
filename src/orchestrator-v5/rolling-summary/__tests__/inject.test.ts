@@ -244,6 +244,10 @@ describe('loadConversationSummaryForInjection — inject renders the block', () 
       lag_turns: 3,
       window_depth: 3,
       watermark_turn_id: T1.turn_id,
+      // 1.73-pre (a): the block WAS injected — refused strictly means
+      // "withheld". generator rides along so consumers can segment.
+      refused: false,
+      generator: 'incremental',
     });
   });
 
@@ -378,10 +382,15 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
     expect(section!.note).toBeDefined();
     expect(section!.note!.toLowerCase()).toContain('withheld');
     expect(section!.note!.toLowerCase()).toContain('not shown');
-    // The staleness signal fires, marked as a refusal.
+    // The staleness signal fires, marked as a refusal. generator rides along
+    // (1.73-pre a): refused:true + a non-floor generator = genuine memory-hole.
     const lag = lagEmits();
     expect(lag).toHaveLength(1);
-    expect(lag[0]![1]).toMatchObject({ scenario_id: 'scn-1', refused: true });
+    expect(lag[0]![1]).toMatchObject({
+      scenario_id: 'scn-1',
+      refused: true,
+      generator: 'incremental',
+    });
   });
 
   it('REFUSES when the gap exceeds verbatim coverage even though the watermark is visible', async () => {
@@ -404,7 +413,7 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
     expect(section!.note).toContain('7');
     expect(section!.note!.toLowerCase()).toContain('not shown');
     expect(lagEmits()).toHaveLength(1);
-    expect(lagEmits()[0]![1]).toMatchObject({ refused: true });
+    expect(lagEmits()[0]![1]).toMatchObject({ refused: true, generator: 'incremental' });
   });
 
   it('REFUSES when a summary exists but the window is empty (coverage unverifiable)', async () => {
@@ -493,10 +502,51 @@ describe('loadConversationSummaryForInjection — floor honesty (M1)', () => {
     expect(section!.stale).toBe(true);
     expect(section!.note).toBeDefined();
     expect(section!.note!.toLowerCase()).toContain('not yet');
-    // A persistent floor means a stuck summariser — it must be loud.
+    // 1.73-pre (b): the note must not claim the FRAME is "drawn from the
+    // brief" — buildDeterministicFloor's source ladder is brief → goal →
+    // opening message → generic, and the stored floor does not record which
+    // source won, so the disclosure has to name the ladder, not assert one rung.
+    expect(section!.note!).not.toContain('drawn from the brief');
+    // A persistent floor means a stuck summariser — it must be loud. But the
+    // block IS injected, so refused stays FALSE (refused strictly means
+    // "withheld" — 1.73-pre a); generator:'floor' is the disambiguator a
+    // v5.summary.lag consumer keys on for the stuck-summariser alarm.
     const lag = lagEmits();
     expect(lag).toHaveLength(1);
-    expect(lag[0]![1]).toMatchObject({ scenario_id: 'scn-1', refused: true });
+    expect(lag[0]![1]).toMatchObject({
+      scenario_id: 'scn-1',
+      refused: false,
+      generator: 'floor',
+    });
+  });
+
+  it('floor note stays honest when the FRAME came from the goal, not the brief (1.73-pre b)', async () => {
+    // No brief anywhere: the floor FRAME derives from the goal label. The
+    // pre-fix note claimed the frame was "drawn from the brief" — a
+    // provenance misstatement for this floor (and for the opening-message
+    // and generic rungs below it).
+    const floor = buildDeterministicFloor({
+      briefText: null,
+      goalLabel: 'Pick HQ',
+      watermark: { turn_id: T2.turn_id, created_at: T2.created_at },
+      version: 1,
+      latestUserMessage: 'Help me choose a city for the office.',
+    });
+    const store = storeReturning(floor);
+    const outcome = await loadConversationSummaryForInjection({
+      flag: 'inject',
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 5,
+      summaryStore: store,
+    });
+    const section = outcome.section;
+    expect(section).not.toBeNull();
+    expect(section!.text).toContain('Goal: Pick HQ');
+    expect(section!.stale).toBe(true);
+    expect(section!.note!).not.toContain('drawn from the brief');
+    expect(section!.note!.toLowerCase()).toContain('not yet');
+    expect(lagEmits()[0]![1]).toMatchObject({ refused: false, generator: 'floor' });
   });
 
   it('a real (non-floor) summary with the same empty shape still renders bare "(none)" (no over-reach)', async () => {
