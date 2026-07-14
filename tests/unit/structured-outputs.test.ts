@@ -194,6 +194,32 @@ describe("buildStrictAnthropicTools", () => {
     }
   });
 
+  it("does NOT treat claude-sonnet-5 as strict-capable via the shared allowlist (live-safety pin)", () => {
+    // claude-sonnet-5 is the model staging serves for /orchestrate/v2/turn
+    // TODAY, and buildStrictAnthropicTools keys strict: true on shared-set
+    // membership ALONE — there is no env gate on this path. Listing sonnet-5
+    // in STRUCTURED_OUTPUTS_SUPPORTED_MODELS therefore changes every live
+    // turn's tool calls the moment it deploys, with all M2 flags off. The V6
+    // dual-draft M2 review opts in per-call via
+    // ChatArgs.structuredOutputsAdditionalModels instead (m2-review.ts).
+    const result = buildStrictAnthropicTools(sampleTools, "claude-sonnet-5");
+    for (const tool of result) {
+      expect(tool).not.toHaveProperty("strict");
+    }
+  });
+
+  it("does NOT inject additionalProperties: false for claude-sonnet-5 (live-safety pin)", () => {
+    const toolsWithoutAP = [
+      {
+        name: "test_tool",
+        description: "Test.",
+        input_schema: { type: "object", properties: {} },
+      },
+    ];
+    const result = buildStrictAnthropicTools(toolsWithoutAP, "claude-sonnet-5");
+    expect(result[0].input_schema).not.toHaveProperty("additionalProperties");
+  });
+
   it("forces additionalProperties: false on input_schema for supported models", () => {
     const toolsWithoutAP = [
       {

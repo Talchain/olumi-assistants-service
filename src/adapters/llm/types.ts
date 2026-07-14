@@ -330,6 +330,21 @@ export interface ChatArgs {
    * the draft_graph path (Lane 26). Non-Anthropic adapters ignore this field.
    */
   structuredOutputsUserReminder?: string;
+  /**
+   * Per-call EXTENSION of the structured-outputs model allowlist: models the
+   * CALLER has verified as structured-outputs-capable, consulted for this
+   * call only. Exists so one call path (the V6 dual-draft M2 review, which is
+   * structured-outputs-only by design) can use structured outputs on a model
+   * that is deliberately kept OUT of the adapter's shared allowlist —
+   * shared-set membership is also consulted by strict tool calling
+   * (buildStrictAnthropicTools) for every live /orchestrate/v2/turn with NO
+   * env gate, and flips the edit_graph/draft prompt-only fallbacks when
+   * CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. This field changes NOTHING for
+   * call sites that do not pass it. Still subject to
+   * CEE_ANTHROPIC_STRUCTURED_OUTPUTS and the thinking-disabled requirement.
+   * Non-Anthropic adapters ignore this field.
+   */
+  structuredOutputsAdditionalModels?: readonly string[];
 }
 
 /**

@@ -15,7 +15,7 @@
  * Structural agreement with the zod contract and guard allowlists is pinned
  * by __tests__/serialise-and-schema.test.ts.
  */
-import { PROPOSAL_TYPES, PROPOSAL_CAP } from './proposals.js';
+import { PROPOSAL_TYPES } from './proposals.js';
 import { ALLOWED_NODE_DELTA_FIELDS, ALLOWED_EDGE_DELTA_FIELDS, PROPOSAL_FIELD_CAPS } from './guards.js';
 
 // Size caps mirrored from the single source of truth (guards.PROPOSAL_FIELD_CAPS)
@@ -39,12 +39,19 @@ const NODE_DELTA_SCHEMA = {
     category: { type: 'string', enum: ['controllable', 'observable', 'external'] },
     uncertainty_drivers: {
       type: 'array',
-      maxItems: PROPOSAL_FIELD_CAPS.uncertainty_drivers_items,
+      // No maxItems: the structured-outputs compiler rejects it (live-probed
+      // 2026-07-14); the item-count cap is enforced by findOversizedProposalField.
       items: { type: 'string', maxLength: PROPOSAL_FIELD_CAPS.uncertainty_driver_length },
     },
   },
 } as const;
 
+// Numeric bounds live in `description` hints only: the Anthropic structured-
+// outputs compiler REJECTS `minimum`/`maximum`/`exclusiveMinimum` on numbers
+// with a 400 (live-probed 2026-07-14, GA output_config, claude-sonnet-5 and
+// claude-sonnet-4-6) — and the adapter passes this schema through verbatim.
+// Enforcement is unchanged: checkEdgeNumericSanity (G10) rejects out-of-bounds
+// values in the deterministic merge, which is the authoritative gate.
 const EDGE_DELTA_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -57,11 +64,11 @@ const EDGE_DELTA_SCHEMA = {
       additionalProperties: false,
       required: ['mean', 'std'],
       properties: {
-        mean: { type: 'number', minimum: -1, maximum: 1 },
-        std: { type: 'number', exclusiveMinimum: 0 },
+        mean: { type: 'number', description: 'Effect strength in [-1, 1]; sign must match effect_direction.' },
+        std: { type: 'number', description: 'Strength uncertainty; > 0 and <= max(0.5, 2*|mean|).' },
       },
     },
-    exists_probability: { type: 'number', minimum: 0, maximum: 1 },
+    exists_probability: { type: 'number', description: 'Probability the connection exists, in [0, 1].' },
     effect_direction: { type: 'string', enum: ['positive', 'negative'] },
   },
 } as const;
@@ -77,7 +84,9 @@ export const PROPOSALS_JSON_SCHEMA: Record<string, unknown> = {
   properties: {
     proposals: {
       type: 'array',
-      maxItems: PROPOSAL_CAP,
+      // No maxItems (API-rejected; see EDGE_DELTA_SCHEMA note). The cap is
+      // enforced deterministically: G5 (merge.ts) rejects proposals at index
+      // >= PROPOSAL_CAP, and the prompt instructs 0-8.
       items: {
         type: 'object',
         additionalProperties: false,
