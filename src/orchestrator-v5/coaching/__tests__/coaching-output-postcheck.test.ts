@@ -62,6 +62,20 @@ const BLOCKED = pack({
   rerun_required: true,
   readiness_status: 'blocked',
 });
+// FAILED-run / FACT-LOSS state: no selectable success fact (analysis_present
+// false, freshness 'none') yet the state is BLOCKED — the scenario/UI still
+// asserts an unusable result. The state-conditional rules MUST still fire here;
+// the bare `analysis_present && freshness!=='none'` gate would wrongly disarm
+// them, so the runtime gate adds `|| pack.blocked` (review r2).
+const BLOCKED_NO_FACT = pack({
+  analysis_present: false,
+  freshness: 'none',
+  blocked: true,
+  usable_for_prose: false,
+  usable_for_chips: false,
+  rerun_required: true,
+  readiness_status: 'blocked',
+});
 
 function expectViolation(
   res: { safe: boolean; violation?: CoachingViolation },
@@ -125,13 +139,12 @@ describe('checkCoachingOutput — confident advice under unsafe state', () => {
     );
   });
 
-  it('no-analysis state + "you should choose X" degrades', () => {
-    expectViolation(
-      checkCoachingOutput('You should choose Option A.', NONE),
-      'confident_advice_under_unsafe_state',
-    );
-  });
-
+  // Behavioural-retest T1/T2 dead-end fix: the state-conditional rules protect
+  // the integrity of an EXISTING analysis result. Pre-analysis (NONE) there is
+  // no result to misrepresent, so directional coaching is legitimate and must
+  // reach the user rather than being clobbered by the canned no-analysis nudge.
+  // The pre-analysis pass-through is asserted in its own describe block below;
+  // the unsafe-state degrade coverage here uses states where a result exists.
   it('blocked state + recommendation degrades', () => {
     expectViolation(
       checkCoachingOutput('I’d recommend Option C.', BLOCKED),
@@ -222,6 +235,298 @@ describe('checkCoachingOutput — stale results presented as fresh', () => {
         STALE,
       ),
     ).toEqual({ safe: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-analysis coaching reaches the user (behavioural-retest T1/T2 dead-end fix)
+//
+// The reported bug: on early conversational turns BEFORE any analysis has run,
+// a genuine coaching answer (the LLM WAS invoked, converse/coach path) was
+// degraded by this post-check into the canned "No analysis has been run… run
+// the analysis?" dead-end, because the state-conditional rules fired purely on
+// freshness === 'none'. The state-conditional rules protect an EXISTING
+// analysis result; pre-analysis there is no result to misrepresent, so the
+// coaching must pass through. The always-unsafe rules (below) still fire.
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — pre-analysis coaching reaches the user (T1/T2 fix)', () => {
+  it('NONE + directional option advice is ALLOWED (no result to misrepresent)', () => {
+    // Previously degraded to confident_advice_under_unsafe_state; the model's
+    // real coaching answer must now reach the user.
+    expect(checkCoachingOutput('You should choose Option A.', NONE)).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput(
+        'Honestly, given your churn, the enterprise option looks like the riskier bet — '
+          + "I'd lean towards testing it through the hybrid option first.",
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expect(checkCoachingOutput('Option A is the stronger option here.', NONE)).toEqual({
+      safe: true,
+    });
+  });
+
+  it('NONE + coaching that echoes the user’s own numbers is ALLOWED', () => {
+    // T1 shape: the user gave "3% monthly churn"; good coaching reflects it.
+    // RESULT_PRESENTATION over-fired on result-verbs (e.g. "leads" in "leads
+    // to") under the pre-analysis unsafe state — NOT on the bare "%", whose
+    // trailing \b makes that alternative near-dead. Pre-analysis it must pass.
+    expect(
+      checkCoachingOutput(
+        'Your ~3% monthly churn is the number I would watch most — it compounds fast.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput(
+        "Enterprise leads to longer sales cycles, which is the risk you're not weighing.",
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('NONE + "biggest risks you’re missing" coaching is ALLOWED (T2 shape)', () => {
+    expect(
+      checkCoachingOutput(
+        "The biggest risk you're not thinking about is team strain: moving upmarket "
+          + 'stretches your 3 customer-success people across heavier enterprise support.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('NONE still degrades genuinely fabricated claims via the always-unsafe rules', () => {
+    // The fix does NOT open the always-unsafe rules pre-analysis: an invented
+    // mutation-success claim on a coaching turn is still false by construction.
+    expectViolation(
+      checkCoachingOutput("I've updated the model to add a churn factor.", NONE),
+      'invented_mutation_success',
+    );
+    expectViolation(
+      checkCoachingOutput('I set churn to 5% for you.', NONE),
+      'value_change_narration',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-analysis fabricated-RESULT reference (review r2)
+//
+// The #450 narrowing (state-conditional rules gated on a result existing) must
+// NOT let the model attribute a RESULT to an analysis / simulation that never
+// ran. This always-on (pre-analysis) rule closes that class — attribution-
+// anchored, so it degrades fabricated-result references but SHIPS the user's own
+// echoed numbers and genuine coaching prose.
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — pre-analysis fabricated-result reference (review r2)', () => {
+  it('NONE + result attribution degrades (analysis/results/simulation shows …)', () => {
+    expectViolation(
+      checkCoachingOutput('The analysis shows Enterprise is stronger.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('The results show SMB comes out ahead here.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('Based on the simulation, Enterprise is the safer bet.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('NONE + invented run degrades ("I ran the analysis …")', () => {
+    expectViolation(
+      checkCoachingOutput('I ran the analysis and Enterprise came out ahead.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('We ran the numbers and SMB wins.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('NONE + a fabricated result figure degrades (attribution-anchored, review r3)', () => {
+    // r3 FIX 1: the % arm requires same-sentence ATTRIBUTION (analysis/results/
+    // simulation/model run) — a bare "N% probability" is lexically
+    // indistinguishable from the user's own echoed framing, so it is now the
+    // user-echo class and SHIPS (accepted miss, documented in the module doc).
+    expectViolation(
+      checkCoachingOutput('The analysis gives Enterprise a 72% chance.', NONE),
+      'fabricated_result_reference',
+    );
+    // "wins with N%" is inherently result-claiming — standalone arm, no
+    // attribution required.
+    expectViolation(
+      checkCoachingOutput('SMB wins with 68% here.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('NONE + a bare unattributed % figure SHIPS (r3 FIX 1 — user-echo class)', () => {
+    // Was DEGRADES in r2; the xhigh review confirmed this arm over-suppressed
+    // the user's own echoed framing, recreating the dead-end #450 fixes.
+    expect(
+      checkCoachingOutput('There is a 72% probability Enterprise is the right call.', NONE),
+    ).toEqual({ safe: true });
+  });
+
+  it('NONE + the user’s own echoed % SHIPS (no attribution, no result claim)', () => {
+    expect(
+      checkCoachingOutput(
+        'With your ~3% churn, enterprise is worth exploring before you commit.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput('Your 3 CS people are already stretched thin.', NONE),
+    ).toEqual({ safe: true });
+  });
+
+  it('NONE + genuine pre-analysis coaching prose SHIPS', () => {
+    expect(
+      checkCoachingOutput(
+        'Before deciding, get clear on what "too thin" actually means for your team.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('post-analysis (fresh) + result attribution is NOT a fabrication (rule is pre-analysis only)', () => {
+    // Once a real analysis exists, referencing it is legitimate; the pre-analysis
+    // rule must not fire (fresh + usable coaching is never degraded).
+    expect(
+      checkCoachingOutput('The analysis shows Enterprise is stronger.', FRESH),
+    ).toEqual({ safe: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fabricated-result rule precision (review r3, final regex round)
+//
+// The xhigh review confirmed 4 defects in the r2 rule, both directions:
+//   FIX 1 — the bare-% arm over-suppressed user-echoed framing;
+//   FIX 2 — verb alternation missed suggests/concludes/predicts/… ;
+//   FIX 3 — zero-gap adjacency missed "clearly shows" / "our analysis" /
+//           "the latest results";
+//   FIX 4 — no screen for hypothetical/offer contexts or the USER'S OWN
+//           analysis ("the analysis you shared").
+// Exact review strings below. Class limitation goes to phase ②.
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — fabricated-result rule precision (review r3)', () => {
+  it('FIX 1: user-echoed "% chance" framing SHIPS; attributed % and "wins with" DEGRADE', () => {
+    expect(
+      checkCoachingOutput(
+        'Working with that 30% chance of churn, enterprise is worth exploring',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expectViolation(
+      checkCoachingOutput('the analysis gives Enterprise a 72% chance', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('Enterprise wins with 68%', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('FIX 2: wider result-verbs degrade (suggests/concludes/predicts/…)', () => {
+    expectViolation(
+      checkCoachingOutput('The analysis suggests Enterprise is the winner', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('The simulation predicts SMB stays in front.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('The results confirm Enterprise as the stronger play.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('The analysis tells us Enterprise is the better route.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('FIX 3: bounded gaps degrade (adverb before verb; det + modifiers before noun)', () => {
+    expectViolation(
+      checkCoachingOutput('The analysis clearly shows Enterprise wins', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('According to our analysis, Enterprise is the stronger play.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('Based on the latest results, SMB stays ahead.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('FIX 4: hypothetical / offer context SHIPS (conditional before match, ?, run-offer)', () => {
+    expect(
+      checkCoachingOutput(
+        'If the analysis shows Enterprise ahead, we should double-check churn — want me to run it?',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput(
+        'Once the analysis shows how the options compare, we can pressure-test your churn worry.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('FIX 4: the USER’S OWN analysis SHIPS (attributed to the user, not a fabricated run)', () => {
+    expect(
+      checkCoachingOutput('Based on the analysis you shared, churn is the swing factor', NONE),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput('Your own analysis already points to churn as the weak spot.', NONE),
+    ).toEqual({ safe: true });
+  });
+
+  it('r3 screens do NOT blunt plain fabricated claims (regression pin)', () => {
+    // A declarative fabricated claim in a multi-sentence reply still degrades
+    // even when a NEIGHBOURING sentence is a question — screens are per-sentence.
+    expectViolation(
+      checkCoachingOutput(
+        'The analysis shows Enterprise is stronger. Shall we look at churn next?',
+        NONE,
+      ),
+      'fabricated_result_reference',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FAILED-run / FACT-LOSS blocked state still degrades (gate fix, review r2)
+//
+// `analysis_present` is false yet the state is blocked — the scenario/UI still
+// asserts an unusable result. The state-conditional gate adds `|| pack.blocked`
+// so the directional / result guards are NOT disarmed here.
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — blocked-without-fact gate (review r2)', () => {
+  it('BLOCKED_NO_FACT + directional advice still degrades (gate fix)', () => {
+    // Pre-fix this shipped: analysisResultExists is false (no fact) so the state
+    // block was skipped. `|| pack.blocked` restores the guard.
+    expectViolation(
+      checkCoachingOutput('Go with Option A — it is clearly the best option.', BLOCKED_NO_FACT),
+      'confident_advice_under_unsafe_state',
+    );
+  });
+
+  it('BLOCKED_NO_FACT + a fabricated result reference degrades', () => {
+    expectViolation(
+      checkCoachingOutput('The analysis shows Option A comes out ahead.', BLOCKED_NO_FACT),
+      'fabricated_result_reference',
+    );
   });
 });
 

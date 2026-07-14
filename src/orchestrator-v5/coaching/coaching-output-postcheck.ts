@@ -3,7 +3,30 @@
  *
  * This is the HARD enforcement of the lane's core boundary: deterministic code
  * owns truth; the LLM only expresses it. The flag-gated prompt instruction
- * (route-with-tool-use.ts) is soft guidance — this module is the guarantee.
+ * (route-with-tool-use.ts) is soft guidance — for the STATE-CONDITIONAL rules
+ * (an existing result presented as current) this module is the enforcement
+ * backstop.
+ *
+ * ## Known limitations (honesty — review r3, FIX 5)
+ *
+ * The PRE-ANALYSIS `fabricated_result_reference` rule is BEST-EFFORT
+ * deterministic mitigation, NOT a complete guarantee. Regex disqualifiers are
+ * brittle against paraphrase (the ROADMAP 1.81 dossier finding); a semantic
+ * check is the phase-② candidate. Accepted-miss classes, deliberately not
+ * pattern-chased further:
+ *   - "your model shows X wins" — 'model' collides with legitimate structure
+ *     talk ("your decision model"), so it is not a result-noun here;
+ *   - bare comparative result language with no attribution anchor — "higher
+ *     expected value", "the stronger play";
+ *   - a bare unattributed figure — "there is a 72% probability X is right" —
+ *     lexically indistinguishable from the user's own echoed framing
+ *     ("that 30% chance of churn"), so it ships (r3 FIX 1 chose the
+ *     over-suppression direction as the greater harm: it recreates the
+ *     conversational dead-end #450 fixes);
+ *   - paraphrased attribution via pronouns or novel verbs outside the
+ *     alternations ("it points that way", "the numbers lean enterprise").
+ * The screened arms also accept hypothetical / offer / user-own-analysis
+ * contexts by design (r3 FIX 4), which a determined paraphrase could exploit.
  *
  * It inspects LLM-authored coaching prose (the `coach` / `text_only`→converse
  * compose branches) against the SAME canonical `CoachingStatePack` the prompt
@@ -64,7 +87,13 @@ export type CoachingViolation =
   | 'value_change_narration'
   | 'unsupported_evidence_or_confidence_claim'
   | 'confident_advice_under_unsafe_state'
-  | 'stale_presented_as_fresh';
+  | 'stale_presented_as_fresh'
+  // Pre-analysis fabricated RESULT: the prose attributes a result to an
+  // analysis / simulation that has not run (no successful fact exists). The
+  // fabricated-result honesty guarantee — distinct from `stale_presented_as_fresh`,
+  // which is about an EXISTING result presented as current. See
+  // FABRICATED_RESULT_REFERENCE_PATTERNS and checkCoachingOutput.
+  | 'fabricated_result_reference';
 
 export interface CoachingPostcheckResult {
   readonly safe: boolean;
@@ -381,6 +410,115 @@ const STALENESS_SIGNAL_PATTERN =
   /\b(?:stale|out[- ]of[- ]date|re[- ]?run|refresh|since\s+(?:the\s+)?(?:last\s+|latest\s+)?analysis|may\s+be\s+out\s+of\s+date|model\s+has\s+changed|no\s+longer\s+reflects?|can(?:'|’)?t\s+confirm|cannot\s+confirm)\b/i;
 
 /**
+ * Pre-analysis fabricated-RESULT reference (review r2). Applied as an ALWAYS-ON
+ * rule that fires ONLY when no analysis result exists (`!analysisResultExists`).
+ *
+ * The #450 narrowing (state-conditional rules gated on a result existing) is
+ * correct for ordinary pre-analysis coaching, but it opened a real honesty hole:
+ * a fabricated RESULT — a claim that attributes a ranking / probability to an
+ * analysis or simulation that HAS NOT RUN — would ship. This MITIGATES that
+ * class (best-effort, NOT a guarantee — see "Known limitations" in the module
+ * doc). Arms, evaluated per SENTENCE (r3 precision round — final regex round;
+ * further hardening is the phase-② semantic check):
+ *   (a) result-noun → (≤2 intervening words) → result-verb — "the analysis
+ *       [clearly] shows/suggests/predicts/… X" (SCREENED, see below);
+ *   (b) "according to / based on" + determiner + (≤2 modifiers) + result-noun
+ *       — "according to our analysis", "based on the latest results"
+ *       (SCREENED);
+ *   (c) "(I|we) ran the <analysis|simulation|numbers>" — an invented run
+ *       (unscreened: a first-person past-tense run claim is false by
+ *       construction pre-analysis);
+ *   (d) "wins with <n>%" (unscreened: inherently result-claiming), and
+ *       "<n>% (probability|chance|likelihood)" ONLY with same-sentence
+ *       attribution (analysis/results/simulation/model run). A bare
+ *       "30% chance of churn" is the USER-ECHO class and ships (r3 FIX 1 —
+ *       the r2 unanchored arm over-suppressed the user's own framing,
+ *       recreating the exact dead-end #450 fixes).
+ *
+ * SCREENS (r3 FIX 4; same class as the #418 negation-screen precedent): the
+ * screened arms do NOT fire when the sentence is a hypothetical / offer —
+ * a conditional (if/whether/once/when/after) BEFORE the match, the sentence
+ * ends with "?", or it contains an offer to run ("want me to run", "shall I
+ * run", "I can run") — or when the analysis is attributed to the USER ("the
+ * analysis you shared/ran/did", "your (own) analysis/spreadsheet/numbers").
+ * Screens are applied to arms (a), (b) and the %-figure arm; arms (c) and
+ * "wins with N%" stay unscreened (both are result-claims in any context).
+ */
+const FABRICATED_RESULT_NOUN = '(?:analysis|results?|simulation|monte\\s+carlo)';
+const FABRICATED_RESULT_VERB =
+  '(?:shows?|says?|found|indicates?|points?\\s+to|came\\s+out|reveals?' +
+  '|suggests?|concludes?|predicts?|estimates?|recommends?|confirms?|favou?rs?' +
+  '|tells\\s+(?:us|you))';
+
+/** (a) noun → ≤2 intervening words → verb. Lazy gap so the shortest bridge wins. */
+const FABRICATED_ATTRIBUTION_VERB_PATTERN = new RegExp(
+  `\\b${FABRICATED_RESULT_NOUN}\\s+(?:[\\w'’-]+\\s+){0,2}?${FABRICATED_RESULT_VERB}\\b`,
+  'i',
+);
+
+/** (b) according to / based on + determiner + ≤2 modifiers + result-noun. */
+const FABRICATED_ATTRIBUTION_PREP_PATTERN = new RegExp(
+  `\\b(?:according\\s+to|based\\s+on)\\s+(?:the|our|your|this|that|my)\\s+` +
+    `(?:[\\w-]+\\s+){0,2}?(?:analysis|results?|simulation)\\b`,
+  'i',
+);
+
+/** (c) invented first-person run — unscreened. */
+const FABRICATED_RUN_CLAIM_PATTERN =
+  /\b(?:i|we)\s+ran\s+the\s+(?:analysis|simulation|numbers)\b/i;
+
+/** (d) standalone result-claiming figure — unscreened. */
+const FABRICATED_WINS_WITH_PATTERN = /\bwins?\s+with\s+\d{1,3}\s?%/i;
+/** (d) probability-figure term — fires only with same-sentence attribution. */
+const RESULT_FIGURE_TERM_PATTERN = /\b\d{1,3}\s?%\s+(?:probability|chance|likelihood)\b/i;
+const RESULT_ATTRIBUTION_NOUN_PATTERN = /\b(?:analysis|results?|simulation|model\s+run)\b/i;
+
+/** r3 FIX 4 screens — hypothetical / offer / user-own-analysis contexts. */
+const CONDITIONAL_BEFORE_MATCH_PATTERN = /\b(?:if|whether|once|when|after)\b/i;
+const RUN_OFFER_PATTERN = /\b(?:want\s+me\s+to\s+run|shall\s+i\s+run|i\s+can\s+run)\b/i;
+const USER_OWN_ANALYSIS_PATTERN =
+  /\b(?:analysis\s+you\s+(?:shared|ran|did)|your\s+(?:own\s+)?(?:analysis|spreadsheet|numbers))\b/i;
+
+/** Sentence split for the per-sentence arms/screens. Coarse on purpose. */
+function splitIntoSentences(text: string): string[] {
+  return text.split(/(?<=[.!?])\s+|\n+/);
+}
+
+/** Is a screened-arm match inside a hypothetical / offer / user-own context? */
+function isFabricationScreened(sentence: string, matchIndex: number): boolean {
+  if (sentence.trimEnd().endsWith('?')) return true;
+  if (RUN_OFFER_PATTERN.test(sentence)) return true;
+  if (USER_OWN_ANALYSIS_PATTERN.test(sentence)) return true;
+  return CONDITIONAL_BEFORE_MATCH_PATTERN.test(sentence.slice(0, matchIndex));
+}
+
+function hasFabricatedResultReference(text: string): boolean {
+  for (const sentence of splitIntoSentences(text)) {
+    // Unscreened arms: first-person run claim / inherently result-claiming figure.
+    if (FABRICATED_RUN_CLAIM_PATTERN.test(sentence)) return true;
+    if (FABRICATED_WINS_WITH_PATTERN.test(sentence)) return true;
+    // Screened attribution arms (a) + (b).
+    for (const re of [
+      FABRICATED_ATTRIBUTION_VERB_PATTERN,
+      FABRICATED_ATTRIBUTION_PREP_PATTERN,
+    ]) {
+      const m = re.exec(sentence);
+      if (m !== null && !isFabricationScreened(sentence, m.index)) return true;
+    }
+    // Screened %-figure arm: requires same-sentence attribution (r3 FIX 1).
+    const fig = RESULT_FIGURE_TERM_PATTERN.exec(sentence);
+    if (
+      fig !== null &&
+      RESULT_ATTRIBUTION_NOUN_PATTERN.test(sentence) &&
+      !isFabricationScreened(sentence, fig.index)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Is the deterministic state unsafe for confident current-result coaching?
  * Stale / unknown ("unconfirmed") / absent / blocked / not chip-usable, OR a
  * rerun is required. Mirrors the live `deriveAnalysisFreshness` verdict carried
@@ -450,7 +588,43 @@ export function checkCoachingOutput(
   // State-conditional rules: only when the analysis is not safe to present as
   // current. When state IS fresh + usable, directional advice and result
   // presentation are allowed — ordinary coaching is never degraded.
-  if (isStateUnsafe(pack)) {
+  //
+  // These rules protect the integrity of an EXISTING analysis RESULT — they
+  // stop the model presenting a stale / unknown / blocked / unusable result as
+  // though it were current. They are meaningful ONLY when a successful analysis
+  // actually exists. PRE-ANALYSIS (no successful run_analysis fact —
+  // `!analysis_present` / freshness 'none') there is no result to misrepresent:
+  // ordinary early-conversation coaching legitimately weighs the options, names
+  // the risks, and echoes the user's own numbers ("your ~3% churn"). Degrading
+  // that here produced the conversational dead-end where a genuine coaching
+  // answer — the model WAS invoked (converse/coach path) — was clobbered by the
+  // canned "No analysis has been run… run the analysis?" nudge
+  // (behavioural-retest T1/T2). So gate the state-conditional rules on a result
+  // actually existing. The always-unsafe rules above still fire pre-analysis,
+  // so a fabricated evidence / confidence / mutation / value claim is still
+  // caught by construction; a user who explicitly asks to explain a not-yet-run
+  // analysis is still nudged by the explanation handler / no-analysis guard,
+  // which is a different code path, not this post-check.
+  const analysisResultExists = pack.analysis_present && pack.freshness !== 'none';
+
+  // Always-on (pre-analysis) — no fabricated RESULT reference (review r2).
+  // The #450 narrowing above must NOT let the model attribute a result to an
+  // analysis / simulation that never ran. Fires only pre-analysis (no result
+  // exists to legitimately present); attribution-anchored so it never trips on
+  // the user's own echoed figures. Placed AFTER the always-unsafe rules so a
+  // genuine mutation / value / evidence claim keeps its more-specific verdict.
+  if (!analysisResultExists && hasFabricatedResultReference(text)) {
+    return { safe: false, violation: 'fabricated_result_reference' };
+  }
+
+  // State-conditional rules protect an EXISTING analysis result from being
+  // presented as current. They fire when such a result exists AND is unsafe
+  // (stale / unknown / blocked / unusable). The `|| pack.blocked` restores the
+  // guard for a FAILED-run / FACT-LOSS state — `analysis_present` is false yet
+  // the scenario/UI still asserts a (blocked, unusable) result — which the bare
+  // `analysisResultExists` gate would have wrongly disarmed. Genuine
+  // pre-analysis (freshness 'none', not blocked) stays exempt (the #450 fix).
+  if ((analysisResultExists || pack.blocked) && isStateUnsafe(pack)) {
     if (
       isDirectionalOptionAdvice(text) ||
       (labelDet !== null && isLabelDirectionalAdvice(text, labelDet))

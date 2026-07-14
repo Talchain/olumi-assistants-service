@@ -97,31 +97,26 @@ function postcheckEvent(): Event | undefined {
 const DIRECTIONAL = 'You should choose Option A. It is clearly the best option.';
 
 describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () => {
-  it('degrades confident directional advice under unsafe (none) state + emits telemetry', async () => {
+  it('pre-analysis (none) directional coaching REACHES THE USER, not the canned dead-end (behavioural-retest T1/T2)', async () => {
+    // The reported bug: a genuine coaching answer on an early conversational
+    // turn (the model WAS invoked — converse branch) was degraded into the
+    // canned "No analysis has been run… run the analysis?" nudge because the
+    // state-conditional post-check fired purely on freshness === 'none'.
+    // Pre-analysis there is no result to misrepresent, so the model's answer
+    // must ship through and the post-check must NOT fire.
     setFlag(true);
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'what should I do about my decision?' },
-      'req-coach-degrade',
+      'req-coach-preanalysis-passthrough',
       { routingAdapter: mockRoutingAdapter(DIRECTIONAL) },
     );
 
-    // The wire text is NOT the model's confident advice — it is a safe
-    // deterministic trust response.
-    expect(response.assistant_text).not.toBe(DIRECTIONAL);
-    expect(response.assistant_text).toMatch(
-      /no analysis has been run|may be out of date|can't confirm|usable result/i,
-    );
-    // A rerun affordance survives.
-    expect(
-      (response.suggested_actions ?? []).some(
-        (a) => (a as { action_type?: string }).action_type === 'run_analysis',
-      ),
-    ).toBe(true);
-    // Telemetry records the violation + closed-enum state.
-    const evt = postcheckEvent();
-    expect(evt, 'post-check telemetry should fire').toBeDefined();
-    expect(evt!.data.violation).toBe('confident_advice_under_unsafe_state');
-    expect(evt!.data.freshness).toBe('none');
+    // The model's actual coaching answer reaches the user verbatim.
+    expect(response.assistant_text).toBe(DIRECTIONAL);
+    // It is NOT the canned no-analysis dead-end.
+    expect(response.assistant_text).not.toMatch(/no analysis has been run/i);
+    // No degrade telemetry — nothing was clobbered.
+    expect(postcheckEvent()).toBeUndefined();
   });
 
   it('passes safe coaching prose through unchanged (no telemetry)', async () => {
@@ -154,18 +149,22 @@ describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () =
     ],
   };
 
-  it('threads the graph’s real option label: "I recommend Plan A" degrades (end-to-end)', async () => {
+  it('pre-analysis (none): a directional recommendation on a real option label REACHES THE USER (T1/T2 fix)', async () => {
+    // "I recommend Plan A" pre-analysis is legitimate coaching, not a
+    // misrepresented result — it must ship through. (Post-analysis, when a
+    // stale/unknown/blocked result exists, the label-aware directional degrade
+    // still fires — covered by the coaching-output-postcheck unit tests.)
     setFlag(true);
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'what should I do about my decision?' },
       'req-coach-label-dir',
       { routingAdapter: mockRoutingAdapter('I recommend Plan A.'), graphState: LABELLED_GRAPH as never },
     );
-    expect(response.assistant_text).not.toBe('I recommend Plan A.');
-    expect(postcheckEvent()?.data.violation).toBe('confident_advice_under_unsafe_state');
+    expect(response.assistant_text).toBe('I recommend Plan A.');
+    expect(postcheckEvent()).toBeUndefined();
   });
 
-  it('threads the graph’s real factor label: "I updated Pricing" degrades (end-to-end)', async () => {
+  it('threads the graph’s real factor label: "I updated Pricing" degrades even pre-analysis (always-on rule)', async () => {
     setFlag(true);
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'help me think about this' },
