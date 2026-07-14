@@ -99,3 +99,50 @@ PR merges to staging, re-run the T1/T2 wire and confirm the assistant_text
 ENGAGES the message (real coaching) rather than the canned nudge.  NOTE:
 llm_calls will STILL read [] on staging (the trace artifact in §2a) — the
 correct success signal is the assistant_text content, NOT llm_calls.
+
+────────────────────────────────────────────────────────────────────────
+5. REVIEW R2 HARDENING (second adversarial pass — same PR #450)
+────────────────────────────────────────────────────────────────────────
+The #450 narrowing (gate the state rules on a result existing) was correct
+but opened / left three gaps, all closed here:
+
+(1) GATE FIX — coaching-output-postcheck.ts checkCoachingOutput:
+    `if ((analysisResultExists || pack.blocked) && isStateUnsafe(pack))`.
+    The bare `analysis_present && freshness!=='none'` gate ALSO disarmed the
+    state rules for a FAILED-run / FACT-LOSS blocked state (analysis_present
+    false but the scenario/UI still asserts an unusable result). `|| pack.blocked`
+    restores that protection. T1/T2 unaffected (blocked is false there).
+    New fixture BLOCKED_NO_FACT (analysis_present:false, blocked:true) +
+    directional advice → still degrades (was shipping pre-fix).
+
+(2) NEW ALWAYS-ON RULE `fabricated_result_reference` — fires only pre-analysis
+    (`!analysisResultExists`). Attribution-anchored; does NOT match a bare `%`
+    (user-echoed "your ~3% churn" ships). Four regexes:
+      (a) (analysis|results|simulation|monte carlo)+(shows|says|found|indicates|
+          points to|came out|reveals)
+      (b) (according to|based on) the (analysis|results|simulation)
+      (c) (I|we) ran the (analysis|simulation|numbers)      [invented run]
+      (d) \d{1,3}% (probability|chance|likelihood)  OR  wins with \d{1,3}%
+    Accepted phase-② misses (documented in PR): "your model shows X wins"
+    ('model' collides with legit structure talk) and a bare "higher expected
+    value" (no attribution anchor).
+
+(3) FALSE-STALENESS FIX — route-with-tool-use.ts COACHING_CONTEXT_INSTRUCTION.
+    The single unsafe-state bullet told the model (for freshness 'none' too) to
+    say the results "may be out of date" and suggest "re-running" — FALSE
+    pre-analysis and a live partial-recurrence of T1/T2 (model self-nudges).
+    Split into an honest 'none' bullet ("no analysis has been run yet …", no
+    "out of date"/"re-run") + the retained "Otherwise …" bullet for genuinely
+    stale/unusable results. The "don't recommend one option before analysis"
+    stance is intentionally retained (phase-② design question).
+
+R2 verification (all RED-first, then green):
+  - r2-fabricated-result-and-gate-tests.txt: attribution / invented-run /
+    figure degrade; user-echoed % + genuine coaching SHIP; fresh+attribution
+    is NOT a fabrication; blocked-without-fact degrades; 'none' instruction has
+    no "out of date"/"re-run".
+  - RED proof: with the r2 hunks neutralised, all 6 new tests fail; SHIP tests
+    stay green. Restored → 76/76 green.
+  - Gates: typecheck:src PASS; eslint PASS; controlled-factor-authority 16/16;
+    required suite over coaching + turn-executor + routing + compose =
+    204 files / 4701 tests PASS.

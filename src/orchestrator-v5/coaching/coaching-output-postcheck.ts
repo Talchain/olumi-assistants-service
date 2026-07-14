@@ -64,7 +64,13 @@ export type CoachingViolation =
   | 'value_change_narration'
   | 'unsupported_evidence_or_confidence_claim'
   | 'confident_advice_under_unsafe_state'
-  | 'stale_presented_as_fresh';
+  | 'stale_presented_as_fresh'
+  // Pre-analysis fabricated RESULT: the prose attributes a result to an
+  // analysis / simulation that has not run (no successful fact exists). The
+  // fabricated-result honesty guarantee — distinct from `stale_presented_as_fresh`,
+  // which is about an EXISTING result presented as current. See
+  // FABRICATED_RESULT_REFERENCE_PATTERNS and checkCoachingOutput.
+  | 'fabricated_result_reference';
 
 export interface CoachingPostcheckResult {
   readonly safe: boolean;
@@ -381,6 +387,41 @@ const STALENESS_SIGNAL_PATTERN =
   /\b(?:stale|out[- ]of[- ]date|re[- ]?run|refresh|since\s+(?:the\s+)?(?:last\s+|latest\s+)?analysis|may\s+be\s+out\s+of\s+date|model\s+has\s+changed|no\s+longer\s+reflects?|can(?:'|’)?t\s+confirm|cannot\s+confirm)\b/i;
 
 /**
+ * Pre-analysis fabricated-RESULT reference (review r2). Applied as an ALWAYS-ON
+ * rule that fires ONLY when no analysis result exists (`!analysisResultExists`).
+ *
+ * The #450 narrowing (state-conditional rules gated on a result existing) is
+ * correct for ordinary pre-analysis coaching, but it opened a real honesty hole:
+ * a fabricated RESULT — a claim that attributes a ranking / probability to an
+ * analysis or simulation that HAS NOT RUN — would ship. This closes that class
+ * directly. It is deliberately ATTRIBUTION-ANCHORED (an analysis/simulation/run
+ * reference, or a probability-qualified figure) and does NOT match a bare `%`,
+ * so the user's OWN echoed figures ("your ~3% churn", "3 CS people") still ship:
+ *   (a) "<analysis|results|simulation|monte carlo> <shows|says|found|indicates|
+ *        points to|came out|reveals>" — "the analysis shows Enterprise is
+ *        stronger", "the results show …";
+ *   (b) "according to / based on the <analysis|results|simulation>";
+ *   (c) "(I|we) ran the <analysis|simulation|numbers>" — an invented run;
+ *   (d) "<n>% (probability|chance|likelihood)" or "wins with <n>%" — a
+ *        fabricated result FIGURE (attribution-anchored; a bare "3% churn"
+ *        never matches).
+ * Reviewer-validated: 0 false positives on the pass-through fixtures, catches
+ * 6/8 fabrication probes. Two accepted phase-② misses (documented in the PR):
+ * "your model shows X wins" ('model' collides with legitimate structure talk)
+ * and a bare "higher expected value" (no attribution anchor).
+ */
+const FABRICATED_RESULT_REFERENCE_PATTERNS: readonly RegExp[] = [
+  /\b(?:analysis|results?|simulation|monte\s+carlo)\s+(?:shows?|says?|found|indicates?|points?\s+to|came\s+out|reveals?)\b/i,
+  /\b(?:according\s+to|based\s+on)\s+the\s+(?:analysis|results?|simulation)\b/i,
+  /\b(?:i|we)\s+ran\s+the\s+(?:analysis|simulation|numbers)\b/i,
+  /(?:\b\d{1,3}\s?%\s+(?:probability|chance|likelihood)\b|\bwins?\s+with\s+\d{1,3}\s?%)/i,
+];
+
+function hasFabricatedResultReference(text: string): boolean {
+  return FABRICATED_RESULT_REFERENCE_PATTERNS.some((re) => re.test(text));
+}
+
+/**
  * Is the deterministic state unsafe for confident current-result coaching?
  * Stale / unknown ("unconfirmed") / absent / blocked / not chip-usable, OR a
  * rerun is required. Mirrors the live `deriveAnalysisFreshness` verdict carried
@@ -468,7 +509,25 @@ export function checkCoachingOutput(
   // analysis is still nudged by the explanation handler / no-analysis guard,
   // which is a different code path, not this post-check.
   const analysisResultExists = pack.analysis_present && pack.freshness !== 'none';
-  if (analysisResultExists && isStateUnsafe(pack)) {
+
+  // Always-on (pre-analysis) — no fabricated RESULT reference (review r2).
+  // The #450 narrowing above must NOT let the model attribute a result to an
+  // analysis / simulation that never ran. Fires only pre-analysis (no result
+  // exists to legitimately present); attribution-anchored so it never trips on
+  // the user's own echoed figures. Placed AFTER the always-unsafe rules so a
+  // genuine mutation / value / evidence claim keeps its more-specific verdict.
+  if (!analysisResultExists && hasFabricatedResultReference(text)) {
+    return { safe: false, violation: 'fabricated_result_reference' };
+  }
+
+  // State-conditional rules protect an EXISTING analysis result from being
+  // presented as current. They fire when such a result exists AND is unsafe
+  // (stale / unknown / blocked / unusable). The `|| pack.blocked` restores the
+  // guard for a FAILED-run / FACT-LOSS state — `analysis_present` is false yet
+  // the scenario/UI still asserts a (blocked, unusable) result — which the bare
+  // `analysisResultExists` gate would have wrongly disarmed. Genuine
+  // pre-analysis (freshness 'none', not blocked) stays exempt (the #450 fix).
+  if ((analysisResultExists || pack.blocked) && isStateUnsafe(pack)) {
     if (
       isDirectionalOptionAdvice(text) ||
       (labelDet !== null && isLabelDirectionalAdvice(text, labelDet))

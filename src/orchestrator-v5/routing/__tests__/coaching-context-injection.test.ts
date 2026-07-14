@@ -24,7 +24,7 @@ import {
   summariseCoachingStatePack,
   type CoachingStatePack,
 } from '../../context/canonical-analysis-state.js';
-import { routeWithToolUse } from '../route-with-tool-use.js';
+import { routeWithToolUse, COACHING_CONTEXT_INSTRUCTION } from '../route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 function mkResult(content: ToolResponseBlock[]): ChatWithToolsResult {
@@ -100,6 +100,24 @@ describe('Coaching Context Pack v1 — prompt injection (flag-on)', () => {
     const msg = await userMessageFor(stalePack());
     expect(msg).not.toContain('a1b2c3d4e5f60718');
     expect(msg).not.toContain('ffeeddccbbaa9988');
+  });
+
+  it('none-state coaching guidance is honest — no false "out of date" pre-analysis (review r2)', () => {
+    // Pre-analysis (`freshness` "none") NOTHING has run, so instructing the model
+    // to say the results "may be out of date" / to "re-run" is a false claim and
+    // makes the T1/T2 dead-end partially recur live (the model self-nudges).
+    const lines = COACHING_CONTEXT_INSTRUCTION.split('\n');
+    const noneLine = lines.find((l) => /`freshness`\s+is\s+"none"/i.test(l));
+    expect(noneLine, 'a none-state bullet exists').toBeDefined();
+    expect(noneLine).toMatch(/no analysis has been run/i);
+    expect(noneLine).not.toMatch(/out of date/i);
+    expect(noneLine).not.toMatch(/re-?run/i);
+    // The OTHER unsafe states (an analysis exists but is stale/unusable) still
+    // legitimately suggest re-running.
+    const otherLine = lines.find((l) => /^- Otherwise,/i.test(l));
+    expect(otherLine, 'the non-none unsafe bullet is retained').toBeDefined();
+    expect(otherLine).toMatch(/out of date/i);
+    expect(otherLine).toMatch(/re-?run/i);
   });
 });
 

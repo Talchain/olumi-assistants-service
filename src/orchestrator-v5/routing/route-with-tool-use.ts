@@ -947,10 +947,17 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
  * rather than giving confident advice; never invent freshness / confidence /
  * evidence / values / units / mutation / science; never quote internal fields.
  */
-const COACHING_CONTEXT_INSTRUCTION = [
+export const COACHING_CONTEXT_INSTRUCTION = [
   '## Coaching state (deterministic — authoritative)',
   'The `coaching_context` block above is the system’s verified state of the analysis. Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',
-  '- If `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not recommend one option over another. Say the analysis may be out of date and suggest re-running it before giving confident advice.',
+  // Pre-analysis honesty (review r2): when `freshness` is "none" NO analysis has
+  // ever run, so telling the user the results "may be out of date" or to
+  // "re-run" is a FALSE claim (there is nothing to re-run). Say plainly that no
+  // analysis has been run yet. The "don't recommend one option over another
+  // before analysis" stance is retained here deliberately (a phase-② design
+  // question, out of scope for this fix).
+  '- If `freshness` is "none": no analysis has been run yet — say so plainly, and do not recommend one option over another as though a result already existed.',
+  '- Otherwise, if `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not recommend one option over another. Say the analysis may be out of date and suggest re-running it before giving confident advice.',
   '- Never invent freshness, confidence, evidence, provenance, scientific or bias claims, numeric values or units, and never claim a change was applied. State only what the supplied context or analysis already contains.',
   '- Never quote hashes, identifiers, or internal field names.',
 ].join('\n');

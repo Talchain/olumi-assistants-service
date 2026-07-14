@@ -62,6 +62,20 @@ const BLOCKED = pack({
   rerun_required: true,
   readiness_status: 'blocked',
 });
+// FAILED-run / FACT-LOSS state: no selectable success fact (analysis_present
+// false, freshness 'none') yet the state is BLOCKED — the scenario/UI still
+// asserts an unusable result. The state-conditional rules MUST still fire here;
+// the bare `analysis_present && freshness!=='none'` gate would wrongly disarm
+// them, so the runtime gate adds `|| pack.blocked` (review r2).
+const BLOCKED_NO_FACT = pack({
+  analysis_present: false,
+  freshness: 'none',
+  blocked: true,
+  usable_for_prose: false,
+  usable_for_chips: false,
+  rerun_required: true,
+  readiness_status: 'blocked',
+});
 
 function expectViolation(
   res: { safe: boolean; violation?: CoachingViolation },
@@ -255,7 +269,9 @@ describe('checkCoachingOutput — pre-analysis coaching reaches the user (T1/T2 
 
   it('NONE + coaching that echoes the user’s own numbers is ALLOWED', () => {
     // T1 shape: the user gave "3% monthly churn"; good coaching reflects it.
-    // RESULT_PRESENTATION over-fired on the bare "%"; pre-analysis it must pass.
+    // RESULT_PRESENTATION over-fired on result-verbs (e.g. "leads" in "leads
+    // to") under the pre-analysis unsafe state — NOT on the bare "%", whose
+    // trailing \b makes that alternative near-dead. Pre-analysis it must pass.
     expect(
       checkCoachingOutput(
         'Your ~3% monthly churn is the number I would watch most — it compounds fast.',
@@ -290,6 +306,110 @@ describe('checkCoachingOutput — pre-analysis coaching reaches the user (T1/T2 
     expectViolation(
       checkCoachingOutput('I set churn to 5% for you.', NONE),
       'value_change_narration',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-analysis fabricated-RESULT reference (review r2)
+//
+// The #450 narrowing (state-conditional rules gated on a result existing) must
+// NOT let the model attribute a RESULT to an analysis / simulation that never
+// ran. This always-on (pre-analysis) rule closes that class — attribution-
+// anchored, so it degrades fabricated-result references but SHIPS the user's own
+// echoed numbers and genuine coaching prose.
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — pre-analysis fabricated-result reference (review r2)', () => {
+  it('NONE + result attribution degrades (analysis/results/simulation shows …)', () => {
+    expectViolation(
+      checkCoachingOutput('The analysis shows Enterprise is stronger.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('The results show SMB comes out ahead here.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('Based on the simulation, Enterprise is the safer bet.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('NONE + invented run degrades ("I ran the analysis …")', () => {
+    expectViolation(
+      checkCoachingOutput('I ran the analysis and Enterprise came out ahead.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('We ran the numbers and SMB wins.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('NONE + a fabricated result figure degrades (probability-anchored, not a bare %)', () => {
+    expectViolation(
+      checkCoachingOutput('There is a 72% probability Enterprise is the right call.', NONE),
+      'fabricated_result_reference',
+    );
+    expectViolation(
+      checkCoachingOutput('SMB wins with 68% here.', NONE),
+      'fabricated_result_reference',
+    );
+  });
+
+  it('NONE + the user’s own echoed % SHIPS (no attribution, no result claim)', () => {
+    expect(
+      checkCoachingOutput(
+        'With your ~3% churn, enterprise is worth exploring before you commit.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+    expect(
+      checkCoachingOutput('Your 3 CS people are already stretched thin.', NONE),
+    ).toEqual({ safe: true });
+  });
+
+  it('NONE + genuine pre-analysis coaching prose SHIPS', () => {
+    expect(
+      checkCoachingOutput(
+        'Before deciding, get clear on what "too thin" actually means for your team.',
+        NONE,
+      ),
+    ).toEqual({ safe: true });
+  });
+
+  it('post-analysis (fresh) + result attribution is NOT a fabrication (rule is pre-analysis only)', () => {
+    // Once a real analysis exists, referencing it is legitimate; the pre-analysis
+    // rule must not fire (fresh + usable coaching is never degraded).
+    expect(
+      checkCoachingOutput('The analysis shows Enterprise is stronger.', FRESH),
+    ).toEqual({ safe: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FAILED-run / FACT-LOSS blocked state still degrades (gate fix, review r2)
+//
+// `analysis_present` is false yet the state is blocked — the scenario/UI still
+// asserts an unusable result. The state-conditional gate adds `|| pack.blocked`
+// so the directional / result guards are NOT disarmed here.
+// ---------------------------------------------------------------------------
+
+describe('checkCoachingOutput — blocked-without-fact gate (review r2)', () => {
+  it('BLOCKED_NO_FACT + directional advice still degrades (gate fix)', () => {
+    // Pre-fix this shipped: analysisResultExists is false (no fact) so the state
+    // block was skipped. `|| pack.blocked` restores the guard.
+    expectViolation(
+      checkCoachingOutput('Go with Option A — it is clearly the best option.', BLOCKED_NO_FACT),
+      'confident_advice_under_unsafe_state',
+    );
+  });
+
+  it('BLOCKED_NO_FACT + a fabricated result reference degrades', () => {
+    expectViolation(
+      checkCoachingOutput('The analysis shows Option A comes out ahead.', BLOCKED_NO_FACT),
+      'fabricated_result_reference',
     );
   });
 });
