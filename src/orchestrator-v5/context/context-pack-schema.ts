@@ -389,8 +389,12 @@ const CoachingStatePackSchema = z
  * conversation summary section. `.strict()` so no field can silently join
  * the prompt-facing block without review (same posture as
  * CoachingStatePackSchema). `note` is the in-band staleness disclosure —
- * present IFF `stale` (never silently stale, 01 §4). Doctrine P: `text` is
- * summariser prose (no raw floats by the summariser's own contract).
+ * present IFF `stale` (never silently stale, 01 §4). `stale` is lag-derived
+ * (lag ≥ window depth) EXCEPT for a generator:'floor' summary, where the
+ * injector forces it true regardless of lag — a floor absorbed no
+ * conversation history, so lag-freshness is vacuous for it (1.73-pre b).
+ * Doctrine P: `text` is summariser prose (no raw floats by the summariser's
+ * own contract).
  *
  * NOTE: `conversation_summary` also names a V4 prompt-zones registry entry
  * (src/orchestrator/prompt-zones/*) — unrelated; this is the V5 pack path.
