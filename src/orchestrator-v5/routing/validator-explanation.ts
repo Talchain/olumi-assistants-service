@@ -16,8 +16,13 @@
  *  2. answer_text.length >= 80 (too short to be a real explanation)
  *  3. Must NOT contain forbidden internal terms
  *  4. Must NOT contain mutation language (uses `containsMutationLanguage`)
- *  5. For explain_results / what_would_flip without a non-noop run_analysis
- *     fact: must NOT contain analysis language (probability, driver, etc.)
+ *  5. Without a non-noop run_analysis fact: must NOT reference a RESULT as if
+ *     an analysis had run (uses `hasFabricatedResultReference`, shared with the
+ *     coaching post-check). Applies to EVERY explanation handler reaching this
+ *     point — which is what makes a new explanation handler policed by default.
+ *     This is the only fabricated-result policing an explanation turn gets:
+ *     `applyCoachingOutputGuard` in the turn-executor runs on coach / converse
+ *     only and is never reached from an explanation branch.
  *
  * Staleness caveat ordering used to be rule 6 (regex-based) but has been
  * superseded by deterministic prefixing in the handler — the handler's
@@ -36,6 +41,7 @@
  * telemetry and drops the field.
  */
 
+import { hasFabricatedResultReference } from './fabricated-result-reference.js';
 import { containsMutationLanguage } from './mutation-language.js';
 import { EXPLANATION_HANDLER_IDS, type ProposalExplanation } from './types.js';
 
@@ -70,16 +76,16 @@ const FORBIDDEN_INTERNAL_TERM_PATTERNS: readonly RegExp[] = [
   /\bZod\b/,
 ];
 
-const ANALYSIS_LANGUAGE_TERMS: readonly string[] = [
-  'probability',
-  'driver',
-  'sensitivity',
-  'robustness',
-  'margin',
-  'leading option',
-  'performs best',
-];
-
+/**
+ * Handlers that CANNOT function without an analysis fact — they hit the
+ * precondition bypass and render their own "no analysis yet" template.
+ *
+ * This set means "this handler needs a result to do its job", NOT "this
+ * handler must be policed for fabricated results". Rule 5 polices every
+ * explanation handler that reaches it, so `explain_from_structure` is
+ * deliberately absent here: it answers PRE-analysis structural questions, so
+ * bypassing it would disable it, not protect it.
+ */
 const HANDLERS_REQUIRING_ANALYSIS_FACT: ReadonlySet<string> = new Set([
   'explain_results',
   'what_would_flip',
@@ -96,7 +102,16 @@ export type ExplanationAnswerErrorReason =
   | 'too_short'
   | 'forbidden_internal_term'
   | 'mutation_language_detected'
+  /**
+   * RETIRED — never emitted. Was rule 5's code while rule 5 was unreachable
+   * dead code; superseded by `fabricated_result_reference`, which polices the
+   * same class (result language with no analysis) with an attribution-anchored
+   * detector instead of a term-substring list. The member is retained because
+   * `tools/handlers/diagnostics.ts` still has a `case` for it in
+   * `mapFallbackReason`; removing it would break that switch.
+   */
   | 'analysis_language_without_analysis_fact'
+  | 'fabricated_result_reference'
   | 'raw_decimal_coefficient';
 
 /**
@@ -257,15 +272,39 @@ export function validateExplanationAnswer(
     return invalid(answerText, explanation, 'raw_decimal_coefficient');
   }
 
-  // Rule 5: analysis language without an analysis fact (only meaningful for
-  // explain_results / what_would_flip — but those hit the precondition
-  // bypass above when no analysis fact exists, so this branch is defensive
-  // in case the handler set or precondition logic changes later).
-  if (requiresAnalysis && !hasAnalysisFact) {
-    const lower = answerText.toLowerCase();
-    if (ANALYSIS_LANGUAGE_TERMS.some((term) => lower.includes(term))) {
-      return invalid(answerText, explanation, 'analysis_language_without_analysis_fact');
-    }
+  // Rule 5: fabricated RESULT reference with no analysis fact.
+  //
+  // Gated on `!hasAnalysisFact` ALONE. The previous guard was
+  // `requiresAnalysis && !hasAnalysisFact` — the identical condition that
+  // already returned `skip: true` at the precondition bypass above, which made
+  // this rule unreachable dead code (its own comment conceded it was
+  // "defensive"). Combined with `explain_from_structure` being absent from
+  // HANDLERS_REQUIRING_ANALYSIS_FACT, explanation turns had NO fabricated-
+  // result policing of any kind; only a prompt worked-example stood between the
+  // model and a fabricated result reference.
+  //
+  // Dropping `requiresAnalysis` is what makes the rule live AND safe by
+  // default: it now covers every explanation handler that reaches this point,
+  // so a NEW handler added to EXPLANATION_HANDLER_IDS is policed with no extra
+  // wiring. Handlers in HANDLERS_REQUIRING_ANALYSIS_FACT still bypass earlier
+  // (their deterministic "no analysis yet" template is safe by construction),
+  // so in practice this polices the pre-analysis answer-carrying handlers —
+  // today, `explain_from_structure`.
+  //
+  // `explain_from_structure` deliberately stays OUT of
+  // HANDLERS_REQUIRING_ANALYSIS_FACT: it exists to answer pre-analysis
+  // structural questions, so routing it into the bypass would disable the
+  // handler's entire purpose rather than police it.
+  //
+  // The detector is the attribution-anchored `hasFabricatedResultReference`
+  // shared with the coaching post-check, NOT a term-substring test: structural
+  // answers legitimately say "driver" / "sensitivity" / "margin" (and echo the
+  // user's own factor labels), so only an ATTRIBUTED result claim — "the
+  // analysis shows…", "I ran the analysis", "wins with 62%" — is fabrication.
+  // Hypotheticals, offers to run, and the user's own analysis are screened out
+  // inside the detector.
+  if (!hasAnalysisFact && hasFabricatedResultReference(answerText)) {
+    return invalid(answerText, explanation, 'fabricated_result_reference');
   }
 
   return {
