@@ -91,6 +91,29 @@ export function formatFactorValueSet(input: {
   return `Updated ${input.label} to ${after}.`;
 }
 
+/**
+ * Honest receipt for when a proposed factor value is IDENTICAL to the one
+ * already persisted (Gate-1 claim integrity). `formatFactorChange` implies
+ * a fresh commit; shipping it for a value that did not change produces the
+ * self-refuting "Updated X from 0.8 to 0.8." — the fact channel already
+ * knows it is a no-op (`SetFactorValueHandlerFact.noop === true`) but the
+ * text channel ignored it and narrated a change regardless.
+ *
+ * Same discipline as `formatConstraintUnchanged` (ROADMAP 1.19(a)), which
+ * fixed this exact divergence for add_constraint: deliberately avoids a
+ * sentence-leading commit verb ("Updated"/"Set"), so the sentence cannot
+ * be misread as a receipt for work done. The value is still named — the
+ * user asked for a specific number and is owed confirmation that it is
+ * the number in the model.
+ */
+export function formatFactorValueUnchanged(input: {
+  readonly label: string;
+  readonly after: { readonly raw_value: number; readonly unit?: string };
+}): string {
+  const value = formatValueWithUnit(input.after.raw_value, input.after.unit);
+  return `${input.label} is already set to ${value}.`;
+}
+
 export interface ConstraintAddedInput {
   readonly targetLabel: string;
   readonly operator: '>=' | '<=';
@@ -222,6 +245,31 @@ export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
     : '';
 
   return `Adjusted the link between ${input.fromLabel} and ${input.toLabel} from ${beforeBand} to ${afterBand}.${tail}`;
+}
+
+/**
+ * Honest receipt for an edge-strength proposal that matches the strength
+ * already persisted (Gate-1 claim integrity). The counterpart to
+ * `formatFactorValueUnchanged` for the edge handler, which had the same
+ * fact/text divergence: `adjust-edge-strength.ts` computed `noop` for its
+ * fact but always narrated via `formatEdgeAdjustment`, yielding the
+ * false "Adjusted the link between A and B from moderate to moderate."
+ *
+ * No sentence-leading commit verb. Near-zero means take a "has no
+ * material influence" phrasing because the band noun does not read as a
+ * predicate complement ("is already no material influence" is not
+ * English).
+ */
+export function formatEdgeStrengthUnchanged(input: {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+  readonly mean: number;
+}): string {
+  const link = `The link between ${input.fromLabel} and ${input.toLabel}`;
+  if (Math.abs(input.mean) < NEAR_ZERO_INFLUENCE_THRESHOLD) {
+    return `${link} already has no material influence.`;
+  }
+  return `${link} is already ${describeBandWithDirection(input.mean)}.`;
 }
 
 function describeBandWithDirection(mean: number): string {

@@ -391,4 +391,79 @@ describe('D1 cross-handler family invariants', () => {
       expect(fact.result.status === 'noop').toBe(fact.noop === true);
     }
   });
+
+  // --------------------------------------------------------------------
+  // Gate-1 claim integrity: the TEXT channel must agree with the FACT
+  // channel on a no-op. The four-state vocabulary is proposed / applied /
+  // blocked / stale; "noop" must never render as "applied".
+  //
+  // Family-level pin: every D1 handler computes `noop` for its fact, so
+  // every D1 handler's narration must honour it. Before this fix only
+  // add_constraint did (ROADMAP 1.19(a)); set_factor_value narrated
+  // "Updated X from 0.8 to 0.8." and adjust_edge_strength narrated
+  // "Adjusted the link ... from moderate to moderate." — both false
+  // "a change happened" claims on a turn where nothing changed.
+  // --------------------------------------------------------------------
+  it('NOOP narration never claims a change: no leading commit verb on any D1 handler', async () => {
+    const noopSet = await setFactorValue(
+      buildInvocation(buildD1Fixture(), noopSetFactorValueProposal()),
+    );
+    const firstAdd = await addConstraint(
+      buildInvocation(buildD1Fixture(), addConstraintProposal(5)),
+    );
+    const noopAdd = await addConstraint(
+      buildInvocation(firstAdd.mutated_graph as GraphV3T, addConstraintProposal(5)),
+    );
+    const noopAdjust = await adjustEdgeStrength(
+      buildInvocation(buildD1Fixture(), noopAdjustEdgeStrengthProposal()),
+    );
+
+    for (const outcome of [noopSet, noopAdd, noopAdjust]) {
+      // Precondition: these really are the no-op paths.
+      expect(outcome.handler_facts[0].noop).toBe(true);
+      // A no-op receipt must not open with a commit verb. `formatFactor-
+      // Change` ("Updated …"), `formatFactorValueSet` ("Updated …"),
+      // `formatConstraintUpdated` ("Updated constraint: …") and
+      // `formatEdgeAdjustment` ("Adjusted the link …") all do.
+      expect(outcome.assistant_text).not.toMatch(/^(Updated|Set|Added|Adjusted|Changed)\b/);
+      // And it must positively say the value was already there.
+      expect(outcome.assistant_text).toMatch(/\balready\b/);
+    }
+  });
+
+  it('NOOP narration never emits an X-to-X change receipt', async () => {
+    // The precise live defect: "Updated Customer churn from 4% to 4%."
+    // A from-A-to-A receipt is self-evidently a non-change rendered as a
+    // change; assert the shape is gone rather than only that some
+    // "already" wording appeared somewhere in the string.
+    const noopSet = await setFactorValue(
+      buildInvocation(buildD1Fixture(), noopSetFactorValueProposal()),
+    );
+    expect(noopSet.assistant_text).not.toMatch(/from\s+(.+?)\s+to\s+\1/);
+    expect(noopSet.assistant_text).not.toContain('from 4% to 4%');
+
+    const noopAdjust = await adjustEdgeStrength(
+      buildInvocation(buildD1Fixture(), noopAdjustEdgeStrengthProposal()),
+    );
+    expect(noopAdjust.assistant_text).not.toMatch(/from\s+(.+?)\s+to\s+\1/);
+  });
+
+  it('APPLIED narration still claims the change (the fix must discriminate, not blanket-silence)', async () => {
+    // Guard against "fix by suppression": a change that DID happen must
+    // still get its commit-verb receipt. Without this, returning a
+    // constant "nothing changed" string would pass the two tests above.
+    const appliedSet = await setFactorValue(
+      buildInvocation(buildD1Fixture(), mutateSetFactorValueProposal()),
+    );
+    expect(appliedSet.handler_facts[0].noop).toBe(false);
+    expect(appliedSet.assistant_text).toMatch(/^Updated\b/);
+    expect(appliedSet.assistant_text).not.toMatch(/\balready\b/);
+
+    const appliedAdjust = await adjustEdgeStrength(
+      buildInvocation(buildD1Fixture(), mutateAdjustEdgeStrengthProposal()),
+    );
+    expect(appliedAdjust.handler_facts[0].noop).toBe(false);
+    expect(appliedAdjust.assistant_text).toMatch(/^Adjusted\b/);
+    expect(appliedAdjust.assistant_text).not.toMatch(/\balready\b/);
+  });
 });
