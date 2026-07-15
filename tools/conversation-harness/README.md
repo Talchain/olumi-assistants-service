@@ -439,12 +439,24 @@ Specific traps worth knowing about:
   payload lists *every* option on every analysed turn, so accepting it would
   auto-resolve every entity on every analysed turn — a 1.000 that means nothing.
   Evidence must be something the system could only have produced *by* resolving
-  the user's specific mention (a chip, a staged proposal). Prose echo is string
-  handling, not resolution — it is exactly what a model does when it has *not*
-  looked anything up.
+  the user's specific mention — in practice a chip that NAMES the entity. Prose
+  echo is string handling, not resolution — it is exactly what a model does when
+  it has *not* looked anything up. A bare `held_proposal` is **not** evidence
+  either: it is a staging fact with no entity attached, so it certifies nothing
+  about the mention on this turn. (It granted an unconditional pass until the
+  review of this lane; that was the same entity-blind free pass G3 refuses for
+  the payload. A held proposal concerning the named entity still scores, via the
+  chip that offers it.)
 - **G4 is scored per figure, not per turn**, so one turn inventing nine numbers
   cannot hide behind eight clean turns. Only the turn's *own* payload counts — a
   number that was canonical three turns ago is a staleness leak.
+- **G4 reads the whole numeric literal, and compares it rounded.** `prosePercentages`
+  parses integers, decimals and thousands-grouped figures, anchored on `%` or
+  "percent" (`62.5%` → `62.5`, not `5`). Because `payloadPercentages` is built
+  with `Math.round`, the stated figure is rounded through the *same* function
+  before lookup — otherwise a faithful `62.5%` restating a canonical `0.625`
+  (surfaced as `63`) would score 0. This tolerates restated precision, never an
+  invented value.
 - **G5 is a count, not a rate**, so padding a run with silent turns cannot
   dilute a violation.
 - **G2 is symmetric** — "always mutate" fails the coach direction and "never

@@ -10,7 +10,7 @@ import {
   gateDeadEnd,
   gateCorrectionBurden,
   runGateDims,
-  proseIntegerPercentages,
+  prosePercentages,
   questionTokens,
   type GateTurn,
 } from '../scorer/gate-dims.js';
@@ -202,9 +202,20 @@ describe('G3 entity-resolution', () => {
     expect(d.value).toBe(0);
   });
 
-  it('a staged proposal counts as resolution', () => {
+  // A held proposal is a staging fact, not an entity-resolution fact: the row
+  // carries no evidence that the staged proposal concerns the entity the user
+  // named. The unconditional pass this replaces was the same entity-blind
+  // free-pass class G3 removed for the analysis payload.
+  it('VIOLATING: a held proposal alone is entity-BLIND and is not resolution', () => {
     const d = gateEntityResolution([
       turn({ turn: 'T1', assistantText: 'x', heldProposal: true }, 'change Plan Beta', s),
+    ]);
+    expect(d.value).toBe(0);
+  });
+
+  it('COMPLIANT: a held proposal whose chip ties to the named entity resolves', () => {
+    const d = gateEntityResolution([
+      turn({ turn: 'T1', assistantText: 'x', heldProposal: true, chips: [chip('Apply to Plan Beta')] }, 'change Plan Beta', s),
     ]);
     expect(d.value).toBe(1);
   });
@@ -275,8 +286,55 @@ describe('G4 canonical-state-use', () => {
     expect(d.value).toBe(0.5);
   });
 
-  it('proseIntegerPercentages extracts only percentages', () => {
-    expect(proseIntegerPercentages('62% and 5 % but not 2026 or 3.5')).toEqual([62, 5]);
+  it('prosePercentages extracts only anchored percentages', () => {
+    expect(prosePercentages('62% and 5 % but not 2026 or 3.5')).toEqual([62, 5]);
+  });
+
+  // ---------- decimal-percentage extraction (F-G4) ----------
+  // The old /(\d{1,3})\s?%/ captured the FRACTIONAL digits of a decimal figure:
+  // '62.5%' -> 5. That inverted the gate in both directions (see the two
+  // gate-level tests below), so extraction must parse the whole numeric literal.
+
+  it('extracts the WHOLE numeric literal of a decimal percentage, not its fraction', () => {
+    expect(prosePercentages('62.5%')).toEqual([62.5]);
+  });
+
+  it('extracts a sub-1% decimal', () => {
+    expect(prosePercentages('0.5%')).toEqual([0.5]);
+  });
+
+  it('extracts a 3-digit integer percentage', () => {
+    expect(prosePercentages('100%')).toEqual([100]);
+  });
+
+  it('does NOT extract a bare thousands-separated number with no % sign', () => {
+    expect(prosePercentages('1,250')).toEqual([]);
+  });
+
+  it('extracts a thousands-separated percentage as one figure', () => {
+    expect(prosePercentages('1,250%')).toEqual([1250]);
+  });
+
+  it('extracts the word form "percent"', () => {
+    expect(prosePercentages('62.5 percent')).toEqual([62.5]);
+  });
+
+  it('VIOLATING: a FABRICATED decimal figure must not score a free 1.000', () => {
+    // Canonical payload holds 5 (e.g. a p10). Prose invents '62.5%'. The old
+    // parser extracted 5, found it canonical, and returned a perfect PASS.
+    const d = gateCanonicalStateUse([
+      turn({ turn: 'T1', assistantText: 'It wins 62.5% of the time.' }, 'x', { payloadPercentages: [5] }),
+    ]);
+    expect(d.value).toBe(0);
+  });
+
+  it('COMPLIANT: a FAITHFUL restatement of a canonical decimal must not BLOCK', () => {
+    // Payload win_probability 0.625 surfaces as the rounded canonical 63.
+    // Prose faithfully restates '62.5%'. The old parser extracted 5 -> 0.000.
+    const d = gateCanonicalStateUse([
+      turn({ turn: 'T1', assistantText: 'It wins 62.5% of the time.' }, 'x', { payloadPercentages: [63] }),
+    ]);
+    expect(d.value).toBe(1);
   });
 });
 

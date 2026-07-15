@@ -238,9 +238,12 @@ export function gateDispatchAccuracy(turns: GateTurn[]): PromptDimScore {
  * ANTI-GAMING — this is the subtle one:
  *  - Prose echo does NOT count. The assistant repeating "Plan A" in a sentence
  *    is string handling, not resolution; it is exactly what a model does when
- *    it has NOT looked anything up. Only structured output counts, because
- *    chips and proposals are generated from graph state — the system cannot
- *    emit a chip for an entity it failed to resolve.
+ *    it has NOT looked anything up. Only structured output that NAMES the
+ *    entity counts, because such a chip is generated from graph state — the
+ *    system cannot emit a chip for an entity it failed to resolve.
+ *  - A bare held proposal does NOT count. It is a staging fact with no entity
+ *    attached, so it certifies nothing about the mention on THIS turn; it is
+ *    the same entity-blind free pass refused for the payload listing below.
  *  - The analysis payload naming the entity does NOT count either, and this is
  *    the trap worth naming: the payload lists EVERY option on every analysed
  *    turn, so accepting it as evidence would auto-resolve every entity on every
@@ -269,7 +272,15 @@ export function gateEntityResolution(turns: GateTurn[]): PromptDimScore {
     // option on every analysed turn, so it certifies nothing about THIS mention.
     const structured = t.row.chips.map((c) => `${c.label} ${c.action ?? ''}`).join('   ');
     const tiedInStructure = named.some((l) => new RegExp(`\\b${escapeRe(l)}\\b`, 'i').test(structured));
-    if (tiedInStructure || t.row.heldProposal === true) resolved++;
+    // Structure ONLY. A held proposal used to grant an unconditional pass here,
+    // but heldProposal is a STAGING fact carrying no entity: the row is not
+    // evidence that what was staged concerns the entity the user just named.
+    // That is the same entity-blind free-pass class this gate already refuses
+    // for the payload's own label listing (see the anti-gaming note above), so
+    // it cannot be excused on the ground that a proposal happens to be pending.
+    // A held proposal that DOES concern the named entity still scores, via the
+    // chip that offers it.
+    if (tiedInStructure) resolved++;
   }
   if (denom === 0) {
     return dim('G3-entity-resolution', 'Entity resolution (named entity tied to canonical state)', 'higher-better', null, 'fraction', { turns_naming_an_entity: 0 }, [
@@ -314,12 +325,18 @@ export function gateCanonicalStateUse(turns: GateTurn[]): PromptDimScore {
   let total = 0;
   let traceable = 0;
   for (const t of act) {
-    const figures = proseIntegerPercentages(t.row.assistantText);
+    const figures = prosePercentages(t.row.assistantText);
     if (figures.length === 0) continue;
     const canonical = new Set(t.surfaces.payloadPercentages);
     for (const f of figures) {
       total++;
-      if (canonical.has(f)) traceable++;
+      // The canonical surface is built with Math.round (prompt-dims.ts buildSurfaces),
+      // so a stated figure must be normalised through the SAME rounding to be
+      // comparable: a faithful '62.5%' restates a canonical 0.625 that surfaced
+      // as 63. Rounding only the payload side is what made a faithful decimal
+      // untraceable. This tolerates restated precision, never invented VALUE:
+      // '62.5%' against a canonical {62} still rounds to 63 and blocks.
+      if (canonical.has(Math.round(f))) traceable++;
     }
   }
   if (total === 0) {
@@ -338,14 +355,31 @@ export function gateCanonicalStateUse(turns: GateTurn[]): PromptDimScore {
   );
 }
 
-/** Integer percentages stated in prose ("62%", "62 %"). Deliberately narrow:
- * bare integers are ambiguous (dates, counts, the user's own figures) and a
- * false positive here degrades a real candidate. */
-export function proseIntegerPercentages(text: string): number[] {
+/**
+ * Percentages stated in prose: "62%", "62 %", "62.5%", "0.5%", "1,250%",
+ * "62.5 percent". Returns the WHOLE numeric literal of each figure.
+ *
+ * Deliberately narrow on the ANCHOR: a figure only counts when it is attached
+ * to a % sign or the word "percent". Bare numbers are ambiguous (dates, counts,
+ * the user's own figures) and a false positive here degrades a real candidate —
+ * so "1,250" with no anchor yields nothing.
+ *
+ * Deliberately WIDE on the literal, which is what this used to get wrong. The
+ * previous pattern (/(\d{1,3})\s?%/) captured only the digits abutting the '%',
+ * so a decimal figure surfaced as its FRACTION: '62.5%' -> 5. That inverted G4
+ * in both directions — a fabricated '62.5%' scored a free 1.000 whenever the
+ * fraction digit happened to be canonical, and a faithful restatement of a
+ * canonical decimal scored 0.000. Both are proven in gate-dims.harness-test.ts.
+ */
+export function prosePercentages(text: string): number[] {
   const out: number[] = [];
-  const re = /(\d{1,3})\s?%/g;
+  // <thousands-grouped or plain integer><optional fraction><optional space><% | percent | per cent>
+  // \b on the word forms keeps "percentile"/"percentage" from anchoring a figure.
+  const re = /(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*(?:%|percent\b|per cent\b)/gi;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text ?? '')) !== null) out.push(Number(m[1]));
+  while ((m = re.exec(text ?? '')) !== null) {
+    out.push(Number(`${m[1].replace(/,/g, '')}${m[2] ?? ''}`));
+  }
   return out;
 }
 
