@@ -840,4 +840,74 @@ describe('POST /orchestrate/v2/turn — V5 edit lifecycle recovery v1 intercepts
       expect(dispatchEditGraphMock).not.toHaveBeenCalled();
     });
   });
+
+  // ────────────────────────────────────────────────────────────────
+  // add_constraint dead-letter closure — ROUTE WIRING.
+  //
+  // These are WIRING tests, not predicate tests. `value-update-gate`'s
+  // own unit suite proves clause D matches; it CANNOT prove route-v2
+  // consults the gate for these shapes. PR #464's lane learned this the
+  // hard way: all 12 of its pure-function guard tests passed with the
+  // guard UNWIRED — only the chokepoint-wiring tests caught it. The
+  // assertion that matters is therefore `dispatchEditGraphMock` never
+  // being called: that is the V4 lane whose LLM has no constraint
+  // operation and which no-opped every live probe into the
+  // "factor, edge, option, or value" clarifier.
+  // ────────────────────────────────────────────────────────────────
+  describe('add_constraint dead-letter closure (route wiring)', () => {
+    it.each([
+      // The refusal chip's own replay text, verbatim (under-specified).
+      'Add a constraint on Key Talent Attrition.',
+      // Live probe 2 — fully specified; proves under-specification was
+      // never the cause.
+      'Add a constraint on Key Talent Attrition of at most 0.5.',
+      // Live probe 3 — a factor target.
+      'Add a constraint on Office Rent Cost of at most 0.5.',
+    ])('constraint request "%s" → does NOT dispatch to V4 edit_graph', async (message) => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({
+          message,
+          turn_id: '11111111-1111-4111-8111-111111111ee6',
+        }),
+      });
+      expect(res.statusCode).toBe(200);
+      // The whole defect in one assertion.
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      // And it must not be swallowed by the Stage-4A clarify intercepts
+      // either — those emit the same dead-end copy by another door.
+      expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_vague_edit');
+      expect(emittedNames()).not.toContain('v5.edit_graph.intercepted_chip_clarify');
+    });
+
+    // Anti-over-reach WIRING pin. Clause D must not swallow structural
+    // `add` requests, which are add_node territory and MUST keep their
+    // existing V4 route (this mirrors test #5 above; asserted here so a
+    // future widening of clause D fails loudly rather than silently
+    // stealing structural edits from edit_graph).
+    it('structural "Add a risk for coordination overhead" → STILL dispatches to edit_graph', async () => {
+      dispatchEditGraphMock.mockResolvedValueOnce({
+        response: {
+          response_version: 2 as const,
+          assistant_text: 'Tell me what drives the new risk.',
+          blocks: [] as const,
+          suggested_actions: [] as const,
+          insights: [] as const,
+          stage_indicator: 'analyse' as const,
+        },
+        commitPerformed: true,
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({
+          message: 'Add a risk for coordination overhead',
+          turn_id: '11111111-1111-4111-8111-111111111ee7',
+        }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });
