@@ -56,6 +56,7 @@ import type { OlumiResponse, Action, Insight, Block } from '@talchain/schemas/bo
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { finalizeChips } from './chip-finalizer.js';
+import { guardLoopingChipsAtEgress } from './looping-chip-guard.js';
 
 // ----------------------------------------------------------------------------
 // Per-string scrubber — moved to neutral location so V4 + CEE pipeline can
@@ -88,6 +89,18 @@ export interface EgressSanitiseOpts {
    * it through. Tests must supply a placeholder (e.g. 'test').
    */
   readonly exitPath: string;
+  /**
+   * The user's message for THIS turn, verbatim, or `null` when the turn has
+   * no user message (system events). Feeds the looping-chip guard, which
+   * drops any pure-text-replay chip that would re-submit this exact message
+   * (see `looping-chip-guard.ts` for the invariant and its scope).
+   *
+   * REQUIRED — same rationale as `exitPath` above. An optional field is one a
+   * future caller silently forgets, which would turn the no-dead-end
+   * guarantee into theatre. `null` is an explicit, honest "this turn has no
+   * user message"; omission is not an option the type checker allows.
+   */
+  readonly userMessage: string | null;
 }
 
 /**
@@ -118,13 +131,22 @@ export function sanitiseOlumiResponseForEgress(
   // unsafe/generic, dedupe exact + near, proposal-protected budget). Pure
   // and idempotent; the chokepoint runs this up to 4× per response.
   const finalized = finalizeChips(scrubbedActions);
+  // No-dead-end invariant: a chip whose click would re-submit the user's own
+  // message verbatim is an inescapable loop, never a choice. Runs AFTER the
+  // finalizer so it sees the same post-scrub text the wire would carry.
+  // Idempotent (a second pass finds nothing left to drop), which the
+  // chokepoint's up-to-4× re-entry requires.
+  const loopGuarded = guardLoopingChipsAtEgress(finalized.chips, opts.userMessage, {
+    requestId: opts.requestId,
+    exitPath: opts.exitPath,
+  });
 
   const sanitised: OlumiResponse = {
     ...response,
     assistant_text: collect(response.assistant_text),
     blocks: response.blocks.map((b) => sanitiseBlock(b, collect)),
-    // Spread the finalizer's readonly result into the mutable wire array.
-    suggested_actions: [...finalized.chips],
+    // Spread the finalizer + loop-guard readonly result into the mutable wire array.
+    suggested_actions: [...loopGuarded],
     insights: response.insights.map((i) => sanitiseInsight(i, collect)),
   };
 

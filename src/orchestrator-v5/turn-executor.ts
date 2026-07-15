@@ -77,6 +77,7 @@ import {
   tryDeterministicValueUpdate,
   tryDeicticValueUpdate,
   buildClarifyAssistantText,
+  buildNonFactorKindRefusalText,
   buildClarifyChipMessage,
   buildDeicticClarifyAssistantText,
   mapCqeQuantityToProposalValue,
@@ -4008,31 +4009,64 @@ export async function runTurnExecutor(
           // If precheck rejected above, STEP 2 returns PARAMETER_INVALID
           // and the validator-recoverable path produces the chip.
         } else {
-          // Either the candidate is non-factor (outcome, risk,
-          // decision, action — the kind gate per brief correction #3),
-          // OR the active registries cannot execute set_factor_value
-          // (registry guard — protects against misconfigured executors
-          // and future flag-gated handler registration). In both cases
-          // fall back to clarify so the user disambiguates / the chip
-          // click on the next turn re-enters Sonnet's normal routing.
-          // The `downgrade_reason` is recorded for the telemetry emit
-          // below so dashboards see why the dispatch flipped.
-          downgradeReason = !isFactor ? 'non_factor_kind' : 'handler_not_executable';
           // Preserve any from/to attribution tag across the downgrade
           // so the V5DeterministicValueUpdate telemetry still records
           // that this candidate originated from the from/to branch,
-          // even after the kind/registry guard demoted it to clarify.
+          // even after the kind/registry guard demoted the dispatch.
           // The outer guard at the top of this block already narrowed
           // `deterministicValueUpdate.dispatch === 'set_factor_value'`,
           // so `.attribution` is directly accessible on this variant.
           const carriedAttribution = deterministicValueUpdate.attribution;
-          deterministicValueUpdate = {
-            matched: true,
-            dispatch: 'clarify',
-            candidates: [candidate],
-            quantity: deterministicValueUpdate.quantity,
-            ...(carriedAttribution ? { attribution: carriedAttribution } : {}),
-          };
+          if (!isFactor) {
+            // KIND GATE — the user named a real node and we resolved it
+            // with certainty; it just isn't a factor, and no operation
+            // sets a value on a non-factor node directly.
+            //
+            // This used to reuse `dispatch: 'clarify'`, which was a
+            // CONFLATION of two different situations: "I don't know
+            // which entity you meant" (a real question, whose candidate
+            // list is the answer) versus "I know exactly which entity
+            // you meant and cannot do this to it" (not a question at
+            // all). The clarify copy then asked "I wasn't sure which
+            // factor you meant. Did you mean <label>?" — offering the
+            // user's own words back as the sole option, with a replay
+            // chip byte-identical to the message they had just sent.
+            // Live dead-end on staging f31e3852 (scenario 906d6aff…,
+            // "Set Key Talent Attrition to 0.8" on a risk node): no
+            // graph_patch, no route forward, and a risk described to
+            // the user as a "factor". Coach doctrine V3: a dead end is
+            // a failed turn even when every sentence in it is true.
+            //
+            // Now it dispatches its own variant, composed as an honest
+            // refusal that names the real kind and the supported route.
+            downgradeReason = 'non_factor_kind';
+            deterministicValueUpdate = {
+              matched: true,
+              dispatch: 'refuse_non_factor_kind',
+              candidate,
+              node_kind:
+                typeof nodeKind?.kind === 'string' ? nodeKind.kind : 'node',
+              quantity: deterministicValueUpdate.quantity,
+              ...(carriedAttribution ? { attribution: carriedAttribution } : {}),
+            };
+          } else {
+            // Registry guard — the active validation/handler registries
+            // cannot execute set_factor_value (misconfigured executor, or
+            // a future build gating handler registration on a flag). The
+            // target itself is valid, so this is NOT a refusal-on-kind:
+            // fall back to clarify so the chip click on the next turn
+            // re-enters Sonnet's normal routing. The `downgrade_reason`
+            // is recorded for the telemetry emit below so dashboards see
+            // why the dispatch flipped.
+            downgradeReason = 'handler_not_executable';
+            deterministicValueUpdate = {
+              matched: true,
+              dispatch: 'clarify',
+              candidates: [candidate],
+              quantity: deterministicValueUpdate.quantity,
+              ...(carriedAttribution ? { attribution: carriedAttribution } : {}),
+            };
+          }
         }
       }
 
@@ -4043,7 +4077,8 @@ export async function runTurnExecutor(
       // the pre-guard candidate. `original_dispatch` is preserved for
       // observability when a downgrade fires.
       const telemetryCandidates = deterministicValueUpdate.matched
-        ? deterministicValueUpdate.dispatch === 'set_factor_value'
+        ? deterministicValueUpdate.dispatch === 'set_factor_value' ||
+          deterministicValueUpdate.dispatch === 'refuse_non_factor_kind'
           ? [deterministicValueUpdate.candidate]
           : deterministicValueUpdate.candidates
         : [];
@@ -4069,7 +4104,8 @@ export async function runTurnExecutor(
         attribution:
           deterministicValueUpdate.matched &&
           (deterministicValueUpdate.dispatch === 'set_factor_value' ||
-            deterministicValueUpdate.dispatch === 'clarify')
+            deterministicValueUpdate.dispatch === 'clarify' ||
+            deterministicValueUpdate.dispatch === 'refuse_non_factor_kind')
             ? deterministicValueUpdate.attribution ?? null
             : null,
         skip_reason: deterministicValueUpdate.matched
@@ -4186,6 +4222,115 @@ export async function runTurnExecutor(
               err: serialiseError(error),
             },
             'V5 TurnExecutor commit failure on deictic-clarify pre-route',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      }
+
+      if (
+        deterministicValueUpdate.matched &&
+        deterministicValueUpdate.dispatch === 'refuse_non_factor_kind'
+      ) {
+        // HONEST REFUSAL — the user named a real node for a value-edit and
+        // it is not a factor. Setting a value on a non-factor node is
+        // unsupported by design (`set_factor_value` is the only
+        // value-setting handler and rejects non-factor targets; no
+        // `set_node_value` handler exists), so there is nothing to
+        // disambiguate and no proposal to hold. Say so plainly, name the
+        // node's REAL kind, and name the routes that exist.
+        //
+        // NO pending actions are persisted: a pending action exists to be
+        // resumed by a chip click, and there is no resumable
+        // `set_factor_value` here — the target is invalid for it. Emitting
+        // one would recreate the dead-end loop by another door.
+        //
+        // Chips are `chip_prompt_*` (suggestion family), NOT
+        // `chip_clarify_factor_*` (candidate-pick family): these are
+        // alternative routes the user may take, not answers to a question
+        // we asked. The distinction is load-bearing for the egress
+        // chip-finalizer, which sizes and dedupes the two families
+        // differently.
+        const refusedCandidate = deterministicValueUpdate.candidate;
+        const refusedKind = deterministicValueUpdate.node_kind;
+        const factorLabelsForRefusal = (graphStateForTurn?.nodes ?? [])
+          .filter((n) => (n as { kind?: unknown }).kind === 'factor')
+          .map((n) => (n as { label?: unknown }).label)
+          .filter(
+            (l): l is string => typeof l === 'string' && l.trim().length > 0,
+          );
+        const refusalChips: SuggestedAction[] = [
+          ...factorLabelsForRefusal.slice(0, 2).map((factorLabel, idx) => ({
+            id: `chip_prompt_refuse_factor_${idx}`,
+            label: factorLabel,
+            message: buildClarifyChipMessage(
+              payload.message,
+              {
+                id: '',
+                label: factorLabel,
+                score: 1,
+                source: 'substring' as const,
+                labelMatchIndex: null,
+              },
+              deterministicValueUpdate.quantity,
+            ),
+          })),
+          {
+            id: 'chip_prompt_refuse_constraint',
+            label: `Add a constraint on ${refusedCandidate.label}`,
+            message: `Add a constraint on ${refusedCandidate.label}.`,
+          },
+        ];
+        const refusalResponse = composeDirectAnswerResponse({
+          assistant_text: buildNonFactorKindRefusalText(
+            refusedCandidate.label,
+            refusedKind,
+            factorLabelsForRefusal,
+          ),
+          stage: context.stage,
+          suggested_actions: refusalChips,
+        });
+        sonnetTextForLog = refusalResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+
+        try {
+          const committed = await commitTurn(refusalResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            pending_actions: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              err:
+                error instanceof Error
+                  ? { name: error.name, message: error.message }
+                  : { message: String(error) },
+            },
+            'V5 TurnExecutor: commit failed on non-factor-kind refusal',
           );
           failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
           response = buildFailureResponse(

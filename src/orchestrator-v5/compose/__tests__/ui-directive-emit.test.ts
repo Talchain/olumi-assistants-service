@@ -234,7 +234,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, recommended option 
     const out = sanitiseOlumiResponseForEgress(OlumiResponseSchema.parse(env), {
       graph,
       requestId: 'req-ui-directive',
-      exitPath: 'test',
+      exitPath: 'test', userMessage: null,
     });
     const after = uiDirectives(out);
     expect(after).toHaveLength(1);
