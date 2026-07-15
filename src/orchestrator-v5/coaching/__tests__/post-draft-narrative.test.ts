@@ -1268,3 +1268,48 @@ describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery 
     assertPassesAllGuards(result.text);
   });
 });
+
+// ============================================================================
+// RC4 proportionate remedies (2026-07-15 session RCA) — the em-dash STYLE
+// offence must never cost the user the drafted coaching summary. Live
+// evidence: turn 1 of the session generated a good coaching summary that the
+// gate killed for a single em dash (`coaching_summary_passed_gate:false,
+// reject_reason:"em_dash"` → strengthen_item_label fallback). The remedy is
+// now an in-place deterministic rewrite; the summary SHIPS.
+// This asserts through the real composition path (`buildPostDraftNarrative`
+// is what draft-graph-dispatch renders as final user-visible text).
+// ============================================================================
+
+describe('RC4 — em-dash coaching summary survives with the dash rewritten', () => {
+  const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]);
+
+  it('ships the LLM coaching summary with the em dash rewritten in place', () => {
+    const summary =
+      'Your decision model weighs delivery speed against hiring risk — the trade-off that matters most here. One assumption worth checking is the hiring timeline. Next, run the analysis to see how the options compare.';
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    expect(result.telemetry.assumption_source).toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(true);
+    expect(result.telemetry.coaching_summary_reject_reason).toBeNull();
+    expect(result.telemetry.coaching_summary_style_rewritten).toBe(true);
+    expect(result.text).toBe(
+      'Your decision model weighs delivery speed against hiring risk, the trade-off that matters most here. One assumption worth checking is the hiring timeline. Next, run the analysis to see how the options compare.',
+    );
+    expect(result.text).not.toMatch(/[–—]/);
+    assertCleanCopy(result.text);
+  });
+
+  it('reports style_rewritten=false for a dash-free summary that passes', () => {
+    const summary =
+      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare.';
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+    });
+    expect(result.telemetry.assumption_source).toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_style_rewritten).toBe(false);
+    expect(result.text).toBe(summary);
+  });
+});

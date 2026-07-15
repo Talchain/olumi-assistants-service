@@ -1582,16 +1582,20 @@ export const TelemetryEvents = {
   //   coaching_summary_present: boolean,
   //   coaching_summary_passed_gate: boolean,
   //   coaching_summary_reject_reason: GateRejectReason | null,
+  //   coaching_summary_style_rewritten: boolean,   // RC4: em/en dash
+  //                                                // rewritten in place
   //   fallback_reason: 'gate_rejected' | 'no_candidate' | null,
   //   strengthen_items_count: number,
   //   bias_findings_count: number,
   //   coaching_bias_signals_count: number }.
   //
   // GateRejectReason values: 'empty' | 'too_short' | 'too_long' |
-  //   'em_dash' | 'internal_id' | 'schema_term' | 'graph_shape' |
+  //   'internal_id' | 'schema_term' | 'graph_shape' |
   //   'premature_recommendation' | 'question_shaped' |
   //   'trailing_punctuation' | 'awkward_grammar' | 'markdown' |
   //   'no_decision_framing' | 'no_tradeoff_or_gap' | 'no_next_step'.
+  // ('em_dash' retired by RC4 proportionate remedies — a style offence
+  //  is rewritten in place by the gate, never rejected.)
   V5PostDraftCoachingSourceSelected: "v5.post_draft_coaching.source_selected",
 
   // V5 Phase 2 workstream A — post-analysis coaching wrapper fired.

@@ -1,4 +1,5 @@
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import { rewriteEmDashes } from '../compose/terminology-rewrite.js';
 
 /**
  * Pure deterministic copy-quality gate for post-draft coaching strings.
@@ -131,12 +132,6 @@ const PREMATURE_RECOMMENDATION_REGEX = new RegExp(
 );
 
 /**
- * Em dash detection. The existing draft-narrative tests pin this as a
- * hard ban, mirroring the egress guard. En dashes also trip (U+2013).
- */
-const EM_DASH_REGEX = /[–—]/;
-
-/**
  * Markdown / bullet / numbered-list / header formatting. A coaching
  * summary should render as a single paragraph of prose; bullet-shaped
  * input is almost always either an LLM that ignored the format
@@ -201,7 +196,6 @@ export type GateRejectReason =
   | 'empty'
   | 'too_short'
   | 'too_long'
-  | 'em_dash'
   | 'internal_id'
   | 'schema_term'
   | 'graph_shape'
@@ -217,12 +211,18 @@ export type GateRejectReason =
 export interface GateResult {
   readonly accept: boolean;
   readonly rejectReason?: GateRejectReason;
+  /**
+   * RC4 proportionate remedies: the sanitised candidate to ship on accept.
+   * Equal to the trimmed input when no style rewrite was needed. Callers
+   * MUST render this value, not the original candidate, so a style
+   * offence (em/en dash) is repaired in place instead of costing the
+   * user the generated coaching (the 2026-07-15 session lost its drafted
+   * coaching summary to a single em dash).
+   */
+  readonly text?: string;
+  /** True when the deterministic style rewrite changed the candidate. */
+  readonly styleRewritten?: boolean;
 }
-
-// Frozen singleton — accept results have no per-call state, and freezing
-// guards against accidental shared-reference mutation from mixed-JS
-// callers that bypass the readonly type-level contract.
-const ACCEPT: GateResult = Object.freeze({ accept: true });
 
 /** Convenience: build a rejecting result with a category. */
 function reject(reason: GateRejectReason): GateResult {
@@ -231,21 +231,49 @@ function reject(reason: GateRejectReason): GateResult {
 
 /**
  * Shared checks applied to both fragments and full responses.
- * Returns the first failure, or null if none of the shared rules trip.
+ *
+ * RC4 proportionate remedies: em/en dashes are a STYLE offence — the
+ * previous hard `em_dash` rejection destroyed whole LLM coaching
+ * candidates over one character (live-evidenced 2026-07-15). The dash is
+ * now rewritten in place (`rewriteEmDashes`: numeric ranges → "to",
+ * interior dashes → comma join) BEFORE the remaining rules run; every
+ * other rule keeps its rejecting remedy (they are content offences —
+ * premature recommendation pre-analysis, internal leaks — with no safe
+ * deterministic rewrite at this surface).
  */
-function checkShared(text: string): GateResult | null {
-  if (typeof text !== 'string') return reject('empty');
-  const trimmed = text.trim();
-  if (trimmed.length === 0) return reject('empty');
-  if (EM_DASH_REGEX.test(trimmed)) return reject('em_dash');
-  if (hasConfirmedInternalId(trimmed)) return reject('internal_id');
-  if (GRAPH_SHAPE_REGEX.test(trimmed)) return reject('graph_shape');
+interface SharedCheckOutcome {
+  /** The first failing rule, or null when the shared rules pass. */
+  readonly failure: GateResult | null;
+  /** The trimmed, style-rewritten candidate the caller must continue with. */
+  readonly text: string;
+  /** True when the dash rewrite changed the candidate. */
+  readonly styleRewritten: boolean;
+}
+
+function checkShared(text: string): SharedCheckOutcome {
+  if (typeof text !== 'string') {
+    return { failure: reject('empty'), text: '', styleRewritten: false };
+  }
+  const dash = rewriteEmDashes(text.trim());
+  const trimmed = dash.text.trim();
+  if (trimmed.length === 0) {
+    return { failure: reject('empty'), text: trimmed, styleRewritten: dash.rewritten };
+  }
+  const outcome = (failure: GateResult | null): SharedCheckOutcome => ({
+    failure,
+    text: trimmed,
+    styleRewritten: dash.rewritten,
+  });
+  if (hasConfirmedInternalId(trimmed)) return outcome(reject('internal_id'));
+  if (GRAPH_SHAPE_REGEX.test(trimmed)) return outcome(reject('graph_shape'));
   const lower = trimmed.toLowerCase();
   for (const term of FORBIDDEN_SCHEMA_TERMS) {
-    if (lower.includes(term)) return reject('schema_term');
+    if (lower.includes(term)) return outcome(reject('schema_term'));
   }
-  if (PREMATURE_RECOMMENDATION_REGEX.test(trimmed)) return reject('premature_recommendation');
-  return null;
+  if (PREMATURE_RECOMMENDATION_REGEX.test(trimmed)) {
+    return outcome(reject('premature_recommendation'));
+  }
+  return outcome(null);
 }
 
 /**
@@ -272,8 +300,8 @@ function hasConfirmedInternalId(text: string): boolean {
  */
 export function gateAssumptionFragment(text: string): GateResult {
   const shared = checkShared(text);
-  if (shared) return shared;
-  const trimmed = (text as string).trim();
+  if (shared.failure) return shared.failure;
+  const trimmed = shared.text;
 
   if (trimmed.length < FRAGMENT_MIN_CHARS) return reject('too_short');
   if (trimmed.length > FRAGMENT_MAX_CHARS) return reject('too_long');
@@ -296,7 +324,7 @@ export function gateAssumptionFragment(text: string): GateResult {
     return reject('awkward_grammar');
   }
 
-  return ACCEPT;
+  return { accept: true, text: trimmed, styleRewritten: shared.styleRewritten };
 }
 
 /**
@@ -310,8 +338,8 @@ export function gateAssumptionFragment(text: string): GateResult {
  */
 export function gateFullResponse(text: string): GateResult {
   const shared = checkShared(text);
-  if (shared) return shared;
-  const trimmed = (text as string).trim();
+  if (shared.failure) return shared.failure;
+  const trimmed = shared.text;
 
   if (trimmed.length < RESPONSE_MIN_CHARS) return reject('too_short');
   if (trimmed.length > RESPONSE_MAX_CHARS) return reject('too_long');
@@ -324,5 +352,5 @@ export function gateFullResponse(text: string): GateResult {
   if (!TRADEOFF_OR_GAP_TOKENS_REGEX.test(trimmed)) return reject('no_tradeoff_or_gap');
   if (!NEXT_STEP_TOKENS_REGEX.test(trimmed)) return reject('no_next_step');
 
-  return ACCEPT;
+  return { accept: true, text: trimmed, styleRewritten: shared.styleRewritten };
 }

@@ -31,6 +31,8 @@
  * denial detection.
  */
 
+import { applyTerminologyRewrite } from './terminology-rewrite.js';
+
 export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // "I haven't applied any changes" — straight apostrophe AND curly
   // apostrophe variants. Anchoring on `\b` after `changes` allows for
@@ -189,30 +191,65 @@ export const EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT =
 
 /**
  * Apply the finaliser-level egress guard to a candidate `assistant_text`
- * value. Pure function — returns either the original text unchanged
- * (when clean) or the neutral fallback (when a forbidden phrase fires).
+ * value. Pure function.
+ *
+ * RC4 proportionate remedies (2026-07-15 session RCA): the guard is
+ * REWRITE-FIRST. When the (first) hit belongs to the rewritable
+ * prescriptive-lexicon class, the deterministic terminology substitution
+ * (`applyTerminologyRewrite`, mirroring the prompt TERMINOLOGY map —
+ * "recommendation" → "leading option" etc.) is applied and the result is
+ * RE-SCANNED with `findForbiddenPhraseHit`. Only a residual hit — by
+ * construction a fatal-class phrase (mutation denial, false success,
+ * staleness wording, internal jargon), for which no safe rewrite exists —
+ * triggers the whole-response neutral-fallback replacement. Detection is
+ * NOT weakened anywhere: the phrase list and `findForbiddenPhraseHit` are
+ * unchanged; only the REMEDY is proportionate to the offence class. The
+ * re-scan (not a second phrase list) is what keeps the fatal classes
+ * fatal — there is no mirrored "rewritable phrases" list to drift.
  *
  * Callers MUST emit `v5.egress.forbidden_phrase_detected` telemetry on
  * a rewritten result, tagging the per-emit-path `dispatch_path`. The
  * helper itself is telemetry-free so it stays usable from any module
- * without coupling to the telemetry registry.
+ * without coupling to the telemetry registry. `remedy` (and
+ * `rewritten_terms` on a terminology rewrite) let callers enrich that
+ * event without re-deriving the classification.
  *
  * Idempotent: a second call on a rewritten result is a no-op because
- * the fallback contains no forbidden phrase.
+ * neither the terminology-rewritten text nor the fallback contains a
+ * forbidden phrase.
  */
 export interface EgressGuardResult {
   readonly rewritten: boolean;
   readonly text: string;
   readonly hit: string | null;
+  /** How the violation was remedied (RC4 proportionate remedies). */
+  readonly remedy: 'none' | 'terminology_rewrite' | 'fallback_replacement';
+  /** Terms substituted when `remedy === 'terminology_rewrite'`. Generic
+   *  banned vocabulary only — safe for telemetry. */
+  readonly rewritten_terms?: readonly string[];
 }
 
 export function applyEgressForbiddenPhraseGuard(text: string): EgressGuardResult {
   const hit = findForbiddenPhraseHit(text);
-  if (hit === null) return { rewritten: false, text, hit: null };
+  if (hit === null) return { rewritten: false, text, hit: null, remedy: 'none' };
+  const substituted = applyTerminologyRewrite(text);
+  if (
+    substituted.applied.length > 0 &&
+    findForbiddenPhraseHit(substituted.text) === null
+  ) {
+    return {
+      rewritten: true,
+      text: substituted.text,
+      hit,
+      remedy: 'terminology_rewrite',
+      rewritten_terms: substituted.applied,
+    };
+  }
   return {
     rewritten: true,
     text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
     hit,
+    remedy: 'fallback_replacement',
   };
 }
 

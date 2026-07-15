@@ -1215,7 +1215,12 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     ['fac_delivery_risk', 'low'],
   ]);
 
-  it('narrative card drops when narrative_summary contains banned recommendation language', () => {
+  // RC4 (2026-07-15 session RCA): banned RECOMMENDATION/WINNER language is a
+  // REWRITABLE lexicon offence — the proportionate remedy is a deterministic
+  // terminology substitution (prompt TERMINOLOGY map), not a block drop. The
+  // previous versions of these tests pinned the drop remedy; they now pin the
+  // rewrite. Non-rewritable offences (raw decimals, raw ids) keep the drop.
+  it('narrative card survives with banned recommendation language rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         narrative_summary: 'Our recommendation is to launch immediately.',
@@ -1223,7 +1228,9 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+    const narrative = blocks.filter((b) => b.card_kind === 'narrative');
+    expect(narrative).toHaveLength(1);
+    expect(narrative[0]!.body).toBe('Our leading option is to launch immediately.');
   });
 
   it('narrative card drops when narrative_summary contains a raw decimal probability', () => {
@@ -1248,7 +1255,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
   });
 
-  it('bias card drops when description contains banned "winning option" language', () => {
+  it('bias card survives with banned "winning option" language rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         bias_findings: [
@@ -1263,7 +1270,11 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.card_kind === 'bias')).toHaveLength(0);
+    const bias = blocks.filter((b) => b.card_kind === 'bias');
+    expect(bias).toHaveLength(1);
+    expect(bias[0]!.body).toBe(
+      'The model favours the leading option without sufficient evidence.',
+    );
   });
 
   it('robustness card drops when summary contains a raw decimal sensitivity value', () => {
@@ -1279,7 +1290,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     expect(blocks.filter((b) => b.card_kind === 'robustness')).toHaveLength(0);
   });
 
-  it('flip_threshold card drops when narrative contains banned recommendation language', () => {
+  it('flip_threshold card survives with banned recommendation language rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         flip_thresholds: [
@@ -1295,7 +1306,9 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.card_kind === 'flip_threshold')).toHaveLength(0);
+    const flips = blocks.filter((b) => b.card_kind === 'flip_threshold');
+    expect(flips).toHaveLength(1);
+    expect(flips[0]!.body).toBe('The leading option hinges on delivery risk staying low.');
   });
 
   it('assumption card drops when key_assumption text contains an entity-id-shaped token', () => {
@@ -1309,7 +1322,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     expect(blocks.filter((b) => b.card_kind === 'assumption')).toHaveLength(0);
   });
 
-  it('scenario_context card drops when trigger/consequence prose contains a banned phrase', () => {
+  it('scenario_context card survives with a banned (rewritable) phrase rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         scenario_contexts: {
@@ -1322,10 +1335,14 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.card_kind === 'scenario_context')).toHaveLength(0);
+    const scenarios = blocks.filter((b) => b.card_kind === 'scenario_context');
+    expect(scenarios).toHaveLength(1);
+    expect(scenarios[0]!.body).toBe(
+      'If delivery risk spikes. the leading option flips to overseas.',
+    );
   });
 
-  it('coaching assumption_check drops when assumption text contains banned recommendation language', () => {
+  it('coaching assumption_check survives with banned recommendation language rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         key_assumptions: ['Our recommendation assumes market growth continues.'],
@@ -1333,7 +1350,9 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildCoachingBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.coaching_kind === 'assumption_check')).toHaveLength(0);
+    const checks = blocks.filter((b) => b.coaching_kind === 'assumption_check');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.body).toContain('Our leading option assumes market growth continues');
   });
 
   it('coaching calibration_prompt drops when question prose contains a raw decimal', () => {
@@ -1352,7 +1371,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     expect(blocks.filter((b) => b.coaching_kind === 'calibration_prompt')).toHaveLength(0);
   });
 
-  it('evidence block drops when rationale contains banned "the winner" prescriptive phrasing', () => {
+  it('evidence block survives with banned "the winner" prescriptive phrasing rewritten (RC4)', () => {
     const fact = makeFact({
       decisionReview: {
         evidence_enhancements: {
@@ -1368,7 +1387,9 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
     });
     const blocks = buildEvidenceBlocks(fact, cleanLookup, cleanConf, CTX);
-    expect(blocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.evidence_gap).toBe('This evidence picks the leading option cleanly.');
+    expect(blocks[0]!.evidence_gap).not.toMatch(/\bthe\s+winners?\b/i);
   });
 
   it('evidence block drops when impact_if_gathered contains a raw decimal sensitivity value', () => {
@@ -1491,9 +1512,12 @@ describe('Round-4 raw-ID telemetry redaction (P1.2)', () => {
   });
 
   it('logs full-token matched substring for forbidden-phrase drops (safe — generic vocabulary)', () => {
+    // RC4: the fixture must be a NON-rewritable (fatal-class) phrase —
+    // rewritable lexicon offences ("recommendation") no longer drop; they
+    // are rewritten in place and logged via v5.phase3.block_rewritten.
     const fact = makeFact({
       decisionReview: {
-        narrative_summary: 'Our recommendation is to launch.',
+        narrative_summary: 'Our validator confirms the launch plan holds.',
       },
       graphNodes: STANDARD_GRAPH_NODES,
     });
@@ -1507,8 +1531,44 @@ describe('Round-4 raw-ID telemetry redaction (P1.2)', () => {
     // Forbidden-phrase samples are generic banned vocabulary; logging
     // them is the operator signal for what to chase.
     expect((call![0] as Record<string, unknown>).sample).toMatch(
-      /recommendation/i,
+      /validator/i,
     );
+  });
+
+  it('RC4: a rewritable lexicon hit is VISIBLE via v5.phase3.block_rewritten telemetry, not a drop', () => {
+    const infoSpy = vi.spyOn(log, 'info').mockImplementation(() => log);
+    try {
+      const fact = makeFact({
+        decisionReview: {
+          narrative_summary: 'Our recommendation is to launch.',
+        },
+        graphNodes: STANDARD_GRAPH_NODES,
+      });
+      buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+      // No drop fired for this block… (`call` not destructured — the spy's
+      // calls are `any[]`, and a destructured binding would add a TS7031 to
+      // the typecheck-drift census.)
+      const dropCall = warnSpy.mock.calls.find(
+        (call: unknown[]) =>
+          (call[0] as Record<string, unknown>).drop_reason ===
+          'prose_guard_forbidden_phrase',
+      );
+      expect(dropCall).toBeUndefined();
+      // …and the rewrite is visible with gate id + term.
+      const rewriteCall = infoSpy.mock.calls.find(
+        ([payload]) =>
+          typeof payload === 'object' &&
+          payload !== null &&
+          (payload as Record<string, unknown>).event ===
+            'v5.phase3.block_rewritten',
+      );
+      expect(rewriteCall).toBeDefined();
+      const payload = rewriteCall![0] as Record<string, unknown>;
+      expect(payload.block_type).toBe('review_card');
+      expect(JSON.stringify(payload.terms)).toMatch(/recommendation/i);
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 });
 
@@ -2021,5 +2081,81 @@ describe('Finding 1 — lever-naming guard on all free-text surfaces', () => {
     const cal = buildCoachingBlocks(fact, lookup, CTX)
       .filter((b) => b.coaching_kind === 'calibration_prompt');
     expect(cal).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// RC4 proportionate remedies — REWRITE-DON'T-DROP for the prescriptive
+// lexicon. Live evidence (2026-07-15 session RCA): the robustness review
+// card was DROPPED at egress for containing the word "recommendation"
+// (`prose_guard_forbidden_phrase`, sample "recommendation") on every review
+// emission — generated coaching destroyed by its own guard. The remedy for
+// a REWRITABLE lexicon offence is now a deterministic terminology
+// substitution (prompt TERMINOLOGY map: "recommendation" → "leading
+// option"); the block SURVIVES with the term rewritten. Fatal classes
+// (denial phrases, raw decimals, raw ids, lever-naming, lookup misses)
+// keep their drop remedy — pinned below.
+// ============================================================================
+
+describe('RC4 rewrite-don\'t-drop — rewritable lexicon offences survive rewritten', () => {
+  const cleanLookup = buildGraphNodeLookup(
+    makeFact({ graphNodes: STANDARD_GRAPH_NODES }),
+  );
+
+  it('robustness card SURVIVES with "recommendation" rewritten to "leading option" (tonight\'s live kill)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        robustness_explanation: {
+          summary:
+            'The recommendation is robust: it holds across most plausible scenarios, and only a large shift in delivery risk would overturn it.',
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    const robustness = blocks.filter((b) => b.card_kind === 'robustness');
+    expect(robustness).toHaveLength(1);
+    expect(robustness[0]!.body).toBe(
+      'The leading option is robust: it holds across most plausible scenarios, and only a large shift in delivery risk would overturn it.',
+    );
+    expect(robustness[0]!.body).not.toMatch(/\brecommendations?\b/i);
+  });
+
+  // ── FATAL classes keep the drop remedy — do NOT weaken. ──────────────────
+
+  it('still DROPS when a denial phrase (fatal class) accompanies a rewritable term', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary:
+          'Nothing changed on the model, so the recommendation stands as before.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+  });
+
+  it('still DROPS on a raw decimal even when a rewritable term is also present', () => {
+    const fact = makeFact({
+      decisionReview: {
+        robustness_explanation: {
+          summary: 'The recommendation is sensitive at the 0.42 threshold.',
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'robustness')).toHaveLength(0);
+  });
+
+  it('still DROPS on an internal-jargon phrase with no safe rewrite', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'The validator confirmed the launch plan is coherent.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
   });
 });
