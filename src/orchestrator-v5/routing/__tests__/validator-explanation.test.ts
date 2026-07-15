@@ -392,3 +392,141 @@ describe('Test A diagnosis: explain_from_structure pre-analysis validation paths
 // regex. Tests for the prefix helper live in `staleness-prefix.test.ts`;
 // integration coverage flows through the handler tests in
 // `explain-results.test.ts` / `what-would-flip.test.ts`.
+
+// ---------------------------------------------------------------------------
+// Rule 5 — fabricated RESULT reference on a pre-analysis explanation turn.
+//
+// Before this lane, explanation turns had NO fabricated-result policing at all:
+//   * `applyCoachingOutputGuard` (turn-executor) runs only on coach/converse;
+//   * the old rule 5 was guarded by `requiresAnalysis && !hasAnalysisFact` —
+//     the identical condition that already returned `skip:true` upstream, so it
+//     was unreachable DEAD CODE;
+//   * `explain_from_structure` was not in HANDLERS_REQUIRING_ANALYSIS_FACT, so
+//     it could never be analysis-policed under any condition.
+// The rule is now gated on `!hasAnalysisFact` alone, so it is live for EVERY
+// explanation handler that does not hit the precondition bypass — which is what
+// makes a NEW explanation handler policed by default.
+//
+// The detector is the attribution-anchored `hasFabricatedResultReference`
+// shared with the coaching post-check — NOT the old crude
+// ANALYSIS_LANGUAGE_TERMS substring list. See the "does not fire on structural
+// prose" test below for why the crude list could never have been turned on.
+// ---------------------------------------------------------------------------
+describe('rule 5: fabricated result reference (pre-analysis explanation turns)', () => {
+  it('arm (c): explain_from_structure, no analysis — invented first-person run is caught', () => {
+    const verdict = validateExplanationAnswer(
+      'explain_from_structure',
+      {
+        answer_text:
+          'I ran the analysis overnight and Plan A came out clearly ahead of the other two choices you are weighing.',
+      },
+      [],
+    );
+    expect(verdict.skip).toBe(false);
+    expect(verdict.payload?.answer_text_valid).toBe(false);
+    expect(verdict.payload?.answer_validation_error).toBe('fabricated_result_reference');
+  });
+
+  it('arm (a): explain_from_structure, no analysis — result-noun → verb attribution is caught', () => {
+    const verdict = validateExplanationAnswer(
+      'explain_from_structure',
+      {
+        answer_text:
+          'The analysis shows Plan A is the strongest choice for your situation, with a comfortable lead over the alternatives.',
+      },
+      [],
+    );
+    expect(verdict.skip).toBe(false);
+    expect(verdict.payload?.answer_text_valid).toBe(false);
+    expect(verdict.payload?.answer_validation_error).toBe('fabricated_result_reference');
+  });
+
+  it('arm (b): explain_from_structure, no analysis — "according to our analysis" is caught', () => {
+    const verdict = validateExplanationAnswer(
+      'explain_from_structure',
+      {
+        answer_text:
+          'According to our analysis, Plan A is the strongest option available to you right now given the constraints you described.',
+      },
+      [],
+    );
+    expect(verdict.skip).toBe(false);
+    expect(verdict.payload?.answer_text_valid).toBe(false);
+    expect(verdict.payload?.answer_validation_error).toBe('fabricated_result_reference');
+  });
+
+  it('arm (d): explain_from_structure, no analysis — "wins with 62%" is caught', () => {
+    const verdict = validateExplanationAnswer(
+      'explain_from_structure',
+      {
+        answer_text:
+          'Plan A wins with 62% across every scenario we considered, so it is the one I would steer you toward today overall.',
+      },
+      [],
+    );
+    expect(verdict.skip).toBe(false);
+    expect(verdict.payload?.answer_text_valid).toBe(false);
+    expect(verdict.payload?.answer_validation_error).toBe('fabricated_result_reference');
+  });
+
+  it('screen: an OFFER to run the analysis is not a fabricated result', () => {
+    const verdict = validateExplanationAnswer(
+      'explain_from_structure',
+      {
+        answer_text:
+          'Want me to run the analysis so it shows which option leads? Nothing has been computed for you yet at this point.',
+      },
+      [],
+    );
+    expect(verdict.skip).toBe(false);
+    expect(verdict.payload?.answer_text_valid).toBe(true);
+  });
+
+  it("screen: attribution to the USER's own analysis is not a fabricated result", () => {
+    const verdict = validateExplanationAnswer(
+      'explain_from_structure',
+      {
+        answer_text:
+          'The analysis you shared shows Plan A ahead, but I have not computed anything on this side for you yet.',
+      },
+      [],
+    );
+    expect(verdict.skip).toBe(false);
+    expect(verdict.payload?.answer_text_valid).toBe(true);
+  });
+
+  it('gate: WITH a real analysis fact, attributing a result is legitimate and stays valid', () => {
+    // The rule is gated on `!hasAnalysisFact`, mirroring the coaching
+    // post-check's `!analysisResultExists`. A real result exists here, so
+    // referencing it is not fabrication. Guards against over-policing.
+    const verdict = validateExplanationAnswer(
+      'explain_results',
+      {
+        answer_text:
+          'The analysis shows Plan A is the strongest choice for your situation, with a comfortable lead over the alternatives.',
+      },
+      [RUN_ANALYSIS_FACT],
+    );
+    expect(verdict.skip).toBe(false);
+    expect(verdict.payload?.answer_text_valid).toBe(true);
+  });
+
+  it('does NOT fire on legitimate structural prose using driver / sensitivity / margin', () => {
+    // This is why the rule could NOT simply reuse the old crude
+    // ANALYSIS_LANGUAGE_TERMS substring list ('driver', 'sensitivity',
+    // 'margin', ...). explain_from_structure exists precisely to answer
+    // pre-analysis STRUCTURAL questions, and that prose legitimately names
+    // causal drivers and the user's own factor labels. A substring rule would
+    // have degraded every one of those answers to the deterministic fallback.
+    const verdict = validateExplanationAnswer(
+      'explain_from_structure',
+      {
+        answer_text:
+          'Profit Margin is the strongest driver of your goal, and its sensitivity to demand is the largest in the structure you built.',
+      },
+      [],
+    );
+    expect(verdict.skip).toBe(false);
+    expect(verdict.payload?.answer_text_valid).toBe(true);
+  });
+});
