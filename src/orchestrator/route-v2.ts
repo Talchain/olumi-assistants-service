@@ -142,6 +142,8 @@ import {
   PROPOSAL_CONFIRM_PATTERN,
   SHORT_CONFIRM_PATTERN,
 } from '../orchestrator-v5/routing/deterministic-short-confirm.js';
+import { findExactProposalCopyMatchIndexes } from '../orchestrator-v5/routing/proposal-ordinal-select.js';
+import { resolveProposalRenderCopy } from '../orchestrator-v5/compose/proposed-change.js';
 import { isStateQueryQuestionShape } from '../orchestrator-v5/routing/state-query-guard.js';
 import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
 import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
@@ -1040,7 +1042,28 @@ type ProposalConfirmResolution =
   | {
       readonly kind: 'clarify';
       readonly outcome: 'clarify_none' | 'clarify_expired' | 'clarify_hash_mismatch';
+    }
+  | {
+      /**
+       * P0 held-proposal replay (2026-07-15, DGAI #340) — replay-candidate
+       * path only: the message did not exactly match any proposal the user
+       * was shown, so this is NOT a confirmation. Edit routing proceeds
+       * untouched (an unrelated edit-verb chip label or a fresh
+       * affirmative-prefixed edit command must never be hijacked by a live
+       * hold, and must never get the no-live-proposal clarification).
+       */
+      readonly kind: 'pass';
+      readonly outcome: 'replay_no_match';
     };
+
+/**
+ * P0 held-proposal replay (2026-07-15, DGAI #340) — affirmative-prefixed
+ * message shapes ("Yes, add 'Wasted time' and 2 more changes.") that a user
+ * may type, or that a hold chip's MESSAGE replays. Prefix-anchored only:
+ * the exact-match against the proposal's rendered copy is the real gate;
+ * this pattern merely bounds which messages pay the pendings read.
+ */
+const AFFIRMATIVE_PREFIX_PATTERN = /^\s*(?:yes|yeah|yep|ok(?:ay)?|sure|confirm)\b/i;
 
 /**
  * Resolve whether a confirmation-shaped message should SUPPRESS edit routing
@@ -1056,6 +1079,18 @@ async function resolveProposalConfirmAtRoute(
   scenarioId: string,
   requestId: string,
   requestGraphState: GraphStateIngress | null,
+  /**
+   * P0 held-proposal replay (2026-07-15, DGAI #340): non-null on the
+   * REPLAY-CANDIDATE path — a message that is NOT confirmation-shaped but
+   * could be a proposal-copy replay (a chip_click ingress, or an
+   * affirmative-prefixed reply). The message must then EXACTLY match a
+   * proposal's rendered label or message (the same strings + normalisation
+   * TurnExecutor's pass-7 pre-route matches) for edit routing to be
+   * suppressed; no match returns `pass` and edit routing proceeds
+   * untouched. `null` keeps the original confirmation-shaped behaviour
+   * byte-identical.
+   */
+  replayMessage: string | null = null,
 ): Promise<ProposalConfirmResolution> {
   let pendings: readonly PendingAction[];
   try {
@@ -1076,6 +1111,43 @@ async function resolveProposalConfirmAtRoute(
     return { kind: 'suppress', outcome: 'suppressed_read_failed', liveCount: 0 };
   }
   const proposals = pendings.filter((pa) => pa.action.kind === 'apply_proposed_change');
+  // ── P0 held-proposal replay path (2026-07-15, DGAI #340) ──────────────
+  // The message is edit-verb-bearing and NOT confirmation-shaped, but came
+  // from a chip click or starts with an affirmative. It counts as a
+  // confirmation ONLY if it exactly matches a live proposal's rendered
+  // copy — the strings the user was actually shown. On a match, suppress
+  // edit routing so TurnExecutor's exact-match pre-route resolves the SAME
+  // proposal (GM holds via the dedicated held-execute resume). The
+  // graph-hash precondition is deliberately NOT filtered here: the
+  // executor's resume path re-checks it like-for-like and owns the honest
+  // superseded recovery — filtering here would misdirect a hash-diverged
+  // replay into the edit LLM instead.
+  if (replayMessage !== null) {
+    if (proposals.length === 0) {
+      return { kind: 'pass', outcome: 'replay_no_match' };
+    }
+    const replayNowMs = Date.now();
+    const liveProposals = proposals.filter((pa) => !isPendingActionExpired(pa, replayNowMs));
+    const liveMatches = findExactProposalCopyMatchIndexes(
+      replayMessage,
+      liveProposals.map((pa) => resolveProposalRenderCopy(pa.action)),
+    );
+    if (liveMatches.length > 0) {
+      return { kind: 'suppress', outcome: 'suppressed_live', liveCount: liveMatches.length };
+    }
+    // Honest expiry: the exact copy of a DEAD hold must resolve to the
+    // deterministic clarification, never a silent edit-LLM redraft that
+    // pretends the offer never existed.
+    const expiredProposals = proposals.filter((pa) => isPendingActionExpired(pa, replayNowMs));
+    const expiredMatches = findExactProposalCopyMatchIndexes(
+      replayMessage,
+      expiredProposals.map((pa) => resolveProposalRenderCopy(pa.action)),
+    );
+    if (expiredMatches.length > 0) {
+      return { kind: 'clarify', outcome: 'clarify_expired' };
+    }
+    return { kind: 'pass', outcome: 'replay_no_match' };
+  }
   if (proposals.length === 0) {
     return { kind: 'clarify', outcome: 'clarify_none' };
   }
@@ -1760,11 +1832,25 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isConfirmationShaped =
       SHORT_CONFIRM_PATTERN.test(ingress.message) ||
       PROPOSAL_CONFIRM_PATTERN.test(ingress.message);
-    if (editVerbCandidate && isConfirmationShaped) {
+    // P0 held-proposal replay (2026-07-15, DGAI #340): the consent-clarity
+    // NAMED hold chip copy ("Add 'X' and 2 more changes") carries an edit
+    // verb + digits by construction, so it can never be confirmation-shaped
+    // — yet it IS the product's own confirmation affordance (the chip
+    // replays its label/message as the user text, with no proposal
+    // reference on the wire). A chip_click ingress or an
+    // affirmative-prefixed reply therefore also pays the pendings read; the
+    // resolver then requires an EXACT match against a proposal's rendered
+    // copy before suppressing, so unrelated edit chips and fresh edit
+    // commands proceed to the edit path untouched.
+    const isProposalReplayCandidate =
+      !isConfirmationShaped &&
+      (ingress.source === 'chip_click' || AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message));
+    if (editVerbCandidate && (isConfirmationShaped || isProposalReplayCandidate)) {
       const resolution = await resolveProposalConfirmAtRoute(
         ingress.scenario_id,
         requestId,
         extensions.graphState ?? null,
+        isConfirmationShaped ? null : ingress.message,
       );
       emit(TelemetryEvents.V5EditGraphProposalConfirmResolved, {
         request_id: requestId,
@@ -1774,7 +1860,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       if (resolution.kind === 'suppress') {
         proposalConfirmSuppressed = true;
-      } else {
+      } else if (resolution.kind === 'clarify') {
         // No live, graph-safe proposal — return the deterministic
         // no-live-proposal clarification rather than dispatching an edit that
         // would no-op. This turn does NOT mutate the graph.
@@ -1791,6 +1877,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         userMessage: ingress.message,
         });
       }
+      // resolution.kind === 'pass' (replay-candidate, no exact copy match):
+      // not a confirmation — edit routing proceeds untouched.
     }
     // A confirmation routed to apply, or a state-query question, must bypass the
     // Stage-4A edit intercepts below — otherwise tryVagueEditGuard /

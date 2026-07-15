@@ -100,6 +100,7 @@ import {
   resolveProposalResume,
 } from '../coaching/proposal-continuation.js';
 import {
+  buildHeldSupersessionNotice,
   evaluateEditGraphMutations,
   type EditGmDecision,
 } from './edit-graph-referee-gate.js';
@@ -2067,6 +2068,30 @@ export async function dispatchEditGraph(
           }
         : {}),
     };
+    // P0 held-proposal survival (2026-07-15, DGAI #340) requirement 4 —
+    // honest supersession. A fresh hold minted while an earlier consent hold
+    // is still live must SAY what happens to the earlier one: same target →
+    // the carry-forward's same-key rule retires it ("this replaces..."),
+    // different target → both stay live and the copy names the earlier hold
+    // so two consents are never held silently. Appended BEFORE the commit so
+    // stored copy == wire copy (same seam doctrine as the lapse notice).
+    if (
+      gmDecision.governing === 'held' &&
+      gmDecision.pendingActions !== null &&
+      gmDecision.pendingActions.length > 0
+    ) {
+      const supersessionNotice = buildHeldSupersessionNotice(
+        gmDecision.pendingActions[0]!,
+        priorPendingForCarry,
+        Date.now(),
+      );
+      if (supersessionNotice !== null) {
+        response = {
+          ...response,
+          assistant_text: appendLapseNotice(response.assistant_text, supersessionNotice),
+        };
+      }
+    }
     // The graph did NOT change this turn — re-derive the wire freshness
     // against the UNCHANGED frame base so staleness is never claimed off an
     // unpersisted mutation. A derivation_failed verdict is kept as-is

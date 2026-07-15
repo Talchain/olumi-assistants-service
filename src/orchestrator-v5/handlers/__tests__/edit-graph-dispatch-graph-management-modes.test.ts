@@ -78,11 +78,16 @@ vi.mock('../../graph-management/referee.js', async (importOriginal) => {
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { buildTurnContext } from '../../build-turn-context.js';
+import {
+  GM_HELD_REPLACES_PRIOR_NOTICE,
+  gmHeldProposalRef,
+} from '../edit-graph-referee-gate.js';
 import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
-import { parsePendingAction } from '../../session/pending-action.js';
+import { parsePendingAction, type PendingAction } from '../../session/pending-action.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { _resetConfigCache } from '../../../config/index.js';
 
@@ -431,6 +436,106 @@ describe('mode=live', () => {
     } finally {
       emitSpy.mockRestore();
     }
+  });
+});
+
+// ── P0 held-proposal survival (2026-07-15, DGAI #340) requirement 4 ──────
+// Honest supersession: a NEW hold minted while an earlier consent hold is
+// still live must say what happens to the earlier one — same target is
+// replaced (carry-forward same-key rule), different target coexists and is
+// NAMED. Never two holds silently.
+
+describe('mode=live — held supersession honesty (P0 DGAI #340 req 4)', () => {
+  function priorHold(overrides: {
+    chipId: string;
+    label?: string;
+    expiresAtIso?: string;
+  }): PendingAction {
+    return {
+      id: `pend-prior-${overrides.chipId}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: overrides.chipId,
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: overrides.chipId,
+        inline_patch: {
+          handler_id: 'graph_management_held_v1',
+          apply_wiring: 'held_execute_v1',
+          operations: [
+            { op: 'update_node', path: 'fac_price', value: { description: 'desc' } },
+          ],
+          operations_count: 1,
+          params: {},
+          target_entity_ids: [],
+        },
+        public_label: overrides.label ?? 'Update the earlier thing',
+        public_message: `Yes, ${(overrides.label ?? 'Update the earlier thing').toLowerCase()}.`,
+      },
+      preconditions: { graph_hash: 'h_prior_pin' },
+      expires_at_turn_count: 4,
+      expires_at_iso: overrides.expiresAtIso ?? new Date(Date.now() + 600_000).toISOString(),
+      emitted_at_iso: new Date().toISOString(),
+    } as PendingAction;
+  }
+
+  function installPriorPendings(pendings: readonly PendingAction[]): void {
+    vi.mocked(buildTurnContext).mockResolvedValueOnce({
+      prior_facts: [],
+      prior_turns: [],
+      most_recent_pending_actions: pendings,
+    } as never);
+  }
+
+  it('same-target newer hold says it REPLACES the earlier one', async () => {
+    setMode('live');
+    // STRUCT_OPS adds node fac_cost → the new hold's deterministic handle.
+    const sameTargetRef = gmHeldProposalRef(SCENARIO_ID, 'node:fac_cost');
+    installPriorPendings([priorHold({ chipId: sameTargetRef, label: "Add 'Cost'" })]);
+    const { response } = await runDispatch(STRUCT_OPS);
+    const text = (response as { assistant_text: string }).assistant_text;
+    expect(text).toContain('Nothing in the model moves until you confirm');
+    expect(text).toContain(GM_HELD_REPLACES_PRIOR_NOTICE);
+    expect(findSuccessClaimHit(text)).toBeNull();
+    expect(findForbiddenPhraseHit(text)).toBeNull();
+  });
+
+  it('different-target newer hold NAMES the still-live earlier hold (never two silent holds)', async () => {
+    setMode('live');
+    installPriorPendings([
+      priorHold({ chipId: 'gmh_differenttar', label: 'Set Team size to 6' }),
+    ]);
+    const { response, metadata } = await runDispatch(STRUCT_OPS);
+    const text = (response as { assistant_text: string }).assistant_text;
+    expect(text).toContain("I am still holding the earlier change 'Set Team size to 6' as well");
+    expect(text).toContain('all of them');
+    expect(findSuccessClaimHit(text)).toBeNull();
+    expect(findForbiddenPhraseHit(text)).toBeNull();
+    // The new hold still ships its own pending confirmation.
+    expect((metadata.pending_actions as unknown[])).toHaveLength(1);
+  });
+
+  it('an EXPIRED earlier hold earns no supersession sentence (no notice spam)', async () => {
+    setMode('live');
+    installPriorPendings([
+      priorHold({
+        chipId: 'gmh_expiredearli',
+        label: 'Set Team size to 6',
+        expiresAtIso: '2020-01-01T00:00:00.000Z',
+      }),
+    ]);
+    const { response } = await runDispatch(STRUCT_OPS);
+    const text = (response as { assistant_text: string }).assistant_text;
+    expect(text).not.toContain('still holding the earlier change');
+    expect(text).not.toContain(GM_HELD_REPLACES_PRIOR_NOTICE);
+  });
+
+  it('no prior pendings → held copy byte-identical to the no-supersession baseline', async () => {
+    setMode('live');
+    const { response } = await runDispatch(STRUCT_OPS);
+    const text = (response as { assistant_text: string }).assistant_text;
+    expect(text).not.toContain('still holding the earlier change');
+    expect(text).not.toContain(GM_HELD_REPLACES_PRIOR_NOTICE);
+    expect(text).toContain('Nothing in the model moves until you confirm');
   });
 });
 
