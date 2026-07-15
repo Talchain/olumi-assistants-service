@@ -41,7 +41,7 @@ import { z } from 'zod';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
-import { repairGraphNumericBounds } from '../../validators/numeric-bounds.js';
+import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
 
 export const REQUEST_EXTENSIONS_VALIDATOR_NAME = 'V5RequestExtensions';
 
@@ -244,15 +244,22 @@ export function parseRequestExtensions(
     // Infinity, so this IS reachable from the wire).
     //
     // This is path (a): PERSISTED state re-entering CEE on every turn. Per the
-    // repair-vs-reject doctrine (src/validators/numeric-bounds.ts header), a
-    // sigma <= 0 is REPAIRED to the contract floor and metered — hard-rejecting
-    // it would permanently brick every scenario already saved with std=0, which
-    // is worse than the leak the gate closes. Values with no safe reading
-    // (non-finite, out-of-range probability/mean) still reject, with the same
-    // BoundaryError shape as a structural failure so the UI's existing
-    // CEE-validation-error handling renders them. Messages carry field paths and
-    // bounds only — no values, no labels (PII rule).
-    const bounds = repairGraphNumericBounds(parsed.data);
+    // doctrine (src/validators/numeric-bounds.ts header), this gate is
+    // IDENTITY-PRESERVING: it rejects or it hands the graph straight back, and
+    // it NEVER rewrites a value. `strength.std` is part of the
+    // analysis-affecting hash projection, and every hash token is minted off
+    // the UNREPAIRED persisted graph at other parse sites — so repairing here
+    // would fork graph identity and silently desync those tokens
+    // (clarify_hash_mismatch on every pending proposal). A sigma <= 0 therefore
+    // passes through untouched and is floored at the COMPUTE boundary instead
+    // (PLoTClient.run → floorGraphSigmaForCompute), where it is actually
+    // consumed and where nothing hashes the result.
+    //
+    // Values with no safe reading (non-finite, out-of-range probability/mean)
+    // reject here, with the same BoundaryError shape as a structural failure so
+    // the UI's existing CEE-validation-error handling renders them. Messages
+    // carry field paths and bounds only — no values, no labels (PII rule).
+    const bounds = assertIngressGraphNumericBounds(parsed.data);
     if (!bounds.ok) {
       emit(TelemetryEvents.BoundaryValidation, {
         boundary: 'B1',
@@ -279,15 +286,6 @@ export function parseRequestExtensions(
           retryable: false,
         },
       };
-    }
-    for (const repair of bounds.repairs) {
-      emit(TelemetryEvents.IngressNumericRepair, {
-        field: 'graph_state',
-        path: repair.path,
-        kind: repair.kind,
-        repaired_to: repair.repaired_to,
-        request_id: requestId,
-      });
     }
     graphState = bounds.graph;
   }

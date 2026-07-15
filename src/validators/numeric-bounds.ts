@@ -1,17 +1,22 @@
 /**
- * W2E-2 — numeric-bounds enforcement for graph values at CEE ingress.
+ * W2E-2 — numeric-bounds enforcement for graph values crossing CEE.
  *
- * Numeric graph fields enter CEE from three directions:
+ * Numeric graph fields enter CEE from two directions:
  *   (a) the UI's `graph_state` on POST /orchestrate/v2/turn
  *       (src/orchestrator-v5/boundary/request-extensions.ts), and
  *   (b) LLM tool-call output — edit_graph PatchOperation[] values
- *       (src/orchestrator/patch-validation.ts) and draft/repair graph
- *       responses (src/adapters/llm/shared-schemas.ts).
+ *       (src/orchestrator/patch-validation.ts), draft/repair graph responses
+ *       (src/adapters/llm/shared-schemas.ts), and V5 proposal parameters
+ *       (src/orchestrator-v5/routing/validation-registry.ts).
+ * and they leave CEE in one direction:
+ *   (a′) the outbound PLoT run payload (src/orchestrator/plot-client.ts) —
+ *        the COMPUTE boundary, and the last place a value can be corrected.
  *
  * Out-of-range values (probability 1.4, strength mean -7, Infinity) that slip
  * past these seams flow to PLoT/ISL where they corrupt analysis or crash late
  * with an opaque error. This module is the single shared source of truth for
- * the bounds those seams enforce.
+ * the bounds those seams enforce — and, per the doctrine below, for WHERE each
+ * violation class is handled. Enforcement is deliberately NOT all at ingress.
  *
  * The ranges MATCH the vendored @talchain/schemas pin (0.16.0, dist/graph.js)
  * exactly — nothing stricter is invented:
@@ -28,29 +33,73 @@
  * bound only — never the offending value and never node/factor labels.
  *
  * ---------------------------------------------------------------------------
- * DOCTRINE — PERSISTED-STATE REPAIR vs NEW-CLAIM REJECTION
+ * DOCTRINE — WHERE A VIOLATION IS HANDLED (three constraints, in priority order)
  * ---------------------------------------------------------------------------
- * The two ingress paths are NOT symmetric, and treating them the same way
- * bricks real users. The first cut of this gate hard-rejected every violation
- * on both paths; because the UI re-sends its persisted canvas on EVERY turn,
- * any scenario already saved with sigma <= 0 became permanently unusable —
- * every turn 422'd with a non-actionable error. That is worse than the leak
- * the gate closes.
+ *   (1) never brick a persisted scenario;
+ *   (2) never silently fork graph identity / desync hash tokens;
+ *   (3) never let a meaningless value (NaN/±Infinity) or an un-interpretable
+ *       one (probability outside [0,1]) reach computation.
  *
- * Path (a) — UI `graph_state` (persisted state re-entering CEE):
- *   The user is re-sending state WE previously accepted and persisted. A
- *   violation with an unambiguous safe interpretation must be REPAIRED and
- *   recorded via telemetry, never rejected. Bricking a user's scenario is not
- *   an acceptable way to enforce a bound we failed to enforce earlier.
- *     - sigma <= 0 (`strength.std`, `observed_state.std`) means "no
- *       uncertainty stated" → REPAIR to INGRESS_SIGMA_REPAIR_FLOOR.
- *   Values that are semantically MEANINGLESS, or that cannot be safely
- *   interpreted, stay HARD REJECTS with an actionable error:
- *     - NaN / ±Infinity — no defensible reading at all.
- *     - a probability outside [0, 1], or strength.mean outside [-1, 1] — we
- *       cannot know whether 1.4 meant 1.0 or 0.14, and guessing would silently
- *       change the user's model. Rejecting names the field and the bound so
- *       the user can fix it.
+ * This gate has been wrong twice, in opposite directions. Both cuts are
+ * recorded here because each failure mode is easy to reintroduce.
+ *
+ * Cut 1 — REJECT EVERYTHING AT INGRESS. Violated (1). The UI re-sends its
+ * persisted canvas on EVERY turn, so a scenario already saved with sigma <= 0
+ * became permanently unusable: every turn 422'd with a non-actionable error.
+ *
+ * Cut 2 — REPAIR SIGMA AT INGRESS. Violated (2), and did so SILENTLY, which is
+ * worse than the bug it fixed. `strength.std` is part of the analysis-affecting
+ * hash projection (context/graph-hash.ts `projectEdge`), so rewriting it at
+ * ingress makes the repaired WIRE graph hash differently from the UNREPAIRED
+ * PERSISTED graph. Every hash token is minted off the persisted graph, and the
+ * repair was wired at exactly ONE of the ~9 GraphStateIngressSchema parse sites
+ * (request-extensions.ts) — the mint sites (turn-executor.ts:1094/:1265,
+ * build-turn-context.ts:547, tools/handlers/run-analysis.ts:418,
+ * handlers/chip-click-dispatch.ts:793/:1334, context/graph-cas-conflict.ts:149,
+ * orchestrator/route-v2.ts:1934) parse the raw graph directly and never repair.
+ * Net effect on a std=0 scenario: a pending proposal minted with
+ * `graph_hash = H(unrepaired)` is compared at route-v2.ts:1086 against
+ * `H(repaired request graph)`, they differ, and the proposal is silently
+ * dropped as `clarify_hash_mismatch`. The scenario is not bricked at the door;
+ * the edit flow is bricked without a word.
+ *
+ * This is the same regression class the codebase already paid for once:
+ * run-analysis.ts:400 records "false-stale on every explain turn (live
+ * regression observed at staging build abc7d29)" and settles the invariant —
+ * the ONE representation every side agrees on is the raw persisted graph as
+ * stored in scenarios.graph BEFORE any parse. Ingress repair re-breaks it.
+ *
+ * There is no "single true ingress point" to repair at instead: the persisted
+ * graph enters CEE through the request body AND through several independent
+ * session-store reload paths (the mint sites above). Repairing at one of them
+ * forks; repairing at all of them means every consumer must agree to rewrite
+ * identically forever, and the abc7d29 precedent is that they do not.
+ *
+ * Cut 3 — CURRENT. Split by WHERE the value does harm, not by which door it
+ * came through:
+ *
+ * Path (a) — UI `graph_state` ingress (persisted state re-entering CEE):
+ *   IDENTITY IS SACRED. `assertIngressGraphNumericBounds` never rewrites the
+ *   graph; it returns the caller's object by reference or rejects it.
+ *     - sigma <= 0 passes THROUGH unrepaired — hash identity exactly preserved,
+ *       every existing token stays valid, nothing forks. Satisfies (1) and (2).
+ *     - NaN / ±Infinity, probability outside [0,1], strength.mean outside
+ *       [-1,1] still HARD REJECT with an actionable error naming field + bound.
+ *       These have no defensible reading (we cannot know whether 1.4 meant 1.0
+ *       or 0.14, and guessing would silently change the user's model), and the
+ *       UI writer does not routinely produce them — so (3) is satisfied at the
+ *       door without bricking anyone.
+ *
+ * Path (a′) — the COMPUTE boundary (PLoTClient.run):
+ *   Where sigma is actually CONSUMED, `floorGraphSigmaForCompute` floors it to
+ *   COMPUTE_SIGMA_FLOOR and meters it. This satisfies (3) for the one class
+ *   that survives ingress, without ever touching the graph the hash is minted
+ *   from. It is the same discipline as the neighbouring
+ *   `guardAnalysisGraphIntercepts` ("a runtime guard, not a migration, and must
+ *   not perturb freshness"), applied at the same seam. NOTE it must FLOOR and
+ *   not FAIL: the live UI writer emits std=0 continuously, so failing here
+ *   would break analysis for routinely-produced state — constraint (1) again,
+ *   just moved downstream.
  *
  * Path (b) — LLM output (edit_graph patches, draft/repair responses):
  *   Keep rejection / repair-retry as built. The model can simply be asked
@@ -65,7 +114,7 @@
 
 import { z } from 'zod';
 
-import { INGRESS_SIGMA_REPAIR_FLOOR } from '../cee/constants.js';
+import { COMPUTE_SIGMA_FLOOR } from '../cee/constants.js';
 
 export type NumericBoundsIssue = {
   /** Dot-joined path relative to the checked value, e.g. "edges.0.strength.mean". */
@@ -258,9 +307,12 @@ export type NumericBoundsRepair = {
  * the gate — a repaired graph is the same shape as the one that went in, and
  * the caller should not need an `as`-cast to say so.
  */
-export type GraphNumericRepairResult<T> =
-  /** No un-interpretable violation. `graph` carries any repairs applied. */
-  | { ok: true; graph: T; repairs: NumericBoundsRepair[] }
+export type GraphNumericIngressResult<T> =
+  /**
+   * No un-interpretable violation. `graph` is the caller's own object, handed
+   * back BY REFERENCE and never rewritten — ingress preserves graph identity.
+   */
+  | { ok: true; graph: T }
   /** At least one value with no safe reading — the caller must reject. */
   | { ok: false; issues: NumericBoundsIssue[] };
 
@@ -287,38 +339,61 @@ function setAtPath(root: unknown, path: string[], value: number): unknown {
 }
 
 /**
- * Numeric-bounds gate for the UI `graph_state` ingress path.
+ * Numeric-bounds gate for the UI `graph_state` ingress path (path a).
  *
- * Repairs non-positive sigma to INGRESS_SIGMA_REPAIR_FLOOR and reports each
- * repair so we can see how much invalid persisted state exists. Rejects
- * anything with no safe interpretation (non-finite, out-of-range probability
- * or strength.mean).
+ * IDENTITY-PRESERVING BY CONSTRUCTION. This function NEVER rewrites the graph:
+ * it either rejects it or hands the very same object back by reference. That
+ * is the whole point — see the "WHY INGRESS DOES NOT REPAIR" section in the
+ * module header. A sigma <= 0 is deliberately allowed THROUGH here; it is
+ * floored later, at the compute boundary, by `floorGraphSigmaForCompute`.
  *
- * A rejection takes precedence over a repair: if a graph carries both, the
- * turn cannot proceed anyway, and reporting the (silently repairable) sigma
- * alongside a real error would only make the message less actionable.
- *
- * Non-mutating, and a clean graph is returned by reference — valid input
- * round-trips byte-identically.
+ * Rejects only the classes with no safe reading (non-finite, out-of-range
+ * probability or strength.mean), which are exactly the classes the round-3
+ * ruling's constraint (3) forbids from reaching computation and which the UI
+ * writer does not routinely produce — so rejecting them bricks nothing.
  */
-export function repairGraphNumericBounds<T>(graph: T): GraphNumericRepairResult<T> {
-  const issues = checkGraphNumericBounds(graph);
-  if (issues.length === 0) return { ok: true, graph, repairs: [] };
-
-  const rejects = issues.filter((i) => i.kind !== 'sigma_non_positive');
+export function assertIngressGraphNumericBounds<T>(graph: T): GraphNumericIngressResult<T> {
+  const rejects = checkGraphNumericBounds(graph).filter((i) => i.kind !== 'sigma_non_positive');
   if (rejects.length > 0) return { ok: false, issues: rejects };
+  return { ok: true, graph };
+}
 
-  let repaired = graph;
+/**
+ * Sigma floor for the COMPUTE boundary (PLoTClient.run) — the point where the
+ * graph is actually consumed for computation and leaves CEE.
+ *
+ * Floors non-positive `strength.std` / `observed_state.std` to
+ * COMPUTE_SIGMA_FLOOR and reports each floor so we can see how much invalid
+ * persisted state exists. Everything else is left exactly as-is: by the time a
+ * graph reaches compute, the no-safe-reading classes have already been
+ * rejected at ingress, and this guard's job is narrow.
+ *
+ * Non-mutating (copy-on-write via `setAtPath`), and a clean graph is returned
+ * BY REFERENCE — valid input round-trips byte-identically at zero cost. The
+ * caller's graph is never touched, which is load-bearing: `graph_hash_at_run`
+ * is computed from `snapshot.rawPersistedGraph` and must not observe the floor
+ * (perturbing it reproduces the false-stale regression of build abc7d29).
+ */
+export function floorGraphSigmaForCompute<T>(graph: T): {
+  graph: T;
+  repairs: NumericBoundsRepair[];
+} {
+  const sigmaIssues = checkGraphNumericBounds(graph).filter(
+    (i) => i.kind === 'sigma_non_positive',
+  );
+  if (sigmaIssues.length === 0) return { graph, repairs: [] };
+
+  let floored = graph;
   const repairs: NumericBoundsRepair[] = [];
-  for (const issue of issues) {
-    repaired = setAtPath(repaired, issue.path.split('.'), INGRESS_SIGMA_REPAIR_FLOOR) as T;
+  for (const issue of sigmaIssues) {
+    floored = setAtPath(floored, issue.path.split('.'), COMPUTE_SIGMA_FLOOR) as T;
     repairs.push({
       path: issue.path,
       kind: 'sigma_non_positive',
-      repaired_to: INGRESS_SIGMA_REPAIR_FLOOR,
+      repaired_to: COMPUTE_SIGMA_FLOOR,
     });
   }
-  return { ok: true, graph: repaired, repairs };
+  return { graph: floored, repairs };
 }
 
 // ---------------------------------------------------------------------------

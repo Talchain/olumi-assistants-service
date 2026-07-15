@@ -528,19 +528,21 @@ export const TelemetryEvents = {
   // Fields per §4.4: boundary, direction, validator, contract_version, pass, error_code?, request_id
   BoundaryValidation: "boundary.validation",
 
-  // W2E-2 — PERSISTED-STATE REPAIR on the UI graph_state ingress path.
-  // Fires once per repaired field when a turn's canvas carries a sigma <= 0
-  // (edge strength.std / node observed_state.std) and CEE floors it to
-  // INGRESS_SIGMA_REPAIR_FLOOR instead of rejecting the turn. Rationale and the
-  // repair-vs-reject split: src/validators/numeric-bounds.ts module header.
+  // W2E-2 — SIGMA FLOOR at the COMPUTE boundary (PLoTClient.run).
+  // Fires once per floored field when an outbound PLoT run payload carries a
+  // sigma <= 0 (edge strength.std / node observed_state.std) and CEE floors it
+  // to COMPUTE_SIGMA_FLOOR. Deliberately NOT at ingress: ingress preserves
+  // graph identity exactly, because strength.std is in the analysis-affecting
+  // hash projection and rewriting it there desyncs every hash token. Full
+  // rationale: src/validators/numeric-bounds.ts module header.
   //
   // This is the meter for how much invalid persisted state exists in the wild:
   // the UI's own writer floors outbound std at ZERO, so affected scenarios emit
-  // this on EVERY turn. Expect a non-zero baseline that decays only as
+  // this on EVERY analysis run. Expect a non-zero baseline that decays only as
   // scenarios are re-saved. A sustained rise means a NEW writer is producing
-  // zero-sigma state — find it. Fields: field, path, repaired_to, request_id.
+  // zero-sigma state — find it. Fields: path, repaired_to, request_id.
   // Never carries the offending value or any label (PII rule).
-  IngressNumericRepair: "cee.ingress.numeric_repair",
+  ComputeSigmaFloor: "cee.compute.sigma_floor",
 
   // V5 TurnExecutor lifecycle (slice A1, addendum §2.1.9).
   // Started emits when runTurnExecutor enters. Completed emits in `finally`.

@@ -37,7 +37,8 @@
 import { z } from "zod";
 import { config } from "../config/index.js";
 import { PLOT_RUN_TIMEOUT_MS, PLOT_RUN_BRIEF_TIMEOUT_MS, PLOT_VALIDATE_TIMEOUT_MS } from "../config/timeouts.js";
-import { log } from "../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
+import { floorGraphSigmaForCompute } from "../validators/numeric-bounds.js";
 import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
 
 // ============================================================================
@@ -254,6 +255,46 @@ export type ValidatePatchResult = ValidatePatchSuccess | ValidatePatchRejection 
  * Validates the PLoT-facing contract: options must have `id` (PLoT primary key)
  * and `interventions` must be a flat { factor_id: number } map.
  */
+/**
+ * W2E-2 — sigma floor at the COMPUTE boundary.
+ *
+ * `PLoTClient.run` is the single choke point BOTH live PLoT dispatches funnel
+ * through (orchestrator-v5/tools/handlers/run-analysis.ts:466 and
+ * orchestrator/tools/run-analysis.ts:229), and the last place CEE touches the
+ * graph before it leaves for compute. A non-positive `strength.std` /
+ * `observed_state.std` violates the vendored @talchain/schemas contract
+ * (`z.number().positive()`), but it has an unambiguous safe reading ("no
+ * uncertainty stated") and the live UI writer emits it continuously
+ * (`Math.max(0, strengthStdValue)` floors at ZERO) — so it is FLOORED here,
+ * never rejected. Rejecting would break analysis for routinely-produced state;
+ * flooring at ingress instead would fork graph identity and desync every hash
+ * token. See the doctrine in src/validators/numeric-bounds.ts.
+ *
+ * Non-mutating: the caller's payload and graph are untouched (copy-on-write),
+ * so `graph_hash_at_run` — computed from `snapshot.rawPersistedGraph` — never
+ * observes the floor. A clean payload is returned by reference.
+ */
+function floorRunPayloadSigma(
+  payload: Record<string, unknown>,
+  requestId: string,
+): Record<string, unknown> {
+  if (payload.graph == null) return payload;
+  const { graph, repairs } = floorGraphSigmaForCompute(payload.graph);
+  if (repairs.length === 0) return payload;
+
+  for (const repair of repairs) {
+    // Redacted: field path + the floor we wrote. Never the offending value,
+    // never a node/factor label (PII rule).
+    emit(TelemetryEvents.ComputeSigmaFloor, {
+      path: repair.path,
+      kind: repair.kind,
+      repaired_to: repair.repaired_to,
+      request_id: requestId,
+    });
+  }
+  return { ...payload, graph };
+}
+
 function validateRunPayload(payload: Record<string, unknown>): void {
   if (payload.graph == null) {
     throwPayloadError('run', 'Missing required field: graph');
@@ -400,7 +441,11 @@ class PLoTClientImpl implements PLoTClient {
     private readonly authToken: string | undefined,
   ) {}
 
-  async run(payload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<V2RunResponseEnvelope> {
+  async run(rawPayload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<V2RunResponseEnvelope> {
+    // W2E-2: floor non-positive sigma before anything else reads the payload —
+    // this is the compute boundary, the point of consumption. Copy-on-write, so
+    // the caller's graph (and the hash minted from it) is unaffected.
+    const payload = floorRunPayloadSigma(rawPayload, requestId);
     // H.5: Outbound structural validation
     validateRunPayload(payload);
 
@@ -860,7 +905,7 @@ class PLoTClientImpl implements PLoTClient {
 // Exports for testing
 // ============================================================================
 
-export { validateRunPayload as _validateRunPayload, validatePatchPayload as _validatePatchPayload };
+export { validateRunPayload as _validateRunPayload, validatePatchPayload as _validatePatchPayload, floorRunPayloadSigma as _floorRunPayloadSigma };
 export { isRetryableError as _isRetryableError, cancellableSleep as _cancellableSleep };
 export { RETRY_BACKOFF_MS as _RETRY_BACKOFF_MS, MIN_RETRY_BUDGET_MS as _MIN_RETRY_BUDGET_MS };
 
