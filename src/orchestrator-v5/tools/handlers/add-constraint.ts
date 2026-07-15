@@ -19,6 +19,23 @@
  * Idempotent collision rule: when a constraint with the same
  * `(node_id, operator)` already exists, its `value`/`label`/`unit` are
  * updated in place. `noop: true` only when the value matches exactly.
+ *
+ * Gate-1 unit integrity (2026-07-15, Paul-ruled doctrine):
+ *   - OMISSION MEANS UNCHANGED. An update turn that does not mention a
+ *     unit keeps the persisted constraint's unit ("keep it at most 30"
+ *     means 30 of the same kind). The unit fallback chain is
+ *     `params.unit` → `existing?.unit` → `observed_state.unit`; before
+ *     this fix `existing` was never consulted, so the whole-object
+ *     update splice silently STRIPPED the persisted `%` — and the
+ *     unit-less 30 fell through PLoT's range priority to the default
+ *     [0,1] range, clamped to 1.0, turning "attrition <= 30%" into the
+ *     trivially-true "<= 1.0" (silent guardrail nullification; see
+ *     acceptance-evidence/constraint-unit-drop/).
+ *   - A CONSTRAINT MUST NOT REACH THE WIRE UNIT-AMBIGUOUS. A unit-less
+ *     value outside [0,1] targeting a probability-domain node
+ *     (goal/outcome/risk) with no declared cap is KNOWN to be
+ *     heuristically normalised downstream; the handler refuses it and
+ *     asks for the unit (see the emit guard below).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -90,6 +107,43 @@ const ALLOWED_TARGET_KINDS: readonly string[] = [
   'risk',
 ];
 const ALLOWED_TARGET_KIND_SET: ReadonlySet<string> = new Set(ALLOWED_TARGET_KINDS);
+
+/**
+ * Probability-domain target kinds (Gate-1 emit guard). Mirrors PLoT's
+ * PROBABILITY_DOMAIN_KINDS (plot-lite-service
+ * src/normalisation/constraint-filter.ts): ISL evaluates these nodes on
+ * a [0,1] scale, so a unit-less constraint value outside [0,1] cannot
+ * be interpreted without a unit or a declared cap — downstream it is
+ * heuristically ranged and CLAMPED (value > 1 → 1.0, a trivially-true
+ * threshold; value < 0 → 0, a trivially-false one). `factor` is
+ * deliberately absent: unit-less absolute factor thresholds ("at most
+ * 30" on a headcount) are legitimate.
+ */
+const PROBABILITY_DOMAIN_KIND_SET: ReadonlySet<string> = new Set([
+  'goal',
+  'outcome',
+  'risk',
+]);
+
+/**
+ * User-visible clarify for the unit-ambiguity refusal (Gate-1). Rides
+ * the SAME wired mechanic as the reduction-sign backstop:
+ * `D1HandlerError.userGuidance` → `details.specific_issue`
+ * (error-boundary.ts) → the recoverable composer's full assistant_text
+ * (compose/handler-failure-responses.ts, `parameter_invalid_at_execute`
+ * branch) with a text-prompt recovery chip. Wording is leak-safe per
+ * the d1-user-guidance-leak panel (no handler ids, parameter names,
+ * enum or operator literals). A specific clarify (not the canonical
+ * ADD_CONSTRAINT_USER_GUIDANCE phrase) is deliberate and
+ * design-sanctioned: the Gate-1 fix design requires an honest
+ * "percentage or absolute?" question, because the generic phrase gives
+ * the user no path to resolve the ambiguity. Kept comfortably under the
+ * composer's 100-char `sanitiseForUser` truncation (MAX_USER_STRING in
+ * compose/helpers.ts) so the question is never cut mid-sentence.
+ */
+function formatUnitAmbiguityClarify(value: number): string {
+  return `Did you mean ${value}% or an absolute ${value}? Tell me which, and I'll apply it.`;
+}
 
 interface ResolvedParams {
   readonly constraint_type: 'at_least' | 'at_most';
@@ -306,11 +360,24 @@ export function createAddConstraintHandler(): HandlerFn {
         value: params.value, // user units, no normalisation
         label: constraintLabel,
         provenance: 'explicit',
+        // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
+        // UNCHANGED). On an update, a turn that does not mention a unit
+        // keeps the persisted row's unit — `existing?.unit` sits between
+        // the explicit parameter and the node's observed unit, and it
+        // OUTRANKS the observed unit because the row is the prior state
+        // of the thing being updated (same convention as
+        // set_factor_value's `parsed.unit → before.unit` merge). Before
+        // this fix the chain skipped `existing` entirely, so the
+        // whole-object update splice below silently stripped the
+        // persisted `%` (the live gc-cdd6eb74 silent-nullification
+        // defect). Never silently clear a persisted unit.
         ...(params.unit !== undefined
           ? { unit: params.unit }
-          : targetNode.observed_state?.unit !== undefined
-            ? { unit: targetNode.observed_state.unit }
-            : {}),
+          : existing?.unit !== undefined
+            ? { unit: existing.unit }
+            : targetNode.observed_state?.unit !== undefined
+              ? { unit: targetNode.observed_state.unit }
+              : {}),
       };
 
       const newConstraint: GoalConstraintT = {
@@ -409,6 +476,72 @@ export function createAddConstraintHandler(): HandlerFn {
       // field the F9 defect actually moved.
       const stampGoalThreshold = isGoalTargetSet && !valueUnchanged;
 
+      // Gate-1 EMIT GUARD — a constraint must not reach the wire
+      // unit-ambiguous. A unit-less value outside [0,1] targeting a
+      // probability-domain node (goal/outcome/risk) with no declared cap
+      // is KNOWN to be heuristically normalised downstream: PLoT's range
+      // priority finds no percent unit and no explicit cap, falls to the
+      // default [0,1] range, and CLAMPS — value > 1 becomes a
+      // trivially-true threshold (the analysis reports the guardrail
+      // checked-and-passed while it was never evaluated; the live
+      // 2026-07-15 silent-nullification defect), value < 0 the
+      // trivially-false mirror. Refuse and ask for the unit instead of
+      // guessing — a false positive costs one clarifying round-trip,
+      // never a silent wrong persist (same doctrine as the
+      // reduction-framing backstop above). Exemptions, in order:
+      //   - the effective unit (params → existing row → observed_state)
+      //     resolved: the scale is asserted;
+      //   - the node carries a declared cap (`observed_state.cap` or
+      //     `goal_threshold_cap`): downstream normalisation is explicit;
+      //   - this very turn co-stamps a goal_threshold_cap (goal `>=`
+      //     target-set with a changed value — `capToStamp` below is
+      //     non-null whenever the stamp will run, since the positive-
+      //     target guard above guarantees `params.value > 0`): the cap
+      //     travels in the SAME committed write, PLoT's P0 tier.
+      // NOTE: this deliberately fires even when the ambiguous row is
+      // ALREADY persisted and the turn is a value-identical restatement —
+      // confirming "already constrained ✓" would re-affirm a guardrail
+      // that is not being evaluated; the clarify is the repair path.
+      const declaredCap =
+        (typeof targetNode.observed_state?.cap === 'number' &&
+          targetNode.observed_state.cap > 0) ||
+        (typeof targetNode.goal_threshold_cap === 'number' &&
+          targetNode.goal_threshold_cap > 0);
+      const capToStamp = stampGoalThreshold
+        ? resolveGoalThresholdCap(
+            targetNode.goal_threshold_cap,
+            params.value,
+            newConstraint.unit,
+            targetNode.goal_threshold_unit,
+          )
+        : null;
+      if (
+        newConstraint.unit === undefined &&
+        (params.value > 1 || params.value < 0) &&
+        PROBABILITY_DOMAIN_KIND_SET.has(targetNode.kind) &&
+        !declaredCap &&
+        capToStamp === null
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'add_constraint: unit-ambiguous constraint refused — a unit-less ' +
+            `value ${params.value} on a probability-domain node with no ` +
+            'declared cap would be heuristically ranged downstream and ' +
+            'clamped into a trivially-satisfied (or trivially-violated) ' +
+            'threshold. Ask the user for the unit instead of guessing.',
+          {
+            details: {
+              handler_id: 'add_constraint',
+              target_id: targetId,
+              target_kind: targetNode.kind,
+              value: params.value,
+              rejection_reason: 'unit_ambiguous_probability_domain',
+            },
+            userGuidance: formatUnitAmbiguityClarify(params.value),
+          },
+        );
+      }
+
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
         // F8 backfill residual (self-review hardening): when there is no
@@ -440,9 +573,16 @@ export function createAddConstraintHandler(): HandlerFn {
               goalNode.goal_threshold_unit,
             );
             goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
-            // Unit is ALWAYS reconciled (review hardening): keeping a stale
-            // '%' unit when a unitless absolute target re-registers would
-            // display "900%" — a unitless registration clears the old unit.
+            // Unit is ALWAYS reconciled (review hardening): the node's
+            // threshold unit follows the constraint row's effective unit.
+            // Gate-1 doctrine note: with `existing?.unit` now in the
+            // fallback chain, a turn that OMITS the unit inherits the
+            // persisted row's unit (omission means unchanged) rather
+            // than clearing it — the inherited unit is displayed in the
+            // receipt, so a wrong inheritance is user-visible and
+            // correctable, never a silent scale change. The clearing
+            // branch below now only runs when no unit resolves anywhere
+            // (params, existing row, observed_state).
             if (newConstraint.unit !== undefined) {
               goalNode.goal_threshold_unit = newConstraint.unit;
             } else {
