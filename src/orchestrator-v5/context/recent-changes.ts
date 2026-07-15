@@ -35,6 +35,7 @@ import { createHash } from 'node:crypto';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
+import { isNoopFact } from '../tools/fact-noop.js';
 import {
   formatConstraintAdded,
   formatConstraintUpdated,
@@ -139,8 +140,10 @@ export function projectRecentChanges(
 
 function summariseMutation(fact: HandlerFact): RecentMutation | null {
   // Successful mutations only — noops carry no user-visible change to
-  // reference.
-  if (fact.noop === true) return null;
+  // reference. `isNoopFact` is the shared predicate (tools/fact-noop.ts);
+  // the coaching-signal detector gates on the same one, so the two
+  // channels cannot drift apart on what "no change" means.
+  if (isNoopFact(fact)) return null;
 
   if (fact.fact_type === 'add_constraint') {
     return summariseAddConstraint(fact.result);
@@ -188,7 +191,7 @@ function summariseEditGraph(
   // Filtering on 'noop' AND 'rejected' here is belt-and-braces: if a
   // future schema bump adds a 'rejected' literal (or any non-applied
   // status), the projection treats it as not-surface-able. The
-  // top-level `fact.noop === true` filter at line 143 is the
+  // top-level `isNoopFact` filter in `summariseMutation` is the
   // primary gate; this is the secondary.
   const status = (result as { status?: unknown }).status;
   if (status === 'noop' || status === 'rejected') return null;

@@ -85,6 +85,56 @@ function setFactorOutcome(targetId: string): SuccessfulHandlerOutcome {
   return { assistant_text: 'done', handler_facts: [fact], llm_calls_used: 0 };
 }
 
+/**
+ * A no-op edit outcome: the handler ran and succeeded, but the proposed
+ * value already matched the persisted one, so `noop: true` and
+ * `status: 'noop'`. Mirrors what set-factor-value.ts emits at :411/:423.
+ */
+function noopSetFactorOutcome(targetId: string): SuccessfulHandlerOutcome {
+  const fact: HandlerFact = {
+    fact_type: 'set_factor_value',
+    fact_version: 1,
+    noop: true,
+    result: {
+      target_id: targetId,
+      status: 'noop',
+      before: { value: 2 },
+      after: { value: 2 },
+    },
+  };
+  return { assistant_text: 'already', handler_facts: [fact], llm_calls_used: 0 };
+}
+
+function noopEdgeOutcome(targetId: string): SuccessfulHandlerOutcome {
+  const fact: HandlerFact = {
+    fact_type: 'adjust_edge_strength',
+    fact_version: 1,
+    noop: true,
+    result: {
+      target_id: targetId,
+      status: 'noop',
+      before: { strength: { mean: 0.4 } },
+      after: { strength: { mean: 0.4 } },
+    },
+  };
+  return { assistant_text: 'already', handler_facts: [fact], llm_calls_used: 0 };
+}
+
+function noopAddConstraintOutcome(targetId: string): SuccessfulHandlerOutcome {
+  const fact: HandlerFact = {
+    fact_type: 'add_constraint',
+    fact_version: 1,
+    noop: true,
+    result: {
+      target_id: targetId,
+      status: 'noop',
+      before: { value: 5 },
+      after: { value: 5 },
+    },
+  };
+  return { assistant_text: 'already', handler_facts: [fact], llm_calls_used: 0 };
+}
+
 function priorRunAnalysisFact(): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -135,7 +185,7 @@ describe('detectCoachingSignal', () => {
     });
   });
 
-  describe('STALE_ANALYSIS_AFTER_EDIT (dormant today)', () => {
+  describe('STALE_ANALYSIS_AFTER_EDIT', () => {
     it('fires on an edit handler when a prior run_analysis fact exists', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
@@ -155,9 +205,64 @@ describe('detectCoachingSignal', () => {
       });
       expect(detection).toBeNull();
     });
+
+    // ------------------------------------------------------------------
+    // Gate-1 claim integrity. STALE_ANALYSIS_AFTER_EDIT asserts "This
+    // change affects the model. The current analysis may not reflect it."
+    // A no-op edit changed nothing, so it cannot stale an analysis, and
+    // both sentences would be false. The fact channel already carries
+    // `noop: true`; the signal must honour it.
+    // ------------------------------------------------------------------
+    it('does NOT fire on a NO-OP set_factor_value even with a prior analysis', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        outcome: noopSetFactorOutcome('f-cost'),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      expect(detection).toBeNull();
+    });
+
+    it('does NOT fire on a NO-OP adjust_edge_strength even with a prior analysis', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'adjust_edge_strength',
+        outcome: noopEdgeOutcome('f-budget→g-revenue'),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      expect(detection).toBeNull();
+    });
+
+    it('does NOT fire on a NO-OP add_constraint even with a prior analysis', () => {
+      // add_constraint's NARRATION is already honest (ROADMAP 1.19(a)
+      // formatConstraintUnchanged), but it still emitted false staleness
+      // coaching on a no-op restatement. The coaching gate covers all
+      // three edit handlers, not just the two whose narration was wrong.
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'add_constraint',
+        outcome: noopAddConstraintOutcome('f-churn'),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      expect(detection).toBeNull();
+    });
+
+    it('STILL fires on a real (non-noop) edit with a prior analysis (the gate must discriminate)', () => {
+      // Guard against "fix by suppression": gating on noop must not
+      // silence the signal on edits that genuinely did stale the
+      // analysis. Without this, `return null` would pass the tests above.
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        outcome: setFactorOutcome('f-cost'),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      expect(detection?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+      expect(detection?.coaching_text).toContain('This change affects the model');
+    });
   });
 
-  describe('HIGH_SENSITIVITY_EDIT (dormant today)', () => {
+  describe('HIGH_SENSITIVITY_EDIT', () => {
     it('fires on an edit to a top driver when no prior analysis exists in facts', () => {
       // HIGH_SENSITIVITY branch: no prior run_analysis fact, but contextPack
       // carries top_drivers. The edit target matches a driver label.
@@ -176,6 +281,20 @@ describe('detectCoachingSignal', () => {
         proposedHandlerId: 'set_factor_value',
         outcome: setFactorOutcome('Unrelated Factor'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn'] }),
+        priorFacts: [],
+      });
+      expect(detection).toBeNull();
+    });
+
+    it('does NOT fire on a NO-OP edit of a top driver', () => {
+      // "You're editing X ... Rerunning will show how this changes the
+      // picture" is equally false on a no-op: nothing was edited and a
+      // re-run would show an identical picture. Both edit-branch signals
+      // presuppose an actual edit, so the gate sits on the branch.
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        outcome: noopSetFactorOutcome('Customer Churn'),
+        contextPack: makeContextPack({ topDrivers: ['Customer Churn', 'Ad Spend'] }),
         priorFacts: [],
       });
       expect(detection).toBeNull();

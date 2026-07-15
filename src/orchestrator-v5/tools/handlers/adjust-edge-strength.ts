@@ -29,7 +29,10 @@ import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../hand
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
-import { formatEdgeAdjustment } from './d1-shared/format-confirmation.js';
+import {
+  formatEdgeAdjustment,
+  formatEdgeStrengthUnchanged,
+} from './d1-shared/format-confirmation.js';
 import { ADJUST_EDGE_STRENGTH_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
@@ -295,12 +298,18 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         );
       }
 
-      const assistantText = formatEdgeAdjustment({
-        fromLabel,
-        toLabel,
-        beforeMean,
-        afterMean: newMean,
-      });
+      // Gate-1 claim integrity: same divergence set_factor_value had —
+      // `noop` was computed for the fact above but the narration always
+      // claimed an adjustment, yielding "Adjusted the link between A and
+      // B from moderate to moderate." on a turn that changed nothing.
+      const assistantText = noop
+        ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean })
+        : formatEdgeAdjustment({
+            fromLabel,
+            toLabel,
+            beforeMean,
+            afterMean: newMean,
+          });
 
       return {
         assistant_text: assistantText,

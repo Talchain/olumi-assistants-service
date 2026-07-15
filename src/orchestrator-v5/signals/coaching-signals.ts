@@ -9,11 +9,16 @@
  *   - HIGH_SENSITIVITY_EDIT     (priority 2)
  *   - FIRST_ANALYSIS_COMPLETE   (priority 3)
  *
- * Edit-handler signals (STALE_*, HIGH_*) are shape-correct but dormant:
- * set_factor_value / adjust_edge_strength / add_constraint handlers are not
- * yet registered in the V5 handler registry. When they land, the detectors
- * fire automatically against their emitted handler facts without further
- * wiring.
+ * Edit-handler signals (STALE_*, HIGH_*) are LIVE. The header previously
+ * described them as "dormant until set_factor_value / adjust_edge_strength
+ * / add_constraint register in the V5 handler registry" — those handlers
+ * have since registered, and the detectors have been firing against their
+ * facts on real turns ever since, so the note was stale and understated
+ * the blast radius of a change here. `turn-executor.ts` calls this on
+ * every successful action turn and composes `coaching_text` into the
+ * user-visible `assistant_text`; see
+ * `__tests__/turn-executor-noop-edit-claim-integrity.integration.test.ts`
+ * for the wired proof.
  *
  * F.6: deterministic only. No LLM calls in Step 5. No math; only field
  * lookups.
@@ -23,6 +28,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { CoachingSignalId } from '../coaching/types.js';
+import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
 
 export type { CoachingSignalId };
@@ -74,8 +80,20 @@ const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
 export function detectCoachingSignal(
   input: CoachingSignalInput,
 ): CoachingSignalDetection | null {
-  // Edit-handler branch (dormant until handlers register).
+  // Edit-handler branch.
   if (EDIT_HANDLER_IDS.has(input.proposedHandlerId)) {
+    // Gate-1 claim integrity: a no-op edit changed nothing, so it cannot
+    // have staled an analysis and there is nothing to re-run for. Both
+    // signals on this branch presuppose an actual edit —
+    // STALE_ANALYSIS_AFTER_EDIT asserts "This change affects the model.
+    // The current analysis may not reflect it", and HIGH_SENSITIVITY_EDIT
+    // asserts "You're editing X ... Rerunning will show how this changes
+    // the picture" — so the gate sits on the branch rather than on one
+    // signal. The fact channel already carries the verdict; this reads it
+    // through the same `isNoopFact` predicate `context/recent-changes.ts`
+    // uses to keep no-ops out of the recent-changes projection.
+    if (isNoopEditOutcome(input.outcome)) return null;
+
     const priorSuccessfulAnalysis = findMostRecentSuccessfulAnalysisFact(input.priorFacts);
     if (priorSuccessfulAnalysis) {
       // STALE wins over HIGH_SENSITIVITY per the authoritative priority order.
@@ -111,6 +129,22 @@ export function detectCoachingSignal(
 // ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
+
+/**
+ * True when this turn's edit handler reported that nothing changed.
+ *
+ * Scoped to the edit fact types (the three ids in `EDIT_HANDLER_IDS`
+ * double as their fact types) so an unrelated co-emitted no-op fact
+ * cannot suppress coaching for an edit that really happened. `some`
+ * rather than `every`: each edit handler emits exactly one fact, and an
+ * empty `handler_facts` must not read as "no-op" — with `every` it
+ * would, silencing coaching on a shape we never want to guess at.
+ */
+function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
+  return outcome.handler_facts.some(
+    (fact) => EDIT_HANDLER_IDS.has(fact.fact_type) && isNoopFact(fact),
+  );
+}
 
 function hasPriorSuccessfulRunAnalysis(facts: readonly HandlerFact[]): boolean {
   // Presence of a run_analysis fact in priorFacts means the handler returned

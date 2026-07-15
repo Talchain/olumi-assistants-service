@@ -45,6 +45,7 @@ import {
 import {
   formatFactorChange,
   formatFactorValueSet,
+  formatFactorValueUnchanged,
   formatValueWithUnit,
 } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
@@ -66,6 +67,15 @@ import { log } from '../../../utils/telemetry.js';
  * patch language). Suppressed on noop applies (raw_value unchanged) and
  * when no prior analysis existed (the model is being built; nothing to
  * stale yet).
+ *
+ * SCOPE — this "suppressed on noop" note governs THIS constant only.
+ * It never covered the receipt sentence (`changeText`), which ignored
+ * `noop` and narrated "Updated X from 0.8 to 0.8." until the Gate-1 fix
+ * below, nor the Step 5 coaching signal, which is a separate channel in
+ * `signals/coaching-signals.ts` and emitted its own false staleness
+ * claim ("This change affects the model...") on the same no-op turn.
+ * Three channels, three independent noop gates — do not read a
+ * suppression note on one as covering the others.
  */
 // V5 stale-aware explain recovery — the phrase "previous analysis"
 // is on the brief's hard-fail list. The narrative uses "last analysis"
@@ -452,8 +462,20 @@ export function createSetFactorValueHandler(): HandlerFn {
       return snap.unit !== undefined ? { raw_value: raw, unit: snap.unit } : { raw_value: raw };
     };
     const beforeResolution = resolveExistingRawValue(before);
-    const changeText =
-      beforeResolution.kind === 'resolved'
+    // Gate-1 claim integrity: the fact channel decided this was a no-op
+    // above; the text channel must agree. Narrating `formatFactorChange`
+    // here produced the self-refuting "Updated X from 0.8 to 0.8." plus
+    // an implied commit that never happened. Checked FIRST because both
+    // change-shaped receipts below assert a change.
+    //
+    // `after` is the narration side on the no-op path: on a no-op it is
+    // equal to `before` by construction (the noop predicate compares
+    // value/raw_value/unit/cap), and `after` is always `resolved`
+    // (normaliseFactorValue writes raw_value), so this cannot fabricate
+    // a value the way a non-resolved `before` could.
+    const changeText = noop
+      ? formatFactorValueUnchanged({ label, after: narrationSide(after) })
+      : beforeResolution.kind === 'resolved'
         ? formatFactorChange({ label, before: narrationSide(before), after: narrationSide(after) })
         : formatFactorValueSet({ label, after: narrationSide(after) });
 
