@@ -219,12 +219,19 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     expect(preRouteEvent?.data.downgrade_reason).toBe('handler_not_executable');
   });
 
-  it('"Set Customer Risk to 5" — single substring match on a non-factor (risk) → falls back to clarify (factor-only dispatch gate)', async () => {
+  it('"Set Customer Risk to 5" — single substring match on a non-factor (risk) → HONEST REFUSAL, never a clarify (factor-only dispatch gate)', async () => {
     // Brief correction #3: a single substring match that resolves to a
     // non-factor node MUST NOT dispatch set_factor_value. Risks live
     // in the same EntityKind 'node' bucket as factors in GraphLookup,
     // so this case can only be caught by re-resolving NodeV3.kind on
     // the raw graph state — exactly what the kind gate does.
+    //
+    // This test previously asserted the gate produced a clarify
+    // ("wasn't sure"). That was pinning a DEFECT: there is no ambiguity
+    // here — the node was resolved with certainty and the operation is
+    // simply unsupported on it. The clarify shipped live as a dead-end
+    // loop (see the dedicated fixture below). The gate now refuses
+    // honestly instead.
     const routingAdapter = throwingRoutingAdapter();
     const { response, telemetry } = await runTurnExecutor(
       payload('Set Customer Risk to 5'),
@@ -234,8 +241,7 @@ describe('turn-executor × deterministic value-update pre-route', () => {
         graphState: {
           nodes: [
             // Only one 'node'-bucket entity substring-matches the
-            // message; it's a risk, not a factor. The kind gate
-            // downgrades to clarify.
+            // message; it's a risk, not a factor.
             { id: 'r1', kind: 'risk', label: 'Customer Risk' },
             { id: 'goal_1', kind: 'goal', label: 'Profit' },
           ],
@@ -246,17 +252,108 @@ describe('turn-executor × deterministic value-update pre-route', () => {
 
     expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
     expect(telemetry?.turn_class).toBe('direct_answer');
-    expect(response.assistant_text).toContain("wasn't sure");
+    // NOT a question — a refusal that names the real kind.
+    expect(response.assistant_text).not.toContain("wasn't sure");
+    expect(response.assistant_text).toContain('Customer Risk is a risk, not a factor');
 
     const preRouteEvent = events.find(
       (e) => e.event === 'v5.deterministic_value_update',
     );
-    // Telemetry now reflects the FINAL dispatch (clarify) AND
-    // surfaces the original pre-guard candidate plus the downgrade
-    // reason so observability sees both halves of the decision.
-    expect(preRouteEvent?.data.dispatch).toBe('clarify');
+    // Telemetry reflects the FINAL dispatch AND surfaces the original
+    // pre-guard candidate plus the downgrade reason so observability
+    // sees both halves of the decision.
+    expect(preRouteEvent?.data.dispatch).toBe('refuse_non_factor_kind');
     expect(preRouteEvent?.data.original_dispatch).toBe('set_factor_value');
     expect(preRouteEvent?.data.downgrade_reason).toBe('non_factor_kind');
+  });
+
+  it('LIVE DEFECT FIXTURE (staging f31e3852, scenario 906d6aff-08d6-4e66-8458-031bb8c86835, 2026-07-15): "Set Key Talent Attrition to 0.8." on a RISK node named VERBATIM → honest refusal with a route, never a clarifier offering the user their own words back', async () => {
+    // Paul-reported dead end. The graph carries risk `risk_talent_loss`
+    // labelled EXACTLY "Key Talent Attrition"; the user typed that label
+    // verbatim. Live response was HTTP 200, zero blocks, and:
+    //   "I wasn't sure which factor you meant. Did you mean Key Talent
+    //    Attrition?"
+    // with a single chip whose replay message was byte-identical to the
+    // message just sent — an unescapable loop, and it called a risk a
+    // "factor". Coach doctrine V3: a dead end is a failed turn even when
+    // every sentence in it is true.
+    const USER_MESSAGE = 'Set Key Talent Attrition to 0.8.';
+    const routingAdapter = throwingRoutingAdapter();
+    const { response } = await runTurnExecutor(
+      payload(USER_MESSAGE),
+      'req-live-defect-906d6aff',
+      {
+        routingAdapter,
+        graphState: {
+          nodes: [
+            { id: 'goal_cost_reduction', kind: 'goal', label: 'Reduce Operating Costs' },
+            { id: 'risk_talent_loss', kind: 'risk', label: 'Key Talent Attrition' },
+            { id: 'fac_office_rent', kind: 'factor', label: 'Office Rent' },
+            { id: 'fac_talent_pool', kind: 'factor', label: 'Talent Pool' },
+          ],
+          edges: [],
+        },
+      },
+    );
+
+    // 1. Still deterministic — no LLM lane involved (the live trace showed
+    //    `llm_calls: []`, refuting the "falls through to the LLM" theory).
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+
+    // 2. NOT a tautological question.
+    expect(response.assistant_text).not.toContain("wasn't sure which factor");
+    expect(response.assistant_text).not.toContain('Did you mean Key Talent Attrition');
+
+    // 3. Names the real kind — a risk is never described to the user as a
+    //    "factor".
+    expect(response.assistant_text).toContain('Key Talent Attrition is a risk, not a factor');
+
+    // 4. Honest about mutation state, using the sanctioned lead. (The
+    //    natural phrasings — "No change was made", "nothing changed" — are
+    //    banned as state-mutation denials; the egress forbidden-phrase guard
+    //    caught exactly that while this fix was being written.)
+    expect(response.assistant_text).toContain('The model is unchanged so far');
+
+    // 5. Gives a ROUTE, not just a refusal — names the supported
+    //    alternative and a real factor the user COULD set.
+    expect(response.assistant_text).toContain('add a constraint');
+    expect(response.assistant_text).toMatch(/Office Rent|Talent Pool/);
+
+    // 6. THE UNIVERSAL INVARIANT: no chip replays the user's own message.
+    for (const action of response.suggested_actions) {
+      expect((action as { message: string }).message.trim().toLowerCase()).not.toBe(
+        USER_MESSAGE.trim().toLowerCase(),
+      );
+    }
+
+    // 7. No pending action is persisted — there is no resumable
+    //    set_factor_value against an invalid target, and persisting one
+    //    would rebuild the loop by another door.
+    const commitWrite = appendCalls.find(
+      (w) => (w as { pending_actions?: unknown[] }).pending_actions !== undefined,
+    ) as { pending_actions?: unknown[] } | undefined;
+    expect(commitWrite?.pending_actions ?? []).toEqual([]);
+  });
+
+  it('non-factor refusal on a graph with NO factor nodes at all — still refuses honestly, invents no example factor', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+    const { response } = await runTurnExecutor(
+      payload('Set Customer Risk to 5'),
+      'req-pre-route-non-factor-nofactors',
+      {
+        routingAdapter,
+        graphState: {
+          nodes: [
+            { id: 'r1', kind: 'risk', label: 'Customer Risk' },
+            { id: 'goal_1', kind: 'goal', label: 'Profit' },
+          ],
+          edges: [],
+        },
+      },
+    );
+    expect(response.assistant_text).toContain('Customer Risk is a risk, not a factor');
+    // Generic fallback clause — no fabricated factor label.
+    expect(response.assistant_text).toContain('You can set a value on any factor in your model');
   });
 
   it('1.16b REGRESSION FIXTURE (render request_id 1921f7c1-b295-4056-8b3a-21b4c3ef63fb): exact factor label named verbatim + a decision node sharing tokens → auto-applies to the factor, no LLM call, decision node never offered as a chip', async () => {

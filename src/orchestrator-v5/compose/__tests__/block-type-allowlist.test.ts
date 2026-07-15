@@ -436,7 +436,7 @@ describe('V5 block-type allowlist — egress choke point (GUARD 2)', () => {
   it('passes every frozen block type through egress with no drop and no off-allowlist type', () => {
     const out = sanitiseOlumiResponseForEgress(
       makeResponse({ blocks: oneBlockOfEachType() }),
-      { graph: makeGraph(), requestId: 'req-allowlist', exitPath: 'test' },
+      { graph: makeGraph(), requestId: 'req-allowlist', exitPath: 'test', userMessage: null },
     );
 
     // Nothing dropped: all 12 survive the egress walk.

@@ -241,6 +241,40 @@ export type ValueUpdateDispatch =
       readonly candidate: ValueUpdateCandidate;
       readonly quantity: QuantityExtractionResult;
       readonly attribution?: QuantityAttribution;
+    }
+  /**
+   * The user named a real graph node for a value-edit, we resolved it
+   * with certainty, and it is NOT a factor (risk / outcome / decision /
+   * action). Setting a value on a non-factor node is UNSUPPORTED by
+   * design — `set_factor_value` is the only value-setting handler and it
+   * rejects non-factor targets (`tools/handlers/set-factor-value.ts`
+   * ENTITY_KIND_MISMATCH); no `set_node_value`-style handler exists.
+   *
+   * This is deliberately NOT the `clarify` variant. `clarify` means "I
+   * could not tell WHICH entity you meant" — an ambiguity question whose
+   * candidate list is the answer. Here there is no ambiguity: we know
+   * exactly which node the user meant and we cannot perform the
+   * operation on it. Reusing `clarify` for this case produced the live
+   * dead-end defect (staging f31e3852, scenario 906d6aff…, 2026-07-15):
+   * "Set Key Talent Attrition to 0.8" on a risk node answered "I wasn't
+   * sure which factor you meant. Did you mean Key Talent Attrition?" —
+   * offering the user's own words back as the only choice, with a chip
+   * whose replay message was byte-identical to the message just sent. An
+   * unescapable loop, and it called a risk a "factor".
+   *
+   * The caller composes an honest refusal that names the node's real
+   * kind and the route that IS supported (`add_constraint` accepts
+   * risk/outcome/goal/factor targets — see
+   * `tools/handlers/add-constraint.ts` ALLOWED_TARGET_KINDS).
+   */
+  | {
+      readonly matched: true;
+      readonly dispatch: 'refuse_non_factor_kind';
+      readonly candidate: ValueUpdateCandidate;
+      /** The node's real NodeV3.kind, re-resolved from raw graph state. */
+      readonly node_kind: string;
+      readonly quantity: QuantityExtractionResult;
+      readonly attribution?: QuantityAttribution;
     };
 
 export type SkipReason =
@@ -839,6 +873,67 @@ export function buildClarifyAssistantText(
     return `I wasn't sure which factor you meant. Did you mean ${c.label}?`;
   }
   return `I wasn't sure which factor you meant. Did you mean one of these?`;
+}
+
+/**
+ * Article for a node-kind noun. Only the kinds NodeV3 defines reach here;
+ * 'outcome' and 'action' are the vowel-initial cases.
+ */
+function articleFor(kind: string): string {
+  return /^[aeiou]/i.test(kind) ? 'an' : 'a';
+}
+
+/**
+ * User-facing copy for the "you named a real node, but it isn't a factor and
+ * a value cannot be set on it" case (`dispatch: 'refuse_non_factor_kind'`).
+ *
+ * HONEST-REFUSAL-WITH-A-ROUTE, per coach doctrine V3 ("a dead end is a failed
+ * turn even when every sentence in it is true"). Three obligations:
+ *   1. Say plainly that the operation is not supported, and say WHY in the
+ *      user's terms (the node's real kind) — never re-describe a risk as a
+ *      "factor", which the old clarify copy did.
+ *   2. State the mutation status, using the SANCTIONED lead
+ *      "The model is unchanged so far." (`compose/edit-clarify-response.ts`
+ *      LEAD_TEXT). Note the phrasings that read naturally here — "No change
+ *      was made", "nothing changed" — are BANNED by
+ *      FORBIDDEN_USER_FACING_PHRASES as state-mutation denials; the egress
+ *      guard replaces the whole response when one fires. Positive framing
+ *      only.
+ *   3. Name what IS available, so the turn has an exit:
+ *        - `add_constraint` genuinely accepts risk / outcome / goal / factor
+ *          targets (`tools/handlers/add-constraint.ts` ALLOWED_TARGET_KINDS,
+ *          whose doc cites exactly this use case: "keep churn risk below 5%");
+ *        - the factor labels actually present in THIS graph, which are the
+ *          only valid `set_factor_value` targets.
+ *
+ * Claim discipline: this copy deliberately does NOT say "risks have no value".
+ * That would be FALSE — `schemas/cee-v3.ts` does not gate `observed_state` by
+ * kind, and `cee/transforms/graph-data-integrity.ts` INTERCEPT_ELIGIBLE_KINDS
+ * includes 'risk', so risk nodes do carry values downstream. The true and
+ * narrower claim is that no operation sets a value on one DIRECTLY.
+ *
+ * `factorLabels` is the caller's canonical factor-label list (may be empty —
+ * a graph with no factor nodes at all drops the "for example" clause rather
+ * than inventing one).
+ */
+export function buildNonFactorKindRefusalText(
+  label: string,
+  nodeKind: string,
+  factorLabels: readonly string[],
+): string {
+  const examples = factorLabels.slice(0, 2);
+  const exampleClause =
+    examples.length === 0
+      ? `You can set a value on any factor in your model.`
+      : examples.length === 1
+        ? `You can set a value on a factor instead — ${examples[0]}, for example.`
+        : `You can set a value on a factor instead — ${examples[0]} or ${examples[1]}, for example.`;
+  return (
+    `${label} is ${articleFor(nodeKind)} ${nodeKind}, not a factor, and I can't ` +
+    `set a value on ${articleFor(nodeKind)} ${nodeKind} directly. The model is unchanged so far. ` +
+    `${exampleClause} ` +
+    `If you want to hold ${label} to a limit, ask me to add a constraint on it.`
+  );
 }
 
 /**

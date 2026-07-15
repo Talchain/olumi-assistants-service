@@ -328,6 +328,18 @@ function sendFinalised200(
      * collapsed-default UI + explicit label, not a wire-level scrub.
      */
     readonly reasoning?: string;
+    /**
+     * The user's message for THIS turn, verbatim, or `null` when the turn
+     * carries none (system events). Threaded to the egress sanitiser's
+     * looping-chip guard, which drops any pure-text-replay chip that would
+     * re-submit this exact message — the no-dead-end invariant (see
+     * `orchestrator-v5/compose/looping-chip-guard.ts`).
+     *
+     * REQUIRED, deliberately: every dispatch path that can emit chips must
+     * state what the user said, so no path can opt out of the guard by
+     * omission. `null` is the honest value when there is no user message.
+     */
+    readonly userMessage: string | null;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -438,15 +450,16 @@ function sendFinalised200(
     graph: ctx.graph,
     requestId,
     exitPath,
+    userMessage: ctx.userMessage,
   });
   const egress = validateEgress(candidateSanitised, requestId);
   let wireBody = egress.ok
     ? finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath }),
+        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
         ctx,
       )
     : finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath }),
+        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
         ctx,
       );
   if (!egress.ok) {
@@ -496,7 +509,7 @@ function sendFinalised200(
       _timings: timingsBlock,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
       ctx,
     );
   }
@@ -537,7 +550,7 @@ function sendFinalised200(
       _diagnostic_trace: stampedTrace,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
       ctx,
     );
   }
@@ -607,7 +620,7 @@ function sendFinalised200(
         _context_summary: contextSummary,
       };
       wireBody = finaliseV5Response(
-        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
         ctx,
       );
     }
@@ -628,7 +641,7 @@ function sendFinalised200(
       _reasoning: ctx.reasoning,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
       ctx,
     );
   }
@@ -887,6 +900,7 @@ function sendEditGraphRecovery(
   scenarioId: string,
   stage: import('@talchain/schemas/boundary').StageType,
   reason: EditGraphRecoveryReason,
+  userMessage: string | null,
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
     request_id: requestId,
@@ -896,7 +910,7 @@ function sendEditGraphRecovery(
   return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
     assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
     stage,
-  }), { graph: null });
+  }), { graph: null, userMessage });
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1253,6 +1267,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+        // System events carry no user message (the ingress union's
+        // 'system_event' variant has no `message` field), so the
+        // looping-chip guard has nothing to compare against and is
+        // explicitly inert here rather than accidentally omitted.
+        userMessage: null,
       });
     }
 
@@ -1307,6 +1326,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestStartedAt: routeStartedAt,
             scenarioId: ingress.scenario_id,
             turnId: ingress.turn_id,
+          userMessage: ingress.message,
           });
         }
         if (cc.outcome === 'handler_failure') {
@@ -1353,6 +1373,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
+        userMessage: ingress.message,
         });
       } catch (err) {
         log.error(
@@ -1504,6 +1525,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
+        userMessage: ingress.message,
         });
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
@@ -1766,6 +1788,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
+        userMessage: ingress.message,
         });
       }
     }
@@ -1794,6 +1817,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+      userMessage: ingress.message,
       });
     }
 
@@ -1840,6 +1864,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+      userMessage: ingress.message,
       });
     }
 
@@ -1862,6 +1887,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+      userMessage: ingress.message,
       });
     }
 
@@ -1922,10 +1948,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph graphState reload failed — returning typed recovery',
           );
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed');
+          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed', ingress.message);
         }
         if (persisted == null) {
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph');
+          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message);
         }
         // Validate the reloaded graph through the same ingress schema the
         // request body would have gone through. A persisted-but-invalid
@@ -1941,7 +1967,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
           );
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid');
+          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message);
         }
         resolvedGraphState = parsed.data;
         emit(TelemetryEvents.V5EditGraphGraphStateReloaded, {
@@ -1994,6 +2020,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
+        userMessage: ingress.message,
         });
       } catch (err) {
         log.error(
@@ -2087,6 +2114,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+      userMessage: ingress.message,
       });
     }
 
@@ -2185,6 +2213,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       requestStartedAt: routeStartedAt,
       scenarioId: ingress.scenario_id,
       turnId: ingress.turn_id,
+      userMessage: ingress.message,
       ...(run.coachingDelivery ? { coachingDelivery: run.coachingDelivery } : {}),
       // V5 M5 (read-only): thread the turn-executor's full canonical analysis
       // state into the flag-gated `_context_summary` diagnostic. When present
