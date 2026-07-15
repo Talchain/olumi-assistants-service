@@ -33,12 +33,15 @@ jobs:
         run: pnpm openapi:generate
       - name: Lint
         run: pnpm lint
-      - name: Typecheck (src/build, blocking gate)
-        # Source-only typecheck (tsconfig.build.json excludes tests). The full
-        # src+test `tsc --noEmit` runs in the separate non-required
-        # "Typecheck Drift (ratchet)" job, so pre-existing test-file type drift
-        # no longer blocks this required check or masks the unit-test result.
-        run: pnpm typecheck:src
+      - name: Typecheck (blocking gate)
+        # `pnpm typecheck` IS the honest gate: source-only (tsconfig.build.json
+        # excludes tests), plus a `pretypecheck` that regenerates the OpenAPI types
+        # and asserts @talchain/schemas resolves from THIS checkout at the pinned
+        # version. The full src+test `tsc --noEmit` is deliberately NOT this gate —
+        # it carries ~466 pre-existing test-file errors and lives behind the honest
+        # name `pnpm typecheck:all-including-known-broken-tests`, run by the separate
+        # non-required "Typecheck Drift (ratchet)" job.
+        run: pnpm typecheck
       - name: Validate config defaults
         run: pnpm config:validate
         env:

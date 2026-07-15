@@ -30,12 +30,70 @@ git status && git diff --staged
 
 ---
 
+## The typecheck gate
+
+**`pnpm typecheck` is the gate. It is the only typecheck command you should run, cite,
+or put in a report.** It is green on a clean checkout, so green means something.
+
+```bash
+pnpm typecheck        # tsconfig.build.json, source-only. Clean on staging => green is real.
+```
+
+It runs `tsc -p tsconfig.build.json --noEmit`, preceded (via `pretypecheck`) by two
+prerequisites that must not be skipped:
+
+- **`openapi:generate`** — a fresh clone/worktree has no `src/generated/openapi.d.ts`
+  (gitignored) and ~40 source files import it. Without it, tsc emits a wall of phantom
+  TS2307s that mask real errors.
+- **`check:schemas-resolution`** — asserts `@talchain/schemas` resolves *from this
+  checkout* at the pinned version, and **fails the gate** if not (see below).
+
+### Do not use the full-tree typecheck as a gate
+
+`tsc --noEmit` over `tsconfig.json` (src **+** tests) carries **~466 pre-existing
+test-file type errors**. It cannot pass, so it cannot tell you anything. It lives behind
+a deliberately unmissable name:
+
+```bash
+pnpm typecheck:all-including-known-broken-tests   # ~466 errors. NOT a gate. Never cite as evidence.
+```
+
+Scope of that noise, measured at `a1f0c457`: 466 errors across 137 files — 350 in
+`tests/`, 116 in `src/**/__tests__/*.test.ts`. **Zero are in production source.** That is
+exactly why `tsconfig.build.json` is safe to gate on: its exclusions drop only tests
+(`src/_archive` and `* 2.ts` match nothing), so it still typechecks the full ~823-file
+production tree.
+
+New drift in that noise is caught by the non-required CI job **"Typecheck Drift
+(ratchet)"** (`scripts/ci/typecheck-ratchet.sh`) against a frozen baseline. It never
+blocks merges; it is a shrink-toward-zero signal, not a gate.
+
+### The worktree trap (why the schemas assertion exists)
+
+A bare `git worktree` has no `node_modules`, so Node's resolver **walks up** and silently
+binds a parent directory's `@talchain/schemas` — historically `0.8.1` at the `GitHub/`
+checkout root. A typecheck taken that way is green against a *different codebase*: it
+measures nothing, and schema skew silently drops wire fields.
+
+`scripts/check-schemas-resolution.mjs` makes this fail loudly instead of silently. It
+asserts the bound package (a) comes from this project, not a parent, and (b) matches the
+`package.json` pin exactly. It **fails closed** — a range pin (`^`, `~`) is rejected
+rather than assumed-good — and has no env escape hatch on purpose.
+
+If it fires, fix the install; do not work around it:
+
+```bash
+pnpm install --frozen-lockfile      # or: bash scripts/bootstrap-worktree.sh
+```
+
+---
+
 ## Pre-push validation
 
 A pre-push hook runs six automated checks before allowing `git push`:
 
 1. **Branch guard** — blocks direct push to `main`
-2. **TypeScript type check** — `tsc -p tsconfig.build.json --noEmit` (source only; test files have pre-existing type errors tracked separately)
+2. **TypeScript type check** — delegates to `pnpm typecheck` (see [The typecheck gate](#the-typecheck-gate))
 3. **Lint changed files** — ESLint on changed `src/**/*.ts` only (test files have pre-existing lint issues tracked separately)
 4. **Smoke tests** — 8 critical orchestrator pipeline tests (~60s)
 5. **Stale .js detection** — tracked `.js` files with co-located `.ts` in `src/`
@@ -102,7 +160,7 @@ Run **only** after making changes, before reporting the task as done.
 Targets changed files and their direct dependents — fast and light.
 
 ```bash
-pnpm exec tsc --noEmit                                # ~60-90s, catches type errors
+pnpm typecheck                                         # ~60-90s, catches type errors
 pnpm exec vitest run --changed --bail=1                # only tests affected by changes
 ```
 
@@ -114,7 +172,7 @@ Report: "Typecheck passed. N related tests passed." (or "No related tests for th
 Run before committing. Still lightweight — no full test suite.
 
 ```bash
-pnpm exec tsc --noEmit
+pnpm typecheck
 pnpm lint
 ```
 
@@ -143,7 +201,7 @@ Before reporting ANY task as complete, run the **Tier 1 smoke checks** (not the 
 ```bash
 git branch --show-current                              # Correct branch?
 git status                                             # Clean state?
-pnpm exec tsc --noEmit                                 # TypeScript compiles?
+pnpm typecheck                                         # TypeScript compiles?
 pnpm exec vitest run --changed --bail=1                # Related tests pass?
 ```
 
