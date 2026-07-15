@@ -41,6 +41,7 @@ import { z } from 'zod';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+import { checkGraphNumericBounds } from '../../validators/numeric-bounds.js';
 
 export const REQUEST_EXTENSIONS_VALIDATOR_NAME = 'V5RequestExtensions';
 
@@ -228,6 +229,44 @@ export function parseRequestExtensions(
           details: {
             field: 'graph_state',
             issues: trimIssues(parsed.error.issues),
+          },
+          request_id: requestId,
+          retryable: false,
+        },
+      };
+    }
+    // W2E-2 numeric-bounds gate (schema-hard-boundary): the shape schema above
+    // is deliberately permissive (passthrough), so numeric graph values need an
+    // explicit check against the vendored @talchain/schemas ranges before they
+    // can flow onwards to PLoT/ISL. Contract-declared ranges (exists_probability
+    // [0,1], strength.mean [-1,1], strength.std > 0, observed_state.std > 0)
+    // plus universal finiteness (reject NaN/±Infinity — JSON.parse("1e999")
+    // yields Infinity, so this IS reachable from the wire). Never clamped:
+    // violations reject with the same BoundaryError shape as structural
+    // failures. Messages carry field paths and bounds only — no values, no
+    // labels (PII rule).
+    const boundsIssues = checkGraphNumericBounds(parsed.data);
+    if (boundsIssues.length > 0) {
+      emit(TelemetryEvents.BoundaryValidation, {
+        boundary: 'B1',
+        direction: 'ingress',
+        validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+        contract_version: '1.5.0',
+        pass: false,
+        request_id: requestId,
+        field: 'graph_state',
+        reason: 'numeric_bounds',
+      });
+      return {
+        ok: false,
+        error: {
+          error: 'INGRESS_CONTRACT_VIOLATION',
+          boundary: 'B1',
+          direction: 'ingress',
+          validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+          details: {
+            field: 'graph_state',
+            issues: boundsIssues,
           },
           request_id: requestId,
           retryable: false,
