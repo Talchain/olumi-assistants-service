@@ -58,6 +58,11 @@ describe('tryShortConfirmResume — regex matrix', () => {
     ['go ahead', true],
     ['apply', true],
     ['apply it', true],
+    // P0 DGAI #340 — the hold copy's promised affirmatives for a multi-part
+    // held change ("apply them") must resolve, not fall to the LLM.
+    ['apply them', true],
+    ['apply these', true],
+    ['Apply them please', true],
     ['confirmed', true],
     ['please do', true],
     ['yes please', true],

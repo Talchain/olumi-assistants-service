@@ -66,6 +66,7 @@ import type {
   RefereeVerdict,
 } from '../graph-management/types.js';
 import {
+  isPendingActionExpired,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
 } from '../session/pending-action.js';
@@ -350,6 +351,57 @@ export function buildGmHeldAssistantText(subject: string | null): string {
     `I'm holding the change to ${subject} rather than applying it straight away. ` +
     'Nothing in the model moves until you confirm. Reply yes to continue, or tell ' +
     'me what to adjust instead.'
+  );
+}
+
+/**
+ * P0 held-proposal survival (2026-07-15, DGAI #340) requirement 4 — honest
+ * supersession. A newer hold for the SAME target silently retires the older
+ * one via the commit carry-forward's same-key rule (`gmHeldProposalRef` is
+ * keyed on scenario + target), and a hold for a DIFFERENT target leaves TWO
+ * consents live with no mention. Neither state may be silent: the hold-turn
+ * copy must say what happened to the earlier hold.
+ */
+export const GM_HELD_REPLACES_PRIOR_NOTICE =
+  'This replaces the change I was holding before for the same part of the model.';
+
+/** Fallback when the earlier still-live hold has no safe printable label. */
+export const GM_HELD_COEXISTS_PRIOR_NOTICE_GENERIC =
+  'I am still holding an earlier change as well. Confirm them one at a time, or say all of them.';
+
+/**
+ * Deterministic one-sentence notice for a NEW hold minted while an earlier
+ * consent hold is still live. Same-target (same deterministic `gmh_` handle,
+ * which the commit carry-forward will retire) → the "replaces" sentence.
+ * Different target (both stay live; a bare "yes" now lists them) → name the
+ * earlier hold so neither consent is silent. Null when no live prior
+ * consent hold exists — the common case, copy unchanged.
+ */
+export function buildHeldSupersessionNotice(
+  newHold: PendingAction,
+  priorPendings: readonly PendingAction[],
+  nowMs: number,
+): string | null {
+  const livePriorHolds = priorPendings.filter(
+    (pa) =>
+      pa.action.kind === 'apply_proposed_change' && !isPendingActionExpired(pa, nowMs),
+  );
+  if (livePriorHolds.length === 0) return null;
+  if (livePriorHolds.some((pa) => pa.chip_id === newHold.chip_id)) {
+    return GM_HELD_REPLACES_PRIOR_NOTICE;
+  }
+  const other = livePriorHolds[0]!;
+  const rawLabel =
+    other.action.kind === 'apply_proposed_change' &&
+    typeof other.action.public_label === 'string'
+      ? other.action.public_label.trim()
+      : '';
+  if (rawLabel.length === 0 || !subjectIsSafe(rawLabel)) {
+    return GM_HELD_COEXISTS_PRIOR_NOTICE_GENERIC;
+  }
+  return (
+    `I am still holding the earlier change '${clampLabel(rawLabel)}' as well. ` +
+    'Confirm them one at a time, or say all of them.'
   );
 }
 
