@@ -12,8 +12,14 @@
  *   - every number anywhere in graph_state must be finite (no NaN/Infinity)
  *
  * Where the contract is silent (e.g. observed_state.value) only finiteness is
- * enforced — no invented ranges, no clamping. Violations reject with the same
- * INGRESS_CONTRACT_VIOLATION BoundaryError shape the structural parse uses.
+ * enforced — no invented ranges.
+ *
+ * This file covers the REJECT half of the path-(a) split: values with no safe
+ * interpretation, which reject with the same INGRESS_CONTRACT_VIOLATION
+ * BoundaryError shape the structural parse uses. The REPAIR half (sigma <= 0,
+ * which is repaired to the contract floor rather than bricking a persisted
+ * scenario) lives in request-extensions-persisted-state-repair.test.ts. The
+ * doctrine behind the split is documented in src/validators/numeric-bounds.ts.
  *
  * PII invariant: rejection messages must not echo factor labels or the
  * offending numeric values.
@@ -101,12 +107,12 @@ describe('parseRequestExtensions — numeric bounds on graph_state (W2E-2)', () 
     );
   });
 
-  it('rejects non-positive edge strength.std', () => {
-    expectBoundsRejection(
-      bodyWithEdge({ strength: { mean: 0.5, std: 0 } }),
-      'edges.0.strength.std',
-    );
-  });
+  // NOTE: non-positive strength.std / observed_state.std are deliberately NOT
+  // rejected on this path — they are REPAIRED to the contract floor. See the
+  // PERSISTED-STATE REPAIR doctrine (src/validators/numeric-bounds.ts header):
+  // the UI re-sends persisted canvas state on every turn, so rejecting a saved
+  // std=0 bricks the scenario permanently. Coverage lives in
+  // request-extensions-persisted-state-repair.test.ts.
 
   it('rejects Infinity node value (Infinity observed_state.value)', () => {
     expectBoundsRejection(
@@ -115,12 +121,8 @@ describe('parseRequestExtensions — numeric bounds on graph_state (W2E-2)', () 
     );
   });
 
-  it('rejects non-positive node observed_state.std', () => {
-    expectBoundsRejection(
-      bodyWithNode({ observed_state: { value: 0.5, std: -1 } }),
-      'nodes.0.observed_state.std',
-    );
-  });
+  // (see the repair note above — observed_state.std <= 0 is repaired, not
+  // rejected, on the UI graph_state path)
 
   it('rejects non-finite numbers in passthrough numeric fields (node intercept: Infinity)', () => {
     expectBoundsRejection(

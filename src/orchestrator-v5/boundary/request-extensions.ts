@@ -41,7 +41,7 @@ import { z } from 'zod';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
-import { checkGraphNumericBounds } from '../../validators/numeric-bounds.js';
+import { repairGraphNumericBounds } from '../../validators/numeric-bounds.js';
 
 export const REQUEST_EXTENSIONS_VALIDATOR_NAME = 'V5RequestExtensions';
 
@@ -240,13 +240,20 @@ export function parseRequestExtensions(
     // explicit check against the vendored @talchain/schemas ranges before they
     // can flow onwards to PLoT/ISL. Contract-declared ranges (exists_probability
     // [0,1], strength.mean [-1,1], strength.std > 0, observed_state.std > 0)
-    // plus universal finiteness (reject NaN/±Infinity — JSON.parse("1e999")
-    // yields Infinity, so this IS reachable from the wire). Never clamped:
-    // violations reject with the same BoundaryError shape as structural
-    // failures. Messages carry field paths and bounds only — no values, no
-    // labels (PII rule).
-    const boundsIssues = checkGraphNumericBounds(parsed.data);
-    if (boundsIssues.length > 0) {
+    // plus universal finiteness (NaN/±Infinity — JSON.parse("1e999") yields
+    // Infinity, so this IS reachable from the wire).
+    //
+    // This is path (a): PERSISTED state re-entering CEE on every turn. Per the
+    // repair-vs-reject doctrine (src/validators/numeric-bounds.ts header), a
+    // sigma <= 0 is REPAIRED to the contract floor and metered — hard-rejecting
+    // it would permanently brick every scenario already saved with std=0, which
+    // is worse than the leak the gate closes. Values with no safe reading
+    // (non-finite, out-of-range probability/mean) still reject, with the same
+    // BoundaryError shape as a structural failure so the UI's existing
+    // CEE-validation-error handling renders them. Messages carry field paths and
+    // bounds only — no values, no labels (PII rule).
+    const bounds = repairGraphNumericBounds(parsed.data);
+    if (!bounds.ok) {
       emit(TelemetryEvents.BoundaryValidation, {
         boundary: 'B1',
         direction: 'ingress',
@@ -266,14 +273,23 @@ export function parseRequestExtensions(
           validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
           details: {
             field: 'graph_state',
-            issues: boundsIssues,
+            issues: bounds.issues,
           },
           request_id: requestId,
           retryable: false,
         },
       };
     }
-    graphState = parsed.data;
+    for (const repair of bounds.repairs) {
+      emit(TelemetryEvents.IngressNumericRepair, {
+        field: 'graph_state',
+        path: repair.path,
+        kind: repair.kind,
+        repaired_to: repair.repaired_to,
+        request_id: requestId,
+      });
+    }
+    graphState = bounds.graph;
   }
 
   let analysisState: AnalysisStateIngress | null = null;

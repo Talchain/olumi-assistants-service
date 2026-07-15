@@ -60,6 +60,24 @@ export const NAN_FIX_SIGNATURE_STD = DEFAULT_STRENGTH_STD;
 export const LLM_STRENGTH_STD_FLOOR = 0.001;
 
 /**
+ * Floor applied when REPAIRING a non-positive sigma (edge `strength.std`,
+ * node `observed_state.std`) arriving on the UI `graph_state` ingress path.
+ *
+ * Deliberately the same number as LLM_STRENGTH_STD_FLOOR — one source of
+ * truth for "the smallest sigma CEE lets into the pipeline" — but named for
+ * the ingress seam because the LLM name would be actively misleading at a
+ * UI boundary. See the PERSISTED-STATE REPAIR doctrine in
+ * src/validators/numeric-bounds.ts for why this path repairs rather than
+ * rejects.
+ *
+ * Magnitude rationale: sigma <= 0 means "no uncertainty stated", so the
+ * repair must preserve "essentially certain" rather than fabricate
+ * uncertainty the user never expressed. A large floor (e.g. the 0.15
+ * weak-guess floor) would silently change analysis results.
+ */
+export const INGRESS_SIGMA_REPAIR_FLOOR = LLM_STRENGTH_STD_FLOOR;
+
+/**
  * Nudge appended to the user message when retrying due to default strength
  * detection. Instructs the LLM to differentiate edge strengths rather than
  * using the same value for every relationship.

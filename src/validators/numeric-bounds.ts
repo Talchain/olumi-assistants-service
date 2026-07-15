@@ -26,9 +26,46 @@
  *
  * PII invariant: issue messages reference the field path and the violated
  * bound only — never the offending value and never node/factor labels.
+ *
+ * ---------------------------------------------------------------------------
+ * DOCTRINE — PERSISTED-STATE REPAIR vs NEW-CLAIM REJECTION
+ * ---------------------------------------------------------------------------
+ * The two ingress paths are NOT symmetric, and treating them the same way
+ * bricks real users. The first cut of this gate hard-rejected every violation
+ * on both paths; because the UI re-sends its persisted canvas on EVERY turn,
+ * any scenario already saved with sigma <= 0 became permanently unusable —
+ * every turn 422'd with a non-actionable error. That is worse than the leak
+ * the gate closes.
+ *
+ * Path (a) — UI `graph_state` (persisted state re-entering CEE):
+ *   The user is re-sending state WE previously accepted and persisted. A
+ *   violation with an unambiguous safe interpretation must be REPAIRED and
+ *   recorded via telemetry, never rejected. Bricking a user's scenario is not
+ *   an acceptable way to enforce a bound we failed to enforce earlier.
+ *     - sigma <= 0 (`strength.std`, `observed_state.std`) means "no
+ *       uncertainty stated" → REPAIR to INGRESS_SIGMA_REPAIR_FLOOR.
+ *   Values that are semantically MEANINGLESS, or that cannot be safely
+ *   interpreted, stay HARD REJECTS with an actionable error:
+ *     - NaN / ±Infinity — no defensible reading at all.
+ *     - a probability outside [0, 1], or strength.mean outside [-1, 1] — we
+ *       cannot know whether 1.4 meant 1.0 or 0.14, and guessing would silently
+ *       change the user's model. Rejecting names the field and the bound so
+ *       the user can fix it.
+ *
+ * Path (b) — LLM output (edit_graph patches, draft/repair responses):
+ *   Keep rejection / repair-retry as built. The model can simply be asked
+ *   again, and there is no user state to brick.
+ *
+ * Which sigma reaches path (a) is not hypothetical — the UI's own writer
+ * produces it. DecisionGuideAI `useConversation.ts` (buildRequest) floors
+ * outbound std with `Math.max(0, strengthStd)` — a floor of ZERO, not >0 —
+ * and `applyDraftResult.ts` stores `strength.std` verbatim from a CEE draft
+ * response. `observed_state` is forwarded with no clamp at all.
  */
 
 import { z } from 'zod';
+
+import { INGRESS_SIGMA_REPAIR_FLOOR } from '../cee/constants.js';
 
 export type NumericBoundsIssue = {
   /** Dot-joined path relative to the checked value, e.g. "edges.0.strength.mean". */
@@ -37,6 +74,14 @@ export type NumericBoundsIssue = {
   message: string;
   /** Matches the ZodIssue code vocabulary used by boundary error `issues`. */
   code: string;
+  /**
+   * Violation class, used ONLY by the path-(a) repair split (see the doctrine
+   * in the module header). `sigma_non_positive` is the one class with an
+   * unambiguous safe interpretation ("no uncertainty stated"), so path (a)
+   * repairs it instead of bricking the scenario. Absent = no safe reading →
+   * hard reject on both paths. Path (b) rejects every class regardless.
+   */
+  kind?: 'sigma_non_positive';
 };
 
 const FINITE_MESSAGE = 'must be a finite number';
@@ -97,9 +142,10 @@ function checkFiniteNumber(
   issues: NumericBoundsIssue[],
   predicate: (n: number) => boolean,
   message: string,
+  kind?: NumericBoundsIssue['kind'],
 ): void {
   if (typeof value === 'number' && Number.isFinite(value) && !predicate(value)) {
-    issues.push({ path, message, code: 'custom' });
+    issues.push({ path, message, code: 'custom', ...(kind ? { kind } : {}) });
   }
 }
 
@@ -135,6 +181,7 @@ export function collectEdgeRangeIssues(
       issues,
       (n) => n > 0,
       POSITIVE_MESSAGE,
+      'sigma_non_positive',
     );
   }
   return issues;
@@ -159,6 +206,7 @@ export function collectNodeRangeIssues(
       issues,
       (n) => n > 0,
       POSITIVE_MESSAGE,
+      'sigma_non_positive',
     );
   }
   return issues;
@@ -191,8 +239,95 @@ export function checkGraphNumericBounds(graph: unknown): NumericBoundsIssue[] {
 }
 
 // ---------------------------------------------------------------------------
+// Path (a) — UI graph_state: PERSISTED-STATE REPAIR.
+// See the doctrine in the module header. This is the ONLY place that repairs;
+// path (b) rejects everything via the superRefine adapters below.
+// ---------------------------------------------------------------------------
+
+/** A single applied repair. Carries the field path and the floor — never the
+ *  offending value and never a label (PII rule). */
+export type NumericBoundsRepair = {
+  path: string;
+  kind: NonNullable<NumericBoundsIssue['kind']>;
+  /** The value written in place of the violation. */
+  repaired_to: number;
+};
+
+/**
+ * Generic in the graph type so callers keep their parsed ingress type through
+ * the gate — a repaired graph is the same shape as the one that went in, and
+ * the caller should not need an `as`-cast to say so.
+ */
+export type GraphNumericRepairResult<T> =
+  /** No un-interpretable violation. `graph` carries any repairs applied. */
+  | { ok: true; graph: T; repairs: NumericBoundsRepair[] }
+  /** At least one value with no safe reading — the caller must reject. */
+  | { ok: false; issues: NumericBoundsIssue[] };
+
+/**
+ * Set `object[key] = value` along `path`, copying every container on the way
+ * down (copy-on-write). The caller's input object is never mutated — a turn
+ * body can be retried/logged/compared afterwards without observing our repair.
+ * Key insertion order is preserved, so an unrepaired sibling field still
+ * round-trips byte-identically.
+ */
+function setAtPath(root: unknown, path: string[], value: number): unknown {
+  if (path.length === 0) return value;
+  const [head, ...rest] = path;
+  if (Array.isArray(root)) {
+    const index = Number(head);
+    const copy = root.slice();
+    copy[index] = setAtPath(root[index], rest, value);
+    return copy;
+  }
+  if (isRecord(root)) {
+    return { ...root, [head]: setAtPath(root[head], rest, value) };
+  }
+  return root;
+}
+
+/**
+ * Numeric-bounds gate for the UI `graph_state` ingress path.
+ *
+ * Repairs non-positive sigma to INGRESS_SIGMA_REPAIR_FLOOR and reports each
+ * repair so we can see how much invalid persisted state exists. Rejects
+ * anything with no safe interpretation (non-finite, out-of-range probability
+ * or strength.mean).
+ *
+ * A rejection takes precedence over a repair: if a graph carries both, the
+ * turn cannot proceed anyway, and reporting the (silently repairable) sigma
+ * alongside a real error would only make the message less actionable.
+ *
+ * Non-mutating, and a clean graph is returned by reference — valid input
+ * round-trips byte-identically.
+ */
+export function repairGraphNumericBounds<T>(graph: T): GraphNumericRepairResult<T> {
+  const issues = checkGraphNumericBounds(graph);
+  if (issues.length === 0) return { ok: true, graph, repairs: [] };
+
+  const rejects = issues.filter((i) => i.kind !== 'sigma_non_positive');
+  if (rejects.length > 0) return { ok: false, issues: rejects };
+
+  let repaired = graph;
+  const repairs: NumericBoundsRepair[] = [];
+  for (const issue of issues) {
+    repaired = setAtPath(repaired, issue.path.split('.'), INGRESS_SIGMA_REPAIR_FLOOR) as T;
+    repairs.push({
+      path: issue.path,
+      kind: 'sigma_non_positive',
+      repaired_to: INGRESS_SIGMA_REPAIR_FLOOR,
+    });
+  }
+  return { ok: true, graph: repaired, repairs };
+}
+
+// ---------------------------------------------------------------------------
 // Zod superRefine adapters — let existing schemas plug the same checks into
 // their established failure conventions (edit repair loop / draft retry throw).
+//
+// Path (b) ONLY. These reject every violation class, sigma included: the model
+// can be asked again, and no user state is at stake. Do NOT wire the repair
+// above into these.
 // ---------------------------------------------------------------------------
 
 function addIssuesToCtx(ctx: z.RefinementCtx, issues: NumericBoundsIssue[]): void {
