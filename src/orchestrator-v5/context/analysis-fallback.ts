@@ -59,6 +59,7 @@ import {
   resolveInfluenceDirection,
   type InfluenceDirection,
 } from '../../orchestrator/context/influence-direction.js';
+import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   deriveConfidenceTierFromEnrichment,
@@ -97,17 +98,20 @@ function buildLabelMap(
 
 /**
  * Derive top drivers from a TOP-LEVEL `enrichment.factor_sensitivity[]`
- * array — the shape PLoT actually returns on staging. Each entry is read
- * with both legacy and current field names so we tolerate vendor drift:
+ * array — the shape PLoT actually returns on staging.
  *
- *   { label, elasticity, direction }   ← V2RunResponseEnvelope contract
- *   { factor_label, sensitivity, direction }  ← alternate naming
+ * DGAI #341: entries are RANKED by `influence_score` via the shared accessor
+ * (`readDriverInfluenceScore`) — the field ISL actually ranks
+ * (`influence_rank`) and the UI displays. Entries without a usable
+ * influence_score are omitted; `sensitivity` / `elasticity` are never a
+ * ranking fallback (on an intervention_override board they are zeroed
+ * artifacts that invert the ranking). `DriverSummary.sensitivity` carries the
+ * influence magnitude (field name kept for shape compatibility).
  *
  * `compactAnalysis()`'s `deriveTopDrivers` only walks
  * `results[].factor_sensitivity` (per-option) and misses the top-level
  * array entirely. This helper closes that gap so Step 5 actually sees
- * sensitivity figures from prior facts. Mirrors the dual-shape approach
- * in `src/orchestrator/guidance/post-analysis.ts:getAllFactors`.
+ * driver figures from prior facts.
  */
 function deriveTopDriversFromTopLevel(
   enrichment: Record<string, unknown>,
@@ -124,11 +128,14 @@ function deriveTopDriversFromTopLevel(
     if (!entry || typeof entry !== 'object') continue;
     const e = entry as Record<string, unknown>;
 
-    const sensitivityRaw =
-      typeof e.sensitivity === 'number' ? e.sensitivity
-      : typeof e.elasticity === 'number' ? e.elasticity
-      : null;
-    if (sensitivityRaw === null || !Number.isFinite(sensitivityRaw)) continue;
+    // DGAI #341: driver RANKING reads the shared influence accessor
+    // (`influence_score` only — what ISL ranks and the UI displays). An entry
+    // without a usable influence_score is NOT a driver candidate; the former
+    // `sensitivity → elasticity` fallback latched onto the only non-zero
+    // elasticity artifact on an intervention_override board and named the
+    // LEAST influential factor as top driver.
+    const influence = readDriverInfluenceScore(e);
+    if (influence === null) continue;
 
     const factorId =
       typeof e.factor_id === 'string' ? e.factor_id
@@ -145,11 +152,19 @@ function deriveTopDriversFromTopLevel(
       : factorId;
 
     // Honour the authoritative `direction` enum ('positive'|'negative'|
-    // 'neutral'); only sign-derive when it is absent (elasticity is unsigned
-    // per the sensitivity contract). Shared rule with the primary derive path.
-    const direction: InfluenceDirection = resolveInfluenceDirection(e.direction, sensitivityRaw);
+    // 'neutral'); when it is absent, sign-derive from the SIGN of the legacy
+    // signed magnitude when one exists (`sensitivity` then `elasticity` —
+    // sign only, never the magnitude; DGAI #341), else from the non-negative
+    // influence score (⇒ 'positive'). Preserves pre-#341 direction behaviour.
+    const signedForDirection =
+      typeof e.sensitivity === 'number' && Number.isFinite(e.sensitivity)
+        ? e.sensitivity
+        : typeof e.elasticity === 'number' && Number.isFinite(e.elasticity)
+          ? e.elasticity
+          : influence;
+    const direction: InfluenceDirection = resolveInfluenceDirection(e.direction, signedForDirection);
 
-    const absSensitivity = Math.abs(sensitivityRaw);
+    const absSensitivity = influence;
     const existing = factorMap.get(factorId);
     if (!existing || absSensitivity > existing.absSensitivity) {
       factorMap.set(factorId, { label, absSensitivity, direction });

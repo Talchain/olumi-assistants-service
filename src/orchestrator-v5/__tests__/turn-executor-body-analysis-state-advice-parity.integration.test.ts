@@ -160,8 +160,8 @@ function stagingShapedAnalysisState(): Record<string, unknown> {
       },
     ],
     factor_sensitivity: [
-      { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive' },
-      { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative' },
+      { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive', influence_score: 0.42 },
+      { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative', influence_score: 0.31 },
     ],
     robustness: {
       level: 'low',

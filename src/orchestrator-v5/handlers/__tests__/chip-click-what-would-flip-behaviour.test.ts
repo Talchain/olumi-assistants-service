@@ -473,7 +473,7 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
               // test (neutral → "has little effect") is unaffected. (Using the
               // option-controlled `fac_acquisition_cost` here would be correctly
               // suppressed; that path is covered by its own test below.)
-              { node_id: 'fac_runway', label: 'Runway', elasticity: 0.6, direction: 'neutral' },
+              { node_id: 'fac_runway', label: 'Runway', elasticity: 0.6, direction: 'neutral', influence_score: 0.6 },
             ],
           },
           {
@@ -498,10 +498,14 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     expect(routeWithToolUseSpy).not.toHaveBeenCalled();
 
     const text = commitedAssistantText();
-    expect(text.toLowerCase()).toContain('has little effect');
+    // DGAI #341 (replaces the former "still named with 'has little effect'"
+    // pin): a neutral driver projects to sensitivity_value 0, and a factor
+    // whose own band reads "has little effect on the lead" must NOT be billed
+    // as what "would shift this result the most" — that pairing was the live
+    // self-contradiction. With no material driver, the sentence is omitted.
+    expect(text.toLowerCase()).not.toContain('would shift this result the most');
     expect(text.toLowerCase()).not.toMatch(/strengthens|weakens/);
-    // The neutral driver is still named — no raw id leak.
-    expect(text).toContain('Runway');
+    expect(text).not.toContain('Runway');
   });
 
   it('multi-driver: a lower-magnitude DIRECTIONAL driver is selected ahead of a higher-magnitude NEUTRAL driver', async () => {
@@ -526,8 +530,8 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
               // Both factors are genuinely external/tunable (no option
               // intervenes on them), so the Spine A backstop leaves them in
               // place — the ordering mechanic under test is unaffected.
-              { node_id: 'fac_brand', label: 'Brand sentiment', elasticity: 0.8, direction: 'neutral' },
-              { node_id: 'fac_runway', label: 'Runway', elasticity: 0.4, direction: 'negative' },
+              { node_id: 'fac_brand', label: 'Brand sentiment', elasticity: 0.8, direction: 'neutral', influence_score: 0.8 },
+              { node_id: 'fac_runway', label: 'Runway', elasticity: 0.4, direction: 'negative', influence_score: 0.4 },
             ],
           },
           {
@@ -551,14 +555,15 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
     expect(routeWithToolUseSpy).not.toHaveBeenCalled();
 
     const text = commitedAssistantText();
-    // Both named, but the directional driver leads (appears first).
+    // DGAI #341 (replaces the former "both named, directional first" pin):
+    // the directional driver carries the "would shift this result the most"
+    // claim; the neutral driver (sensitivity_value 0, band "has little
+    // effect") is OMITTED from that sentence entirely — naming it there was
+    // the live self-contradiction class.
     expect(text).toContain('Runway');
-    expect(text).toContain('Brand sentiment');
-    expect(text.indexOf('Runway')).toBeLessThan(text.indexOf('Brand sentiment'));
-    // Honest direction: the directional driver weakens; the neutral one has
-    // little effect (and is never mis-signed as strengthen/weaken).
     expect(text.toLowerCase()).toMatch(/weakens/);
-    expect(text.toLowerCase()).toContain('has little effect');
+    expect(text).not.toContain('Brand sentiment');
+    expect(text.toLowerCase()).not.toContain('has little effect');
   });
 
   it('Spine A: an option-controlled lever is NOT named as a tunable driver (end-to-end)', async () => {
@@ -582,7 +587,7 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
             win_probability: 0.55,
             outcome_mean: 1,
             factor_sensitivity: [
-              { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.7, direction: 'negative' },
+              { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.7, direction: 'negative', influence_score: 0.7 },
             ],
           },
           {
@@ -641,7 +646,7 @@ describe('chip-click what_would_flip — behavioural regression (PR #196 round-1
           win_probability: 0.55,
           outcome_mean: 1,
           factor_sensitivity: [
-            { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.7, direction: 'negative' },
+            { node_id: 'fac_acquisition_cost', label: 'Acquisition cost', elasticity: 0.7, direction: 'negative', influence_score: 0.7 },
           ],
         },
         {

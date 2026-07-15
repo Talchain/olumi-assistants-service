@@ -34,6 +34,10 @@ function envelope(opts: {
         node_id: d.id,
         label: d.label,
         sensitivity: d.sensitivity,
+        // DGAI #341: driver ranking reads influence_score only; the spec's
+        // `sensitivity` doubles as the influence magnitude here (sign carried
+        // by `sensitivity` for direction fallback).
+        influence_score: Math.abs(d.sensitivity),
         direction: 'increases',
       })),
     })),
@@ -64,8 +68,8 @@ function otherFact(factType: string): HandlerFact {
 const PRIOR_ENV = envelope({
   options: [
     { id: 'a', label: 'Offshore', win: 0.62, drivers: [
-      { id: 'q', label: 'Quality', sensitivity: 0.5 },
-      { id: 'c', label: 'Communication overhead', sensitivity: 0.3 },
+      { id: 'q', label: 'Quality', sensitivity: 0.5, influence_score: 0.5 },
+      { id: 'c', label: 'Communication overhead', sensitivity: 0.3, influence_score: 0.3 },
     ] },
     { id: 'b', label: 'Onshore', win: 0.38 },
   ],
@@ -77,8 +81,8 @@ const PRIOR_ENV = envelope({
 const CURRENT_ENV = envelope({
   options: [
     { id: 'b', label: 'Onshore', win: 0.55, drivers: [
-      { id: 'c', label: 'Communication overhead', sensitivity: 0.6 },
-      { id: 'q', label: 'Quality', sensitivity: 0.4 },
+      { id: 'c', label: 'Communication overhead', sensitivity: 0.6, influence_score: 0.6 },
+      { id: 'q', label: 'Quality', sensitivity: 0.4, influence_score: 0.4 },
     ] },
     { id: 'a', label: 'Offshore', win: 0.45 },
   ],
@@ -204,15 +208,15 @@ describe('compareRuns — Spine A option-controlled-driver suppression', () => {
   it('excludes an option-controlled lever from driver_rank_changes', () => {
     const prior = compactAnalysis(envelope({ options: [
       { id: 'a', label: 'Offshore', win: 0.62, drivers: [
-        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9 },
-        { id: 'fac_ext', label: 'Market demand', sensitivity: 0.5 },
+        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9, influence_score: 0.9 },
+        { id: 'fac_ext', label: 'Market demand', sensitivity: 0.5, influence_score: 0.5 },
       ] },
       onshore(0.38),
     ] }))!;
     const current = compactAnalysis(envelope({ options: [
       { id: 'a', label: 'Offshore', win: 0.62, drivers: [
-        { id: 'fac_ext', label: 'Market demand', sensitivity: 0.9 },
-        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.5 },
+        { id: 'fac_ext', label: 'Market demand', sensitivity: 0.9, influence_score: 0.9 },
+        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.5, influence_score: 0.5 },
       ] },
       onshore(0.38),
     ] }))!;
@@ -228,17 +232,17 @@ describe('compareRuns — Spine A option-controlled-driver suppression', () => {
   it('still reports an external driver rank change (no over-suppression)', () => {
     const prior = compactAnalysis(envelope({ options: [
       { id: 'a', label: 'Offshore', win: 0.62, drivers: [
-        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9 },
-        { id: 'fac_b', label: 'Brand sentiment', sensitivity: 0.5 },
-        { id: 'fac_c', label: 'Conversion rate', sensitivity: 0.3 },
+        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9, influence_score: 0.9 },
+        { id: 'fac_b', label: 'Brand sentiment', sensitivity: 0.5, influence_score: 0.5 },
+        { id: 'fac_c', label: 'Conversion rate', sensitivity: 0.3, influence_score: 0.3 },
       ] },
       onshore(0.38),
     ] }))!;
     const current = compactAnalysis(envelope({ options: [
       { id: 'a', label: 'Offshore', win: 0.62, drivers: [
-        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9 },
-        { id: 'fac_c', label: 'Conversion rate', sensitivity: 0.5 },
-        { id: 'fac_b', label: 'Brand sentiment', sensitivity: 0.3 },
+        { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9, influence_score: 0.9 },
+        { id: 'fac_c', label: 'Conversion rate', sensitivity: 0.5, influence_score: 0.5 },
+        { id: 'fac_b', label: 'Brand sentiment', sensitivity: 0.3, influence_score: 0.3 },
       ] },
       onshore(0.38),
     ] }))!;

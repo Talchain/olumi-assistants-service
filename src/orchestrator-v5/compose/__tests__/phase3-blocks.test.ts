@@ -1133,7 +1133,13 @@ describe('Round-3 fail-closed lookup-miss invariants', () => {
     expect(flip?.title).not.toContain('Different LLM Label');
   });
 
-  it('pre_mortem: emits with empty target_refs when grounded_in is absent (no claim, no harm)', () => {
+  // DGAI #342(1): REPLACES the former "no claim, no harm" pin. The harm was
+  // real — downstream surfaces re-render this body verbatim (the Decision-
+  // overview framing-question slot), so an unanchored canned narrative reads
+  // as a statement about the user's decision with no model context. Fully
+  // context-free ⇒ dropped; prose that names a graph node still emits with
+  // honest empty target_refs (the LLM made no grounding claim).
+  it('pre_mortem: DROPS when grounded_in is absent and the prose names no graph node (context_unanchored, DGAI #342)', () => {
     const fact = makeFact({
       decisionReview: {
         pre_mortem: {
@@ -1143,9 +1149,26 @@ describe('Round-3 fail-closed lookup-miss invariants', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    expect(blocks.filter((b) => b.card_kind === 'pre_mortem')).toHaveLength(0);
+  });
+
+  it('pre_mortem: emits with empty target_refs when grounded_in is absent but the prose names a graph node', () => {
+    const fact = makeFact({
+      decisionReview: {
+        pre_mortem: {
+          failure_scenario: 'Cost overrun risk was underestimated from the start.',
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
     const pm = blocks.find((b) => b.card_kind === 'pre_mortem');
     expect(pm).toBeDefined();
     expect(pm?.target_refs).toEqual([]);
+    // DGAI #342(1) BIND rule: the body stands alone as a hypothetical.
+    expect(pm?.body).toBe(
+      'Imagine this decision has failed: Cost overrun risk was underestimated from the start.',
+    );
   });
 
   it('pre_mortem: drops the card when grounded_in was provided but EVERY entry misses lookup (P1.2)', () => {

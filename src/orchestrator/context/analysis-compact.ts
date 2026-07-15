@@ -11,6 +11,7 @@
 import type { V2RunResponseEnvelope } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
+import { readDriverInfluenceScore } from "./driver-influence.js";
 import { winnerOptionResultSource } from "./option-result-source.js";
 
 // ============================================================================
@@ -39,6 +40,15 @@ export interface OptionComparisonEntry {
 export interface DriverSummary {
   factor_id: string;
   factor_label: string;
+  /**
+   * Driver magnitude. DGAI #341: this is the factor's `influence_score`
+   * magnitude (the ranking ISL emits and the UI displays), read via the
+   * shared `readDriverInfluenceScore` accessor — NEVER the
+   * sensitivity/elasticity heuristic, which intervention_override zeroes
+   * into ranking-inverting artifacts. Field name kept for shape
+   * compatibility with existing consumers (`projectTopDrivers`,
+   * `toSignedInfluenceValue`, influence-band prose).
+   */
   sensitivity: number;
   direction: InfluenceDirection;
 }
@@ -525,8 +535,12 @@ function deriveTopFragileEdges(
 
 /**
  * Derive top drivers across all option results.
- * Collects unique factors by node_id (or factor_id), takes max absolute sensitivity,
- * sorts descending, returns top 5.
+ * Collects unique factors by node_id (or factor_id), takes the max
+ * `influence_score` magnitude per factor (DGAI #341 — the shared
+ * `readDriverInfluenceScore` accessor; entries without a usable
+ * influence_score are not driver candidates), sorts descending, returns
+ * top 5. `DriverSummary.sensitivity` carries the influence magnitude
+ * (field name kept for shape compatibility).
  */
 function deriveTopDrivers(
   response: V2RunResponseEnvelope,
@@ -546,18 +560,33 @@ function deriveTopDrivers(
         ?? (typeof factor.factor_id === 'string' ? factor.factor_id : null);
       if (!factorId) continue;
 
-      const sensitivityRaw = typeof factor.sensitivity === 'number'
-        ? factor.sensitivity
-        : (typeof factor.elasticity === 'number' ? factor.elasticity : null);
-      // Drop non-finite magnitudes (NaN / Infinity) so they never reach
-      // DriverSummary — matches deriveTopDriversFromTopLevel's guard, protecting
-      // shared summary consumers that do not re-filter at projection time.
-      if (sensitivityRaw === null || !Number.isFinite(sensitivityRaw)) continue;
+      // DGAI #341: driver RANKING reads the shared influence accessor
+      // (`influence_score` only — what ISL ranks and the UI displays). An
+      // entry without a usable influence_score is NOT a driver candidate;
+      // the former `sensitivity → elasticity` fallback latched onto the only
+      // non-zero elasticity artifact on an intervention_override board and
+      // named the LEAST influential factor as top driver. When per-option
+      // entries carry no influence_score at all, this derivation yields []
+      // and the shared top-level override (analysis-fallback.ts) fills
+      // top_drivers from the influence-ranked top-level shape instead.
+      const influence = readDriverInfluenceScore(
+        factor as Record<string, unknown>,
+      );
+      if (influence === null) continue;
 
-      const absSensitivity = Math.abs(sensitivityRaw);
-      // Honour the authoritative PLoT `direction` enum; only sign-derive when
-      // it is absent (elasticity is unsigned per the sensitivity contract).
-      const direction: InfluenceDirection = resolveInfluenceDirection(factor.direction, sensitivityRaw);
+      const absSensitivity = influence;
+      // Honour the authoritative PLoT `direction` enum; when it is absent,
+      // sign-derive from the SIGN of the legacy signed magnitude when one
+      // exists (`sensitivity` then `elasticity` — sign only, never the
+      // magnitude; DGAI #341), else from the non-negative influence score
+      // (⇒ 'positive'). Preserves the pre-#341 direction behaviour exactly.
+      const signedForDirection =
+        typeof factor.sensitivity === 'number' && Number.isFinite(factor.sensitivity)
+          ? factor.sensitivity
+          : typeof factor.elasticity === 'number' && Number.isFinite(factor.elasticity)
+            ? factor.elasticity
+            : influence;
+      const direction: InfluenceDirection = resolveInfluenceDirection(factor.direction, signedForDirection);
 
       // Derive label: graph lookup → factor.label → factor.factor_label → factor_id
       const label = graphNodeLabels?.get(factorId)

@@ -46,6 +46,7 @@ import {
   readRobustnessLevel,
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
+import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
 import { isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
 import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
@@ -936,6 +937,15 @@ function resolveTopDriverLabel(
       // authoritative as the structural controlled set — an
       // intervention_override lever must never be named a driver even when
       // the caller could not supply interventionControlledFactorIds.
+      //
+      // DGAI #341: this pin keeps OMIT-NOT-SUBSTITUTE semantics on top of the
+      // influence_score ranking. On the live #341 board the influence-TOP
+      // factor carried this pin, so the driver clause is OMITTED entirely
+      // ("or omit the driver claim when elasticities are suppressed by
+      // intervention_override" — the issue's own ruled alternative). It can
+      // never re-select the elasticity artifact: the artifact factor ranks
+      // LAST on influence, and a suppressed top omits rather than falls
+      // through to a weaker candidate.
       entry.zero_reason === 'intervention_override';
 
     const score = computeDriverScore(entry);
@@ -977,13 +987,17 @@ function resolveTopDriverLabel(
   return bestNamed?.label ?? null;
 }
 
+/**
+ * DGAI #341: driver-claim magnitude comes from the shared influence accessor
+ * (`influence_score` only — what ISL ranks and the UI displays). The former
+ * `sensitivity_score → |elasticity| × confidence` heuristic named the LEAST
+ * influential factor on a board where `intervention_override` zeroed every
+ * elasticity except one; it must never be a fallback for driver RANKING.
+ * `null` ⇒ the entry is not a driver candidate (claim omitted, never scored
+ * from an artifact).
+ */
 function computeDriverScore(entry: Record<string, unknown>): number | null {
-  const sensitivity = readNumber(entry.sensitivity_score);
-  if (sensitivity !== null) return Math.abs(sensitivity);
-  const elasticity = readNumber(entry.elasticity);
-  if (elasticity === null) return null;
-  const confidence = readNumber(entry.confidence);
-  return Math.abs(elasticity) * (confidence ?? 1);
+  return readDriverInfluenceScore(entry);
 }
 
 // ============================================================================

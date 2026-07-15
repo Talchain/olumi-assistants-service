@@ -254,6 +254,26 @@ export function synthesiseRangeDisplayValue(
     return undefined;
   }
 
+  // DGAI #342(2): a range that spans the FULL normalised domain is not an
+  // estimate — it is the domain itself (typically a defaulted prior on a
+  // factor drafted with no observed value). Rendering it produced
+  // "Range: 0 to 1" as the factor's VALUE line on the canvas card — raw
+  // internals presented as if a value had been set. Return undefined so the
+  // caller omits display_value (the honest "no value set yet" state).
+  // Applies to unitless bounds at 0..1 and percentage bounds at 0..1 /
+  // 0..100 (both render as "0% to 100%"), including the one-sided
+  // "Up to 1" / "At least 0" degenerate forms. Real-world units (currency,
+  // time, counts) are untouched — a 0..1 range there is a genuine quantity.
+  const isDomainScale = !unit || unit === "%";
+  if (isDomainScale) {
+    const domainMax = unit === "%" && ((hasMax && rangeMax! > 1) || (hasMin && rangeMin! > 1))
+      ? 100
+      : 1;
+    const minIsDomainEdge = !hasMin || rangeMin === 0;
+    const maxIsDomainEdge = !hasMax || rangeMax === domainMax;
+    if (minIsDomainEdge && maxIsDomainEdge) return undefined;
+  }
+
   /**
    * Format a single bound using the same logic as synthesiseDisplayValue
    * (currency prefix, % multiply, time unit, plain number).
