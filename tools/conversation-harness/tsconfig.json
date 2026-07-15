@@ -1,0 +1,38 @@
+{
+  "//": [
+    "Typecheck config for the conversation harness (Wave1-L3).",
+    "",
+    "WHY THIS EXISTS: neither of the repo's typecheck gates covers this tool.",
+    "tsconfig.build.json includes only src/**/*.ts; the root tsconfig.json includes",
+    "src, tests, *.config.ts and sdk — tools/ appears in NEITHER. Vitest runs the",
+    "harness through esbuild, which strips types without checking them, so until",
+    "now a type error in scorer/ could not fail any gate. That is a poor property",
+    "for the code that decides whether a coach prompt ships.",
+    "",
+    "Run:  pnpm exec tsc -p tools/conversation-harness/tsconfig.json --noEmit",
+    "(also wired as the repo script `harness:typecheck`).",
+    "",
+    "Scope note: this checks the harness scorer + its self-tests. It reaches into",
+    "src/ only via the production guard imports score-run.ts and",
+    "unsupported-claim-adapter.ts deliberately make (never copies) — those are",
+    "pulled in transitively and checked against the real production types, which",
+    "is the point: if a guard's signature moves, this fails.",
+    "",
+    "src/**/*.d.ts is included because the ambient module declarations src/ relies",
+    "on (e.g. cqe/compromise-numbers.d.ts) are picked up by tsconfig.build.json via",
+    "its src/**/*.ts glob. Transitively importing a src/ module without them",
+    "resurfaces settled TS7016s that are not this tool's to fix."
+  ],
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": ["node"]
+  },
+  "include": [
+    "scorer/**/*.ts",
+    "__tests__/**/*.ts",
+    "vitest.config.ts",
+    "../../src/**/*.d.ts"
+  ]
+}

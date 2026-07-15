@@ -100,8 +100,15 @@ export function opsFromRows(rows: Record<string, unknown>[]): OpsMetrics {
  * when EVERY participating turn is FULLY measured (both directions numeric); if
  * any is incomplete the run's cost is UNKNOWN (null), so a downstream cost
  * comparison excludes it and never ranks it cheaper. Runs with no participating
- * turn (old artifacts) stay null, exactly as before. */
-function totalTokensFromRows(active: Record<string, unknown>[]): number | null {
+ * turn (old artifacts) stay null, exactly as before.
+ *
+ * EXPORTED (Wave1-L3) so the promotion gate's cost floor consumes THIS
+ * accounting rather than reimplementing it. There must be exactly one answer to
+ * "what did this run cost, and is that answer trustworthy?" — a second
+ * implementation would drift and reintroduce the F14 bug (a less-measured arm
+ * ranking cheaper) on the promotion path specifically, which is the one path
+ * where being wrong ships a prompt. */
+export function totalTokensFromRows(active: Record<string, unknown>[]): number | null {
   const participating = active.filter((r) => 'llm_tokens_in' in r || 'llm_tokens_out' in r);
   if (participating.length === 0) return null;
   let sum = 0;

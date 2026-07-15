@@ -46,6 +46,14 @@ scorer/dims.ts           v0 property-based dims (pure, self-tested)
 scorer/prompt-dims.ts    prompt-quality dims (1.70 v1): comparable scalars for A/B
 scorer/score-run.ts      per-run scorer — imports PRODUCTION guards from src/ (never copies)
 scorer/ab-verdict.ts     A/B verdict (1.70 v1): baseline vs candidate deltas + call
+                         (RANKING — use on the ITERATION partition only)
+scorer/holdout.ts        deterministic seeded iteration/holdout split + structural
+                         isolation (Wave1-L3) — see "Promotion gate" below
+scorer/gate-dims.ts      G1-G7 promotion gate dims with explicit floors (Wave1-L3)
+scorer/promotion-verdict.ts  THE promotion entrypoint (Wave1-L3): candidate vs
+                         baseline on the HOLDOUT -> machine-readable pass/fail
+scorer/unsupported-claim-adapter.ts  G5's checker — imports the PRODUCTION
+                         coaching-output-postcheck (never copies its patterns)
 scorer/llm-judge.ts      OPT-IN rubric LLM-judge (1.70 v1): specificity/actionability/
                          depth/no-filler, N reruns, mean+variance delta (live model)
 scorer/localize.ts       localization reporter v0
@@ -297,6 +305,189 @@ CANDIDATE_DIRS=runs/cand-1,runs/cand-2,runs/cand-3 \
   pnpm exec tsx scorer/ab-verdict.ts
 ```
 
+## Promotion gate: may this coach prompt ship? (Wave1-L3)
+
+`ab-verdict.ts` answers *"is A better than B?"*. That is a **ranking**, and a
+ranking cannot tell you whether the winner is good enough to put in front of a
+user. The promotion gate answers the other question — *"does this clear the
+floor?"* — and it is the thing that stands between a candidate prompt and the
+founder's manual test.
+
+### Doctrine: the holdout is a pass/fail FLOOR, never a ranking
+
+The scenario set is split in two:
+
+| partition | who reads it | what for |
+|---|---|---|
+| **iteration** (5 scenarios) | anyone, freely | tuning, staring at transcripts, `ab-verdict` ranking |
+| **holdout** (3 scenarios) | `promotion-verdict.ts` only | one pass/fail floor check per candidate |
+
+**The holdout answers exactly one question: is this candidate good enough to
+ship?** It does *not* answer "which candidate is best". The moment you rank
+candidates on the holdout you have begun tuning against it — pick the best of K
+on the holdout and the holdout is now training data, and its floor no longer
+generalises to anything.
+
+Two consequences, both enforced in code rather than asked for politely:
+
+- `computePromotionVerdict` takes **exactly one candidate**. There is no
+  array-of-candidates form, so best-of-K on the holdout is not expressible.
+- A **failed promotion is not a signal to iterate against**. Read the failing
+  dimension *name*, go back to the iteration partition, and fix that class of
+  problem there. Do not open the holdout transcripts. Every look costs you some
+  of the floor's meaning, and nothing tells you when it is spent.
+
+To compare candidates: `ab-verdict.ts` on the iteration partition. Bring the
+winner here, once.
+
+### Structural exclusion (code, not convention)
+
+`openScenarioSet('iterate')` returns a `ScenarioSet` in which holdout scenarios
+**do not exist**: absent from `ids()`, and `resolve(id)` / `load(id)` throw
+`HoldoutIsolationError` rather than returning a path or bytes. The mode is fixed
+at construction, the instance is frozen, and there is no setter, no override
+flag and no env escape hatch. An iterate-mode run has no function available to
+it that yields a holdout scenario — it cannot read one by accident, by loop, or
+by a well-meaning refactor.
+
+The exclusion is **symmetric**: `'holdout'` mode cannot read iteration
+scenarios either, so a promotion run cannot pad its floor with scenarios the
+prompt was tuned on. That is the leak everyone forgets.
+
+### The split is hash-bucketed, not shuffled — deliberately
+
+A scenario's partition is a pure function of `(seed, scenarioId)` **alone**:
+
+```ts
+partitionFor(id, seed) // -> 'iteration' | 'holdout'
+```
+
+It does not depend on which other scenarios exist. Adding, renaming or deleting
+a scenario **cannot** move a different scenario across the boundary.
+
+That property is the anti-gaming one. Under the obvious alternative
+(seeded-shuffle-then-take-N) every scenario's partition depends on the whole
+set — so anyone who overfits the prompt to a scenario, then finds it landed in
+the holdout, can add a throwaway scenario, reshuffle, and walk it back into the
+iteration partition. Hash-bucketing makes that impossible: the only ways to move
+scenario X are to rename X (visible in the diff — exactly the review signal we
+want) or to change the seed (which invalidates every prior verdict).
+
+The price is that holdout **size** is approximate, not an exact N.
+`assertSplitIntegrity` refuses a split too small to be a floor rather than
+letting a 1-scenario "holdout" quietly pass a candidate.
+
+**Changing `DEFAULT_SPLIT_SEED` re-partitions everything and invalidates every
+previously-recorded verdict.** It is a breaking change to the evidence base, not
+a tuning knob.
+
+### The gate dimensions
+
+Each is a scored dimension with an explicit floor. Aggregation across holdout
+scenarios is **worst-case, not mean**: the holdout asks "does this ever fail?",
+and the honest aggregator for that is the worst case. (A mean would also let you
+lift a failing candidate over the floor by padding the holdout with easy
+scenarios.)
+
+| dim | direction | floor | measures |
+|---|---|---|---|
+| `G1-decision-advancement` | higher | ≥ 0.6 | fraction of turns that moved the decision (L0 oracle / newly-staged proposal / genuinely new affordance) |
+| `G2-dispatch-accuracy` | higher | ≥ 0.9 | declared intent vs actual state effect, both directions |
+| `G3-entity-resolution` | higher | ≥ 0.9 | named entity tied to canonical state via structured output |
+| `G4-canonical-state-use` | higher | = 1.0 | every stated figure traceable to the turn's payload |
+| `G5-unsupported-claim` | lower | = 0 | production coaching-postcheck violations |
+| `G6-dead-end` | lower | ≤ 0.1 | turns leaving no next action |
+| `G7-correction-burden` | lower | ≤ 0.5 | redundant re-asks per coach turn |
+| `OPS-latency-median` | lower | non-inferiority | vs baseline, within existing `NOISE_THRESHOLD` |
+| `OPS-cost-tokens` | lower | non-inferiority | vs baseline; **reuses** `ab-verdict.totalTokensFromRows` (F14) |
+
+Latency and cost have no absolute floor — "2400ms" is only good or bad relative
+to what we ship today — so they are gated as **non-inferiority vs the baseline**,
+using `ab-verdict`'s existing per-dim noise thresholds so rerun jitter does not
+block a good prompt.
+
+**Cost reuses the F14 accounting; it does not reimplement it.** A run is
+cost-unmeasurable if *any* cost-bearing turn is incomplete — a partial total is
+not a comparable total, and the F14 bug (the *less-measured* arm ranking
+*cheaper*) would be at its most expensive on the promotion path, the one path
+where being wrong ships a prompt. There must be exactly one answer to "what did
+this run cost, and is that answer trustworthy?"
+
+### Anti-gaming: how each dimension resists a letter-vs-intent transcript
+
+An adversarial reviewer will try to build a transcript that satisfies the letter
+of each dimension while violating its intent. Three rules, obeyed by every dim:
+
+1. **Score state, not prose.** No dimension is satisfied by the assistant
+   *saying* it did something. Advancement and dispatch are read off the L0
+   mutation oracle (the DB graph sha actually moved). `"I've updated your
+   model"` advances nothing. Prose is scored only where prose is the artifact
+   under test (G5), and there only negatively.
+2. **Silence is not a pass.** The classic gaming move is an empty transcript: no
+   numbers ⇒ no untraceable numbers ⇒ "perfect" grounding. So every ratio dim is
+   **UNMEASURABLE (null)** when its denominator is empty, and the verdict
+   **fails on null**. A silent transcript fails; it does not ace.
+3. **Repetition is not progress.** Re-offering the same chip or re-asking the
+   same question scores as a dead end / correction burden, never as an
+   affordance. Grounded in an observed live defect (identical chip 6× in one
+   conversation). Semantic chip keys are used, so regenerated chip ids cannot
+   disguise a repeat.
+
+Specific traps worth knowing about:
+
+- **G3 does not accept the analysis payload as evidence of resolution.** The
+  payload lists *every* option on every analysed turn, so accepting it would
+  auto-resolve every entity on every analysed turn — a 1.000 that means nothing.
+  Evidence must be something the system could only have produced *by* resolving
+  the user's specific mention (a chip, a staged proposal). Prose echo is string
+  handling, not resolution — it is exactly what a model does when it has *not*
+  looked anything up.
+- **G4 is scored per figure, not per turn**, so one turn inventing nine numbers
+  cannot hide behind eight clean turns. Only the turn's *own* payload counts — a
+  number that was canonical three turns ago is a staleness leak.
+- **G5 is a count, not a rate**, so padding a run with silent turns cannot
+  dilute a violation.
+- **G2 is symmetric** — "always mutate" fails the coach direction and "never
+  mutate" fails the edit direction, so there is no trivially-safe policy.
+- **The floors interlock.** A prompt that avoids numbers to dodge G4 must still
+  clear G1 and G6 on its own merits; a prompt that asks nothing to dodge G7 is a
+  dead end under G6. No single-dimension policy clears all of them.
+
+### Fail-closed
+
+Every path that is not an affirmative, fully-measured pass is a **BLOCK**:
+
+| condition | outcome |
+|---|---|
+| any dim null (unmeasurable) on the candidate | BLOCK |
+| no unsupported-claim checker wired | BLOCK ("we did not check" ≠ clean) |
+| a holdout scenario missing from either side | BLOCK |
+| candidate supplies non-holdout scenarios | BLOCK |
+| cost-bearing turn incomplete (F14) | BLOCK, never "cheaper" |
+| mode is not `'holdout'` | throws |
+| split is degenerate | throws |
+
+`promote` is only ever `true` when every floor was affirmatively cleared on
+measured data. There is no "inconclusive ⇒ ship" edge.
+
+### Running it
+
+```bash
+# each side is a dir of per-scenario run dirs: <side>/<scenario-id>/{turns,l0,journey.json,scores.json}
+# score-run.ts must have been run on each (the OPS metrics read scores.json rows)
+BASELINE_RUNS=runs/base CANDIDATE_RUNS=runs/cand \
+  pnpm exec tsx tools/conversation-harness/scorer/promotion-verdict.ts
+```
+
+Writes `promotion-verdict.json` + `.md` to `PROMOTION_OUT` (default:
+`CANDIDATE_RUNS`). **Exits 0 only on PROMOTE, 1 on BLOCK**, so CI cannot ignore
+it. The holdout ids come from the split over the real `journeys/` dir opened in
+`'holdout'` mode — the CLI has no flag to widen that, by design.
+
+**PII:** the verdict artifact carries dim names, counts and turn ids only —
+never factor labels, label-derived node ids, or decision values. G5 returns the
+production violation *tag* (a closed telemetry-safe enum), never prose.
+
 ## Staging-mode discipline (when you must)
 
 1. **Quiesce**: no open canvas tab on a harness scenario — a live UI tab
@@ -325,8 +516,19 @@ script here.
 
 ## Gates
 
-- `tsconfig.build.json` includes `src/**` only — this directory is outside the
-  build/typecheck gate (verified).
+- **Typecheck (Wave1-L3): `pnpm harness:typecheck`.** `tsconfig.build.json`
+  includes `src/**` only, and the root `tsconfig.json` includes `src`, `tests`,
+  `*.config.ts` and `sdk` — `tools/**` appears in NEITHER, and vitest runs this
+  code through esbuild (types stripped, never checked). So until Wave1-L3 a type
+  error in `scorer/` could not fail any gate. `tsconfig.json` in this directory
+  closes that for the harness; it is verified by injecting a deliberate type
+  error and confirming the new gate fails while both repo gates stay green.
+  ```bash
+  pnpm harness:typecheck   # tsc -p tools/conversation-harness/tsconfig.json --noEmit
+  pnpm harness:test        # vitest run --config tools/conversation-harness/vitest.config.ts
+  ```
+  The rest of `tools/**` remains outside any typecheck gate — out of this lane's
+  scope, but worth a lane of its own.
 - `test:required` DOES collect `tools/**` test globs, so the self-tests are
   named `*.harness-test.ts` (not collected by `**/*.{test,spec}.*`) and run via
   their own config — deliberately NOT wired into the required gate:
