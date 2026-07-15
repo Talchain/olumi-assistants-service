@@ -7,11 +7,29 @@
  *
  * Output contract (matches the existing wire — no new fields, no new
  * action_type, no new turn-class):
- *   - `assistant_text`: deterministic copy. Lead sentence: "No change
- *     was made to the model yet." If a fresh prior `run_analysis` fact
- *     exists, append: "Your previous analysis is still current."
- *     Closing sentence asks the user for a specific factor / edge /
- *     option / value to change.
+ *   - `assistant_text`: deterministic copy. Lead sentence:
+ *     "The model is unchanged so far." (`LEAD_TEXT`) If a fresh prior
+ *     `run_analysis` fact exists, append: "Your last analysis is still
+ *     current." (`FRESHNESS_SUFFIX`) Closing sentence asks the user for
+ *     a specific factor / edge / option / value to change
+ *     (`CLOSING_TEXT`).
+ *
+ *     ⚠ DO NOT reach for the natural phrasings here. "No change was
+ *     made to the model" / "no changes were made" / "nothing changed"
+ *     are BANNED at runtime as state-mutation denials
+ *     (`compose/forbidden-user-facing-phrases.ts`), as is "previous
+ *     analysis" / "prior analysis". They read perfectly and they are
+ *     landmines: the V5 egress guard replaces the ENTIRE response with
+ *     the neutral fallback when one fires. Use the positive framings
+ *     above ("unchanged so far", "last analysis").
+ *
+ *     This header previously quoted the two BANNED variants as though
+ *     they were the shipped copy (the constants had moved on; the
+ *     hand-maintained mirror had not). That drift actively misled PR
+ *     #464, whose lane wrote new user-facing refusal copy on the
+ *     strength of it and only caught the breach when the egress guard
+ *     fired in a test. If you change the constants, change these quotes
+ *     in the same edit — and see the copy contract at `LEAD_TEXT`.
  *   - `suggested_actions`: 1–3 text-prompt chips drawn from canonical
  *     graph factor / option labels. No `action_type` — chip clicks
  *     re-submit as fresh user turns and route normally. When the graph

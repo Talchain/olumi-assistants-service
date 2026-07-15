@@ -65,6 +65,40 @@ const SUPPRESS_CASES: ReadonlyArray<Case> = [
   },
   { label: 'goal target raise',                 message: 'Raise the success target to 20%',                                expect: true },
   { label: 'goal target update at',             message: 'Update our success target at 90% retention',                     expect: true },
+
+  // Clause D — constraint phrasings (add_constraint dead-letter fix).
+  // PR #464 shipped an honest refusal for value-edits on non-factor nodes
+  // whose closing sentence promises "ask me to add a constraint on it" and
+  // renders a `chip_prompt_refuse_constraint` chip replaying
+  // "Add a constraint on <label>." That text hit EDIT_GRAPH_POSITIVE_REGEX
+  // via `add`, was NOT caught by any clause here (`add` is excluded from
+  // clauses A/B as structural), dispatched to the V4 edit_graph LLM — which
+  // has NO constraint operation — and no-opped into the
+  // buildEditClarifyFallbackParts clarifier. Live-proven: 3 probes, 0 blocks,
+  // exit_path edit_graph, no constraint EVER added, INCLUDING a fully
+  // specified probe (so under-specification was never the cause).
+  // `add_constraint` is registered (registry.ts) and the router tool-schema
+  // teaches it, so these phrasings MUST reach the TurnExecutor tool-use path.
+  {
+    label: 'constraint — the refusal chip verbatim (under-specified)',
+    message: 'Add a constraint on Key Talent Attrition.',
+    expect: true,
+  },
+  {
+    label: 'constraint — fully specified (live probe 2, verbatim)',
+    message: 'Add a constraint on Key Talent Attrition of at most 0.5.',
+    expect: true,
+  },
+  {
+    label: 'constraint on a factor (live probe 3, verbatim)',
+    message: 'Add a constraint on Office Rent Cost of at most 0.5.',
+    expect: true,
+  },
+  { label: 'constraint — bare add',             message: 'Add a constraint',                                               expect: true },
+  { label: 'constraint — plural',               message: 'Add constraints on Office Rent Cost',                            expect: true },
+  { label: 'constraint — "put a constraint"',   message: 'Put a constraint on the cost factor',                            expect: true },
+  { label: 'constraint — "apply a constraint"', message: 'Apply a constraint to Key Talent Attrition below 0.5',           expect: true },
+  { label: 'constraint — "place a constraint"', message: 'Place a hard constraint on headcount',                           expect: true },
 ];
 
 const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
@@ -118,6 +152,54 @@ const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
   { label: 'plural kind "to be risks"',         message: 'set X to be risks',                                              expect: false },
   { label: 'plural kind "to become options"',   message: 'update nodes to become options',                                 expect: false },
   { label: 'plural kind "to be factors"',       message: 'set the goals to be factors',                                    expect: false },
+
+  // Clause D negatives — the constraint clause must stay NARROW.
+  // The clause requires a constraint-INTENT verb driving the noun within a
+  // tight window. Removal is NOT add_constraint's contract (the handler
+  // only adds), so `remove`/`delete` MUST stay on the edit_graph route —
+  // routing them to TurnExecutor would trade one dead end for another.
+  { label: 'constraint removal stays on edit_graph',   message: 'Remove the constraint on Office Rent Cost',               expect: false },
+  { label: 'constraint deletion stays on edit_graph',  message: 'Delete the constraint on churn',                          expect: false },
+  // `set` is EXCLUDED from clause D and this row is the lock.
+  // Suppressing edit_graph sends the message to TurnExecutor, whose first
+  // stop is the deterministic value-update pre-route. That module's
+  // EDIT_VERB_PATTERN contains `set` but NOT `add` (measured), and the
+  // module has no notion of "constraint"/"at most" — so a suppressed
+  // "Set a constraint on churn of at most 5%" would satisfy its
+  // verb + quantity + factor-candidate predicates and silently set
+  // churn's VALUE to 5% instead of registering a 5% CEILING. A wrong
+  // mutation is strictly worse than the dead end clause D fixes. Keeping
+  // this false leaves the phrasing exactly where it is today.
+  // Re-admitting `set` REQUIRES teaching the deterministic pre-route to
+  // stand down on constraint phrasings first — if you flip this row,
+  // that work is your precondition, not an afterthought.
+  { label: '"set a constraint" excluded (deterministic pre-route collision)', message: 'Set a constraint on churn of at most 5%', expect: false },
+  // Questions / descriptions about constraints carry no constraint-intent
+  // verb driving the noun and must not be swept into the gate.
+  { label: 'constraint question',               message: 'What constraints do I have?',                                    expect: false },
+  { label: 'constraint explain',                message: 'Explain the constraint on churn',                                expect: false },
+  { label: 'constraint describe',               message: 'Describe the constraints in my model',                           expect: false },
+  // Distant co-occurrence — the noun is not the verb's object. The tight
+  // token window keeps these out (mirrors clause C's rationale).
+  {
+    label: 'constraint distant co-occurrence',
+    message: 'Update the model and then tell me how you would describe the constraint',
+    expect: false,
+  },
+  // Structural `add` requests WITHOUT the constraint noun must be
+  // untouched — these are add_node territory and are pinned by
+  // route-v2-edit-lifecycle test #5.
+  { label: 'add risk (structural, unchanged)',  message: 'Add a risk for coordination overhead',                           expect: false },
+  { label: 'add factor (structural, unchanged)', message: 'add market competition as a factor',                            expect: false },
+  // Structural `add_node` requests that merely CONTAIN "constraint" as
+  // part of the new node's NAME. Clause D requires the constraint noun to
+  // be the verb's DIRECT OBJECT precisely so these are not stolen from
+  // edit_graph: a first-draft clause D using clause C's looser
+  // `(?:\s+\S+){0,4}?` token window matched BOTH of these (measured), which
+  // would have silently broken structural add_node for any node whose label
+  // ends in "constraint". Locked here so a future widening fails loudly.
+  { label: 'add factor NAMED "...constraint"',  message: 'Add a factor for budget constraint',                             expect: false },
+  { label: 'add risk NAMED "...constraint"',    message: 'Add a risk called supply constraint',                            expect: false },
 ];
 
 describe('isValueUpdatePhrasing — table-driven gate behaviour', () => {

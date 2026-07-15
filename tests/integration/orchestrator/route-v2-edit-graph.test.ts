@@ -214,6 +214,23 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
     expect(body.assistant_text).toContain('Applied edit');
   });
 
+  // The VARIABLE under test here is the STAGE (`decide`), not the message —
+  // cf. the sibling test above, which is the same assertion at `analyse`
+  // stage. The message is only a carrier for "some positive edit keyword".
+  //
+  // It previously carried "Add a constraint on time-to-launch", which made
+  // this test a PIN ON THE add_constraint DEAD LETTER: it asserted that a
+  // constraint request reaches the V4 edit_graph LLM — a lane with no
+  // constraint operation at all, which no-ops such requests into the
+  // "factor, edge, option, or value" clarifier (live-proven: 3 probes, 0
+  // blocks, no constraint ever added). The routing gap was, in other words,
+  // test-pinned as correct behaviour, which is part of how it survived.
+  //
+  // Swapped to a STRUCTURAL add — genuinely edit_graph's contract
+  // (add_node), so it still dispatches and the stage-gating intent is
+  // preserved — while constraint phrasings now route to the TurnExecutor
+  // tool-use path via value-update-gate clause D, where `add_constraint`
+  // actually lives.
   it('decide stage with edit keyword → dispatches', async () => {
     dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
     const res = await app.inject({
@@ -222,7 +239,7 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
       payload: payload({
         stage: 'decide',
         turn_class: 'decide',
-        message: 'Add a constraint on time-to-launch',
+        message: 'Add a risk for time-to-launch delays',
       }),
     });
     expect(res.statusCode).toBe(200);
