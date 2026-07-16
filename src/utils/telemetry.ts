@@ -155,6 +155,17 @@ export const TelemetryEvents = {
   // the flag is still not crossing the wire.
   V5ExplicitGenerateReceived: "v5.explicit_generate_received",
 
+  // ROADMAP 2.63 C3/C4 — deterministic draft/redraft offer lifecycle.
+  // `seeded` fires when an offer chip + `draft_graph` pending are emitted
+  // (`site`: frame_no_brief_guard / explicit_generate_graph_present;
+  // `persisted` false = commit failed and the chip was withheld).
+  // `resumed` fires when a consent-shaped turn resolved against a live
+  // offer (`outcome`: dispatch_draft / declined_no_brief /
+  // reoffered_graph_changed / reoffered_graph_present /
+  // state_read_failed_fallthrough; `trigger`: copy_replay / bare_confirm).
+  V5DraftOfferSeeded: "v5.draft_offer.seeded",
+  V5DraftOfferResumed: "v5.draft_offer.resumed",
+
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
   CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",

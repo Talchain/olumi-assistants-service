@@ -97,6 +97,16 @@ export interface DispatchDraftGraphParams {
    * (isDraftGraphShape) path, where behaviour is unchanged.
    */
   readonly briefOverride?: string;
+  /**
+   * ROADMAP 2.63 C3/C4 — pending-action refs (== chip_id) CONSUMED by this
+   * draft: the `draft_graph` offer pending the route-level resume just
+   * honoured. Threaded to `CommitMetadata.consumedPendingRefs` so the
+   * carry-forward retires the offer with the draft — otherwise a live
+   * "build/redraft the model" offer would survive the very draft it
+   * produced and a later bare "yes" could re-trigger it (zombie re-offer).
+   * Absent on the heuristic and flag paths (nothing to consume).
+   */
+  readonly consumedPendingRefs?: readonly string[];
 }
 
 export interface DispatchDraftGraphResult {
@@ -642,6 +652,11 @@ export async function dispatchDraftGraph(
         // carry-forward runs on this path; graph_hash is the NEW draft's
         // analysis-affecting hash (only when a graph is actually written).
         priorPendingActions: holdThread.threaded,
+        // ROADMAP 2.63 C3/C4 — retire the honoured draft-offer pending
+        // atomically with the draft it produced (see the param doc).
+        ...(params.consumedPendingRefs !== undefined
+          ? { consumedPendingRefs: params.consumedPendingRefs }
+          : {}),
         ...(draftResult.graphOutput != null && postDraftGraphHash !== null
           ? { graph_hash: postDraftGraphHash }
           : {}),

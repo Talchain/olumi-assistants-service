@@ -141,6 +141,53 @@ export type PendingActionAction =
     }
   | {
       /**
+       * ROADMAP 2.63 C3/C4 — deterministic draft/redraft offer.
+       *
+       * Seeded server-side (explicit `CommitMetadata.pending_actions`,
+       * NEVER chip-derived — `draft_graph` is not in the wire ActionType
+       * enum, so the offer chip is a plain text-replay chip) by:
+       *   - the frame_no_brief_guard when the guard-firing message carries
+       *     a usable brief seed (C3 — "Build the model" offer), and
+       *   - the explicit-generate graph-present decline (C4 — "Redraft
+       *     the model" offer; `redraft: true`).
+       *
+       * Resumed at ROUTE level only (route-v2's draft-offer pre-route,
+       * upstream of TurnExecutor) into the C1/C2 deterministic draft path:
+       * an exact replay of the offer's public copy (chip click or typed),
+       * or a bare short-confirm while this is the SOLE live pending kind.
+       * TurnExecutor's bare-confirm resumer deliberately does NOT dispatch
+       * it (`kind_not_yet_resumable` fall-through — the executor cannot
+       * draft), and the kind is deliberately NOT confirmation-expecting:
+       * a bare "yes" while a real consent hold (`apply_proposed_change`)
+       * is live resolves the HOLD per the F-HELD consent-priority ruling;
+       * the draft offer then requires its named copy. Like the
+       * chip-suggestion kinds, a lapsed offer dies silently — the
+       * deterministic re-offer paths (guard re-fire / a fresh
+       * generate-flag turn) replace it cheaply.
+       */
+      readonly kind: 'draft_graph';
+      /**
+       * Brief candidate captured at offer time (normaliseBriefText-bounded,
+       * ≥ DRAFT_GRAPH_MIN_BRIEF_LENGTH). Absent when the offering turn had
+       * no usable typed content — the resume then relies on the persisted
+       * brief / recent shaped turns, or declines honestly. Never captured
+       * from a chip_click's canned text.
+       */
+      readonly brief_seed?: string;
+      /**
+       * True on the C4 offer: consenting means REPLACING the persisted
+       * graph. `preconditions.graph_hash` carries the persisted graph's
+       * analysis-affecting hash at offer time when computable, so the
+       * commit carry-forward invalidates the offer if an edit lands
+       * between offer and consent. Absent/false = C3 first-draft offer.
+       */
+      readonly redraft?: boolean;
+      /** Stable public copy captured at emit time (chip label/message). */
+      readonly public_label: string;
+      readonly public_message: string;
+    }
+  | {
+      /**
        * V5 P0 proposal-memory continuation. Captures a noun-phrase
        * concept extracted from the prior assistant turn's Sonnet-emitted
        * "add X as a factor" / "would you like me to add X" proposal.
@@ -185,6 +232,10 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   'apply_proposed_change',
   'edit_graph_add_risk',
   'proposed_concept',
+  // ROADMAP 2.63 C3/C4 — resumed by route-v2's draft-offer pre-route,
+  // NOT by TurnExecutor's bare-confirm resumer (which cannot draft and
+  // falls through with `kind_not_yet_resumable`).
+  'draft_graph',
 ]);
 
 /**
@@ -307,6 +358,13 @@ export const PENDING_ACTIONS_PER_TURN_CAP = 3;
  *   - `run_analysis` / `what_would_flip` — chip suggestion offers; chips derive
  *     pending actions after most analysis turns, so counting them would leave
  *     the flag near-constant-true for `PENDING_ACTION_DEFAULT_TURN_TTL` turns.
+ *   - `draft_graph` (ROADMAP 2.63 C3/C4) — an OFFER, resolved at ROUTE level
+ *     only (route-v2's draft-offer pre-route). Deliberately excluded so a bare
+ *     "yes" while a real consent hold is live keeps resolving the hold
+ *     (F-HELD consent-priority); the draft/redraft offer then requires its
+ *     named public copy. Including it would also route its lapse through
+ *     `buildHeldLapseNotice`'s "held change" copy, which misdescribes an
+ *     offer to draft.
  *
  * All kinds (including the excluded ones) remain visible in the frame's
  * pending diagnostics COUNTS regardless of this set.
@@ -480,6 +538,24 @@ export function parsePendingAction(input: unknown): PendingAction | null {
   }
   if (a.kind === 'edit_graph_add_risk') {
     if (typeof a.label !== 'string' || a.label.length === 0) return null;
+  }
+  if (a.kind === 'draft_graph') {
+    // ROADMAP 2.63 C3/C4 — the offer's public copy is REQUIRED: the
+    // route-level resume exact-matches the persisted copy against the
+    // replayed message, so an entry without it is unresumable.
+    if (typeof a.public_label !== 'string' || a.public_label.length === 0) return null;
+    if (typeof a.public_message !== 'string' || a.public_message.length === 0) return null;
+    // brief_seed is optional; when present it must be a non-empty bounded
+    // string (normaliseBriefText caps at 8000 — mirror the DB bound here
+    // so a corrupted row cannot smuggle an unbounded value to the draft
+    // pipeline).
+    if (
+      a.brief_seed !== undefined &&
+      (typeof a.brief_seed !== 'string' || a.brief_seed.length === 0 || a.brief_seed.length > 8000)
+    ) {
+      return null;
+    }
+    if (a.redraft !== undefined && typeof a.redraft !== 'boolean') return null;
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.

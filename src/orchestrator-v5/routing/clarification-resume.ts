@@ -226,6 +226,13 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // mutating now so they fail closed by default when wired.
   apply_proposed_change: 'mutating',
   edit_graph_add_risk: 'mutating',
+  // ROADMAP 2.63 C3/C4 — the draft/redraft offer. Never resumed by this
+  // module (route-v2's draft-offer pre-route owns it; here it falls
+  // through like any unclassified-for-resume kind), but classified
+  // MUTATING fail-closed: consenting to the C4 variant REPLACES the
+  // persisted graph, and the offer pins `preconditions.graph_hash` so
+  // divergence guards fire by default anywhere the kind is evaluated.
+  draft_graph: 'mutating',
   // Non-mutating: resuming reads from analysis state but does not
   // change the graph; hash divergence is not a safety concern.
   run_analysis: 'non_mutating',

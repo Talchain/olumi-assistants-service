@@ -84,6 +84,44 @@ describe('assembleExplicitGenerateBrief — priority order', () => {
     expect(out).toBeNull();
   });
 
+  // ── ROADMAP 2.63 C3/C4 — pending_seed (draft-offer resume) ─────────────
+  it('2.63-C3: a pending brief_seed beats the persisted brief and recent turns (the offer was ABOUT the seed)', () => {
+    const seed = 'Three pricing tiers for the new analytics product, mid-market focus.';
+    const out = assembleExplicitGenerateBrief(
+      input({
+        message: 'yes',
+        source: 'composer',
+        pendingBriefSeed: seed,
+        persistedBriefText: BRIEF,
+        recentTurns: [turn(BRIEF)],
+      }),
+    );
+    expect(out).toEqual({ brief: seed, source: 'pending_seed' });
+  });
+
+  it('2.63-C3: a brief-shaped MESSAGE still beats the pending seed (the user just typed something better)', () => {
+    const out = assembleExplicitGenerateBrief(
+      input({
+        message: BRIEF,
+        source: 'composer',
+        pendingBriefSeed: 'Three pricing tiers for the new analytics product, mid-market focus.',
+      }),
+    );
+    expect(out).toEqual({ brief: BRIEF, source: 'message' });
+  });
+
+  it('2.63-C3: an under-floor pending seed is skipped, not an error (falls through to the persisted brief)', () => {
+    const out = assembleExplicitGenerateBrief(
+      input({
+        message: 'yes',
+        source: 'composer',
+        pendingBriefSeed: 'too short',
+        persistedBriefText: BRIEF,
+      }),
+    );
+    expect(out).toEqual({ brief: BRIEF, source: 'persisted_brief' });
+  });
+
   it('caps an over-long assembled brief at the draft pipeline Zod max', () => {
     const long = 'Should we expand? ' + 'x'.repeat(7000);
     const out = assembleExplicitGenerateBrief(input({ message: long, source: 'composer' }));

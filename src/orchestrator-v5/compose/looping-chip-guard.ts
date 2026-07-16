@@ -70,7 +70,7 @@ import type { SuggestedAction } from './types.js';
  * content or matches fuzzily: two messages that differ by any WORD stay
  * distinct.
  */
-function normaliseReplayMessage(s: string): string {
+export function normaliseReplayMessage(s: string): string {
   return s
     .trim()
     .toLowerCase()

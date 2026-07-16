@@ -21,9 +21,13 @@
  * the no-flag guard case and the C4 graph-present pin pass before AND after
  * (behaviour-preservation pins).
  *
- * Scope note: C3 (pending-action confirm seeding) and C4 (graph-present
- * doctrine) are PAUL-GATED and deliberately NOT built — the "flag with a
- * persisted graph" case below PINS today's fall-through behaviour for C4.
+ * Scope note (UPDATED for the C3+C4 lane, Paul-ratified 16 Jul): the
+ * original C1+C2 change PINNED the graph-present fall-through as a named
+ * PAUL-GATED TODO. That pin is now REPLACED by the ratified C4 doctrine —
+ * decline-with-redraft-offer — in the "flag with a persisted graph" case
+ * below (the old fall-through expectation goes RED against the C4 build,
+ * by design). C3/C4 mechanism coverage (offer seeding, consent resume,
+ * goldens) lives in route-v2-draft-offer.test.ts.
  * Mocking strategy mirrors route-v2-held-proposal-confirm.test.ts.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -324,9 +328,13 @@ describe('POST /orchestrate/v2/turn — explicit-generate wire flag (ROADMAP 2.6
     expect(appendMock).not.toHaveBeenCalled();
   });
 
-  // ── C4 pin (PAUL-GATED, not built): flag + persisted graph preserves
-  //    today's routing exactly ──────────────────────────────────────────────
-  it('flag arriving with a PERSISTED graph is ignored — the turn falls through to pre-existing routing (C4 pin)', async () => {
+  // ── C4 (Paul-ratified 16 Jul — decline-with-redraft-offer): flag +
+  //    persisted graph gets the deterministic decline, an offer chip, and a
+  //    committed `draft_graph` (redraft) pending. REPLACES the previous
+  //    PAUL-GATED fall-through pin (which this test used to assert: no
+  //    draft, chatWithTools CALLED, no decline copy — that expectation goes
+  //    RED against this build, by design). ─────────────────────────────────
+  it('flag arriving with a PERSISTED graph gets the deterministic decline-with-redraft-offer (C4)', async () => {
     persistedGraphForRead = STRICT_GRAPH;
     persistedBriefTextForRead = REAL_BRIEF;
     hasPriorTurnsForRead = true;
@@ -335,15 +343,30 @@ describe('POST /orchestrate/v2/turn — explicit-generate wire flag (ROADMAP 2.6
       url: '/orchestrate/v2/turn',
       payload: p2Payload({ generate_model: true }),
     });
-    // Today's behaviour: no draft, no decline — the turn reaches the
-    // TurnExecutor's routing LLM as if the flag were absent. (The mocked
-    // router throws, so the executor surfaces its failure envelope; the
-    // pin is the ROUTING, not the reply.)
+    expect(res.statusCode).toBe(200);
+    // Deterministic: no draft dispatched, zero LLM routing calls.
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
-    expect(chatWithToolsMock).toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
     const body = JSON.parse(res.body);
-    expect(String(body.assistant_text ?? '')).not.toContain("don't have a decision brief");
-    expect(res.statusCode).toBeGreaterThanOrEqual(200);
+    // Decline copy: says a model already exists; never the no-brief decline
+    // and never the frame guard's first-time framing copy.
+    expect(body.assistant_text).toContain('already has a model');
+    expect(String(body.assistant_text)).not.toContain("don't have a decision brief");
+    expect(body.assistant_text).not.toContain(FRAME_GUARD_COPY);
+    // The redraft route is OFFERED: exactly one chip, whose message is the
+    // replay copy the consent turn resumes on.
+    expect(body.suggested_actions).toHaveLength(1);
+    expect(body.suggested_actions[0].label).toBe('Redraft the model');
+    // The offer COMMITS (pendings live on committed turn rows) with a
+    // draft_graph redraft pending whose chip_id matches the offered chip.
+    expect(appendMock).toHaveBeenCalledTimes(1);
+    const write = appendMock.mock.calls[0]![0] as {
+      pending_actions: readonly { chip_id: string; action: Record<string, unknown> }[];
+    };
+    expect(write.pending_actions).toHaveLength(1);
+    expect(write.pending_actions[0]!.action.kind).toBe('draft_graph');
+    expect(write.pending_actions[0]!.action.redraft).toBe(true);
+    expect(write.pending_actions[0]!.chip_id).toBe(body.suggested_actions[0].id);
   });
 
   // ── No-flag regression pin: the P2 shape WITHOUT the flag keeps landing
