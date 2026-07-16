@@ -116,10 +116,14 @@ function SCAFFOLD_SUFFIX_EXACT_REGEX(): RegExp {
   return scaffoldSuffixExactRegex;
 }
 
+// P2-4 (A1 execution ruling): the copy names the WHOLE COMPARISON as
+// illustrative, not just the scaffolded option's own results — placeholder
+// values shift every option's relative position, so scoping the caveat to
+// the new option would under-disclose.
 function labelledSuffix(label: string): string {
   return (
     ` Placeholder values were used for '${label}' because it has no values set — ` +
-    `its results are illustrative until you configure it. ` +
+    `the whole comparison is illustrative until you configure it. ` +
     `To set real values, say '${buildConfigureOptionChipMessage(label)}'`
   );
 }
@@ -127,7 +131,7 @@ function labelledSuffix(label: string): string {
 function genericSingleSuffix(): string {
   return (
     ` Placeholder values were used for one of your options because it has no values set — ` +
-    `its results are illustrative until you configure it. ` +
+    `the whole comparison is illustrative until you configure it. ` +
     `To set real values, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
   );
 }
@@ -135,7 +139,7 @@ function genericSingleSuffix(): string {
 function pluralSuffix(count: number): string {
   return (
     ` Placeholder values were used for ${count} of your options because they have no values set — ` +
-    `their results are illustrative until you configure them. ` +
+    `the whole comparison is illustrative until you configure them. ` +
     `To set real values, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
   );
 }
@@ -226,7 +230,7 @@ export function buildScaffoldPromptDisclosure(
 export const SCAFFOLD_DISCLOSURE_RE_SRC =
   " Placeholder values were used for (?:'[^'\\n]{1,40}'|one of your options|\\d{1,2} of your options) " +
   'because (?:it has|they have) no values set — ' +
-  '(?:its|their) results are illustrative until you configure (?:it|them)\\. ' +
+  'the whole comparison is illustrative until you configure (?:it|them)\\. ' +
   "To set real values, say 'Help me configure [^'\\n]{1,41}\\.'";
 
 /**
