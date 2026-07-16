@@ -503,10 +503,20 @@ function scanWordNumberLiterals(text: string): Literal[] {
   return out;
 }
 
-/** ROUND 7: common non-ASCII numerals (Arabic-Indic, Extended Arabic-Indic,
- * full-width) and Unicode vulgar fractions — recognised, never valuable. */
-const FOREIGN_NUMERAL_RE =
-  /[\u0660-\u0669\u06F0-\u06F9\uFF10-\uFF19]+|[\u00BC-\u00BE\u2150-\u215E]/g;
+/** ROUND 7: non-ASCII numerals and Unicode fraction/number forms —
+ * recognised, never valuable.
+ *
+ * ROUND 8 (P1): DERIVED, not mirrored. The round-7 version hand-enumerated
+ * 3 digit ranges (Arabic-Indic, Extended Arabic-Indic, full-width) plus the
+ * vulgar-fraction block, so Devanagari/Thai/Bengali/Tamil digit runs and
+ * superscripts were invisible to the token stream — the hand-maintained-
+ * mirror defect class, again. Unicode property escapes cover every script
+ * by construction: \p{Nd} is ANY script's decimal digits (ASCII excluded —
+ * the main scanner owns 0-9), \p{No} is every other-number form (vulgar
+ * fractions, superscripts, circled numbers, ...). A maximal run is ONE
+ * token, mirroring the digit scanner. Mutation hook: regressing this to the
+ * round-7 enumeration turns the multi-script corpus RED. */
+const FOREIGN_NUMERAL_RE = /(?:(?![0-9])\p{Nd})+|\p{No}+/gu;
 
 function scanForeignNumeralLiterals(text: string): Literal[] {
   const out: Literal[] = [];

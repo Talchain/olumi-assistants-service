@@ -973,6 +973,40 @@ describe('round 8 corpus: the round-7 P0 — fraction words re-opened the shared
 });
 
 // ============================================================
+// ROUND 8 — (2) P1: FOREIGN_NUMERAL_RE was a hand-enumerated mirror of 3
+// Unicode ranges — the programme's dominant defect class. Anchor-distant
+// digit runs in every non-enumerated script were invisible; the Arabic-Indic
+// control refused correctly, which is exactly how a mirror drift reads as
+// green. Now DERIVED via Unicode property escapes (\p{Nd} minus ASCII +
+// \p{No}): every script covered by construction.
+// ============================================================
+
+describe('round 8 corpus: the round-7 P1 — foreign numerals derived, not enumerated', () => {
+  it('P1 family (verbatim probe strings): anchor-distant runs fail closed in EVERY script', () => {
+    // Round 7 scanned each of these {values:[...], unparseable:0} — the
+    // numeral run was invisible to the token stream.
+    expect(scanProseFigures('a २५ share of the 40% pool')).toEqual({ values: [40], unparseable: 1 }); // Devanagari
+    expect(scanProseFigures('a ๒๕ share of the 40% pool')).toEqual({ values: [40], unparseable: 1 }); // Thai
+    expect(scanProseFigures('a ৪৫ share of the 20% pool')).toEqual({ values: [20], unparseable: 1 }); // Bengali
+    expect(scanProseFigures('a ௪௫ share of the 20% pool')).toEqual({ values: [20], unparseable: 1 }); // Tamil
+    expect(scanProseFigures('a ²⁵ share of the 40% pool')).toEqual({ values: [40], unparseable: 1 }); // superscripts (\p{No})
+  });
+
+  it('directly-anchored foreign numerals refuse in every script too', () => {
+    expect(scanProseFigures('२५% of runs')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('the round-7 enumerated behaviours are unchanged (the derivation is a superset)', () => {
+    expect(scanProseFigures('a ٤٥ share of the 20% pool')).toEqual({ values: [20], unparseable: 1 });
+    expect(scanProseFigures('٤٥ and 20%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a ¼ share of the 20% pool')).toEqual({ values: [20], unparseable: 1 });
+    expect(scanProseFigures('a ½% margin')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('٦٢% of runs')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('６２% of runs')).toEqual({ values: [], unparseable: 1 });
+  });
+});
+
+// ============================================================
 // ROUND 7 — PROPERTY GENERATOR v2 (the meta-lesson: the generator must be
 // taught every blindness the moment it is found). The round-6 generator
 // rendered exactly ONE number per anchor, so the shared-anchor P0 was
