@@ -834,6 +834,16 @@ describe('round 7 corpus: the round-6 P1 — percent pts is pp, never %', () => 
     expect(scanProseFigures('up 40 basis points')).toEqual({ values: [], unparseable: 1 });
   });
 
+  it('a BARE pp-family anchor fails closed via Layer 1 (mutation-killer: the standalone pts/bps alternatives)', () => {
+    // No number at all — only the Layer-1 detector can see these tokens, so
+    // removing the standalone 'pts?'/'bps' alternatives from ANCHOR_TOKEN_RE
+    // turns exactly these assertions RED (round-7 mutation-matrix survivor,
+    // now pinned). The '12 pts'-shaped cases above cannot kill that mutation:
+    // Layer 2 anchors them itself and its consumed span covers the token.
+    expect(scanProseFigures('shown in pts')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('measured in bps')).toEqual({ values: [], unparseable: 1 });
+  });
+
   it('P1 gate: a percent-pts figure can never trace against a % canonical', () => {
     const d = gateCanonicalStateUse([gateTurn('the win rate rose 12 percent pts.', [12])]);
     expect(d.details.figures_stated).toBe(1);
@@ -876,6 +886,17 @@ describe('round 7 corpus: pp-delta-then-level, self-anchored splits, glyphs, sof
     expect(scanProseFigures('a ½% margin')).toEqual({ values: [], unparseable: 1 });
     expect(scanProseFigures('٦٢% of runs')).toEqual({ values: [], unparseable: 1 });
     expect(scanProseFigures('６２% of runs')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('a foreign numeral AWAY from the anchor still fails closed (mutation-killer: the foreign-numeral token scan)', () => {
+    // The anchor-adjacent cases above are masked under a disabled foreign
+    // scan by invariant v1 (the bare anchor goes unconsumed — same count),
+    // which let a 'scanForeignNumeralLiterals off' mutant survive the
+    // round-7 matrix. These shapes are visible ONLY as numeric TOKENS:
+    // sharing a clause (reconciliation v2) or glued into the anchored form.
+    expect(scanProseFigures('a ٤٥ share of the 20% pool')).toEqual({ values: [20], unparseable: 1 });
+    expect(scanProseFigures('٤٥ and 20%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a ¼ share of the 20% pool')).toEqual({ values: [20], unparseable: 1 });
   });
 
   it('soft hyphens are normalised before scanning (round-7 P2 pickup)', () => {
