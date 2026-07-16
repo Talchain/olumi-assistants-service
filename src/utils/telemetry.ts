@@ -145,6 +145,16 @@ export const TelemetryEvents = {
   // prompt. See src/orchestrator/route-v2.ts (frame_no_brief_guard).
   V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
 
+  // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
+  // message turn that arrives with generate_model/explicit_generate set,
+  // regardless of outcome (`outcome` field: dispatch_draft /
+  // declined_no_brief / graph_present_fallthrough /
+  // state_read_failed_fallthrough; `brief_source` names which server-side
+  // source won the C2 assembly). This is the end-to-end observability for
+  // the UI-half emit (A2's U1/U2): zero firings after the UI deploy means
+  // the flag is still not crossing the wire.
+  V5ExplicitGenerateReceived: "v5.explicit_generate_received",
+
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
   CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",

@@ -90,7 +90,10 @@ import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { debugFieldRequested, type OlumiResponseWithDebugFields } from './debug-fields.js';
 import type { TurnTimingsBlock, V5TurnTimings } from '../orchestrator-v5/telemetry/turn-timings.js';
-import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import type {
+  V5DiagnosticExitPath,
+  V5DiagnosticTrace,
+} from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import {
   canonicalStateFromFreshness,
@@ -122,7 +125,10 @@ import {
   dispatchDeterministicChipClick,
   isDeterministicChipClickActionType,
 } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
-import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
+import {
+  DRAFT_GRAPH_DECISION_BRIEF_REGEX,
+  DRAFT_GRAPH_MIN_BRIEF_LENGTH,
+} from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
 import {
   GraphStateIngressSchema,
@@ -132,7 +138,13 @@ import {
   loadHasPriorTurns,
   loadMostRecentPendingActionsStrict,
   loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict,
+  loadRecentConversationTurns,
 } from '../orchestrator-v5/build-turn-context.js';
+import {
+  assembleExplicitGenerateBrief,
+  type AssembledExplicitGenerateBrief,
+} from '../orchestrator-v5/routing/assemble-explicit-generate-brief.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
@@ -205,13 +217,13 @@ export function detectChipClickResumeIntent(
 // matters for JSON.stringify determinism — the UI parser and contract
 // fixtures depend on it.
 
-type V5ExitPath =
-  | 'system_event'
-  | 'chip_click'
-  | 'draft_graph'
-  | 'edit_graph'
-  | 'frame_no_brief_guard'
-  | 'turn_executor';
+// DERIVED from the diagnostics union (ROADMAP 2.63: this was a hand-synced
+// twin of V5DiagnosticExitPath minus its error member — a silent-drift
+// hazard). `draft_graph_error` is the only diagnostics-only member: it tags
+// the 500 BoundaryError trace path, never a 200-OK exit through
+// sendFinalised200. Adding a new 200-OK exit path now happens ONCE, in
+// v5-diagnostic-trace.ts.
+type V5ExitPath = Exclude<V5DiagnosticExitPath, 'draft_graph_error'>;
 
 /**
  * V5 200-OK exit helper — the SOLE sanctioned `reply.code(200).send` site
@@ -1057,14 +1069,11 @@ function isPriorAnalysisFreshFromRequest(
 // inside the request handler would rebuild RegExp objects on every turn).
 // ────────────────────────────────────────────────────────────────────
 
-/**
- * Positive decision-brief regex for draft_graph dispatch. Matches common
- * decision verbs or a trailing question mark. See
- * `tests/integration/orchestrator/route-v2-draft-graph.test.ts` for
- * regression cases including known false negatives.
- */
-const DRAFT_GRAPH_DECISION_BRIEF_REGEX =
-  /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
+// Positive decision-brief regex for draft_graph dispatch — canonical
+// definition now lives in src/schemas/assist.ts (ROADMAP 2.63: was a
+// module-local twin of derive-brief-seed's BRIEF_SEED_DECISION_REGEX;
+// both now derive from the single export). Imported above alongside
+// DRAFT_GRAPH_MIN_BRIEF_LENGTH.
 
 /** Positive edit-intent regex for edit_graph dispatch. */
 const EDIT_GRAPH_POSITIVE_REGEX =
@@ -1635,6 +1644,150 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         prior_turns_present: true,
       });
     }
+    // ────────────────────────────────────────────────────────────────────
+    // ROADMAP 2.63 C1+C2 — explicit-generate wire flag.
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // `generate_model` / `explicit_generate` are boolean fields on
+    // MessageTurnPayload at the 0.16.0 pin (both parse through B1 ingress —
+    // zero contract change) that until now NO live V5 code read: their only
+    // consumers were the dead V4 pipeline (request-normalization.ts /
+    // turn-contract.ts). The stage-2 "Generate model" intent therefore never
+    // crossed the wire in any form, and the confirm-chip flow was
+    // structurally unable to draft (2.63 diagnosis, live-reproduced P1–P5).
+    //
+    // C1 — the flag is a DETERMINISTIC draft trigger. Unlike the
+    // shape-heuristic below it bypasses the brief-keyword regex AND the
+    // continuation guard: an explicit generate on a no-graph continuation
+    // scenario is precisely the stage-2 "converse → confirm → generate"
+    // flow the continuation guard otherwise strands (Finding 3 corollary).
+    // It fires ONLY when no graph exists anywhere — neither on the request
+    // (`extensions.graphState`) nor persisted server-side.
+    //
+    // C2 — the message on a confirm click is canned chip text, not the
+    // brief, so the brief is assembled server-side (persisted
+    // scenarios.brief_text → recent user turns → the message itself; see
+    // assemble-explicit-generate-brief.ts for the priority order). When
+    // nothing usable exists the turn gets a deterministic HONEST decline
+    // naming what is missing — never a silent fall-through to
+    // frame_no_brief_guard or the routing LLM. Like frame_no_brief_guard,
+    // the decline commits no turn, so the scenario stays draftable.
+    //
+    // TODO(ROADMAP 2.63 C4 — PAUL-GATED): when the flag arrives on a
+    // scenario that ALREADY has a graph (request graph_state or persisted),
+    // the doctrine (decline-with-redraft-offer vs silent replace) is
+    // Paul-gated and NOT built here. Today's behaviour is preserved
+    // exactly: the flag is ignored and the turn falls through to the
+    // pre-existing routing below (pinned by the "flag with persisted graph"
+    // case in route-v2-explicit-generate.test.ts). Same preservation on a
+    // failed persisted-state read: graph presence is unknown, so the flag
+    // path must not fire.
+    const explicitGenerateRequested =
+      ingress.generate_model === true || ingress.explicit_generate === true;
+    let explicitGenerateBrief: AssembledExplicitGenerateBrief | null = null;
+    let explicitGenerateDraft = false;
+    let explicitGenerateDeclined = false;
+    if (explicitGenerateRequested) {
+      let outcome:
+        | 'dispatch_draft'
+        | 'declined_no_brief'
+        | 'graph_present_fallthrough'
+        | 'state_read_failed_fallthrough';
+      if (extensions.graphState != null) {
+        outcome = 'graph_present_fallthrough';
+      } else {
+        try {
+          // STRICT read, deliberately: the swallowing variant collapses a
+          // store outage into "no graph", which would let the flag path
+          // draft over an existing graph during an outage — C4 territory.
+          // On a read failure we preserve today's routing instead.
+          const persisted = await loadPersistedScenarioStateStrict(ingress.scenario_id);
+          if (persisted.graph != null) {
+            outcome = 'graph_present_fallthrough';
+          } else {
+            explicitGenerateBrief = assembleExplicitGenerateBrief({
+              message: ingress.message,
+              source: ingress.source,
+              persistedBriefText: persisted.briefText,
+              recentTurns: [],
+            });
+            if (
+              explicitGenerateBrief === null ||
+              explicitGenerateBrief.source === 'message_unshaped'
+            ) {
+              // Only read the conversation chain when the message and the
+              // persisted brief cannot settle it — a prior user turn may
+              // carry the brief (and ranks above the unshaped message).
+              const recentTurns = await loadRecentConversationTurns(
+                ingress.scenario_id,
+                requestId,
+              );
+              explicitGenerateBrief =
+                assembleExplicitGenerateBrief({
+                  message: ingress.message,
+                  source: ingress.source,
+                  persistedBriefText: persisted.briefText,
+                  recentTurns,
+                }) ?? explicitGenerateBrief;
+            }
+            if (explicitGenerateBrief !== null) {
+              explicitGenerateDraft = true;
+              outcome = 'dispatch_draft';
+            } else {
+              explicitGenerateDeclined = true;
+              outcome = 'declined_no_brief';
+            }
+          }
+        } catch (err) {
+          outcome = 'state_read_failed_fallthrough';
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            'V5 explicit-generate — persisted-state read failed; preserving pre-flag routing',
+          );
+        }
+      }
+      emit(TelemetryEvents.V5ExplicitGenerateReceived, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        message_length: ingress.message.length,
+        continuation: isContinuationScenario,
+        had_chip: ingress.chip != null,
+        source: ingress.source,
+        outcome,
+        brief_source: explicitGenerateBrief?.source ?? null,
+      });
+    }
+    if (explicitGenerateDeclined) {
+      // C2 honest decline — deterministic, zero LLM calls, no commit. Names
+      // what is missing (a decision brief) and how to proceed. Deliberately
+      // NOT the frame_no_brief_guard copy: the user explicitly asked to
+      // generate, so "I need a single decision question to start" would
+      // misread their intent as a first-time framing turn.
+      const declineText =
+        "You asked me to build the model, but I don't have a decision brief to build it from yet — " +
+        'nothing in this conversation contains one. ' +
+        'Tell me the decision in one sentence, including the options you are comparing — for example: ' +
+        '“Should we hire a tech lead or two developers?” — and I will draft the model from that.';
+      const declineResponse: import('@talchain/schemas/boundary').OlumiResponse = {
+        response_version: 2,
+        assistant_text: declineText,
+        blocks: [],
+        suggested_actions: [],
+        insights: [],
+        stage_indicator: 'frame',
+      } as import('@talchain/schemas/boundary').OlumiResponse;
+      return sendFinalised200(reply, requestId, 'explicit_generate_no_brief', declineResponse, {
+        graph: null,
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
+        userMessage: ingress.message,
+      });
+    }
     const isDraftGraphShape =
       ingress.stage === 'frame' &&
       extensions.graphState == null &&
@@ -1643,7 +1796,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       !isContinuationScenario &&
       ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
       DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
-    if (isDraftGraphShape) {
+    if (isDraftGraphShape || explicitGenerateDraft) {
       // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
       // pipeline. V5 has no deterministic draft_graph handler yet. See
       // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.
@@ -1652,6 +1805,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           payload: ingress,
           requestId,
           request: req,
+          // C2 — on the explicit-generate path the pipeline drafts from the
+          // server-assembled brief, not the (possibly canned-chip) wire
+          // message. The committed turn's user_message stays verbatim
+          // (`payload.message`) — the override redirects only the brief
+          // consumers inside the dispatcher. Absent on the heuristic path:
+          // behaviour there is bit-identical to before.
+          ...(explicitGenerateDraft && explicitGenerateBrief !== null
+            ? { briefOverride: explicitGenerateBrief.brief }
+            : {}),
         });
         if (!dg.commitPerformed) {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({

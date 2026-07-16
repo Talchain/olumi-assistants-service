@@ -169,6 +169,12 @@ export type V5DiagnosticExitPath =
   | 'edit_graph'
   | 'system_event'
   | 'frame_no_brief_guard'
+  // ROADMAP 2.63 C2 — deterministic honest decline when an explicit
+  // generate (generate_model/explicit_generate wire flag) arrives but no
+  // usable brief exists anywhere (message, persisted brief_text, recent
+  // user turns). Distinct from frame_no_brief_guard by design: the user
+  // explicitly asked to generate, so the copy names what is missing.
+  | 'explicit_generate_no_brief'
   | 'draft_graph_error';
 
 // ─── Inputs ────────────────────────────────────────────────────────────────
