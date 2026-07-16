@@ -2,8 +2,9 @@
  * orchestrator-eval — SEAM-1 candidate A/B CLI.
  *
  * Ranks prompt CANDIDATES (not recorded fixture responses) against the
- * checked-in scenario pack, scored by the same five deterministic dimensions
- * as `pnpm eval:orchestrator`.
+ * checked-in scenario pack, scored by the same deterministic dimensions as
+ * `pnpm eval:orchestrator` (including substance — an empty answer fails) plus
+ * the extraction contract (a raw_unparsed turn is a failed turn).
  *
  * Run:  pnpm eval:orchestrator:candidates -- --prompt A=mock:good --prompt B=mock:regression
  *
@@ -83,7 +84,8 @@ function printReport(report: CandidateEvalReport): void {
   console.log(`turns used: ${report.turnsUsed}`);
 
   for (const c of report.candidates) {
-    console.log(`\n━━ candidate ${c.label} (${c.kind}: ${c.ref}) — ${c.passCount}/${c.results.length} fixtures pass ━━`);
+    const flagged = c.flaggedTurnCount > 0 ? `, ${c.flaggedTurnCount} turn(s) FLAGGED raw_unparsed` : '';
+    console.log(`\n━━ candidate ${c.label} (${c.kind}: ${c.ref}) — ${c.passCount}/${c.results.length} fixtures pass${flagged} ━━`);
     for (const r of c.results) {
       const verdict = r.pass ? 'PASS' : 'FAIL';
       console.log(`  - ${r.fixtureId}: ${verdict}  [extraction: ${r.extraction}]`);
@@ -101,7 +103,13 @@ function printReport(report: CandidateEvalReport): void {
   if (second) {
     const a = report.candidates.find((c) => c.label === best);
     const b = report.candidates.find((c) => c.label === second);
-    if (a && b && a.passCount === b.passCount && a.failedDimensionCount === b.failedDimensionCount) {
+    if (
+      a &&
+      b &&
+      a.passCount === b.passCount &&
+      a.flaggedTurnCount === b.flaggedTurnCount &&
+      a.failedDimensionCount === b.failedDimensionCount
+    ) {
       console.log('NOTE: top candidates are TIED on this scenario pack — the ranking above is alphabetical, not a verdict.');
     }
   }

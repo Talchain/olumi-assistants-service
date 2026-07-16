@@ -1,12 +1,19 @@
 /**
  * orchestrator-eval — deterministic scorer wrapper.
  *
- * Aggregates five dimensions into a pass/fail verdict for one candidate:
+ * Aggregates six dimensions into a pass/fail verdict for one candidate:
  *   1. no_forbidden_terms   (PRODUCTION guard) — findForbiddenMatches
  *   2. no_mutation_language (PRODUCTION guard) — containsMutationLanguage
  *   3. no_goal_fit_conflation (eval assertion) — detectGoalFitConflation
  *   4. no_held_science_vocabulary (eval assertion) — detectHeldScience
  *   5. no_false_success_claim (PRODUCTION guard) — findSuccessClaimHit
+ *   6. substance_present (eval assertion) — non-empty prose
+ *
+ * Dimension 6 exists because 1-5 are all ABSENCE checks: an EMPTY answer
+ * passes every one of them, so without a substance floor the pack —
+ * repurposed as a RANKING (SEAM-1) — literally rewards emptiness. Empty
+ * answer_text is the live prompt-defect class measured pre-v42.2g (0/6
+ * populated); a candidate that regresses to empty text must FAIL, not win.
  *
  * Dimensions 1, 2, and 5 are imported wholesale from the runtime (see
  * guards.ts); the eval never re-specifies them. Dimensions 3 and 4 are this
@@ -78,6 +85,17 @@ export function scoreCandidate(
     pass: falseSuccess === null,
     source: 'production-guard',
     detail: falseSuccess === null ? 'clean' : `hit: "${falseSuccess}"`,
+  });
+
+  // 6. Eval assertion — SUBSTANCE: dimensions 1-5 are absence checks, which
+  // an empty answer passes vacuously. Empty/whitespace-only prose is a failed
+  // turn (the pre-v42.2g empty-answer_text defect class), never a clean one.
+  const substantive = text.trim().length > 0;
+  dimensions.push({
+    name: 'substance_present',
+    pass: substantive,
+    source: 'eval-assertion',
+    detail: substantive ? 'non-empty prose' : 'empty/whitespace-only text — an empty answer is a failed turn, not a clean one',
   });
 
   const pass = dimensions.every((d) => d.pass);

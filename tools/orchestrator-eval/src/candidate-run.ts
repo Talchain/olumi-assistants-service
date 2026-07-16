@@ -13,7 +13,9 @@
  *     -> response produced by the live model (double-opted-in only) or by
  *        offline mock playback of a recorded fixture candidate
  *     -> user-facing `text` extracted from the v30.3 JSON envelope
- *     -> scored by scoreCandidate (the five floor-pack dimensions, unchanged)
+ *     -> scored by scoreCandidate (the floor-pack dimensions, including
+ *        substance) + the extraction contract (a flagged raw_unparsed turn is
+ *        a FAILED turn — see applyExtractionContract)
  *     -> candidates RANKED on identical scenarios.
  *
  * SCOPE (deliberate, documented): the turn context here is the ASSEMBLED
@@ -35,7 +37,7 @@ import { assembleAnalysis } from './assemble.js';
 import { scoreCandidate } from './scorer.js';
 import { enforceTurnCap, resolveLiveGate, type LiveGateInput, type LiveGateResult } from './live-gate.js';
 import { resolvePmsPromptText, type CandidatePromptSpec } from './prompt-source.js';
-import type { OrchestratorEvalFixture, ScoreResult } from './types.js';
+import type { DimensionResult, OrchestratorEvalFixture, ScoreResult } from './types.js';
 
 /** The v30.3 JSON-forcing suffix (mirrors tools/graph-evaluator adapters/orchestrator.ts). */
 const JSON_FORCING_SUFFIX = '\n\nRespond with valid JSON only.';
@@ -73,6 +75,8 @@ export interface CandidateReport {
   readonly kind: CandidatePromptSpec['kind'];
   readonly results: readonly CandidateFixtureResult[];
   readonly passCount: number;
+  /** Turns whose raw output did not parse as the v30.3 envelope (raw_unparsed). */
+  readonly flaggedTurnCount: number;
   readonly failedDimensionCount: number;
 }
 
@@ -83,7 +87,13 @@ export interface CandidateEvalReport {
   readonly model: string | null;
   readonly turnsUsed: number;
   readonly candidates: readonly CandidateReport[];
-  /** Labels best-first: passCount desc, failedDimensionCount asc, label asc. */
+  /**
+   * Labels best-first: passCount desc, flaggedTurnCount asc,
+   * failedDimensionCount asc, label asc. flaggedTurnCount sorts BEFORE
+   * failedDimensionCount so a candidate flagged raw_unparsed can never break
+   * a tie past an unflagged one — the direction invariant: a flagged turn
+   * never ranks above an unflagged honest one.
+   */
   readonly ranking: readonly string[];
 }
 
@@ -115,7 +125,9 @@ export function buildCandidateRequest(
  * Extract the user-facing prose from a raw model output per the v30.3 JSON
  * contract (object with `text` / `insights` / `recommended_actions`; fences
  * tolerated). Falls back to scoring the RAW output — flagged, never silent —
- * when the envelope does not parse.
+ * when the envelope does not parse. The flag is SCORED downstream
+ * (applyExtractionContract): a raw_unparsed turn fails the
+ * extraction_contract dimension and its substance is counted as empty.
  */
 export function extractAssistantText(raw: string): { text: string; extraction: ExtractionMode } {
   let cleaned = raw.trim();
@@ -143,6 +155,48 @@ export function extractAssistantText(raw: string): { text: string; extraction: E
 /** Wrap a recorded candidate in the v30.3 envelope for mock playback. */
 function mockEnvelope(text: string): string {
   return JSON.stringify({ text, insights: [], recommended_actions: [] });
+}
+
+/**
+ * Score the extraction FLAG itself — a flagged turn is a FAILED turn, never
+ * merely an annotated one.
+ *
+ * Why a scored dimension rather than a hard non-zero CLI exit on any flagged
+ * turn (both satisfy the direction invariant): a hard exit throws away the
+ * rest of the run's ranking signal the moment one arm misbehaves — live turns
+ * already paid for — and a red that fires on every exploratory run trains
+ * operators to ignore it (the broken-alarm class). A scored dimension keeps
+ * the report complete AND makes the flag count against the candidate where
+ * the ranking actually looks: the turn can never PASS, and `flaggedTurnCount`
+ * is a ranking key ahead of failedDimensionCount, so a flagged arm can never
+ * tie past an unflagged one. The invariant — a flagged turn never ranks above
+ * an unflagged honest one — is structural, not advisory.
+ *
+ * Fail-closed substance: when the envelope did not parse there is no
+ * extracted user-facing text, so the turn counts as EMPTY —
+ * `substance_present` is forced to FAIL rather than letting raw non-JSON
+ * prose stand in for extractable substance.
+ */
+export function applyExtractionContract(score: ScoreResult, extraction: ExtractionMode): ScoreResult {
+  const extracted = extraction === 'json_text';
+  const dimensions: DimensionResult[] = score.dimensions.map((d) =>
+    !extracted && d.name === 'substance_present'
+      ? {
+          ...d,
+          pass: false,
+          detail: 'fail-closed: envelope did not parse, so no user-facing text was extractable — counts as empty',
+        }
+      : d,
+  );
+  dimensions.push({
+    name: 'extraction_contract',
+    pass: extracted,
+    source: 'eval-assertion',
+    detail: extracted
+      ? 'v30.3 envelope parsed; `text` field scored'
+      : 'raw output did not parse as the v30.3 envelope — a flagged turn is a failed turn',
+  });
+  return { ...score, dimensions, pass: dimensions.every((d) => d.pass) };
 }
 
 /** Produce the raw response for one (candidate, fixture) pair. */
@@ -265,26 +319,42 @@ export async function runCandidateEval(options: RunCandidateEvalOptions): Promis
         continue;
       }
       const { text, extraction } = extractAssistantText(raw.text);
-      const score = scoreCandidate(fixture.analysis, {
-        label: spec.label,
-        note: `SEAM-1 ${spec.kind} candidate (${spec.ref})`,
-        source: spec.kind === 'mock' ? 'recorded' : 'live',
-        text,
-      });
+      const score = applyExtractionContract(
+        scoreCandidate(fixture.analysis, {
+          label: spec.label,
+          note: `SEAM-1 ${spec.kind} candidate (${spec.ref})`,
+          source: spec.kind === 'mock' ? 'recorded' : 'live',
+          text,
+        }),
+        extraction,
+      );
       results.push({ fixtureId: fixture.id, extraction, score, pass: score.pass, error: null });
     }
     const passCount = results.filter((r) => r.pass).length;
+    const flaggedTurnCount = results.filter((r) => r.extraction === 'raw_unparsed').length;
     const failedDimensionCount = results.reduce(
       (n, r) => n + (r.score ? r.score.dimensions.filter((d) => !d.pass).length : 0),
       0,
     );
-    candidates.push({ label: spec.label, ref: spec.ref, kind: spec.kind, results, passCount, failedDimensionCount });
+    candidates.push({
+      label: spec.label,
+      ref: spec.ref,
+      kind: spec.kind,
+      results,
+      passCount,
+      flaggedTurnCount,
+      failedDimensionCount,
+    });
   }
 
+  // Ranking keys, in order (see CandidateEvalReport.ranking for the why):
+  // flaggedTurnCount sits ahead of failedDimensionCount so a flagged arm can
+  // never break a tie past an unflagged one.
   const ranking = [...candidates]
     .sort(
       (a, b) =>
         b.passCount - a.passCount ||
+        a.flaggedTurnCount - b.flaggedTurnCount ||
         a.failedDimensionCount - b.failedDimensionCount ||
         a.label.localeCompare(b.label),
     )

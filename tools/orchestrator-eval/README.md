@@ -16,7 +16,7 @@ For each fixture it:
    `target_fit` as two distinct percent vocabularies. The eval uses the runtime
    formatter itself, not a re-specified copy, so it cannot drift from what the
    prompt is actually grounded on.
-2. **Scores each candidate response deterministically** on five dimensions:
+2. **Scores each candidate response deterministically** on six dimensions:
    - `no_forbidden_terms` — the runtime's `findForbiddenMatches` (forbidden
      user-facing phrases + raw-id / graph-hash / dev-phrase leaks).
    - `no_mutation_language` — the runtime's `containsMutationLanguage` (prose
@@ -35,6 +35,11 @@ For each fixture it:
    - `no_false_success_claim` (**D6**) — the runtime's `findSuccessClaimHit`
      (the mutation-receipt honesty class: "done / updated / applied" claimed
      before any confirmation exists).
+   - `substance_present` — non-empty, non-whitespace prose. The five checks
+     above are all ABSENCE checks, which an EMPTY answer passes vacuously —
+     without this floor, ranking (SEAM-1) literally rewards emptiness, and
+     empty `answer_text` is the live prompt-defect class measured pre-v42.2g
+     (0/6 populated). An empty answer is a failed turn, not a clean one.
 3. **Checks each verdict against the fixture's `expected` map** and exits
    non-zero on any disagreement.
 
@@ -153,8 +158,8 @@ wires it into `scorer.ts`.
 `pnpm eval:orchestrator` scores RECORDED fixture responses; it structurally
 cannot evaluate a prompt candidate. **SEAM-1 closes that gap**: a candidate
 PROMPT produces responses at run time and the produced text is scored by the
-SAME five deterministic dimensions, so two candidates become RANKABLE on
-identical scenarios.
+SAME deterministic dimensions (plus the extraction contract, below), so two
+candidates become RANKABLE on identical scenarios.
 
 ```bash
 pnpm eval:orchestrator:candidates -- --prompt <label>=<ref> [--prompt <label>=<ref> ...] \
@@ -186,7 +191,10 @@ pnpm eval:orchestrator:candidates -- \
 ```
 
 The report prints per-fixture PASS/FAIL with the failing dimension and detail
-for each arm, then a ranking (pass-count desc, then fewest failed dimensions).
+for each arm, then a ranking (pass-count desc, then fewest flagged
+`raw_unparsed` turns, then fewest failed dimensions). The flagged-turn key
+sits ahead of failed-dimensions so a flagged arm can never break a tie past
+an unflagged one — a flagged turn never ranks above an unflagged honest one.
 `--model` has **no default on purpose**: the eval must run the model the
 orchestrator actually serves — check `CEE_MODEL_ORCHESTRATOR` on the target
 environment. A tie is reported as a tie, not silently broken.
@@ -251,7 +259,15 @@ the **assembled** analysis (production `formatAnalysisForContext` output — the
 same projection stage the floor pack grounds on), `user` = the fixture's user
 message + the v30.3 JSON-forcing suffix. The user-facing prose is extracted
 from the `text` field of the JSON envelope; when the envelope does not parse,
-the RAW output is scored and flagged `raw_unparsed` — visible, never silent.
+the RAW output is scored and flagged `raw_unparsed` — visible, never silent,
+and **scored**: a flagged turn fails the `extraction_contract` dimension (it
+can never PASS), and its `substance_present` is forced to FAIL — fail-closed:
+unextractable output counts as EMPTY, never as absent-from-scoring. A scored
+dimension was chosen over a hard non-zero exit on any flagged turn because a
+hard exit discards the whole run's ranking signal (live turns already paid
+for) the moment one arm misbehaves, and an always-red exit trains operators
+to ignore it; the scored dimension + the flagged-turn ranking key make the
+same invariant structural where the ranking actually looks.
 Eligible-actions shaping and the full context-pack → system-prompt compose
 stay deferred (below), so rankings are comparable BETWEEN candidates run the
 same way, not absolute predictions of staging behaviour.
@@ -283,7 +299,7 @@ tools/orchestrator-eval/
 │   ├── guards.ts                # re-exports of PRODUCTION guards (never re-specified)
 │   ├── goal-fit-conflation.ts   # the worked win%-vs-target-fit assertion (D3)
 │   ├── held-science.ts          # the worked held-science eval-assertion (D5)
-│   ├── scorer.ts                # deterministic scorer wrapper (5 dimensions)
+│   ├── scorer.ts                # deterministic scorer wrapper (6 dimensions)
 │   ├── run.ts                   # the chassis: load → assemble → score → agree
 │   ├── judge-seam.ts            # seam docs: SEAM-1 wired ↓, SEAM-2 (paid judge) still open
 │   ├── live-gate.ts             # SEAM-1: fail-closed double opt-in + hard turn cap
