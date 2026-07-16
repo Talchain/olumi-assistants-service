@@ -2400,7 +2400,44 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       (!isContinuationScenario || draftOfferMarker !== null) &&
       ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
       DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
-    if (isDraftGraphShape || explicitGenerateDraft) {
+    // ── Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
+    // CEE_CLARIFY_V2_ENABLED (default off; flag-off skips the import
+    // entirely, same containment as V6 dual-draft). Two deterministic
+    // claims, zero LLM calls: (1) draft preflight — a thin brief gets up to
+    // 3 tap-able clarifying questions instead of the draft; (2) resume — a
+    // live clarify_v2_round pending claims the user's answer and either
+    // asks a follow-up or proceeds to the ordinary draft dispatch below
+    // with the answer-augmented briefOverride. Fail-open: any internal
+    // failure returns null and this turn routes exactly as with the flag
+    // off. See handlers/clarify-v2-dispatch.ts.
+    let clarifyV2DraftBrief: string | null = null;
+    if (config.cee.clarifyV2Enabled && extensions.graphState == null) {
+      const { tryClarifyV2Turn } = await import(
+        '../orchestrator-v5/handlers/clarify-v2-dispatch.js'
+      );
+      const cv2 = await tryClarifyV2Turn({
+        payload: ingress,
+        requestId,
+        draftShaped: isDraftGraphShape,
+        explicitGenerateBrief:
+          explicitGenerateDraft && explicitGenerateBrief !== null
+            ? explicitGenerateBrief.brief
+            : null,
+      });
+      if (cv2 !== null && cv2.kind === 'respond') {
+        return sendFinalised200(reply, requestId, 'clarify_v2', cv2.response, {
+          graph: null,
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        });
+      }
+      if (cv2 !== null && cv2.kind === 'draft') {
+        clarifyV2DraftBrief = cv2.briefOverride;
+      }
+    }
+    if (isDraftGraphShape || explicitGenerateDraft || clarifyV2DraftBrief !== null) {
       // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
       // pipeline. V5 has no deterministic draft_graph handler yet. See
       // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.
@@ -2414,10 +2451,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // message. The committed turn's user_message stays verbatim
           // (`payload.message`) — the override redirects only the brief
           // consumers inside the dispatcher. Absent on the heuristic path:
-          // behaviour there is bit-identical to before.
-          ...(explicitGenerateDraft && explicitGenerateBrief !== null
-            ? { briefOverride: explicitGenerateBrief.brief }
-            : {}),
+          // behaviour there is bit-identical to before. Clarify v2's
+          // answer-augmented brief (flag-gated resume) takes precedence —
+          // when set, it already incorporates the explicit-generate brief.
+          ...(clarifyV2DraftBrief !== null
+            ? { briefOverride: clarifyV2DraftBrief }
+            : explicitGenerateDraft && explicitGenerateBrief !== null
+              ? { briefOverride: explicitGenerateBrief.brief }
+              : {}),
           // ROADMAP 2.63 C3/C4 — a draft retires any outstanding draft
           // offer: the honoured pending on a consent resume, or the stale
           // marker when a shaped brief drafted alongside one. Without this
