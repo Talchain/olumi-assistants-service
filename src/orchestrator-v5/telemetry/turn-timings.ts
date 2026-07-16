@@ -113,8 +113,43 @@ export interface V5TurnTimings {
   handler_id?: string | null;
   /** Wall clock for the handler EXECUTE step. */
   handler_execute_ms?: number;
-  /** Wall clock for the COMPOSE step (response composition). */
+  /**
+   * Wall clock for the COMPOSE step (response composition).
+   *
+   * DE-ABSORPTION (decision-review-latency-attribution lane): when a turn
+   * awaits the decision_review enrichment LLM call (only under
+   * `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true`), that call fires INSIDE the
+   * compose bracket (`composeStartedAt` is anchored at handler return, the
+   * enricher await is after it, the commit anchor is after that). Left alone,
+   * ~14 s of a synchronous LLM call would be mislabelled here as "response
+   * composition". The executor therefore subtracts `decision_review_ms` from
+   * this figure so `compose_ms` measures only real composition work; the
+   * subtracted latency is surfaced separately in `decision_review_ms` and as a
+   * dedicated `decision_review` entry in `_diagnostic_trace.llm_calls`.
+   */
   compose_ms?: number;
+  /**
+   * Wall clock for the awaited decision_review enrichment LLM call
+   * (`enrichRunAnalysisWithDecisionReview`). Populated only when the turn
+   * actually awaited a decision_review that RETURNED a result — i.e. under
+   * `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true` on a run_analysis turn whose
+   * enricher reached and completed the LLM call. Absent on the production
+   * default (flag off → enricher short-circuited), on chip-click / non-analysis
+   * turns, and on enricher skip/abort paths that never made the call (so a
+   * phantom LLM call is never attributed to a call that did not happen).
+   */
+  decision_review_ms?: number;
+  /**
+   * Model id / provider / token usage of the awaited decision_review call,
+   * threaded back from the enricher's `DecisionReviewInvokeResult`. Co-set with
+   * `decision_review_ms` (all four present together or all absent). Real values
+   * only — omitted honestly when the call did not return, never zero/placeholder
+   * -filled.
+   */
+  decision_review_model?: string;
+  decision_review_provider?: string;
+  decision_review_input_tokens?: number;
+  decision_review_output_tokens?: number;
   /** Wall clock for the COMMIT step (append_turn_atomic, awaited). */
   commit_ms?: number;
   /** Number of LLM calls attributed to this turn (echoes telemetry.llm_calls_used). */

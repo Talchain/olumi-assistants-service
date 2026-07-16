@@ -574,6 +574,13 @@ export async function runTurnExecutor(
   // turn never reaches the handler-return path (recovery / chip-click /
   // routing-error / short-confirm).
   let composeStartedAt = 0;
+  // Wall clock spent in the awaited decision_review enrichment call. Captured
+  // (only when timings are on) so it can be (a) surfaced as its own
+  // `_diagnostic_trace.llm_calls` entry and (b) subtracted out of `compose_ms`,
+  // which otherwise mislabels this synchronous LLM call as response
+  // composition. 0 when the turn never awaited a decision_review (production
+  // default, chip-click, non-analysis turns).
+  let decisionReviewMs = 0;
 
   let buildContextStartedAt = 0;
   if (timingsEnabled) buildContextStartedAt = Date.now();
@@ -6355,6 +6362,21 @@ export async function runTurnExecutor(
                 'This channel is deprecated and will be removed in Phase 2.',
             );
           }
+          // Latency attribution (decision-review-latency-attribution lane).
+          // The enricher is the dominant analysis-turn LLM cost (~14 s on
+          // staging) and fires INSIDE the compose bracket. Time the await on
+          // the caller's own wall-clock (more honest than the LLM's
+          // self-reported latency — it includes adapter/parse/attach overhead)
+          // and thread the call's model/tokens back via `callTelemetrySink`.
+          // Both are gated on `timingsEnabled`, so production (flag off) passes
+          // no sink and evaluates one Date.now()→0 ternary: byte-identical.
+          const decisionReviewStartedAt = timingsEnabled ? Date.now() : 0;
+          const callTelemetrySink: {
+            model?: string;
+            provider?: string;
+            input_tokens?: number;
+            output_tokens?: number;
+          } = {};
           try {
             handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
               handlerFacts: handlerOutcome.handler_facts,
@@ -6362,6 +6384,7 @@ export async function runTurnExecutor(
               scenarioId: context.session_id,
               signal: turnAbort.signal,
               brief: resolvedBrief,
+              ...(timingsEnabled ? { callTelemetrySink } : {}),
             });
           } catch (err) {
             // D-T orphaned-commit guard (Codex finding 3). The enricher
@@ -6391,6 +6414,25 @@ export async function runTurnExecutor(
             handlerFactsForCommit = patchRunAnalysisDecisionReviewNull(
               handlerOutcome.handler_facts,
             );
+          } finally {
+            if (timingsEnabled && decisionReviewStartedAt > 0) {
+              // Always capture the await's wall-clock so compose_ms can
+              // de-absorb it below (even a fast enricher skip legitimately
+              // spent this time inside the compose bracket).
+              decisionReviewMs = Date.now() - decisionReviewStartedAt;
+              // Surface the call as its own attributable LLM record ONLY when
+              // it actually RETURNED (sink populated). A skip / abort path
+              // (no LLM call, or a throw before return) leaves the sink empty,
+              // so we never fabricate a `decision_review` llm_calls entry — nor
+              // zero-fill its tokens — for a call that did not happen.
+              if (callTelemetrySink.model !== undefined) {
+                turnTimings.decision_review_ms = decisionReviewMs;
+                turnTimings.decision_review_model = callTelemetrySink.model;
+                turnTimings.decision_review_provider = callTelemetrySink.provider;
+                turnTimings.decision_review_input_tokens = callTelemetrySink.input_tokens;
+                turnTimings.decision_review_output_tokens = callTelemetrySink.output_tokens;
+              }
+            }
           }
           // D-T orphaned-commit guard (Codex finding 3) — race sibling of the
           // catch above. The enricher can also RETURN NORMALLY (no throw) just
@@ -7442,8 +7484,18 @@ export async function runTurnExecutor(
         // egress-prep. Captured only on the main happy path; absent on
         // recovery/short-confirm/chip-click paths where the handler-return
         // anchor was never set.
+        //
+        // De-absorb the awaited decision_review enrichment call: it fires
+        // inside [composeStartedAt, commitStartedAt] but is a synchronous LLM
+        // call, not composition. Subtracting `decisionReviewMs` (0 unless a
+        // decision_review was awaited this turn) keeps compose_ms honest — the
+        // latency is surfaced separately via `decision_review_ms` and a
+        // dedicated llm_calls entry. Math.max guards against clock skew.
         if (composeStartedAt > 0) {
-          turnTimings.compose_ms = commitStartedAt - composeStartedAt;
+          turnTimings.compose_ms = Math.max(
+            0,
+            commitStartedAt - composeStartedAt - decisionReviewMs,
+          );
         }
       }
       // V5 P0 proposal-memory continuation — emit-time capture.

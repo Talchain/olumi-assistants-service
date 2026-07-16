@@ -452,9 +452,9 @@ function populateCollectorFromTurnTimings(
   // model, input/output tokens, cache split, and served-prompt identity.
   // `model` falls back to 'unknown' ONLY when the routing layer genuinely did
   // not expose it (test injectors / recovery) — an honest sentinel, not a
-  // fabricated id. This is the routing/orient LLM call; additional per-turn
-  // calls (e.g. an awaited decision_review) carry their own telemetry events
-  // and are not reconstructed here without real timing data.
+  // fabricated id. This is the routing/orient LLM call; the awaited
+  // decision_review call (when it fired) is added as a SECOND entry below from
+  // its own threaded model/token attribution.
   if (turnTimings.routing_llm_ms != null || turnTimings.total_input_tokens != null) {
     collector.recordLLMCall({
       role: 'routing',
@@ -479,6 +479,32 @@ function populateCollectorFromTurnTimings(
         is_staging: config.server.nodeEnv !== 'production',
       });
     }
+  }
+
+  // Second llm_calls entry: the awaited decision_review enrichment call — the
+  // dominant analysis-turn LLM cost (~14 s on staging). Present only when the
+  // turn actually awaited a decision_review that RETURNED
+  // (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true), which is exactly when the
+  // executor co-sets `decision_review_ms` with the threaded model/provider/token
+  // usage — so every field below is REAL data, never fabricated for a call that
+  // did not happen. `latency_ms` is the executor's wall-clock for the await
+  // (includes adapter/parse/attach), not the LLM's self-reported figure. The
+  // `?? ` fallbacks are type-narrowing only: the four fields are co-set, so they
+  // are never actually reached when the entry is emitted.
+  if (turnTimings.decision_review_ms != null) {
+    collector.recordLLMCall({
+      role: 'decision_review',
+      provider: turnTimings.decision_review_provider ?? 'unknown',
+      model: turnTimings.decision_review_model ?? 'unknown',
+      input_tokens: turnTimings.decision_review_input_tokens ?? 0,
+      output_tokens: turnTimings.decision_review_output_tokens ?? 0,
+      cache_read_tokens: null,
+      cache_creation_tokens: null,
+      latency_ms: turnTimings.decision_review_ms,
+      stop_reason: null,
+      thinking_enabled: false,
+      error: null,
+    });
   }
 }
 

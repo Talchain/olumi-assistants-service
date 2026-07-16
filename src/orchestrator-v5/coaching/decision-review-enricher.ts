@@ -79,6 +79,29 @@ export interface EnrichDecisionReviewInput {
    * minimise churn — only the upstream source has changed.
    */
   readonly brief: string | null;
+  /**
+   * Optional write-back sink for the decision_review LLM call's attribution
+   * (model / provider / token usage). Populated as a side effect ONLY on the
+   * path where the underlying `invokeDecisionReview` /
+   * `invokeDecomposedDecisionReview` call RETURNS a result (tokens were spent);
+   * every skip/abort path leaves it untouched so the caller can distinguish
+   * "a real LLM call happened" from "no call / no data".
+   *
+   * Why an out-param and not the return type: the executor needs this
+   * attribution to surface a `decision_review` entry in
+   * `_diagnostic_trace.llm_calls`, but widening the return type
+   * (`readonly HandlerFact[]`) would ripple through 7 early-return paths, the
+   * second production caller (chip-click-dispatch), and 8 test suites. An
+   * additive OPTIONAL input field keeps every non-passing caller byte-identical
+   * and threads REAL usage (no zero-fill). Latency is measured by the caller's
+   * own wall-clock, not read from here.
+   */
+  readonly callTelemetrySink?: {
+    model?: string;
+    provider?: string;
+    input_tokens?: number;
+    output_tokens?: number;
+  };
 }
 
 type SkipReason =
@@ -207,6 +230,18 @@ export async function enrichRunAnalysisWithDecisionReview(
     // (rather than only on output !== null) keeps the attribution honest
     // even when shape extraction failed downstream: the tokens were spent.
     recordModelResolution(input.requestId, input.scenarioId, result.resolution);
+    // Thread the call's REAL attribution back to the caller (decision-review-
+    // latency-attribution lane). Done here — right after the call returned,
+    // BEFORE the output===null branch — because the tokens were spent whether
+    // or not shape extraction succeeded (same rationale as the unconditional
+    // recordModelResolution above). Only touched when a sink was provided
+    // (timings on); production default is untouched.
+    if (input.callTelemetrySink) {
+      input.callTelemetrySink.model = result.model;
+      input.callTelemetrySink.provider = result.provider;
+      input.callTelemetrySink.input_tokens = result.input_tokens;
+      input.callTelemetrySink.output_tokens = result.output_tokens;
+    }
     if (result.output === null) {
       emit(TelemetryEvents.V5DecisionReviewFailed, {
         request_id: input.requestId,
