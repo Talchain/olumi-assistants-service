@@ -40,6 +40,12 @@ import {
   type ConfigureOptionChip,
 } from '../configure-option-chip-text.js';
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
+// P1-3 (derive, don't mirror): the REAL egress defence functions — the same
+// module the registry-side allowlist applies after its structural match.
+// The builder validates its COMPOSED suffix against these at build time;
+// local regex mirrors are exactly the drift class that silently swallowed
+// the disclosure for ID-shaped labels ("Plan E_2").
+import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
 
 /**
  * One scaffolded option, as reported by the run_analysis scaffold mechanism
@@ -67,30 +73,47 @@ export interface ScaffoldedOptionRecord {
  */
 export const SCAFFOLD_LABEL_MAX_CHARS = 40;
 
-/** Raw decimals are rejected by the run_analysis egress defence-in-depth. */
-const DECIMAL_REGEX = /\d+\.\d+/;
-/** Mirror of the egress forbidden-vocabulary defence (headline scope). */
-const FORBIDDEN_VOCAB_REGEX =
-  /\b(?:recommend(?:s|ed|ation|ations)?|winners?|best|optimal|preferred)\b/i;
-
 /**
  * Return a label safe to interpolate into the disclosure suffix / chip, or
- * null to force the generic form. A label that would trip ANY of the
- * registry egress defences (raw decimal, internal-id shape, forbidden
- * vocabulary) or break the suffix grammar (quote, newline, over-length)
- * must be rejected here — otherwise the WHOLE disclosure-bearing summary
- * would be replaced by the bland locked-template fallback and the
- * disclosure silently lost.
+ * null to force the generic form.
+ *
+ * P1-3 mechanism — validate the COMPOSED suffix, not label properties: the
+ * candidate label is interpolated into the real labelled suffix, and that
+ * suffix must (a) match the exact egress grammar this module publishes
+ * (which structurally enforces the quote / newline / length slot rules)
+ * and (b) pass the REAL shared content defences
+ * (`passesAssistantTextContentDefences` — the same function the registry
+ * egress applies to the whole wire text: forbidden vocabulary, internal-ID
+ * tokens, raw decimals). No local mirrors remain: a defence added to the
+ * shared module bites here automatically, so a label that would get the
+ * WHOLE disclosure-bearing summary silently replaced by the locked
+ * template is rejected at build time instead.
  */
 export function safeScaffoldOptionLabel(label: string | null | undefined): string | null {
   if (typeof label !== 'string') return null;
   const clean = sanitiseLabel(label, '');
   if (clean === null) return null;
-  if (clean.length > SCAFFOLD_LABEL_MAX_CHARS) return null;
-  if (clean.includes("'") || clean.includes('\n') || clean.includes('\r')) return null;
-  if (DECIMAL_REGEX.test(clean)) return null;
-  if (FORBIDDEN_VOCAB_REGEX.test(clean)) return null;
-  return clean;
+  return composedSuffixSurvivesEgress(labelledSuffix(clean)) ? clean : null;
+}
+
+/**
+ * True when a composed disclosure suffix would SURVIVE the registry-side
+ * egress: single-line, matches this module's published grammar exactly, and
+ * passes the shared content defences. The generic and plural forms are
+ * probed always-surviving by the scaffold-disclosure test suite.
+ */
+function composedSuffixSurvivesEgress(suffix: string): boolean {
+  if (suffix.includes('\n') || suffix.includes('\r')) return false;
+  if (!SCAFFOLD_SUFFIX_EXACT_REGEX().test(suffix)) return false;
+  return passesAssistantTextContentDefences(suffix);
+}
+
+// Lazily-compiled anchored grammar (the RE source constant is declared at
+// the bottom of this module, next to the budget it documents).
+let scaffoldSuffixExactRegex: RegExp | null = null;
+function SCAFFOLD_SUFFIX_EXACT_REGEX(): RegExp {
+  scaffoldSuffixExactRegex ??= new RegExp(`^(?:${SCAFFOLD_DISCLOSURE_RE_SRC})$`);
+  return scaffoldSuffixExactRegex;
 }
 
 function labelledSuffix(label: string): string {

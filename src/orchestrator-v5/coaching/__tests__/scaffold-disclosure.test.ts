@@ -19,6 +19,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildScaffoldDisclosureSuffix,
+  buildScaffoldConfigureChip,
   safeScaffoldOptionLabel,
   SCAFFOLD_DISCLOSURE_MAX_CHARS,
   type ScaffoldedOptionRecord,
@@ -146,5 +147,55 @@ describe('egress allowlist × scaffold disclosure', () => {
     expect(
       isAllowedRunAnalysisAssistantText(`${template}${LABELLED} Extra improvised sentence.`),
     ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-3 — the builder validates the COMPOSED suffix against the REAL egress
+// defence functions at build time (derive, don't mirror). The pre-fix builder
+// mirrored the decimal + vocabulary defences locally but NOT the internal-ID
+// token defence (ASSISTANT_TEXT_ID_REGEX applies to the WHOLE text) — so a
+// label like "Plan E_2" passed the builder, and the egress allowlist then
+// silently REPLACED the entire disclosure-bearing summary with the bland
+// locked template: the user saw scaffolded numbers with NO disclosure.
+// ---------------------------------------------------------------------------
+
+describe('P1-3 — composed suffix validated against the real egress defences', () => {
+  // Each probe label smuggles a token the ID defence rejects ("E_2", "N_1",
+  // "E_visa") while passing every mirror the pre-fix builder had.
+  const PROBE_LABELS = ['Plan E_2', 'Option N_1 pilot', 'Fast-track E_visa'];
+  const TEMPLATE = 'Ran analysis on your current scenario.';
+  const HEADLINE =
+    'Option A currently leads by 24 percentage points because Price is the strongest driver.';
+
+  it('every probe label yields a SURVIVING disclosure (specific or generic) on both the template and headline egress shapes', () => {
+    for (const label of PROBE_LABELS) {
+      const suffix = buildScaffoldDisclosureSuffix([record('opt_1', label)]);
+      expect(suffix.length).toBeGreaterThan(0);
+      expect(suffix).toContain('Placeholder values');
+      // The whole disclosure-bearing text must survive the REAL egress
+      // predicate — the same function the validation-registry forwarder
+      // gates the wire with. A false here means the forwarder replaces the
+      // text with the locked template and the disclosure is silently lost.
+      expect(isAllowedRunAnalysisAssistantText(`${TEMPLATE}${suffix}`)).toBe(true);
+      expect(isAllowedRunAnalysisAssistantText(`${HEADLINE}${suffix}`)).toBe(true);
+    }
+  });
+
+  it('an egress-unsafe label also gets the GENERIC configure chip (chip and disclosure stay coherent)', () => {
+    for (const label of PROBE_LABELS) {
+      expect(buildScaffoldConfigureChip([record('opt_1', label)])).toEqual(
+        CONFIGURE_OPTION_GENERIC_CHIP,
+      );
+    }
+  });
+
+  it('positive control: a safe label still yields the SPECIFIC disclosure and chip', () => {
+    const suffix = buildScaffoldDisclosureSuffix([record('opt_1', 'Acquisition')]);
+    expect(suffix).toContain("'Acquisition'");
+    expect(isAllowedRunAnalysisAssistantText(`${TEMPLATE}${suffix}`)).toBe(true);
+    expect(buildScaffoldConfigureChip([record('opt_1', 'Acquisition')]).label).toBe(
+      'Configure Acquisition',
+    );
   });
 });

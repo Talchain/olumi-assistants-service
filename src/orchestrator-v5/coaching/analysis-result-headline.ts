@@ -62,6 +62,12 @@ import {
   SCAFFOLD_DISCLOSURE_RE_SRC,
   SCAFFOLD_DISCLOSURE_MAX_CHARS,
 } from './scaffold-disclosure.js';
+// P1-3 (derive, don't mirror): the defence-in-depth content rules live in
+// their own leaf module so the scaffold-disclosure BUILDER validates its
+// composed suffix against the SAME functions this egress allowlist applies
+// — a builder-side mirror is exactly the drift class that silently
+// swallowed the disclosure for ID-shaped labels ("Plan E_2").
+import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
 
 export const MAX_HEADLINE_CHARS = 220;
 
@@ -1297,30 +1303,9 @@ export const RUN_ANALYSIS_LOCKED_TEMPLATES: ReadonlySet<string> = new Set([
   'Ran analysis on your current scenario. Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.',
 ]);
 
-/**
- * Forbidden vocabulary in any run_analysis assistant_text. Case-
- * insensitive substring / word-boundary checks; mirrors the spirit of
- * the broader forbidden-user-facing-phrases list but narrowed to the
- * headline-relevant prescriptive terms.
- */
-const FORBIDDEN_HEADLINE_VOCABULARY_REGEX =
-  /\b(?:recommend(?:s|ed|ation|ations)?|winners?|best|optimal|preferred)\b/i;
-
-/**
- * Slug-shape ID prefixes. Mirrors the runtime ID-prefix detector used
- * by {@link sanitiseLabel}, but applied to the whole assistant_text
- * — a regressed handler that interpolates `opt_a` into its prose
- * would be caught here even when the headline builder's label
- * sanitiser was bypassed.
- */
-const ASSISTANT_TEXT_ID_REGEX = /\b(?:opt|goal|fac|node|edge|n|e)_[a-z0-9_]+/i;
-
-/**
- * Raw decimals: `\d+\.\d+`. The headline only emits integer
- * percentages ("62%"); any decimal in the text suggests improvised
- * prose.
- */
-const RAW_DECIMAL_REGEX = /\d+\.\d+/;
+// The forbidden-vocabulary / internal-ID / raw-decimal content rules now
+// live in ./assistant-text-defences.ts (P1-3: single home, shared with the
+// scaffold-disclosure builder — derive, don't mirror).
 
 /**
  * Headline grammar regex set — mirrors the exact Case A/B/C/D/E shapes
@@ -1501,14 +1486,5 @@ export function isAllowedRunAnalysisAssistantText(text: unknown): boolean {
   return passesAssistantTextContentDefences(text);
 }
 
-/**
- * Shared defence-in-depth content rules applied AFTER a structural match
- * (headline grammar or template+scaffold-disclosure): no forbidden
- * vocabulary, no internal-ID tokens, no raw decimals.
- */
-function passesAssistantTextContentDefences(text: string): boolean {
-  if (FORBIDDEN_HEADLINE_VOCABULARY_REGEX.test(text)) return false;
-  if (ASSISTANT_TEXT_ID_REGEX.test(text)) return false;
-  if (RAW_DECIMAL_REGEX.test(text)) return false;
-  return true;
-}
+// `passesAssistantTextContentDefences` is imported from
+// ./assistant-text-defences.ts (see the P1-3 note at the import site).
