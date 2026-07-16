@@ -24,7 +24,7 @@
 |---------|---------|-------------|----------------|-------|
 | `GROUNDING_ENABLED` / `CEE_GROUNDING_ENABLED` | `false` | feature-flags.ts, v1.status.ts | No | Deprecated alias: `GROUNDING_ENABLED` |
 | `CRITIQUE_ENABLED` | `true` | feature-flags.ts, v1.status.ts | No | |
-| `CLARIFIER_ENABLED` | `true` | feature-flags.ts, v1.status.ts | No | Deprecated: forwards to `CEE_CLARIFIER_ENABLED` |
+| `CLARIFIER_ENABLED` | `true` | feature-flags.ts, v1.status.ts | No | Gates the standalone `/assist/clarify-brief` route only (Stage-4 pipeline clarifier retired 2026-07-16) |
 | `PII_GUARD_ENABLED` | `false` | v1.status.ts | No | |
 | `SHARE_REVIEW_ENABLED` | `false` | assist.share.ts, v1.status.ts | Commented | |
 | `ENABLE_LEGACY_SSE` | `false` | assist.draft-graph.ts, auth.ts | No | Legacy SSE path |
@@ -63,7 +63,7 @@
 | `CEE_PREFLIGHT_ENABLED` | `false` | assist.v1.draft-graph.ts, assist.v1.draft-graph-stream.ts | Yes | |
 | `CEE_PREFLIGHT_STRICT` | `false` | assist.v1.draft-graph.ts, assist.v1.draft-graph-stream.ts | No | |
 | `CEE_CLARIFICATION_ENFORCED` | `false` | assist.v1.draft-graph.ts, assist.v1.draft-graph-stream.ts, unified-pipeline/stages/package.ts | Commented | |
-| `CEE_CLARIFIER_ENABLED` | `false` | validation/pipeline.ts, unified-pipeline/stages/repair/clarifier.ts | No | |
+| `CEE_CLARIFIER_ENABLED` | — | (removed) | No | INERT since 2026-07-16 — Stage-4 clarifier retired (ROADMAP 1.94 Option A); safe to delete from deployment dashboards |
 | `CEE_ORCHESTRATOR_VALIDATION_ENABLED` | `false` | unified-pipeline/stages/repair/orchestrator-validation.ts, assist.draft-graph.ts | No | |
 
 ## CEE Bias & Review
@@ -220,4 +220,3 @@ Flags that default to `true` but gate features that may not be stable:
 |-----------------|------------------|----------|
 | `CEE_GROUNDING_ENABLED` | `GROUNDING_ENABLED` | Falls back to deprecated if current not set |
 | `CEE_ORCHESTRATOR_ENABLED` | `ENABLE_ORCHESTRATOR` | Falls back to deprecated if current not set |
-| `CEE_CLARIFIER_ENABLED` | `CLARIFIER_ENABLED` | Falls back with runtime deprecation warning |

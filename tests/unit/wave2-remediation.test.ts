@@ -5,7 +5,6 @@ import {
   type ValidationWarning,
 } from "../../src/orchestrator/prompt-zones/validate.js";
 import type { AnalysisReadyFallbackMeta } from "../../src/cee/transforms/analysis-ready.js";
-import { ANSWER_INCORPORATION_SYSTEM_PROMPT } from "../../src/cee/clarifier/prompts.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -172,15 +171,7 @@ describe("Wave 2 — Task 8: Analysis-ready fallback meta type", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Task 6 (F10): Clarifier factor exclusion documentation
+// Task 6 (F10): Clarifier factor exclusion documentation — RETIRED 2026-07-16.
+// The answer-incorporation prompt was deleted with the Stage-4 clarifier
+// (ROADMAP 1.94 Option A); the F10 pin is moot with the code gone.
 // ---------------------------------------------------------------------------
-
-describe("Wave 2 — Task 6: Clarifier allowed node kinds exclude factor", () => {
-  it("clarifier system prompt specifies allowed kinds without factor", () => {
-    expect(ANSWER_INCORPORATION_SYSTEM_PROMPT).toContain("goal, decision, option, outcome, risk, action");
-    expect(ANSWER_INCORPORATION_SYSTEM_PROMPT).not.toMatch(/allowed node kinds:.*\bfactor\b/);
-    // Verify the documentation comment exists explaining why factor is excluded
-    expect(ANSWER_INCORPORATION_SYSTEM_PROMPT).toContain("factor");
-    expect(ANSWER_INCORPORATION_SYSTEM_PROMPT).toContain("intentionally excluded");
-  });
-});

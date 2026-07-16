@@ -125,8 +125,7 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   validate_graph: 'validate_graph',
   // V5 slice A1 — narrate-mode operation on /orchestrate/v2/turn.
   direct_answer_narrate: 'direct_answer_narrate',
-  // V5 slice A2 — clarification narrate + pre-narrate turn classifier.
-  clarify_narrate: 'clarify_narrate',
+  // V5 slice A2 — pre-narrate turn classifier.
   turn_classifier: 'turn_classifier',
   // V5 slices C2 + D1 + D2 (Phase 0 wiring). Operation keys match the V4
   // action_type literals verified in the phase-0 Supabase audit §6 mapping

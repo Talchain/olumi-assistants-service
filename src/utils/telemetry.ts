@@ -296,16 +296,8 @@ export const TelemetryEvents = {
   ClarifierRoundComplete: "assist.clarifier.round_complete",
   ClarifierRoundFailed: "assist.clarifier.round_failed",
 
-  // Multi-turn clarifier integration events (v1.15)
-  CeeClarifierSessionStart: "cee.clarifier.session_start",
-  CeeClarifierQuestionAsked: "cee.clarifier.question_asked",
-  CeeClarifierAnswerReceived: "cee.clarifier.answer_received",
-  CeeClarifierAnswerIncorporated: "cee.clarifier.answer_incorporated",
-  CeeClarifierConverged: "cee.clarifier.converged",
-  CeeClarifierQuestionCached: "cee.clarifier.question_cached",
-  CeeClarifierQuestionRetrieved: "cee.clarifier.question_retrieved",
-  CeeClarifierFailed: "cee.clarifier.failed",
-  CeeClarifierSkipped: "cee.clarifier.skipped",
+  // (Multi-turn Stage-4 clarifier events cee.clarifier.* removed 2026-07-16 —
+  // the stage was retired under ROADMAP 1.94 Option A.)
 
   // Critique events (v04)
   CritiqueStart: "assist.critique.start",

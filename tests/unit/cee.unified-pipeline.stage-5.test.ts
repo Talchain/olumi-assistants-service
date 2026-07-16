@@ -195,7 +195,6 @@ function makeCtx(overrides?: Partial<Record<string, any>>): any {
     checkpointsEnabled: false,
     validationSummary: undefined,
     structuralMeta: undefined,
-    clarifierResult: undefined,
     quality: undefined,
     archetype: undefined,
     draftWarnings: [],

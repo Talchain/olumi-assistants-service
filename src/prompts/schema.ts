@@ -42,10 +42,9 @@ export const CeeTaskIdSchema = z.enum([
   // V5 slice A1 — narrate-mode prompt for direct_answer turns on
   // /orchestrate/v2/turn. Additive; existing callers unaffected.
   'direct_answer_narrate',
-  // V5 slice A2 — clarification narrate-mode fragment + pre-narrate turn
-  // classifier. Additive; existing callers unaffected. Paul is sole author of
-  // both fragments (placeholder defaults in defaults.ts).
-  'clarify_narrate',
+  // V5 slice A2 — pre-narrate turn classifier. Paul is sole author
+  // (placeholder default in defaults.ts). (clarify_narrate was removed
+  // 2026-07-16 with the Stage-4 clarifier retirement — zero live callers.)
   'turn_classifier',
   // V5 slices C2 + D1 + D2 (Phase 0 wiring) — narrate-mode prompts for each
   // handler turn class. Additive; handlers themselves do not land until the

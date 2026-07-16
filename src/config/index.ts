@@ -776,13 +776,9 @@ const ConfigSchema = z.object({
     clarificationThresholdOneRound: z.coerce.number().min(0).max(1).default(0.4), // >= this = require 1 round, < this = require 2+ rounds
     // Pre-decision checklist and framing nudges (Phase 6)
     preDecisionChecksEnabled: booleanString.default(false), // If true, include pre-decision checks in draft response
-    // Multi-turn clarifier integration
-    clarifierEnabled: booleanString.default(false), // If true, enable clarifier integration in draft-graph
-    clarifierMaxRoundsDefault: z.coerce.number().int().min(0).max(10).default(5), // Default max clarifier rounds
-    clarifierQualityThreshold: z.coerce.number().min(0).max(10).default(8.0), // Quality score to stop asking
-    clarifierStabilityThreshold: z.coerce.number().int().min(0).default(2), // Max graph changes for stability
-    clarifierMinImprovementThreshold: z.coerce.number().min(0).max(10).default(0.5), // Min quality improvement per round
-    clarifierQuestionCacheTtlSeconds: z.coerce.number().int().min(0).default(3600), // Question cache TTL
+    // (Multi-turn Stage-4 clarifier settings removed 2026-07-16 — ROADMAP 1.94
+    // Option A retirement. CEE_CLARIFIER_ENABLED and CEE_CLARIFIER_* env vars
+    // are now inert; they can be deleted from deployment dashboards.)
     // Bias detection confidence thresholding (Phase 6)
     biasConfidenceThreshold: z.coerce.number().min(0).max(1).default(0.3), // Minimum confidence to report bias finding
     // Response caching (Phase 7)
@@ -805,7 +801,7 @@ const ConfigSchema = z.object({
     // flag-off renders exactly as today. Final user-facing wording is authored separately
     // before any live run / flag enablement.
     addRiskRejectionGuidanceEnabled: booleanString.default(false),
-    deterministicEnforcementEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ENFORCEMENT_ENABLED — budget rescale + bridge chain repair (Stage 4 substep 9b, after clarifier)
+    deterministicEnforcementEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ENFORCEMENT_ENABLED — budget rescale + bridge chain repair (Stage 4 substep 9b)
     editNormalisationEnabled: booleanString.default(true), // CEE_EDIT_NORMALISATION_ENABLED — normalise non-canonical LLM field names before Zod validation
     editInterventionRoutingEnabled: booleanString.default(true), // CEE_EDIT_INTERVENTION_ROUTING_ENABLED — read interventions from data.interventions + slash-keyed entries
     // Session cache (for /ask endpoint)
@@ -1282,10 +1278,10 @@ function parseConfig(): Config {
       // CEE_GROUNDING_ENABLED preferred; falls back to GROUNDING_ENABLED
       grounding: env.CEE_GROUNDING_ENABLED ?? env.GROUNDING_ENABLED,
       critique: env.CRITIQUE_ENABLED,
-      // NOTE: features.clarifier is the per-request override gate (used by feature-flags.ts
-      // and v1.status.ts). It is DISTINCT from cee.clarifierEnabled which gates the
-      // in-pipeline Stage 4 multi-turn clarifier. Both read CLARIFIER_ENABLED but serve
-      // different purposes. Prefer CEE_CLARIFIER_ENABLED for the pipeline gate.
+      // NOTE: features.clarifier gates the standalone POST /assist/clarify-brief
+      // route (feature-flags.ts, v1.status.ts). The in-pipeline Stage-4 clarifier
+      // it used to be distinct from was retired 2026-07-16 (ROADMAP 1.94 Option A);
+      // CLARIFIER_ENABLED now serves this route gate only.
       clarifier: env.CLARIFIER_ENABLED,
       piiGuard: env.PII_GUARD_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
@@ -1387,34 +1383,6 @@ function parseConfig(): Config {
       clarificationThresholdOneRound: env.CEE_CLARIFICATION_THRESHOLD_ONE_ROUND,
       // Pre-decision checklist and framing nudges
       preDecisionChecksEnabled: env.CEE_PRE_DECISION_CHECKS_ENABLED,
-      // Multi-turn clarifier integration
-      // DEPRECATION: CLARIFIER_ENABLED is the legacy name for CEE_CLARIFIER_ENABLED.
-      // If CEE_CLARIFIER_ENABLED is not set but CLARIFIER_ENABLED is, forward the value.
-      // Remove CLARIFIER_ENABLED support in the next major version.
-      clarifierEnabled: (() => {
-        if (env.CEE_CLARIFIER_ENABLED !== undefined) {
-          if (env.CLARIFIER_ENABLED !== undefined && env.CLARIFIER_ENABLED !== env.CEE_CLARIFIER_ENABLED) {
-            console.warn(
-              "[DEPRECATION] Both CLARIFIER_ENABLED and CEE_CLARIFIER_ENABLED are set with different values. " +
-              "CEE_CLARIFIER_ENABLED takes precedence. Remove CLARIFIER_ENABLED."
-            );
-          }
-          return env.CEE_CLARIFIER_ENABLED;
-        }
-        if (env.CLARIFIER_ENABLED !== undefined) {
-          console.warn(
-            "[DEPRECATION] CLARIFIER_ENABLED is deprecated. Use CEE_CLARIFIER_ENABLED instead. " +
-            "Value has been forwarded."
-          );
-          return env.CLARIFIER_ENABLED;
-        }
-        return undefined; // schema default (false) applies
-      })(),
-      clarifierMaxRoundsDefault: env.CEE_CLARIFIER_MAX_ROUNDS_DEFAULT,
-      clarifierQualityThreshold: env.CEE_CLARIFIER_QUALITY_THRESHOLD,
-      clarifierStabilityThreshold: env.CEE_CLARIFIER_STABILITY_THRESHOLD,
-      clarifierMinImprovementThreshold: env.CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD,
-      clarifierQuestionCacheTtlSeconds: env.CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS,
       // Bias detection confidence thresholding
       biasConfidenceThreshold: env.CEE_BIAS_CONFIDENCE_THRESHOLD,
       // Response caching
@@ -1875,7 +1843,6 @@ const DEPRECATED_ENV_VARS: Record<string, string | null> = {
   HMAC_SECRET: 'CEE_HMAC_SECRET',
   SHARE_SECRET: 'CEE_SHARE_SECRET',
   GROUNDING_ENABLED: 'CEE_GROUNDING_ENABLED',
-  CLARIFIER_ENABLED: 'CEE_CLARIFIER_ENABLED',
   CEE_MODEL_DRAFT_GRAPH: 'CEE_MODEL_DRAFT',
   ENABLE_LEGACY_SSE: null,  // No replacement — legacy SSE path returns 426; remove the flag
 };

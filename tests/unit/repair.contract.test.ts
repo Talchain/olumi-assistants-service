@@ -77,7 +77,6 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
   buildCeeErrorResponse: (code: string, msg: string, _meta?: any) => ({
     error: { code, message: msg },
   }),
-  integrateClarifier: vi.fn(),
   isAdminAuthorized: () => false,
 }));
 
@@ -288,7 +287,6 @@ function makeCtx(graphOverride?: any): any {
     draftAdapter: { name: "openai", model: "gpt-4o" },
     llmMeta: { model: "gpt-4o" },
     confidence: 0.85,
-    clarifierStatus: "confident",
     effectiveBrief: "Should we expand to Europe?",
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
@@ -304,7 +302,6 @@ function makeCtx(graphOverride?: any): any {
     constraintStrpResult: undefined,
     repairCost: 0,
     repairFallbackReason: undefined,
-    clarifierResult: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
     quality: undefined,

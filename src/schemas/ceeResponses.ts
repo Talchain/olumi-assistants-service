@@ -315,7 +315,8 @@ export const CEEDraftGraphResponseV1Schema = DraftGraphOutput.and(
       draft_warnings: z.array(z.record(z.any())).optional(),
       confidence_flags: z.record(z.any()).optional(),
       guidance: z.record(z.any()).optional(),
-      // Multi-turn clarifier integration (Phase 1)
+      // Multi-turn clarifier integration (Phase 1) — never populated since
+      // the Stage-4 clarifier retirement (2026-07-16); kept for wire compat.
       clarifier: CEEClarifierBlockV1Schema.optional(),
       // Graph quality enhancement - Phase 1
       weight_suggestions: z.array(CEEWeightSuggestionV1Schema).optional(),
