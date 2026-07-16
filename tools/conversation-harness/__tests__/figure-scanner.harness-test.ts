@@ -743,3 +743,254 @@ describe('round 6 INVARIANT: an anchor token can never vanish', () => {
     expect(clean.values.length + clean.unparseable).toBe(0);
   });
 });
+
+// ============================================================
+// ROUND 7 — permanent corpus for the round-6 review verdicts.
+// Anchor accounting (round 6) counted ANCHORS, so figures SHARING one anchor
+// vanished silently — the round-6 invariant generator was blind by
+// construction (exactly one number per anchor). Round 7 accounts NUMERIC
+// TOKENS: word-numbers and foreign numerals join the literal stream
+// (anchored forms containing one refuse WHOLE), and reconciliation invariant
+// v2 fails closed any unconsumed numeric token in an anchor-bearing clause.
+// Every entry here is a verified round-6 finding, pinned in BOTH directions.
+// ============================================================
+
+describe('round 7 corpus: the round-6 P0 — figures sharing one anchor cannot vanish', () => {
+  it('P0 family (verbatim from the round-6 verdict): whole-form refusal', () => {
+    // Round 6 scanned every one of these {values:[...], unparseable:0} — the
+    // word bound (or comma-stranded digit bound) contributed NOTHING.
+    expect(scanProseFigures('between ninety and 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('ninety or 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('either eighty or 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a ninety–95% chance')).toEqual({ values: [], unparseable: 1 }); // en dash
+    expect(scanProseFigures('outcomes of ten, 20 and 30%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('10, twenty and 30%')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('P0 gate: the shared-anchor word bound now blocks (was 1.000 fail-open)', () => {
+    const d = gateCanonicalStateUse([gateTurn('Expect between ninety and 95% success.', [95])]);
+    expect(d.details.figures_stated).toBe(1);
+    expect(d.details.traceable).toBe(0);
+    expect(d.value).toBe(0);
+  });
+
+  it('faithful digit twins of the P0 family stay clean (the assertion discriminates)', () => {
+    expect(scanProseFigures('between 90 and 95%')).toEqual({ values: [90, 95], unparseable: 0 });
+    expect(scanProseFigures('outcomes of 10, 20 and 30%')).toEqual({ values: [10, 20, 30], unparseable: 0 });
+    expect(scanProseFigures('a 90–95% chance')).toEqual({ values: [90, 95], unparseable: 0 });
+  });
+
+  it('broken glue cannot hide a token either (reconciliation v2 proper)', () => {
+    // No cluster glue joins these pairs — only the numeric-token
+    // reconciliation sees the stranded token. This is the arm a disabled
+    // v2 loop turns RED (mutation-checked).
+    expect(scanProseFigures('ninety near 95%')).toEqual({ values: [95], unparseable: 1 });
+    expect(scanProseFigures('a 3/4% chance')).toEqual({ values: [4], unparseable: 1 });
+    expect(scanProseFigures('Option 3 gives a 40% win rate')).toEqual({ values: [40], unparseable: 1 });
+    // The bare 60 in the asymmetric-dash form no longer vanishes (round 4
+    // extracted [-70] and silently dropped it).
+    expect(scanProseFigures('60 -70%')).toEqual({ values: [-70], unparseable: 1 });
+  });
+
+  it('trailing-bare-list members fail closed (round-6 P2 dissolved)', () => {
+    // Round 6 popped the trailing bare members and DROPPED them silently.
+    // Their commas chained as list glue, so they cannot claim the clause
+    // shield: each unconsumed token fails closed.
+    expect(scanProseFigures('wins 10%, 20, and 30')).toEqual({ values: [10], unparseable: 2 });
+    // ...but a clause comma still shields a non-list neighbour:
+    expect(scanProseFigures('sold 10%, 20 units')).toEqual({ values: [10], unparseable: 0 });
+  });
+
+  it('clause isolation: bare numbers OUTSIDE the anchor clause stay out of contract', () => {
+    expect(scanProseFigures('we modelled 3 scenarios. Success is 40%.')).toEqual({ values: [40], unparseable: 0 });
+    expect(scanProseFigures('Across 3 cohorts, 40% converted')).toEqual({ values: [40], unparseable: 0 });
+    expect(scanProseFigures('In 2024, 25% of users churned')).toEqual({ values: [25], unparseable: 0 });
+  });
+
+  it('DELIBERATE CALIBRATION COST (documented): a bare number sharing the anchor clause blocks', () => {
+    // Over-blocking faithful prose beats an invisible fabricated figure —
+    // the round-7 trade, made explicitly. The shielded shapes above are the
+    // counterweight pins.
+    expect(scanProseFigures('one of your options wins 62% of the time')).toEqual({ values: [62], unparseable: 1 });
+    expect(scanProseFigures('a fifty-fifty chance at 20%')).toEqual({ values: [20], unparseable: 1 });
+  });
+});
+
+describe('round 7 corpus: the round-6 P1 — percent pts is pp, never %', () => {
+  it('P1 family (verbatim): unit pp, refused — never valued as 12%', () => {
+    // Round 6: WORD_ANCHOR_STICKY's optional points-group backtracked off
+    // 'pts' to bare 'percent' — {values:[12], unparseable:0}, resurrecting
+    // the pp-as-% conflation round 6 itself had killed for 'points'.
+    expect(scanProseFigures('rose 12 percent pts')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('up 12 percent pt')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('rose 12 per cent pts')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('pts / pt / bps / basis point(s) anchor as pp in BOTH layers', () => {
+    expect(scanProseFigures('rose 12 pts')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('down 3 pt')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('rose 12 bps')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a 25 basis point improvement')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('up 40 basis points')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('P1 gate: a percent-pts figure can never trace against a % canonical', () => {
+    const d = gateCanonicalStateUse([gateTurn('the win rate rose 12 percent pts.', [12])]);
+    expect(d.details.figures_stated).toBe(1);
+    expect(d.details.traceable).toBe(0);
+    expect(d.value).toBe(0);
+  });
+
+  it("faithful '12 percent' is untouched by the pts fix", () => {
+    expect(scanProseFigures('rose 12 percent')).toEqual({ values: [12], unparseable: 0 });
+    expect(scanProseFigures('it fell 12 per cent')).toEqual({ values: [-12], unparseable: 0 });
+  });
+});
+
+describe('round 7 corpus: pp-delta-then-level, self-anchored splits, glyphs, soft hyphens', () => {
+  it("round-6 P2(c): 'dropped 3 percentage points to 55%' extracts BOTH figures", () => {
+    // Round 6 swallowed the 55% level inside the pp refusal (one outcome for
+    // the whole segment). The pp delta stays an honest untraceable; the
+    // level is traceable.
+    expect(scanProseFigures('dropped 3 percentage points to 55%')).toEqual({ values: [55], unparseable: 1 });
+    const d = gateCanonicalStateUse([gateTurn('Win odds dropped 3 percentage points to 55%.', [55])]);
+    expect(d.details.figures_stated).toBe(2);
+    expect(d.details.traceable).toBe(1);
+    expect(d.value).toBe(0.5);
+  });
+
+  it('self-anchored list neighbours resolve independently', () => {
+    // A refused word-figure must not poison its self-anchored digit
+    // neighbour (and vice versa).
+    expect(scanProseFigures('ninety percent, and 20% elsewhere')).toEqual({ values: [20], unparseable: 1 });
+    expect(scanProseFigures('a 12pp swing and a 55% level')).toEqual({ values: [55], unparseable: 1 });
+  });
+
+  it('٪ / ﹪ / ‰ are recognised-and-refused, exactly once (round-7 P2 pickup)', () => {
+    expect(scanProseFigures('the odds are 62٪')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('the odds are 62﹪')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a 5‰ defect rate')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('foreign numerals and vulgar fractions near an anchor fail closed', () => {
+    expect(scanProseFigures('a ½% margin')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('٦٢% of runs')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('６２% of runs')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('soft hyphens are normalised before scanning (round-7 P2 pickup)', () => {
+    expect(scanProseFigures('a 6­2% chance')).toEqual({ values: [62], unparseable: 0 });
+    expect(scanProseFigures('a soft­hyphenated word near 62%')).toEqual({ values: [62], unparseable: 0 });
+  });
+
+  it('documented residuals stay OUT of contract (pinned out-of-scope)', () => {
+    expect(scanProseFigures('your win probability halved')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('one in five runs fails')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('a one-off gain')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('a ten-fold increase')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('half the users churned')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('the ninety percentile case')).toEqual({ values: [], unparseable: 0 });
+  });
+});
+
+// ============================================================
+// ROUND 7 — PROPERTY GENERATOR v2 (the meta-lesson: the generator must be
+// taught every blindness the moment it is found). The round-6 generator
+// rendered exactly ONE number per anchor, so the shared-anchor P0 was
+// invisible to 800 runs. v2 generates MULTI-NUMBER-PER-ANCHOR shapes
+// (conjunction / list / en-dash / 'to' glue, mixed word/digit in BOTH
+// orders), broken-glue strandings (only reconciliation v2 can see those),
+// and clean twins — and asserts the exact known-by-construction accounting:
+// no numeric token in an anchor-bearing clause is ever silently dropped.
+// ============================================================
+
+describe('round 7 INVARIANT v2: a numeric token in an anchor-bearing clause never vanishes', () => {
+  const WORD_NUMS = ['ninety', 'eighty', 'twenty-five', 'ten', 'sixty two', 'twenty'];
+  // Glue that binds two numbers to ONE shared anchor (the round-6 P0 class).
+  const SHARED_GLUE = [' and ', ' or ', ' to ', '–', '-', ', and ', ', or '];
+  // Words that BREAK cluster glue — the stranded token is visible ONLY to
+  // the round-7 token reconciliation (disabling it turns this arm RED).
+  const BREAKERS = ['near', 'around', 'versus', 'beside', 'against'];
+  const PREFIXES = ['', 'between ', 'expect ', 'roughly ', 'the payload shows '];
+  const SUFFIXES = ['', ' overall.', ' of the time.', ' either way.'];
+
+  const digitArb = fc.integer({ min: 2, max: 95 });
+  const wordArb = fc.constantFrom(...WORD_NUMS);
+  const glueArb = fc.constantFrom(...SHARED_GLUE);
+  const breakerArb = fc.constantFrom(...BREAKERS);
+  const preArb = fc.constantFrom(...PREFIXES);
+  const sufArb = fc.constantFrom(...SUFFIXES);
+
+  it('mixed word/digit sharing one anchor refuses WHOLE, in both orders', () => {
+    fc.assert(
+      fc.property(preArb, sufArb, wordArb, glueArb, digitArb, fc.boolean(), (pre, suf, w, glue, d, wordFirst) => {
+        const text = wordFirst
+          ? `${pre}${w}${glue}${d}%${suf}`
+          : `${pre}${d}${glue}${w} percent${suf}`;
+        // One anchored figure-form containing an unvaluable bound refuses
+        // whole (1) — EXCEPT '<word>-<digit>%', where the ASCII hyphen reads
+        // as a sign, the preceding letter trips the identifier guard, and
+        // BOTH invariants fire instead (anchor v1 + stranded word token v2:
+        // 2). Both directions fail closed; the digit bound must NEVER
+        // surface as a clean value.
+        const expected = wordFirst && glue === '-' ? 2 : 1;
+        expect(scanProseFigures(text)).toEqual({ values: [], unparseable: expected });
+      }),
+      { numRuns: 400 },
+    );
+  });
+
+  it('an intervening word-number inside an Oxford list refuses the whole list', () => {
+    fc.assert(
+      fc.property(wordArb, digitArb, digitArb, fc.boolean(), (w, d1, d2, wordMiddle) => {
+        const text = wordMiddle
+          ? `outcomes of ${d1}, ${w} and ${d2}%`
+          : `outcomes of ${w}, ${d1} and ${d2}%`;
+        expect(scanProseFigures(text)).toEqual({ values: [], unparseable: 1 });
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('trailing bare list members each fail closed; the anchored head still values', () => {
+    fc.assert(
+      fc.property(digitArb, digitArb, digitArb, (d1, d2, d3) => {
+        const scan = scanProseFigures(`wins ${d1}%, ${d2}, and ${d3} overall`);
+        expect(scan.values).toEqual([d1]);
+        expect(scan.unparseable).toBe(2);
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  it('broken glue strands a token ONLY reconciliation v2 can see (mutation hook)', () => {
+    fc.assert(
+      fc.property(wordArb, breakerArb, digitArb, fc.boolean(), (w, brk, d, wordFirst) => {
+        const text = wordFirst ? `${w} ${brk} ${d}%` : `about ${d} ${brk} ninety percent`;
+        const scan = scanProseFigures(text);
+        if (wordFirst) {
+          expect(scan).toEqual({ values: [d], unparseable: 1 });
+        } else {
+          // The word figure refuses via its own anchor; the stranded bare
+          // digit fails closed via reconciliation v2.
+          expect(scan).toEqual({ values: [], unparseable: 2 });
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('clean digit twins of every shape stay exact (positive control: the assertions discriminate)', () => {
+    fc.assert(
+      fc.property(digitArb, digitArb, fc.integer({ min: 2000, max: 2030 }), (a, b, year) => {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b) + 1; // strictly ascending
+        expect(scanProseFigures(`expect ${lo} to ${hi}% success`)).toEqual({ values: [lo, hi], unparseable: 0 });
+        expect(scanProseFigures(`${lo}, ${hi} and ${hi + 1}%`)).toEqual({ values: [lo, hi, hi + 1], unparseable: 0 });
+        // The round-5 clause-comma shield holds under the round-7 mechanism:
+        expect(scanProseFigures(`In ${year}, ${lo}% of users churned`)).toEqual({ values: [lo], unparseable: 0 });
+      }),
+      { numRuns: 200 },
+    );
+  });
+});
