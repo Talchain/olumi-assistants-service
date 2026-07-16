@@ -96,6 +96,19 @@ export interface V5TurnTimings {
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
   total_input_tokens?: number;
+  /**
+   * Routing-call attribution (observability). The Sonnet routing call's real
+   * model id, output-token count, and served-prompt identity — captured at the
+   * routing site and surfaced per-call in `_diagnostic_trace.llm_calls` so a
+   * bundle-scored turn attributes latency to a REAL call record rather than an
+   * empty array. All optional: absent when the routing layer did not expose the
+   * datum (test injectors, recovery short-circuits) — omitted honestly, never
+   * zero-filled at the capture site.
+   */
+  routing_model?: string;
+  routing_output_tokens?: number;
+  routing_prompt_hash?: string;
+  routing_prompt_version?: string;
   /** Stable handler identifier for the executed handler (null on no-handler turns). */
   handler_id?: string | null;
   /** Wall clock for the handler EXECUTE step. */
