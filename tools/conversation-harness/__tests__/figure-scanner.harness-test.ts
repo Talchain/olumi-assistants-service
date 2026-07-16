@@ -1007,6 +1007,62 @@ describe('round 8 corpus: the round-7 P1 — foreign numerals derived, not enume
 });
 
 // ============================================================
+// ROUND 8 — (3) P1: bare 'point'/'points' was missing from the pp anchor
+// family in BOTH layers, so 'up 12 points' — the most natural English pp
+// phrasing — was completely invisible whenever a comma/sentence boundary
+// separated it from a %-anchor, while '12 pts' correctly refused.
+// ============================================================
+
+describe("round 8 corpus: the round-7 P1 — bare 'point'/'points' joins the pp family", () => {
+  it('P1 family: comma-separated and sentence-boundary shapes fail closed', () => {
+    // Round 7 scanned these {values:[5|62], unparseable:0} — the pp figure
+    // contributed NOTHING.
+    expect(scanProseFigures('The win rate rose 5%, up 12 points from last week')).toEqual({ values: [5], unparseable: 1 });
+    expect(scanProseFigures('Win odds sit at 62%. Up 12 points since last month.')).toEqual({ values: [62], unparseable: 1 });
+    expect(scanProseFigures('up 12 points')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a 3 point drop')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('twelve points')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('P1 gate: a points figure can never trace against a % canonical', () => {
+    const d = gateCanonicalStateUse([gateTurn('Your win rate rose 5%, up 12 points from last week.', [5, 12])]);
+    expect(d.details.figures_stated).toBe(2);
+    expect(d.details.traceable).toBe(1);
+    expect(d.value).toBe(0.5);
+  });
+
+  it("EXACT-COUNT pin ('12 points' is ONE outcome): kills the Layer-2-only mutation", () => {
+    // With 'points?' removed from WORD_ANCHOR_STICKY but present in Layer 1,
+    // the literal goes bare AND the anchor goes unconsumed: TWO outcomes.
+    // The exact count discriminates the halves of the two-layer fix.
+    expect(scanProseFigures('12 points')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('a BARE points anchor fails closed via Layer 1 (mutation-killer: the standalone alternative)', () => {
+    // Same construction as the round-7 'shown in pts' pin: no number, so
+    // only the Layer-1 detector can see the token.
+    expect(scanProseFigures('shown in points')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('DELIBERATE CALIBRATION COST (documented): prose "point(s)" is recognised-and-refused', () => {
+    // The same treatment as pts/pt/bps means the same cost as 'expressed as
+    // a percent' (round 6) and 'shown in pts' (round 7): a bare token from
+    // the anchor family fails closed rather than being invisible.
+    expect(scanProseFigures('That is a good point to consider.')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it("the round-6 'percent pts' backtracking pin HOLDS (no %-unit backtracking reintroduced)", () => {
+    expect(scanProseFigures('rose 12 percent pts')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('up 12 percent pt')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('rose 12 per cent pts')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('rose 12 percent points')).toEqual({ values: [], unparseable: 1 });
+    // ...and the faithful % forms stay valued:
+    expect(scanProseFigures('rose 12 percent')).toEqual({ values: [12], unparseable: 0 });
+    expect(scanProseFigures('it fell 12 per cent')).toEqual({ values: [-12], unparseable: 0 });
+  });
+});
+
+// ============================================================
 // ROUND 7 — PROPERTY GENERATOR v2 (the meta-lesson: the generator must be
 // taught every blindness the moment it is found). The round-6 generator
 // rendered exactly ONE number per anchor, so the shared-anchor P0 was

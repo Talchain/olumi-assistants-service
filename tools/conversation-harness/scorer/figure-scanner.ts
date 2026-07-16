@@ -228,9 +228,15 @@ const spansOverlap = (a: Span, b: Span): boolean => a.start < b.end && a.end > b
  * 'bps' need non-letters on BOTH sides (ordinary words contain 'pp'/'pt').
  * ROUND 7: 'pts'/'pt'/'bps'/'basis point(s)' join the pp family in BOTH
  * layers; '٪'/'﹪'/'‰' join the glyph set (recognise-and-refuse).
+ * ROUND 8: bare 'point'/'points' joins the pp family in BOTH layers, same
+ * treatment as pts/pt/bps ('up 12 points' — the most natural English pp
+ * phrasing — was invisible whenever a comma/sentence boundary separated it
+ * from a %-anchor). The multi-word alternatives ('percentage points',
+ * 'basis points', 'percent points') still match FIRST at their own start
+ * positions, so they are never split by the standalone token.
  */
 const ANCHOR_TOKEN_RE =
-  /％|%|٪|﹪|‰|percentage[\s-]*(?:points?|pts?)(?![a-z])|per[\s-]+cent(?:[\s-]*(?:points?|pts?))?(?![a-z])|percent(?:[\s-]*(?:points?|pts?))?(?![a-z])|basis[\s-]+points?(?![a-z])|(?<![a-z])bps(?![a-z])|(?<![a-z])pp(?![a-z])|(?<![a-z])pct(?![a-z])|(?<![a-z])pts?(?![a-z])/gi;
+  /％|%|٪|﹪|‰|percentage[\s-]*(?:points?|pts?)(?![a-z])|per[\s-]+cent(?:[\s-]*(?:points?|pts?))?(?![a-z])|percent(?:[\s-]*(?:points?|pts?))?(?![a-z])|basis[\s-]+points?(?![a-z])|(?<![a-z])points?(?![a-z])|(?<![a-z])bps(?![a-z])|(?<![a-z])pp(?![a-z])|(?<![a-z])pct(?![a-z])|(?<![a-z])pts?(?![a-z])/gi;
 
 function detectAnchorTokens(text: string): Span[] {
   const out: Span[] = [];
@@ -413,9 +419,11 @@ interface AnchorMatch {
  * (letter follows / no 'point'). ROUND 7: the points-suffix alternation
  * includes 'pts'/'pt' so 'percent pts' can never backtrack to bare 'percent'
  * (the pp-as-% conflation); standalone 'pts'/'pt'/'bps'/'basis point(s)'
- * anchor as pp; 'pct' anchors as recognise-and-refuse. */
+ * anchor as pp; 'pct' anchors as recognise-and-refuse. ROUND 8: standalone
+ * 'point'/'points' anchors as pp too, same treatment as pts/pt/bps — the
+ * multi-word alternatives are listed first and cannot backtrack onto it. */
 const WORD_ANCHOR_STICKY =
-  /(?:percentage[\s-]*(?:points?|pts?)|per[\s-]+cent(?:[\s-]*(?:points?|pts?))?|percent(?:[\s-]*(?:points?|pts?))?|basis[\s-]+points?|bps|pp|pct|pts?)(?![a-z])/iy;
+  /(?:percentage[\s-]*(?:points?|pts?)|per[\s-]+cent(?:[\s-]*(?:points?|pts?))?|percent(?:[\s-]*(?:points?|pts?))?|basis[\s-]+points?|points?|bps|pp|pct|pts?)(?![a-z])/iy;
 
 function wordAnchorUnit(tok: string): Literal['unit'] {
   const t = tok.toLowerCase();
