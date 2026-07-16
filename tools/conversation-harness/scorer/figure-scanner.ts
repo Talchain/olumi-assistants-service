@@ -44,6 +44,15 @@
  * neighbour, and a directly-anchored currency ('$5%') is malformed ⇒
  * unparseable.
  *
+ * WORD-NUMBERS (round 5): an anchor preceded by a NUMBER WORD ('ninety
+ * percent', 'twenty-five per cent', 'half %') is a stated figure the
+ * digit-based scanner cannot value. Round 4 left these INVISIBLE — neither
+ * value nor unparseable — so a fabricated 'ninety percent' passed G4 at 1.000,
+ * violating this module's own fail-closed contract. They are now RECOGNISED
+ * and counted `unparseable` (untraceable, gate-relevant). Full word-number
+ * parsing is deliberately NOT attempted: a mis-parse would trace or fabricate
+ * silently, whereas a block is visible and investigated.
+ *
  * SIGN — literal and directional
  * ------------------------------
  * An explicit sign character immediately adjacent to the literal is honoured:
@@ -56,6 +65,13 @@
  * against an opposite cue, or both cue directions in the window) are
  * unparseable, not guessed. The hedge bigram 'up to' is neutralised before cue
  * matching so "fell by up to 20%" stays negative.
+ *
+ * BY vs TO (round 5): 'fell BY 20%' states a CHANGE (-20); 'fell TO 20%'
+ * states a LEVEL (+20 — where the metric now sits). Round 4 sign-flipped
+ * both, so a faithful level restatement hard-blocked AND a fabricated
+ * negative could trace through the flip. When the word immediately before
+ * the figure is 'to' (after 'up to' neutralisation), the directional cue is
+ * a level verb and applies NO sign; an explicit sign character still does.
  *
  * HONEST LIMIT: the cue window looks BACKWARD only. A post-noun form like
  * "a 20% drop" is extracted as +20 — post-nouns more often name the metric
@@ -70,8 +86,27 @@
  * A conjunction list sharing one anchor ('10, 20 and 30%') distributes the
  * anchor across the listed literals — the same shared-anchor hole as ranges,
  * closed the same way. Malformed range-like forms — descending bounds
- * ('70-60%'), a sign inside a range, three-bound chains ('10-20-30%'),
+ * ('70-60%'), a sign inside a HYPHEN range, three-bound chains ('10-20-30%'),
  * asymmetric dash spacing ('60- 70%') — are unparseable.
+ *
+ * SIGNED 'to'-RANGES (round 5): explicit signs in a 'to'-glued range are
+ * UNAMBIGUOUS — 'outcomes range from -20% to 35%' is the natural phrasing for
+ * this product's signed p10–p90 percentile surface, and round 4 hard-blocked
+ * it. Both bounds now resolve with their signs (ascending required; a
+ * directional cue against an explicit range sign is still a contradiction).
+ * The refusal stands for sign-in-HYPHEN-range forms ('-20-35%'), which are
+ * genuinely ambiguous typography.
+ *
+ * CLAUSE BOUNDARIES (round 5): a bare comma with no conjunction later in the
+ * cluster is a CLAUSE boundary, not a list separator — the anchor must not
+ * distribute backward across it. 'In 2024, 25% of users churned' yields [25];
+ * round 4 extracted [2024, 25] and the year hard-blocked faithful prose. The
+ * Oxford-list shape ('10, 20 and 30%') still distributes: its commas are
+ * followed by a conjunction glue. (Semicolons and sentence stops already
+ * break clusters outright.) HONEST LIMIT: a comma whose right-hand side
+ * contains both a conjunction and its own anchors ('in 2024, 25% and 30%')
+ * still chains — the conjunction is indistinguishable from a list without
+ * real parsing; that direction fails CLOSED (over-blocks), never open.
  *
  * PII: this module returns numbers and counts only — never text fragments.
  * Callers must not emit scanned prose into details/notes.
@@ -120,6 +155,42 @@ const POS_CUES = new Set([
   'improve', 'improves', 'improved', 'improving',
   'plus', 'positive', 'up',
 ]);
+
+// ---------- word-number figures (recognise-and-fail-closed — see module doc) ----------
+
+const NUMBER_WORDS = new Set([
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+  'seventeen', 'eighteen', 'nineteen',
+  'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
+  'hundred', 'thousand', 'million', 'billion',
+  'half', 'third', 'thirds', 'quarter', 'quarters',
+]);
+
+/** Count anchors whose immediately-preceding word is a NUMBER WORD ('ninety
+ * percent', 'twenty-five per cent', 'ninety%'). Each is a stated figure this
+ * digit-based scanner cannot value ⇒ the caller adds each to `unparseable`
+ * (UNTRACEABLE, never absent). No word-number VALUE parsing is attempted.
+ * Digit-anchored figures never reach here: the char before their anchor is a
+ * digit, not a letter, so the two passes cannot double-count one anchor. */
+function countWordNumberFigures(text: string): number {
+  let count = 0;
+  const patterns = [
+    // word '%'  ('ninety%', 'ninety %')
+    /([a-z]+(?:-[a-z]+)*)[ \t]*%/gi,
+    // word 'percent' / 'per cent', with an optional article between ('half a
+    // percent'). Word-bounded: 'percentile' does not anchor.
+    /([a-z]+(?:-[a-z]+)*)(?:[ \t]+(?:a|an))?[ \t]+(?:percent|per[ \t]+cent)(?![a-z])/gi,
+  ];
+  for (const re of patterns) {
+    for (const m of text.matchAll(re)) {
+      const parts = m[1].toLowerCase().split('-');
+      // 'twenty-five percent': the token ADJACENT to the anchor decides.
+      if (NUMBER_WORDS.has(parts[parts.length - 1])) count++;
+    }
+  }
+  return count;
+}
 
 // ---------- literal token ----------
 
@@ -275,7 +346,7 @@ function scanLiterals(text: string): Literal[] {
 
 // ---------- glue between consecutive literals ----------
 
-type Glue = 'range' | 'list' | 'to' | 'ambiguous' | 'break';
+type Glue = 'range' | 'list' | 'comma' | 'to' | 'ambiguous' | 'break';
 
 function glueKind(s: string): Glue {
   if (/^\s*$/.test(s)) return 'break';
@@ -288,7 +359,12 @@ function glueKind(s: string): Glue {
     if (m && (m[1].length === 0) === (m[3].length === 0)) return 'range';
     return 'ambiguous';
   }
-  if (/^\s*,\s*(?:(?:and|or)\s+)?$/i.test(s)) return 'list';
+  // A bare comma is only PROVISIONALLY list glue: it is a list separator when
+  // a conjunction glue follows later in the cluster ('10, 20 and 30%'),
+  // otherwise a CLAUSE boundary the anchor must not cross ('In 2024, 25%…').
+  // The cluster resolver makes that call — see module doc, round 5.
+  if (/^\s*,\s*$/.test(s)) return 'comma';
+  if (/^\s*,\s*(?:and|or)\s+$/i.test(s)) return 'list';
   if (/^\s+(?:and|or)\s+$/i.test(s)) return 'list';
   if (/^\s+to\s+$/i.test(s)) return 'to';
   return 'break';
@@ -322,6 +398,12 @@ function cueSign(text: string, clusterStart: number): 'neg' | 'pos' | 'none' | '
     dropped.push(words[k]);
   }
   words = dropped.slice(-3);
+  // BY vs TO (round 5): '<fell/dropped/down> TO X%' is a LEVEL restatement —
+  // the figure names where the metric sits, not the change — so no
+  // directional sign applies. 'up to' was neutralised above, so a surviving
+  // trailing 'to' is a true level 'to'. ('fell BY 20%' / 'fell 20%' keep the
+  // cue: their last surviving word is not 'to'.)
+  if (words[words.length - 1] === 'to') return 'none';
   const neg = words.some((w) => NEG_CUES.has(w));
   const pos = words.some((w) => POS_CUES.has(w));
   if (neg && pos) return 'ambiguous';
@@ -342,6 +424,10 @@ export function scanProseFigures(text: string): FigureScan {
   const src = text ?? '';
   const values: number[] = [];
   let unparseable = 0;
+
+  // WORD-NUMBERS (round 5): '%'/'percent' anchored to a number WORD is a
+  // stated figure this digit-based scanner cannot value — fail closed.
+  unparseable += countWordNumberFigures(src);
 
   const lits = scanLiterals(src);
 
@@ -367,82 +453,121 @@ export function scanProseFigures(text: string): FigureScan {
     while (
       members.length > 1 &&
       !members[members.length - 1].anchored &&
-      glues[glues.length - 1] === 'list'
+      (glues[glues.length - 1] === 'list' || glues[glues.length - 1] === 'comma')
     ) {
       members.pop();
       glues.pop();
     }
 
-    const anchoredAny = members.some((m) => m.anchored);
-    if (!anchoredAny) continue; // bare numbers / currency amounts: not figures
-
-    // From here on, this cluster IS a stated figure (or several). Every
-    // malformation below counts as unparseable — never a silent drop.
-    const malformed =
-      glues.includes('ambiguous') ||
-      members.some(
-        (m) => !m.valid || m.malformedPrefix || m.anchorAfterReleasedPunct || (m.currency && m.anchored),
-      );
-    if (malformed) {
-      unparseable++;
-      continue;
+    // CLAUSE BOUNDARIES (round 5): a bare comma with no conjunction glue
+    // later in the cluster is a clause boundary, not a list separator —
+    // split there so the anchor cannot distribute backward across it
+    // ('In 2024, 25% of users churned' must not pull 2024 into the
+    // denominator). Commas followed by a conjunction are the Oxford-list
+    // shape ('10, 20 and 30%') and keep chaining.
+    const segments: Array<{ members: Literal[]; glues: Glue[] }> = [];
+    {
+      let segMembers: Literal[] = [members[0]];
+      let segGlues: Glue[] = [];
+      for (let g = 0; g < glues.length; g++) {
+        if (glues[g] === 'comma' && !glues.slice(g + 1).includes('list')) {
+          segments.push({ members: segMembers, glues: segGlues });
+          segMembers = [members[g + 1]];
+          segGlues = [];
+        } else {
+          segMembers.push(members[g + 1]);
+          segGlues.push(glues[g]);
+        }
+      }
+      segments.push({ members: segMembers, glues: segGlues });
     }
 
-    const kinds = new Set(glues);
-    const isRange = kinds.has('range') || kinds.has('to');
-    if (isRange && (kinds.size > 1 || members.length !== 2)) {
-      // Mixed glue ('10, 20-30%') or a many-bound chain ('10-20-30%').
-      unparseable++;
-      continue;
-    }
-    if (!isRange && members.length > LIST_MEMBER_CAP) {
-      unparseable++;
-      continue;
-    }
+    for (const seg of segments) {
+      const segMembers = seg.members;
+      const segGlues = seg.glues;
 
-    const cue = cueSign(src, members[0].start);
-    if (cue === 'ambiguous') {
-      unparseable++;
-      continue;
-    }
+      const anchoredAny = segMembers.some((m) => m.anchored);
+      if (!anchoredAny) continue; // bare numbers / currency amounts: not figures
 
-    if (isRange) {
-      // A range is one figure-form with two bounds. Explicit signs inside a
-      // range ('-20-30%') and descending bounds ('70-60%') are ambiguous.
-      const [lo, hi] = members;
-      if (lo.sign !== '' || hi.sign !== '' || lo.value > hi.value) {
+      // From here on, this segment IS a stated figure (or several). Every
+      // malformation below counts as unparseable — never a silent drop.
+      const malformed =
+        segGlues.includes('ambiguous') ||
+        segMembers.some(
+          (m) => !m.valid || m.malformedPrefix || m.anchorAfterReleasedPunct || (m.currency && m.anchored),
+        );
+      if (malformed) {
         unparseable++;
         continue;
       }
-      const s = cue === 'neg' ? -1 : 1;
-      values.push(s * lo.value, s * hi.value);
-      continue;
-    }
 
-    // Single literal or conjunction list: resolve each member independently.
-    let clusterBad = false;
-    const resolved: number[] = [];
-    for (const m of members) {
-      if (m.sign === '±') {
-        if (cue !== 'none') {
-          clusterBad = true; // '±' against a directional cue: contradiction
-          break;
-        }
-        resolved.push(m.value, -m.value);
+      const kinds = new Set(segGlues);
+      const isRange = kinds.has('range') || kinds.has('to');
+      if (isRange && (kinds.size > 1 || segMembers.length !== 2)) {
+        // Mixed glue ('10, 20 and 30-40%') or a many-bound chain ('10-20-30%').
+        unparseable++;
         continue;
       }
-      if ((m.sign === '-' && cue === 'pos') || (m.sign === '+' && cue === 'neg')) {
-        clusterBad = true; // explicit sign contradicts the directional cue
-        break;
+      if (!isRange && segMembers.length > LIST_MEMBER_CAP) {
+        unparseable++;
+        continue;
       }
-      const negative = m.sign === '-' || (m.sign === '' && cue === 'neg');
-      resolved.push(negative ? -m.value : m.value);
+
+      const cue = cueSign(src, segMembers[0].start);
+      if (cue === 'ambiguous') {
+        unparseable++;
+        continue;
+      }
+
+      if (isRange) {
+        // A range is one figure-form with two bounds, ascending. Explicit
+        // signs are honoured in a 'to'-glued range ('from -20% to 35%' — the
+        // natural signed-percentile phrasing, round 5) provided no
+        // directional cue contradicts them; a sign inside a HYPHEN range
+        // ('-20-30%'), '±' on any bound, and descending bounds stay refused.
+        const [lo, hi] = segMembers;
+        const hasSign = lo.sign !== '' || hi.sign !== '';
+        const signedFormOk = segGlues[0] === 'to' && lo.sign !== '±' && hi.sign !== '±' && cue === 'none';
+        if (hasSign && !signedFormOk) {
+          unparseable++;
+          continue;
+        }
+        const loV = lo.sign === '-' ? -lo.value : lo.value;
+        const hiV = hi.sign === '-' ? -hi.value : hi.value;
+        if (loV > hiV) {
+          unparseable++;
+          continue;
+        }
+        const s = cue === 'neg' ? -1 : 1;
+        values.push(s * loV, s * hiV);
+        continue;
+      }
+
+      // Single literal or conjunction list: resolve each member independently.
+      let clusterBad = false;
+      const resolved: number[] = [];
+      for (const m of segMembers) {
+        if (m.sign === '±') {
+          if (cue !== 'none') {
+            clusterBad = true; // '±' against a directional cue: contradiction
+            break;
+          }
+          resolved.push(m.value, -m.value);
+          continue;
+        }
+        if ((m.sign === '-' && cue === 'pos') || (m.sign === '+' && cue === 'neg')) {
+          clusterBad = true; // explicit sign contradicts the directional cue
+          break;
+        }
+        const negative = m.sign === '-' || (m.sign === '' && cue === 'neg');
+        resolved.push(negative ? -m.value : m.value);
+      }
+      if (clusterBad) {
+        unparseable++;
+        continue;
+      }
+      values.push(...resolved);
     }
-    if (clusterBad) {
-      unparseable++;
-      continue;
-    }
-    values.push(...resolved);
   }
 
   return { values, unparseable };

@@ -46,6 +46,25 @@ describe('figure-scanner grammar', () => {
     expect(vals('wins up to 20%')).toEqual([20]);
   });
 
+  it("round 5: '<cue> TO X%' is a LEVEL, not a change — no sign flip", () => {
+    // 'fell BY 20%' states a change (-20); 'fell TO 20%' states where the
+    // metric now sits (+20). Round 4 flipped both: faithful level prose
+    // hard-blocked, and a fabricated negative could trace through the flip.
+    expect(vals('it fell to 20%')).toEqual([20]);
+    expect(vals('churn dropped to 8%')).toEqual([8]);
+    expect(vals('down to 20%')).toEqual([20]);
+    expect(vals('demand declined to 30 percent')).toEqual([30]);
+    // ...while the change readings keep the cue sign:
+    expect(vals('it fell by 20%')).toEqual([-20]);
+    expect(vals('it fell 20%')).toEqual([-20]);
+    // ...and an explicit sign on a level still applies:
+    expect(vals('it fell to -20%')).toEqual([-20]);
+  });
+
+  it('round 5: a negative-cued LEVEL range is not sign-flipped either', () => {
+    expect(vals('it fell to 20-30%')).toEqual([20, 30]);
+  });
+
   it('HONEST LIMIT (documented): post-noun forms are not signed', () => {
     // "a 20% drop" / "21% downside" name the metric after the figure; signing
     // them would false-block faithful restatements. Backward window only.
@@ -80,6 +99,25 @@ describe('figure-scanner grammar', () => {
     expect(vals('10%, 20%, and 30%')).toEqual([10, 20, 30]);
   });
 
+  it("round 5: explicit-sign 'to'-ranges are unambiguous — both bounds resolve", () => {
+    // The natural phrasing for the signed p10-p90 percentile surface; round 4
+    // refused it and hard-blocked faithful candidates.
+    expect(scanProseFigures('outcomes range from -20% to 35%')).toEqual({ values: [-20, 35], unparseable: 0 });
+    expect(scanProseFigures('-20% to 35%')).toEqual({ values: [-20, 35], unparseable: 0 });
+    expect(scanProseFigures('from -20 to 35%')).toEqual({ values: [-20, 35], unparseable: 0 });
+    expect(scanProseFigures('from -30% to -10%')).toEqual({ values: [-30, -10], unparseable: 0 });
+    expect(scanProseFigures('+10 to 20%')).toEqual({ values: [10, 20], unparseable: 0 });
+  });
+
+  it('round 5: the % anchor must not cross a clause comma backward', () => {
+    // 'In 2024, 25%…' — the year is clause context, not a shared-anchor list
+    // member; round 4 pulled it into the denominator and hard-blocked
+    // faithful prose. A comma is list glue only when a conjunction follows.
+    expect(scanProseFigures('In 2024, 25% of users churned')).toEqual({ values: [25], unparseable: 0 });
+    expect(scanProseFigures('Across 3 cohorts, 40% converted')).toEqual({ values: [40], unparseable: 0 });
+    expect(scanProseFigures('In 2024, 25 to 30% of users churned')).toEqual({ values: [25, 30], unparseable: 0 });
+  });
+
   it('bare numbers, currency, dates, identifiers are NOT figures', () => {
     expect(scanProseFigures('1,250')).toEqual({ values: [], unparseable: 0 });
     expect(scanProseFigures('it costs $1,250 overall')).toEqual({ values: [], unparseable: 0 });
@@ -110,6 +148,35 @@ describe('figure-scanner grammar', () => {
   });
 
   // ---------- FAIL-CLOSED refusals: unparseable, never absent ----------
+
+  it('round 5: %-anchored WORD-NUMBERS are UNTRACEABLE, never invisible', () => {
+    // Round 4 could not see 'ninety percent' at all — neither value nor
+    // unparseable — so a fabricated word-figure passed G4 at 1.000 (fail-OPEN,
+    // against the module's own contract). Recognise-and-fail-closed.
+    expect(scanProseFigures('the odds are ninety percent')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('twenty-five per cent of runs')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('ninety five percent of the time')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('about half a percent either way')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a hundred percent certain')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('ninety%')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('round 5: word-number recognition does not double-count or false-fire', () => {
+    // A digit figure sharing the sentence is unaffected…
+    expect(scanProseFigures('ninety percent, and 20% elsewhere')).toEqual({ values: [20], unparseable: 1 });
+    // …non-number words before an anchor do not fire…
+    expect(scanProseFigures('expressed as a percent')).toEqual({ values: [], unparseable: 0 });
+    // …and 'percentile'/'percentage' still do not anchor.
+    expect(scanProseFigures('the ninety percentile case')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('twenty percentage points')).toEqual({ values: [], unparseable: 0 });
+  });
+
+  it("round 5: sign-in-HYPHEN-range and cue-vs-signed-'to'-range stay refused", () => {
+    expect(scanProseFigures('a -20-35% swing').unparseable).toBe(1);
+    expect(scanProseFigures('it falls -20 to 35%').unparseable).toBe(1); // cue contradicts explicit signs
+    expect(scanProseFigures('from 35% to -20%').unparseable).toBe(1); // descending signed bounds
+    expect(scanProseFigures('±5 to 10%').unparseable).toBe(1); // '±' in a range
+  });
 
   it('descending bounds are refused, not guessed', () => {
     expect(scanProseFigures('roughly 70-60% odds')).toEqual({ values: [], unparseable: 1 });
@@ -216,12 +283,23 @@ const POS_SINGLE = [
   (m: string) => `Success sits at ${m} percent`,
   (m: string) => `The payload shows ${m}%`,
   (m: string) => `at +${m}%`,
+  // Round 5: a clause-boundary year — the comma must stop the anchor, so the
+  // year contributes NOTHING (neither traceable nor untraceable).
+  (m: string) => `In 2024, ${m}% of users churned`,
+  (m: string) => `Across 3 cohorts, ${m}% converted`,
 ];
 const NEG_SINGLE = [
   (m: string) => `you lose ${m}%`,
   (m: string) => `it fell ${m} percent`,
   (m: string) => `down ${m}%`,
   (m: string) => `stated as -${m}%`,
+];
+// Round 5: '<cue> TO X%' is a LEVEL — extracts +X, no sign flip.
+const LEVEL_SINGLE = [
+  (m: string) => `it fell to ${m}%`,
+  (m: string) => `churn dropped to ${m} percent`,
+  (m: string) => `demand declined to ${m}%`,
+  (m: string) => `down to ${m}%`,
 ];
 const POS_RANGE = [
   (a: string, b: string) => `expect ${a}-${b}% success`,
@@ -230,6 +308,13 @@ const POS_RANGE = [
   (a: string, b: string) => `${a}%-${b}%`,
 ];
 const NEG_RANGE = [(a: string, b: string) => `it falls ${a}-${b}%`];
+// Round 5: explicit-sign 'to'-ranges (the natural signed-percentile phrasing).
+// Bounds arrive as SIGNED strings ('-20', '35').
+const SIGNED_RANGE = [
+  (a: string, b: string) => `outcomes range from ${a}% to ${b}%`,
+  (a: string, b: string) => `from ${a} to ${b}%`,
+  (a: string, b: string) => `${a}% to ${b}%`,
+];
 
 const UNPARSEABLE_POOL = [
   'roughly 70-60% odds',
@@ -237,6 +322,19 @@ const UNPARSEABLE_POOL = [
   'a 10-20-30% swing',
   'gained -3% overall',
   'it fell +2% today',
+  // Round 5: sign-in-hyphen-range and cue-vs-signed-'to'-range stay refused.
+  'a -20-35% swing',
+  'it falls -20 to 35%',
+];
+
+// Round 5: %-anchored word-numbers — recognised and counted UNTRACEABLE
+// (fail-closed), never valued, never invisible.
+const WORD_NUMBER_POOL = [
+  'the odds are ninety percent',
+  'twenty-five per cent of runs',
+  'about a hundred percent certain',
+  'ninety five percent of the time',
+  'roughly half a percent either way',
 ];
 
 const DISTRACTOR_POOL = [
@@ -260,6 +358,10 @@ describe('figure-scanner property/fuzz corpus (zero misclassifications)', () => 
     kind: fc.constantFrom(
       'faithful-single', 'faithful-single', 'faithful-range',
       'fabricated-single', 'fabricated-single', 'fabricated-range',
+      // Round 5 classes:
+      'faithful-level', 'fabricated-level',
+      'faithful-signed-range', 'fabricated-signed-range',
+      'word-number',
       'unparseable', 'distractor',
     ),
     negative: signArb,
@@ -327,6 +429,52 @@ describe('figure-scanner property/fuzz corpus (zero misclassifications)', () => 
                 snippets.push({ text: tpl(String(lo), String(hi)), traceable: 1, untraceable: 1 });
                 break;
               }
+              case 'faithful-level': {
+                // Round 5: 'fell TO c%' restates a POSITIVE canonical level.
+                // The pre-fix scanner sign-flipped it to -c ⇒ untraceable, so
+                // this arm is RED on round-4 code in the faithful direction.
+                if (posCanon.length === 0) break;
+                const c = posCanon[item.pick % posCanon.length];
+                const m = decimalNear(c, item.off);
+                snippets.push({ text: LEVEL_SINGLE[item.pick % LEVEL_SINGLE.length](m), traceable: 1, untraceable: 0 });
+                break;
+              }
+              case 'fabricated-level': {
+                // Round 5, fabricated direction: a level restatement whose +X
+                // exists NOWHERE in canon. The sharpest case is X = |c| for a
+                // NEGATIVE canonical c — the pre-fix sign flip made it TRACE
+                // (fail-open); it must count untraceable.
+                const mag = item.negative && negCanon.length > 0
+                  ? Math.abs(negCanon[item.pick % negCanon.length])
+                  : nextFab();
+                const m = decimalNear(mag, item.off);
+                snippets.push({ text: LEVEL_SINGLE[item.pick % LEVEL_SINGLE.length](m), traceable: 0, untraceable: 1 });
+                break;
+              }
+              case 'faithful-signed-range': {
+                // Round 5: the natural signed p10-p90 phrasing. Both bounds
+                // canonical ⇒ both trace; the pre-fix scanner refused the
+                // whole form (unparseable) and hard-blocked faithful prose.
+                const lo = Math.min(...negCanon);
+                const hi = Math.max(...posCanon);
+                const tpl = SIGNED_RANGE[item.pick % SIGNED_RANGE.length];
+                snippets.push({ text: tpl(String(lo), String(hi)), traceable: 2, untraceable: 0 });
+                break;
+              }
+              case 'fabricated-signed-range': {
+                // Canonical negative lower bound, fabricated upper bound: the
+                // fabricated bound must count against, the real one must trace.
+                const lo = Math.min(...negCanon);
+                const hi = nextFab();
+                const tpl = SIGNED_RANGE[item.pick % SIGNED_RANGE.length];
+                snippets.push({ text: tpl(String(lo), String(hi)), traceable: 1, untraceable: 1 });
+                break;
+              }
+              case 'word-number':
+                // Round 5: recognised, never valued — always untraceable. The
+                // pre-fix scanner saw NOTHING here (fail-open at 1.000).
+                snippets.push({ text: WORD_NUMBER_POOL[item.pick % WORD_NUMBER_POOL.length], traceable: 0, untraceable: 1 });
+                break;
               case 'unparseable':
                 snippets.push({ text: UNPARSEABLE_POOL[item.pick % UNPARSEABLE_POOL.length], traceable: 0, untraceable: 1 });
                 break;
