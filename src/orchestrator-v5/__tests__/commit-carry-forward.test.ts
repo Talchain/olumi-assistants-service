@@ -295,6 +295,68 @@ describe('proposed_concept kind-level supersession — diagnosis D2a (live 2026-
   });
 });
 
+describe('draft_graph kind-level supersession — ROADMAP 2.63 C3/C4 (single-slot offer)', () => {
+  // Each guard re-fire / graph-present decline mints a fresh offer with a
+  // fresh chip_id, so key-level supersession can never fire for the kind;
+  // without kind-level supersession a carried stale offer would survive
+  // alongside the fresh one (two live offers, ambiguous resume target).
+  function draftOffer(overrides: { id: string; turnCount?: number }): PendingAction {
+    return {
+      id: overrides.id,
+      scenario_id: SCENARIO,
+      chip_id: overrides.id,
+      action: {
+        kind: 'draft_graph',
+        brief_seed: 'Three pricing tiers for the new analytics product, mid-market focus.',
+        public_label: 'Build the model',
+        public_message: 'Yes, build the model from what I have shared.',
+      },
+      preconditions: {},
+      expires_at_turn_count: overrides.turnCount ?? 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-07-16T11:59:00.000Z',
+    };
+  }
+
+  it('a fresh offer this turn supersedes a carried stale offer (different chip_id)', () => {
+    const prior = [draftOffer({ id: 'stale-offer' })];
+    const thisTurn = [draftOffer({ id: 'fresh-offer' })];
+    const { survivors, summary } = computeSurvivingPriorPendingsDetailed(
+      prior, thisTurn, [], GRAPH_HASH, NOW,
+    );
+    expect(survivors).toHaveLength(0);
+    expect(summary).toMatchObject({ priorCount: 1, supersededCount: 1, survivedCount: 0 });
+  });
+
+  it('a carried offer still survives (TTL-decremented) when this turn mints no fresh offer', () => {
+    const prior = [draftOffer({ id: 'carried-offer', turnCount: 2 })];
+    const { survivors } = computeSurvivingPriorPendingsDetailed(
+      prior, [], [], GRAPH_HASH, NOW,
+    );
+    expect(survivors).toHaveLength(1);
+    expect(survivors[0]!.expires_at_turn_count).toBe(1);
+  });
+
+  it('a consumed offer (honoured by this turn draft) never carries forward', () => {
+    const prior = [draftOffer({ id: 'honoured-offer' })];
+    const { survivors, summary } = computeSurvivingPriorPendingsDetailed(
+      prior, [], ['honoured-offer'], GRAPH_HASH, NOW,
+    );
+    expect(survivors).toHaveLength(0);
+    expect(summary.consumedCount).toBe(1);
+  });
+
+  it('draft_graph kind-level supersession does not touch other carried kinds', () => {
+    const prior = [proposal({ ref: 'prop_b', turnCount: 2 })];
+    const thisTurn = [draftOffer({ id: 'fresh-offer' })];
+    const { survivors } = computeSurvivingPriorPendingsDetailed(
+      prior, thisTurn, [], GRAPH_HASH, NOW,
+    );
+    expect(survivors).toHaveLength(1);
+    expect(survivors[0]!.chip_id).toBe('prop_b');
+  });
+});
+
 describe('finaliseLifecycleAgainstCap — post-cap survivor/cap-drop split (Track 2)', () => {
   const preCap: PendingLifecycleSummary = {
     priorCount: 2,
