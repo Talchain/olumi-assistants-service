@@ -36,7 +36,7 @@ export const ROUTING_PROMPT_VERSION = 'v40';
  * / truncation disasters at module init.
  */
 export const EXPECTED_SYSTEM_CHARS_MIN = 18_500;
-export const EXPECTED_SYSTEM_CHARS_MAX = 22_000;
+export const EXPECTED_SYSTEM_CHARS_MAX = 29_000;
 
 export interface LoadedPrompt {
   readonly text: string;
