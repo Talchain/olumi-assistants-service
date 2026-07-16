@@ -450,13 +450,24 @@ Specific traps worth knowing about:
 - **G4 is scored per figure, not per turn**, so one turn inventing nine numbers
   cannot hide behind eight clean turns. Only the turn's *own* payload counts — a
   number that was canonical three turns ago is a staleness leak.
-- **G4 reads the whole numeric literal, and compares it rounded.** `prosePercentages`
-  parses integers, decimals and thousands-grouped figures, anchored on `%` or
-  "percent" (`62.5%` → `62.5`, not `5`). Because `payloadPercentages` is built
-  with `Math.round`, the stated figure is rounded through the *same* function
-  before lookup — otherwise a faithful `62.5%` restating a canonical `0.625`
-  (surfaced as `63`) would score 0. This tolerates restated precision, never an
-  invented value.
+- **G4 reads the whole numeric literal, and compares it rounded.** The figure
+  scanner parses integers, decimals and thousands-grouped figures, anchored on
+  `%` or "percent" (`62.5%` → `62.5`, not `5`). Because `payloadPercentages` is
+  built with `Math.round`, the stated figure is rounded through the *same*
+  function before lookup — otherwise a faithful `62.5%` restating a canonical
+  `0.625` (surfaced as `63`) would score 0. This tolerates restated precision,
+  never an invented value.
+- **G4's extractor fails closed BY CONSTRUCTION (round 6).** After five review
+  rounds each found new invisible figure shapes, extraction moved to two-layer
+  anchor accounting: a deliberately dumb Layer-1 detector finds *every*
+  percent-anchor token (`%`, `％`, percent / per cent / per-cent /
+  percentage point(s) / pp / pct — any case, hyphen/newline-separated), and
+  every Layer-1 anchor must be consumed by exactly one Layer-2 outcome (a
+  traced value or an explicit `unparseable`). An unconsumed anchor counts
+  untraceable — so an unknown future phrasing *blocks* instead of vanishing.
+  Percentage-point figures are a distinct unit and never trace against a `%`
+  canonical. See the module doc in `scorer/figure-scanner.ts` for the full
+  doctrine and the deliberate calibration costs.
 - **G5 is a count, not a rate**, so padding a run with silent turns cannot
   dilute a violation.
 - **G2 is symmetric** — "always mutate" fails the coach direction and "never
