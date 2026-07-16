@@ -152,6 +152,44 @@ export function buildScaffoldConfigureChip(
 }
 
 /**
+ * P1-2 — the LLM-facing disclosure line for the decision_review prompt
+ * context. The DR enricher threads `HandlerOutcome.__scaffolded_options`
+ * here and forwards the result on
+ * `DecisionReviewInvokeInput.scaffold_disclosure`; the prompt builders
+ * render it in an explicit `<SCAFFOLDED_OPTIONS>` section. Without it the
+ * review narrates a scaffolded option's placeholder numbers as real user
+ * data. Lives in THIS module so every disclosure surface (summary suffix,
+ * chip, DR prompt) shares one copy source. Deterministic; labels go through
+ * the same `sanitiseLabel` used everywhere else (falling back to the
+ * option id — this text goes to the LLM, which already sees graph ids, not
+ * to the user-facing wire).
+ */
+export function buildScaffoldPromptDisclosure(
+  scaffolded: readonly ScaffoldedOptionRecord[],
+): string {
+  if (scaffolded.length === 0) return '';
+  const lines = scaffolded.map((record) => {
+    const name =
+      record.label !== null
+        ? (sanitiseLabel(record.label, record.option_id) ?? record.option_id)
+        : record.option_id;
+    const factorCount = record.factor_ids.length;
+    return (
+      `Option '${name}' had no user-provided values, so the analysis used neutral ` +
+      `placeholder interventions on ${factorCount} factor${factorCount === 1 ? '' : 's'} ` +
+      `(value_defaulted). Its numbers are defaults, not user data.`
+    );
+  });
+  return (
+    `${lines.join('\n')}\n` +
+    'Because placeholder values shift every option\'s relative position, treat the WHOLE ' +
+    'comparison as illustrative until the scaffolded option(s) are configured. Never present ' +
+    'a scaffolded option\'s numbers as real or user-provided; caveat any comparison that ' +
+    'involves them.'
+  );
+}
+
+/**
  * Grammar source for the disclosure suffix, consumed by the registry-side
  * egress allowlist (`isAllowedRunAnalysisAssistantText`). Mirrors the three
  * builder shapes above exactly:

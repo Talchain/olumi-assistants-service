@@ -6457,6 +6457,12 @@ export async function runTurnExecutor(
               signal: turnAbort.signal,
               brief: resolvedBrief,
               ...(timingsEnabled ? { callTelemetrySink } : {}),
+              // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
+              // disclosure channel — the review must never narrate a
+              // scaffolded option's placeholder numbers as real user data.
+              ...(handlerOutcome.__scaffolded_options !== undefined
+                ? { scaffoldedOptions: handlerOutcome.__scaffolded_options }
+                : {}),
             });
           } catch (err) {
             // D-T orphaned-commit guard (Codex finding 3). The enricher

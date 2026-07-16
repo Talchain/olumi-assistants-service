@@ -645,6 +645,12 @@ export async function dispatchChipClickRunAnalysis(
         signal: turnAbort.signal,
         brief: context.scenarioBriefText,
         ...(timingsEnabled ? { callTelemetrySink } : {}),
+        // D-ask-1 (2.11 P0-1) — P1-2: same scaffolded-placeholder
+        // disclosure threading as the turn-executor decision-review block —
+        // the review must never narrate placeholder numbers as user data.
+        ...(outcome.__scaffolded_options !== undefined
+          ? { scaffoldedOptions: outcome.__scaffolded_options }
+          : {}),
       });
       if (timingsEnabled && callTelemetrySink.model !== undefined) {
         chipTurnTimings = {
