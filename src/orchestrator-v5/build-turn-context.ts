@@ -270,6 +270,18 @@ export interface RunAnalysisScenarioSnapshot {
    * (the handler-side declaration of this same snapshot shape).
    */
   readonly briefText?: string;
+  /**
+   * #343 CEE half — adopt-on-empty marker. True ONLY when the persisted
+   * `scenarios.graph` was GENUINELY null and this load adopted the
+   * request-supplied ingress graph (after the full readiness core passed);
+   * `rawPersistedGraph` then carries the canonical ADOPTED graph for the
+   * commit seams to persist atomically (behind a strict re-verify). Omitted
+   * (never false) on every non-adopted load. Mirrors the field on
+   * run-analysis.ts's `RunAnalysisScenarioSnapshot` (the handler-side
+   * declaration of this same snapshot shape — the handler-ownership
+   * invariant forbids importing it here, hence the structural mirror).
+   */
+  readonly adoptedIngressGraph?: true;
 }
 
 // v0.7.0 schema note: the ingress `OrchestratorTurnPayload` is a discriminated
