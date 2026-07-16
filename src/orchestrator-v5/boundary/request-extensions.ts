@@ -251,9 +251,10 @@ export function parseRequestExtensions(
     // the UNREPAIRED persisted graph at other parse sites — so repairing here
     // would fork graph identity and silently desync those tokens
     // (clarify_hash_mismatch on every pending proposal). A sigma <= 0 therefore
-    // passes through untouched and is floored at the COMPUTE boundary instead
-    // (PLoTClient.run → floorGraphSigmaForCompute), where it is actually
-    // consumed and where nothing hashes the result.
+    // passes through untouched and is floored at the persisted-load boundary
+    // instead (loadScenarioSnapshotForRunAnalysis → floorGraphSigmaForCompute,
+    // build-turn-context.ts — copy-on-write, BEFORE the GraphV3 parse there),
+    // where it is actually consumed and where nothing hashes the result.
     //
     // Values with no safe reading (non-finite, out-of-range probability/mean)
     // reject here, with the same BoundaryError shape as a structural failure so

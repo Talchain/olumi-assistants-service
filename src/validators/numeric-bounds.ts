@@ -8,9 +8,13 @@
  *       (src/orchestrator/patch-validation.ts), draft/repair graph responses
  *       (src/adapters/llm/shared-schemas.ts), and V5 proposal parameters
  *       (src/orchestrator-v5/routing/validation-registry.ts).
- * and they leave CEE in one direction:
- *   (a′) the outbound PLoT run payload (src/orchestrator/plot-client.ts) —
- *        the COMPUTE boundary, and the last place a value can be corrected.
+ * and they cross into the compute projection at one point:
+ *   (a′) the persisted-graph load for run_analysis
+ *        (`loadScenarioSnapshotForRunAnalysis`, build-turn-context.ts) —
+ *        BEFORE its `GraphV3.safeParse`, which rejects `std <= 0` and would
+ *        otherwise fail the turn first. (Round 3 placed the floor in
+ *        `PLoTClient.run`; that seam sits AFTER the parse on the only live
+ *        call chain, so the floor there was dead code.)
  *
  * Out-of-range values (probability 1.4, strength mean -7, Infinity) that slip
  * past these seams flow to PLoT/ISL where they corrupt analysis or crash late
@@ -90,11 +94,14 @@
  *       UI writer does not routinely produce them — so (3) is satisfied at the
  *       door without bricking anyone.
  *
- * Path (a′) — the COMPUTE boundary (PLoTClient.run):
- *   Where sigma is actually CONSUMED, `floorGraphSigmaForCompute` floors it to
- *   COMPUTE_SIGMA_FLOOR and meters it. This satisfies (3) for the one class
- *   that survives ingress, without ever touching the graph the hash is minted
- *   from. It is the same discipline as the neighbouring
+ * Path (a′) — the persisted-load boundary (loadScenarioSnapshotForRunAnalysis):
+ *   Where the persisted graph crosses into the compute projection,
+ *   `floorGraphSigmaForCompute` floors sigma to COMPUTE_SIGMA_FLOOR and meters
+ *   it — BEFORE the `GraphV3.safeParse` there (`std: z.number().positive()`),
+ *   which would otherwise reject the graph and fail the turn first. This
+ *   satisfies (3) for the one class that survives ingress, without ever
+ *   touching the graph the hash is minted from (`rawPersistedGraph` stays
+ *   unfloored). It is the same discipline as the neighbouring
  *   `guardAnalysisGraphIntercepts` ("a runtime guard, not a migration, and must
  *   not perturb freshness"), applied at the same seam. NOTE it must FLOOR and
  *   not FAIL: the live UI writer emits std=0 continuously, so failing here
@@ -345,7 +352,8 @@ function setAtPath(root: unknown, path: string[], value: number): unknown {
  * it either rejects it or hands the very same object back by reference. That
  * is the whole point — see the "WHY INGRESS DOES NOT REPAIR" section in the
  * module header. A sigma <= 0 is deliberately allowed THROUGH here; it is
- * floored later, at the compute boundary, by `floorGraphSigmaForCompute`.
+ * floored later, at the persisted-load boundary
+ * (loadScenarioSnapshotForRunAnalysis), by `floorGraphSigmaForCompute`.
  *
  * Rejects only the classes with no safe reading (non-finite, out-of-range
  * probability or strength.mean), which are exactly the classes the round-3
@@ -359,8 +367,11 @@ export function assertIngressGraphNumericBounds<T>(graph: T): GraphNumericIngres
 }
 
 /**
- * Sigma floor for the COMPUTE boundary (PLoTClient.run) — the point where the
- * graph is actually consumed for computation and leaves CEE.
+ * Sigma floor for the persisted-load boundary
+ * (`loadScenarioSnapshotForRunAnalysis`, build-turn-context.ts) — the point
+ * where the persisted graph crosses into the compute projection, applied
+ * BEFORE the `GraphV3.safeParse` there so the parse cannot reject the graph
+ * this floor exists to save.
  *
  * Floors non-positive `strength.std` / `observed_state.std` to
  * COMPUTE_SIGMA_FLOOR and reports each floor so we can see how much invalid

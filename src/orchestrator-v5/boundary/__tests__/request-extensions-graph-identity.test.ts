@@ -31,10 +31,14 @@
  * the one representation every side agrees on is "the raw persisted graph as
  * stored in scenarios.graph BEFORE any parse". Ingress repair re-breaks it.
  *
- * DOCTRINE (round-3 ruling): ingress preserves graph identity EXACTLY. The
- * sigma floor moves to the compute boundary (PLoTClient.run), which is where
- * the value is actually consumed and where a guard already exists that is
- * explicitly documented as "must not perturb freshness".
+ * DOCTRINE (round-3 ruling, locus corrected in round 4): ingress preserves
+ * graph identity EXACTLY. The sigma floor lives at the persisted-load
+ * boundary (`loadScenarioSnapshotForRunAnalysis`, build-turn-context.ts),
+ * copy-on-write BEFORE the `GraphV3.safeParse` there — where the value is
+ * actually consumed, and where a guard already exists that is explicitly
+ * documented as "must not perturb freshness". (Round 3 placed it in
+ * PLoTClient.run, AFTER that parse on the only live call chain — dead code;
+ * see build-turn-context-sigma-floor.test.ts.)
  */
 import { describe, it, expect } from 'vitest';
 
