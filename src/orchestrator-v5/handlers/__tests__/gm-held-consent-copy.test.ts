@@ -40,15 +40,15 @@ const GRAPH = {
 };
 
 describe('describeHeldOperationsSubject — names the held change', () => {
-  it("update_node resolves the node label from the graph → update 'Marketing'", () => {
+  it("update_node resolves the node label from the graph → update the description of 'Marketing'", () => {
     const subject = describeHeldOperationsSubject(
       [{ op: 'update_node', path: 'fac-marketing', value: { description: 'x' } }],
       GRAPH,
     );
-    expect(subject).toBe("update 'Marketing'");
+    expect(subject).toBe("update the description of 'Marketing'");
   });
 
-  it("add_node uses the new node's label → add 'Customer churn'", () => {
+  it("add_node uses the new node's label and kind → add risk 'Customer churn'", () => {
     const subject = describeHeldOperationsSubject(
       [
         {
@@ -59,15 +59,15 @@ describe('describeHeldOperationsSubject — names the held change', () => {
       ],
       GRAPH,
     );
-    expect(subject).toBe("add 'Customer churn'");
+    expect(subject).toBe("add risk 'Customer churn'");
   });
 
-  it("remove_node → remove 'Marketing'", () => {
+  it("remove_node → remove factor 'Marketing'", () => {
     const subject = describeHeldOperationsSubject(
       [{ op: 'remove_node', path: 'fac-marketing' }],
       GRAPH,
     );
-    expect(subject).toBe("remove 'Marketing'");
+    expect(subject).toBe("remove factor 'Marketing'");
   });
 
   it("add_edge → link 'Marketing' to 'Goal'", () => {
@@ -78,7 +78,7 @@ describe('describeHeldOperationsSubject — names the held change', () => {
     expect(subject).toBe("link 'Marketing' to 'Goal'");
   });
 
-  it('multi-op batches name the first op and count the rest', () => {
+  it('CHANGESET HONESTY (1.134): multi-op batches name EVERY op — never "N more changes"', () => {
     const subject = describeHeldOperationsSubject(
       [
         { op: 'update_node', path: 'fac-marketing', value: { description: 'x' } },
@@ -86,7 +86,10 @@ describe('describeHeldOperationsSubject — names the held change', () => {
       ],
       GRAPH,
     );
-    expect(subject).toBe("update 'Marketing' and 1 more change");
+    expect(subject).toBe(
+      "update the description of 'Marketing' and remove goal 'Goal'",
+    );
+    expect(subject).not.toMatch(/\d+\s+more\s+change/i);
   });
 
   it('returns null for an empty batch (caller falls back to the generic copy)', () => {

@@ -56,6 +56,7 @@ import {
   type HeldProposalBlockInput,
 } from '../compose/held-proposal.js';
 import { sanitisePublicCopyOrFallback } from '../compose/proposed-change.js';
+import { clampLabel, describeHeldOperationsSubject } from './describe-changeset.js';
 import type { HeldProposalBlock } from '@talchain/schemas/boundary';
 import { mutationTelemetryEvent } from '../graph-management/telemetry.js';
 import type {
@@ -250,90 +251,16 @@ export const GM_CLARIFY_ASSISTANT_TEXT =
 // leak unsafe copy).
 // ---------------------------------------------------------------------------
 
-/** Structural view of a patch operation — enough to name its subject. */
-export interface HeldOpLike {
-  readonly op: string;
-  readonly path: string;
-  readonly value?: unknown;
-}
-
-function opAsRecord(v: unknown): Record<string, unknown> {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : {};
-}
-
-/** Resolve a node id to its graph label; fall back to null (never the raw id —
- *  internal ids must not leak into user copy). */
-function nodeLabelFromGraph(graph: unknown, nodeId: string): string | null {
-  const nodes = opAsRecord(graph).nodes;
-  if (!Array.isArray(nodes)) return null;
-  for (const n of nodes) {
-    const rec = opAsRecord(n);
-    if (rec.id === nodeId && typeof rec.label === 'string' && rec.label.trim().length > 0) {
-      return rec.label.trim();
-    }
-  }
-  return null;
-}
-
-/** Truncate a label for chip/ask interpolation (keeps copy short). */
-function clampLabel(label: string): string {
-  const trimmed = label.trim().replace(/\s+/g, ' ');
-  return trimmed.length > 60 ? `${trimmed.slice(0, 57)}...` : trimmed;
-}
-
-/** Name ONE held operation, or null when nothing user-safe can be said. */
-function describeHeldOp(op: HeldOpLike, currentGraph: unknown): string | null {
-  switch (op.op) {
-    case 'add_node': {
-      const label = opAsRecord(op.value).label;
-      return typeof label === 'string' && label.trim().length > 0
-        ? `add '${clampLabel(label)}'`
-        : null;
-    }
-    case 'update_node': {
-      const label = nodeLabelFromGraph(currentGraph, op.path);
-      return label !== null ? `update '${clampLabel(label)}'` : null;
-    }
-    case 'remove_node': {
-      const label = nodeLabelFromGraph(currentGraph, op.path);
-      return label !== null ? `remove '${clampLabel(label)}'` : null;
-    }
-    case 'add_edge': {
-      const v = opAsRecord(op.value);
-      const from = typeof v.from === 'string' ? nodeLabelFromGraph(currentGraph, v.from) : null;
-      const to = typeof v.to === 'string' ? nodeLabelFromGraph(currentGraph, v.to) : null;
-      return from !== null && to !== null
-        ? `link '${clampLabel(from)}' to '${clampLabel(to)}'`
-        : null;
-    }
-    case 'remove_edge':
-    case 'update_edge':
-      // Edge paths carry internal ids; without a cheap safe resolution we
-      // stay generic rather than leak them.
-      return op.op === 'remove_edge' ? 'remove a link' : 'adjust a link';
-    default:
-      return null;
-  }
-}
-
-/**
- * Name a held batch: the first nameable operation plus a count of the
- * rest. Returns null when nothing user-safe can be derived — callers
- * fall back to the generic swept copy, never blank text.
- */
-export function describeHeldOperationsSubject(
-  operations: readonly HeldOpLike[],
-  currentGraph: unknown,
-): string | null {
-  if (operations.length === 0) return null;
-  const first = describeHeldOp(operations[0]!, currentGraph);
-  if (first === null) return null;
-  if (operations.length === 1) return first;
-  const rest = operations.length - 1;
-  return `${first} and ${rest} more ${rest === 1 ? 'change' : 'changes'}`;
-}
+// CHANGESET HONESTY MECHANISM (ROADMAP 1.134, kills F6+F7 — Paul,
+// 2026-07-16): the batch description is derived by ONE source function,
+// `describeChangeset` (./describe-changeset.ts), which names EVERY
+// operation specifically — the pre-mechanism collapse of ops 2..n into
+// "and N more changes" left GM unable to audit its own applied changeset
+// on all three surfaces (hold ask, chip, receipt). The seam is re-exported
+// under its original name so the three surfaces keep converging on it; a
+// second same-named implementation here is the drift vector that created
+// the defect (the two-`generateGraphHash` class) and must never return.
+export { describeHeldOperationsSubject, type HeldOpLike } from './describe-changeset.js';
 
 /** True iff `subject` survives the render-safety filter verbatim
  *  (no em dash, no internal tokens — the same filter chips render with). */
@@ -344,9 +271,23 @@ function subjectIsSafe(subject: string): boolean {
 /**
  * The held consent ask, NAMED. Falls back to the generic swept
  * {@link GM_HELD_ASSISTANT_TEXT} when no safe subject is available.
+ *
+ * CHANGESET HONESTY (1.134): the subject now enumerates EVERY operation
+ * in the held batch, so a multi-op hold states the changes plurally and
+ * lists them after a colon; the single-op framing is unchanged.
  */
-export function buildGmHeldAssistantText(subject: string | null): string {
+export function buildGmHeldAssistantText(
+  subject: string | null,
+  opCount: number = 1,
+): string {
   if (subject === null || !subjectIsSafe(subject)) return GM_HELD_ASSISTANT_TEXT;
+  if (opCount > 1) {
+    return (
+      `I'm holding these changes rather than applying them straight away: ${subject}. ` +
+      'Nothing in the model moves until you confirm. Reply yes to continue, or tell ' +
+      'me what to adjust instead.'
+    );
+  }
   return (
     `I'm holding the change to ${subject} rather than applying it straight away. ` +
     'Nothing in the model moves until you confirm. Reply yes to continue, or tell ' +
@@ -763,6 +704,7 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
         // (falls back to the generic swept copy when no safe subject).
         assistantText: buildGmHeldAssistantText(
           describeHeldOperationsSubject(input.operations, input.currentGraph),
+          input.operations.length,
         ),
         suggestedActions: [held.chip],
         pendingActions: [held.pending],

@@ -166,7 +166,7 @@ describe('live verdict routing', () => {
     // held ask NAMES the change it is holding, keeping the swept
     // consent framing ("Nothing in the model moves until you confirm").
     // D-O consent naming unchanged by D-S.
-    expect(d.assistantText).toContain("add 'New factor'");
+    expect(d.assistantText).toContain("add factor 'New factor'");
     expect(d.assistantText).toContain('Nothing in the model moves until you confirm');
     expect(findSuccessClaimHit(d.assistantText!)).toBeNull();
     expect(findForbiddenPhraseHit(d.assistantText!)).toBeNull();
@@ -180,8 +180,8 @@ describe('live verdict routing', () => {
     // Chip copy names its subject (consent-clarity), so a chip click /
     // typed reply resolves to THIS hold via exact-match, never a bare
     // 'Yes' colliding with other live consents.
-    expect(d.suggestedActions![0]!.label).toBe("Add 'New factor'");
-    expect(d.suggestedActions![0]!.message).toBe("Yes, add 'New factor'.");
+    expect(d.suggestedActions![0]!.label).toBe("Add factor 'New factor'");
+    expect(d.suggestedActions![0]!.message).toBe("Yes, add factor 'New factor'.");
     expect(findForbiddenPhraseHit(d.suggestedActions![0]!.label)).toBeNull();
     expect(d.publicReason).toMatchObject({
       source: 'graph_management',
