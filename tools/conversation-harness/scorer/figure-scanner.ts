@@ -135,9 +135,45 @@
  * 'pct' since round 6 — never valued, never invisible); soft hyphens
  * (U+00AD) are normalised away before scanning.
  *
+ * ==========================================================================
+ * ROUND 8 — three recognizer-edge holes, closed WITHOUT weakening round 7
+ * ==========================================================================
+ * (1) P0 — the fraction-word carve-out re-opened the shared-anchor class for
+ *     the scanner's OWN lexicon: 'between a third and 95%' anchored on the
+ *     digit bound, 'third' never entered the literal stream, and the
+ *     fabricated fraction bound scored 1.000 invisibly. The carve-out is now
+ *     CONDITIONED ON GLUE CONTEXT: a fraction word list/range-glued to a
+ *     numeric neighbour (and/or/to, dashes, a 'between'-partner, a list
+ *     comma — the same glue classes the cluster grammar recognises, one
+ *     optional article allowed) enters the token stream, so the cluster
+ *     grammar refuses the form whole or reconciliation v2 flags the
+ *     stranded token. Plain partitive prose ('half the users churned',
+ *     'a third of users hit 40%') keeps the carve-out — that over-block
+ *     motive is real. The ', maybe'-comma straddle ('roughly a third,
+ *     maybe 95%') stays shielded by the round-5 clause doctrine, identical
+ *     to its digit twin — a FILED follow-up, not a fraction-word special.
+ * (2) P1 — FOREIGN_NUMERAL_RE was a hand-enumerated mirror of 3 Unicode
+ *     ranges (the programme's dominant defect class): Devanagari, Thai,
+ *     Bengali, Tamil, superscript digit runs were invisible. Now DERIVED
+ *     via Unicode property escapes (\p{Nd} minus ASCII + \p{No}) — every
+ *     script is covered by construction, not by enumeration.
+ * (3) P1 — bare 'point'/'points' joins the pp anchor family in BOTH layers
+ *     with the SAME treatment as pts/pt/bps ('up 12 points' was invisible
+ *     whenever a comma/sentence boundary separated it from a %-anchor).
+ *     Same calibration cost as every pp token: recognised, refused, never
+ *     valued — and a bare prose 'point' with no number fails closed via
+ *     invariant v1, exactly like 'shown in pts'.
+ *
  * DOCUMENTED RESIDUALS — OUTSIDE the contract, pinned out-of-scope in tests:
  *  - bare numbers in clauses with NO anchor ('we ran 3 scenarios.') are not
  *    figures; a clause comma shields ('Across 3 cohorts, 40% converted').
+ *    The same shield covers the ', maybe'-straddle for EVERY token kind,
+ *    fraction words included ('roughly a third, maybe 95%' ==
+ *    'roughly 33, maybe 95%') — filed follow-up, round-5 doctrine.
+ *  - ordinal/quantity words OUTSIDE the closed lexicon ('fifth', 'dozen',
+ *    'twice') are not numeric tokens — ACCEPTED scope (round 8): the lexicon
+ *    is closed on cardinal number words + %-adjacent fractions; growing it
+ *    word-by-word is the hand-maintained-mirror trap. Pinned in tests.
  *  - implicit/ratio figures with no anchor token: 'your win probability
  *    halved', 'one in five runs fails'.
  *  - compound modifiers ('a one-off gain', 'ten-fold') are not numeric
@@ -238,8 +274,10 @@ const CORE_NUMBER_WORDS = [
   'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
   'hundred', 'thousand', 'million', 'billion',
 ];
-/** Fraction words are numeric tokens ONLY when %-adjacent ('half a percent'
- * yes; 'half the users' no — see module doc). */
+/** Fraction words are numeric tokens when %-adjacent ('half a percent') OR —
+ * ROUND 8 — when list/range-GLUED to a numeric neighbour ('between a third
+ * and 95%'); plain partitive prose ('half the users') stays carved out —
+ * see module doc. */
 const FRACTION_WORDS = ['half', 'third', 'thirds', 'quarter', 'quarters'];
 const FRACTION_SET = new Set(FRACTION_WORDS);
 
@@ -252,6 +290,40 @@ const WORD_SEQ_RE = new RegExp(
   `\\b(?:${WORD_ALT})(?:(?:[ \\t]+|-)(?:${WORD_ALT}))*\\b`,
   'gi',
 );
+
+// ---------- ROUND 8 (P0): glue-context condition on the fraction carve-out --
+
+/** A numeric neighbour as seen from a glue edge: a (possibly signed) digit
+ * run, a percent glyph (an anchored literal's tail), or a word-number from
+ * the closed lexicon. */
+const FRACTION_GLUE_NUM_RIGHT = `(?:[-+±−]?\\.?[0-9]|[%％]|(?:${WORD_ALT})\\b)`;
+const FRACTION_GLUE_NUM_LEFT = `(?:[0-9]|[%％]|(?:${WORD_ALT}))`;
+/** Right glue: conjunction/'to' (optionally after a comma), a bare LIST
+ * comma, or a dash — then one optional article — then a numeric neighbour.
+ * These are the SAME glue classes the cluster grammar recognises; a comma
+ * followed by a non-number ('a third, maybe 95%') is a clause boundary and
+ * does NOT match (round-5 shield doctrine, deliberately untouched). */
+const FRACTION_RIGHT_GLUE_RE = new RegExp(
+  `^(?:\\s*,?\\s*(?:and|or|to)\\s+|\\s*,\\s*|\\s*[–—-]\\s*)(?:an?\\s+)?${FRACTION_GLUE_NUM_RIGHT}`,
+  'i',
+);
+/** Left glue: a numeric neighbour, then conjunction/'to' (optionally after a
+ * comma) or a dash, then one optional article ('between 95% and a third',
+ * 'either 95% or half'). A BARE left comma is not glue — it is the round-5
+ * clause boundary. */
+const FRACTION_LEFT_GLUE_RE = new RegExp(
+  `${FRACTION_GLUE_NUM_LEFT}(?:\\s*,?\\s*(?:and|or|to)\\s+|\\s*[–—-]\\s*)(?:an?\\s+)?$`,
+  'i',
+);
+
+/** ROUND 8 (P0): true when a fraction word is list/range-glued to a numeric
+ * neighbour on either side — it must then enter the token stream so the
+ * cluster grammar refuses the shared-anchor form whole or reconciliation v2
+ * flags the stranded token. Mutation hook: forcing this to `false` restores
+ * the round-7 unconditional carve-out (the verified P0 leak). */
+function fractionGlueContext(text: string, start: number, end: number): boolean {
+  return FRACTION_RIGHT_GLUE_RE.test(text.slice(end)) || FRACTION_LEFT_GLUE_RE.test(text.slice(0, start));
+}
 
 /** Last `n` words immediately before `pos`, lowercased, not crossing a
  * clause boundary (the shared CUE_BOUNDARY set — round 6). Hyphenated words
@@ -417,9 +489,11 @@ function scanWordNumberLiterals(text: string): Literal[] {
     if (text[start - 1] === '-' && /[a-z]/i.test(text[start - 2] ?? '')) continue;
     const anchor = matchAnchorAfterWord(text, end);
     if (anchor === null) {
-      // Fraction words are numeric tokens only when %-adjacent.
+      // Fraction words are numeric tokens when %-adjacent — or (ROUND 8)
+      // when list/range-glued to a numeric neighbour; only plain partitive
+      // prose ('half the users') keeps the carve-out.
       const words = m[0].toLowerCase().split(/[^a-z]+/).filter(Boolean);
-      if (words.every((w) => FRACTION_SET.has(w))) continue;
+      if (words.every((w) => FRACTION_SET.has(w)) && !fractionGlueContext(text, start, end)) continue;
       // Compound modifiers ('one-off', 'ten-fold') are not numeric tokens.
       // (An anchored hyphen form — 'ninety-percent' — was caught above.)
       if (text[end] === '-' && /[a-z]/i.test(text[end + 1] ?? '')) continue;

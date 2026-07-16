@@ -915,6 +915,64 @@ describe('round 7 corpus: pp-delta-then-level, self-anchored splits, glyphs, sof
 });
 
 // ============================================================
+// ROUND 8 — permanent corpus for the round-7 review verdicts.
+// (1) P0: the fraction-word carve-out re-opened the shared-anchor class for
+// the scanner's OWN lexicon words — 'between a third and 95%' scanned
+// {values:[95], unparseable:0} because 'third' never entered the literal
+// stream. The carve-out is now conditioned on GLUE CONTEXT; the partitive
+// protections it exists for are pinned as the counterweight.
+// ============================================================
+
+describe('round 8 corpus: the round-7 P0 — fraction words re-opened the shared-anchor class', () => {
+  it('P0 family (verbatim from the round-7 verdict): glue-context entry, fail closed', () => {
+    // Round 7 scanned every one of these {values:[95], unparseable:0} — the
+    // fabricated fraction bound contributed NOTHING and scored 1.000.
+    expect(scanProseFigures('between a third and 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('between half and 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('either a quarter or 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('from a third to 95%')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('P0 gate: the fabricated fraction bound now blocks (was 1.000 fail-open)', () => {
+    const d = gateCanonicalStateUse([gateTurn('Expect between a third and 95% success.', [95])]);
+    expect(d.details.figures_stated).toBe(1);
+    expect(d.details.traceable).toBe(0);
+    expect(d.value).toBe(0);
+  });
+
+  it('left-glued and list-comma fraction bounds fail closed too', () => {
+    // Left glue: the fraction bound follows the anchored literal. The bound
+    // is visible either via the cluster (popped trailing member -> v2) or a
+    // broken-article glue (stranded token -> v2) — never silent.
+    expect(scanProseFigures('either 95% or half')).toEqual({ values: [95], unparseable: 1 });
+    expect(scanProseFigures('between 95% and a third')).toEqual({ values: [95], unparseable: 1 });
+    // List commas (the Oxford shapes) chain the fraction member in.
+    expect(scanProseFigures('outcomes of half, 20 and 30%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('outcomes of 10, a quarter and 30%')).toEqual({ values: [], unparseable: 1 });
+    // Dash glue, both dash kinds.
+    expect(scanProseFigures('a half–95% chance')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('half-95%')).toEqual({ values: [], unparseable: 2 }); // ASCII hyphen: both invariants fire (same as the core-word twin)
+  });
+
+  it("the fifth verified leak shape (', maybe' straddle) is the PRE-EXISTING round-5 clause shield — pinned identical to its digit twin, filed follow-up", () => {
+    // NOT a fraction-word special: the comma is a clause boundary for every
+    // token kind. Closing it means changing the round-5 shield doctrine —
+    // out of this round's scope by explicit instruction.
+    expect(scanProseFigures('roughly a third, maybe 95%')).toEqual({ values: [95], unparseable: 0 });
+    expect(scanProseFigures('roughly 33, maybe 95%')).toEqual({ values: [95], unparseable: 0 });
+  });
+
+  it('the carve-out protections stay clean (the over-block motive is real)', () => {
+    expect(scanProseFigures('half the users churned')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('a third of users hit 40%')).toEqual({ values: [40], unparseable: 0 });
+    expect(scanProseFigures('sold half, 20 units')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('half or a quarter of users churned')).toEqual({ values: [], unparseable: 0 });
+    // %-adjacent fraction words keep their round-5 treatment.
+    expect(scanProseFigures('about half a percent either way')).toEqual({ values: [], unparseable: 1 });
+  });
+});
+
+// ============================================================
 // ROUND 7 — PROPERTY GENERATOR v2 (the meta-lesson: the generator must be
 // taught every blindness the moment it is found). The round-6 generator
 // rendered exactly ONE number per anchor, so the shared-anchor P0 was
