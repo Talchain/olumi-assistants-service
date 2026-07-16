@@ -762,30 +762,37 @@ export async function dispatchChipClickRunAnalysis(
 
     try {
       // #343 adopt-on-empty — FIRST write of the adopted graph with the turn
-      // commit. Keyed off the snapshot marker (set only when the pre-load strict
-      // read found scenarios.graph genuinely null and the ingress graph passed
-      // the full readiness core). The PLoT run above takes seconds, so the
-      // pre-load's null is stale by construction: `reverifyAdoptedGraphFirstWrite`
-      // (the SHARED helper — same re-verify/withhold/fail-closed logic the
-      // TurnExecutor STEP 7 path uses) BEST-EFFORT re-reads the base. Its throw
-      // (a degraded re-verify → AdoptedGraphReverifyError) propagates into THIS
-      // commit try → the outer catch below returns `commit_failed` (retryable),
-      // symmetric with the routed path's STATE_COMMIT_FAILED: a graph-bearing
-      // commit is never taken on an unverifiable base (V5-D1-SHAPE-01 rule).
-      // Strong "never overwrite a concurrent write" holds only under
-      // graphCasMode==='enforce'; observe/off leaves a small TOCTOU window (see
-      // the helper's doc). CAS expecteds: base read was null → {null,null} →
-      // `first_write` category. commitDirectAnswer here (unlike the TurnExecutor
-      // commitTurn wrapper) does not derive CAS, so we attach it explicitly.
+      // commit. Keyed off the SAME outcome channel the TurnExecutor STEP 7
+      // seam reads (`outcome.__adopted_ingress_graph`): run-analysis.ts
+      // populates it — with `snapshot.rawPersistedGraph` — only when the
+      // reader adopted (persisted graph genuinely null + ingress passed the
+      // full readiness core), and on this path the handler ran through the
+      // one-shot reader returning the exact `cachedSnapshot`, so the channel
+      // provably carries the cached snapshot's canonical adopted graph. ONE
+      // detection of one fact — a snapshot-marker re-derivation here would be
+      // a second, drift-prone copy of the handler's own decision.
+      //
+      // The PLoT run above takes seconds, so the pre-run null is stale by
+      // construction: `reverifyAdoptedGraphFirstWrite` (the SHARED helper —
+      // same re-verify/withhold/fail-closed logic STEP 7 uses) BEST-EFFORT
+      // re-reads the base. Its throw (a degraded re-verify →
+      // AdoptedGraphReverifyError) propagates into THIS commit try → the outer
+      // catch below returns `commit_failed` (retryable), symmetric with the
+      // routed path's STATE_COMMIT_FAILED: a graph-bearing commit is never
+      // taken on an unverifiable base (V5-D1-SHAPE-01 rule). Strong "never
+      // overwrite a concurrent write" holds only under
+      // graphCasMode==='enforce'; observe/off leaves a small TOCTOU window
+      // (see the helper's doc). CAS expecteds: base read was null →
+      // {null,null} → `first_write` category. commitDirectAnswer here (unlike
+      // the TurnExecutor commitTurn wrapper) does not derive CAS, so we
+      // attach it explicitly.
       let adoptedGraphCommitFields: Record<string, unknown> = {};
-      if (
-        cachedSnapshot?.adoptedIngressGraph === true &&
-        cachedSnapshot.rawPersistedGraph != null
-      ) {
+      const adoptedIngressGraphForCommit = outcome.__adopted_ingress_graph;
+      if (adoptedIngressGraphForCommit != null) {
         const decision = await reverifyAdoptedGraphFirstWrite({
           scenarioId: payload.scenario_id,
           requestId,
-          adoptedGraph: cachedSnapshot.rawPersistedGraph,
+          adoptedGraph: adoptedIngressGraphForCommit,
           dispatchPath: 'chip_click_run_analysis',
         });
         if (decision.write) {

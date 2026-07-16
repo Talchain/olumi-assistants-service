@@ -46,6 +46,10 @@ import {
   type InterventionConversion,
 } from './tools/plot-intervention-scale.js';
 import { assessAnalysisReadiness, AnalysisNotReadyError } from './tools/handlers/analysis-ready-core.js';
+// Types-only base for the run_analysis snapshot's shared fields — see the
+// module doc: zero runtime coupling; the handler-ownership check gates the
+// RUNTIME handler module (tools/handlers/run-analysis), not this sibling.
+import type { RunAnalysisSnapshotSharedFields } from './tools/handlers/run-analysis-snapshot-types.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from './coaching/coaching-state-snapshot.js';
@@ -56,6 +60,7 @@ import {
   type CoachingLifecycle,
 } from './coaching/coaching-lifecycle.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
+import { summariseGraphCounts } from './context/build-context-summary.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
@@ -221,7 +226,18 @@ export interface BuildTurnContextOptions {
   readonly sessionStore?: SessionStore;
 }
 
-export interface RunAnalysisScenarioSnapshot {
+/**
+ * Reader-side declaration of the run_analysis snapshot. The handler-side
+ * contract lives in tools/handlers/run-analysis.ts (the handler-ownership
+ * invariant forbids importing that RUNTIME module here); the shared
+ * optional-metadata fields derive from the types-only base
+ * `run-analysis-snapshot-types.ts` so the two declarations cannot drift on
+ * those fields. Only the genuinely-divergent fields are declared here:
+ * `graph` is the GraphV3-PARSED form on this side (the handler side keeps
+ * `unknown`), and `rawPersistedGraph` is narrowed optional→REQUIRED because
+ * production loads always populate it.
+ */
+export interface RunAnalysisScenarioSnapshot extends RunAnalysisSnapshotSharedFields {
   readonly graph: GraphV3T;
   readonly options: Array<{
     readonly id: string;
@@ -231,19 +247,8 @@ export interface RunAnalysisScenarioSnapshot {
   }>;
   readonly goal_node_id: string;
   /**
-   * V5 D1 (Brief: D1 deterministic handlers, P0-2 follow-up):
-   * `add_constraint` persists to `graph.goal_constraints` (top-level
-   * field on GraphV3). PLoT consumes them via the run payload's
-   * top-level `goal_constraints`, not via the graph object — so the
-   * handler must explicitly forward them. Surfaced on the snapshot
-   * so `runAnalysisHandler` can attach without a second graph parse.
-   */
-  readonly goal_constraints?: unknown;
-  /**
-   * V5 state-trust: the RAW persisted graph as stored in
-   * `scenarios.graph` BEFORE GraphV3.safeParse. This is the same shape
-   * turn-executor sees when it falls back to loadPersistedGraph +
-   * GraphStateIngressSchema.safeParse on a follow-up explain turn.
+   * Narrowed from the base's optional: every load from
+   * `loadScenarioSnapshotForRunAnalysis` populates it.
    *
    * Why surface this alongside the V3-parsed `graph` field: the V3
    * schema strips top-level `options` and `goal_node_id` (they're not
@@ -260,28 +265,6 @@ export interface RunAnalysisScenarioSnapshot {
    * and `goal_node_id`.
    */
   readonly rawPersistedGraph: unknown;
-  /**
-   * Lane 28 — brief pipeline: the persisted `scenarios.brief_text`,
-   * loaded on the SAME round trip as the graph (via
-   * `loadPersistedScenarioStateStrict` → `store.loadGraphAndBriefText`).
-   * Absent (not null) when no brief is persisted — the construction
-   * site spreads the key conditionally. Mirrors the optional
-   * `briefText` on run-analysis.ts's `RunAnalysisScenarioSnapshot`
-   * (the handler-side declaration of this same snapshot shape).
-   */
-  readonly briefText?: string;
-  /**
-   * #343 CEE half — adopt-on-empty marker. True ONLY when the persisted
-   * `scenarios.graph` was GENUINELY null and this load adopted the
-   * request-supplied ingress graph (after the full readiness core passed);
-   * `rawPersistedGraph` then carries the canonical ADOPTED graph for the
-   * commit seams to persist atomically (behind a strict re-verify). Omitted
-   * (never false) on every non-adopted load. Mirrors the field on
-   * run-analysis.ts's `RunAnalysisScenarioSnapshot` (the handler-side
-   * declaration of this same snapshot shape — the handler-ownership
-   * invariant forbids importing it here, hence the structural mirror).
-   */
-  readonly adoptedIngressGraph?: true;
 }
 
 // v0.7.0 schema note: the ingress `OrchestratorTurnPayload` is a discriminated
@@ -1309,18 +1292,19 @@ export async function loadScenarioSnapshotForRunAnalysis(
       }
       graphForSnapshot = verdict.canonicalGraph ?? ingressGraph;
       adoptedIngressGraph = true;
+      // Counts via the two-caller standard summariser (turn-executor +
+      // route-v2 use the same one) — no hand-rolled Array.isArray dance.
+      const adoptedCounts = summariseGraphCounts(
+        graphForSnapshot as Parameters<typeof summariseGraphCounts>[0],
+      );
       log.info(
         {
           event: 'v5.run_analysis.ingress_graph_adopted',
           request_id: requestId,
           scenario_id: scenarioId,
           readiness_status: verdict.status,
-          node_count: Array.isArray((graphForSnapshot as { nodes?: unknown[] })?.nodes)
-            ? (graphForSnapshot as { nodes: unknown[] }).nodes.length
-            : null,
-          edge_count: Array.isArray((graphForSnapshot as { edges?: unknown[] })?.edges)
-            ? (graphForSnapshot as { edges: unknown[] }).edges.length
-            : null,
+          node_count: adoptedCounts?.nodes ?? null,
+          edge_count: adoptedCounts?.edges ?? null,
         },
         'V5 run_analysis — no persisted graph; adopted the request-supplied ingress graph (#343 adopt-on-empty)',
       );

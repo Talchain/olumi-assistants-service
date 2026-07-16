@@ -51,6 +51,7 @@ import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
 import { getHandlerBudgetMs } from '../../budgets.js';
+import type { RunAnalysisSnapshotSharedFields } from './run-analysis-snapshot-types.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { collectInterventionControlledFactorIds } from '../../context/intervention-controlled-drivers.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
@@ -161,8 +162,13 @@ export const PLOT_BRIEF_MAX_CHARS = 10_000;
  *
  * The handler does NOT interpret these fields beyond passing them to PLoT.
  * The reader produces them; PLoT consumes them; the handler is the conduit.
+ *
+ * Shared optional-metadata fields (`goal_constraints`, `rawPersistedGraph`,
+ * `briefText`, `adoptedIngressGraph`) live in the types-only base
+ * (`run-analysis-snapshot-types.ts`) so this contract and build-turn-context's
+ * reader-side declaration derive from ONE source instead of hand-mirroring.
  */
-export interface RunAnalysisScenarioSnapshot {
+export interface RunAnalysisScenarioSnapshot extends RunAnalysisSnapshotSharedFields {
   /** The current graph (PLoT consumes as-is). */
   readonly graph: unknown;
   /** PLoT-shape options: each with {id, option_id, label, interventions{}}. */
@@ -173,36 +179,6 @@ export interface RunAnalysisScenarioSnapshot {
   readonly seed?: number;
   /** Optional sample count passed through to PLoT if present. */
   readonly n_samples?: number;
-  /** PLoT's `goal_constraints` field (not called `constraints`). */
-  readonly goal_constraints?: unknown;
-  /**
-   * V5 state-trust: raw persisted graph BEFORE any parse, so the
-   * freshness hash matches what turn-executor sees on follow-up
-   * explain turns. Optional for backwards compat with test snapshots
-   * built without it; production snapshots from
-   * loadScenarioSnapshotForRunAnalysis always populate it.
-   */
-  readonly rawPersistedGraph?: unknown;
-  /**
-   * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
-   * scenario, loaded by `loadScenarioSnapshotForRunAnalysis` in the same
-   * round trip as the graph. Omitted when no brief has been persisted (or
-   * the persisted value coerced to null). Forwarded to PLoT as the
-   * top-level `brief` field ONLY behind `config.cee.sendBriefToPlot`
-   * (default OFF — doctrine ask D5, brief-to-PLoT privacy, is Paul-gated).
-   */
-  readonly briefText?: string;
-  /**
-   * #343 CEE half — adopt-on-empty marker. True ONLY when the persisted
-   * `scenarios.graph` was GENUINELY null and the reader adopted the
-   * request-supplied ingress graph (after the full readiness core passed).
-   * `rawPersistedGraph` then carries the canonical ADOPTED graph, and the
-   * commit seams (chip-click dispatch / TurnExecutor STEP 7) persist it
-   * atomically with the turn — behind a commit-time strict re-verify so a
-   * concurrent canonical write is never overwritten. Omitted (never false)
-   * on every non-adopted load, keeping existing snapshots byte-identical.
-   */
-  readonly adoptedIngressGraph?: true;
 }
 
 /**
