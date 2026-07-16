@@ -165,6 +165,17 @@ export const TelemetryEvents = {
   // state_read_failed_fallthrough; `trigger`: copy_replay / bare_confirm).
   V5DraftOfferSeeded: "v5.draft_offer.seeded",
   V5DraftOfferResumed: "v5.draft_offer.resumed",
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
+  // CEE_CLARIFY_V2_ENABLED. `questions_emitted` fires once per clarify
+  // response (fields: round, phase, question_count, dimensions) —
+  // questions_emitted / drafts is the ask-rate counter the 1.94 promotion
+  // path requires, so the next "it never asks" regression is a dashboard
+  // fact, not a 7-day log dig. `proceeded` fires when preflight/resume
+  // hands the turn to the draft (fields: reason: complete /
+  // all_missing_already_asked / round_budget_exhausted / user_proceed /
+  // explicit_generate; resumed: bool).
+  V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
+  V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
 
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",

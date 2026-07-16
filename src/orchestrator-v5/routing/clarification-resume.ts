@@ -247,6 +247,13 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // non-mutating because applying the persisted concept does not
   // change the graph.
   proposed_concept: 'non_mutating',
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement). Draft-preflight
+  // clarification round state, claimed exclusively by the flag-gated
+  // clarify-v2 pre-route in route-v2. Resuming re-runs the deterministic
+  // brief rubric and either asks again or proceeds to draft — it never
+  // applies a persisted operator/value to the graph (there IS no graph at
+  // the pre-draft stage), so hash divergence is not a safety concern.
+  clarify_v2_round: 'non_mutating',
 };
 
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(

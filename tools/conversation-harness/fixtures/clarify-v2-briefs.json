@@ -1,0 +1,164 @@
+{
+  "description": "Clarify v2 eval-floor fixture pack (E0-B, ROADMAP 1.94 Option A replacement). ~20 decision briefs annotated with expected preflight behaviour: 'clarify' = the rubric MUST fire >=1 question (the retired clarifier's baseline was 0 questions on 100% of firings — this floor is RED against that baseline by construction); 'silent' = a complete brief MUST proceed with 0 questions (no busywork). Consumed by __tests__/clarify-v2-floors.harness-test.ts, which imports the PRODUCTION rubric/composer from src/ (never copies). All briefs are draft-shaped (>=30 chars + the decision regex) so they would actually reach the draft preflight on the live route.",
+  "briefs": [
+    {
+      "id": "thin-01-market-entry",
+      "brief": "Should we expand into the German market?",
+      "expected": "clarify",
+      "note": "Canonical thin brief: all four dimensions missing."
+    },
+    {
+      "id": "thin-02-crm-switch",
+      "brief": "Should we switch our CRM provider to something better?",
+      "expected": "clarify",
+      "note": "Vague improvement wish; no goal marker, no alternatives, no scale, no horizon."
+    },
+    {
+      "id": "thin-03-loyalty-relaunch",
+      "brief": "Whether to relaunch the loyalty programme for our customers?",
+      "expected": "clarify",
+      "note": "Decision named, everything else missing."
+    },
+    {
+      "id": "thin-04-second-office",
+      "brief": "Should we open a second office somewhere in Europe?",
+      "expected": "clarify",
+      "note": "No goal, no alternatives, no quantities, no timeframe."
+    },
+    {
+      "id": "thin-05-conference",
+      "brief": "Should we sponsor the big industry conference again?",
+      "expected": "clarify",
+      "note": "Recurring-spend decision with no stated stakes."
+    },
+    {
+      "id": "thin-06-support-inhouse",
+      "brief": "Should we bring customer support back in-house?",
+      "expected": "clarify",
+      "note": "Reversal decision; no explicit alternative phrasing."
+    },
+    {
+      "id": "thin-07-app-rebuild",
+      "brief": "Should we rebuild the mobile app from scratch?",
+      "expected": "clarify",
+      "note": "Big-bang engineering call with no scale or horizon."
+    },
+    {
+      "id": "thin-08-four-day-week",
+      "brief": "Should we introduce a four-day week at the company?",
+      "expected": "clarify",
+      "note": "Quantities incidentally satisfied ('four'); goal/options/timeframe still missing."
+    },
+    {
+      "id": "thin-09-acquisition",
+      "brief": "Should we acquire our smallest competitor while we can?",
+      "expected": "clarify",
+      "note": "M&A framing with no stakes or horizon."
+    },
+    {
+      "id": "thin-10-cloud-vendor",
+      "brief": "Should we move the platform to a different cloud vendor?",
+      "expected": "clarify",
+      "note": "Migration decision, nothing quantified."
+    },
+    {
+      "id": "thin-11-goal-only",
+      "brief": "Should we adopt the new CRM in order to improve retention?",
+      "expected": "clarify",
+      "note": "Goal present ('in order to improve'); options/timeframe/quantities missing."
+    },
+    {
+      "id": "thin-12-options-only",
+      "brief": "Should we build the feature in-house or outsource it to an agency?",
+      "expected": "clarify",
+      "note": "Options present ('or'); goal/timeframe/quantities missing."
+    },
+    {
+      "id": "thin-13-no-quantities",
+      "brief": "Should we hire a contractor or a permanent engineer this quarter? The goal is to reduce delivery risk.",
+      "expected": "clarify",
+      "note": "Only quantities missing — the rubric must fire exactly one question."
+    },
+    {
+      "id": "complete-01-hiring",
+      "brief": "Should we hire a senior tech lead or two junior developers to accelerate the platform rebuild this year?",
+      "expected": "silent",
+      "note": "Goal (to accelerate), options (or), quantities (two), timeframe (this year)."
+    },
+    {
+      "id": "complete-02-launch-market",
+      "brief": "Whether to launch in Germany or France next quarter — the goal is to increase revenue by 20%.",
+      "expected": "silent",
+      "note": "Explicit goal clause, both options, percentage, horizon."
+    },
+    {
+      "id": "complete-03-ads-vs-hire",
+      "brief": "Should we spend £50k on paid ads or on a sales hire this quarter? We want to increase qualified pipeline.",
+      "expected": "silent",
+      "note": "Currency, options, want-to goal, quarter horizon."
+    },
+    {
+      "id": "complete-04-pricing",
+      "brief": "Should we raise prices by 10% or hold them this year? The aim is to protect margin.",
+      "expected": "silent",
+      "note": "Aim, or-options, percentage, this-year horizon."
+    },
+    {
+      "id": "complete-05-lease",
+      "brief": "Decide between renewing the office lease for two years or going fully remote in 2027 in order to cut costs.",
+      "expected": "silent",
+      "note": "In-order-to goal, or-options, number word, year."
+    },
+    {
+      "id": "complete-06-billing",
+      "brief": "Should we migrate to the new billing system now or in Q3? Success means fewer than 5 support tickets a week.",
+      "expected": "silent",
+      "note": "Success-means goal, or-options, digit, Q3 horizon."
+    },
+    {
+      "id": "complete-07-contractors",
+      "brief": "Should we hire three contractors or one agency for the website rebuild, to cut delivery time, within two months?",
+      "expected": "silent",
+      "note": "To-cut goal, or-options, number words, within-months horizon."
+    }
+  ],
+  "resume_scripts": [
+    {
+      "id": "resume-01-partial-answer-no-repeat",
+      "brief": "Should we expand into the German market?",
+      "turns": [
+        {
+          "message": "The goal is to increase revenue.",
+          "expect": "ask_only_never_asked_dimensions"
+        },
+        {
+          "message": "The stakes are in the tens of thousands of pounds.",
+          "expect": "proceed"
+        }
+      ],
+      "note": "Round 1 asks 3 of 4 missing dims; the answer fills goal; round 2 may ask ONLY the never-asked dim (quantities); after that answer every still-missing dim was already asked, so the stop rule proceeds with defaults."
+    },
+    {
+      "id": "resume-02-full-answer-proceeds",
+      "brief": "Should we expand into the German market?",
+      "turns": [
+        {
+          "message": "The goal is to increase revenue; the alternative is doing nothing; the stakes are around £200,000; it plays out within this year.",
+          "expect": "proceed"
+        }
+      ],
+      "note": "A single answer completing the brief must draft immediately — never a second round of busywork."
+    },
+    {
+      "id": "resume-03-user-proceed",
+      "brief": "Should we expand into the German market?",
+      "turns": [
+        {
+          "message": "go ahead",
+          "expect": "proceed"
+        }
+      ],
+      "note": "The explicit ready-to-draft escape: a go-ahead always proceeds with the working brief."
+    }
+  ]
+}

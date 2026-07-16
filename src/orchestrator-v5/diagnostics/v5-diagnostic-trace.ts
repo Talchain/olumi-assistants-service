@@ -182,6 +182,12 @@ export type V5DiagnosticExitPath =
   // consent turn resumes through the draft-offer pre-route and exits as
   // a normal `draft_graph`.
   | 'explicit_generate_graph_present'
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — flag-gated
+  // (CEE_CLARIFY_V2_ENABLED) draft-preflight clarification response: the
+  // deterministic brief rubric found the brief thin and the route replied
+  // with up to 3 tap-able questions instead of dispatching the draft.
+  // Zero LLM calls on this path.
+  | 'clarify_v2'
   | 'draft_graph_error';
 
 // ─── Inputs ────────────────────────────────────────────────────────────────
