@@ -45,7 +45,14 @@ function makePayload(): MessageTurnPayload {
 }
 
 function makeAnalysis(
-  drivers: ReadonlyArray<{ id: string; label: string; sensitivity: number; direction: 'positive' | 'negative' }>,
+  drivers: ReadonlyArray<{
+    id: string;
+    label: string;
+    sensitivity: number;
+    direction: 'positive' | 'negative';
+    // DGAI #341: fixtures carry influence_score alongside the signed sensitivity.
+    influence_score: number;
+  }>,
 ): AnalysisResponseSummary {
   return {
     winner: { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.6 },

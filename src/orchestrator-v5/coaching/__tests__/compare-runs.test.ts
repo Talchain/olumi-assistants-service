@@ -16,7 +16,9 @@ interface OptionSpec {
   id: string;
   label: string;
   win: number;
-  drivers?: Array<{ id: string; label: string; sensitivity: number }>;
+  // DGAI #341: fixtures now carry `influence_score` alongside `sensitivity`
+  // because driver ranking reads influence_score (see `envelope` below).
+  drivers?: Array<{ id: string; label: string; sensitivity: number; influence_score: number }>;
 }
 
 function envelope(opts: {
@@ -34,10 +36,9 @@ function envelope(opts: {
         node_id: d.id,
         label: d.label,
         sensitivity: d.sensitivity,
-        // DGAI #341: driver ranking reads influence_score only; the spec's
-        // `sensitivity` doubles as the influence magnitude here (sign carried
-        // by `sensitivity` for direction fallback).
-        influence_score: Math.abs(d.sensitivity),
+        // DGAI #341: driver ranking reads influence_score; fixtures supply it
+        // explicitly (direction carried separately by `sensitivity`'s sign).
+        influence_score: d.influence_score,
         direction: 'increases',
       })),
     })),
