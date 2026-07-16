@@ -84,6 +84,19 @@ export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
   readonly request: FastifyRequest;
+  /**
+   * ROADMAP 2.63 C2 — server-assembled decision brief for explicit-generate
+   * turns (`generate_model` / `explicit_generate` wire flag). When set, the
+   * pipeline drafts from THIS text instead of `payload.message`: the wire
+   * message on a confirm-chip click is the chip's canned label, not the
+   * brief. Redirects every brief consumer in this dispatcher (the unified
+   * pipeline input, brief-text persistence, context-budget telemetry, the
+   * V6 dual-draft enrichment brief) — but NOT the committed turn's
+   * `user_message`, which stays the verbatim wire message so the
+   * conversation record remains honest. Absent on the route's heuristic
+   * (isDraftGraphShape) path, where behaviour is unchanged.
+   */
+  readonly briefOverride?: string;
 }
 
 export interface DispatchDraftGraphResult {
@@ -338,9 +351,14 @@ export async function dispatchDraftGraph(
   const { payload, requestId, request } = params;
   const startedAt = Date.now();
 
+  // C2 — the brief the pipeline drafts from. `payload.message` except on
+  // the explicit-generate path, where route-v2 assembled the real brief
+  // server-side (see DispatchDraftGraphParams.briefOverride).
+  const effectiveBrief = params.briefOverride ?? payload.message;
+
   let draftResult: DraftGraphResult;
   try {
-    draftResult = await handleDraftGraph(payload.message, request, payload.turn_id);
+    draftResult = await handleDraftGraph(effectiveBrief, request, payload.turn_id);
   } catch (err) {
     log.error(
       {
@@ -392,8 +410,8 @@ export async function dispatchDraftGraph(
         prompt_hash: draftResult.toolLLMTelemetry.prompt_hash ?? null,
         request_id: requestId,
         scenario_id: payload.scenario_id,
-        section_chars: { brief: payload.message.length },
-        total_chars: payload.message.length,
+        section_chars: { brief: effectiveBrief.length },
+        total_chars: effectiveBrief.length,
         truncations: [],
         summary_lag_turns: null,
         ui_narrowed: null,
@@ -428,7 +446,7 @@ export async function dispatchDraftGraph(
         const { enrichDraftGraph, m2LlmCallMade } = await import('../../cee/dual-draft/index.js');
         const outcome = await enrichDraftGraph({
           graph: draftResult.graphOutput,
-          brief: payload.message,
+          brief: effectiveBrief,
           analysisReady: draftResult.analysisReady ?? null,
           requestId,
           scenarioId: payload.scenario_id,
@@ -507,7 +525,11 @@ export async function dispatchDraftGraph(
     // as the DB CHECK constraint, with truncation rather than failure
     // on over-length inputs. Whitespace-only payloads collapse to
     // undefined → RPC param NULL → no write.
-    const briefNorm = normaliseBriefText(payload.message);
+    // C2 — persist the EFFECTIVE brief (the assembled one on explicit-
+    // generate turns): brief_text is what downstream enrichers (decision_
+    // review) and future draft turns read as "the user's brief", and the
+    // first-write-wins RPC predicate still protects an already-seeded value.
+    const briefNorm = normaliseBriefText(effectiveBrief);
     if (briefNorm.truncated) {
       emit(TelemetryEvents.V5BriefTextNormalised, {
         request_id: requestId,

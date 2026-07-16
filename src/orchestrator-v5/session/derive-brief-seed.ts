@@ -52,7 +52,10 @@
 
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
-import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../../schemas/assist.js';
+import {
+  DRAFT_GRAPH_DECISION_BRIEF_REGEX,
+  DRAFT_GRAPH_MIN_BRIEF_LENGTH,
+} from '../../schemas/assist.js';
 import {
   normaliseBriefText,
   type NormaliseBriefTextResult,
@@ -60,13 +63,15 @@ import {
 
 /**
  * Positive decision-brief regex — common decision verbs or a trailing
- * question mark. MIRROR of `DRAFT_GRAPH_DECISION_BRIEF_REGEX` in
- * `src/orchestrator/route-v2.ts` (module-local there; duplicated here so the
- * session layer does not import the HTTP route). If you change one, change
- * both — `derive-brief-seed.test.ts` exercises the shape gate.
+ * question mark. Formerly a hand-synced MIRROR of the module-local copy in
+ * `src/orchestrator/route-v2.ts`; both now derive from the CANONICAL
+ * `DRAFT_GRAPH_DECISION_BRIEF_REGEX` export in `src/schemas/assist.ts`
+ * (ROADMAP 2.63 — the mirror could drift silently, and the session layer
+ * must not import the HTTP route). Re-exported under the historical name
+ * for existing consumers/tests; `derive-brief-seed.test.ts` exercises the
+ * shape gate.
  */
-export const BRIEF_SEED_DECISION_REGEX =
-  /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
+export const BRIEF_SEED_DECISION_REGEX = DRAFT_GRAPH_DECISION_BRIEF_REGEX;
 
 /**
  * Options for {@link deriveBriefTextSeed}. A dedicated object (not a bare

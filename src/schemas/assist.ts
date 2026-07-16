@@ -23,6 +23,27 @@ import { BiasType, TopologyPlanSchema, StrengthenItemActionType } from "@talchai
 export const DRAFT_GRAPH_MIN_BRIEF_LENGTH = 30;
 export const DRAFT_GRAPH_MAX_BRIEF_LENGTH = 5000;
 
+/**
+ * Positive decision-brief shape regex — common decision verbs or a trailing
+ * question mark.
+ *
+ * CANONICAL definition (ROADMAP 2.63 C1/C2). This regex previously existed
+ * as two hand-synced twins: a module-local copy in
+ * `src/orchestrator/route-v2.ts` (the draft_graph dispatch heuristic) and
+ * `BRIEF_SEED_DECISION_REGEX` in
+ * `src/orchestrator-v5/session/derive-brief-seed.ts` (the brief_text seed
+ * gate), each carrying a "keep the two in sync" comment. Both now derive
+ * from this single export, alongside the explicit-generate brief assembler
+ * (`src/orchestrator-v5/routing/assemble-explicit-generate-brief.ts`).
+ * Lives here with the brief length constants so no consumer has to import
+ * the HTTP route module.
+ *
+ * See `tests/integration/orchestrator/route-v2-draft-graph.test.ts` for
+ * regression cases including known false negatives.
+ */
+export const DRAFT_GRAPH_DECISION_BRIEF_REGEX =
+  /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
+
 export const DraftGraphInput = z.object({
   brief: z.string().min(DRAFT_GRAPH_MIN_BRIEF_LENGTH).max(DRAFT_GRAPH_MAX_BRIEF_LENGTH),
   attachments: z
