@@ -341,6 +341,15 @@ function sendFinalised200(
      */
     readonly reasoning?: string;
     /**
+     * ROADMAP 1.132 (F2) — validated coach/converse answer shape, threaded
+     * from `run.answerShape` (turn-executor; fail-closed capture — only
+     * present when the final assistant_text IS the shape-derived text).
+     * Attached to the wire body as `_answer_shape` AFTER egress validation
+     * when `config.features.answerShapeEnforced` is set — same re-attach
+     * mechanic as `_reasoning` — and NEVER on the fallback envelope.
+     */
+    readonly answerShape?: import('../orchestrator-v5/routing/answer-shape.js').AnswerShape;
+    /**
      * The user's message for THIS turn, verbatim, or `null` when the turn
      * carries none (system events). Threaded to the egress sanitiser's
      * looping-chip guard, which drops any pure-text-replay chip that would
@@ -415,7 +424,13 @@ function sendFinalised200(
     // gate at the re-attach block below is the sole authority, and the
     // strict `OlumiResponseSchema` must not see an unknown key.
     const hasReasoning = '_reasoning' in asRecord;
-    if (!hasTimings && !hasTrace && !hasContextSummary && !hasReasoning) {
+    // ROADMAP 1.132 — `_answer_shape` is threaded via `ctx`, never
+    // body-attached by any dispatch path today. Stripped defensively anyway
+    // (same defence-in-depth posture as `_reasoning`): the route's flag
+    // gate at the re-attach block below is the sole authority, and the
+    // strict `OlumiResponseSchema` must not see an unknown key.
+    const hasAnswerShape = '_answer_shape' in asRecord;
+    if (!hasTimings && !hasTrace && !hasContextSummary && !hasReasoning && !hasAnswerShape) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
     const cloned = { ...asRecord };
@@ -425,6 +440,7 @@ function sendFinalised200(
     delete cloned._diagnostic_trace;
     delete cloned._context_summary;
     delete cloned._reasoning;
+    delete cloned._answer_shape;
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -655,6 +671,24 @@ function sendFinalised200(
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _reasoning: ctx.reasoning,
+    };
+    wireBody = finaliseV5Response(
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+      ctx,
+    );
+  }
+  // Re-attach `_answer_shape` post-validation on the success path AND only
+  // when `config.features.answerShapeEnforced` is set (ROADMAP 1.132, same
+  // single-flag re-attach shape as `_reasoning` above). `ctx.answerShape`
+  // is threaded from `run.answerShape` (turn-executor) — the VALIDATED
+  // coach/converse shape whose derived text IS the final assistant_text
+  // (fail-closed capture). The fallback envelope never carries it; an
+  // upstream body-attach was dropped by the strip step above. Re-finalise
+  // for WeakSet membership, same as the other surfaces.
+  if (egress.ok && config.features.answerShapeEnforced && ctx.answerShape) {
+    const augmented: OlumiResponseWithDebugFields = {
+      ...wireBody,
+      _answer_shape: ctx.answerShape,
     };
     wireBody = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
@@ -2334,6 +2368,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // into the flag-gated `_reasoning` sidecar (see sendFinalised200 ctx
       // jsdoc). Undefined when the flag was off or no thinking was captured.
       ...(run.reasoning ? { reasoning: run.reasoning } : {}),
+      // ROADMAP 1.132: thread the turn-executor's validated answer shape
+      // into the flag-gated `_answer_shape` sidecar (see sendFinalised200
+      // ctx docs above).
+      ...(run.answerShape ? { answerShape: run.answerShape } : {}),
     });
   });
 }

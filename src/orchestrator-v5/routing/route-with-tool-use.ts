@@ -123,7 +123,7 @@ import { TelemetryEvents, emit } from '../../utils/telemetry.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 
 import {
-  OLUMI_ACTION_TOOL,
+  buildOlumiActionTool,
   OLUMI_ACTION_TOOL_NAME,
   ToolCallParseError,
   parseToolCallResponse,
@@ -554,7 +554,9 @@ export async function routeWithToolUse(
   let firstCallArgs: ChatWithToolsArgs = {
     ...initialSystem.fields,
     messages: [{ role: 'user', content: userMessage }],
-    tools: [OLUMI_ACTION_TOOL],
+    // ROADMAP 1.132 (F2): flag OFF returns the exact pre-flag
+    // OLUMI_ACTION_TOOL object; flag ON advertises `answer_shape`.
+    tools: [buildOlumiActionTool()],
     tool_choice: { type: 'auto' },
     temperature: 0,
     maxTokens: V5_ROUTING_MAX_OUTPUT_TOKENS,

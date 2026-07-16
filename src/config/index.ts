@@ -549,6 +549,28 @@ const ConfigSchema = z.object({
     //       after REPAIR_ONCE.
     // Flag OFF is byte-identical to pre-hardening behaviour on both layers.
     answerTextRequired: booleanString.default(false),
+    // CEE_ANSWER_SHAPE_ENFORCED — ROADMAP 1.132 (F2): schema-enforced
+    // coach/converse answer SHAPE `{ headline: 1 sentence, bullets: ≤3,
+    // detail }` so answers stop arriving as walls of prose. Default OFF and
+    // ships DARK — activation is Paul's. Flag-off is byte-identical: the
+    // served `olumi_action` tool definition is the exact pre-flag object
+    // (buildOlumiActionTool) and `answer_shape` remains rejected at parse.
+    // When true:
+    //   (A) SCHEMA PRESSURE — RawToolCallSchema (tool-schema.ts) REQUIRES a
+    //       valid answer_shape on coach/converse tool calls; any violation
+    //       flows through the EXISTING REPAIR_ONCE retry, then a typed
+    //       schema_repair_failed (same design as CEE_ANSWER_TEXT_REQUIRED).
+    //   (B) DERIVED LEGACY CHANNEL — answer_text is DERIVED from the shape
+    //       at parse (single source of truth), so every existing
+    //       answer_text/assistant_text consumer keeps a populated value.
+    //   (C) WIRE SIDECAR — the shape rides as the flag-gated `_answer_shape`
+    //       additive sidecar (route-v2 strip → validate → re-attach, same
+    //       mechanic as `_reasoning`; the vendored @talchain/schemas
+    //       OlumiResponseSchema is `.strict()` so a bare top-level field
+    //       would fail egress validation). Attached ONLY when the final
+    //       composed assistant_text is exactly the shape-derived text
+    //       (fail-closed against sanitiser/guard rewrites — turn-executor).
+    answerShapeEnforced: booleanString.default(false),
     // CEE_UI_DIRECTIVE_EMIT — ROADMAP 2.27 / seamlessness R4 (CEE half,
     // slice 1): flag-gated deterministic `ui_directive` block emitter.
     // Default OFF; flag-off is byte-identical to pre-slice behaviour (the
@@ -1316,6 +1338,7 @@ function parseConfig(): Config {
       graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
       answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
+      answerShapeEnforced: env.CEE_ANSWER_SHAPE_ENFORCED,
       uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,
       heldProposalEmit: env.CEE_HELD_PROPOSAL_EMIT,
       decisionRecordCapture: env.CEE_DECISION_RECORD_CAPTURE,

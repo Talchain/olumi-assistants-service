@@ -18,6 +18,12 @@ import { z } from 'zod';
 
 import { config } from '../../config/index.js';
 import {
+  ANSWER_SHAPE_TOOL_PROPERTY,
+  AnswerShapeSchema,
+  deriveAnswerTextFromShape,
+  type AnswerShape,
+} from './answer-shape.js';
+import {
   IntentClassSchema,
   CoachingModeSchema,
   ProposalActionSchema,
@@ -374,6 +380,35 @@ export const OLUMI_ACTION_TOOL = {
 } as const;
 
 /**
+ * CEE_ANSWER_SHAPE_ENFORCED (ROADMAP 1.132, F2) — the tool definition
+ * actually served to the model.
+ *
+ * Flag OFF (default): returns the exact `OLUMI_ACTION_TOOL` object above —
+ * byte-identical served definition, not even a clone, so dark deployment
+ * cannot change model behaviour (advertising a new field would already
+ * shift what the model emits).
+ *
+ * Flag ON: returns a copy extended with the `answer_shape` property
+ * (`ANSWER_SHAPE_TOOL_PROPERTY` — descriptive; the hard contract is
+ * `AnswerShapeSchema` enforced in `RawToolCallSchema` below). Everything
+ * else is structurally unchanged (pinned by
+ * tool-schema-answer-shape-enforced.test.ts).
+ */
+export function buildOlumiActionTool(): typeof OLUMI_ACTION_TOOL {
+  if (!config.features.answerShapeEnforced) return OLUMI_ACTION_TOOL;
+  return {
+    ...OLUMI_ACTION_TOOL,
+    input_schema: {
+      ...OLUMI_ACTION_TOOL.input_schema,
+      properties: {
+        ...OLUMI_ACTION_TOOL.input_schema.properties,
+        answer_shape: ANSWER_SHAPE_TOOL_PROPERTY,
+      },
+    },
+  } as typeof OLUMI_ACTION_TOOL;
+}
+
+/**
  * Parsed tool call response — the authoritative typed shape downstream code
  * consumes. Conditional rules (execute ⇔ action, clarify ⇔ clarification)
  * are enforced by the Zod refinement below; once parsed, consumers can trust
@@ -386,6 +421,7 @@ export type ToolCallResponse =
       coaching_mode?: undefined;
       clarification?: undefined;
       answer_text?: undefined;
+      answer_shape?: undefined;
     }
   | {
       intent_class: 'clarify';
@@ -393,6 +429,7 @@ export type ToolCallResponse =
       coaching_mode?: undefined;
       action?: undefined;
       answer_text?: undefined;
+      answer_shape?: undefined;
     }
   | {
       intent_class: 'converse';
@@ -403,6 +440,10 @@ export type ToolCallResponse =
       // description on the JSON schema above for the authoring contract.
       // Falls back to `orientationText` at compose time when absent.
       answer_text?: string;
+      // ROADMAP 1.132 (F2) — structured answer shape. Present ONLY when
+      // CEE_ANSWER_SHAPE_ENFORCED is on (then guaranteed valid, with
+      // `answer_text` derived from it — see parseToolCallResponse).
+      answer_shape?: AnswerShape;
     }
   | {
       intent_class: 'coach';
@@ -413,6 +454,10 @@ export type ToolCallResponse =
       // description on the JSON schema above for the authoring contract.
       // Falls back to `orientationText` at compose time when absent.
       answer_text?: string;
+      // ROADMAP 1.132 (F2) — structured answer shape. Present ONLY when
+      // CEE_ANSWER_SHAPE_ENFORCED is on (then guaranteed valid, with
+      // `answer_text` derived from it — see parseToolCallResponse).
+      answer_shape?: AnswerShape;
     };
 
 export class ToolCallParseError extends Error {
@@ -433,10 +478,77 @@ const RawToolCallSchema = z
     // ROADMAP 1.38 — optional full-answer channel for coach / converse.
     // See the JSON schema `answer_text` description above.
     answer_text: z.string().optional(),
+    // ROADMAP 1.132 (F2) — structured answer shape for coach / converse.
+    // Declared `unknown` so the conditional rules below own ALL validation:
+    // flag OFF preserves the pre-flag rejection (same failure class as the
+    // `.strict()` unknown-key error this key would otherwise produce); flag
+    // ON validates against AnswerShapeSchema with issues that flow through
+    // the EXISTING REPAIR_ONCE mechanism.
+    answer_shape: z.unknown().optional(),
   })
   .strict()
   .superRefine((obj, ctx) => {
-    const { intent_class, action, clarification, coaching_mode, answer_text } = obj;
+    const { intent_class, action, clarification, coaching_mode, answer_text, answer_shape } =
+      obj;
+    // CEE_ANSWER_SHAPE_ENFORCED (ROADMAP 1.132, F2 — default OFF, see
+    // config/index.ts). Flag OFF: `answer_shape` stays REJECTED exactly as
+    // the pre-flag `.strict()` schema rejected it (an unadvertised field the
+    // model cannot legitimately emit), so flag-off behaviour is byte-
+    // identical for every reachable input. Flag ON: coach/converse MUST
+    // carry a shape valid per AnswerShapeSchema (headline exactly one
+    // sentence, ≤3 non-blank bullets, non-blank detail); execute/clarify
+    // remain forbidden. Every violation is a plain Zod issue → the EXISTING
+    // REPAIR_ONCE retry in route-with-tool-use.ts, then a typed
+    // schema_repair_failed — no new retry plumbing (same design as
+    // CEE_ANSWER_TEXT_REQUIRED below).
+    let answerShapeValid = false;
+    if (!config.features.answerShapeEnforced) {
+      if (answer_shape !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['answer_shape'],
+          message:
+            'answer_shape is not accepted (CEE_ANSWER_SHAPE_ENFORCED is disabled) — put your complete answer in answer_text',
+        });
+      }
+    } else if (intent_class === 'execute' || intent_class === 'clarify') {
+      if (answer_shape !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['answer_shape'],
+          message:
+            intent_class === 'execute'
+              ? 'answer_shape is forbidden when intent_class === "execute" — use action.explanation.answer_text'
+              : 'answer_shape is forbidden when intent_class === "clarify" — use clarification.question',
+        });
+      }
+    } else {
+      // coach / converse with the flag ON: shape required + validated.
+      if (answer_shape === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['answer_shape'],
+          message:
+            `answer_shape is required when intent_class === "${intent_class}" ` +
+            '(CEE_ANSWER_SHAPE_ENFORCED is enabled) — populate headline (exactly ' +
+            'one sentence), bullets (at most 3) and detail with your complete ' +
+            'user-facing answer.',
+        });
+      } else {
+        const parsedShape = AnswerShapeSchema.safeParse(answer_shape);
+        if (!parsedShape.success) {
+          for (const issue of parsedShape.error.issues) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['answer_shape', ...issue.path],
+              message: issue.message,
+            });
+          }
+        } else {
+          answerShapeValid = true;
+        }
+      }
+    }
     if (intent_class === 'execute') {
       if (!action) {
         ctx.addIssue({
@@ -536,9 +648,15 @@ const RawToolCallSchema = z
     // (unaffected by this flag; they forbid answer_text outright above).
     // Flag OFF: this block never runs — byte-identical to pre-hardening
     // behaviour.
+    // ROADMAP 1.132 interaction: when CEE_ANSWER_SHAPE_ENFORCED produced a
+    // VALID shape, parseToolCallResponse derives answer_text from it — the
+    // requirement below is satisfied by construction (derived text is
+    // non-blank), so a shape-only tool call must not repair-loop on a
+    // missing answer_text.
     if (
       (intent_class === 'coach' || intent_class === 'converse') &&
       config.features.answerTextRequired &&
+      !answerShapeValid &&
       !answer_text?.trim()
     ) {
       ctx.addIssue({
@@ -570,6 +688,21 @@ export function parseToolCallResponse(toolInput: unknown): ToolCallResponse {
     );
   }
   const data = parsed.data;
+  // ROADMAP 1.132 (F2): under CEE_ANSWER_SHAPE_ENFORCED the refinement above
+  // guarantees coach/converse carry a VALID shape, so this re-parse cannot
+  // throw; it exists purely to narrow `unknown` → `AnswerShape`. The shape
+  // is the single source of truth: `answer_text` is DERIVED from it
+  // (deterministically — headline / • bullets / detail), overriding any
+  // model-authored answer_text, so legacy consumers keep a populated
+  // answer_text while the user-facing text stops being a wall of prose.
+  // Flag OFF: `data.answer_shape` is unreachable here (rejected above) and
+  // the returned objects are byte-identical to the pre-flag shape.
+  const shape: AnswerShape | undefined =
+    config.features.answerShapeEnforced &&
+    (data.intent_class === 'coach' || data.intent_class === 'converse') &&
+    data.answer_shape !== undefined
+      ? AnswerShapeSchema.parse(data.answer_shape)
+      : undefined;
   switch (data.intent_class) {
     case 'execute':
       return { intent_class: 'execute', action: data.action as ProposalAction };
@@ -579,12 +712,17 @@ export function parseToolCallResponse(toolInput: unknown): ToolCallResponse {
         clarification: data.clarification as ProposalClarification,
       };
     case 'converse':
-      return { intent_class: 'converse', answer_text: data.answer_text };
+      return {
+        intent_class: 'converse',
+        answer_text: shape ? deriveAnswerTextFromShape(shape) : data.answer_text,
+        ...(shape ? { answer_shape: shape } : {}),
+      };
     case 'coach':
       return {
         intent_class: 'coach',
         coaching_mode: data.coaching_mode,
-        answer_text: data.answer_text,
+        answer_text: shape ? deriveAnswerTextFromShape(shape) : data.answer_text,
+        ...(shape ? { answer_shape: shape } : {}),
       };
   }
 }
