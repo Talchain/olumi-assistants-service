@@ -133,9 +133,12 @@ describe('figure-scanner grammar', () => {
     expect(unp('$5 and 20%')).toBe(0);
   });
 
-  it("'percentile' / 'percentage' do not anchor", () => {
-    expect(vals('the 90 percentile case')).toEqual([]);
-    expect(vals('62 percentage points')).toEqual([]);
+  it("'percentile' and BARE 'percentage' do not anchor; 'percentage points' is a pp figure", () => {
+    expect(scanProseFigures('the 90 percentile case')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('a large percentage of users')).toEqual({ values: [], unparseable: 0 });
+    // ROUND 6: '62 percentage points' is a RECOGNISED pp-unit figure — it must
+    // never be valued as 62% and never be invisible (see the round-6 block).
+    expect(scanProseFigures('62 percentage points')).toEqual({ values: [], unparseable: 1 });
   });
 
   it("a markdown bullet dash is not a sign ('- 20%')", () => {
@@ -161,14 +164,19 @@ describe('figure-scanner grammar', () => {
     expect(scanProseFigures('ninety%')).toEqual({ values: [], unparseable: 1 });
   });
 
-  it('round 5: word-number recognition does not double-count or false-fire', () => {
-    // A digit figure sharing the sentence is unaffected…
+  it('round 5/6: word-number recognition does not double-count', () => {
+    // A digit figure sharing the sentence is unaffected, and the word figure
+    // counts EXACTLY once (word-number pass and reconciliation must not both
+    // count the same anchor).
     expect(scanProseFigures('ninety percent, and 20% elsewhere')).toEqual({ values: [20], unparseable: 1 });
-    // …non-number words before an anchor do not fire…
-    expect(scanProseFigures('expressed as a percent')).toEqual({ values: [], unparseable: 0 });
-    // …and 'percentile'/'percentage' still do not anchor.
+    // ROUND 6: a bare anchor with NO adjacent number ('expressed as a percent')
+    // is now an UNCONSUMED Layer-1 anchor and fails CLOSED (round 5 scanned it
+    // as clean). Deliberate calibration cost: over-blocking beats the invisible
+    // class. 'percentile' still anchors nothing.
+    expect(scanProseFigures('expressed as a percent')).toEqual({ values: [], unparseable: 1 });
     expect(scanProseFigures('the ninety percentile case')).toEqual({ values: [], unparseable: 0 });
-    expect(scanProseFigures('twenty percentage points')).toEqual({ values: [], unparseable: 0 });
+    // ROUND 6: word-number pp figures are recognised-and-fail-closed too.
+    expect(scanProseFigures('twenty percentage points')).toEqual({ values: [], unparseable: 1 });
   });
 
   it("round 5: sign-in-HYPHEN-range and cue-vs-signed-'to'-range stay refused", () => {
@@ -509,5 +517,229 @@ describe('figure-scanner property/fuzz corpus (zero misclassifications)', () => 
     const d = gateCanonicalStateUse([gateTurn('It wins 62% of the time.', [])]);
     expect(d.details.figures_stated).toBe(1);
     expect(d.details.traceable).toBe(0);
+  });
+});
+
+// ============================================================
+// ROUND 6 — permanent corpus for the round-5 review findings.
+// Five consecutive rounds leaked NEW fail-open holes; round 6 replaced
+// hole-patching with TWO-LAYER ANCHOR ACCOUNTING (see figure-scanner.ts).
+// Every entry here is a verified round-5 finding, pinned in BOTH directions
+// (fabricated must block; faithful must trace).
+// ============================================================
+
+describe('round 6 corpus: the five verified round-5 P1s', () => {
+  it("F1: a word-number bound in a mixed word/digit 'to'-range fails CLOSED", () => {
+    // Round 5: scanProseFigures('from ninety to 95%') -> {values:[95], unparseable:0}
+    // — the fabricated lower bound 'ninety' contributed NOTHING and the
+    // candidate scored a perfect G4.
+    expect(scanProseFigures('from ninety to 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('Expect from ninety to 95% success.')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('from twenty-five to 95%')).toEqual({ values: [], unparseable: 1 });
+    // Word bound on the anchor side stays closed too.
+    const rev = scanProseFigures('from 60 to seventy percent');
+    expect(rev.values).toEqual([]);
+    expect(rev.unparseable).toBeGreaterThanOrEqual(1);
+    // Faithful digit ranges and level-'to' forms are untouched.
+    expect(scanProseFigures('from 60 to 70%')).toEqual({ values: [60, 70], unparseable: 0 });
+    expect(scanProseFigures('it fell to 20%')).toEqual({ values: [20], unparseable: 0 });
+    expect(scanProseFigures('wins up to 20%')).toEqual({ values: [20], unparseable: 0 });
+  });
+
+  it('F1 gate: the fabricated word bound now blocks (was 1.000 fail-open)', () => {
+    const d = gateCanonicalStateUse([gateTurn('Expect from ninety to 95% success.', [95])]);
+    expect(d.details.figures_stated).toBe(1);
+    expect(d.details.traceable).toBe(0);
+    expect(d.value).toBe(0);
+  });
+
+  it('F2: hyphenated and newline-separated anchors are visible', () => {
+    // Round 5: all four forms scanned {values:[], unparseable:0} — a run
+    // stating SOLELY fabricated hyphen-anchored figures was UNMEASURABLE.
+    expect(scanProseFigures('A 25-percent drop is possible')).toEqual({ values: [25], unparseable: 0 });
+    expect(scanProseFigures('a ninety-percent chance of success')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a 9-per-cent gain')).toEqual({ values: [9], unparseable: 0 });
+    expect(scanProseFigures('the odds are 62\npercent overall')).toEqual({ values: [62], unparseable: 0 });
+  });
+
+  it('F2 gate: hyphen-anchored figures block when fabricated, trace when faithful', () => {
+    // Fabricated, as the ONLY figure: must be MEASURED at 0, never null.
+    const fab = gateCanonicalStateUse([gateTurn('A 25-percent drop is possible.', [62])]);
+    expect(fab.details.figures_stated).toBe(1);
+    expect(fab.value).toBe(0);
+    // Faithful: traces at 1.000.
+    const ok = gateCanonicalStateUse([gateTurn('A 25-percent drop is possible.', [25])]);
+    expect(ok.value).toBe(1);
+  });
+
+  it('F3: percentage points are a DISTINCT UNIT — never valued as %', () => {
+    // Round 5: '12 percentage points' was invisible AND '9 percent points'
+    // was VALUED as 9% — a pp figure traced against a % canonical.
+    expect(scanProseFigures('improved by 12 percentage points')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('the win rate rose 9 percent points')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a 12pp swing')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a 12 pp swing')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a single percentage point either way')).toEqual({ values: [], unparseable: 1 });
+    // Abbreviations the round-5 review verified invisible: recognised by the
+    // Layer-1 detector, unconsumed by the strict extractor -> fail closed.
+    expect(scanProseFigures('roughly 12 pct of runs')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('F3 gate: a pp figure can never trace against a % canonical', () => {
+    // Round 5 verified: this exact prose scored 1.000 with a fabricated 12pp.
+    const d = gateCanonicalStateUse([
+      gateTurn('Your win probability improved by 12 percentage points. It sits at 62%.', [62]),
+    ]);
+    expect(d.details.figures_stated).toBe(2);
+    expect(d.details.traceable).toBe(1);
+    expect(d.value).toBe(0.5);
+    // The conflation case: canonical 9 (a 9% figure) must NOT absorb '9
+    // percent points'.
+    const conf = gateCanonicalStateUse([gateTurn('the win rate rose 9 percent points.', [9])]);
+    expect(conf.details.traceable).toBe(0);
+    expect(conf.value).toBe(0);
+  });
+
+  it("F4: 'fell X% to Y%' is change-then-level — X a negative CHANGE, Y a positive LEVEL", () => {
+    // Round 5: read as a negative RANGE, both bounds sign-flipped -> the
+    // faithful level 55 became -55 silently.
+    expect(scanProseFigures('revenue fell 10% to 55%')).toEqual({ values: [-10, 55], unparseable: 0 });
+    expect(scanProseFigures('churn dropped 5% to 12%')).toEqual({ values: [-5, 12], unparseable: 0 });
+    // 'from' keeps the level-transition reading (descending still refused,
+    // documented P2 calibration cost).
+    expect(scanProseFigures('down from 30% to 20%')).toEqual({ values: [], unparseable: 1 });
+    // A shared-anchor change range is NOT the idiom: 'fell 10 to 55%' states a
+    // change of between 10 and 55 points down.
+    expect(scanProseFigures('it fell 10 to 55%')).toEqual({ values: [-10, -55], unparseable: 0 });
+    // Idiom shape without an anchor on the level: ambiguous -> fail closed.
+    expect(scanProseFigures('revenue fell 10% to 55')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('F4 gate: faithful change-then-level prose traces; the flipped trace is dead', () => {
+    // Faithful: canonical holds the -10 change and the 55 level -> 1.000
+    // (round 5 scored this 0.500 silently).
+    const ok = gateCanonicalStateUse([gateTurn('Revenue fell 10% to 55%.', [55, -10])]);
+    expect(ok.details.figures_stated).toBe(2);
+    expect(ok.value).toBe(1);
+    // Fabricated direction: a canonical -55 must NOT validate the stated
+    // level '55%' through a sign flip.
+    const fab = gateCanonicalStateUse([gateTurn('Revenue fell 10% to 55%.', [-55])]);
+    expect(fab.details.traceable).toBe(0);
+    expect(fab.value).toBe(0);
+  });
+
+  it('F5: the directional-cue window stops at the same clause comma as the anchor rule', () => {
+    // Round 5: 'Margins fell 5%, 30% of users churned' -> [-5, -30] — the cue
+    // crossed the exact comma boundary the round-5 anchor rule declared
+    // uncrossable.
+    expect(scanProseFigures('Margins fell 5%, 30% of users churned')).toEqual({ values: [-5, 30], unparseable: 0 });
+    expect(scanProseFigures('Win rate dropped 10%, 60% of runs still succeed')).toEqual({ values: [-10, 60], unparseable: 0 });
+    // The cue still binds inside its own clause.
+    expect(scanProseFigures('it fell 20%')).toEqual({ values: [-20], unparseable: 0 });
+    expect(scanProseFigures('Margins fell 5%, and it fell 3% again')).toEqual({ values: [-5, -3], unparseable: 0 });
+  });
+
+  it('F5 gate: comma-splice faithful prose traces at 1.000 (was 0.500 silently)', () => {
+    const d = gateCanonicalStateUse([gateTurn('Margins fell 5%, 30% of users churned.', [-5, 30])]);
+    expect(d.value).toBe(1);
+  });
+
+  it('P2: full-width ％, bare anchors and abbreviation anchors fail CLOSED by construction', () => {
+    expect(scanProseFigures('the odds are 62％')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a share (%) of the total')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('expressed in pct terms')).toEqual({ values: [], unparseable: 1 });
+    // Still outside the anchor contract (no anchor token present): implicit
+    // and ratio figures. Documented, not silently dropped — the module doc
+    // routes them to the stated-scope note.
+    expect(scanProseFigures('your win probability halved')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('one in five runs fails')).toEqual({ values: [], unparseable: 0 });
+  });
+});
+
+// ============================================================
+// ROUND 6 — THE RECONCILIATION INVARIANT (the test that makes round 7
+// impossible for the invisible-figure class): generate anchor tokens in
+// randomised UNKNOWN shapes; the scanner must NEVER account an
+// anchor-containing snippet as zero figures. Unknown phrasings fail CLOSED
+// by construction — the class is eliminated, not enumerated.
+// ============================================================
+
+describe('round 6 INVARIANT: an anchor token can never vanish', () => {
+  const WORD_TOKENS = [
+    'percent', 'Percent', 'PERCENT', 'per cent', 'per-cent', 'per\ncent',
+    'percentage points', 'percentage point', 'percentage-points',
+    'percent points', 'pct', 'PCT', 'pp', 'PP',
+  ];
+  const SYMBOL_TOKENS = ['%', '％'];
+  // Number renderings: clean digits, decimals, word-numbers, malformed
+  // groupings, chains, signed, released punctuation, absent entirely.
+  const NUM_RENDERS = [
+    '62', '62.5', '0.5', '1,250', '2024', '-20', '+7', '62.', '1,25',
+    '10-20-30', 'ninety', 'twenty-five', 'sixty two', '',
+  ];
+  const SEPS_NONEMPTY = [' ', '\n', '\t', '-', ' - ', '  ', '\n\n', '- ', ' -'];
+  const SEPS_ANY = [...SEPS_NONEMPTY, ''];
+  const PREFIXES = [
+    'The odds are', 'it fell', 'roughly', 'a', 'we expect about',
+    'somewhere near', 'gains reached', 'between runs,', '',
+  ];
+  const SUFFIXES = [' overall.', ' of the time.', ', give or take.', '.', ''];
+
+  interface Item { word: boolean; token: string; num: string; sepIdx: number; pre: string; suf: string }
+
+  const itemArb: fc.Arbitrary<Item> = fc.record({
+    tok: fc.oneof(
+      fc.constantFrom(...WORD_TOKENS).map((t) => ({ t, word: true })),
+      fc.constantFrom(...SYMBOL_TOKENS).map((t) => ({ t, word: false })),
+    ),
+    num: fc.constantFrom(...NUM_RENDERS),
+    sepIdx: fc.nat(1000),
+    pre: fc.constantFrom(...PREFIXES),
+    suf: fc.constantFrom(...SUFFIXES),
+  }).map(({ tok, num, sepIdx, pre, suf }) => ({ word: tok.word, token: tok.t, num, sepIdx, pre, suf }));
+
+  /** Build a snippet guaranteed to contain >= 1 Layer-1 anchor token: a word
+   * token is always detached from letters (never glued to a word), matching
+   * the detector's word-boundary; a symbol token anchors anywhere. */
+  function buildSnippet(it: Item): string {
+    const seps = it.word ? SEPS_NONEMPTY : SEPS_ANY;
+    const sep = seps[it.sepIdx % seps.length];
+    const pre = it.pre === '' ? '' : `${it.pre} `;
+    const body = it.num === '' ? `${pre}${it.token}` : `${pre}${it.num}${sep}${it.token}`;
+    return `${body}${it.suf}`;
+  }
+
+  it('NEVER {values:[], unparseable:0} when an anchor token is present', () => {
+    fc.assert(
+      fc.property(itemArb, (item) => {
+        const text = buildSnippet(item);
+        const scan = scanProseFigures(text);
+        // The reconciliation invariant: every Layer-1 anchor is consumed by
+        // exactly one Layer-2 outcome (a value or an explicit unparseable).
+        // An anchor-bearing snippet accounting to ZERO outcomes is the
+        // fail-open class rounds 2-5 kept leaking.
+        expect(scan.values.length + scan.unparseable).toBeGreaterThanOrEqual(1);
+      }),
+      { numRuns: 800 },
+    );
+  });
+
+  it('outcomes are additive across sentence-separated snippets', () => {
+    fc.assert(
+      fc.property(fc.array(itemArb, { minLength: 1, maxLength: 4 }), (items) => {
+        const joined = items.map(buildSnippet).join(' Plain filler words follow here. ');
+        const scan = scanProseFigures(joined);
+        expect(scan.values.length + scan.unparseable).toBeGreaterThanOrEqual(items.length);
+      }),
+      { numRuns: 300 },
+    );
+  });
+
+  it('positive control: the invariant harness can SEE a vanished anchor', () => {
+    // Prove the assertion shape detects a zero-accounting result: bare prose
+    // with no anchor genuinely accounts to zero, so the >= 1 assertion is
+    // doing real work when an anchor IS present.
+    const clean = scanProseFigures('plain words with a number 42 and no anchor');
+    expect(clean.values.length + clean.unparseable).toBe(0);
   });
 });
