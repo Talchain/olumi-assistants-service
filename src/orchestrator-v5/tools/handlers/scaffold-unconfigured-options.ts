@@ -22,14 +22,32 @@
  * Neutral-value rule (per target factor — the factor's OWN stored numbers,
  * never an invented magnitude; same class as the engine-side
  * CONSTRAINT_NODE_DEFAULT_BASE defaulting convention: default + coded
- * disclosure):
- *   1. `observed_state.raw_value` — the explicit user-scale current value
- *      (the same precedence rung the egress scale net trusts first);
- *   2. `observed_state.value` — the stored current value, passed through on
- *      the SAME value-scale convention the configured siblings' projected
- *      interventions already use;
- *   3. `prior.range_min`/`range_max` midpoint — centre-of-range;
- *   4. no provenance → the factor is SKIPPED (never fabricated).
+ * disclosure). Candidate provenance, in order:
+ *   1. the factor's own `observed_state` numbers (`{value, raw_value}` as
+ *      stored — the factor's current position);
+ *   2. `prior.range_min`/`range_max` midpoint — centre-of-range;
+ *   3. no projectable provenance → the factor is SKIPPED (never fabricated).
+ *
+ * ONE scale convention, not two (P1-1): the candidate is an intervention
+ * OBJECT, and the final WIRE number is derived by routing it through the
+ * EXACT projection the configured siblings' interventions went through in
+ * `loadScenarioSnapshotForRunAnalysis` (both functions live in
+ * `../plot-intervention-scale.ts` — no local mirror):
+ *   - scale net OFF (legacy wire): `extractNumericInterventionValue` — the
+ *     stored `.value` field verbatim, the sibling convention. `raw_value`
+ *     is deliberately NEVER sent on this wire (mixing raw user-scale into
+ *     a normalised wire distorts the whole option ranking, undisclosed);
+ *   - scale net ON (raw wire): `resolveRawInterventionValue` with the SAME
+ *     `buildFactorScaleMap` evidence the sibling projection uses —
+ *     `raw_value` wins, a PROVEN-normalised value is denormalised, a
+ *     capless/raw-looking value passes through. An AMBIGUOUS `[0,1]` value
+ *     on a cap-bearing factor is REJECTED as scaffold provenance: PLoT
+ *     divides intervention values by `observed_state.cap`, so an unproven
+ *     0.4 on a cap-5000 factor would slam the option's position to ~0 — a
+ *     large intervention masquerading as neutral. Skipping is the honest
+ *     neutral (PLoT holds un-intervened factors at baseline); the sibling
+ *     projection SURFACES the same ambiguity instead, because there it is
+ *     interpreting a user-authored value, not fabricating one.
  *
  * Target-factor selection per unconfigured option: the option's own
  * option→factor edges first; when it has none, the union of the CONFIGURED
@@ -47,6 +65,12 @@
  */
 
 import type { ScaffoldedOptionRecord } from '../../coaching/scaffold-disclosure.js';
+import {
+  buildFactorScaleMap,
+  extractNumericInterventionValue,
+  resolveRawInterventionValue,
+  type FactorScaleInfo,
+} from '../plot-intervention-scale.js';
 
 export interface ScaffoldUnconfiguredInput {
   /** PLoT-projection options from the scenario snapshot. */
@@ -59,6 +83,16 @@ export interface ScaffoldUnconfiguredInput {
    * the parsed graph alone would scaffold over autosave-written values).
    */
   readonly rawPersistedGraph?: unknown;
+  /**
+   * P1-1 (one scale convention): MUST be the same
+   * `config.cee.plotEgressScaleNetEnabled` value the snapshot loader
+   * branched on when it projected the configured siblings' interventions —
+   * the caller (run_analysis, which owns the outbound PLoT payload) passes
+   * the live config read. The scaffold routes its neutral candidates
+   * through the SAME projection functions the loader used, so its wire
+   * numbers land in the sibling convention in both flag states.
+   */
+  readonly scaleNetEnabled: boolean;
 }
 
 export interface ScaffoldUnconfiguredOutcome {
@@ -96,32 +130,75 @@ function nodesOf(graph: unknown): Dict[] {
 }
 
 /**
- * Neutral placeholder value per factor id (precedence rungs 1–3 above).
+ * Neutral placeholder WIRE value per factor id. Candidates (the factor's
+ * own `observed_state` object, then the prior-range midpoint) are built as
+ * intervention OBJECTS and routed through the EXACT projection the
+ * configured siblings' interventions went through (see the module header:
+ * one scale convention, not two). A factor none of whose candidates
+ * projects to a safe wire number is absent from the map — skipped, never
+ * fabricated.
  */
-function buildNeutralFactorValues(graph: unknown): Map<string, number> {
+function buildNeutralFactorValues(
+  graph: unknown,
+  scaleNetEnabled: boolean,
+): Map<string, number> {
   const neutral = new Map<string, number>();
-  for (const node of nodesOf(graph)) {
+  const nodes = nodesOf(graph);
+  // The SAME evidence map the loader's net-ON sibling projection builds
+  // (buildFactorScaleMap over the graph nodes) — only needed when the net
+  // is on.
+  const scaleById = scaleNetEnabled ? buildFactorScaleMap(nodes) : undefined;
+  for (const node of nodes) {
     if (node.kind !== 'factor' || typeof node.id !== 'string') continue;
+    const candidates: Dict[] = [];
     const obs = isPlainObject(node.observed_state) ? node.observed_state : undefined;
-    const rawValue = obs ? finiteNum(obs.raw_value) : undefined;
-    if (rawValue !== undefined) {
-      neutral.set(node.id, rawValue);
-      continue;
-    }
-    const value = obs ? finiteNum(obs.value) : undefined;
-    if (value !== undefined) {
-      neutral.set(node.id, value);
-      continue;
+    if (obs !== undefined) {
+      const observedCandidate: Dict = {};
+      const value = finiteNum(obs.value);
+      const rawValue = finiteNum(obs.raw_value);
+      if (value !== undefined) observedCandidate.value = value;
+      if (rawValue !== undefined) observedCandidate.raw_value = rawValue;
+      if (Object.keys(observedCandidate).length > 0) candidates.push(observedCandidate);
     }
     const prior = isPlainObject(node.prior) ? node.prior : undefined;
     const rangeMin = prior ? finiteNum(prior.range_min) : undefined;
     const rangeMax = prior ? finiteNum(prior.range_max) : undefined;
     if (rangeMin !== undefined && rangeMax !== undefined) {
-      neutral.set(node.id, (rangeMin + rangeMax) / 2);
+      candidates.push({ value: (rangeMin + rangeMax) / 2 });
     }
-    // No provenance → skipped: a placeholder is a default, never an invention.
+    for (const candidate of candidates) {
+      const wire = projectNeutralCandidate(candidate, scaleById?.get(node.id), scaleNetEnabled);
+      if (wire !== undefined) {
+        neutral.set(node.id, wire);
+        break;
+      }
+    }
+    // No projectable provenance → skipped: a placeholder is a default,
+    // never an invention.
   }
   return neutral;
+}
+
+/**
+ * Route ONE neutral candidate object through the sibling projection for the
+ * active flag state, returning the wire number or `undefined` when the
+ * candidate is not safe scaffold provenance. Net ON additionally rejects
+ * `ambiguous_no_evidence` — see the module header for why an unproven
+ * `[0,1]` value on a cap-bearing factor must be skipped, not sent.
+ */
+function projectNeutralCandidate(
+  candidate: Dict,
+  factor: FactorScaleInfo | undefined,
+  scaleNetEnabled: boolean,
+): number | undefined {
+  if (!scaleNetEnabled) {
+    const value = extractNumericInterventionValue(candidate);
+    return value === null ? undefined : value;
+  }
+  const result = resolveRawInterventionValue(candidate, factor);
+  if (result.value === null) return undefined;
+  if (result.rule === 'ambiguous_no_evidence') return undefined;
+  return result.value;
 }
 
 /** option id → factor ids the option has outgoing edges to (edge order). */
@@ -190,7 +267,7 @@ export function scaffoldUnconfiguredOptions(
     // All-unconfigured stays with the pre-PLoT guard + honest configure path.
     if (configured.length === 0) return untouched;
 
-    const neutral = buildNeutralFactorValues(input.graph);
+    const neutral = buildNeutralFactorValues(input.graph, input.scaleNetEnabled);
     const edgeTargets = buildOptionFactorEdgeMap(input.graph);
     const intentIds = collectInterventionIntentOptionIds(
       input.rawPersistedGraph ?? input.graph,

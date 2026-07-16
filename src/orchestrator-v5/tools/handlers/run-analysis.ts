@@ -345,6 +345,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       options: snapshot.options,
       graph: snapshot.graph,
       rawPersistedGraph: snapshot.rawPersistedGraph,
+      // P1-1 (one scale convention): the SAME flag the snapshot loader
+      // branched on when it projected the configured siblings'
+      // interventions — the scaffold routes its neutral candidates through
+      // the same projection functions, so its wire numbers land in the
+      // sibling convention in both flag states.
+      scaleNetEnabled: config.cee.plotEgressScaleNetEnabled,
     });
     if (scaffoldOutcome.scaffolded.length > 0) {
       emit(TelemetryEvents.V5RunAnalysisOptionsScaffolded, {

@@ -19,7 +19,7 @@
  * option the ENTIRE analysis fails wholesale. That is the live defect.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
@@ -217,7 +217,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     expect(outcome.handler_facts).toHaveLength(1);
   });
 
-  it('scaffold values are neutral: the factor’s own current value (raw_value rung), never an invented number', async () => {
+  it('P1-1 (A): net-OFF scaffold values use the SIBLING convention (the stored .value), never raw user-scale', async () => {
     const { client, run } = makePreflightPlotClient();
     const handler = createRunAnalysisHandler({
       plotClient: client,
@@ -230,9 +230,17 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
       interventions: Record<string, number>;
     }>;
     const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
-    // opt_new is edge-connected to fac_price only; fac_price's explicit
-    // user-scale current value is observed_state.raw_value = 100.
-    expect(sentNew.interventions).toEqual({ fac_price: 100 });
+    // opt_new is edge-connected to fac_price only. With the egress scale net
+    // OFF (production posture) the configured siblings' interventions reach
+    // the wire as the stored `.value` field verbatim
+    // (extractNumericInterventionValue) — so the scaffold's neutral for
+    // fac_price MUST be observed_state.value (0.5), the same convention.
+    // Sending observed_state.raw_value (100) — the pre-P1-1 behaviour —
+    // mixes raw user-scale into a normalised wire: with cap 200 that is a
+    // 200x position distortion, and because PLoT ranks options RELATIVE to
+    // each other, the REAL options' win probabilities distort with it,
+    // undisclosed.
+    expect(sentNew.interventions).toEqual({ fac_price: 0.5 });
   });
 
   it('neutral-value precedence: observed value rung, then prior range midpoint; no-provenance factors are skipped', async () => {
@@ -298,8 +306,9 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     }>;
     const sentIso = sentOptions.find((o) => o.option_id === 'opt_iso')!;
     // Configured siblings intervene on fac_price + fac_volume → the
-    // scaffold covers the same comparison basis at neutral values.
-    expect(sentIso.interventions).toEqual({ fac_price: 100, fac_volume: 0.4 });
+    // scaffold covers the same comparison basis at neutral values, in the
+    // net-OFF sibling convention (stored `.value`, never raw_value).
+    expect(sentIso.interventions).toEqual({ fac_price: 0.5, fac_volume: 0.4 });
   });
 
   // -------------------------------------------------------------------------
@@ -444,6 +453,125 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
 
     expect(outcome.assistant_text).not.toMatch(/Placeholder values/);
     expect('__scaffolded_options' in outcome).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-1 — ONE scale convention, not two. The scaffold's wire numbers must be
+// produced by the EXACT projection the configured siblings' interventions
+// went through in loadScenarioSnapshotForRunAnalysis, in BOTH flag states of
+// cee.plotEgressScaleNetEnabled and on EVERY provenance rung. The net-OFF
+// (A) construction is pinned above ("P1-1 (A)"); this block pins the net-ON
+// constructions, including (B): a rung-2 value-without-raw_value on a
+// cap-bearing factor must never reach the raw-scale wire as a normalised
+// number (PLoT divides intervention values by observed_state.cap, so an
+// unproven 0.4 on a cap-5000 factor slams the option's position to ~0 — a
+// large intervention masquerading as neutral).
+// ---------------------------------------------------------------------------
+
+describe('run_analysis D-ask-1 scaffold — P1-1 scale-net-ON convention parity', () => {
+  const EGRESS_ENV = 'CEE_PLOT_EGRESS_SCALE_NET_ENABLED';
+
+  beforeEach(async () => {
+    process.env[EGRESS_ENV] = 'true';
+    (await import('../../../../config/index.js'))._resetConfigCache();
+  });
+
+  afterEach(async () => {
+    delete process.env[EGRESS_ENV];
+    (await import('../../../../config/index.js'))._resetConfigCache();
+  });
+
+  /** Siblings as the net-ON loader projects them: RAW user-scale numbers. */
+  const RAW_CONFIGURED_A = { id: 'opt_a', option_id: 'opt_a', label: 'Option A', interventions: { fac_price: 120 } };
+  const RAW_CONFIGURED_B = { id: 'opt_b', option_id: 'opt_b', label: 'Option B', interventions: { fac_volume: 2500 } };
+
+  it('P1-1 (B): an ambiguous [0,1] value on a cap-bearing factor is SKIPPED, never sent as a normalised number on the raw wire', async () => {
+    // fac_volume: observed_state { value: 0.4, cap: 5000 } — no raw_value, so
+    // the factor cannot PROVE the normalised convention. Pre-P1-1 the
+    // scaffold sent 0.4 as the final wire number; PLoT normalises by cap →
+    // 0.4/5000 ≈ 0.00008: the "neutral placeholder" slams the factor to
+    // zero. Post-fix the factor is rejected as scaffold provenance (same
+    // evidence gate as a sibling intervention — ambiguous_no_evidence), and
+    // the scaffold falls back to the configured siblings' comparison basis
+    // where safe provenance exists (fac_price raw_value 100).
+    const graph = makeGraph(
+      [{ id: 'opt_new', kind: 'option', label: 'New Option' }],
+      [{ from: 'opt_new', to: 'fac_volume' }],
+    );
+    const { client, run } = makePreflightPlotClient();
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(
+        makeSnapshot({
+          graph,
+          rawPersistedGraph: graph,
+          options: [
+            RAW_CONFIGURED_A,
+            RAW_CONFIGURED_B,
+            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {} },
+          ],
+        }),
+      ),
+    });
+    await handler(makeInvocation());
+
+    const sentOptions = (run.mock.calls[0][0] as Record<string, unknown>).options as Array<{
+      option_id: string;
+      interventions: Record<string, number>;
+    }>;
+    const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
+    expect(sentNew.interventions).not.toHaveProperty('fac_volume');
+    // raw_value rung on fac_price: 100 IS the raw user-scale value — the
+    // same convention the raw siblings (120 / 2500) are on.
+    expect(sentNew.interventions).toEqual({ fac_price: 100 });
+  });
+
+  it('net-ON rungs route through the sibling projection: raw_value wins; a capless value passes through; proven convention denormalises', async () => {
+    // fac_conv proves the normalised convention (0.4 * 5000 == 2000), so its
+    // raw_value rung yields 2000 — the raw wire number a sibling
+    // intervention { value: 0.4 } on that factor would also produce via
+    // cap_denormalised. fac_range (prior midpoint 20, no cap) passes
+    // through — no cap means PLoT cannot double-normalise it.
+    const graph = makeGraph(
+      [
+        {
+          id: 'fac_conv',
+          kind: 'factor',
+          label: 'Conversion',
+          observed_state: { value: 0.4, raw_value: 2000, cap: 5000 },
+        },
+        { id: 'opt_new', kind: 'option', label: 'New Option' },
+      ],
+      [
+        { from: 'fac_conv', to: 'g' },
+        { from: 'opt_new', to: 'fac_conv' },
+        { from: 'opt_new', to: 'fac_range' },
+      ],
+    );
+    const { client, run } = makePreflightPlotClient();
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(
+        makeSnapshot({
+          graph,
+          rawPersistedGraph: graph,
+          options: [
+            RAW_CONFIGURED_A,
+            RAW_CONFIGURED_B,
+            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {} },
+          ],
+        }),
+      ),
+    });
+    await handler(makeInvocation());
+
+    const sentOptions = (run.mock.calls[0][0] as Record<string, unknown>).options as Array<{
+      option_id: string;
+      interventions: Record<string, number>;
+    }>;
+    const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
+    expect(sentNew.interventions).toEqual({ fac_conv: 2000, fac_range: 20 });
   });
 });
 
