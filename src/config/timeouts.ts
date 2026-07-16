@@ -109,13 +109,19 @@ export const EXPLAIN_DIFF_TIMEOUT_MS = clampTimeout(
 );
 
 /**
- * Decision-review auto-fire LLM call timeout (default: 15s, clamped 5s-5m).
+ * Decision-review auto-fire LLM call timeout (default: 22s, clamped 5s-5m).
  * V5 Group 1 Task B: the decision_review call fires synchronously after a
  * successful run_analysis with this hard timeout. On timeout the turn still
  * succeeds with thin content (decision_review enrichment absent).
+ *
+ * ROADMAP 2.73 Fix B: default raised 15s -> 22s. The 15-Jul Paul-session
+ * RCA (RC5) observed the call aborting at 15,002ms — a coin flip against
+ * observed gpt-4.1 latencies of ~9.7-11.6s. Staging already runs 22s via
+ * an env override; raising the CODE default means environments without
+ * the override (e.g. prod) do not silently re-inherit the coin flip.
  */
 export const DECISION_REVIEW_TIMEOUT_MS = clampTimeout(
-  parseTimeoutEnv("DECISION_REVIEW_TIMEOUT_MS", 15_000),
+  parseTimeoutEnv("DECISION_REVIEW_TIMEOUT_MS", 22_000),
 );
 
 /**

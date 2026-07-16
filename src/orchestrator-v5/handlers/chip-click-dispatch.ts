@@ -87,7 +87,9 @@ import {
   type ScenarioReader,
 } from '../tools/registry.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
+import { applyCoachingSignal } from '../coaching/coaching-signal-application.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
+import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import {
   pickLatestRawRobustness,
   type RawRobustnessSignals,
@@ -203,6 +205,14 @@ export type DispatchChipClickRunAnalysisResult =
        *  just-produced run_analysis fact and the snapshot graph so the
        *  rerun chip-click wire response carries `freshness === 'fresh'`. */
       readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
+      /** ROADMAP 2.73 Fix C — decision_review call attribution for the
+       *  chip-click path (mirrors #476's executor wiring). Present ONLY
+       *  when the timings/trace gate is on AND the enricher's LLM call
+       *  actually RETURNED (sink populated) — never fabricated for a
+       *  skip / timeout. route-v2 threads it into sendFinalised200 so the
+       *  minimal diagnostic trace carries the decision_review llm_calls
+       *  entry, matching the routed path. */
+      readonly turnTimings?: V5TurnTimings;
     }
   | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined; readonly graph: GraphV3T | null }
   | {
@@ -581,6 +591,13 @@ export async function dispatchChipClickRunAnalysis(
     // deterministic PLoT analysis. `v5.decision_review.skipped` with
     // reason `autofire_disabled` is emitted in place of the await.
     let enrichedFacts: readonly HandlerFact[];
+    // ROADMAP 2.73 Fix C — decision_review call attribution parity with the
+    // executor path (#476). Gated exactly like the executor's sink: flag-off
+    // production passes no sink and allocates one empty object + one ternary,
+    // byte-identical behaviour otherwise.
+    const timingsEnabled =
+      config.cee.timingDebugEnabled || config.features.diagnosticTraceEnabled;
+    let chipTurnTimings: V5TurnTimings | undefined;
     if (!config.cee.runAnalysisAwaitDecisionReview) {
       const briefLength =
         typeof context.scenarioBriefText === 'string'
@@ -609,14 +626,59 @@ export async function dispatchChipClickRunAnalysis(
       });
       enrichedFacts = outcome.handler_facts;
     } else {
+      // Wall-clock the await on the caller's clock and thread the call's
+      // model/tokens back via callTelemetrySink — the same #476 pattern the
+      // executor uses. The sink is populated ONLY when the LLM call
+      // RETURNED; a skip / timeout leaves it empty, so no phantom
+      // decision_review llm_calls entry is ever fabricated.
+      const decisionReviewStartedAt = timingsEnabled ? Date.now() : 0;
+      const callTelemetrySink: {
+        model?: string;
+        provider?: string;
+        input_tokens?: number;
+        output_tokens?: number;
+      } = {};
       enrichedFacts = await enrichRunAnalysisWithDecisionReview({
         handlerFacts: outcome.handler_facts,
         requestId,
         scenarioId: context.session_id,
         signal: turnAbort.signal,
         brief: context.scenarioBriefText,
+        ...(timingsEnabled ? { callTelemetrySink } : {}),
       });
+      if (timingsEnabled && callTelemetrySink.model !== undefined) {
+        chipTurnTimings = {
+          decision_review_ms: Date.now() - decisionReviewStartedAt,
+          decision_review_model: callTelemetrySink.model,
+          decision_review_provider: callTelemetrySink.provider,
+          decision_review_input_tokens: callTelemetrySink.input_tokens,
+          decision_review_output_tokens: callTelemetrySink.output_tokens,
+        };
+      }
     }
+
+    // ROADMAP 2.73 Fix A — STEP-5 coaching signal on the chip-click run
+    // path, via the SAME shared helper the turn-executor uses (this path
+    // previously composed `coaching: null` hardcoded, so a chip-driven
+    // first run or rerun shipped zero coaching prose by construction).
+    // contextPack is null on this path — the run_analysis branch signals
+    // never consult it. The returned facts carry the signal marker on the
+    // run_analysis fact and MUST be the array that chips/compose/commit see.
+    const coachingApplication = applyCoachingSignal({
+      proposedHandlerId: 'run_analysis',
+      outcome,
+      contextPack: null,
+      priorFacts: context.prior_facts,
+      handlerFacts: enrichedFacts,
+      requestId,
+      scenarioId: context.session_id,
+      // Same collector + raw-graph source the freshness derivation below
+      // uses (snapshot first, turn-context fallback on the test path).
+      interventionControlledFactorIds: collectInterventionControlledFactorIds(
+        cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+      ),
+    });
+    enrichedFacts = coachingApplication.handlerFacts;
 
     // V5 coaching parity — emit the same post-analysis suggested_actions
     // the Sonnet-routed run_analysis path emits. Reuses the existing
@@ -677,7 +739,11 @@ export async function dispatchChipClickRunAnalysis(
     let response = composeToolCallResponse({
       orientation: '',  // no Sonnet orientation on chip clicks.
       confirmation: confirmationText,
-      coaching: null,
+      // ROADMAP 2.73 Fix A — was `coaching: null` hardcoded; the chip run
+      // path now joins the shared STEP-5 signal text (FIRST_ANALYSIS_COMPLETE
+      // on a first run, RERUN_ANALYSIS_COMPLETE with the compareRuns delta on
+      // a rerun) exactly as the routed path does.
+      coaching: coachingApplication.coachingText,
       stage: payload.stage,
       handlerFacts: enrichedFacts,
       suggested_actions: chipClickSuggestedActions,
@@ -820,7 +886,17 @@ export async function dispatchChipClickRunAnalysis(
         },
       );
 
-      return { outcome: 'ok', response, commitPerformed: true, analysisReady, graph: snapshotGraph, freshness };
+      return {
+        outcome: 'ok',
+        response,
+        commitPerformed: true,
+        analysisReady,
+        graph: snapshotGraph,
+        freshness,
+        // Fix C: present only when the decision_review LLM call returned
+        // under an enabled timings/trace gate (never fabricated).
+        ...(chipTurnTimings !== undefined ? { turnTimings: chipTurnTimings } : {}),
+      };
     } catch (err) {
       log.error(
         {

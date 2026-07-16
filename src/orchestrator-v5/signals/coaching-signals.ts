@@ -8,6 +8,11 @@
  *   - STALE_ANALYSIS_AFTER_EDIT (priority 1)
  *   - HIGH_SENSITIVITY_EDIT     (priority 2)
  *   - FIRST_ANALYSIS_COMPLETE   (priority 3)
+ *   - RERUN_ANALYSIS_COMPLETE   (run_analysis branch, ROADMAP 2.73 — fires
+ *     when a prior run_analysis fact exists, i.e. exactly when
+ *     FIRST_ANALYSIS_COMPLETE does not; text derives from the shared
+ *     `compareRuns` comparator so the rerun acknowledgment names the delta
+ *     or the no-change verdict)
  *
  * Edit-handler signals (STALE_*, HIGH_*) are LIVE. The header previously
  * described them as "dormant until set_factor_value / adjust_edge_strength
@@ -20,14 +25,22 @@
  * `__tests__/turn-executor-noop-edit-claim-integrity.integration.test.ts`
  * for the wired proof.
  *
- * F.6: deterministic only. No LLM calls in Step 5. No math; only field
- * lookups.
+ * F.6: deterministic only. No LLM calls in Step 5. Field lookups plus the
+ * pure `compareRuns` diff (integer percentage-point arithmetic) for the
+ * rerun acknowledgment.
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
+import {
+  compareRuns,
+  projectRunFact,
+  type RunDelta,
+} from '../coaching/compare-runs.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { CoachingSignalId } from '../coaching/types.js';
+import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
 
@@ -39,8 +52,21 @@ export interface CoachingSignalInput {
   /** Outcome of the successful handler (its facts are consulted by the
    *  sensitivity detector to find the edit's target_id). */
   readonly outcome: SuccessfulHandlerOutcome;
-  /** LLM-facing context pack assembled for this turn. */
-  readonly contextPack: ContextPack;
+  /**
+   * LLM-facing context pack assembled for this turn. `null` on the
+   * chip-click dispatch path (which assembles no pack). Only the
+   * edit-handler HIGH_SENSITIVITY branch reads it; the run_analysis
+   * branch signals never consult the pack, so a null pack degrades
+   * only the edit-target driver-label lookup (to null).
+   */
+  readonly contextPack: ContextPack | null;
+  /**
+   * Spine A backstop: factor_ids an option intervenes on. Threaded into
+   * `compareRuns` so an option-controlled lever is never reported as
+   * having gained/lost influence between runs. Omitted / empty ⇒ no
+   * suppression (same contract as `run-comparison-gate.ts`).
+   */
+  readonly interventionControlledFactorIds?: ReadonlySet<string>;
   /**
    * Facts from prior turns in this scenario. Used to distinguish "first
    * successful run_analysis" from subsequent ones. Failed handler turns
@@ -62,8 +88,11 @@ const EDIT_HANDLER_IDS = new Set([
 ]);
 
 // Coaching-text bank. British English, sentence case, no em-dashes.
+// Typed Record over the derived CoachingSignalId union (coaching/types.ts):
+// adding an id to COACHING_SIGNAL_IDS without a bank entry fails to compile.
 const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   readonly factorLabel?: string;
+  readonly runDelta?: RunDelta | null;
 }) => string> = {
   STALE_ANALYSIS_AFTER_EDIT: () =>
     'This change affects the model. The current analysis may not reflect it. Run the analysis to see updated results.',
@@ -71,7 +100,43 @@ const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
     `You're editing ${factorLabel ?? 'a factor'}, which was one of the strongest drivers in the last analysis. Rerunning will show how this changes the picture.`,
   FIRST_ANALYSIS_COMPLETE: () =>
     'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.',
+  RERUN_ANALYSIS_COMPLETE: ({ runDelta }) => composeRerunText(runDelta ?? null),
 };
+
+/**
+ * ROADMAP 2.73 — rerun acknowledgment copy, derived from the shared
+ * `compareRuns` delta (reuse, not a parallel diff). Register mirrors the
+ * run-comparison gate's `composeComparison` so the two rerun surfaces
+ * cannot drift in vocabulary. Content-safe: labels + integer percentage
+ * points only, no raw decimals, no IDs.
+ */
+function composeRerunText(delta: RunDelta | null): string {
+  if (delta === null || !delta.comparable) {
+    // Prior run exists but the two runs cannot be lined up (legacy fact
+    // without a projectable envelope, or missing labels). Acknowledge the
+    // rerun without claiming a comparison we could not make.
+    return 'This was a re-run. It replaces the earlier result as the current analysis.';
+  }
+  if (delta.leading_option_changed) {
+    return (
+      `This re-run changed the outcome: ${delta.prior_leading_label} led before, `
+      + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
+    );
+  }
+  if (delta.margin_direction === 'widened') {
+    return (
+      `${delta.current_leading_label} still leads after this re-run, and its lead `
+      + `has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
+    );
+  }
+  if (delta.margin_direction === 'narrowed') {
+    return (
+      `${delta.current_leading_label} still leads after this re-run, though its lead `
+      + `has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
+    );
+  }
+  return `The result is unchanged: ${delta.current_leading_label} still leads.`;
+}
 
 /**
  * Pick one coaching signal for this turn or return null. Priority:
@@ -120,7 +185,18 @@ export function detectCoachingSignal(
         coaching_text: COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}),
       };
     }
-    return null;
+    // ROADMAP 2.73: a prior run_analysis fact exists, so this turn is a
+    // re-run. Previously this branch returned null and the rerun turn
+    // shipped zero coaching prose by construction. Emit a deterministic
+    // rerun acknowledgment whose text derives from the shared compareRuns
+    // comparator (prior fact vs this turn's fact); when either run cannot
+    // be projected the copy degrades to a comparison-free acknowledgment.
+    return {
+      signal_id: 'RERUN_ANALYSIS_COMPLETE',
+      coaching_text: COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
+        runDelta: buildRerunDelta(input),
+      }),
+    };
   }
 
   return null;
@@ -144,6 +220,33 @@ function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
   return outcome.handler_facts.some(
     (fact) => EDIT_HANDLER_IDS.has(fact.fact_type) && isNoopFact(fact),
   );
+}
+
+/**
+ * ROADMAP 2.73 — diff this turn's run_analysis fact against the most
+ * recent prior successful run. Returns null when either side cannot be
+ * projected (legacy fact without a usable enrichment envelope, or the
+ * current outcome unexpectedly carries no run_analysis fact); the caller
+ * then degrades to comparison-free rerun copy.
+ *
+ * Prior selection uses `isSuccessfulRunAnalysisFact` (the same canonical
+ * predicate the freshness / comparison layers use), scanning newest-first
+ * per the build-turn-context loader convention.
+ */
+function buildRerunDelta(input: CoachingSignalInput): RunDelta | null {
+  const currentFact = input.outcome.handler_facts.find(
+    (f) => f.fact_type === 'run_analysis',
+  );
+  if (currentFact === undefined) return null;
+
+  const priorFact = input.priorFacts.find(isSuccessfulRunAnalysisFact);
+  if (priorFact === undefined) return null;
+
+  const prior = projectRunFact(priorFact);
+  const current = projectRunFact(currentFact);
+  if (prior === null || current === null) return null;
+
+  return compareRuns(prior, current, input.interventionControlledFactorIds);
 }
 
 function hasPriorSuccessfulRunAnalysis(facts: readonly HandlerFact[]): boolean {
@@ -173,9 +276,9 @@ function findMostRecentSuccessfulAnalysisFact(
  */
 function findEditTargetTopDriverLabel(
   outcome: SuccessfulHandlerOutcome,
-  contextPack: ContextPack,
+  contextPack: ContextPack | null,
 ): string | null {
-  if (contextPack.analysis === null) return null;
+  if (contextPack === null || contextPack.analysis === null) return null;
   const drivers = contextPack.analysis.top_drivers;
   if (drivers.length === 0) return null;
 

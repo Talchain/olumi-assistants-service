@@ -1526,6 +1526,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisReady: cc.analysisReady,
           graph: cc.graph,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
+          // ROADMAP 2.73 Fix C — decision_review call attribution from the
+          // chip dispatch (present only when the call returned under an
+          // enabled timings/trace gate). The minimal-trace builder folds it
+          // into `_diagnostic_trace.llm_calls`, matching the routed path.
+          ...(cc.turnTimings ? { turnTimings: cc.turnTimings } : {}),
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,

@@ -9,6 +9,7 @@ import * as invokeMod from '../../../cee/decision-review/invoke.js';
 import * as decomposeMod from '../../../cee/decision-review/decompose.js';
 import type { ModelResolution } from '../../../adapters/llm/router.js';
 import * as turnDebugMod from '../../debug/turn-debug-store.js';
+import { DECISION_REVIEW_TIMEOUT_MS } from '../../../config/timeouts.js';
 import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
 import { config, _resetConfigCache } from '../../../config/index.js';
 
@@ -233,7 +234,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
     expect(out).toBe(facts);
   });
 
-  it('returns facts unchanged when the 15s hard timeout fires (AbortError)', async () => {
+  it('returns facts unchanged when the hard timeout fires (AbortError)', async () => {
     vi.spyOn(invokeMod, 'invokeDecisionReview').mockImplementation(async (_input, opts) => {
       // Resolve when caller aborts; simulates the adapter respecting signal.
       return await new Promise((_resolve, reject) => {
@@ -253,8 +254,10 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
     });
-    // Advance past the 15s DECISION_REVIEW_TIMEOUT_MS default.
-    await vi.advanceTimersByTimeAsync(15_000);
+    // Advance past DECISION_REVIEW_TIMEOUT_MS — derived from the constant
+    // (ROADMAP 2.73 Fix B raised the default 15s -> 22s), so this test
+    // cannot silently pin a stale hard-coded value again.
+    await vi.advanceTimersByTimeAsync(DECISION_REVIEW_TIMEOUT_MS);
     const out = await pending;
     expect(out).toBe(facts);
     vi.useRealTimers();

@@ -25,7 +25,7 @@ import { dirname, resolve } from 'node:path';
 
 import { log } from '../../utils/telemetry.js';
 
-import type { CoachingSignalId } from './types.js';
+import { isCoachingSignalId, type CoachingSignalId } from './types.js';
 
 export const DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH = resolve(
   process.cwd(),
@@ -115,8 +115,8 @@ function isLastCoachingSignalRecord(value: unknown): value is LastCoachingSignal
     typeof obj.scenario_id === 'string' &&
     typeof obj.turn_id === 'string' &&
     typeof obj.produced_at === 'string' &&
-    (obj.signal_id === 'STALE_ANALYSIS_AFTER_EDIT' ||
-      obj.signal_id === 'HIGH_SENSITIVITY_EDIT' ||
-      obj.signal_id === 'FIRST_ANALYSIS_COMPLETE')
+    // Derived from COACHING_SIGNAL_IDS (types.ts) — previously a hand-list
+    // that silently dropped any signal id it had not been manually taught.
+    isCoachingSignalId(obj.signal_id)
   );
 }

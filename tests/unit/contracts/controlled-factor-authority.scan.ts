@@ -94,12 +94,23 @@ export const AUTHORITY_ALLOWLIST: Readonly<
   Record<string, { readonly count: number; readonly allowedArgs: readonly string[] }>
 > = {
   'orchestrator-v5/turn-executor.ts': {
-    count: 3,
+    // 4th site (ROADMAP 2.73): STEP-5 applyCoachingSignal threads the
+    // controlled set into the rerun-delta comparator — same persisted-first
+    // form as the other three sites.
+    count: 4,
     allowedArgs: ['context.persistedGraph ?? options.graphState'],
   },
   'orchestrator-v5/handlers/chip-click-dispatch.ts': {
-    count: 1,
-    allowedArgs: ['context.persistedGraph'],
+    // 2nd site (ROADMAP 2.73): the run_analysis chip path threads the
+    // controlled set into applyCoachingSignal. Persisted-derived on both
+    // legs: the pre-loaded scenario snapshot's raw persisted graph
+    // (production) with the turn-context persisted graph as the
+    // injected-registry test-path fallback. No request-graph leg.
+    count: 2,
+    allowedArgs: [
+      'context.persistedGraph',
+      'cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph',
+    ],
   },
   'orchestrator-v5/tools/handlers/run-analysis.ts': {
     count: 1,

@@ -7,7 +7,7 @@
  *  - Only fires for run_analysis handler facts with a non-empty v5.brief and
  *    non-empty results in the PLoT envelope. Skips (returns input unchanged)
  *    otherwise, logging a telemetry event so operators can see why.
- *  - Hard 15s timeout (DECISION_REVIEW_TIMEOUT_MS). On timeout, abort, or
+ *  - Hard timeout (DECISION_REVIEW_TIMEOUT_MS, default 22s). On timeout, abort, or
  *    shape failure: returns the input facts unchanged. The analysis_result
  *    block is composed without enrichment.decision_review, and UI renders
  *    thin content exactly as today.

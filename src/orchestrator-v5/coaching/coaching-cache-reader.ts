@@ -27,8 +27,8 @@ import { readLatestDraftCoaching } from './draft-coaching-log.js';
 import { readLatestLastCoachingSignal } from './last-coaching-signal-log.js';
 import {
   EMPTY_COACHING_CACHE,
+  isCoachingSignalId,
   type CoachingCache,
-  type CoachingSignalId,
   type DecisionReviewOutput,
   type LastCoachingSignal,
 } from './types.js';
@@ -131,14 +131,6 @@ function pickNewestSignal(
   return sidecarSignal.produced_at > factSignal.produced_at
     ? sidecarSignal
     : factSignal;
-}
-
-function isCoachingSignalId(value: unknown): value is CoachingSignalId {
-  return (
-    value === 'STALE_ANALYSIS_AFTER_EDIT' ||
-    value === 'HIGH_SENSITIVITY_EDIT' ||
-    value === 'FIRST_ANALYSIS_COMPLETE'
-  );
 }
 
 function isDecisionReviewOutput(value: unknown): value is DecisionReviewOutput {
