@@ -319,6 +319,95 @@ describe('G4 canonical-state-use', () => {
     expect(prosePercentages('62.5 percent')).toEqual([62.5]);
   });
 
+  // ---------- round-4: sign, ranges, fail-closed (F-G4b) ----------
+  // Round 3 fixed decimals and STILL left two inversions in the same regex:
+  // the sign was dropped (a sign-flipped "you LOSE 20%" vs canonical +20 scored
+  // a perfect 1.000) and hyphenated ranges anchored only the upper bound (the
+  // fabricated lower bound of '60-70%' never entered the denominator). Two
+  // rounds, same regex, new holes — so round 4 replaces the regex with a
+  // numeric-literal scanner and a FAIL-CLOSED policy: what cannot be parsed
+  // unambiguously counts as UNTRACEABLE, never as absent.
+
+  it('extracts an explicit negative sign', () => {
+    expect(prosePercentages('-20%')).toEqual([-20]);
+  });
+
+  it('extracts a Unicode-minus negative sign', () => {
+    expect(prosePercentages('−20%')).toEqual([-20]);
+  });
+
+  it('extracts a directional-loss cue as a negative figure', () => {
+    expect(prosePercentages('you lose 20%')).toEqual([-20]);
+  });
+
+  it('expands a hyphenated range to BOTH bounds', () => {
+    expect(prosePercentages('60-70%')).toEqual([60, 70]);
+  });
+
+  it('expands a spaced en-dash range to BOTH bounds', () => {
+    expect(prosePercentages('60 – 70%')).toEqual([60, 70]);
+  });
+
+  it('VIOLATING: a sign-flipped figure must not score a free 1.000', () => {
+    // Canonical payload holds +20 (a gain). Prose asserts the user LOSES 20%.
+    // The round-3 regex dropped the sign, extracted 20, and returned a perfect
+    // PASS for a directionally inverted claim.
+    const d = gateCanonicalStateUse([
+      turn({ turn: 'T1', assistantText: 'On this path you LOSE 20% of the value.' }, 'x', {
+        payloadPercentages: [20],
+      }),
+    ]);
+    expect(d.value).toBe(0);
+  });
+
+  it('COMPLIANT: a faithful loss restated against a canonical NEGATIVE traces', () => {
+    // Payload percentile p10 = -0.20 surfaces as canonical -20.
+    const d = gateCanonicalStateUse([
+      turn({ turn: 'T1', assistantText: 'On this path you lose 20% of the value.' }, 'x', {
+        payloadPercentages: [-20],
+      }),
+    ]);
+    expect(d.value).toBe(1);
+  });
+
+  it('VIOLATING: the fabricated LOWER bound of a range must enter the denominator', () => {
+    // Canonical holds 70 only. Prose states '60-70%'. The round-3 regex anchored
+    // only the upper bound, so the fabricated 60 never entered the denominator
+    // and the turn scored 1.000.
+    const d = gateCanonicalStateUse([
+      turn({ turn: 'T1', assistantText: 'Expect 60-70% success.' }, 'x', { payloadPercentages: [70] }),
+    ]);
+    expect(d.value).toBe(0.5);
+  });
+
+  it('COMPLIANT: a range whose BOTH bounds are canonical traces fully', () => {
+    const d = gateCanonicalStateUse([
+      turn({ turn: 'T1', assistantText: 'Expect 60-70% success.' }, 'x', { payloadPercentages: [60, 70] }),
+    ]);
+    expect(d.value).toBe(1);
+  });
+
+  it('FAIL-CLOSED: an anchored figure that cannot be parsed unambiguously is UNTRACEABLE, never absent', () => {
+    // '70-60%' is not a well-formed range (bounds descend): it could be a typo'd
+    // range, or '70' followed by '-60%'. The scanner must refuse to guess — the
+    // figure stays IN the denominator as untraceable. Silently dropping it is
+    // exactly the round-3 hole class (a figure that never enters the denominator
+    // cannot block).
+    const d = gateCanonicalStateUse([
+      turn({ turn: 'T1', assistantText: 'Roughly 70-60% odds.' }, 'x', { payloadPercentages: [60, 70] }),
+    ]);
+    expect(d.value).toBe(0);
+    expect(d.details.figures_stated).toBe(1);
+  });
+
+  it('FAIL-CLOSED: a run whose ONLY figure is unparseable is measured (0), not UNMEASURABLE', () => {
+    const d = gateCanonicalStateUse([
+      turn({ turn: 'T1', assistantText: 'Roughly 70-60% odds.' }, 'x', { payloadPercentages: [] }),
+    ]);
+    expect(d.value).toBe(0);
+    expect(d.value).not.toBeNull();
+  });
+
   it('VIOLATING: a FABRICATED decimal figure must not score a free 1.000', () => {
     // Canonical payload holds 5 (e.g. a p10). Prose invents '62.5%'. The old
     // parser extracted 5, found it canonical, and returned a perfect PASS.

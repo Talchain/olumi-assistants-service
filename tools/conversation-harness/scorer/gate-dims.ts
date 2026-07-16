@@ -51,6 +51,7 @@ import {
 } from './dims.js';
 import type { PromptDimScore } from './prompt-dims.js';
 import type { TurnSurfaces } from './prompt-dims.js';
+import { scanProseFigures } from './figure-scanner.js';
 
 /** Chip-set similarity at/above which two turns' affordances are "the same
  * offer again". Uses the SEMANTIC chip key (dims.chipSemanticKey), so the
@@ -306,29 +307,52 @@ function escapeRe(s: string): string {
 
 /**
  * Every figure the assistant states must exist in the canonical payload.
- * Denominator: integer percentages appearing in coach prose. Numerator: those
+ * Denominator: %-anchored figures appearing in coach prose (signed; range and
+ * list forms expanded so every bound is its own figure), PLUS every anchored
+ * figure the scanner could not parse unambiguously. Numerator: parsed figures
  * that appear in the turn's payload percentages (win-% + outcome percentiles).
+ *
+ * EXTRACTION IS A SCANNER, NOT A REGEX (round 4). The regex approach failed
+ * the same way twice — round 2 inverted on decimals ('62.5%' -> 5), round 3
+ * still inverted on negative figures (sign dropped: "you LOSE 20%" traced to a
+ * canonical +20) and hyphenated ranges (only the upper bound of '60-70%'
+ * anchored; the fabricated lower bound never entered the denominator). Every
+ * form a regex does not enumerate is silently dropped, and a dropped figure
+ * cannot block — each gap fails OPEN. figure-scanner.ts owns the grammar
+ * (sign, decimals, thousands grouping, ranges, conjunction lists, currency
+ * adjacency) and its full rationale.
+ *
+ * FAIL-CLOSED: an anchored figure the scanner cannot parse unambiguously is
+ * counted here as UNTRACEABLE (it enters the denominator and can never enter
+ * the numerator) — never as absent. An unanticipated syntactic form now blocks
+ * a candidate visibly instead of waving it through invisibly.
  *
  * ANTI-GAMING:
  *  - Null when the run states NO figures at all. Otherwise the winning strategy
  *    is to say nothing quantitative and score 1.000 — the exact vacuity this
  *    gate exists to prevent. A prompt that avoids numbers must clear the OTHER
  *    floors (advancement, dead-end) on its own merits, not bank a free 1.0 here.
+ *    A run whose only figures are unparseable IS measured (0.000), not null:
+ *    stating garbled figures is worse than stating none.
  *  - Scored per FIGURE, not per turn: one turn inventing nine numbers cannot
  *    hide behind eight clean turns.
  *  - Only the turn's OWN payload counts, so a number that was canonical three
  *    turns ago but is not on this envelope is untraceable — which is correct,
  *    that is a staleness leak.
+ *  - SIGNED matching: the canonical surface carries signed percentiles (a p10
+ *    of -0.2 surfaces as -20), so "you lose 20%" (-20) traces to a canonical
+ *    -20 and blocks against a canonical +20. Sign-flips are fabrications.
  */
 export function gateCanonicalStateUse(turns: GateTurn[]): PromptDimScore {
   const act = active(turns);
   let total = 0;
   let traceable = 0;
+  let unparseable = 0;
   for (const t of act) {
-    const figures = prosePercentages(t.row.assistantText);
-    if (figures.length === 0) continue;
+    const scan = scanProseFigures(t.row.assistantText ?? '');
+    if (scan.values.length === 0 && scan.unparseable === 0) continue;
     const canonical = new Set(t.surfaces.payloadPercentages);
-    for (const f of figures) {
+    for (const f of scan.values) {
       total++;
       // The canonical surface is built with Math.round (prompt-dims.ts buildSurfaces),
       // so a stated figure must be normalised through the SAME rounding to be
@@ -336,8 +360,14 @@ export function gateCanonicalStateUse(turns: GateTurn[]): PromptDimScore {
       // as 63. Rounding only the payload side is what made a faithful decimal
       // untraceable. This tolerates restated precision, never invented VALUE:
       // '62.5%' against a canonical {62} still rounds to 63 and blocks.
+      // (Math.round rounds toward +Infinity on .5 for BOTH sides — same
+      // function, so a faithful negative decimal stays comparable.)
       if (canonical.has(Math.round(f))) traceable++;
     }
+    // FAIL-CLOSED: unparseable figures are stated figures that can never
+    // trace. They join the denominator, never the numerator.
+    total += scan.unparseable;
+    unparseable += scan.unparseable;
   }
   if (total === 0) {
     return dim('G4-canonical-state-use', 'Canonical-state use (stated figures traceable to payload)', 'higher-better', null, 'fraction', { figures_stated: 0 }, [
@@ -350,37 +380,24 @@ export function gateCanonicalStateUse(turns: GateTurn[]): PromptDimScore {
     'higher-better',
     Number((traceable / total).toFixed(3)),
     'fraction',
-    { figures_stated: total, traceable },
-    [],
+    { figures_stated: total, traceable, unparseable },
+    unparseable > 0
+      ? [`${unparseable} anchored figure(s) could not be parsed unambiguously and were counted UNTRACEABLE (fail-closed)`]
+      : [],
   );
 }
 
 /**
- * Percentages stated in prose: "62%", "62 %", "62.5%", "0.5%", "1,250%",
- * "62.5 percent". Returns the WHOLE numeric literal of each figure.
+ * Signed %-anchored figures stated in prose, in text order: "62%", "-20%",
+ * "you lose 20%" (-20), "62.5 percent", "1,250%", "60-70%" (both bounds).
  *
- * Deliberately narrow on the ANCHOR: a figure only counts when it is attached
- * to a % sign or the word "percent". Bare numbers are ambiguous (dates, counts,
- * the user's own figures) and a false positive here degrades a real candidate —
- * so "1,250" with no anchor yields nothing.
- *
- * Deliberately WIDE on the literal, which is what this used to get wrong. The
- * previous pattern (/(\d{1,3})\s?%/) captured only the digits abutting the '%',
- * so a decimal figure surfaced as its FRACTION: '62.5%' -> 5. That inverted G4
- * in both directions — a fabricated '62.5%' scored a free 1.000 whenever the
- * fraction digit happened to be canonical, and a faithful restatement of a
- * canonical decimal scored 0.000. Both are proven in gate-dims.harness-test.ts.
+ * Thin compatibility wrapper over figure-scanner.ts, which owns the grammar
+ * and the fail-closed contract. NOTE this wrapper DROPS the unparseable count
+ * — gate scoring must use scanProseFigures directly (gateCanonicalStateUse
+ * does); this export exists for callers that only need the parsed values.
  */
 export function prosePercentages(text: string): number[] {
-  const out: number[] = [];
-  // <thousands-grouped or plain integer><optional fraction><optional space><% | percent | per cent>
-  // \b on the word forms keeps "percentile"/"percentage" from anchoring a figure.
-  const re = /(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*(?:%|percent\b|per cent\b)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text ?? '')) !== null) {
-    out.push(Number(`${m[1].replace(/,/g, '')}${m[2] ?? ''}`));
-  }
-  return out;
+  return scanProseFigures(text ?? '').values;
 }
 
 // ---------- G5: unsupported claim ----------
