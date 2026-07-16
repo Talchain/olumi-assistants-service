@@ -24,6 +24,7 @@ import {
   decideClarifyV2Round1,
   incorporateAnswerIntoBrief,
 } from "../../src/orchestrator-v5/clarify-v2/preflight.js";
+import { parsePendingAction } from "../../src/orchestrator-v5/session/pending-action.js";
 import { DRAFT_GRAPH_MAX_BRIEF_LENGTH } from "../../src/schemas/assist.js";
 
 const THIN_BRIEF = "Should we expand into the German market?";
@@ -53,6 +54,54 @@ describe("clarify_v2 round 1 (draft preflight)", () => {
     const d = decideClarifyV2Round1(THIN_BRIEF);
     if (d.kind !== "ask") throw new Error("expected ask");
     expect(d.questions.length).toBe(CLARIFY_V2_MAX_QUESTIONS_PER_ROUND);
+  });
+
+  it("PRODUCER/READER: an over-length round-1 brief is capped at the WRITE so the pending's own reader accepts it (PR #490 review P1)", () => {
+    // A thin decision question + a long pasted background (the probe that
+    // proved the dead end live was 6,341 chars). Round 1 must persist a
+    // working brief the `clarify_v2_round` parser will accept back —
+    // otherwise the pending is dropped at the next turn's read, answers
+    // are silently ignored and the escape chip is dead.
+    const longBrief = `${THIN_BRIEF} ${"Background detail. ".repeat(320)}`.trim();
+    expect(longBrief.length).toBeGreaterThan(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+    const d = decideClarifyV2Round1(longBrief);
+    expect(d.kind).toBe("ask");
+    if (d.kind !== "ask") return;
+    expect(d.state.brief.length).toBeLessThanOrEqual(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+    expect(d.state.brief.startsWith(THIN_BRIEF)).toBe(true);
+    // The REAL reader accepts the persisted shape (round-trip, not a mirror).
+    const parsed = parsePendingAction({
+      id: "cv2_turn-1",
+      scenario_id: "scenario-1",
+      chip_id: CLARIFY_V2_PROCEED_CHIP_ID,
+      action: {
+        kind: "clarify_v2_round",
+        brief: d.state.brief,
+        asked_dimensions: d.state.asked,
+        round: d.state.round,
+      },
+      preconditions: {},
+      expires_at_turn_count: 2,
+      expires_at_iso: new Date(Date.now() + 60_000).toISOString(),
+      emitted_at_iso: new Date(Date.now()).toISOString(),
+    });
+    expect(parsed).not.toBeNull();
+    // And the round stays alive end-to-end: an answer incorporates, the
+    // escape chip proceeds.
+    const answered = decideClarifyV2Resume({
+      state: d.state,
+      message: "The goal is to increase revenue.",
+      messageIsDraftShaped: false,
+      explicitGenerate: false,
+    });
+    expect(answered.kind === "ask" || answered.kind === "proceed").toBe(true);
+    const escaped = decideClarifyV2Resume({
+      state: d.state,
+      message: CLARIFY_V2_PROCEED_MESSAGE,
+      messageIsDraftShaped: false,
+      explicitGenerate: false,
+    });
+    expect(escaped).toEqual({ kind: "proceed", brief: d.state.brief, reason: "user_proceed" });
   });
 });
 
@@ -196,6 +245,14 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
     const long = "x".repeat(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
     const out = incorporateAnswerIntoBrief(long, "The goal is to increase revenue.");
     expect(out.length).toBeLessThanOrEqual(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+  });
+
+  it("incorporation PRESERVES the answer when the working brief is at the cap (the brief's tail makes room, never the answer)", () => {
+    const long = "x".repeat(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+    const answer = "The goal is to increase revenue.";
+    const out = incorporateAnswerIntoBrief(long, answer);
+    expect(out.length).toBeLessThanOrEqual(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+    expect(out).toContain(answer);
   });
 });
 

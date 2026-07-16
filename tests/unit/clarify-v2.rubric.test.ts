@@ -57,6 +57,42 @@ describe("clarify_v2 rubric — completeness table", () => {
       "Should we spend £50k on paid ads or on a sales hire? We want to increase qualified pipeline.",
       ["timeframe"],
     ],
+    // ── Round-2 calibration corpus (PR #490 review P2) — permanent, both
+    // directions. Direction A: natural complete briefs the launch batteries
+    // missed ('choose between', 'success is defined as', 'weighing X
+    // against Y') MUST be silent. Direction B: low-precision satisfiers
+    // (adjectival 'target', bare year digits, determiner 'one', 'or not')
+    // MUST NOT silence genuinely thin briefs.
+    [
+      "calibration A: 'choose between' + 'success is defined as' is complete",
+      "We must choose between acquiring CompetitorX and building in-house; success is defined as 30% market share by 2027.",
+      [],
+    ],
+    [
+      "calibration A: 'weighing X against Y' + trying-to goal is complete",
+      "We are weighing a merger against an IPO; we are trying to maximise shareholder value, roughly fifty million at stake, deadline end of March — which should we pursue?",
+      [],
+    ],
+    [
+      "calibration B: adjectival 'target' + bare year + 'one' do not fake goal/quantities",
+      "Do we go after the target account list this 2026 or focus on the one big account?",
+      ["goal", "quantities"],
+    ],
+    [
+      "calibration B: 'one more review' is not a quantity",
+      "To win, do we ship today or wait for one more review?",
+      ["quantities"],
+    ],
+    [
+      "calibration B: 'or not' is not a second alternative",
+      "Should we renew the vendor contract or not this quarter?",
+      ["goal", "options", "quantities"],
+    ],
+    [
+      "calibration positive control: goal-construction 'the target is' still satisfies goal",
+      "Should we double the sales team or invest in automation? The target is £2m ARR by Q4.",
+      [],
+    ],
   ];
 
   it.each(TABLE)("%s", (_name, brief, expectedMissing) => {

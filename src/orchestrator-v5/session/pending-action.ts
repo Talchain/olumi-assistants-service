@@ -192,6 +192,9 @@ export type PendingActionAction =
       /** Stable public copy captured at emit time (chip label/message). */
       readonly public_label: string;
       readonly public_message: string;
+    }
+  | {
+      /**
        * Clarify v2 round state (ROADMAP 1.94 Option A replacement, E0-B).
        * Carries the draft-preflight clarification round across the answer
        * turn: the WORKING BRIEF (original + incorporated answers), the
@@ -598,6 +601,7 @@ export function parsePendingAction(input: unknown): PendingAction | null {
       return null;
     }
     if (a.redraft !== undefined && typeof a.redraft !== 'boolean') return null;
+  }
   if (a.kind === 'clarify_v2_round') {
     // Clarify v2 (E0-B). The working brief must be a non-empty string
     // within the draft pipeline's max (5000 — mirrored numerically here so

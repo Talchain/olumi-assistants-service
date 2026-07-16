@@ -160,6 +160,7 @@ async function commitClarifyTurn(
   payload: MessageTurnPayload,
   requestId: string,
   startedAtMs: number,
+  priorPendings: readonly PendingAction[],
 ): Promise<boolean> {
   try {
     await commitDirectAnswer(response, {
@@ -177,10 +178,16 @@ async function commitClarifyTurn(
       // even if the user never completes the clarify flow.
       briefText: normaliseBriefText(state.brief).value,
       pending_actions: [buildClarifyPending(state, payload, startedAtMs)],
-      // Pre-draft frame stage: no prior holds exist on this path in
-      // normal use; an explicit empty carry-forward keeps the commit's
-      // pending set exactly this round's state.
-      priorPendingActions: [],
+      // HOLD-WIPE class (same fix as draft-graph-dispatch, task_2e1b8c87):
+      // thread the prior turn's pendings so this commit's carry-forward
+      // runs over the REAL prior set instead of silently wiping it. The
+      // explicit-generate continuation arm CAN carry live pre-graph holds
+      // (e.g. a `proposed_concept` minted by a frame conversation); the
+      // commit's carry-forward handles the lifecycle — supersession
+      // retires the previous clarify round (same chip_id), wall/turn TTLs
+      // decrement once, and lapses surface honestly. Non-mutating turn:
+      // no graph_hash is threaded, so hash invalidation never fires here.
+      priorPendingActions: priorPendings,
       coaching_state: null,
       userMessage: payload.message,
     });
@@ -277,6 +284,7 @@ export async function tryClarifyV2Turn(
         payload,
         requestId,
         startedAtMs,
+        pendings,
       );
       // Commit failure on RESUME degrades to proceed-with-what-we-have
       // rather than null: the reply was an answer to OUR question; letting
@@ -307,6 +315,7 @@ export async function tryClarifyV2Turn(
     payload,
     requestId,
     startedAtMs,
+    pendings,
   );
   if (!committed) return null;
   return { kind: 'respond', response };

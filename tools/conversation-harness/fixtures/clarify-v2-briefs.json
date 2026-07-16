@@ -120,6 +120,36 @@
       "brief": "Should we hire three contractors or one agency for the website rebuild, to cut delivery time, within two months?",
       "expected": "silent",
       "note": "To-cut goal, or-options, number words, within-months horizon."
+    },
+    {
+      "id": "calib-a1-choose-between-success-defined",
+      "brief": "We must choose between acquiring CompetitorX and building in-house; success is defined as 30% market share by 2027.",
+      "expected": "silent",
+      "note": "Round-2 calibration, direction A (missed satisfiers): 'choose between' names both options without an 'or'; 'success is defined as' is a goal clause the launch battery missed. Firing here is spurious-question annoyance."
+    },
+    {
+      "id": "calib-a2-weighing-against",
+      "brief": "We are weighing a merger against an IPO; we are trying to maximise shareholder value, roughly fifty million at stake, deadline end of March — which should we pursue?",
+      "expected": "silent",
+      "note": "Round-2 calibration, direction A: 'weighing X against Y' names the alternatives; trying-to goal, fifty-million scale, deadline horizon. All four present without any launch-battery keyword."
+    },
+    {
+      "id": "calib-b1-target-year-one",
+      "brief": "Do we go after the target account list this 2026 or focus on the one big account?",
+      "expected": "clarify",
+      "note": "Round-2 calibration, direction B (over-matching satisfiers): adjectival 'target', the bare year '2026', and determiner 'one' must NOT silence this — no goal, no scale. Silence here reproduces the never-asks baseline."
+    },
+    {
+      "id": "calib-b2-one-more-review",
+      "brief": "To win, do we ship today or wait for one more review?",
+      "expected": "clarify",
+      "note": "Round-2 calibration, direction B: 'one more review' carries no magnitude — quantities are genuinely missing and must be asked."
+    },
+    {
+      "id": "calib-b3-or-not",
+      "brief": "Should we renew the vendor contract or not this quarter?",
+      "expected": "clarify",
+      "note": "Round-2 calibration, direction B: 'or not' restates the yes/no framing — it names no second alternative, so options (and goal, quantities) are missing."
     }
   ],
   "resume_scripts": [

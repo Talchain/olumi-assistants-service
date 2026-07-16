@@ -107,24 +107,42 @@ export type ClarifyV2Decision =
 
 /**
  * Append an answer to the working brief, capped at the draft pipeline's
- * Zod max so the eventual `briefOverride` is guaranteed-valid. A mid-word
- * cut at 5000 chars loses nothing meaningful (same rationale as
+ * Zod max so the eventual `briefOverride` is guaranteed-valid.
+ *
+ * ANSWER-PRESERVING under the cap (PR #490 review P1): when the working
+ * brief is already at/near the max (a long pasted background capped at
+ * round 1), a naive tail-slice of the JOINED string would delete the
+ * user's answer — the one thing this function exists to keep. The answer
+ * is the newest, highest-signal content, so the BRIEF's tail is truncated
+ * to make room instead (a mid-word cut in a >5k background's tail loses
+ * nothing meaningful — same rationale as
  * `assemble-explicit-generate-brief.ts`'s `capToDraftMax`).
  */
 export function incorporateAnswerIntoBrief(brief: string, answer: string): string {
   const trimmed = answer.trim().replace(/\s+/g, ' ');
   if (trimmed.length === 0) return brief;
   const joined = `${brief.trim()} ${trimmed}`;
-  return joined.length > DRAFT_GRAPH_MAX_BRIEF_LENGTH
-    ? joined.slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH)
-    : joined;
+  if (joined.length <= DRAFT_GRAPH_MAX_BRIEF_LENGTH) return joined;
+  const room = DRAFT_GRAPH_MAX_BRIEF_LENGTH - trimmed.length - 1;
+  if (room <= 0) return trimmed.slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+  return `${brief.trim().slice(0, room)} ${trimmed}`;
 }
 
 /** Round 1: assess the brief at draft preflight. */
 export function decideClarifyV2Round1(brief: string): ClarifyV2Decision {
-  const assessment = assessBriefCompleteness(brief);
+  // PRODUCER/READER CONTRACT — cap at the WRITE. The round state persists
+  // on a `clarify_v2_round` pending whose reader (`parsePendingAction`)
+  // REFUSES briefs over DRAFT_GRAPH_MAX_BRIEF_LENGTH fail-closed; an
+  // uncapped round-1 brief (a long pasted background is the common case)
+  // would ask questions and then be dropped at the next turn's parse —
+  // answers silently ignored, escape chip dead: the exact dead-end class
+  // this capability exists to kill. Same convention as
+  // `incorporateAnswerIntoBrief` and the resume draft-shaped-replacement
+  // branch: trim + hard slice at the draft pipeline's Zod max.
+  const workingBrief = brief.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+  const assessment = assessBriefCompleteness(workingBrief);
   if (assessment.complete) {
-    return { kind: 'proceed', brief, reason: 'complete' };
+    return { kind: 'proceed', brief: workingBrief, reason: 'complete' };
   }
   const questions = composeClarifyQuestions(
     assessment.missing,
@@ -134,7 +152,7 @@ export function decideClarifyV2Round1(brief: string): ClarifyV2Decision {
     kind: 'ask',
     questions,
     state: {
-      brief,
+      brief: workingBrief,
       asked: questions.map((q) => q.dimension),
       round: 1,
     },

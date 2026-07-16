@@ -17,6 +17,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
+import { parsePendingAction } from '../../orchestrator-v5/session/pending-action.js';
 import { _resetConfigCache } from '../../config/index.js';
 import {
   CLARIFY_V2_PROCEED_CHIP_ID,
@@ -159,6 +160,27 @@ function messagePayload(message: string, overrides: Record<string, unknown> = {}
   };
 }
 
+/** A live, unrelated pre-graph hold (V5 proposal memory) — the silent-wipe probe. */
+function makeProposedConceptHold(): PendingAction {
+  const now = Date.now();
+  return {
+    id: 'pc_prior-turn',
+    scenario_id: SCENARIO_ID,
+    chip_id: 'pc_chip-1',
+    action: {
+      kind: 'proposed_concept',
+      concept: 'a churn-risk factor',
+      preferred_kind: 'factor',
+      public_label: 'Add churn risk',
+      public_message: 'Yes, add the churn-risk factor.',
+    },
+    preconditions: {},
+    expires_at_turn_count: 3,
+    expires_at_iso: new Date(now + 60_000).toISOString(),
+    emitted_at_iso: new Date(now).toISOString(),
+  } as PendingAction;
+}
+
 function livePending(brief: string, asked: readonly string[], round: number): PendingAction {
   const now = Date.now();
   return {
@@ -279,6 +301,132 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
     const body = JSON.parse(res.body);
     expect(body.assistant_text).toContain('?');
+  });
+
+  // ── PR #490 review P1 — over-length round-1 brief must round-trip ───────
+  it('ROUND-TRIP: a >5000-char round-1 brief persists a pending its own READER accepts; the answer turn resumes and drafts', async () => {
+    clarifyV2EnabledForTest = true;
+    // Thin decision question + long pasted background (the live probe that
+    // proved the dead end was 6,341 chars).
+    const longBrief = `${THIN_BRIEF} ${'Background detail. '.repeat(340)}`.trim();
+    expect(longBrief.length).toBeGreaterThan(5000);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(longBrief),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
+    const pendingRow = (committed.pending_actions as PendingAction[]).find(
+      (p) => p.action.kind === 'clarify_v2_round',
+    );
+    expect(pendingRow).toBeDefined();
+    // The REAL read-side gate: the store only returns rows parsePendingAction
+    // accepts (supabase-store drops the rest as PendingActionsReadDegraded).
+    // Before the round-1 cap this returned null and the round was dead.
+    const parsed = parsePendingAction(pendingRow);
+    expect(parsed).not.toBeNull();
+
+    // Answer turn: feed the parse-accepted row back, exactly as the store would.
+    pendingActionsForRead = [parsed!];
+    hasPriorTurnsForRead = true;
+    appendMock.mockClear();
+    const answer =
+      'The goal is to increase revenue; the alternative is doing nothing; the stakes are around £200,000; it plays out within this year.';
+    const res2 = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(answer),
+    });
+    expect(res2.statusCode).toBe(200);
+    // Answers incorporated → the draft dispatch runs with the augmented
+    // brief (still ≤ the draft pipeline's Zod max).
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toContain('increase revenue');
+    expect(String(args.briefOverride).length).toBeLessThanOrEqual(5000);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
+  it('ROUND-TRIP: the escape chip stays ALIVE after a >5000-char round-1 brief (go-ahead proceeds to draft)', async () => {
+    clarifyV2EnabledForTest = true;
+    const longBrief = `${THIN_BRIEF} ${'Background detail. '.repeat(340)}`.trim();
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(longBrief),
+    });
+    const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
+    const parsed = parsePendingAction(
+      (committed.pending_actions as PendingAction[]).find(
+        (p) => p.action.kind === 'clarify_v2_round',
+      ),
+    );
+    expect(parsed).not.toBeNull();
+    pendingActionsForRead = [parsed!];
+    hasPriorTurnsForRead = true;
+    const res2 = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(CLARIFY_V2_PROCEED_MESSAGE, { source: 'chip_click', chip: {} }),
+    });
+    expect(res2.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride).length).toBeLessThanOrEqual(5000);
+  });
+
+  // ── PR #490 review P2 — no silent wipe of prior holds ───────────────────
+  it('HOLD SURVIVAL: a live prior pending survives a round-1 clarify commit (explicit-generate continuation arm)', async () => {
+    clarifyV2EnabledForTest = true;
+    hasPriorTurnsForRead = true;
+    persistedBriefTextForRead = THIN_BRIEF;
+    pendingActionsForRead = [makeProposedConceptHold()];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload('Yes, build the model now please', {
+        source: 'chip_click',
+        chip: {},
+        generate_model: true,
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
+    const kinds = (committed.pending_actions as PendingAction[]).map((p) => p.action.kind);
+    expect(kinds).toContain('clarify_v2_round');
+    // The silent-wipe class (draft path's HOLD-WIPE fix, task_2e1b8c87):
+    // with priorPendingActions: [] the hold vanished here.
+    expect(kinds).toContain('proposed_concept');
+  });
+
+  it('HOLD SURVIVAL on RESUME: the follow-up ask supersedes the previous round but CARRIES an unrelated hold', async () => {
+    clarifyV2EnabledForTest = true;
+    hasPriorTurnsForRead = true;
+    pendingActionsForRead = [
+      livePending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+      makeProposedConceptHold(),
+    ];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(
+        'The goal is to increase revenue; the alternative is doing nothing; it plays out within this year.',
+      ),
+    });
+    expect(res.statusCode).toBe(200);
+    const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
+    const pendings = committed.pending_actions as PendingAction[];
+    const clarifyRounds = pendings.filter((p) => p.action.kind === 'clarify_v2_round');
+    // Exactly one round survives (same chip_id → supersession, no zombie twin)…
+    expect(clarifyRounds).toHaveLength(1);
+    if (clarifyRounds[0]!.action.kind === 'clarify_v2_round') {
+      expect(clarifyRounds[0]!.action.round).toBe(2);
+    }
+    // …and the unrelated hold is carried, not wiped.
+    expect(pendings.map((p) => p.action.kind)).toContain('proposed_concept');
   });
 
   // ── FLAG ON: resume ──────────────────────────────────────────────────────

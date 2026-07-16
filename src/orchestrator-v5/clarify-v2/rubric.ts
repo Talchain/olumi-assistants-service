@@ -84,22 +84,39 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
   Record<ClarifyDimension, readonly RegExp[]>
 > = {
   goal: [
-    /\b(?:goal|objective|aim|target|purpose|success (?:looks like|means|criterion|metric)|so that|in order to)\b/i,
+    // "target" needs a goal-marker construction ("the target is…", "target
+    // of 20%"): the bare noun over-matched adjectival uses ("the target
+    // account list") and silently satisfied goal on genuinely thin briefs
+    // (round-2 calibration, direction B).
+    /\b(?:goal|objective|aim|purpose|target (?:is|of)|success (?:looks like|means|criterion|metric|is (?:defined|measured))|so that|in order to)\b/i,
     /\bto (?:increase|grow|improve|boost|reduce|cut|lower|save|protect|retain|maximise|maximize|minimise|minimize|accelerate|win|achieve|hit|reach)\b/i,
     /\bwe (?:want|need|hope|are trying|are aiming) to\b/i,
   ],
   options: [
-    /\b(?:versus|vs\.?|alternative(?:s|ly)?|either|instead of|rather than|compared? (?:to|with)|choice between|option[s]? (?:are|would be|include))\b/i,
+    /\b(?:versus|vs\.?|alternative(?:s|ly)?|either|instead of|rather than|compared? (?:to|with)|(?:choice|choos(?:e|ing)|decid(?:e|ing)) between|option[s]? (?:are|would be|include))\b/i,
+    // "weighing X against Y" — the weigh-verb construction names two
+    // alternatives without an "or" (round-2 calibration, direction A).
+    // Bounded gap so an unrelated "against" clauses away does not fire.
+    /\bweigh(?:ing|ed|s)?\b[^.!?;]{0,80}\bagainst\b/i,
     // A bare "or" joining alternatives ("hire a lead or two developers",
     // "raise prices by 10% or hold"). Anchored between non-space tokens so
     // leading / trailing fragments do not fire; the left token is \S (not
     // \w) because alternatives routinely end in %, £, digits or ).
-    /\S\s+or\s+\w/i,
+    // "X or not" is excluded: it restates the yes/no framing, it does not
+    // name a second alternative (round-2 calibration, direction B).
+    /\S\s+or\s+(?!not\b)\w/i,
   ],
   quantities: [
-    /\d/,
+    // Digits, EXCEPT a bare calendar year (1900–2099): "this 2026" is a
+    // timeframe signal, not a magnitude, and the old bare /\d/ silently
+    // satisfied quantities on briefs with no scale at all (round-2
+    // calibration, direction B). Longer runs ("20,000", "2026Q1") still
+    // count via the surrounding-digit lookarounds.
+    /(?<!\d)(?!(?:19|20)\d\d(?!\d))\d/,
     /[£$€]/,
-    /\b(?:percent|per cent|half|double|triple|dozens?|hundreds?|thousands?|millions?|billions?|one|two|three|four|five|six|seven|eight|nine|ten|twenty|fifty)\b/i,
+    // "one" removed: as a determiner/pronoun ("the one big account", "one
+    // more review") it carries no magnitude and over-matched (direction B).
+    /\b(?:percent|per cent|half|double|triple|dozens?|hundreds?|thousands?|millions?|billions?|two|three|four|five|six|seven|eight|nine|ten|twenty|fifty)\b/i,
   ],
   timeframe: [
     /\b(?:today|tomorrow|this (?:week|month|quarter|year)|next (?:week|month|quarter|year)|by (?:the )?end of|deadline|timeline|time ?frame|horizon|short[- ]term|long[- ]term|near[- ]term|q[1-4]\b|20\d\d|within (?:a|one|two|three|six|twelve|\d+) ?(?:week|month|quarter|year)s?)\b/i,
