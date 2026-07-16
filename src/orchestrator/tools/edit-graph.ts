@@ -3830,11 +3830,32 @@ function normaliseOperation(rawInput: Record<string, unknown>): PatchOperation &
 
   // For field-level update ops (path had /field suffix), wrap scalar value into { field: value }
   // so the Zod update schemas (which expect a record) validate correctly.
+  //
+  // ROADMAP 2.11 / P0-2 — intervention OBJECT leaves are wrapped too. The
+  // edit prompt's option-configuration contract ("patch the whole
+  // intervention object at /nodes/<opt>/data/interventions/<factor_id>",
+  // its EXAMPLE 2) emits an OBJECT value `{value, raw_value, unit, cap}`.
+  // The scalar-only wrap dropped the field key for that shape, so the
+  // object was Object.assign-smeared onto the option node: the
+  // `<factor_id>` attribution was LOST, the referee saw unsanctioned
+  // node-field roots (`value`/`raw_value`/`unit`/`cap`) and REJECTED, and
+  // a multi-factor option could never be configured through chat (pinned
+  // by option-configure-apply-chain.test.ts hop 1). Scoped to the
+  // interventions subtree only: other object-valued field updates keep
+  // their long-standing spread semantics.
+  const isInterventionFieldPath =
+    typeof field === 'string' && /^data\/interventions\/.+$/.test(field);
   if (field && (raw.op === 'update_node' || raw.op === 'update_edge')) {
-    if (value !== undefined && (typeof value !== 'object' || value === null)) {
+    if (
+      value !== undefined &&
+      (typeof value !== 'object' || value === null || (isInterventionFieldPath && !Array.isArray(value)))
+    ) {
       value = { [field]: value };
     }
-    if (oldValue !== undefined && (typeof oldValue !== 'object' || oldValue === null)) {
+    if (
+      oldValue !== undefined &&
+      (typeof oldValue !== 'object' || oldValue === null || (isInterventionFieldPath && !Array.isArray(oldValue)))
+    ) {
       oldValue = { [field]: oldValue };
     }
   }

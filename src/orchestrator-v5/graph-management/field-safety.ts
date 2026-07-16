@@ -24,6 +24,7 @@
  * All checks are pure and total.
  */
 import type { CandidateMutationEnvelope } from './types.js';
+import { InterventionV3 } from '../../schemas/cee-v3.js';
 import {
   FIELD_NOT_ALLOWED,
   PIPELINE_OWNED_FIELD,
@@ -200,6 +201,30 @@ function collectObjectKeys(value: unknown, out: Set<string>): void {
 }
 
 /**
+ * ROADMAP 2.11 / P0-2 — the intervention CONTRACT keys, DERIVED from the
+ * canonical Zod schema (`InterventionV3.shape`, trap-12: derive, don't
+ * mirror) plus `cap` (the edit prompt's DERIVED-FIELD RULE instructs
+ * "Include value, raw_value, unit, and cap"; the option-intervention
+ * encoder reads `cap` to normalise, and InterventionV3 passes it through).
+ *
+ * Why: an option-configure edit ("the raise price option should reduce
+ * marketing spend to £25k") lands as `update_node` at
+ * `data/interventions/<factor_id>` with an object payload carrying
+ * `raw_value` — which is ALSO a pipeline-owned extraction-provenance root
+ * on nodes. The smuggle guard read the payload keys context-free and
+ * REJECTED the whole sanctioned configure vocabulary (PIPELINE_OWNED_FIELD),
+ * so the one chat path that writes option interventions was dead on
+ * arrival. Inside the interventions subtree these keys belong to the
+ * intervention contract, not to node provenance — exempt exactly the
+ * schema-derived set, exactly there. Everywhere else the screen is
+ * unchanged.
+ */
+const INTERVENTION_CONTRACT_KEYS: ReadonlySet<string> = new Set([
+  ...Object.keys(InterventionV3.shape).map((k) => k.toLowerCase()),
+  'cap',
+]);
+
+/**
  * Depth-1 subtree rule for observed_state/data field paths, plus a smuggle
  * guard for whole-object writes: an object payload must not carry pipeline-
  * owned keys at any depth, and a whole-object observed_state/data write may
@@ -213,11 +238,21 @@ function checkObservedSubtree(field: string, payloadValue: unknown): FieldSafety
   if (isObserved && segs.length > 1 && !ALLOWED_OBSERVED_SUBKEYS.has(segs[1]!)) {
     return { ok: false, code: FIELD_NOT_ALLOWED };
   }
+  // Intervention-subtree writes (`data/interventions/<factor_id>` and the
+  // top-level `interventions` root) carry the InterventionV3 contract —
+  // see INTERVENTION_CONTRACT_KEYS above.
+  const isInterventionSubtree =
+    (isObserved && segs[1] === 'interventions') || root === 'interventions';
   if (payloadValue !== null && typeof payloadValue === 'object') {
     const keys = new Set<string>();
     collectObjectKeys(payloadValue, keys);
     for (const k of keys) {
-      if (PIPELINE_OWNED_ROOTS.has(k)) return { ok: false, code: PIPELINE_OWNED_FIELD };
+      if (
+        PIPELINE_OWNED_ROOTS.has(k) &&
+        !(isInterventionSubtree && INTERVENTION_CONTRACT_KEYS.has(k))
+      ) {
+        return { ok: false, code: PIPELINE_OWNED_FIELD };
+      }
     }
     if (isObserved && segs.length === 1) {
       for (const k of keys) {

@@ -588,6 +588,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphAnalyticalQuestionSuppressed: "v5.edit_graph.analytical_question_suppressed",
         V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
         V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
+        V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
         V5ContinuationGuardApplied: "v5.continuation.guard_applied",
         V5EditGraphAppliedGraphMissingWithOperations: "v5.edit_graph.applied_graph_missing_with_operations",
         V5EditGraphAppliedGraphSynthesizedLocally: "v5.edit_graph.applied_graph_synthesized_locally",
@@ -1306,6 +1307,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // operational signal; no Datadog metric mapping in emit()).
         TelemetryEvents.V5EditGraphProposalConfirmResolved,
         TelemetryEvents.V5EditGraphStateQuerySuppressed,
+        // ROADMAP 2.11 / P0-2 — deterministic configure-option routing gate.
+        // Diagnostic-only, same posture as its route-suppressor siblings.
+        TelemetryEvents.V5EditGraphConfigureOptionRouted,
         TelemetryEvents.V5ContinuationGuardApplied,
         TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations,
         TelemetryEvents.V5EditGraphAppliedGraphSynthesizedLocally,
@@ -1915,6 +1919,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.applied_graph_missing_with_operations",
         "v5.edit_graph.proposal_confirm_resolved",
         "v5.edit_graph.state_query_suppressed",
+        "v5.edit_graph.configure_option_intent_routed",
         "v5.edit_graph.applied_graph_synthesized_locally",
         "v5.edit_graph.false_success_rewritten",
         "v5.edit_graph.intercepted_chip_clarify",

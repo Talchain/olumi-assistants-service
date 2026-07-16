@@ -30,7 +30,7 @@
  * `indexOf` (not RegExp) so option labels with regex-special characters are
  * matched literally.
  */
-function containsPhrase(paddedHaystack: string, needle: string): boolean {
+export function containsPhrase(paddedHaystack: string, needle: string): boolean {
   if (needle.length === 0) return false;
   let from = 0;
   for (;;) {

@@ -63,6 +63,7 @@ import {
 } from './edit-graph-referee-gate.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { buildConfigureOptionChip } from '../configure-option-chip-text.js';
 import { log } from '../../utils/telemetry.js';
 
 // ---------------------------------------------------------------------------
@@ -91,11 +92,89 @@ export const GM_HELD_APPLIED_ASSISTANT_TEXT =
  * then the rerun guidance. Empty input (no safe subject derivable) falls
  * back to the generic swept copy — never blank text.
  */
-export function buildGmHeldAppliedReceipt(subjects: readonly string[]): string {
+export function buildGmHeldAppliedReceipt(
+  subjects: readonly string[],
+  unconfiguredOptionLabels: readonly string[] = [],
+): string {
   const named = subjects.map((s) => s.trim()).filter((s) => s.length > 0);
-  if (named.length === 0) return GM_HELD_APPLIED_ASSISTANT_TEXT;
-  const confirmations = named.map((s) => `Confirmed: ${s}.`).join(' ');
-  return `${confirmations} Run the analysis again when you are ready to see how it plays out.`;
+  const base =
+    named.length === 0
+      ? GM_HELD_APPLIED_ASSISTANT_TEXT
+      : `${named.map((s) => `Confirmed: ${s}.`).join(' ')} ` +
+        'Run the analysis again when you are ready to see how it plays out.';
+  // ROADMAP 2.11 / P1-3 — needs-encoding disclosure. Live-proven lie
+  // (diagnosis brief add-option-2.11.md §2 A3→A4): the receipt told the
+  // user to run the analysis again while the just-applied option had no
+  // effect values, so PLoT preflight 422-blocked the WHOLE analysis on the
+  // very next turn. When the applied graph leaves options unconfigured,
+  // the receipt must say so AT APPLY TIME and point at the real writer.
+  const disclosure = buildUnconfiguredOptionsNotice(unconfiguredOptionLabels);
+  return disclosure === null ? base : `${base} ${disclosure}`;
+}
+
+/**
+ * Honest notice for options that block analysis. Null when every option is
+ * configured (copy byte-identical to the pre-2.11 receipt). The advised
+ * phrasing MUST carry the deterministic configure-option gate's own
+ * vocabulary ("configure … option") so a user who echoes it routes to the
+ * edit lane without the LLM router — pinned by
+ * configure-option-copy-detector-contract.test.ts.
+ */
+export function buildUnconfiguredOptionsNotice(
+  unconfiguredOptionLabels: readonly string[],
+): string | null {
+  const labels = unconfiguredOptionLabels.map((l) => l.trim()).filter((l) => l.length > 0);
+  if (labels.length === 0) return null;
+  const first = `'${labels[0]}'`;
+  const named =
+    labels.length === 1
+      ? first
+      : `${first} and ${labels.length - 1} more option${labels.length - 1 === 1 ? '' : 's'}`;
+  return (
+    `Note: ${named} ${labels.length === 1 ? 'does' : 'do'} not have effect values yet, ` +
+    `so the analysis cannot run until they are set. ` +
+    `Say 'configure the ${labels[0]} option' and tell me what ` +
+    `${labels.length === 1 ? 'it' : 'each one'} changes, and I'll write it in.`
+  );
+}
+
+/**
+ * Structural view of one option row from the readiness payload
+ * (`computeStructuralReadiness` → `AnalysisReadyPayload['options']`). The
+ * real payload carries `option_id` alongside `label`/`status`; the shape is
+ * declared here (rather than `{label, status}` only) so callers passing the
+ * genuine payload — including test fixtures shaped like it — satisfy the
+ * type without excess-property errors. `option_id` is deliberately unread:
+ * ids must never leak into user copy.
+ */
+export interface GmReadinessOption {
+  readonly option_id?: string;
+  readonly label?: string;
+  readonly status?: string;
+}
+
+/**
+ * ROADMAP 2.11 / P1-3 — option labels that block analysis, derived from the
+ * SAME readiness computation the commit path already runs
+ * (`computeStructuralReadiness`): any option not `ready` (needs_encoding /
+ * needs_user_mapping) fails PLoT's per-option intervention preflight.
+ * Labels are graph labels (render-safe at source); id-shaped or empty
+ * labels are dropped rather than leaked.
+ */
+export function deriveUnconfiguredOptionLabels(
+  readiness:
+    | {
+        /** Top-level readiness status; unread here but part of the real payload. */
+        readonly status?: string;
+        readonly options: ReadonlyArray<GmReadinessOption>;
+      }
+    | undefined,
+): string[] {
+  if (!readiness) return [];
+  return readiness.options
+    .filter((o) => o.status !== 'ready')
+    .map((o) => (typeof o.label === 'string' ? o.label.trim() : ''))
+    .filter((l) => l.length > 0 && !/^(?:opt|fac|out|risk|goal|dec)_[a-z0-9_]+$/i.test(l));
 }
 
 /** Rerun affordance offered when the post-apply graph is analysis-ready. */
@@ -105,6 +184,26 @@ export const GM_HELD_APPLIED_RERUN_CHIP = Object.freeze({
   message: 'Rerun the analysis.',
   action_type: 'run_analysis' as const,
 });
+
+/**
+ * ROADMAP 2.11 / P1-3 — chips for the applied receipt: rerun when ready;
+ * the SHARED configure chip (same builder + deterministic route as the
+ * options_not_configured recovery) when options still need effects. The
+ * old behaviour offered NOTHING on a non-ready apply, stranding the user.
+ */
+export function buildGmHeldAppliedChips(
+  readiness:
+    | {
+        readonly status?: string;
+        readonly options: ReadonlyArray<GmReadinessOption>;
+      }
+    | undefined,
+): Array<{ id: string; label: string; message: string; action_type?: 'run_analysis' }> {
+  if (readiness?.status === 'ready') return [{ ...GM_HELD_APPLIED_RERUN_CHIP }];
+  const unconfigured = deriveUnconfiguredOptionLabels(readiness);
+  if (unconfigured.length > 0) return [buildConfigureOptionChip(unconfigured[0]!)];
+  return [];
+}
 
 // ---------------------------------------------------------------------------
 // Pending recognition + payload extraction.
