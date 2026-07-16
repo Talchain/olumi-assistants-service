@@ -38,6 +38,7 @@ type Dict = Record<string, unknown>;
 // ---------------------------------------------------------------------------
 let preLoadGraph: unknown = null;
 let reVerifyGraph: unknown = null;
+let reVerifyError: Error | null = null;
 const loadGraphCalls: string[] = [];
 
 vi.mock('../../session/index.js', () => ({
@@ -45,6 +46,7 @@ vi.mock('../../session/index.js', () => ({
     loadGraphAndBriefText: async () => ({ graph: preLoadGraph, briefText: null }),
     loadGraph: async (scenarioId: string) => {
       loadGraphCalls.push(scenarioId);
+      if (reVerifyError) throw reVerifyError;
       return reVerifyGraph;
     },
     readRecent: async () => [],
@@ -185,14 +187,16 @@ function makeUnrecoverableIngress(): Dict {
 beforeEach(() => {
   preLoadGraph = null;
   reVerifyGraph = null;
+  reVerifyError = null;
   loadGraphCalls.length = 0;
   commitCalls.length = 0;
   plotRunCalls.n = 0;
+  // Flag now defaults OFF (dark); arm it explicitly per-test.
   (config.cee as { runAnalysisAdoptIngressGraph: boolean }).runAnalysisAdoptIngressGraph = true;
   (config.features as { graphCasMode: string }).graphCasMode = 'observe';
 });
 afterEach(() => {
-  (config.cee as { runAnalysisAdoptIngressGraph: boolean }).runAnalysisAdoptIngressGraph = true;
+  (config.cee as { runAnalysisAdoptIngressGraph: boolean }).runAnalysisAdoptIngressGraph = false;
   (config.features as { graphCasMode: string }).graphCasMode = 'off';
 });
 
@@ -283,6 +287,24 @@ describe('#343 adopt-on-empty — chip_click run_analysis dispatch', () => {
     expect(plotRunCalls.n).toBe(1);
     expect(commitCalls).toHaveLength(1);
     expect(commitCalls[0].meta.graph).toBeUndefined();
+  });
+
+  // #343 review #3 — degraded commit-time re-verify is symmetric with the
+  // routed path: it must fail CLOSED to the retryable commit-failed class
+  // (never an uncaught crash, never a silent write on an unverifiable base).
+  it('degraded re-verify (loadGraph throws at commit): fails closed to commit_failed, nothing persisted', async () => {
+    reVerifyError = new Error('session store unreachable');
+    const result = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-degraded-reverify',
+      ingressGraphState: makeIngressGraph(),
+    });
+
+    expect(result.outcome).toBe('commit_failed');
+    expect(commitCalls).toHaveLength(0);
+    // The analysis DID run — the fail-closed is specifically the graph WRITE,
+    // not the compute; the retryable class lets the client retry the persist.
+    expect(plotRunCalls.n).toBe(1);
   });
 
   it('PRESENT persisted graph + ingress supplied: analysed from canonical state; no graph write on the commit (byte-parity with today)', async () => {

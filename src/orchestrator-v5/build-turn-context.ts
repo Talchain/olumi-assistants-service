@@ -1139,6 +1139,99 @@ export async function loadPersistedScenarioStateStrict(
   return await store.loadGraphAndBriefText(scenarioId);
 }
 
+/**
+ * #343 adopt-on-empty — is `g` a POPULATED graph candidate worth assessing?
+ *
+ * True only for a plain object carrying a non-empty `nodes` array. Everything
+ * else — a non-object (`"x"`, a number), `{}`, or `{nodes:[],edges:[]}` — is
+ * treated as "no adoptable model": the request carried nothing usable, so the
+ * honest response is the draft-first NO_GRAPH nudge, NOT a structural
+ * "options not configured" verdict (review #5) and NOT a throw that would map
+ * to the retryable `scenario_read_failed` (review #7). A present-but-MALFORMED
+ * graph WITH nodes is still a candidate → the readiness core gives it the
+ * SPECIFIC verdict (the user sent SOMETHING, just broken).
+ */
+function isPopulatedGraphCandidate(g: unknown): boolean {
+  return (
+    g !== null &&
+    typeof g === 'object' &&
+    !Array.isArray(g) &&
+    Array.isArray((g as { nodes?: unknown }).nodes) &&
+    (g as { nodes: unknown[] }).nodes.length > 0
+  );
+}
+
+/**
+ * #343 adopt-on-empty — thrown by {@link reverifyAdoptedGraphFirstWrite} when
+ * the commit-time strict re-verify read is DEGRADED (store/RPC threw). Both
+ * dispatch paths let it propagate into their commit try/catch, which maps it
+ * to the retryable commit-failed class (chip → `commit_failed`; TurnExecutor
+ * STEP 7 → `STATE_COMMIT_FAILED`) — a graph-bearing commit is never taken on
+ * an unverifiable base. Extends Error so the generic commit catches handle it
+ * without a new instanceof branch.
+ */
+export class AdoptedGraphReverifyError extends Error {
+  constructor(scenarioId: string, cause: unknown) {
+    super(
+      `V5 #343 — refusing to persist adopted ingress graph for scenario ${scenarioId}: persisted base unavailable at commit-time re-verify (${cause instanceof Error ? cause.message : String(cause)})`,
+    );
+    this.name = 'AdoptedGraphReverifyError';
+  }
+}
+
+/**
+ * #343 adopt-on-empty — the SINGLE commit-time re-verify shared by both
+ * run_analysis dispatch paths (chip-click dispatch + TurnExecutor STEP 7).
+ *
+ * Adopting an ingress graph is a FIRST write onto a genuinely-empty
+ * `scenarios.graph`. The handler's null read happened BEFORE the (seconds-long)
+ * PLoT run, so the pre-run null is stale by construction. Re-read the base
+ * STRICTLY and decide:
+ *   - still null → `{ write: true, graph }` — the caller persists the adopted graph.
+ *   - non-null   → `{ write: false }` — WITHHELD: a concurrent canonical write
+ *     landed; the analysis facts stay honest (they hash the adopted graph, and
+ *     later freshness compares against whatever is actually persisted).
+ *   - degraded   → THROWS {@link AdoptedGraphReverifyError} — fail closed.
+ *
+ * ⚠ BEST-EFFORT, NOT atomic: the re-verify READ and the subsequent WRITE are two
+ * separate operations. The strong "a concurrent canonical write is never
+ * overwritten" guarantee holds only under `graphCasMode==='enforce'` (the RPC's
+ * compare-and-set rejects a stale first-write expected-base). In observe/off
+ * (staging today) a small TOCTOU window remains between this read and the
+ * commit — this shrinks that window to milliseconds; it does not close it.
+ *
+ * Extracted to ONE function because the two call sites previously carried
+ * near-identical re-verify + withhold + fail-closed blocks that had already
+ * DIVERGED (the hand-maintained-mirror defect class) — two copies WILL drift.
+ */
+export async function reverifyAdoptedGraphFirstWrite(args: {
+  readonly scenarioId: string;
+  readonly requestId: string;
+  readonly adoptedGraph: unknown;
+  readonly dispatchPath: string;
+  readonly sessionStore?: SessionStore;
+}): Promise<{ readonly write: true; readonly graph: unknown } | { readonly write: false }> {
+  let baseAtCommit: unknown;
+  try {
+    baseAtCommit = await loadPersistedGraphStrict(args.scenarioId, args.sessionStore);
+  } catch (err) {
+    throw new AdoptedGraphReverifyError(args.scenarioId, err);
+  }
+  if (baseAtCommit == null) {
+    return { write: true, graph: args.adoptedGraph };
+  }
+  log.warn(
+    {
+      event: 'v5.run_analysis.adopted_graph_write_withheld',
+      request_id: args.requestId,
+      scenario_id: args.scenarioId,
+      dispatch_path: args.dispatchPath,
+    },
+    'V5 run_analysis — adopted ingress graph write WITHHELD: a persisted graph appeared between the pre-run strict read and the commit (concurrent canonical write wins)',
+  );
+  return { write: false };
+}
+
 export async function loadScenarioSnapshotForRunAnalysis(
   scenarioId: string,
   requestId: string,
@@ -1188,23 +1281,28 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // guest scenario that never drafted/saved a model. A store/RPC failure does NOT
     // reach here (it threw above → propagates to scenario_read_failed).
     //
-    // #343 adopt-on-empty (CEE_RUN_ANALYSIS_ADOPT_INGRESS_GRAPH, default ON):
-    // when the request carried a graph_state (the client-built model — starter/
-    // template inserts and hand-built canvas models exist ONLY client-side; the
-    // V5 wire historically carried no graph, so this seam starved and every
-    // first-CTA analyse dead-ended on NO_GRAPH), assess the INGRESS graph with
-    // the SAME neutral readiness core EP2 uses:
+    // #343 adopt-on-empty (CEE_RUN_ANALYSIS_ADOPT_INGRESS_GRAPH, default OFF /
+    // dark): when the request carried a POPULATED graph_state (the client-built
+    // model — starter/template inserts and hand-built canvas models exist ONLY
+    // client-side; the V5 wire historically carried no graph, so this seam
+    // starved and every first-CTA analyse dead-ended on NO_GRAPH), assess the
+    // INGRESS graph with the SAME neutral readiness core EP2 uses:
     //   - ready/repaired  → adopt the canonical ingress graph as this run's
     //     graph. Persistence happens at the COMMIT seam (never here — a read
-    //     path must not write), gated by a strict re-verify so a concurrent
-    //     canonical write is never overwritten. Mirrors the edit-graph-dispatch
+    //     path must not write), gated by a BEST-EFFORT strict re-verify
+    //     (`reverifyAdoptedGraphFirstWrite`) that withholds the write if a
+    //     concurrent canonical write appeared. Mirrors the edit-graph-dispatch
     //     ingress-base fallback doctrine ("a client that sent graph_state for a
     //     never-persisted scenario — there is nothing to lose").
     //   - unrecoverable   → the SPECIFIC verdict (missing cap / structure /
     //     options not configured), NEVER the false "Draft or save a model
     //     first" copy — the user HAS a model; telling them to draft one
     //     contradicts the canvas.
-    if (config.cee.runAnalysisAdoptIngressGraph && ingressGraph != null) {
+    // A present-but-EMPTY / non-object ingress (zero nodes, `{}`, `"x"`) is NOT
+    // a candidate (`isPopulatedGraphCandidate`) → it falls through to the
+    // null-branch draft-first nudge (reviews #5 + #7), never a structural
+    // verdict and never a throw.
+    if (config.cee.runAnalysisAdoptIngressGraph && isPopulatedGraphCandidate(ingressGraph)) {
       const verdict = assessAnalysisReadiness(ingressGraph);
       if (verdict.status === 'unrecoverable') {
         throw new AnalysisNotReadyError(verdict);

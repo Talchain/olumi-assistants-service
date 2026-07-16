@@ -189,11 +189,12 @@ beforeEach(() => {
   reVerifyGraph = null;
   reVerifyError = null;
   plotRunCalls.n = 0;
+  // Flag now defaults OFF (dark); arm it explicitly per-test.
   (config.cee as { runAnalysisAdoptIngressGraph: boolean }).runAnalysisAdoptIngressGraph = true;
 });
 afterEach(() => {
   setTestSink(null);
-  (config.cee as { runAnalysisAdoptIngressGraph: boolean }).runAnalysisAdoptIngressGraph = true;
+  (config.cee as { runAnalysisAdoptIngressGraph: boolean }).runAnalysisAdoptIngressGraph = false;
   vi.restoreAllMocks();
 });
 

@@ -953,21 +953,27 @@ const ConfigSchema = z.object({
     // a present-but-broken graph is still EP2's (default-off) concern.
     runAnalysisNullGraphRecoverable: booleanString.default(true),
     // #343 CEE half — run_analysis ingress-graph adoption (CEE_RUN_ANALYSIS_ADOPT_INGRESS_GRAPH).
-    // Default ON. When ON, a run_analysis whose persisted `scenarios.graph` is
-    // GENUINELY null (strict read; store reachable, nothing stored) and whose
-    // request carried a `graph_state` adopts the ingress graph: it is assessed
-    // with the SAME neutral readiness core EP2 uses (assessAnalysisReadiness —
-    // GraphV3 + structural + option-configured checks), analysed when
+    // Default OFF (dark). When ON, a run_analysis whose persisted `scenarios.graph`
+    // is GENUINELY null (strict read; store reachable, nothing stored) and whose
+    // request carried a populated `graph_state` adopts the ingress graph: it is
+    // assessed with the SAME neutral readiness core EP2 uses (assessAnalysisReadiness
+    // — GraphV3 + structural + option-configured checks), analysed when
     // ready/repaired, and persisted atomically with the turn commit (CAS
     // first_write; commit-time strict re-verify withholds the write if a graph
     // appeared concurrently). An unrecoverable ingress graph surfaces its
     // SPECIFIC verdict instead of the false "Draft or save a model first".
     // Mirrors the edit-graph-dispatch ingress-base fallback doctrine ("a client
     // that sent graph_state for a never-persisted scenario — there is nothing
-    // to lose"). OFF = code-free rollback to the NULL-graph recoverable branch
-    // (`runAnalysisNullGraphRecoverable`) exactly as before. A PRESENT persisted
-    // graph is NEVER affected: ingress can never overwrite canonical state.
-    runAnalysisAdoptIngressGraph: booleanString.default(true),
+    // to lose").
+    //
+    // DEFAULT OFF = a true dark merge: this ships the machinery without changing
+    // any live behaviour, and the flag is flipped ON as a DELIBERATE activation
+    // decision — TOGETHER with the DGAI UI half that attaches `graph_state` to
+    // the V5 run_analysis body, and with Paul's nod. Default-ON would have made
+    // activation an implicit side-effect of the UI deploy; ACTIVATION is Paul's
+    // call, not a code default. A PRESENT persisted graph is NEVER affected even
+    // when ON: ingress can never overwrite canonical state.
+    runAnalysisAdoptIngressGraph: booleanString.default(false),
     // Lane 28 — brief pipeline seam 3 (CEE_SEND_BRIEF_TO_PLOT). When true,
     // run_analysis forwards the persisted decision brief (scenarios.brief_text,
     // loaded in the same round trip as the graph) as the top-level `brief`

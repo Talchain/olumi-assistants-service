@@ -279,10 +279,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 2. Load scenario snapshot ----------------------------------------
     // #343 adopt-on-empty: thread the per-turn ingress graph
-    // (`invocation.graphForTurn` — the request graph_state when present) as
-    // the adoption candidate. The production reader consults it ONLY when
-    // the strict persisted read returns a genuinely-null graph; a present
-    // persisted graph always wins (canonical-state doctrine intact).
+    // (`invocation.graphForTurn`) as the adoption candidate. The production
+    // reader consults it ONLY when the strict persisted read returns a
+    // genuinely-null graph; a present persisted graph always wins
+    // (canonical-state doctrine intact).
+    //
+    // SAME-SOURCE INVARIANT (review #6): on the ADOPTION path (persisted graph
+    // null) `invocation.graphForTurn` IS the request `graph_state`, the SAME
+    // value the chip-click path threads as `ingressGraphState`. Both originate
+    // at ONE point — route-v2 reads `extensions.graphState` (the
+    // boundary-parsed request body) and passes it as `runTurnExecutor({
+    // graphState })` on the routed path and as `dispatchChipClickRunAnalysis({
+    // ingressGraphState })` on the chip path. In TurnExecutor,
+    // `graphStateForTurn = options.graphState` and is reassigned to the
+    // persisted-graph fallback ONLY when the request graph is absent — which
+    // never happens on the adoption path (a populated request graph is exactly
+    // what we adopt). So the chip and routed paths can never adopt DIFFERENT
+    // graphs for the same request.
     let snapshot: RunAnalysisScenarioSnapshot;
     try {
       snapshot = await deps.scenarioReader(

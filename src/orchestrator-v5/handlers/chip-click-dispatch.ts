@@ -56,8 +56,8 @@ import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { composeToolCallResponse } from '../compose.js';
 import {
   buildTurnContext,
-  loadPersistedGraphStrict,
   loadScenarioSnapshotForRunAnalysis,
+  reverifyAdoptedGraphFirstWrite,
   type EnrichedTurnContext,
 } from '../build-turn-context.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
@@ -761,42 +761,40 @@ export async function dispatchChipClickRunAnalysis(
     );
 
     try {
-      // #343 adopt-on-empty — atomic FIRST write of the adopted graph with the
-      // turn commit. Keyed off the snapshot marker (set only when the pre-load
-      // strict read found scenarios.graph genuinely null and the ingress graph
-      // passed the full readiness core). The PLoT run above takes seconds, so
-      // the pre-load's null is stale by construction: STRICT-RE-VERIFY the base
-      // is STILL empty and WITHHOLD the write if a concurrent canonical write
-      // landed (never overwrite; the analysis facts stay honest — they hash the
-      // adopted graph, and later freshness derivation compares against whatever
-      // is actually persisted). A degraded re-verify THROWS here, inside the
-      // commit try → 'commit_failed' (fail closed: a graph-bearing commit is
-      // never taken on an unverifiable base — same rule as V5-D1-SHAPE-01).
-      // CAS expecteds: the server base read was null → {null, null} →
-      // `first_write` category (observe-mode; never a conflict).
+      // #343 adopt-on-empty — FIRST write of the adopted graph with the turn
+      // commit. Keyed off the snapshot marker (set only when the pre-load strict
+      // read found scenarios.graph genuinely null and the ingress graph passed
+      // the full readiness core). The PLoT run above takes seconds, so the
+      // pre-load's null is stale by construction: `reverifyAdoptedGraphFirstWrite`
+      // (the SHARED helper — same re-verify/withhold/fail-closed logic the
+      // TurnExecutor STEP 7 path uses) BEST-EFFORT re-reads the base. Its throw
+      // (a degraded re-verify → AdoptedGraphReverifyError) propagates into THIS
+      // commit try → the outer catch below returns `commit_failed` (retryable),
+      // symmetric with the routed path's STATE_COMMIT_FAILED: a graph-bearing
+      // commit is never taken on an unverifiable base (V5-D1-SHAPE-01 rule).
+      // Strong "never overwrite a concurrent write" holds only under
+      // graphCasMode==='enforce'; observe/off leaves a small TOCTOU window (see
+      // the helper's doc). CAS expecteds: base read was null → {null,null} →
+      // `first_write` category. commitDirectAnswer here (unlike the TurnExecutor
+      // commitTurn wrapper) does not derive CAS, so we attach it explicitly.
       let adoptedGraphCommitFields: Record<string, unknown> = {};
       if (
         cachedSnapshot?.adoptedIngressGraph === true &&
         cachedSnapshot.rawPersistedGraph != null
       ) {
-        const baseAtCommit = await loadPersistedGraphStrict(payload.scenario_id);
-        if (baseAtCommit == null) {
+        const decision = await reverifyAdoptedGraphFirstWrite({
+          scenarioId: payload.scenario_id,
+          requestId,
+          adoptedGraph: cachedSnapshot.rawPersistedGraph,
+          dispatchPath: 'chip_click_run_analysis',
+        });
+        if (decision.write) {
           adoptedGraphCommitFields = {
-            graph: cachedSnapshot.rawPersistedGraph,
+            graph: decision.graph,
             ...(config.features.graphCasMode !== 'off'
               ? computeExpectedGraphCasHashes(null)
               : {}),
           };
-        } else {
-          log.warn(
-            {
-              event: 'v5.run_analysis.adopted_graph_write_withheld',
-              request_id: requestId,
-              scenario_id: payload.scenario_id,
-              dispatch_path: 'chip_click_run_analysis',
-            },
-            'V5 run_analysis — adopted ingress graph write WITHHELD: a persisted graph appeared between the pre-load strict read and the commit (concurrent canonical write wins)',
-          );
         }
       }
       await commitDirectAnswer(response, {

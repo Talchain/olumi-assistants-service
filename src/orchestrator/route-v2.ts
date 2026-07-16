@@ -1400,6 +1400,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // null (a client-built model that never reached CEE) — a present
           // persisted graph always wins. Null/absent → byte-identical to
           // today (the V5 UI half that attaches graph_state ships separately).
+          //
+          // SAME-SOURCE INVARIANT (review #6): this is the EXACT value passed
+          // as `runTurnExecutor({ graphState: extensions.graphState })` on the
+          // routed path below, so the chip and routed run_analysis paths adopt
+          // the same request graph. See the invariant note in run-analysis.ts.
           ...(extensions.graphState != null
             ? { ingressGraphState: extensions.graphState }
             : {}),

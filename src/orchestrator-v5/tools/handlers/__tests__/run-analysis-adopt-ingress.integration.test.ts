@@ -25,7 +25,7 @@
  * Test idioms mirror analysis-ready-guard.integration.test.ts (same fixtures,
  * same config-setter pattern) so the two seams stay reviewable side by side.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { AnalysisNotReadyError } from '../analysis-ready-core.js';
@@ -45,8 +45,14 @@ function setAdopt(on: boolean): void {
 function setNullRecoverable(on: boolean): void {
   (config.cee as { runAnalysisNullGraphRecoverable: boolean }).runAnalysisNullGraphRecoverable = on;
 }
+// This file exercises the ON behaviour; the flag now defaults OFF (dark), so
+// arm it per-test. Individual tests override (the flag-OFF kill-switch case).
+beforeEach(() => {
+  setAdopt(true);
+  setNullRecoverable(true);
+});
 afterEach(() => {
-  setAdopt(true); // default (ON)
+  setAdopt(false); // reset to the new default (OFF)
   setNullRecoverable(true); // default (ON)
 });
 
@@ -79,6 +85,10 @@ function makeUnrecoverableIngress(): Dict {
   const fac = (g.nodes as Dict[]).find((n) => n.id === 'fac_annual_cost')!;
   fac.observed_state = { value: 0.6, unit: '£' }; // cap removed
   return g;
+}
+/** Present-but-EMPTY ingress: a truly-empty canvas, zero nodes (#343 review #5). */
+function makeEmptyIngress(): Dict {
+  return { nodes: [], edges: [] };
 }
 /** A distinct PERSISTED graph so persisted-vs-ingress selection is provable. */
 function makePersistedGraph(): Dict {
@@ -132,7 +142,7 @@ function invocationWith(graphForTurn: unknown): HandlerInvocation {
 // ---------------------------------------------------------------------------
 
 describe('#343 adopt-on-empty — reader seam', () => {
-  it('null persisted + valid ingress (flag ON, default): snapshot is built FROM the ingress graph and marked adopted', async () => {
+  it('null persisted + valid ingress (flag ON): snapshot is built FROM the ingress graph and marked adopted', async () => {
     const snap = await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(null), makeIngressGraph());
     expect(snap.goal_node_id).toBe('goal_1');
     expect(snap.adoptedIngressGraph).toBe(true);
@@ -173,13 +183,43 @@ describe('#343 adopt-on-empty — reader seam', () => {
     expect(verdict.nextStep).toContain('bound (cap)');
   });
 
-  it('null persisted + structurally-invalid ingress: specific verdict (schema/structure), not NO_GRAPH', async () => {
+  it('null persisted + structurally-invalid ingress WITH nodes: specific verdict (schema/structure), not NO_GRAPH', async () => {
+    // Has ≥1 node → a populated candidate → assessed by the readiness core →
+    // the SPECIFIC verdict (the user sent SOMETHING malformed, not nothing).
     const garbage = { nodes: [{ id: 'x' }], edges: 'nope' };
     let err: unknown;
     try { await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(null), garbage); } catch (e) { err = e; }
     expect(err).toBeInstanceOf(AnalysisNotReadyError);
     const verdict = (err as AnalysisNotReadyError).verdict;
     expect(verdict.reasonCodes).not.toEqual(['NO_GRAPH']);
+  });
+
+  // #343 review #5 — a truly-empty canvas gets the honest draft-first nudge,
+  // NOT a structural "options not configured" verdict.
+  it('null persisted + present-but-EMPTY ingress (zero nodes): draft-first NO_GRAPH, not a structural verdict', async () => {
+    let err: unknown;
+    try { await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(null), makeEmptyIngress()); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(AnalysisNotReadyError);
+    const verdict = (err as AnalysisNotReadyError).verdict;
+    expect(verdict.reasonCodes).toEqual(['NO_GRAPH']);
+    expect(verdict.nextStep).toBe('Draft or save a model first, then run analysis.');
+  });
+
+  it('null persisted + empty {} ingress (no nodes key at all): draft-first NO_GRAPH', async () => {
+    let err: unknown;
+    try { await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(null), {}); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(AnalysisNotReadyError);
+    expect((err as AnalysisNotReadyError).verdict.reasonCodes).toEqual(['NO_GRAPH']);
+  });
+
+  // #343 review #7 — non-object garbage graph_state must resolve to a typed
+  // recoverable verdict (never a throw that maps to the retryable
+  // scenario_read_failed, which would read as an infra 500).
+  it('null persisted + NON-OBJECT garbage ingress ("x"): unrecoverable NO_GRAPH, NOT a throw / scenario_read_failed', async () => {
+    let err: unknown;
+    try { await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(null), 'x'); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(AnalysisNotReadyError);
+    expect((err as AnalysisNotReadyError).verdict.reasonCodes).toEqual(['NO_GRAPH']);
   });
 
   it('PRESENT persisted graph + ingress supplied: ingress is IGNORED — canonical state wins, no adoption marker', async () => {
@@ -246,6 +286,17 @@ describe('#343 adopt-on-empty — run_analysis handler seam', () => {
     const details = (err as HandlerInvocationFailedError).details as Dict;
     expect(details.reason_code).toBe('NO_CAP_UNRECOVERABLE');
     expect(String(details.next_step)).toContain('bound (cap)');
+    expect(calls.n).toBe(0);
+  });
+
+  it('null persisted + NON-OBJECT garbage graphForTurn: analysis_not_ready (NOT scenario_read_failed), zero PLoT (#7)', async () => {
+    const calls = { n: 0 };
+    const handler = makeHandlerForStore(stubStore(null), calls);
+    let err: unknown;
+    try { await handler(invocationWith('x')); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(HandlerInvocationFailedError);
+    expect((err as HandlerInvocationFailedError).cause_kind).toBe('analysis_not_ready');
+    expect((err as HandlerInvocationFailedError).cause_kind).not.toBe('scenario_read_failed');
     expect(calls.n).toBe(0);
   });
 

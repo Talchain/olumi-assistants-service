@@ -52,7 +52,11 @@ import {
   composeToolCallResponse,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
-import { buildTurnContext, loadPersistedGraphStrict } from './build-turn-context.js';
+import {
+  buildTurnContext,
+  loadPersistedGraphStrict,
+  reverifyAdoptedGraphFirstWrite,
+} from './build-turn-context.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -7308,45 +7312,35 @@ export async function runTurnExecutor(
       // #343 adopt-on-empty — routed run_analysis FIRST write. When the
       // handler adopted the request-supplied ingress graph (scenarios.graph
       // was genuinely null at its strict read; the ingress graph passed the
-      // full readiness core), persist the canonical adopted graph atomically
-      // with this commit. DISTINCT from the D1 `mutated_graph` chokepoint
-      // above by design: there is no persisted base to merge onto — this is
-      // a first write, not an ingress-echo mutation (see the channel's
-      // contract in tools/registry.ts). The handler's read happened BEFORE
-      // the PLoT round trip, so STRICT-RE-VERIFY the base is STILL empty:
-      //   - still null   → commit the adopted graph (CAS expecteds derive
-      //     from context.persistedGraph (null) in commitTurn → first_write).
-      //   - non-null now → WITHHOLD the write (a concurrent canonical write
-      //     is never overwritten; the analysis facts stay honest — they hash
-      //     the adopted graph and later freshness compares against whatever
-      //     is actually persisted).
-      //   - degraded read → FAIL CLOSED (throw here, inside the STEP 7 try →
-      //     STATE_COMMIT_FAILED): a graph-bearing commit is never taken on an
-      //     unverifiable base — same rule as V5-D1-SHAPE-01 above.
+      // full readiness core), persist the canonical adopted graph with this
+      // commit. DISTINCT from the D1 `mutated_graph` chokepoint above by
+      // design: there is no persisted base to merge onto — this is a first
+      // write, not an ingress-echo mutation (see the channel's contract in
+      // tools/registry.ts). The handler's read happened BEFORE the PLoT round
+      // trip, so `reverifyAdoptedGraphFirstWrite` (the SHARED helper, same
+      // re-verify/withhold/fail-closed logic the chip-click path uses)
+      // BEST-EFFORT re-reads the base:
+      //   - still null → set graphForCommit (CAS expecteds derive from
+      //     context.persistedGraph (null) in commitTurn → first_write).
+      //   - non-null   → withhold (the helper logs it); a concurrent canonical
+      //     write wins. Strong never-overwrite holds only under CAS enforce.
+      //   - degraded   → the helper throws AdoptedGraphReverifyError; it
+      //     propagates into THIS STEP 7 try → the catch below maps it to
+      //     STATE_COMMIT_FAILED (retryable), symmetric with the chip path's
+      //     commit_failed — a graph-bearing commit is never taken on an
+      //     unverifiable base (V5-D1-SHAPE-01 rule).
       if (
         graphForCommit == null &&
         handlerOutcome?.__adopted_ingress_graph != null
       ) {
-        let baseAtCommit: unknown;
-        try {
-          baseAtCommit = await loadPersistedGraphStrict(context.session_id);
-        } catch (err) {
-          throw new Error(
-            `V5 #343 — refusing to persist adopted ingress graph for scenario ${context.session_id}: persisted base unavailable at commit-time re-verify (${err instanceof Error ? err.message : String(err)})`,
-          );
-        }
-        if (baseAtCommit == null) {
-          graphForCommit = handlerOutcome.__adopted_ingress_graph;
-        } else {
-          log.warn(
-            {
-              event: 'v5.run_analysis.adopted_graph_write_withheld',
-              request_id: requestId,
-              scenario_id: context.session_id,
-              dispatch_path: 'turn_executor_run_analysis',
-            },
-            'V5 run_analysis — adopted ingress graph write WITHHELD: a persisted graph appeared between the handler read and the commit (concurrent canonical write wins)',
-          );
+        const decision = await reverifyAdoptedGraphFirstWrite({
+          scenarioId: context.session_id,
+          requestId,
+          adoptedGraph: handlerOutcome.__adopted_ingress_graph,
+          dispatchPath: 'turn_executor_run_analysis',
+        });
+        if (decision.write) {
+          graphForCommit = decision.graph;
         }
       }
       // Lane 20 — goal-target receipt honesty guard (STEP 6.6-class swap
