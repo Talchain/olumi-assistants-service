@@ -13,7 +13,8 @@
  *
  *   Two LLM calls happen per turn on the happy path:
  *     1. Pre-narrate classifier (turn_classifier) → A2TurnClass
- *     2. Narrate fragment (direct_answer_narrate | clarify_narrate)
+ *     2. Narrate fragment (direct_answer_narrate; the clarify_narrate
+ *        fragment was retired 2026-07-16 with the Stage-4 clarifier, #486)
  *
  *   Each LLM call gets a FRESH `LLM_BUDGET_NARRATE_MS` window (INDEPENDENT
  *   inner budgets). The outer `TURN_BUDGET_MS` is the SHARED wall-clock

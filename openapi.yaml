@@ -2386,7 +2386,12 @@ components:
             minLength: 1
         clarifier_response:
           type: object
-          description: User's answer to a clarifying question from a previous round
+          description: >-
+            DEPRECATED / INERT (2026-07-16): the in-pipeline Stage-4 clarifier
+            was retired (ROADMAP 1.94 Option A, #486). The field is still
+            accepted for wire compatibility but nothing consumes it — answers
+            do not incorporate. Historically: user's answer to a clarifying
+            question from a previous round.
           properties:
             question_id:
               type: string
@@ -2418,7 +2423,11 @@ components:
           minimum: 0
           maximum: 10
           default: 5
-          description: Maximum clarification rounds (0 to skip clarifier)
+          description: >-
+            DEPRECATED / INERT (2026-07-16): the in-pipeline Stage-4 clarifier
+            was retired (ROADMAP 1.94 Option A, #486). Accepted for wire
+            compatibility, consumed by nothing. Historically: maximum
+            clarification rounds (0 to skip clarifier).
       additionalProperties: false
 
     Attachment:

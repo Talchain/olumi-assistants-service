@@ -1926,6 +1926,16 @@ const DEAD_ENV_VARS: string[] = [
   'VITE_ENABLE_ORCHESTRATOR_V2',       // Frontend-only (Vite prefix); not read by backend
   'CEE_UNIFIED_PIPELINE_ENABLED',      // Unified pipeline is always-on; flag retired
   'CEE_MODEL_REPAIR_GRAPH',            // Never existed; canonical name is CEE_MODEL_REPAIR
+  // Stage-4 draft clarifier retired 2026-07-16 (ROADMAP 1.94 Option A, #486).
+  // These readers were deleted; the vars are inert and safe to remove from
+  // deployment dashboards. (CLARIFIER_ENABLED itself stays LIVE — it gates
+  // the standalone /assist/clarify-brief route only.)
+  'CEE_CLARIFIER_ENABLED',
+  'CEE_CLARIFIER_MAX_ROUNDS_DEFAULT',
+  'CEE_CLARIFIER_QUALITY_THRESHOLD',
+  'CEE_CLARIFIER_STABILITY_THRESHOLD',
+  'CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD',
+  'CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS',
 ];
 
 /**
