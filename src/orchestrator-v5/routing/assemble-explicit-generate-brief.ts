@@ -21,14 +21,22 @@
  *                          -brief regex). Covers the Generate button sending
  *                          the composer brief, and the fixed UI (U2) sending
  *                          the accumulated brief on confirm clicks.
- *   2. `persisted_brief` — `scenarios.brief_text` (first-write-wins column,
+ *   2. `pending_seed`    — the brief candidate captured on a `draft_graph`
+ *                          pending action at OFFER time (ROADMAP 2.63 C3/C4:
+ *                          the frame-guard "Build the model" offer and the
+ *                          graph-present "Redraft the model" offer). When the
+ *                          user consents to the offer, they consent to
+ *                          drafting from what they had just shared — the
+ *                          seed — so it outranks the older stored sources.
+ *                          Absent (null) on non-resume calls.
+ *   3. `persisted_brief` — `scenarios.brief_text` (first-write-wins column,
  *                          seeded by earlier draft attempts or the
  *                          turn-executor's derive-brief-seed commit leg).
- *   3. `recent_turn`     — the most recent prior USER message in the
+ *   4. `recent_turn`     — the most recent prior USER message in the
  *                          conversation chain that is brief-shaped (same
  *                          length + regex gate as 1). Assistant messages
  *                          are never considered.
- *   4. `message_unshaped`— the turn's own message when it meets the length
+ *   5. `message_unshaped`— the turn's own message when it meets the length
  *                          floor but fails the shape regex, ONLY for
  *                          non-chip sources. An explicit generate is a
  *                          direct instruction, so a typed ≥ min-length
@@ -60,6 +68,7 @@ import type { SessionTurnWithContent } from '../session/conversation-content.js'
 
 export type ExplicitGenerateBriefSource =
   | 'message'
+  | 'pending_seed'
   | 'persisted_brief'
   | 'recent_turn'
   | 'message_unshaped';
@@ -78,6 +87,13 @@ export interface AssembleExplicitGenerateBriefInput {
   readonly source: MessageTurnPayload['source'];
   /** Persisted `scenarios.brief_text`, or null when none is stored. */
   readonly persistedBriefText: string | null;
+  /**
+   * ROADMAP 2.63 C3/C4 — `brief_seed` from the `draft_graph` pending action
+   * being resumed, or null/omitted on non-resume calls. Already
+   * normaliseBriefText-bounded at capture time; re-normalised here as
+   * defence-in-depth against a corrupted persisted row.
+   */
+  readonly pendingBriefSeed?: string | null;
   /**
    * Prior committed turns, MOST-RECENT-FIRST (the `readRecent` order).
    * Only `user_message` content is consulted. Pass `[]` when the chain
@@ -113,13 +129,21 @@ export function assembleExplicitGenerateBrief(
     return { brief: capToDraftMax(message), source: 'message' };
   }
 
-  // Source 2 — the persisted first-write-wins brief.
+  // Source 2 — the offer-time brief seed (draft-offer resume only). The
+  // capture site already enforces the length floor; a seed that no longer
+  // meets it after re-normalisation is skipped, not an error.
+  const seed = normaliseBriefText(input.pendingBriefSeed ?? null).value ?? '';
+  if (usableLength(seed)) {
+    return { brief: capToDraftMax(seed), source: 'pending_seed' };
+  }
+
+  // Source 3 — the persisted first-write-wins brief.
   const persisted = normaliseBriefText(input.persistedBriefText).value ?? '';
   if (usableLength(persisted)) {
     return { brief: capToDraftMax(persisted), source: 'persisted_brief' };
   }
 
-  // Source 3 — most recent brief-shaped USER turn.
+  // Source 4 — most recent brief-shaped USER turn.
   for (const turn of input.recentTurns) {
     const userMessage = normaliseBriefText(turn.user_message ?? null).value ?? '';
     if (usableLength(userMessage) && DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(userMessage)) {
@@ -127,7 +151,7 @@ export function assembleExplicitGenerateBrief(
     }
   }
 
-  // Source 4 — unshaped typed message (never a chip's canned text).
+  // Source 5 — unshaped typed message (never a chip's canned text).
   if (messageMeetsLength && input.source !== 'chip_click') {
     return { brief: capToDraftMax(message), source: 'message_unshaped' };
   }

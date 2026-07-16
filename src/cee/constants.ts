@@ -61,9 +61,12 @@ export const LLM_STRENGTH_STD_FLOOR = 0.001;
 
 /**
  * Floor applied to a non-positive sigma (edge `strength.std`, node
- * `observed_state.std`) at the COMPUTE boundary — PLoTClient.run, the single
- * choke point both PLoT dispatches funnel through, and the last place the
- * graph is touched before it leaves CEE for compute.
+ * `observed_state.std`) at the PERSISTED-LOAD boundary —
+ * loadScenarioSnapshotForRunAnalysis (build-turn-context.ts), copy-on-write
+ * BEFORE the GraphV3 parse, so a persisted std=0 scenario loads instead of
+ * bricking. (Round-3 placed this in PLoTClient.run, AFTER the parse — dead
+ * code; do not move it back. See numeric-bounds.ts for the authoritative
+ * doctrine.)
  *
  * Named for the compute seam, NOT for ingress: ingress deliberately does not
  * repair. Rewriting sigma at ingress forks graph identity (`strength.std` is

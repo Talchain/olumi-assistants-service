@@ -136,6 +136,7 @@ import {
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import {
   loadHasPriorTurns,
+  loadMostRecentPendingActions,
   loadMostRecentPendingActionsStrict,
   loadPersistedGraphStrict,
   loadPersistedScenarioStateStrict,
@@ -148,8 +149,23 @@ import {
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
-import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
-import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
+import type {
+  PendingAction,
+  PendingActionAction,
+} from '../orchestrator-v5/session/pending-action.js';
+import {
+  isPendingActionExpired,
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+  PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+} from '../orchestrator-v5/session/pending-action.js';
+import { randomUUID } from 'node:crypto';
+import {
+  commitDirectAnswer,
+  computeRequestHash,
+  computeSurvivingPriorPendings,
+} from '../orchestrator-v5/commit.js';
+import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
+import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
 import {
   PROPOSAL_CONFIRM_PATTERN,
@@ -193,6 +209,268 @@ export function detectChipClickResumeIntent(
   if (ingress.source !== 'chip_click') return undefined;
   if (ingress.chip?.action_type !== 'what_would_flip') return undefined;
   return 'what_would_flip';
+}
+
+// ───────────────────────────────────────────────────────────────────
+// ROADMAP 2.63 C3/C4 — deterministic draft/redraft offer
+// ───────────────────────────────────────────────────────────────────
+//
+// `draft_graph` is not in the wire ActionType enum, so the offer chip is a
+// plain text-replay chip and the pending action is server-only (explicit
+// `CommitMetadata.pending_actions`, mirroring `proposed_concept`). The offer
+// resumes HERE at the route (never in TurnExecutor, which cannot draft) via
+// the SAME primitives as the existing consent machinery: the persisted
+// public copy exact-match (`findExactProposalCopyMatchIndexes` — the
+// held-proposal replay matcher) and `SHORT_CONFIRM_PATTERN` (the
+// deterministic short-confirm pattern), with the shared read-time liveness
+// authority (`isPendingActionExpired`). Fixed copy, British English, no em
+// dashes (house style — this text bypasses no sanitise seam but must not
+// depend on one either).
+
+/** C3 — frame-guard offer chip (no action_type: text-replay chip). */
+const DRAFT_OFFER_CHIP_LABEL = 'Build the model';
+const DRAFT_OFFER_CHIP_MESSAGE = 'Yes, build the model from what I have shared.';
+/**
+ * C3 — appended to the frame-guard copy ONLY when a usable brief seed was
+ * captured (so the offer is never made with nothing to build from). The
+ * guard's original first sentence is preserved verbatim: existing tests and
+ * dashboards key on it.
+ *
+ * P1-1 (adversarial review, #488): the ", or just reply yes" clause is
+ * DERIVED from the pendings state (`willDraftOfferBeSoleLivePending`), never
+ * asserted unconditionally — see that helper's doc for the mechanism.
+ */
+function draftOfferGuardSentence(offerWillBeSoleLive: boolean): string {
+  const base =
+    "Or I can draft a first model from what you've shared so far: choose 'Build the model' below";
+  return offerWillBeSoleLive ? `${base}, or just reply yes.` : `${base}.`;
+}
+
+/** C4 — graph-present decline offer chip (text-replay chip). */
+const REDRAFT_OFFER_CHIP_LABEL = 'Redraft the model';
+const REDRAFT_OFFER_CHIP_MESSAGE = 'Yes, redraft the model from my brief.';
+/**
+ * C4 — alternate replay copy, used when the INCOMING message already equals
+ * the standard copy (a hash-changed re-offer answering the user's own click
+ * of the previous offer chip). The egress looping-chip guard rightly drops
+ * any text-replay chip whose message normalise-equals the user's message
+ * (no-dead-end invariant); alternating the copy keeps the re-offer clickable
+ * without weakening that guard. Equality is checked with the guard's OWN
+ * `normaliseReplayMessage` — never a hand-mirrored predicate.
+ */
+const REDRAFT_OFFER_CHIP_MESSAGE_ALT = 'Yes, start the redraft from my brief.';
+/**
+ * C4 — deterministic decline for an explicit generate on a scenario that
+ * already has a graph (request `graph_state` or persisted). Ratified
+ * doctrine (Paul, 16 Jul): decline-with-redraft-offer, consistent with the
+ * held-proposal consent posture (never a silent replace, never a silent
+ * ignore). Consenting to the offer chip / replying yes REPLACES the model.
+ *
+ * P1-1 (adversarial review, #488): the "or reply yes" clause is DERIVED from
+ * the pendings state (`willDraftOfferBeSoleLivePending`), never asserted
+ * unconditionally — see that helper's doc for the mechanism.
+ */
+function explicitGenerateGraphPresentText(offerWillBeSoleLive: boolean): string {
+  return (
+    'This decision already has a model, so I have not replaced it. ' +
+    (offerWillBeSoleLive
+      ? "If you want a fresh draft instead, choose 'Redraft the model' below or reply yes, " +
+        'and I will rebuild it from your brief. '
+      : "If you want a fresh draft instead, choose 'Redraft the model' below and I will " +
+        'rebuild it from your brief. ') +
+    'Otherwise tell me what to change and I will edit the existing model.'
+  );
+}
+
+/**
+ * P1-1 (adversarial review, #488) — will the freshly-minted draft/redraft
+ * offer be the SOLE live pending after this commit?
+ *
+ * `resolveDraftOfferResume` accepts a bare confirmation ("yes") ONLY when the
+ * offer is the sole live pending; with any other live pending (a
+ * chip-suggestion `run_analysis` / `what_would_flip`, TTL 2 turns, which
+ * SURVIVES this commit's carry-forward) the next turn's "yes" falls to the
+ * deterministic-short-confirm machinery's RESUMABLE_KINDS and executes THAT
+ * action instead — so copy promising "reply yes" would promise the wrong
+ * action (reproduced in review: dispatchDraftGraph 0 calls, analysis ran).
+ *
+ * MECHANISM (ratified direction — derive the promise from the state, never
+ * mirror it): reuse the commit seam's OWN carry-forward
+ * (`computeSurvivingPriorPendings`) with the same inputs the emit site's
+ * `commitDirectAnswer` call will pass (no consumed refs, no
+ * `metadata.graph_hash` at either offer-emit site), so the survivor set here
+ * IS the set the next turn's resume will read. Any survivor is
+ * non-`draft_graph` by construction (a fresh offer supersedes carried offers
+ * kind-level), so zero survivors ⟺ the offer stands alone. This also covers
+ * the live `proposed_concept` case (review P2-a): a surviving concept hold
+ * suppresses the "reply yes" clause the same way.
+ *
+ * Error direction is safe by construction: a survivor counted here that
+ * wall-expires before the next read (or is cap-evicted at persist) only makes
+ * the copy OMIT "reply yes" where it would in fact have worked — the named
+ * chip route always works.
+ */
+function willDraftOfferBeSoleLivePending(
+  priorPendings: readonly PendingAction[],
+  offer: PendingAction,
+  nowMs: number,
+): boolean {
+  return (
+    computeSurvivingPriorPendings(priorPendings, [offer], [], undefined, nowMs)
+      .length === 0
+  );
+}
+
+/**
+ * P1-2 (adversarial review, #488) — is the ingress `graph_state` a POPULATED
+ * graph? `GraphStateIngressSchema` accepts `{nodes:[],edges:[]}` (a
+ * structurally-valid EMPTY canvas), and the C4 arms must treat that as "no
+ * model": declining with "This decision already has a model" over zero nodes
+ * is false, and the redraft offer it seeds would target a model that does not
+ * exist. LOCAL twin of `isPopulatedGraphCandidate` (#473's run_analysis
+ * adopt-on-empty lane — same judgement: plain object with a non-empty `nodes`
+ * array), not importable while that lane is unmerged; when both land, keep
+ * one and delete the other.
+ */
+function isPopulatedIngressGraph(g: unknown): boolean {
+  return (
+    g !== null &&
+    typeof g === 'object' &&
+    !Array.isArray(g) &&
+    Array.isArray((g as { nodes?: unknown }).nodes) &&
+    (g as { nodes: unknown[] }).nodes.length > 0
+  );
+}
+
+type DraftOfferAction = Extract<PendingActionAction, { readonly kind: 'draft_graph' }>;
+
+interface DraftOfferResume {
+  readonly pending: PendingAction;
+  readonly action: DraftOfferAction;
+  readonly trigger: 'copy_replay' | 'bare_confirm';
+}
+
+/**
+ * Most-recent draft_graph offer among the prior turn's pendings, or null.
+ * Presence (regardless of expiry) is the structural MARKER that the last
+ * committed turn was a draft/redraft offer turn — used to un-strand the
+ * brief-shape heuristic and to let the frame guard re-fire on continuation
+ * scenarios it created. LIVENESS (non-expired) additionally gates CONSENT
+ * (bare confirm / copy replay actually dispatching a draft).
+ */
+function findDraftOfferPending(
+  pendings: readonly PendingAction[],
+): PendingAction | null {
+  const offers = pendings.filter((pa) => pa.action.kind === 'draft_graph');
+  if (offers.length === 0) return null;
+  if (offers.length === 1) return offers[0]!;
+  const emittedMs = (pa: PendingAction): number => {
+    const ms = Date.parse(pa.emitted_at_iso);
+    return Number.isFinite(ms) ? ms : 0;
+  };
+  return [...offers].sort((a, b) => emittedMs(b) - emittedMs(a))[0]!;
+}
+
+/**
+ * Resolve whether this message CONSENTS to a live draft/redraft offer.
+ *
+ *   1. Exact replay of the offer's persisted public copy (our chip click, or
+ *      the same text typed) names the target: resumes regardless of other
+ *      live pendings — same posture as the held-proposal replay pre-route.
+ *   2. A bare short-confirmation ("yes", "ok", "go ahead") resumes ONLY when
+ *      the draft offer is the SOLE live pending kind. With any other live
+ *      pending (a consent hold, a chip suggestion) the message falls through
+ *      untouched, so the existing short-confirm machinery keeps owning it —
+ *      the F-HELD consent-priority and consent-clarity rulings are never
+ *      shadowed from here.
+ *
+ * Expired offers never consent (the caller's re-offer paths own recovery).
+ */
+function resolveDraftOfferResume(
+  message: string,
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): DraftOfferResume | null {
+  const offer = findDraftOfferPending(pendings);
+  if (offer === null || isPendingActionExpired(offer, nowMs)) return null;
+  const action = offer.action as DraftOfferAction;
+  const copyMatches = findExactProposalCopyMatchIndexes(message, [
+    { label: action.public_label, message: action.public_message },
+  ]);
+  if (copyMatches.length > 0) {
+    return { pending: offer, action, trigger: 'copy_replay' };
+  }
+  const otherLivePendingExists = pendings.some(
+    (pa) => pa.action.kind !== 'draft_graph' && !isPendingActionExpired(pa, nowMs),
+  );
+  if (!otherLivePendingExists && SHORT_CONFIRM_PATTERN.test(message)) {
+    return { pending: offer, action, trigger: 'bare_confirm' };
+  }
+  return null;
+}
+
+/**
+ * Capture a brief seed from the offering turn's message: typed sources only
+ * (a chip_click's canned text carries zero decision content — same rule as
+ * C2's `message_unshaped` bar), normalised and length-floored. Undefined
+ * when unusable — the offer is then not made (C3) or made without a seed
+ * (C4, where the persisted brief usually exists).
+ */
+function deriveDraftOfferSeed(
+  message: string,
+  source: string,
+): string | undefined {
+  if (source === 'chip_click') return undefined;
+  const value = normaliseBriefText(message).value ?? '';
+  if (value.length < DRAFT_GRAPH_MIN_BRIEF_LENGTH) return undefined;
+  // Never seed a TYPED replay of an offer's own copy: "Yes, build the model
+  // from what I have shared." is long enough to pass the floor but is a
+  // consent phrase, not decision content — seeding it would make a later
+  // resume draft a model ABOUT the confirmation sentence.
+  const normalised = normaliseReplayMessage(value);
+  if (
+    normalised === normaliseReplayMessage(DRAFT_OFFER_CHIP_MESSAGE) ||
+    normalised === normaliseReplayMessage(REDRAFT_OFFER_CHIP_MESSAGE) ||
+    normalised === normaliseReplayMessage(REDRAFT_OFFER_CHIP_MESSAGE_ALT)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function buildDraftOfferPending(input: {
+  readonly scenarioId: string;
+  readonly chipId: string;
+  readonly publicLabel: string;
+  readonly publicMessage: string;
+  readonly briefSeed?: string;
+  readonly redraft?: boolean;
+  readonly graphHash?: string | null;
+  readonly nowMs: number;
+}): PendingAction {
+  return {
+    id: randomUUID(),
+    scenario_id: input.scenarioId,
+    chip_id: input.chipId,
+    action: {
+      kind: 'draft_graph',
+      ...(input.briefSeed !== undefined ? { brief_seed: input.briefSeed } : {}),
+      ...(input.redraft === true ? { redraft: true } : {}),
+      public_label: input.publicLabel,
+      public_message: input.publicMessage,
+    },
+    // The redraft offer pins the persisted graph's analysis-affecting hash
+    // (when computable) so the commit carry-forward's existing hash rule
+    // invalidates the offer if an edit lands between offer and consent —
+    // consent must never silently cover a graph the user changed since.
+    preconditions:
+      typeof input.graphHash === 'string' && input.graphHash.length > 0
+        ? { graph_hash: input.graphHash }
+        : {},
+    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+    expires_at_iso: new Date(input.nowMs + PENDING_ACTION_DEFAULT_WALL_TTL_MS).toISOString(),
+    emitted_at_iso: new Date(input.nowMs).toISOString(),
+  };
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -1651,6 +1929,51 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
     }
     // ────────────────────────────────────────────────────────────────────
+    // ROADMAP 2.63 C3/C4 — draft-offer pre-route: narrow pendings read.
+    // ────────────────────────────────────────────────────────────────────
+    // Paid ONLY by (a) frame-stage no-graph CONTINUATION turns — the state
+    // a committed C3/C4 offer turn creates; a FRESH scenario cannot carry
+    // an offer, so the hot first-turn path is unchanged — and (b) turns
+    // whose message shape could consent to a C4 redraft offer: chip clicks,
+    // bare short-confirms and affirmative-prefixed replies, the same
+    // classes that already pay the held-proposal replay pendings read
+    // (see AFFIRMATIVE_PREFIX_PATTERN's field note). Degrades to [] on a
+    // read failure (store-layer telemetry fires): every draft-offer
+    // behaviour then falls back to the pre-C3 routing — no silent draft,
+    // no swallowed turn.
+    const couldCarryDraftOffer =
+      (frameStageNoGraph && isContinuationScenario) ||
+      ingress.source === 'chip_click' ||
+      SHORT_CONFIRM_PATTERN.test(ingress.message) ||
+      AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message);
+    let draftOfferPendingsLoaded = false;
+    let draftOfferPriorPendings: readonly PendingAction[] = [];
+    if (couldCarryDraftOffer) {
+      draftOfferPriorPendings = await loadMostRecentPendingActions(
+        ingress.scenario_id,
+        requestId,
+      );
+      draftOfferPendingsLoaded = true;
+    }
+    /** Lazy variant for paths that commit but did not pay the read above. */
+    const ensureDraftOfferPriorPendings = async (): Promise<readonly PendingAction[]> => {
+      if (!draftOfferPendingsLoaded) {
+        draftOfferPriorPendings = await loadMostRecentPendingActions(
+          ingress.scenario_id,
+          requestId,
+        );
+        draftOfferPendingsLoaded = true;
+      }
+      return draftOfferPriorPendings;
+    };
+    // Presence marker (any liveness) vs consent resume (live only) — see
+    // the helper docs above the route handler.
+    const draftOfferMarker = findDraftOfferPending(draftOfferPriorPendings);
+    const draftOfferResume =
+      draftOfferMarker !== null
+        ? resolveDraftOfferResume(ingress.message, draftOfferPriorPendings, Date.now())
+        : null;
+    // ────────────────────────────────────────────────────────────────────
     // ROADMAP 2.63 C1+C2 — explicit-generate wire flag.
     // ────────────────────────────────────────────────────────────────────
     //
@@ -1679,28 +2002,44 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // frame_no_brief_guard or the routing LLM. Like frame_no_brief_guard,
     // the decline commits no turn, so the scenario stays draftable.
     //
-    // TODO(ROADMAP 2.63 C4 — PAUL-GATED): when the flag arrives on a
-    // scenario that ALREADY has a graph (request graph_state or persisted),
-    // the doctrine (decline-with-redraft-offer vs silent replace) is
-    // Paul-gated and NOT built here. Today's behaviour is preserved
-    // exactly: the flag is ignored and the turn falls through to the
-    // pre-existing routing below (pinned by the "flag with persisted graph"
-    // case in route-v2-explicit-generate.test.ts). Same preservation on a
-    // failed persisted-state read: graph presence is unknown, so the flag
-    // path must not fire.
+    // C4 (ROADMAP 2.63, Paul-ratified 16 Jul — decline-with-redraft-offer):
+    // when the flag arrives on a scenario that ALREADY has a graph (request
+    // graph_state or persisted), the turn gets a deterministic decline that
+    // says a model already exists and OFFERS the redraft route — a
+    // "Redraft the model" chip plus a persisted `draft_graph` pending with
+    // `redraft: true`, so the consent click / a typed yes on the NEXT turn
+    // resumes through the draft-offer pre-route above into this same
+    // deterministic dispatch, REPLACING the model with the user's explicit
+    // consent (held-proposal consent doctrine: never a silent replace,
+    // never a silent ignore). On a failed persisted-state read graph
+    // presence is unknown, so today's routing is preserved (the flag path
+    // must neither draft over an unknown graph nor claim one exists).
     const explicitGenerateRequested =
       ingress.generate_model === true || ingress.explicit_generate === true;
     let explicitGenerateBrief: AssembledExplicitGenerateBrief | null = null;
     let explicitGenerateDraft = false;
     let explicitGenerateDeclined = false;
+    /**
+     * C4 — non-null when this turn must get the deterministic
+     * graph-present decline (+ redraft offer seed). Carries the graph the
+     * offer's hash precondition pins.
+     */
+    let explicitGenerateGraphPresent: { readonly graphForHash: unknown } | null = null;
+    /** C3/C4 — offer pending honoured by this turn's draft (consumed at commit). */
+    let draftOfferConsumedRefs: readonly string[] | undefined;
     if (explicitGenerateRequested) {
       let outcome:
         | 'dispatch_draft'
         | 'declined_no_brief'
-        | 'graph_present_fallthrough'
+        | 'declined_graph_present'
         | 'state_read_failed_fallthrough';
-      if (extensions.graphState != null) {
-        outcome = 'graph_present_fallthrough';
+      // P1-2 — a zero-node request graph_state is ABSENT here: the schema
+      // accepts {nodes:[],edges:[]} and declining over an empty canvas would
+      // be false ("already has a model"). The persisted read below still
+      // decides graph presence server-side.
+      if (isPopulatedIngressGraph(extensions.graphState)) {
+        outcome = 'declined_graph_present';
+        explicitGenerateGraphPresent = { graphForHash: extensions.graphState };
       } else {
         try {
           // STRICT read, deliberately: the swallowing variant collapses a
@@ -1709,7 +2048,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // On a read failure we preserve today's routing instead.
           const persisted = await loadPersistedScenarioStateStrict(ingress.scenario_id);
           if (persisted.graph != null) {
-            outcome = 'graph_present_fallthrough';
+            outcome = 'declined_graph_present';
+            explicitGenerateGraphPresent = { graphForHash: persisted.graph };
           } else {
             explicitGenerateBrief = assembleExplicitGenerateBrief({
               message: ingress.message,
@@ -1766,6 +2106,132 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         outcome,
         brief_source: explicitGenerateBrief?.source ?? null,
       });
+    } else if (draftOfferResume !== null) {
+      // ────────────────────────────────────────────────────────────────
+      // ROADMAP 2.63 C3/C4 — consent turn for a prior draft/redraft offer.
+      // ────────────────────────────────────────────────────────────────
+      // The user clicked the offer chip (its copy replays verbatim) or
+      // typed a bare confirmation while the offer was the sole live
+      // pending. Same deterministic posture as the flag path: dispatch,
+      // honest decline, or honest re-offer — never a silent LLM
+      // fall-through once the consent named this offer. A persisted-state
+      // read failure falls back to the pre-offer routing (fail-safe: never
+      // draft without knowing whether a graph exists).
+      const offerAction = draftOfferResume.action;
+      const isRedraftOffer = offerAction.redraft === true;
+      let resumeOutcome:
+        | 'dispatch_draft'
+        | 'declined_no_brief'
+        | 'reoffered_graph_changed'
+        | 'reoffered_graph_present'
+        | 'state_read_failed_fallthrough';
+      try {
+        const persisted = await loadPersistedScenarioStateStrict(ingress.scenario_id);
+        // P1-2 — same emptiness rule as the flag arm above: a zero-node
+        // request graph_state never counts as a present model here.
+        const graphNow: unknown = isPopulatedIngressGraph(extensions.graphState)
+          ? extensions.graphState
+          : persisted.graph ?? null;
+        const assembleResumeBrief = async (): Promise<AssembledExplicitGenerateBrief | null> => {
+          let assembled = assembleExplicitGenerateBrief({
+            message: ingress.message,
+            source: ingress.source,
+            persistedBriefText: persisted.briefText,
+            pendingBriefSeed: offerAction.brief_seed ?? null,
+            recentTurns: [],
+          });
+          if (assembled === null || assembled.source === 'message_unshaped') {
+            const recentTurns = await loadRecentConversationTurns(
+              ingress.scenario_id,
+              requestId,
+            );
+            assembled =
+              assembleExplicitGenerateBrief({
+                message: ingress.message,
+                source: ingress.source,
+                persistedBriefText: persisted.briefText,
+                pendingBriefSeed: offerAction.brief_seed ?? null,
+                recentTurns,
+              }) ?? assembled;
+          }
+          return assembled;
+        };
+        if (graphNow == null) {
+          // First draft. (A redraft offer whose graph has since vanished
+          // reduces to the same action — nothing exists to replace.)
+          explicitGenerateBrief = await assembleResumeBrief();
+          if (explicitGenerateBrief !== null) {
+            explicitGenerateDraft = true;
+            draftOfferConsumedRefs = [draftOfferResume.pending.chip_id];
+            resumeOutcome = 'dispatch_draft';
+          } else {
+            explicitGenerateDeclined = true;
+            resumeOutcome = 'declined_no_brief';
+          }
+        } else if (!isRedraftOffer) {
+          // A build-offer consent arriving AFTER a graph appeared (e.g. a
+          // parallel tab drafted meanwhile): never silently replace on a
+          // consent that predates the graph — re-offer as a redraft.
+          explicitGenerateGraphPresent = { graphForHash: graphNow };
+          resumeOutcome = 'reoffered_graph_present';
+        } else {
+          // Redraft consent with a graph present — verify the offer's hash
+          // precondition against the CURRENT graph when both are known.
+          // The commit carry-forward already invalidates a hash-diverged
+          // offer at the intervening edit's own commit; this is
+          // belt-and-braces for writes that bypassed it.
+          const offerHash = draftOfferResume.pending.preconditions.graph_hash;
+          const currentHash = ((): string | null => {
+            try {
+              return computeAnalysisAffectingGraphHash(
+                graphNow as GraphStateIngress | null | undefined,
+              );
+            } catch {
+              return null;
+            }
+          })();
+          if (
+            typeof offerHash === 'string' &&
+            offerHash.length > 0 &&
+            typeof currentHash === 'string' &&
+            currentHash.length > 0 &&
+            offerHash !== currentHash
+          ) {
+            // The model moved between offer and consent — decline and
+            // re-offer against the graph as it stands now.
+            explicitGenerateGraphPresent = { graphForHash: graphNow };
+            resumeOutcome = 'reoffered_graph_changed';
+          } else {
+            explicitGenerateBrief = await assembleResumeBrief();
+            if (explicitGenerateBrief !== null) {
+              explicitGenerateDraft = true;
+              draftOfferConsumedRefs = [draftOfferResume.pending.chip_id];
+              resumeOutcome = 'dispatch_draft';
+            } else {
+              explicitGenerateDeclined = true;
+              resumeOutcome = 'declined_no_brief';
+            }
+          }
+        }
+      } catch (err) {
+        resumeOutcome = 'state_read_failed_fallthrough';
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'V5 draft-offer resume — persisted-state read failed; preserving pre-offer routing',
+        );
+      }
+      emit(TelemetryEvents.V5DraftOfferResumed, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        trigger: draftOfferResume.trigger,
+        redraft: isRedraftOffer,
+        outcome: resumeOutcome,
+        brief_source: explicitGenerateBrief?.source ?? null,
+      });
     }
     if (explicitGenerateDeclined) {
       // C2 honest decline — deterministic, zero LLM calls, no commit. Names
@@ -1794,12 +2260,144 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         userMessage: ingress.message,
       });
     }
+    if (explicitGenerateGraphPresent !== null) {
+      // ────────────────────────────────────────────────────────────────
+      // C4 — deterministic graph-present decline + redraft offer.
+      // ────────────────────────────────────────────────────────────────
+      // Zero LLM calls. Unlike the no-brief decline this turn COMMITS: the
+      // redraft offer's `draft_graph` pending must persist for the consent
+      // turn to resume (pendings live on committed turn rows). The chip is
+      // only rendered when the pending persisted — a chip whose consent
+      // cannot resume would be guarantee-theatre — so on a commit failure
+      // the decline is sent chip-less and the user can simply re-click
+      // Generate.
+      const offerNowMs = Date.now();
+      const offerSeed = deriveDraftOfferSeed(ingress.message, ingress.source);
+      const offerGraphHash = ((): string | null => {
+        try {
+          return computeAnalysisAffectingGraphHash(
+            explicitGenerateGraphPresent.graphForHash as GraphStateIngress | null | undefined,
+          );
+        } catch {
+          return null;
+        }
+      })();
+      const offerChip = {
+        id: `redraft-offer-${randomUUID()}`,
+        label: REDRAFT_OFFER_CHIP_LABEL,
+        // See REDRAFT_OFFER_CHIP_MESSAGE_ALT: a re-offer answering the
+        // user's own click of the previous offer chip must not replay the
+        // exact message they just sent, or the egress looping-chip guard
+        // (correctly) strips it and the offer becomes type-only.
+        message:
+          normaliseReplayMessage(ingress.message) ===
+          normaliseReplayMessage(REDRAFT_OFFER_CHIP_MESSAGE)
+            ? REDRAFT_OFFER_CHIP_MESSAGE_ALT
+            : REDRAFT_OFFER_CHIP_MESSAGE,
+      };
+      const offerPending = buildDraftOfferPending({
+        scenarioId: ingress.scenario_id,
+        chipId: offerChip.id,
+        publicLabel: offerChip.label,
+        publicMessage: offerChip.message,
+        ...(offerSeed !== undefined ? { briefSeed: offerSeed } : {}),
+        redraft: true,
+        graphHash: offerGraphHash,
+        nowMs: offerNowMs,
+      });
+      // P1-1 — read the carried pendings BEFORE composing the copy: the
+      // "or reply yes" promise is derived from the very set this commit's
+      // carry-forward will persist (the same array is threaded to the
+      // commit below, so copy and state cannot diverge).
+      const offerPriorPendings = await ensureDraftOfferPriorPendings();
+      const offerWillBeSoleLive = willDraftOfferBeSoleLivePending(
+        offerPriorPendings,
+        offerPending,
+        offerNowMs,
+      );
+      const declineCandidate: import('@talchain/schemas/boundary').OlumiResponse = {
+        response_version: 2,
+        assistant_text: explicitGenerateGraphPresentText(offerWillBeSoleLive),
+        blocks: [],
+        suggested_actions: [offerChip],
+        insights: [],
+        stage_indicator: ingress.stage,
+      } as import('@talchain/schemas/boundary').OlumiResponse;
+      let wireResponse = declineCandidate;
+      let offerPersisted = false;
+      try {
+        const commitResult = await commitDirectAnswer(declineCandidate, {
+          scenario_id: ingress.scenario_id,
+          turn_id: ingress.turn_id,
+          turn_class: 'clarify',
+          handler_id: null,
+          request_hash: computeRequestHash(ingress),
+          llm_calls_used: 0,
+          duration_ms: Date.now() - routeStartedAt,
+          handler_facts: [],
+          pending_actions: [offerPending],
+          // Never wipe live holds: thread the prior pendings through this
+          // commit's carry-forward (HOLD-WIPE fix pattern). Same array the
+          // copy derivation above consumed (read lazily there — a composer
+          // flag turn may not have paid the pre-route read).
+          priorPendingActions: offerPriorPendings,
+          coaching_state: null,
+          userMessage: ingress.message,
+          contentGraph: explicitGenerateGraphPresent.graphForHash,
+        });
+        // Carry-forward may have attached a lapse notice — send what was
+        // committed (stored copy == wire copy).
+        wireResponse = commitResult.response;
+        offerPersisted = true;
+      } catch (err) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'V5 explicit-generate graph-present decline — offer commit failed; sending chip-less decline',
+        );
+        wireResponse = {
+          ...declineCandidate,
+          suggested_actions: [],
+        } as import('@talchain/schemas/boundary').OlumiResponse;
+      }
+      emit(TelemetryEvents.V5DraftOfferSeeded, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        site: 'explicit_generate_graph_present',
+        redraft: true,
+        had_seed: offerSeed !== undefined,
+        graph_hash_pinned: offerGraphHash !== null,
+        persisted: offerPersisted,
+      });
+      return sendFinalised200(
+        reply,
+        requestId,
+        'explicit_generate_graph_present',
+        wireResponse,
+        {
+          graph: null,
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        },
+      );
+    }
     const isDraftGraphShape =
       ingress.stage === 'frame' &&
       extensions.graphState == null &&
       // V5 Signature Loop — a scenario with prior committed turns is a
       // continuation, not a first brief; let it reach TurnExecutor's memory.
-      !isContinuationScenario &&
+      // ROADMAP 2.63 C3 — EXCEPT when the last committed turn was a
+      // draft-offer turn (the marker): the guard's own committed turns must
+      // not strand the very reply they asked for ("here is my decision
+      // question" after the framing prompt). Marker presence, not liveness:
+      // drafting a full shaped brief the user just typed carries no consent
+      // risk, so a wall-expired offer still un-strands it.
+      (!isContinuationScenario || draftOfferMarker !== null) &&
       ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
       DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
     if (isDraftGraphShape || explicitGenerateDraft) {
@@ -1820,6 +2418,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           ...(explicitGenerateDraft && explicitGenerateBrief !== null
             ? { briefOverride: explicitGenerateBrief.brief }
             : {}),
+          // ROADMAP 2.63 C3/C4 — a draft retires any outstanding draft
+          // offer: the honoured pending on a consent resume, or the stale
+          // marker when a shaped brief drafted alongside one. Without this
+          // the offer survives its own fulfilment and a later bare "yes"
+          // re-triggers a draft (zombie re-offer).
+          ...(draftOfferConsumedRefs !== undefined
+            ? { consumedPendingRefs: draftOfferConsumedRefs }
+            : draftOfferMarker !== null
+              ? { consumedPendingRefs: [draftOfferMarker.chip_id] }
+              : {}),
         });
         if (!dg.commitPerformed) {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
@@ -2437,12 +3045,28 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //       → "I couldn't complete that turn cleanly" generic fallback
     //     - NOW caught here, emits a deterministic framing prompt.
     // ────────────────────────────────────────────────────────────────────
+    // ROADMAP 2.63 C3 — the guard may RE-FIRE on a continuation scenario the
+    // guard itself created (marker = the last committed turn was a draft
+    // offer): a second unshaped, non-confirm message keeps the deterministic
+    // framing loop (fresh copy, fresh offer, refreshed TTL) instead of
+    // paying a broad TurnExecutor LLM call. Confirm-shaped messages are
+    // EXCLUDED from the re-fire: a "yes" that did not resume above (offer
+    // expired, or another live pending exists) belongs to TurnExecutor's
+    // short-confirm machinery (recovery_expired / consent-priority), never
+    // to a canned framing prompt that would swallow it.
+    const isDraftOfferRefire =
+      isContinuationScenario &&
+      draftOfferMarker !== null &&
+      !SHORT_CONFIRM_PATTERN.test(ingress.message) &&
+      !AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message);
     const isFrameNoBriefShape =
       ingress.stage === 'frame' &&
       extensions.graphState == null &&
       // V5 Signature Loop — a continuation (prior committed turns) must NOT get
       // the "start over" framing prompt; let it reach TurnExecutor's memory.
-      !isContinuationScenario &&
+      // C3 re-fire (above) is the one exception: the continuation consists of
+      // the guard's own offer turns.
+      (!isContinuationScenario || isDraftOfferRefire) &&
       !isDraftGraphShape;
     if (isFrameNoBriefShape) {
       log.info(
@@ -2479,6 +3103,105 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         insights: [],
         stage_indicator: 'frame',
       } as import('@talchain/schemas/boundary').OlumiResponse;
+      // ────────────────────────────────────────────────────────────────
+      // ROADMAP 2.63 C3 — seed the deterministic draft offer.
+      // ────────────────────────────────────────────────────────────────
+      // Only when the guard-firing message carries a usable brief seed
+      // (typed, ≥ min length after normalisation): a "Build the model"
+      // chip is added, and a `draft_graph` pending action carrying the
+      // seed is COMMITTED with the turn (pendings live on committed turn
+      // rows), so the next turn's chip click / typed "yes" resumes through
+      // the draft-offer pre-route into the C1/C2 deterministic dispatch.
+      // Unusable-seed turns (short messages, chip_click canned text) keep
+      // the pre-C3 guard byte-identically: no chip, no commit, scenario
+      // stays fresh. On a commit failure the chip-less pre-C3 response is
+      // sent (a chip whose consent cannot resume would be
+      // guarantee-theatre) and the loop stays recoverable.
+      const guardOfferSeed = deriveDraftOfferSeed(ingress.message, ingress.source);
+      if (guardOfferSeed !== undefined) {
+        const guardNowMs = Date.now();
+        const guardChip = {
+          id: `draft-offer-${randomUUID()}`,
+          label: DRAFT_OFFER_CHIP_LABEL,
+          message: DRAFT_OFFER_CHIP_MESSAGE,
+        };
+        const guardPending = buildDraftOfferPending({
+          scenarioId: ingress.scenario_id,
+          chipId: guardChip.id,
+          publicLabel: guardChip.label,
+          publicMessage: guardChip.message,
+          briefSeed: guardOfferSeed,
+          nowMs: guardNowMs,
+        });
+        // P1-1 — same derivation as the C4 site (one derivation, two
+        // consumers): `draftOfferPriorPendings` is exactly what the commit
+        // below threads, so the ", or just reply yes" clause is only made
+        // when the offer will stand alone after this commit.
+        const guardOfferWillBeSoleLive = willDraftOfferBeSoleLivePending(
+          draftOfferPriorPendings,
+          guardPending,
+          guardNowMs,
+        );
+        const offerResponse: import('@talchain/schemas/boundary').OlumiResponse = {
+          ...guardResponse,
+          assistant_text: `${assistantText} ${draftOfferGuardSentence(guardOfferWillBeSoleLive)}`,
+          suggested_actions: [guardChip],
+        } as import('@talchain/schemas/boundary').OlumiResponse;
+        try {
+          const commitResult = await commitDirectAnswer(offerResponse, {
+            scenario_id: ingress.scenario_id,
+            turn_id: ingress.turn_id,
+            turn_class: 'clarify',
+            handler_id: null,
+            request_hash: computeRequestHash(ingress),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - routeStartedAt,
+            handler_facts: [],
+            pending_actions: [guardPending],
+            // Fresh scenarios have no prior pendings ([]); on a re-fire the
+            // pre-route read already loaded them — threading keeps the
+            // carry-forward honest either way (the fresh offer supersedes
+            // the carried one kind-level).
+            priorPendingActions: draftOfferPriorPendings,
+            coaching_state: null,
+            userMessage: ingress.message,
+          });
+          emit(TelemetryEvents.V5DraftOfferSeeded, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            site: 'frame_no_brief_guard',
+            redraft: false,
+            had_seed: true,
+            refire: isDraftOfferRefire,
+            persisted: true,
+          });
+          return sendFinalised200(reply, requestId, 'frame_no_brief_guard', commitResult.response, {
+            graph: null,
+            requestStartedAt: routeStartedAt,
+            scenarioId: ingress.scenario_id,
+            turnId: ingress.turn_id,
+            userMessage: ingress.message,
+          });
+        } catch (err) {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'V5 frame-guard draft offer — commit failed; sending chip-less framing prompt (pre-C3 behaviour)',
+          );
+          emit(TelemetryEvents.V5DraftOfferSeeded, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            site: 'frame_no_brief_guard',
+            redraft: false,
+            had_seed: true,
+            refire: isDraftOfferRefire,
+            persisted: false,
+          });
+        }
+      }
       return sendFinalised200(reply, requestId, 'frame_no_brief_guard', guardResponse, {
         graph: null,
         requestStartedAt: routeStartedAt,
