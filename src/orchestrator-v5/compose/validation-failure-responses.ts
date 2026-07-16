@@ -549,6 +549,24 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
  */
 function composeOptionInterventionMisroute(error: ValidationError): BranchResult {
   const details = error.details ?? {};
+  // ROADMAP 2.11 / P1-3 — the guard now also refuses adjust_edge_strength
+  // proposals for configure-option intent (the live A5/A7 loop wrote edge
+  // strength while READING as configuration). The clarify names the right
+  // contrast per refused handler.
+  if (readString(details.handler_id) === 'adjust_edge_strength') {
+    return {
+      body: {
+        assistant_text:
+          `That looks like setting an option's effect rather than adjusting ` +
+          `the strength of a link, so I haven't changed anything. Tell me ` +
+          `which option and what it should change, for example 'the ` +
+          `acquisition option sets Setup Cost to £2m', and I'll write it in.`,
+        suggested_actions: [fallbackPrompt('Describe the option\'s effect')],
+      },
+      template_id: 'option_intervention_misroute',
+      chip_type: 'text_prompt',
+    };
+  }
   const factorLabel = readString(details.factor_label);
   const subject = factorLabel
     ? `the ${safeLabel({ label: factorLabel, kind: undefined })} factor's own value`

@@ -56,7 +56,12 @@ import {
   type HeldProposalBlockInput,
 } from '../compose/held-proposal.js';
 import { sanitisePublicCopyOrFallback } from '../compose/proposed-change.js';
-import { clampLabel, describeHeldOperationsSubject } from './describe-changeset.js';
+import {
+  clampLabel,
+  describeHeldOperationsSubject,
+  type HeldOpLike,
+} from './describe-changeset.js';
+import { optionIdsAddedWithInterventionIntent } from '../../orchestrator/tools/encode-option-interventions.js';
 import type { HeldProposalBlock } from '@talchain/schemas/boundary';
 import { mutationTelemetryEvent } from '../graph-management/telemetry.js';
 import type {
@@ -292,6 +297,60 @@ export function buildGmHeldAssistantText(
     `I'm holding the change to ${subject} rather than applying it straight away. ` +
     'Nothing in the model moves until you confirm. Reply yes to continue, or tell ' +
     'me what to adjust instead.'
+  );
+}
+
+/**
+ * ROADMAP 2.11 / P1-3 — needs-encoding disclosure ON THE HOLD. An
+ * `add_node` option op whose payload requests NO interventions will, once
+ * confirmed, persist an option with no effect values — and PLoT preflight
+ * then 422-blocks the WHOLE analysis (`options_not_configured`). The
+ * live-proven failure (2.11 diagnosis, scenario A A2→A4) is that the user
+ * learns this only two turns later, from a recovery chip that used to loop.
+ * The consent ask must say it AT ADD TIME.
+ *
+ * Detection derives from `optionIdsAddedWithInterventionIntent` — the SAME
+ * intent classifier the edit pipeline's configure-or-don't-persist gate
+ * uses (encode-option-interventions.ts) — so "requests interventions" can
+ * never mean two different things (trap-12). Labels are render-safety
+ * filtered; nothing safe to say → null (copy unchanged).
+ */
+/** Total object view of an op payload (hostile shapes → empty record). */
+function opAsRecord(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
+export function buildNeedsEncodingAddNotice(
+  operations: readonly HeldOpLike[],
+  currentGraph: unknown,
+): string | null {
+  void currentGraph; // labels come from the ADD payloads, not the pre-add graph
+  const withIntent = optionIdsAddedWithInterventionIntent(
+    operations as ReadonlyArray<{ op?: unknown; value?: unknown }>,
+  );
+  const labels: string[] = [];
+  for (const op of operations) {
+    if (op.op !== 'add_node') continue;
+    const value = opAsRecord(op.value);
+    if (value.kind !== 'option') continue;
+    const id = typeof value.id === 'string' ? value.id : undefined;
+    if (id !== undefined && withIntent.has(id)) continue;
+    const label = typeof value.label === 'string' ? value.label.trim() : '';
+    if (label.length === 0 || !subjectIsSafe(label)) continue;
+    labels.push(clampLabel(label));
+  }
+  if (labels.length === 0) return null;
+  const first = `'${labels[0]}'`;
+  const named =
+    labels.length === 1
+      ? first
+      : `${first} and ${labels.length - 1} more option${labels.length - 1 === 1 ? '' : 's'}`;
+  return (
+    `Heads up: ${named} ${labels.length === 1 ? 'has' : 'have'} no effect values yet, ` +
+    'so the analysis will stay blocked after this is applied until you set them. ' +
+    `You can tell me what ${labels.length === 1 ? 'it' : 'each one'} changes once it is added.`
   );
 }
 
@@ -697,15 +756,24 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
               graph: input.currentGraph as HeldProposalBlockInput['graph'],
             })
           : null;
+      // ROADMAP 2.11 / P1-3 — needs-encoding disclosure on the consent ask
+      // (null when every added option carries interventions: copy
+      // byte-identical to the pre-2.11 hold).
+      const needsEncodingNotice = buildNeedsEncodingAddNotice(
+        input.operations,
+        input.currentGraph,
+      );
+      const heldAsk = buildGmHeldAssistantText(
+        describeHeldOperationsSubject(input.operations, input.currentGraph),
+        input.operations.length,
+      );
       return {
         governing,
         blockApply: true,
         // CONSENT-CLARITY AMENDMENT — the ask names the held change
         // (falls back to the generic swept copy when no safe subject).
-        assistantText: buildGmHeldAssistantText(
-          describeHeldOperationsSubject(input.operations, input.currentGraph),
-          input.operations.length,
-        ),
+        assistantText:
+          needsEncodingNotice === null ? heldAsk : `${heldAsk} ${needsEncodingNotice}`,
         suggestedActions: [held.chip],
         pendingActions: [held.pending],
         publicReason,

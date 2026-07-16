@@ -30,6 +30,10 @@ import type {
   SuggestedAction,
 } from './types.js';
 import { safeLabel, sanitiseForUser } from './helpers.js';
+import {
+  buildConfigureOptionChip,
+  CONFIGURE_OPTION_GENERIC_CHIP,
+} from '../configure-option-copy.js';
 
 export interface ComposedHandlerFailure {
   readonly response: OlumiResponse;
@@ -229,19 +233,23 @@ export function composeHandlerFailureBody(
       // entityRef will be 'that option' — route to the generic branch so the
       // chip reads naturally ("Configure an option") instead of "Configure
       // that option", which sounds off.
+      //
+      // ROADMAP 2.11 / P1-3: the chips are built from the SHARED
+      // configure-option copy module, whose message prefix the route-v2
+      // configure-option gate matches deterministically — this chip now
+      // provably reaches the edit lane (the chat path that WRITES option
+      // interventions), never adjust_edge_strength. Before that gate, this
+      // chip's own message live-routed to an edge-strength tweak and looped
+      // the user forever (2.11 diagnosis, scenario A A6→A7). The copy also
+      // says WHAT to tell the assistant, since the capability is now real.
       const labelUsable = rawLabel !== null && !entityRef.startsWith('that ');
       if (labelUsable) {
         return {
           body: {
             assistant_text:
-              `Options exist but don't have effects configured yet. ${entityRef} needs intervention values to proceed.`,
-            suggested_actions: [
-              {
-                id: 'chip_prompt_configure_option',
-                label: `Configure ${entityRef}`,
-                message: `Help me configure ${entityRef}.`,
-              },
-            ],
+              `Options exist but don't have effects configured yet. ${entityRef} needs intervention values to proceed. ` +
+              `Tell me what ${entityRef} changes and I'll write it into the model.`,
+            suggested_actions: [buildConfigureOptionChip(entityRef)],
           },
           template_id: 'options_not_configured_with_label',
           chip_type: 'text_prompt',
@@ -250,14 +258,9 @@ export function composeHandlerFailureBody(
       return {
         body: {
           assistant_text:
-            "Options exist but don't have effects configured yet. Add intervention values to at least one option to proceed.",
-          suggested_actions: [
-            {
-              id: 'chip_prompt_configure_option_generic',
-              label: 'Configure an option',
-              message: 'Help me configure one of my options.',
-            },
-          ],
+            "Options exist but don't have effects configured yet. Add intervention values to at least one option to proceed. " +
+            "Tell me what one of your options changes and I'll write it into the model.",
+          suggested_actions: [{ ...CONFIGURE_OPTION_GENERIC_CHIP }],
         },
         template_id: 'options_not_configured_no_label',
         chip_type: 'text_prompt',

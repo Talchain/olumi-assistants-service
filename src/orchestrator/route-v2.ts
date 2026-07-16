@@ -158,6 +158,7 @@ import {
 import { findExactProposalCopyMatchIndexes } from '../orchestrator-v5/routing/proposal-ordinal-select.js';
 import { resolveProposalRenderCopy } from '../orchestrator-v5/compose/proposed-change.js';
 import { isStateQueryQuestionShape } from '../orchestrator-v5/routing/state-query-guard.js';
+import { detectConfigureOptionIntent } from '../orchestrator-v5/routing/configure-option-intent.js';
 import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
 import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
 import {
@@ -2039,9 +2040,43 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
     const valueUpdatePhrasingHit = isValueUpdatePhrasing(ingress.message);
+    // ROADMAP 2.11 / P0-2 (deterministic half) — configure-option intent
+    // ("configure {option}", "set {option}'s {factor} intervention to X",
+    // and the system's OWN options_not_configured recovery-chip message)
+    // must reach the edit lane: it is the only chat path that WRITES option
+    // interventions (update_node → data/interventions/<factor_id>, already
+    // sanctioned end-to-end). Before this gate these messages carried no
+    // positive edit verb (or were value-update gated), fell through to the
+    // LLM router, and live-routed to adjust_edge_strength — a field PLoT's
+    // preflight ignores — closing the infinite recovery-chip loop the 2.11
+    // diagnosis captured (scenario A, A5–A7). Negative gates shared with
+    // the edit-verb candidate: meta-questions, analytical questions and
+    // state queries never dispatch. Deliberately NOT gated on the
+    // value-update phrasing (an option-intervention "set …" must not go to
+    // set_factor_value, whose misroute guard can only refuse-to-clarify).
+    const configureOptionDetection = detectConfigureOptionIntent(
+      ingress.message,
+      (extensions.graphState?.nodes ?? [])
+        .filter((n) => n.kind === 'option' && typeof n.label === 'string')
+        .map((n) => n.label as string),
+    );
     // State-query suppressor (behaviour #3): a question containing an edit verb
     // ("what did you just change?", "what did that update do?") must NOT edit.
     const stateQuerySuppressed = isStateQueryQuestionShape(ingress.message);
+    const configureOptionIntent =
+      configureOptionDetection.matched &&
+      !negativeEditRegexHit &&
+      !analyticalQuestionDetected &&
+      !stateQuerySuppressed;
+    if (configureOptionIntent && !positiveEditRegexHit) {
+      // Emit ONLY when this gate is the deciding factor (an edit-verb-
+      // bearing configure message would have dispatched anyway).
+      emit(TelemetryEvents.V5EditGraphConfigureOptionRouted, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        trigger: configureOptionDetection.trigger,
+      });
+    }
     if (
       stateQuerySuppressed
       && positiveEditRegexHit
@@ -2088,7 +2123,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isProposalReplayCandidate =
       !isConfirmationShaped &&
       (ingress.source === 'chip_click' || AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message));
-    if (editVerbCandidate && (isConfirmationShaped || isProposalReplayCandidate)) {
+    if ((editVerbCandidate || configureOptionIntent) && (isConfirmationShaped || isProposalReplayCandidate)) {
       const resolution = await resolveProposalConfirmAtRoute(
         ingress.scenario_id,
         requestId,
@@ -2227,7 +2262,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // a confirmation / state-query cannot be claimed by tryVagueEditGuard et al.
     // before it is applied / answered). Edit intent is the candidate minus a
     // suppressed proposal confirmation.
-    const editIntentDetected = editVerbCandidate && !proposalConfirmSuppressed;
+    // ROADMAP 2.11 / P0-2: configure-option intent is an edit-lane candidate
+    // in its own right (see the detection block above) — same suppressors,
+    // same proposal-confirm resolution, same dispatch.
+    const editIntentDetected =
+      (editVerbCandidate || configureOptionIntent) && !proposalConfirmSuppressed;
     // Emit ONLY when the analytical-question guard is THE deciding
     // factor — i.e. the message WOULD have dispatched to edit_graph
     // had the guard not fired. The earlier loose condition (emit on

@@ -115,6 +115,7 @@ import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
 import { impliesOptionInterventionEdit } from './routing/option-intervention-guard.js';
+import { detectConfigureOptionIntent } from './routing/configure-option-intent.js';
 import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
 import {
   deriveContextReadiness,
@@ -134,9 +135,10 @@ import {
 } from './routing/proposed-change-synthesis.js';
 import {
   buildGmHeldAppliedReceipt,
+  buildGmHeldAppliedChips,
+  deriveUnconfiguredOptionLabels,
   executeGmHeldResume,
   readGmHeldResume,
-  GM_HELD_APPLIED_RERUN_CHIP,
   type GmHeldResumeRead,
 } from './handlers/gm-held-execute.js';
 import { describeHeldOperationsSubject } from './handlers/edit-graph-referee-gate.js';
@@ -1873,15 +1875,20 @@ export async function runTurnExecutor(
         // CONSENT-CLARITY AMENDMENT — the receipt NAMES what was confirmed
         // ("Confirmed: update 'Marketing'."), never a bare "Done"; falls
         // back to the generic swept copy when no safe subject derives.
+        // ROADMAP 2.11 / P1-3: the receipt DISCLOSES options the apply left
+        // without effect values (needs_encoding) instead of advising a rerun
+        // that PLoT preflight would 422-block, and the chip set points at
+        // the real configure path (shared builder → deterministic edit-lane
+        // route) rather than offering nothing.
         const gmReadiness = computeStructuralReadiness(outcome.appliedGraph);
         const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph);
         const appliedResponse = composeDirectAnswerResponse({
           assistant_text: buildGmHeldAppliedReceipt(
             gmAppliedSubject !== null ? [gmAppliedSubject] : [],
+            deriveUnconfiguredOptionLabels(gmReadiness),
           ),
           stage: context.stage,
-          suggested_actions:
-            gmReadiness?.status === 'ready' ? [{ ...GM_HELD_APPLIED_RERUN_CHIP }] : [],
+          suggested_actions: buildGmHeldAppliedChips(gmReadiness),
         });
         sonnetTextForLog = appliedResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -2091,8 +2098,13 @@ export async function runTurnExecutor(
         // Honest applied path (mirrors the single-resume commit exactly).
         // Receipt names every applied change; per-name decline sentence
         // for any hold the re-referee refused — never a silent partial.
+        // ROADMAP 2.11 / P1-3: same needs-encoding disclosure + chip
+        // behaviour as the single-resume site above.
         const gmReadiness = computeStructuralReadiness(lastExecuted.appliedGraph);
-        let receiptText = buildGmHeldAppliedReceipt(appliedSubjects);
+        let receiptText = buildGmHeldAppliedReceipt(
+          appliedSubjects,
+          deriveUnconfiguredOptionLabels(gmReadiness),
+        );
         if (declinedLabels.length > 0) {
           const declinedNamed = declinedLabels.map((l) => `'${l}'`).join(', ');
           receiptText += ` I couldn't take ${declinedNamed} forward, so the model is unchanged for ${
@@ -2102,8 +2114,7 @@ export async function runTurnExecutor(
         const appliedResponse = composeDirectAnswerResponse({
           assistant_text: receiptText,
           stage: context.stage,
-          suggested_actions:
-            gmReadiness?.status === 'ready' ? [{ ...GM_HELD_APPLIED_RERUN_CHIP }] : [],
+          suggested_actions: buildGmHeldAppliedChips(gmReadiness),
         });
         sonnetTextForLog = appliedResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -5536,6 +5547,48 @@ export async function runTurnExecutor(
             details: {
               handler_id: 'set_factor_value',
               ...(action.entity.label ? { factor_label: action.entity.label } : {}),
+            },
+          },
+        };
+      }
+
+      // ROADMAP 2.11 / P1-3 — adjust_edge_strength backstop for configure-
+      // option intent. The primary fix is deterministic: route-v2's
+      // configure-option gate sends these messages to the edit lane before
+      // the LLM router ever sees them. This guard is defence-in-depth for
+      // residual free-text shapes the gate misses (or graph-absent turns):
+      // when the routed proposal is adjust_edge_strength but the message
+      // carries configure/intervention vocabulary anchored to options, the
+      // proposal would write edge `strength` — a field PLoT's preflight
+      // ignores — while READING as configuration. Live-proven infinite loop
+      // (2.11 diagnosis, scenario A A5–A7: chip → edge tweak → analysis
+      // still blocked → same chip). Same containment doctrine as the
+      // set_factor_value misroute guard above: refuse into the recoverable
+      // clarify path, graph unchanged; a false positive costs one clarify
+      // turn, a false negative writes the wrong field forever.
+      if (
+        validationResult.valid &&
+        proposedHandlerId === 'adjust_edge_strength' &&
+        detectConfigureOptionIntent(
+          userMessageForTurn ?? '',
+          graphLookupForValidate
+            ? graphLookupForValidate
+                .listEntitiesByKind('option')
+                .map((entity) => entity.label)
+                .filter((label): label is string =>
+                  typeof label === 'string' && label.trim().length > 0,
+                )
+            : [],
+        ).matched
+      ) {
+        validationResult = {
+          valid: false,
+          error: {
+            code: 'OPTION_INTERVENTION_MISROUTE',
+            message:
+              'adjust_edge_strength refused — the request implies configuring an option\'s interventions, not tuning a link strength',
+            details: {
+              handler_id: 'adjust_edge_strength',
             },
           },
         };

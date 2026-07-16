@@ -1391,6 +1391,16 @@ export const TelemetryEvents = {
   // mutating edit. Diagnostic-only. Payload: request_id, scenario_id.
   V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
 
+  // ROADMAP 2.11 / P0-2 — deterministic configure-option routing. Emitted
+  // when the configure-option intent gate is the DECIDING factor sending a
+  // turn to the edit lane (no positive edit verb would have dispatched it):
+  // "configure {option}" phrasings and the options_not_configured
+  // recovery-chip message, which previously fell through to the LLM router
+  // and live-routed to adjust_edge_strength (the 2.11 infinite-loop
+  // diagnosis). Payload: request_id, scenario_id, trigger
+  // ('chip_prefix' | 'configure_vocab' | 'intervention_vocab').
+  V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
+
   // V5 Signature Loop — refresh-continuation guard. Emitted when a turn arrives
   // at frame stage with no request graph but the scenario already has committed
   // turns (refresh / reconnection). The guard suppresses the draft_graph /
