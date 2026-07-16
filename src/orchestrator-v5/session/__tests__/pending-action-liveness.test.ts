@@ -126,9 +126,6 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
     case 'run_analysis':
     case 'what_would_flip':
       return { ...base, action: { kind } };
-    case 'draft_graph':
-      // C3/C4 (#488): brief_seed optional — minimal valid form is bare.
-      return { ...base, action: { kind } };
     case 'set_factor_value':
       return { ...base, action: { kind, factor_id: 'fac_x', value: 1, operator: 'set' } };
     case 'edit_graph_add_risk':
