@@ -43,7 +43,12 @@ function makeResponse(): MockResponse {
 }
 
 describe('applyNarrativeEgressGuard — single string slots', () => {
-  it('rewrites a slot containing a banned phrase to the neutral fallback', () => {
+  // RC4 proportionate remedies: a REWRITABLE lexicon hit ("recommended" /
+  // "recommendation" / "winner" class) is now repaired in place via the
+  // terminology substitution; the neutral-fallback replacement is reserved
+  // for fatal-class phrases (denial, staleness, jargon) with no safe
+  // rewrite. Both remedies stay visible through `out.rewrites`.
+  it('rewrites a rewritable lexicon hit IN PLACE, preserving the content', () => {
     const resp = makeResponse();
     resp.headline = 'Hire two senior engineers locally is recommended.';
     const out = applyNarrativeEgressGuard(
@@ -55,6 +60,22 @@ describe('applyNarrativeEgressGuard — single string slots', () => {
     expect(out.rewritten).toBe(true);
     expect(out.rewrites).toEqual([
       { path: 'headline', hit: expect.stringMatching(/recommended/i) },
+    ]);
+    expect(resp.headline).toBe('Hire two senior engineers locally is suggested.');
+  });
+
+  it('replaces a slot containing a FATAL-class phrase with the neutral fallback', () => {
+    const resp = makeResponse();
+    resp.headline = 'The previous analysis still holds for this decision.';
+    const out = applyNarrativeEgressGuard(
+      resp,
+      [
+        { path: 'headline', get: (r) => r.headline, set: (r, v) => { r.headline = v; } },
+      ],
+    );
+    expect(out.rewritten).toBe(true);
+    expect(out.rewrites).toEqual([
+      { path: 'headline', hit: expect.stringMatching(/previous analysis/i) },
     ]);
     expect(resp.headline).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
   });
@@ -127,8 +148,9 @@ describe('applyNarrativeEgressGuard — array slots', () => {
     expect(out.rewrites[0].path).toBe('evidence[1]');
     expect(out.rewrites[1].path).toBe('evidence[2]');
     expect(resp.evidence[0]).toBe('Cost is the dominant factor.');
-    expect(resp.evidence[1]).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
-    expect(resp.evidence[2]).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+    // RC4: both hits are rewritable lexicon — repaired in place.
+    expect(resp.evidence[1]).toBe('This leading option has high confidence.');
+    expect(resp.evidence[2]).toBe('The leading option stands out clearly.');
   });
 
   it('preserves arrays whose elements are all clean', () => {
@@ -265,12 +287,33 @@ describe('applyNarrativeEgressGuard — slot-ownership contract', () => {
 });
 
 describe('applyNarrativeEgressGuard — coverage of banned phrase set', () => {
+  // RC4: the prescriptive-lexicon class is rewritten in place (terminology
+  // substitution), never nuked to the fallback — detection (the `hit`)
+  // is unchanged.
   it.each([
-    ['headline', 'The recommendation is to expand.', /recommendation/i],
-    ['headline', 'X is recommended.', /recommended/i],
-    ['headline', 'The winner is X.', /the\s+winner/i],
-    ['headline', 'Winning option is X.', /winning\s+option/i],
-  ])('rewrites %s containing banned phrase: %s', (path, raw, hitRe) => {
+    ['headline', 'The recommendation is to expand.', /recommendation/i, 'The leading option is to expand.'],
+    ['headline', 'X is recommended.', /recommended/i, 'X is suggested.'],
+    ['headline', 'The winner is X.', /the\s+winner/i, 'The leading option is X.'],
+    ['headline', 'Winning option is X.', /winning\s+option/i, 'Leading option is X.'],
+  ])('rewrites %s containing banned phrase: %s', (path, raw, hitRe, expected) => {
+    const resp = makeResponse();
+    resp.headline = raw;
+    const out = applyNarrativeEgressGuard(
+      resp,
+      [
+        { path, get: (r) => r.headline, set: (r, v) => { r.headline = v; } },
+      ],
+    );
+    expect(out.rewritten).toBe(true);
+    expect(out.rewrites[0].hit).toMatch(hitRe);
+    expect(resp.headline).toBe(expected);
+  });
+
+  it.each([
+    ['headline', 'The previous analysis still holds.', /previous analysis/i],
+    ['headline', 'Showing a cached result for this query.', /cached result/i],
+    ['headline', 'Nothing changed on the model.', /nothing changed/i],
+  ])('replaces %s containing FATAL-class phrase with the fallback: %s', (path, raw, hitRe) => {
     const resp = makeResponse();
     resp.headline = raw;
     const out = applyNarrativeEgressGuard(

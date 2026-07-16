@@ -71,6 +71,19 @@ import {
   type GateRejectReason,
 } from './copy-quality-gate.js';
 
+/**
+ * RC4 proportionate remedies: run a candidate through
+ * {@link gateAssumptionFragment} and return the SANITISED text to render
+ * (style offences such as em/en dashes are rewritten in place by the
+ * gate), or null on rejection. Callers must render the returned text,
+ * never the raw candidate.
+ */
+function gatedFragmentText(candidate: string): string | null {
+  if (candidate.length === 0) return null;
+  const gated = gateAssumptionFragment(candidate);
+  return gated.accept ? (gated.text ?? candidate) : null;
+}
+
 const MAX_WORDS = 140;
 const MAX_LABEL_CHARS = 40;
 const MAX_GOAL_CHARS = 80;
@@ -233,6 +246,13 @@ export interface PostDraftNarrativeTelemetry {
    * never carries raw user or coaching text.
    */
   readonly coaching_summary_reject_reason: GateRejectReason | null;
+  /**
+   * RC4 proportionate remedies: true when the accepted coachingSummary was
+   * shipped with a deterministic STYLE rewrite applied in place (em/en
+   * dashes). False when the summary shipped verbatim, was rejected, or was
+   * absent. Ops visibility for the rewrite-don't-drop remedy.
+   */
+  readonly coaching_summary_style_rewritten: boolean;
   readonly fallback_reason: FallbackReason;
   readonly strengthen_items_count: number;
   readonly bias_findings_count: number;
@@ -311,14 +331,17 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // Short-circuit: coachingSummary may replace the WHOLE response when
   // it passes the strict full-response gate. No deterministic opener is
   // prepended — the summary stands alone or it does not run.
+  // RC4: render the gate's SANITISED text (style offences such as em/en
+  // dashes are rewritten in place), never the raw candidate.
   if (summaryGateResult && summaryGateResult.accept) {
     return {
-      text: summaryCandidate,
+      text: summaryGateResult.text ?? summaryCandidate,
       telemetry: {
         assumption_source: 'coaching_summary',
         coaching_summary_present: true,
         coaching_summary_passed_gate: true,
         coaching_summary_reject_reason: null,
+        coaching_summary_style_rewritten: summaryGateResult.styleRewritten === true,
         fallback_reason: null,
         strengthen_items_count: strengthenItemsCount,
         bias_findings_count: biasFindingsCount,
@@ -343,6 +366,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         coaching_summary_present: coachingSummaryPresent,
         coaching_summary_passed_gate: false,
         coaching_summary_reject_reason: summaryRejectReason,
+        coaching_summary_style_rewritten: false,
         fallback_reason: 'no_candidate',
         strengthen_items_count: strengthenItemsCount,
         bias_findings_count: biasFindingsCount,
@@ -422,6 +446,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       coaching_summary_present: coachingSummaryPresent,
       coaching_summary_passed_gate: false,
       coaching_summary_reject_reason: summaryRejectReason,
+      coaching_summary_style_rewritten: false,
       fallback_reason: assumption.fallbackReason,
       strengthen_items_count: strengthenItemsCount,
       bias_findings_count: biasFindingsCount,
@@ -681,14 +706,14 @@ function pickStrengthenAssumption(
   // Try the full detail first (richer coaching value). If too long /
   // gate-rejected, try the first-sentence slice of the detail.
   if (typeof detail === 'string') {
-    const candidate = cleanLeadIn(detail);
-    if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) {
+    const candidate = gatedFragmentText(cleanLeadIn(detail));
+    if (candidate !== null) {
       return { text: candidate, source: 'strengthen_item_detail' };
     }
     const firstSentence = extractFirstSentence(detail);
     if (firstSentence) {
-      const cleaned = cleanLeadIn(firstSentence);
-      if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) {
+      const cleaned = gatedFragmentText(cleanLeadIn(firstSentence));
+      if (cleaned !== null) {
         return { text: cleaned, source: 'strengthen_item_detail' };
       }
     }
@@ -696,8 +721,8 @@ function pickStrengthenAssumption(
 
   // Fall back to label.
   if (typeof label === 'string') {
-    const cleaned = cleanLeadIn(label);
-    if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) {
+    const cleaned = gatedFragmentText(cleanLeadIn(label));
+    if (cleaned !== null) {
       return { text: cleaned, source: 'strengthen_item_label' };
     }
   }
@@ -714,14 +739,14 @@ function pickBiasFindingAssumption(
     if (typeof f !== 'object' || f === null) continue;
     const explanation = (f as { explanation?: unknown }).explanation;
     if (typeof explanation !== 'string') continue;
-    const candidate = cleanLeadIn(explanation);
-    if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) {
+    const candidate = gatedFragmentText(cleanLeadIn(explanation));
+    if (candidate !== null) {
       return candidate;
     }
     const firstSentence = extractFirstSentence(explanation);
     if (firstSentence) {
-      const cleaned = cleanLeadIn(firstSentence);
-      if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+      const cleaned = gatedFragmentText(cleanLeadIn(firstSentence));
+      if (cleaned !== null) return cleaned;
     }
   }
   return null;
@@ -735,14 +760,14 @@ function pickCoachingBiasSignalAssumption(
     if (typeof s !== 'object' || s === null) continue;
     const detail = (s as { detail?: unknown }).detail;
     if (typeof detail !== 'string') continue;
-    const candidate = cleanLeadIn(detail);
-    if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) {
+    const candidate = gatedFragmentText(cleanLeadIn(detail));
+    if (candidate !== null) {
       return candidate;
     }
     const firstSentence = extractFirstSentence(detail);
     if (firstSentence) {
-      const cleaned = cleanLeadIn(firstSentence);
-      if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+      const cleaned = gatedFragmentText(cleanLeadIn(firstSentence));
+      if (cleaned !== null) return cleaned;
     }
   }
   return null;
@@ -810,17 +835,17 @@ function extractStrengthenText(item: unknown): string | null {
   const detail = (item as { detail?: unknown }).detail;
   const label = (item as { label?: unknown }).label;
   if (typeof detail === 'string') {
-    const candidate = cleanLeadIn(detail);
-    if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) return candidate;
+    const candidate = gatedFragmentText(cleanLeadIn(detail));
+    if (candidate !== null) return candidate;
     const firstSentence = extractFirstSentence(detail);
     if (firstSentence) {
-      const cleaned = cleanLeadIn(firstSentence);
-      if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+      const cleaned = gatedFragmentText(cleanLeadIn(firstSentence));
+      if (cleaned !== null) return cleaned;
     }
   }
   if (typeof label === 'string') {
-    const cleaned = cleanLeadIn(label);
-    if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+    const cleaned = gatedFragmentText(cleanLeadIn(label));
+    if (cleaned !== null) return cleaned;
   }
   return null;
 }
@@ -834,12 +859,12 @@ function extractBiasSignalText(signal: unknown): string | null {
   if (typeof signal !== 'object' || signal === null) return null;
   const detail = (signal as { detail?: unknown }).detail;
   if (typeof detail !== 'string') return null;
-  const candidate = cleanLeadIn(detail);
-  if (candidate.length > 0 && gateAssumptionFragment(candidate).accept) return candidate;
+  const candidate = gatedFragmentText(cleanLeadIn(detail));
+  if (candidate !== null) return candidate;
   const firstSentence = extractFirstSentence(detail);
   if (firstSentence) {
-    const cleaned = cleanLeadIn(firstSentence);
-    if (cleaned.length > 0 && gateAssumptionFragment(cleaned).accept) return cleaned;
+    const cleaned = gatedFragmentText(cleanLeadIn(firstSentence));
+    if (cleaned !== null) return cleaned;
   }
   return null;
 }

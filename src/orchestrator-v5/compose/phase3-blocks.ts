@@ -84,6 +84,7 @@ import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.j
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { deterministicBlockId } from './block-id.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
+import { applyTerminologyRewrite } from './terminology-rewrite.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
 
@@ -112,6 +113,9 @@ const TECHNIQUE_MAX = 300;
 //
 // Banned recommendation/winner language is sourced from the central
 // `FORBIDDEN_USER_FACING_PHRASES` list via `findForbiddenPhraseHit`.
+// RC4: for the REWRITABLE prescriptive-lexicon subset the remedy is a
+// deterministic terminology substitution, not a drop — see
+// `validateProseAndSchemaOrDrop`.
 const RAW_DECIMAL_RE = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
 
 // ============================================================================
@@ -1460,6 +1464,21 @@ function emitDrop(reason: DropReason): void {
  * Round-3 review: combined prose-guard + schema-validate gate. Returns the
  * typed block on success, null on failure. Drops are logged with
  * structural metadata only (no user prose / raw IDs).
+ *
+ * RC4 proportionate remedies (2026-07-15 session RCA): a `forbidden_phrase`
+ * hit is now REWRITE-FIRST. Live evidence: the robustness review card was
+ * dropped on every review emission for containing the word "recommendation"
+ * — generated coaching destroyed by its own guard. When the hit belongs to
+ * the rewritable prescriptive-lexicon class, the deterministic terminology
+ * substitution (`applyTerminologyRewrite` — the prompt TERMINOLOGY map) is
+ * applied to every prose field, the fields are RE-SCANNED, and only a
+ * residual hit (a fatal-class phrase with no safe rewrite: denial, false
+ * success, staleness, jargon) — or a `raw_decimal` / `raw_id` hit, which
+ * never had a rewrite — drops the block as before. A successful rewrite is
+ * VISIBLE via `v5.phase3.block_rewritten` (gate id + substituted terms).
+ * Note the rewritten field re-enters the Zod parse below, so a rewrite that
+ * pushed a field over its schema cap still fails closed (drop, logged) —
+ * never an oversize block on the wire.
  */
 function validateProseAndSchemaOrDrop<TSchema extends z.ZodTypeAny>(
   schema: TSchema,
@@ -1470,7 +1489,44 @@ function validateProseAndSchemaOrDrop<TSchema extends z.ZodTypeAny>(
     prose: readonly ProseField[];
   },
 ): z.infer<TSchema> | null {
-  const proseHit = scanProse(ctx.prose);
+  let effectiveCandidate = candidate;
+  let proseHit = scanProse(ctx.prose);
+  if (proseHit !== null && proseHit.reason === 'forbidden_phrase') {
+    const appliedTerms: string[] = [];
+    const rewrittenFields: string[] = [];
+    const rewrittenProse: ProseField[] = ctx.prose.map((f) => {
+      if (typeof f.value !== 'string' || f.value.length === 0) return f;
+      const r = applyTerminologyRewrite(f.value);
+      if (r.applied.length === 0) return f;
+      appliedTerms.push(...r.applied);
+      rewrittenFields.push(f.name);
+      return { name: f.name, value: r.text };
+    });
+    if (appliedTerms.length > 0 && scanProse(rewrittenProse) === null) {
+      // Every prose field is clean after the substitution — ship the block
+      // with the rewritten fields instead of dropping it.
+      const patch: Record<string, unknown> = {};
+      for (const f of rewrittenProse) {
+        if (rewrittenFields.includes(f.name)) patch[f.name] = f.value;
+      }
+      effectiveCandidate = {
+        ...(candidate as Record<string, unknown>),
+        ...patch,
+      };
+      proseHit = null;
+      log.info(
+        {
+          event: 'v5.phase3.block_rewritten',
+          block_type: ctx.block_type,
+          block_kind: ctx.kind,
+          rewritten_fields: rewrittenFields,
+          // Generic banned vocabulary only (the matched terms) — safe to log.
+          terms: appliedTerms,
+        },
+        'V5 Phase 3 block prose rewritten (terminology substitution) before egress',
+      );
+    }
+  }
   if (proseHit !== null) {
     emitDrop({
       block_type: ctx.block_type,
@@ -1481,7 +1537,7 @@ function validateProseAndSchemaOrDrop<TSchema extends z.ZodTypeAny>(
     });
     return null;
   }
-  const parsed = schema.safeParse(candidate);
+  const parsed = schema.safeParse(effectiveCandidate);
   if (!parsed.success) {
     const firstIssue = parsed.error.issues[0];
     emitDrop({

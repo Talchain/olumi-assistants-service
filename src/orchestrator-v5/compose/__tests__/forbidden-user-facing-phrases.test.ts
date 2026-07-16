@@ -15,6 +15,7 @@ import {
   findSuccessClaimHit,
   SUCCESS_CLAIM_PATTERNS,
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
+  applyEgressForbiddenPhraseGuard,
 } from '../forbidden-user-facing-phrases.js';
 import { RUN_ANALYSIS_LOCKED_TEMPLATES } from '../../coaching/analysis-result-headline.js';
 import { composeEditClarifyResponse } from '../edit-clarify-response.js';
@@ -594,5 +595,85 @@ describe('V5 coaching — validation chip + composer copy passes forbidden-phras
       COMPOSER_FALLBACK_GAP,
     ].join('\n');
     expect(wrappers).not.toMatch(/(?:^|[\s(=,])(?:0\.\d|\.\d)/);
+  });
+});
+
+// ============================================================================
+// RC4 proportionate remedies — the egress guard is REWRITE-FIRST for the
+// prescriptive lexicon ("recommendation"/"winner" class, per the prompt
+// TERMINOLOGY map) and FALLBACK-REPLACEMENT for everything else (denial,
+// false-success, staleness, internal jargon — the fatal classes). The
+// 2026-07-15 session RCA (RC4) evidenced whole-block/response nuking as the
+// only remedy; a rewritable offence must now cost the user nothing.
+// ============================================================================
+
+describe('applyEgressForbiddenPhraseGuard — proportionate remedies (RC4)', () => {
+  it('rewrites a rewritable lexicon hit in place, preserving the content', () => {
+    const guarded = applyEgressForbiddenPhraseGuard(
+      'The recommendation is to expand into the enterprise segment first.',
+    );
+    expect(guarded.rewritten).toBe(true);
+    expect(guarded.remedy).toBe('terminology_rewrite');
+    expect(guarded.text).toBe(
+      'The leading option is to expand into the enterprise segment first.',
+    );
+    expect(guarded.hit).toMatch(/recommendation/i);
+    expect(findForbiddenPhraseHit(guarded.text)).toBeNull();
+  });
+
+  it('rewrites "the winner" / "winning option" prescriptions in place', () => {
+    const a = applyEgressForbiddenPhraseGuard('The winner is Hire a tech lead.');
+    expect(a.remedy).toBe('terminology_rewrite');
+    expect(a.text).toBe('The leading option is Hire a tech lead.');
+    const b = applyEgressForbiddenPhraseGuard('The winning option leads at 72%.');
+    expect(b.remedy).toBe('terminology_rewrite');
+    expect(b.text).toBe('The leading option leads at 72%.');
+  });
+
+  it('still REPLACES the whole response for a fatal-class denial phrase', () => {
+    const guarded = applyEgressForbiddenPhraseGuard(
+      "I haven't applied any changes in this session yet. Tell me more.",
+    );
+    expect(guarded.rewritten).toBe(true);
+    expect(guarded.remedy).toBe('fallback_replacement');
+    expect(guarded.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+  });
+
+  it('still REPLACES when a fatal-class phrase accompanies a rewritable one', () => {
+    const guarded = applyEgressForbiddenPhraseGuard(
+      'Nothing changed on the model, so the recommendation stands.',
+    );
+    expect(guarded.rewritten).toBe(true);
+    expect(guarded.remedy).toBe('fallback_replacement');
+    expect(guarded.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+  });
+
+  it('still REPLACES internal jargon (no safe rewrite exists)', () => {
+    for (const text of [
+      'The validator rejected that change.',
+      'The orchestrator returned an error envelope.',
+      'The wire currently shows unknown freshness.',
+    ]) {
+      const guarded = applyEgressForbiddenPhraseGuard(text);
+      expect(guarded.remedy, text).toBe('fallback_replacement');
+      expect(guarded.text, text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+    }
+  });
+
+  it('reports remedy "none" and returns the text unchanged when clean', () => {
+    const clean = 'Hire a tech lead leads at 72% probability, per the analysis.';
+    const guarded = applyEgressForbiddenPhraseGuard(clean);
+    expect(guarded.rewritten).toBe(false);
+    expect(guarded.remedy).toBe('none');
+    expect(guarded.text).toBe(clean);
+  });
+
+  it('is idempotent across both remedies', () => {
+    const rewritten = applyEgressForbiddenPhraseGuard(
+      'The recommendation is to expand.',
+    );
+    expect(applyEgressForbiddenPhraseGuard(rewritten.text).rewritten).toBe(false);
+    const replaced = applyEgressForbiddenPhraseGuard('Nothing changed.');
+    expect(applyEgressForbiddenPhraseGuard(replaced.text).rewritten).toBe(false);
   });
 });
