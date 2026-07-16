@@ -184,16 +184,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
-      - name: Use Node.js 20
+          # pnpm 11+ REQUIRED here (other jobs stay on 9): npmjs.org retired the
+          # legacy quick-audit endpoint (/-/npm/v1/security/audits{,/quick}) and
+          # now returns 410. pnpm <=10.x still calls it, so `pnpm audit` below
+          # errored on EVERY run (ERR_PNPM_AUDIT_BAD_RESPONSE 410). Since v11
+          # pnpm audit uses the bulk advisory endpoint
+          # (/-/npm/v1/security/advisories/bulk). Do NOT downgrade to 9 — that
+          # re-breaks this alarm. See pnpm/pnpm#11265, pnpm/pnpm#11268.
+          version: 11
+      - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        env:
-          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+          # pnpm 11 requires Node >=22.13 (it uses the node:sqlite builtin); on
+          # Node 20 the pnpm binary itself crashes. Only this audit job moves to
+          # 22 — the other jobs stay on Node 20.
+          node-version: 22
+      # NOTE: deliberately NO `pnpm install` here. `pnpm audit` reads pnpm-lock.yaml
+      # directly (it does not need node_modules), so the install is unnecessary.
+      # Skipping it also dodges ERR_PNPM_LOCKFILE_CONFIG_MISMATCH: pnpm 11 no longer
+      # reads `pnpm.overrides` from package.json (moved to pnpm-workspace.yaml), so a
+      # `--frozen-lockfile` install would reject this lockfile's baked-in overrides.
+      # Migrating overrides is out of scope for this CI-hygiene fix and would affect
+      # the pnpm-9 jobs. Auditing from the committed lockfile needs no NPM_PACKAGES_TOKEN.
       - name: Check for duplicate files (prevents drift from shadow copies)
         run: |
           # Fail if any duplicate-pattern files exist in tracked files
@@ -212,6 +224,11 @@ jobs:
             exit 1
           fi
       - name: Run security audit
+        # This is the always-on, blocking dependency-vuln alarm. It is NOT made
+        # redundant by security-scanning.yml: Snyk there is gated on SNYK_TOKEN
+        # (skipped when unset) and Dependency Review is continue-on-error + PR-only
+        # + needs the Dependency Graph enabled. This step runs on push and PR with
+        # no token, so keep it working rather than removing it.
         run: pnpm audit --audit-level=high
 
   # Job C: Spec v04 compliance (already exists as separate workflow, keeping here for visibility)
