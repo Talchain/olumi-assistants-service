@@ -1072,7 +1072,7 @@ type ProposalConfirmResolution =
 
 /**
  * P0 held-proposal replay (2026-07-15, DGAI #340) — affirmative-prefixed
- * message shapes ("Yes, add 'Wasted time' and 2 more changes.") that a user
+ * message shapes ("Yes, add 'Wasted time' and update 'Marketing'.") that a user
  * may type, or that a hold chip's MESSAGE replays. Prefix-anchored only:
  * the exact-match against the proposal's rendered copy is the real gate;
  * this pattern merely bounds which messages pay the pendings read.
@@ -1847,8 +1847,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       SHORT_CONFIRM_PATTERN.test(ingress.message) ||
       PROPOSAL_CONFIRM_PATTERN.test(ingress.message);
     // P0 held-proposal replay (2026-07-15, DGAI #340): the consent-clarity
-    // NAMED hold chip copy ("Add 'X' and 2 more changes") carries an edit
-    // verb + digits by construction, so it can never be confirmation-shaped
+    // NAMED hold chip copy ("Add 'X', change 'Y' to 0.8 and link 'Z' to
+    // 'W'" — changeset honesty 1.134 enumerates every op) carries an edit
+    // verb by construction, so it can never be confirmation-shaped
     // — yet it IS the product's own confirmation affordance (the chip
     // replays its label/message as the user text, with no proposal
     // reference on the wire). A chip_click ingress or an

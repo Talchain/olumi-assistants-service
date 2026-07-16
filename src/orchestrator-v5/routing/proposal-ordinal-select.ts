@@ -191,8 +191,9 @@ function classifyExactLabelOrMessageMatch(
  * user's input, under the SAME normalisation the pre-route matcher uses.
  *
  * Exposed for route-v2's proposal-replay resolution: the consent-clarity
- * NAMED hold chip copy ("Add 'X' and 2 more changes") contains an edit
- * verb + digits by construction, so the route's edit-intent heuristic
+ * NAMED hold chip copy ("Add 'X', change 'Y' to 0.8 and link 'Z' to 'W'" —
+ * changeset honesty 1.134 enumerates every op) contains an edit
+ * verb by construction, so the route's edit-intent heuristic
  * would otherwise claim the confirm turn before TurnExecutor's exact-match
  * pre-route can resolve it. The route consults THIS helper — the identical
  * matching rule — so the two layers cannot diverge on what counts as a

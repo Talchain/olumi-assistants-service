@@ -196,12 +196,18 @@ const HELD_OPERATIONS = [
 
 /**
  * The consent-clarity NAMED public copy exactly as `buildGmHeldPublicCopy`
- * mints it for this batch (subject = first nameable op + count of the rest).
- * The chip LABEL is what the UI replays on click (DGAI #340); the MESSAGE is
- * the "Yes, ..." variant a typed confirmation may repeat verbatim.
+ * mints it for this batch (CHANGESET HONESTY 1.134: the subject enumerates
+ * EVERY operation — the pre-mechanism "and 2 more changes" collapse is
+ * dead). The chip LABEL is what the UI replays on click (DGAI #340); the
+ * MESSAGE is the "Yes, ..." variant a typed confirmation may repeat
+ * verbatim.
  */
-const HELD_CHIP_LABEL = "Add 'Wasted time searching for a co-founder' and 2 more changes";
-const HELD_CHIP_MESSAGE = "Yes, add 'Wasted time searching for a co-founder' and 2 more changes.";
+const HELD_CHIP_LABEL =
+  "Add factor 'Wasted time searching for a co-founder', " +
+  "update the description of 'Marketing' and update the description of 'Revenue'";
+const HELD_CHIP_MESSAGE =
+  "Yes, add factor 'Wasted time searching for a co-founder', " +
+  "update the description of 'Marketing' and update the description of 'Revenue'.";
 
 /** Deterministic clarify copy for a confirm with no live proposal (route-v2). */
 const NO_LIVE_PROPOSAL_TEXT =

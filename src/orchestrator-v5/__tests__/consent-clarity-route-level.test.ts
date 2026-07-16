@@ -472,8 +472,11 @@ describe('consent-clarity — apply-all with a mid-chain referee decline (review
     // Receipt names BOTH applied changes AND the declined one — honest
     // partial, never silent.
     const assistant = String(write.assistantMessage ?? '');
-    expect(assistant).toContain("Confirmed: update 'Marketing'.");
-    expect(assistant).toContain("Confirmed: update 'Goal'.");
+    // CHANGESET HONESTY (1.134): the receipt derives from
+    // describeChangeset at confirm time — description-only updates are
+    // named as such.
+    expect(assistant).toContain("Confirmed: update the description of 'Marketing'.");
+    expect(assistant).toContain("Confirmed: update the description of 'Goal'.");
     expect(assistant).toContain("I couldn't take 'Re-add Marketing' forward");
     expect(findForbiddenPhraseHit(assistant)).toBeNull();
     // Applied holds consumed; the declined hold is NOT consumed (it keeps

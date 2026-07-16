@@ -381,7 +381,7 @@ describe('mode=live', () => {
     // held change (doctrine (a)) while keeping the swept consent framing.
     // D-O consent naming unchanged by D-S.
     const text = (response as { assistant_text: string }).assistant_text;
-    expect(text).toContain("add 'Cost'");
+    expect(text).toContain("add factor 'Cost'");
     expect(text).toContain('Nothing in the model moves until you confirm');
     expect(findSuccessClaimHit(text)).toBeNull();
     expect(findForbiddenPhraseHit(text)).toBeNull();
@@ -400,7 +400,7 @@ describe('mode=live', () => {
       .suggested_actions;
     expect(chips).toHaveLength(1);
     expect(chips[0]!.id).toBe(parsed!.chip_id);
-    expect(chips[0]!.message).toBe("Yes, add 'Cost'.");
+    expect(chips[0]!.message).toBe("Yes, add factor 'Cost'.");
 
     // The wire carries the redacted public reason (codes only, no candidate internals).
     const blocks = (response as { blocks: Array<{ details?: Record<string, unknown> }> }).blocks;
