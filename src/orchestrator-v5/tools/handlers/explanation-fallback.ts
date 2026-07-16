@@ -32,7 +32,10 @@ import {
   formatProbability,
 } from '../../format/format-analysis-value.js';
 import { bandFromMagnitude } from '../../format/influence-bands.js';
-import { formatSensitivityDirection } from '../../format/sensitivity-phrases.js';
+import {
+  formatSensitivityDirection,
+  hasMaterialInfluence,
+} from '../../format/sensitivity-phrases.js';
 import {
   describeRobustnessBand,
   isNearTieByMargin,
@@ -70,6 +73,21 @@ const CANONICAL_FRAGILE_BAND = 'fragile';
 
 function formatDriver(d: AnalysisProjectionDriver): string {
   return d.factor_label;
+}
+
+/**
+ * DGAI #341 claim guard: drivers that may be NAMED in the superlative
+ * sentences below ("driven mainly by …", "would shift this result the
+ * most"). A near-zero driver renders as "has little effect on the lead",
+ * which self-contradicts a "most/mainly" claim in the same breath (the live
+ * #341 wire). Omit such drivers from the sentence — never substitute a
+ * weaker candidate's band for an inflated claim. The projection is already
+ * influence-ranked upstream, so filtering preserves rank order.
+ */
+function nameableDrivers(
+  drivers: readonly AnalysisProjectionDriver[],
+): readonly AnalysisProjectionDriver[] {
+  return drivers.filter((d) => hasMaterialInfluence(d.sensitivity_value));
 }
 
 /**
@@ -137,8 +155,13 @@ export function composeExplainResultsFallback(
     );
   }
 
-  if (projection.top_drivers.length > 0) {
-    const drivers = projection.top_drivers.slice(0, 2);
+  // DGAI #341: only materially-influential drivers may carry the "driven
+  // mainly by" claim — a near-zero driver would self-contradict ("driven
+  // mainly by X, which has little effect on the lead"). Empty ⇒ omit the
+  // sentence entirely.
+  const explainDrivers = nameableDrivers(projection.top_drivers);
+  if (explainDrivers.length > 0) {
+    const drivers = explainDrivers.slice(0, 2);
     if (drivers.length === 1) {
       const d = drivers[0]!;
       sentences.push(
@@ -288,8 +311,14 @@ export function composeWhatWouldFlipFallback(
     );
   }
 
-  if (projection.top_drivers.length > 0) {
-    const drivers = projection.top_drivers.slice(0, 2);
+  // DGAI #341: only materially-influential drivers may carry the "would
+  // shift this result the most" claim. The live defect paired that claim
+  // with "Today it has little effect on the lead" about the SAME factor —
+  // a self-contradiction. A near-zero driver is omitted from this sentence,
+  // never re-billed as the top mover. Empty ⇒ omit the sentence entirely.
+  const flipDrivers = nameableDrivers(projection.top_drivers);
+  if (flipDrivers.length > 0) {
+    const drivers = flipDrivers.slice(0, 2);
     if (drivers.length === 1) {
       const d = drivers[0]!;
       sentences.push(

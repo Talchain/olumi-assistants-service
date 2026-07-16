@@ -16,8 +16,8 @@ const HIRING_FULL: Record<string, unknown> = {
     { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.38 },
   ],
   factor_sensitivity: [
-    { label: 'Technical Leadership in Place', elasticity: 0.6, confidence: 0.8 },
-    { label: 'Hiring and Salary Cost', elasticity: -0.3, confidence: 0.7 },
+    { label: 'Technical Leadership in Place', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
+    { label: 'Hiring and Salary Cost', elasticity: -0.3, confidence: 0.7, influence_score: 0.3 },
   ],
   robustness: {
     level: 'moderate',
@@ -285,7 +285,7 @@ describe('buildAnalysisResultHeadline', () => {
       results: [
         { option_id: 'opt_a', option_label: longWinner, win_probability: 0.62 },
       ],
-      factor_sensitivity: [{ label: 'Driver', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Driver', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: {
         level: 'low',
         fragile_edges: [{ from_label: 'X', switch_probability: 0.5 }],
@@ -299,14 +299,21 @@ describe('buildAnalysisResultHeadline', () => {
     expect(out).toBeNull();  // both Case A and Case B exceed 220
   });
 
-  it('multiple drivers — strongest selected by sensitivity_score when present', () => {
+  // DGAI #341: the two tests below REPLACE the former heuristic pins
+  // ("strongest selected by sensitivity_score when present" / "falls back to
+  // abs(elasticity) * confidence when sensitivity_score absent"). Those
+  // pinned the defect: on an intervention_override board the
+  // sensitivity/elasticity artifacts invert the ranking, and the headline
+  // named the LEAST influential factor. The driver claim now derives from
+  // influence_score ONLY.
+  it('multiple drivers — strongest selected by influence_score, even when sensitivity_score/elasticity rank the other way (DGAI #341)', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
       factor_sensitivity: [
-        { label: 'Weak Factor', elasticity: 0.9, confidence: 0.9, sensitivity_score: 0.1 },
-        { label: 'Strong Factor', elasticity: 0.1, confidence: 0.1, sensitivity_score: 0.9 },
+        { label: 'Artifact Factor', elasticity: 0.9, confidence: 0.9, sensitivity_score: 0.9, influence_score: 0.1 },
+        { label: 'True Driver', elasticity: 0.1, confidence: 0.1, sensitivity_score: 0.1, influence_score: 0.9 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -314,17 +321,18 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Strong Factor is the strongest driver');
+    expect(out).toContain('True Driver is the strongest driver');
+    expect(out).not.toContain('Artifact Factor');
   });
 
-  it('multiple drivers — falls back to abs(elasticity) * confidence when sensitivity_score absent', () => {
+  it('multiple drivers — NEVER falls back to the elasticity heuristic: no influence_score anywhere ⇒ no driver clause (DGAI #341)', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
       factor_sensitivity: [
         { label: 'Driver Low', elasticity: 0.2, confidence: 0.3 },
-        { label: 'Driver High', elasticity: -0.8, confidence: 0.9 },  // abs * conf wins
+        { label: 'Driver High', elasticity: -0.8, confidence: 0.9 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -332,7 +340,8 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Driver High is the strongest driver');
+    expect(out).not.toBeNull();
+    expect(out).not.toContain('strongest driver');
   });
 
   it('fragile edge picks highest switch_probability', () => {
@@ -422,8 +431,8 @@ describe('buildAnalysisResultHeadline', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
       factor_sensitivity: [
-        { label: 'fac_price', factor_id: 'fac_price', elasticity: 0.9, confidence: 0.9 },
-        { label: 'Quality Index', factor_id: 'fac_quality', elasticity: 0.4, confidence: 0.7 },
+        { label: 'fac_price', factor_id: 'fac_price', elasticity: 0.9, confidence: 0.9, influence_score: 0.9 },
+        { label: 'Quality Index', factor_id: 'fac_quality', elasticity: 0.4, confidence: 0.7, influence_score: 0.4 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -466,7 +475,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.33 },
       ],
       factor_sensitivity: [
-        { label: 'Delivery Capacity', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Delivery Capacity', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
       robustness: {
         level: 'low',
@@ -496,7 +505,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
       ],
       factor_sensitivity: [
-        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -527,7 +536,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.20 },
       ],
       factor_sensitivity: [
-        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -554,7 +563,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_a', option_label: 'Option A' /* no win_probability */ },
       ],
       factor_sensitivity: [
-        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
       robustness: {
         level: 'low',
@@ -579,7 +588,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.20 },
       ],
       factor_sensitivity: [
-        { label: 'Strong Driver', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Strong Driver', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -598,7 +607,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.25 },
       ],
       factor_sensitivity: [
-        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -619,7 +628,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
       factor_sensitivity: [
-        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -636,7 +645,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 1.5 },
       ],
       factor_sensitivity: [
-        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -1106,7 +1115,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
       ],
       factor_sensitivity: [
-        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
       robustness: {
         level: 'low',
@@ -1536,7 +1545,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.41 },
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
       ],
-      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Risk', switch_probability: 0.5 }] },
     };
     const out = buildAnalysisResultHeadline({
@@ -1657,7 +1666,7 @@ describe('buildAnalysisResultHeadline — driver / fragility de-duplication', ()
         { option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.62 },
         { option_id: 'opt_b', option_label: 'Defer', win_probability: 0.38 },
       ],
-      factor_sensitivity: [{ label: 'Delivery Speed', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Delivery Speed', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: {
         level: 'moderate',
         fragile_edges: [{ from_label: 'Delivery Speed', switch_probability: 0.5 }],
@@ -1830,7 +1839,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         { option_id: 'opt_d', option_label: 'Outsource', win_probability: 0.21 },
       ],
       factor_sensitivity: [
-        { label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9 },
+        { label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9, influence_score: 0.7 },
       ],
       robustness: {
         level: 'low',
@@ -1872,7 +1881,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.22 },
         { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.20 },
       ],
-      factor_sensitivity: [{ label: 'Launch Timing', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Launch Timing', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
     };
     const out = buildAnalysisResultHeadline({
       enrichment,
@@ -1911,7 +1920,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.33 },
       ],
-      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Cost', switch_probability: 0.5 }] },
     };
     const out = buildAnalysisResultHeadline({
@@ -1935,7 +1944,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         { option_id: 'opt_c', option_label: 'Status Quo', win_probability: 0.21 },
         { option_id: 'opt_d', option_label: 'Outsource', win_probability: 0.19 },
       ],
-      factor_sensitivity: [{ label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9 }],
+      factor_sensitivity: [{ label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9, influence_score: 0.7 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Overtime Intensity', switch_probability: 0.5 }] },
     };
     const out = buildAnalysisResultHeadline({
@@ -1956,7 +1965,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
   // Two-floor structure: [0.30, 0.40) is the soft-confidence enriched band;
   // below 0.30 even a real margin + driver/fragility reverts to bare Case E.
 
-  const driver = [{ label: 'Cost', elasticity: 0.6, confidence: 0.8 }];
+  const driver = [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }];
 
   it('winner exactly 0.30 (boundary, inclusive) + 5pp margin + driver — qualifies for SC', () => {
     const enrichment: Record<string, unknown> = {
@@ -2075,8 +2084,8 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
       { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.38 },
     ],
     factor_sensitivity: [
-      { factor_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
-      { factor_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1 },
+      { factor_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1, influence_score: 0.9 },
+      { factor_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1, influence_score: 0.4 },
     ],
     robustness: { level: 'moderate' }, // no fragility → Case B driver clause
   };
@@ -2104,8 +2113,8 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     const enrichment: Record<string, unknown> = {
       results: ENRICH_CONTROLLED.results,
       factor_sensitivity: [
-        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
-        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1, influence_score: 0.9 },
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1, influence_score: 0.4 },
       ],
       robustness: { level: 'moderate' },
     };
@@ -2123,8 +2132,8 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     const enrichment: Record<string, unknown> = {
       results: ENRICH_CONTROLLED.results,
       factor_sensitivity: [
-        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.9, confidence: 1 },
-        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.4, confidence: 1 },
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.9, confidence: 1, influence_score: 0.9 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.4, confidence: 1, influence_score: 0.4 },
       ],
       robustness: { level: 'moderate' },
     };
@@ -2147,8 +2156,8 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     const enrichment: Record<string, unknown> = {
       results: ENRICH_CONTROLLED.results,
       factor_sensitivity: [
-        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.7, confidence: 1 },
-        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.7, confidence: 1 },
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.7, confidence: 1, influence_score: 0.7 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.7, confidence: 1, influence_score: 0.7 },
       ],
       robustness: { level: 'moderate' },
     };
@@ -2177,7 +2186,7 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
       enrichment: {
         results: ENRICH_CONTROLLED.results,
         factor_sensitivity: [
-          { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
+          { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1, influence_score: 0.9 },
         ],
         robustness: { level: 'moderate' },
       },

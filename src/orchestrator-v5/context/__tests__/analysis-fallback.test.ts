@@ -220,8 +220,8 @@ describe('buildAnalysisFromPriorFacts', () => {
           outcome_p10: 1200000,
           outcome_p90: 1800000,
           factor_sensitivity: [
-            { node_id: 'fac-marketing', label: 'Marketing Spend', sensitivity: 0.45, direction: 'positive' },
-            { node_id: 'fac-eng-cap',   label: 'Eng Capacity',    sensitivity: -0.32, direction: 'negative' },
+            { node_id: 'fac-marketing', label: 'Marketing Spend', sensitivity: 0.45, direction: 'positive', influence_score: 0.45 },
+            { node_id: 'fac-eng-cap',   label: 'Eng Capacity',    sensitivity: -0.32, direction: 'negative', influence_score: 0.32 },
           ],
           robustness: {
             overall_robustness: 'moderate',
@@ -345,9 +345,9 @@ describe('buildAnalysisFromPriorFacts', () => {
           },
         ],
         factor_sensitivity: [
-          { label: 'Marketing Spend',  elasticity: 0.45,  direction: 'positive' },
-          { label: 'Eng Capacity',     elasticity: -0.32, direction: 'negative' },
-          { label: 'Customer Acq Cost', elasticity: 0.21, direction: 'negative' },
+          { label: 'Marketing Spend',  elasticity: 0.45,  direction: 'positive', influence_score: 0.45 },
+          { label: 'Eng Capacity',     elasticity: -0.32, direction: 'negative', influence_score: 0.32 },
+          { label: 'Customer Acq Cost', elasticity: 0.21, direction: 'negative', influence_score: 0.21 },
         ],
         analysis_status: 'complete',
       });
@@ -360,7 +360,11 @@ describe('buildAnalysisFromPriorFacts', () => {
       expect(summary.top_drivers[0].factor_label).toBe('Marketing Spend');
     });
 
-    it('top-level factor_sensitivity tolerates `factor_label`/`sensitivity` field names', () => {
+    it('top-level factor_sensitivity tolerates `factor_label` naming; `sensitivity` is NOT a ranking source (DGAI #341)', () => {
+      // REPLACES the former alternate-ranking pin ("tolerates
+      // `factor_label`/`sensitivity` field names"): the `sensitivity` field
+      // is no longer a driver-ranking source — influence_score is the only
+      // one. Label-name tolerance (`factor_label` vs `label`) is preserved.
       const fact = runAnalysisFactWithEnrichment({
         meta: { seed_used: 1, n_samples: 1000, response_hash: 'h-alt' },
         results: [
@@ -368,7 +372,9 @@ describe('buildAnalysisFromPriorFacts', () => {
           { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
         ],
         factor_sensitivity: [
-          { factor_label: 'Alt Field A', sensitivity: 0.7, direction: 'positive', factor_id: 'fac-a' },
+          { factor_label: 'Alt Field A', sensitivity: 0.7, direction: 'positive', factor_id: 'fac-a', influence_score: 0.7 },
+          // Carries only the legacy `sensitivity` magnitude — no
+          // influence_score, so it is not a driver candidate.
           { factor_label: 'Alt Field B', sensitivity: 0.4, direction: 'negative', factor_id: 'fac-b' },
         ],
         analysis_status: 'complete',
@@ -376,7 +382,7 @@ describe('buildAnalysisFromPriorFacts', () => {
       const summary = buildAnalysisFromPriorFacts([fact])!;
       const labels = summary.top_drivers.map((d) => d.factor_label);
       expect(labels).toContain('Alt Field A');
-      expect(labels).toContain('Alt Field B');
+      expect(labels).not.toContain('Alt Field B');
     });
 
     it('top-level factor_sensitivity: signed elasticity with no direction → sign inferred from value', () => {
@@ -391,8 +397,8 @@ describe('buildAnalysisFromPriorFacts', () => {
           { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
         ],
         factor_sensitivity: [
-          { label: 'Drag',   elasticity: -0.45 }, // no direction
-          { label: 'Boost',  elasticity:  0.30 }, // no direction
+          { label: 'Drag',   elasticity: -0.45, influence_score: 0.45 }, // no direction
+          { label: 'Boost',  elasticity:  0.30, influence_score: 0.3 }, // no direction
         ],
         analysis_status: 'complete',
       });
@@ -417,7 +423,7 @@ describe('buildAnalysisFromPriorFacts', () => {
         ],
         factor_sensitivity: [
           // Magnitude positive, but direction says negative — driver hurts the goal.
-          { label: 'Cost Pressure', elasticity: 0.45, direction: 'negative' },
+          { label: 'Cost Pressure', elasticity: 0.45, direction: 'negative', influence_score: 0.45 },
         ],
         analysis_status: 'complete',
       });
@@ -438,7 +444,7 @@ describe('buildAnalysisFromPriorFacts', () => {
           { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
         ],
         factor_sensitivity: [
-          { label: 'Mixed Signal', elasticity: 0.5, direction: 'neutral' },
+          { label: 'Mixed Signal', elasticity: 0.5, direction: 'neutral', influence_score: 0.5 },
         ],
         analysis_status: 'complete',
       });
@@ -456,9 +462,9 @@ describe('buildAnalysisFromPriorFacts', () => {
           { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
         ],
         factor_sensitivity: [
-          { label: 'Good',     elasticity: 0.5, direction: 'positive' },
-          { label: 'NaN-y',    elasticity: Number.NaN, direction: 'positive' },
-          { label: 'Inf-y',    elasticity: Number.POSITIVE_INFINITY, direction: 'positive' },
+          { label: 'Good',     elasticity: 0.5, direction: 'positive', influence_score: 0.5 },
+          { label: 'NaN-y',    elasticity: Number.NaN, direction: 'positive', influence_score: Number.NaN },
+          { label: 'Inf-y',    elasticity: Number.POSITIVE_INFINITY, direction: 'positive', influence_score: Number.POSITIVE_INFINITY },
           { label: 'No-elast', direction: 'positive' },
         ],
         analysis_status: 'complete',
@@ -474,7 +480,7 @@ describe('buildAnalysisFromPriorFacts', () => {
       const fact = runAnalysisFactWithEnrichment({
         ...RICH_ENRICHMENT,
         factor_sensitivity: [
-          { label: 'Top-Level Only', elasticity: 0.99, direction: 'positive' },
+          { label: 'Top-Level Only', elasticity: 0.99, direction: 'positive', influence_score: 0.99 },
         ],
       });
       const summary = buildAnalysisFromPriorFacts([fact])!;
@@ -1047,8 +1053,8 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
       { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.38 },
     ],
     factor_sensitivity: [
-      { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive' },
-      { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative' },
+      { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive', influence_score: 0.42 },
+      { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative', influence_score: 0.31 },
     ],
     robustness: { level: 'moderate' },
     analysis_status: 'complete',
@@ -1123,11 +1129,15 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
     expect(ingress.top_drivers).toEqual(fallback.top_drivers);
   });
 
-  it('accepts the alternate {factor_label, sensitivity} field naming', () => {
+  it('accepts the alternate {factor_label} naming; DriverSummary.sensitivity carries the influence magnitude (DGAI #341)', () => {
+    // REPLACES the former alternate-ranking pin ("accepts the alternate
+    // {factor_label, sensitivity} field naming"): `sensitivity` is no longer
+    // a ranking source — influence_score is the only one. `factor_label`
+    // naming tolerance is preserved.
     const { summary, source } = projectDriversViaIngress({
       ...STAGING_DRIVERS_ENRICHMENT,
       factor_sensitivity: [
-        { factor_label: 'Hiring Budget', sensitivity: 0.5, direction: 'negative' },
+        { factor_label: 'Hiring Budget', sensitivity: 0.5, direction: 'negative', influence_score: 0.5 },
       ],
     });
     expect(source).toBe('top_level');
@@ -1173,8 +1183,8 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
   it('fail-closed: non-finite or unlabelled sensitivity entries are skipped', () => {
     const out = applyTopLevelDriversOverride(driversBaseSummary(), {
       factor_sensitivity: [
-        { label: 'Bad Sensitivity', elasticity: Number.NaN },
-        { elasticity: 0.4 }, // no id/label at all
+        { label: 'Bad Sensitivity', influence_score: Number.NaN },
+        { influence_score: 0.4 }, // no id/label at all
         'not-an-object',
       ],
     });
@@ -1209,8 +1219,8 @@ function topLevelOnlyEnrichment(): Record<string, unknown> {
     analysis_status: 'computed',
     option_comparison: [{ status: 'computed' }, { status: 'computed' }],
     factor_sensitivity: [
-      { factor_id: 'f1', factor_label: 'Engineering Capacity', elasticity: 0.43, direction: 'positive' },
-      { factor_id: 'f2', factor_label: 'Offshore Engagement', elasticity: 0.34, direction: 'negative' },
+      { factor_id: 'f1', factor_label: 'Engineering Capacity', elasticity: 0.43, direction: 'positive', influence_score: 0.43 },
+      { factor_id: 'f2', factor_label: 'Offshore Engagement', elasticity: 0.34, direction: 'negative', influence_score: 0.34 },
     ],
     robustness: {
       level: 'moderate',

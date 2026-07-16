@@ -58,7 +58,10 @@ import {
   formatPercentagePoints,
   formatProbability,
 } from '../format/format-analysis-value.js';
-import { formatSensitivityDirection } from '../format/sensitivity-phrases.js';
+import {
+  formatSensitivityDirection,
+  hasMaterialInfluence,
+} from '../format/sensitivity-phrases.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import {
   closenessLead,
@@ -893,13 +896,21 @@ export function hasRenderableTopDriverLabel(
 }
 
 /**
- * True when a renderable SECOND driver exists. Used by the evidence-gap
- * fallback to name the two highest-leverage factors (where more evidence
- * matters most) instead of one, when the projection carries them. Same
- * non-empty-label contract as {@link hasRenderableTopDriver}.
+ * DGAI #341 claim guard: the drivers the COMPOSERS may NAME in superlative
+ * claims ("the strongest sensitivity is on …", "the factor with the most
+ * influence …", "driven by …", "the order could shift with movement on …").
+ * A driver whose finite `sensitivity_value` sits below the shared near-zero
+ * threshold renders as "has little effect on the lead" — pairing that band
+ * with a superlative is the live #341 self-contradiction. Such drivers are
+ * omitted from prose; drivers WITHOUT a value stay nameable (no materiality
+ * verdict on missing data). Deliberately NOT used by the per-class
+ * availability requirements (`missing_inputs`) or the copy-source
+ * diagnostics — routing is unchanged; only what the copy asserts is gated.
  */
-function hasRenderableSecondDriver(analysis: AdviceGateAnalysis): boolean {
-  return hasNonEmptyLabel(analysis.top_drivers[1]?.factor_label);
+function nameableTopDrivers(
+  analysis: AdviceGateAnalysis,
+): readonly AdviceGateAnalysisDriver[] {
+  return analysis.top_drivers.filter((d) => hasMaterialInfluence(d.sensitivity_value));
 }
 
 /**
@@ -1076,7 +1087,9 @@ export function tryPostAnalysisAdviceGate(
   }
 
   const leadingLabel = analysis.leading_option?.label ?? '';
-  const topDriverLabel = analysis.top_drivers[0]?.factor_label ?? null;
+  // DGAI #341: the composers bill this label as "the factor with the most
+  // influence here" — only a materially-influential driver may carry it.
+  const topDriverLabel = nameableTopDrivers(analysis)[0]?.factor_label ?? null;
 
   const composeInput: ComposeInput = {
     leadingLabel,
@@ -1664,7 +1677,12 @@ function composeEvidenceGap(
       );
     }
   }
-  if (gaps.length === 0 && hasRenderableTopDriver(analysis)) {
+  // DGAI #341: superlative fallback ("the strongest sensitivity is on …")
+  // may only name materially-influential drivers — a near-zero driver would
+  // be billed as where "more evidence would change the analysis the most"
+  // while its own band reads "has little effect on the lead".
+  const evidenceDrivers = nameableTopDrivers(analysis);
+  if (gaps.length === 0 && hasNonEmptyLabel(evidenceDrivers[0]?.factor_label)) {
     // Fallback: name where evidence matters most. The first sentence is
     // byte-identical to the historical single-driver copy (gated on
     // `hasRenderableTopDriver` so a whitespace-only label can't emit
@@ -1678,12 +1696,12 @@ function composeEvidenceGap(
     // whitespace, and the dedup compare below operates on clean labels.
     // `hasRenderable*Driver` already rejects whitespace-only labels, so the
     // trimmed value is always non-empty here.
-    const top = analysis.top_drivers[0]!.factor_label.trim();
+    const top = evidenceDrivers[0]!.factor_label.trim();
     gaps.push(
       `the strongest sensitivity is on ${top}, so that's where more evidence would change the analysis the most`,
     );
-    if (hasRenderableSecondDriver(analysis)) {
-      const second = analysis.top_drivers[1]!.factor_label.trim();
+    if (hasNonEmptyLabel(evidenceDrivers[1]?.factor_label)) {
+      const second = evidenceDrivers[1]!.factor_label.trim();
       // Defensive: skip the second-driver line when it would name the same
       // factor twice. Compare case-folded (labels already trimmed) so
       // whitespace / case variants of the same display label are caught. The
@@ -1801,8 +1819,11 @@ function composeExplainResults(
   const tieReason = nearTieReason(analysis, rawRobustness);
   const nearTie = tieReason !== null;
   const rawFragile = isRawFragile(rawRobustness);
-  const driverA = analysis.top_drivers[0];
-  const driverB = analysis.top_drivers[1];
+  // DGAI #341: "driven by …" / "could shift with movement on …" / "the
+  // most-weighted factor" may only name materially-influential drivers.
+  const interpretationDrivers = nameableTopDrivers(analysis);
+  const driverA = interpretationDrivers[0];
+  const driverB = interpretationDrivers[1];
   const runnerLabel = analysis.runner_up?.label;
   const margin = marginPpString(analysis.margin_pp);
   const topEdge = renderableFragileEdges(analysis)[0];
@@ -1970,7 +1991,9 @@ function composeWhatWouldFlip(
   const runnerLabel = analysis.runner_up?.label;
   const margin = marginPpString(analysis.margin_pp);
   const topEdge = renderableFragileEdges(analysis)[0];
-  const driverA = analysis.top_drivers[0];
+  // DGAI #341: "the factor with the most influence on the result" may only
+  // name a materially-influential driver.
+  const driverA = nameableTopDrivers(analysis)[0];
   const flip = deriveFlipStatus(decisionReview);
   const sentences: string[] = [];
 

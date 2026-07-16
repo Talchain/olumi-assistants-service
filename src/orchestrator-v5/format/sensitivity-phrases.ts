@@ -37,6 +37,28 @@ import {
   NEAR_ZERO_INFLUENCE_THRESHOLD,
 } from './influence-bands.js';
 
+/**
+ * DGAI #341 claim guard: may a driver with this magnitude be NAMED in a
+ * superlative driver claim ("would shift this result the most", "driven
+ * mainly by", "the strongest sensitivity is on")?
+ *
+ * A finite magnitude below {@link NEAR_ZERO_INFLUENCE_THRESHOLD} renders as
+ * "has little effect on the lead" via {@link formatSensitivityDirection} —
+ * pairing that band with a "most/strongest" claim is a self-contradiction
+ * (the live #341 wire: "Movement on X would shift this result the most.
+ * Today it has little effect on the lead."). Such drivers are OMITTED from
+ * those sentences, never renamed to a weaker candidate.
+ *
+ * An ABSENT / non-numeric value returns true: with no magnitude there is no
+ * materiality verdict, and legacy driver shapes without values must keep
+ * their (label-only) claims. The two functions share the same threshold so
+ * the claim gate and the rendered band can never disagree.
+ */
+export function hasMaterialInfluence(value: unknown): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return true;
+  return Math.abs(value) >= NEAR_ZERO_INFLUENCE_THRESHOLD;
+}
+
 export function formatSensitivityDirection(value: number): string {
   if (!Number.isFinite(value)) return 'has little effect on the lead';
   const absV = Math.abs(value);

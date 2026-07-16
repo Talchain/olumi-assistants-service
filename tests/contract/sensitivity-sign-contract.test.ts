@@ -72,7 +72,7 @@ function makeAnalysis(
 describe('Sensitivity sign — ContextPack projection rule', () => {
   it('direction === "negative" → sensitivity_value is the negative magnitude', () => {
     const analysis = makeAnalysis([
-      { id: 'fac_cost', label: 'Cost', sensitivity: 0.42, direction: 'negative' },
+      { id: 'fac_cost', label: 'Cost', sensitivity: 0.42, direction: 'negative', influence_score: 0.42 },
     ]);
     const { contextPack } = assembleContextPackWithSummary({
       payload: makePayload(),
@@ -86,7 +86,7 @@ describe('Sensitivity sign — ContextPack projection rule', () => {
 
   it('direction === "positive" → sensitivity_value preserves the magnitude', () => {
     const analysis = makeAnalysis([
-      { id: 'fac_quality', label: 'Quality', sensitivity: 0.55, direction: 'positive' },
+      { id: 'fac_quality', label: 'Quality', sensitivity: 0.55, direction: 'positive', influence_score: 0.55 },
     ]);
     const { contextPack } = assembleContextPackWithSummary({
       payload: makePayload(),
@@ -99,9 +99,9 @@ describe('Sensitivity sign — ContextPack projection rule', () => {
 
   it('mixed factors retain consistent signs (abs sort by magnitude descending)', () => {
     const analysis = makeAnalysis([
-      { id: 'fac_a', label: 'A', sensitivity: 0.42, direction: 'negative' },
-      { id: 'fac_b', label: 'B', sensitivity: 0.65, direction: 'positive' },
-      { id: 'fac_c', label: 'C', sensitivity: 0.10, direction: 'negative' },
+      { id: 'fac_a', label: 'A', sensitivity: 0.42, direction: 'negative', influence_score: 0.42 },
+      { id: 'fac_b', label: 'B', sensitivity: 0.65, direction: 'positive', influence_score: 0.65 },
+      { id: 'fac_c', label: 'C', sensitivity: 0.10, direction: 'negative', influence_score: 0.1 },
     ]);
     const { contextPack } = assembleContextPackWithSummary({
       payload: makePayload(),
@@ -146,7 +146,7 @@ describe('Sensitivity sign — derive path honours the direction enum', () => {
     // The core bug: pre-fix, deriveTopDrivers read the sign of the unsigned
     // elasticity (0.6 >= 0) and emitted 'positive'. The enum must win.
     const summary = compactAnalysis(
-      envelopeWith([{ node_id: 'fac_cost', label: 'Cost', elasticity: 0.6, direction: 'negative' }]),
+      envelopeWith([{ node_id: 'fac_cost', label: 'Cost', elasticity: 0.6, direction: 'negative', influence_score: 0.6 }]),
     );
     expect(summary?.top_drivers[0]?.factor_label).toBe('Cost');
     expect(summary?.top_drivers[0]?.direction).toBe('negative');
@@ -154,7 +154,7 @@ describe('Sensitivity sign — derive path honours the direction enum', () => {
 
   it('direction "neutral" survives the derive path and projects to sensitivity_value 0', () => {
     const summary = compactAnalysis(
-      envelopeWith([{ node_id: 'fac_mix', label: 'Mixed', elasticity: 0.5, direction: 'neutral' }]),
+      envelopeWith([{ node_id: 'fac_mix', label: 'Mixed', elasticity: 0.5, direction: 'neutral', influence_score: 0.5 }]),
     )!;
     expect(summary.top_drivers[0]?.direction).toBe('neutral');
 

@@ -880,6 +880,43 @@ function buildNarrativeCard(
   });
 }
 
+/**
+ * DGAI #342(1) — the pre-mortem body is re-surfaced VERBATIM by downstream
+ * surfaces (the DGAI Decision-overview panel promotes the top-ranked
+ * interrogative block body into "Olumi's framing question", stripped of this
+ * card's "If things go wrong" frame). Un-framed failure prose then reads as a
+ * statement that the decision ALREADY failed. Two rules make the body honest
+ * on ANY surface (canned-never-a-substitute doctrine):
+ *
+ *   1. BIND — the emitted body must stand alone: it is prefixed with an
+ *      explicit hypothetical frame ({@link PRE_MORTEM_FRAME_PREFIX}) unless
+ *      the LLM prose already opens hypothetically
+ *      ({@link OPENS_HYPOTHETICALLY_RE}).
+ *   2. ANCHOR — the card ships only when it is anchored to the user's model:
+ *      `grounded_in` resolves to at least one real node, OR the failure
+ *      prose names a graph node label (same whole-phrase matcher as the
+ *      lever-naming guard). A fully context-free canned question is DROPPED
+ *      (`context_unanchored`), not decorated.
+ */
+const PRE_MORTEM_FRAME_PREFIX = 'Imagine this decision has failed: ';
+
+/** LLM prose that already carries its own hypothetical frame. */
+const OPENS_HYPOTHETICALLY_RE = /^(?:imagine|suppose|picture|what\s+if|if\b)/i;
+
+/** True when the prose names ANY graph node label (model anchor). Reuses the
+ *  lever-guard's normalised whole-phrase matcher; 1–2 char labels are skipped
+ *  (same over-match rule as {@link collectLeverLabels}). */
+function proseNamesGraphNode(text: string, lookup: GraphNodeLookup): boolean {
+  const hay = normaliseForPhraseMatch(text);
+  if (hay.length === 0) return false;
+  for (const ref of lookup.values()) {
+    const needle = normaliseForPhraseMatch(ref.label);
+    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
+    if (containsWholePhrase(hay, needle)) return true;
+  }
+  return false;
+}
+
 function buildPreMortemCard(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
@@ -925,12 +962,32 @@ function buildPreMortemCard(
     });
     return null;
   }
+  // DGAI #342(1) ANCHOR rule: no resolved grounding AND the prose names no
+  // graph node ⇒ a context-free canned question. Drop it — a template
+  // question with no anchor to the user's model is never a substitute for
+  // real coaching, and downstream surfaces re-render this body verbatim.
+  if (targetRefs.length === 0 && !proseNamesGraphNode(failure, lookup)) {
+    emitDrop({
+      block_type: 'review_card',
+      kind: 'pre_mortem',
+      reason: 'context_unanchored',
+      field: 'failure_scenario',
+    });
+    return null;
+  }
+  // DGAI #342(1) BIND rule: the body must read as a hypothetical on any
+  // surface, including ones that strip this card's "If things go wrong"
+  // frame. Fixed prefix only — no derived content, no rewriting of the
+  // LLM's prose.
+  const standaloneBody = OPENS_HYPOTHETICALLY_RE.test(failure)
+    ? failure
+    : `${PRE_MORTEM_FRAME_PREFIX}${failure}`;
   const candidate = {
     ...commonMetadata('review:pre_mortem', '', ctx),
     type: 'review_card' as const,
     card_kind: 'pre_mortem' as const,
     title: truncate('If things go wrong', TITLE_MAX),
-    body: truncate(failure, BODY_MAX),
+    body: truncate(standaloneBody, BODY_MAX),
     severity: 'warning' as Phase3BlockSeverityLiteral,
     target_refs: targetRefs,
     priority_rank: 20,

@@ -91,12 +91,12 @@ describe("compactAnalysis", () => {
       {
         ...makeOption({ option_id: "opt_a" }),
         factor_sensitivity: [
-          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.8 },
-          { node_id: "factor_2", label: "Factor 2", sensitivity: -0.6 },
-          { node_id: "factor_3", label: "Factor 3", sensitivity: 0.4 },
-          { node_id: "factor_4", label: "Factor 4", sensitivity: -0.3 },
-          { node_id: "factor_5", label: "Factor 5", sensitivity: 0.2 },
-          { node_id: "factor_6", label: "Factor 6", sensitivity: 0.1 },
+          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.8, influence_score: 0.8 },
+          { node_id: "factor_2", label: "Factor 2", sensitivity: -0.6, influence_score: 0.6 },
+          { node_id: "factor_3", label: "Factor 3", sensitivity: 0.4, influence_score: 0.4 },
+          { node_id: "factor_4", label: "Factor 4", sensitivity: -0.3, influence_score: 0.3 },
+          { node_id: "factor_5", label: "Factor 5", sensitivity: 0.2, influence_score: 0.2 },
+          { node_id: "factor_6", label: "Factor 6", sensitivity: 0.1, influence_score: 0.1 },
         ],
       },
     ];
@@ -118,7 +118,7 @@ describe("compactAnalysis", () => {
       {
         ...makeOption({ option_id: "opt_a" }),
         factor_sensitivity: [
-          { node_id: "factor_1", label: "Factor 1", elasticity: 0.6, direction: "negative" },
+          { node_id: "factor_1", label: "Factor 1", elasticity: 0.6, direction: "negative", influence_score: 0.6 },
         ],
       },
     ];
@@ -132,7 +132,7 @@ describe("compactAnalysis", () => {
       {
         ...makeOption({ option_id: "opt_a" }),
         factor_sensitivity: [
-          { node_id: "factor_1", label: "Factor 1", elasticity: 0.5, direction: "neutral" },
+          { node_id: "factor_1", label: "Factor 1", elasticity: 0.5, direction: "neutral", influence_score: 0.5 },
         ],
       },
     ];
@@ -146,8 +146,8 @@ describe("compactAnalysis", () => {
       {
         ...makeOption({ option_id: "opt_a" }),
         factor_sensitivity: [
-          { node_id: "factor_1", label: "Factor 1", sensitivity: -0.7 },
-          { node_id: "factor_2", label: "Factor 2", sensitivity: 0.3 },
+          { node_id: "factor_1", label: "Factor 1", sensitivity: -0.7, influence_score: 0.7 },
+          { node_id: "factor_2", label: "Factor 2", sensitivity: 0.3, influence_score: 0.3 },
         ],
       },
     ];
@@ -165,10 +165,10 @@ describe("compactAnalysis", () => {
       {
         ...makeOption({ option_id: "opt_a" }),
         factor_sensitivity: [
-          { node_id: "factor_good", label: "Good", sensitivity: 0.5, direction: "positive" },
-          { node_id: "factor_nan", label: "NaN", sensitivity: Number.NaN, direction: "positive" },
-          { node_id: "factor_inf", label: "Inf", elasticity: Number.POSITIVE_INFINITY, direction: "negative" },
-          { node_id: "factor_ninf", label: "NegInf", elasticity: Number.NEGATIVE_INFINITY, direction: "negative" },
+          { node_id: "factor_good", label: "Good", sensitivity: 0.5, direction: "positive", influence_score: 0.5 },
+          { node_id: "factor_nan", label: "NaN", sensitivity: Number.NaN, direction: "positive", influence_score: Number.NaN },
+          { node_id: "factor_inf", label: "Inf", elasticity: Number.POSITIVE_INFINITY, direction: "negative", influence_score: Number.POSITIVE_INFINITY },
+          { node_id: "factor_ninf", label: "NegInf", elasticity: Number.NEGATIVE_INFINITY, direction: "negative", influence_score: Number.NEGATIVE_INFINITY },
         ],
       },
     ];
@@ -182,13 +182,13 @@ describe("compactAnalysis", () => {
       {
         ...makeOption({ option_id: "opt_a" }),
         factor_sensitivity: [
-          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.3 },
+          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.3, influence_score: 0.3 },
         ],
       },
       {
         ...makeOption({ option_id: "opt_b" }),
         factor_sensitivity: [
-          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.8 },
+          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.8, influence_score: 0.8 },
         ],
       },
     ];
@@ -442,7 +442,7 @@ describe("compactAnalysis", () => {
       {
         ...makeOption(),
         factor_sensitivity: [
-          { node_id: "n1", sensitivity: 0.9 },
+          { node_id: "n1", sensitivity: 0.9, influence_score: 0.9 },
         ],
       },
     ];
