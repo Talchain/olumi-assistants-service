@@ -9,6 +9,10 @@
  *
  * Coverage (the deltas this lane introduces):
  *   1. Clean in-sync analysis, guard ON → stays FRESH (no false-positive stale).
+ *   1b. F10 live repro (ROADMAP 1.133): identical hashes + PLoT-namespace
+ *      option identifiers, guard ON → FRESH — identical-hash ⇒ fresh, by
+ *      construction; a run's own response can never be stale versus the hash
+ *      it just analysed.
  *   2. Recovered-session option mismatch (legacy fact, analysed X/Y/C vs current
  *      A/B/C, clear leader X), guard ON → fails closed to STALE /
  *      analysed_options_diverged (the system must NOT imply the analysis
@@ -190,6 +194,36 @@ describe('V5 context-reliability lifecycle — option-identity freshness guard',
     expect(evt, 'pre-handler freshness telemetry should fire').toBeDefined();
     expect(evt!.data.freshness).toBe('fresh');
     expect(evt!.data.reason).toBe('graph_hash_match');
+  });
+
+  it('F10 LIVE REPRO: identical hashes + PLoT-namespace option identifiers with guard ON → FRESH (a run\'s own response is never stale)', async () => {
+    // The verified 16 Jul live failure: the fact ran against the CURRENT graph
+    // hash (identical on both sides), but its enrichment option_comparison
+    // carries identifiers from the PLoT namespace ("Option A"/"Option B") that
+    // are NOT graph option node IDs (opt_a/opt_b/opt_c). The old fresh-path
+    // "defence-in-depth" check compared those two namespaces and stamped the
+    // run's own response STALE / analysed_options_diverged — firing both UI
+    // banners. Identical-hash ⇒ fresh, by construction.
+    mockState.priorFacts = [
+      mkRunAnalysisFact({
+        graphHashAtRun: CURRENT_GRAPH_HASH,
+        leader: 'Option A',
+        analysedOptionIds: ['Option A', 'Option B', 'Option C'],
+      }),
+    ];
+    setGuard(true);
+    await runTurnExecutor(mkPayload('why does that option lead?'), 'req-f10-own-response', {
+      routingAdapter: callingRoutingAdapter('Because of the cost factor.'),
+      graphState: CURRENT_GRAPH as never,
+    });
+    const evt = preHandlerFreshness();
+    expect(evt, 'pre-handler freshness telemetry should fire').toBeDefined();
+    expect(evt!.data.freshness).toBe('fresh');
+    expect(evt!.data.reason).toBe('graph_hash_match');
+    expect(evt!.data.graph_hash_at_run).toBe(CURRENT_GRAPH_HASH);
+    expect(evt!.data.current_graph_hash).toBe(CURRENT_GRAPH_HASH);
+    // No divergence event on an identical-hash turn.
+    expect(events.some((e) => e.event === 'v5.analysis_freshness.options_diverged')).toBe(false);
   });
 
   it('RECOVERED-SESSION mismatch with guard ON → STALE / analysed_options_diverged (fails closed)', async () => {

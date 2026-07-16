@@ -1029,13 +1029,18 @@ const ConfigSchema = z.object({
     // When true, the freshness derivation additionally compares the analysed
     // option identities carried on the selected run_analysis fact
     // (enrichment.option_comparison[].option_id ∪ leading_option_id) against
-    // the current graph's option IDs. If they diverge while the hash path
-    // could not already prove staleness ('fresh' or the hash-impossible
-    // 'unknown' paths — legacy_fact_missing_hash / current_graph_hash_unavailable,
-    // i.e. recovered-session / unparseable-graph reloads), the verdict is
+    // the current graph's option IDs. If they diverge while the hash
+    // comparison was IMPOSSIBLE (the 'unknown' paths —
+    // legacy_fact_missing_hash / current_graph_hash_unavailable, i.e.
+    // recovered-session / unparseable-graph reloads), the verdict is
     // forced to 'stale' with reason 'analysed_options_diverged' so the system
     // fails closed instead of implying the analysis reflects the current model.
-    // The guard is DOWNGRADE-ONLY: it can only move 'fresh'/'unknown' → 'stale',
+    // The guard NEVER runs on the hash-proven 'fresh' path: identical-hash ⇒
+    // fresh, by construction (F10 root, ROADMAP 1.133) — the hash already
+    // covers options[].id, while the analysed identifiers come from the PLoT
+    // enrichment namespace and can differ from graph option IDs on
+    // byte-identical input (a run's own response was stamped stale live).
+    // The guard is DOWNGRADE-ONLY: it can only move 'unknown' → 'stale',
     // never the reverse, so enabling it can never make a stale/diverged analysis
     // read as current. Default ON (proven in deterministic tests; routing already
     // fails closed on 'stale' regardless of reason). Set

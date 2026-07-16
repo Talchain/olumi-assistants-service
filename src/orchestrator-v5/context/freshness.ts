@@ -65,9 +65,15 @@ export type FreshnessReason =
   | 'invariant_failed'
   /** Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): the analysed
    *  option identities on the selected fact no longer match the current graph's
-   *  option IDs, so a `fresh` or hash-impossible `unknown` verdict is forced to
-   *  `stale` (fail closed). Only reachable when the guard is enabled and the
-   *  caller threaded current graph option IDs. */
+   *  option IDs, so a hash-impossible `unknown` verdict is forced to `stale`
+   *  (fail closed). Only reachable when the guard is enabled, the caller
+   *  threaded current graph option IDs, AND the hash comparison could not run
+   *  (legacy fact missing hash / current graph hash unavailable). NEVER
+   *  reachable from a hash-proven `fresh` verdict — identical hashes ⇒ fresh,
+   *  by construction (F10 root, ROADMAP 1.133): the analysis-affecting hash
+   *  already covers options[].id, while the analysed identifiers on the fact
+   *  come from the PLoT enrichment namespace and can legitimately differ from
+   *  graph option IDs on byte-identical input. */
   | 'analysed_options_diverged'
   /** Dispatcher attempted derivation and failed (session-store error,
    *  bad graph parse, etc.). Honours the "always emit freshness"
@@ -339,9 +345,17 @@ function assertExhaustive(value: never): never {
 }
 
 /**
- * Validate post-derivation invariants. Returns null on pass, or an
- * invariant-violation reason on fail. Hard violations cause the caller
- * to fall back to 'unknown' and emit telemetry.
+ * A hard-invariant violation names the freshness value the enforcer must
+ * coerce the derivation to. The reason is always overwritten with
+ * 'invariant_failed' so telemetry surfaces the enforcement.
+ */
+interface HardInvariantViolation {
+  readonly coerce_to: AnalysisFreshness;
+}
+
+/**
+ * Validate post-derivation invariants. Returns null on pass, or the
+ * coercion the enforcer must apply on fail.
  *
  * Soft invariants (monotonicity, previous-fresh) are NOT enforced here
  * because the previous-turn outcome is not reliably persisted yet
@@ -349,7 +363,7 @@ function assertExhaustive(value: never): never {
  */
 function checkHardInvariants(
   derivation: FreshnessDerivation,
-): FreshnessReason | null {
+): HardInvariantViolation | null {
   // Invariant 1: enum exhaustiveness. TypeScript already enforces this at
   // compile time via the union type, but a runtime guard catches any
   // sneaky `as unknown` upstream.
@@ -363,15 +377,30 @@ function checkHardInvariants(
       assertExhaustive(derivation.freshness);
   }
 
-  // Invariant 2: if both hashes are present, freshness must be 'fresh'
-  // or 'stale' — never 'unknown'. Unknown should only fire when data is
-  // genuinely missing.
+  // Invariant 2 (F10 root, ROADMAP 1.133): identical-hash ⇒ fresh, by
+  // construction. If both hashes are present AND equal, the verdict MUST be
+  // 'fresh' — a run's own response can never be stale versus the hash it just
+  // analysed. Checked BEFORE invariant 3 so an identical-hash 'unknown' also
+  // lands on 'fresh' (the hashes prove freshness; 'unknown' would discard
+  // that proof). Coerce to 'fresh', never 'unknown'/'stale'.
+  if (
+    derivation.graph_hash_at_run !== null &&
+    derivation.current_graph_hash !== null &&
+    derivation.graph_hash_at_run === derivation.current_graph_hash &&
+    derivation.freshness !== 'fresh'
+  ) {
+    return { coerce_to: 'fresh' };
+  }
+
+  // Invariant 3: if both hashes are present (and, per invariant 2, differ),
+  // freshness must be 'fresh' or 'stale' — never 'unknown'. Unknown should
+  // only fire when data is genuinely missing.
   if (
     derivation.graph_hash_at_run !== null &&
     derivation.current_graph_hash !== null &&
     derivation.freshness === 'unknown'
   ) {
-    return 'invariant_failed';
+    return { coerce_to: 'unknown' };
   }
 
   return null;
@@ -391,13 +420,26 @@ function checkHardInvariants(
  *
  * Option-identity guard (optional `currentGraphOptionIds`, gated by
  * `cee.optionIdentityFreshnessGuard` at the call sites): when provided, a
- * `fresh` or hash-impossible `unknown` verdict is downgraded to `stale`
- * (reason `analysed_options_diverged`) if the analysed option identities on the
+ * hash-impossible `unknown` verdict is downgraded to `stale` (reason
+ * `analysed_options_diverged`) if the analysed option identities on the
  * selected fact no longer match the current graph's option IDs. This fails
  * closed on the recovered-session / unparseable-graph paths the hash cannot
  * reach. Passing `undefined` (the default — flag off) skips the guard entirely,
  * so behaviour is byte-identical to the two-argument form. `none` and already-
  * `stale` verdicts, and indeterminate option data, are left untouched.
+ *
+ * INVARIANT (F10 root, ROADMAP 1.133): identical-hash ⇒ fresh, by
+ * construction. The guard is deliberately NOT consulted on the hash-proven
+ * `fresh` path: the analysis-affecting graph hash already includes
+ * options[].id, so equal hashes prove the option set is unchanged — whereas
+ * the analysed identifiers on the fact (enrichment.option_comparison[]
+ * .option_id / leading_option_id) come from the PLoT enrichment namespace and
+ * can legitimately differ from graph option IDs on byte-identical input. The
+ * former "defence-in-depth check on the fresh path" compared those two
+ * namespaces and stamped a run's OWN response stale with identical hashes on
+ * both sides (verified live, 16 Jul). `enforceInvariants` backstops this
+ * structurally: a non-fresh verdict with equal non-null hashes is coerced to
+ * `fresh`.
  *
  * Caller is responsible for emitting the `analysis_freshness.derived`
  * telemetry event with the returned derivation. The function does not
@@ -464,13 +506,17 @@ export function deriveAnalysisFreshness(
   }
 
   // Option-identity guard. Only engaged when the caller threaded current graph
-  // option IDs (flag on) AND the hash path could not already prove staleness
-  // (`fresh`, or the hash-impossible `unknown` paths). A genuine divergence
-  // fails closed to `stale`. `undefined` (flag off) → skip → byte-identical.
-  if (
-    currentGraphOptionIds !== undefined &&
-    (base.freshness === 'fresh' || base.freshness === 'unknown')
-  ) {
+  // option IDs (flag on) AND the hash comparison was IMPOSSIBLE (the `unknown`
+  // paths: legacy fact missing hash / current graph hash unavailable). A
+  // genuine divergence fails closed to `stale`. `undefined` (flag off) → skip
+  // → byte-identical.
+  //
+  // The guard MUST NOT run on the `fresh` path (identical-hash ⇒ fresh, by
+  // construction — see the function docstring): equal hashes already prove the
+  // option set unchanged, and the enrichment-namespace identifiers this guard
+  // compares can differ from graph option IDs on byte-identical input, which
+  // stamped a run's own response stale in production (F10).
+  if (currentGraphOptionIds !== undefined && base.freshness === 'unknown') {
     const verdict = compareAnalysedOptionIdentity(
       extractAnalysedOptionIds(selected.fact),
       extractAnalysedLeaderId(selected.fact),
@@ -487,8 +533,13 @@ export function deriveAnalysisFreshness(
 /**
  * Run the hard-invariant enforcer on a candidate derivation. Returns
  * the derivation unchanged when invariants hold; otherwise returns a
- * coerced derivation with `freshness: 'unknown'` and
- * `reason: 'invariant_failed'`.
+ * coerced derivation with the violation's mandated freshness and
+ * `reason: 'invariant_failed'`:
+ *   - identical non-null hashes but not 'fresh' → coerced to 'fresh'
+ *     (identical-hash ⇒ fresh, by construction — F10 root); NEVER 'stale',
+ *     and never 'unknown' (which would discard the hashes' proof);
+ *   - differing non-null hashes but 'unknown' → coerced to 'unknown'
+ *     with the violation marker (NEVER 'stale').
  *
  * Exported for test injection — production code paths reach this only
  * via the regular `deriveAnalysisFreshness` decision tree (which is
@@ -501,13 +552,13 @@ export function enforceInvariants(
 ): FreshnessDerivation {
   const violation = checkHardInvariants(derivation);
   if (violation === null) return derivation;
-  // Hard invariant failed — fall back to 'unknown' (NEVER 'stale') and
+  // Hard invariant failed — coerce to the violation's mandated freshness and
   // overwrite the reason with the violation marker. Caller checks for
   // reason === 'invariant_failed' to emit the
   // analysis_freshness.invariant_failed telemetry event.
   return {
     ...derivation,
-    freshness: 'unknown',
+    freshness: violation.coerce_to,
     reason: 'invariant_failed',
   };
 }
