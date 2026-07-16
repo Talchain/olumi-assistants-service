@@ -495,6 +495,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // shape-capture signal for the `_answer_shape` sidecar
         // (lengths/counts only).
         V5AnswerShapeEmitted: "v5.answer_shape.emitted",
+        // P1 hardening — stale-sidecar drop (fail closed): the captured
+        // shape no longer matched the FINAL assistant_text at finalise /
+        // route egress (lengths + seam only).
+        V5AnswerShapeDroppedStale: "v5.answer_shape.dropped_stale",
         V5DecisionReviewDegraded: "v5.decision_review_degraded",
         // Neuro-symbolic B1 (ROADMAP 1.77) — decomposition outcome (log-only).
         V5DecisionReviewDecomposed: "v5.decision_review.decomposed",
@@ -1375,6 +1379,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // dark) — diagnostic-only shape-capture signal (lengths/counts only);
         // no Datadog metric mapping until the flag is activated.
         TelemetryEvents.V5AnswerShapeEmitted,
+        // Same flag family — stale-sidecar drop signal; diagnostic-only
+        // until the flag is activated.
+        TelemetryEvents.V5AnswerShapeDroppedStale,
         // V6 dual-draft (flag default OFF) — diagnostic-only: m2 outcome,
         // merge accounting histogram, and degrade reasons; no Datadog metric
         // until activation dashboards exist.
@@ -1813,6 +1820,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching.empty_answer_recovered",
         "v5.coaching.answer_source",
         "v5.answer_shape.emitted",
+        "v5.answer_shape.dropped_stale",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",

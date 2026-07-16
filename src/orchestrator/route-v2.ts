@@ -114,6 +114,7 @@ import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-disp
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
+import { deriveAnswerTextFromShape } from '../orchestrator-v5/routing/answer-shape.js';
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import { getRequestId } from '../utils/request-id.js';
@@ -681,19 +682,45 @@ function sendFinalised200(
   // when `config.features.answerShapeEnforced` is set (ROADMAP 1.132, same
   // single-flag re-attach shape as `_reasoning` above). `ctx.answerShape`
   // is threaded from `run.answerShape` (turn-executor) — the VALIDATED
-  // coach/converse shape whose derived text IS the final assistant_text
-  // (fail-closed capture). The fallback envelope never carries it; an
+  // coach/converse shape whose derived text was the final assistant_text
+  // when the executor finalised. The fallback envelope never carries it; an
   // upstream body-attach was dropped by the strip step above. Re-finalise
   // for WeakSet membership, same as the other surfaces.
+  //
+  // Stale-sidecar fail-closed (P1 hardening): this block is the LAST body
+  // mutation before send, so the tie between the shape and the text the
+  // user actually receives is verified HERE, at the true final egress —
+  // covering every rewriter between the executor's compose-time capture and
+  // the wire (the executor's own STEP 6.6 / goal-receipt / backstop /
+  // finaliser guards are re-checked in finalizeRun; THIS check additionally
+  // covers the route-level sanitiseOlumiResponseForEgress entity-id scrub
+  // and any future mutator on this path). Mismatch ⇒ ship the body WITHOUT
+  // the sidecar, never a shape describing text the user never sees. The
+  // comparison runs on the POST-sanitise augmented body, i.e. the exact
+  // bytes `reply.send` would carry.
   if (egress.ok && config.features.answerShapeEnforced && ctx.answerShape) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _answer_shape: ctx.answerShape,
     };
-    wireBody = finaliseV5Response(
+    const withShape = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
       ctx,
     );
+    const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
+    const finalText =
+      typeof withShape.assistant_text === 'string' ? withShape.assistant_text : '';
+    if (finalText === derivedText) {
+      wireBody = withShape;
+    } else {
+      emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+        request_id: requestId,
+        exit_path: exitPath,
+        dispatch_path: 'route_egress',
+        final_text_length: finalText.length,
+        derived_text_length: derivedText.length,
+      });
+    }
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);

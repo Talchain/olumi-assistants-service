@@ -57,6 +57,9 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
 }));
 
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+const { deriveAnswerTextFromShape } = await import(
+  '../../../src/orchestrator-v5/routing/answer-shape.js'
+);
 
 const SCENARIO_ID = '88888888-8888-4888-8888-888888888888';
 const ANSWER_SHAPE = {
@@ -65,11 +68,14 @@ const ANSWER_SHAPE = {
   detail: 'The churn to revenue causal link is the strongest in the model.',
 };
 
-function mkRunResult(opts: { withShape: boolean }) {
+function mkRunResult(opts: { withShape: boolean; assistantText?: string }) {
   return {
     response: {
       response_version: 2 as const,
-      assistant_text: 'Focus on retention before pricing.',
+      // Default to the shape-derived text — the honest case where the final
+      // assistant_text IS what the shape describes (the executor's capture
+      // contract). Tests exercising a post-capture rewrite override this.
+      assistant_text: opts.assistantText ?? deriveAnswerTextFromShape(ANSWER_SHAPE),
       blocks: [] as const,
       suggested_actions: [] as const,
       insights: [] as const,
@@ -130,15 +136,40 @@ describe('route-v2 — flag-gated `_answer_shape` (ROADMAP 1.132)', () => {
     expect(body).not.toHaveProperty('_answer_shape');
   });
 
-  it('flag ON + run.answerShape present → `_answer_shape` attached post-validation', async () => {
+  it('flag ON + run.answerShape present + final text IS the shape-derived text → `_answer_shape` attached post-validation', async () => {
     configHolder.features.answerShapeEnforced = true;
     runTurnExecutorMock.mockResolvedValue(mkRunResult({ withShape: true }));
     const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc02');
     expect(status).toBe(200);
+    // Positive control for the drop test below: this harness CAN see the
+    // sidecar when the tie holds.
     expect(body._answer_shape).toEqual(ANSWER_SHAPE);
     // Legacy consumers keep a populated assistant_text alongside the sidecar.
     expect(typeof body.assistant_text).toBe('string');
     expect(body.assistant_text.length).toBeGreaterThan(0);
+  });
+
+  it('flag ON + run.answerShape present but final assistant_text was rewritten after capture → `_answer_shape` is DROPPED, never shipped stale (P1)', async () => {
+    configHolder.features.answerShapeEnforced = true;
+    // Simulates any post-capture rewriter (STEP 6.6 honesty swap, goal-receipt
+    // swap, empty-answer backstop, finaliser guards, commit-failure
+    // replacement, route egress entity-id scrub): the run result carries a
+    // captured shape whose derived text is NOT the final assistant_text.
+    runTurnExecutorMock.mockResolvedValue(
+      mkRunResult({
+        withShape: true,
+        assistantText:
+          "I haven't changed the model. This version can't make that kind of model edit yet.",
+      }),
+    );
+    const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc06');
+    expect(status).toBe(200);
+    // Fail closed: a sidecar describing text the user never sees must not ship.
+    expect(body).not.toHaveProperty('_answer_shape');
+    // The response itself is untouched — only the stale sidecar is withheld.
+    expect(body.assistant_text).toBe(
+      "I haven't changed the model. This version can't make that kind of model edit yet.",
+    );
   });
 
   it('flag ON but run.answerShape absent → still no `_answer_shape` (never fabricated)', async () => {
@@ -194,6 +225,6 @@ describe('route-v2 — flag-gated `_answer_shape` (ROADMAP 1.132)', () => {
     expect(body).not.toHaveProperty('_answer_shape');
     // Not the fallback envelope: the real assistant_text survived, which
     // proves the strict schema never saw the unknown key.
-    expect(body.assistant_text).toBe('Focus on retention before pricing.');
+    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(ANSWER_SHAPE));
   });
 });

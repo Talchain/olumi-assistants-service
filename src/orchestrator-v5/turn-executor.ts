@@ -8169,6 +8169,36 @@ export async function runTurnExecutor(
         frameForRun = undefined;
       }
     }
+    // ROADMAP 1.132 (F2) hardening — stale-sidecar fail-closed (P1). The
+    // shape was captured at COMPOSE time (STEP 6.7 coach/converse branches),
+    // but assistant_text can be rewritten AFTER capture. Complete
+    // executor-level post-capture mutator manifest (this file, capture →
+    // here): the STEP 6.6 structural-claim honesty swap, the goal-target
+    // receipt swap (ROADMAP 1.19), the STEP 7 unconditional empty-answer
+    // backstop (ROADMAP 1.20a), the commit-failure response replacement
+    // (STATE_COMMIT_FAILED), and the two finaliser egress guards that ran
+    // just above (forbidden-phrase, structural-success-claim). Re-verify the
+    // content tie HERE — after the LAST executor-level mutator — and DROP
+    // the shape on mismatch: a sidecar describing text the user never sees
+    // must not leave this seam. route-v2 re-verifies once more at the true
+    // wire egress (after its entity-id scrub), so a future mutator added
+    // after this point still cannot ship a stale sidecar.
+    let answerShapeForRun: AnswerShape | undefined = capturedAnswerShape;
+    if (capturedAnswerShape) {
+      const derivedText = deriveAnswerTextFromShape(capturedAnswerShape);
+      const finalText =
+        typeof response?.assistant_text === 'string' ? response.assistant_text : '';
+      if (finalText !== derivedText) {
+        answerShapeForRun = undefined;
+        emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          dispatch_path: 'turn_executor_finalise',
+          final_text_length: finalText.length,
+          derived_text_length: derivedText.length,
+        });
+      }
+    }
     return {
       response,
       analysisReady: analysisReadyForTurn,
@@ -8200,8 +8230,10 @@ export async function runTurnExecutor(
       ...(capturedReasoning ? { reasoning: capturedReasoning } : {}),
       // ROADMAP 1.132 (F2) — validated coach/converse answer shape for the
       // flag-gated `_answer_shape` wire sidecar (route-v2 attaches it
-      // post-egress-validation; never attached to `response` here).
-      ...(capturedAnswerShape ? { answerShape: capturedAnswerShape } : {}),
+      // post-egress-validation; never attached to `response` here). Already
+      // re-verified against the FINAL assistant_text just above — absent
+      // whenever a post-capture rewriter diverged the text from the shape.
+      ...(answerShapeForRun ? { answerShape: answerShapeForRun } : {}),
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,

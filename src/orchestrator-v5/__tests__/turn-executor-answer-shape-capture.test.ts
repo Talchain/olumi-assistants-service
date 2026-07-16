@@ -42,6 +42,7 @@ vi.mock('../session/index.js', () => ({
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 const { deriveAnswerTextFromShape } = await import('../routing/answer-shape.js');
+const { V5_STRUCTURAL_DECLINE_TEXT } = await import('../routing/mutation-language.js');
 
 const BASE_PAYLOAD = makeMessagePayload({
   turn_id: '99999999-9999-4999-8999-999999999997',
@@ -144,6 +145,41 @@ describe('TurnExecutor — answer_shape threading (CEE_ANSWER_SHAPE_ENFORCED)', 
 
     expect(result.response.assistant_text).toBe(deriveAnswerTextFromShape(VALID_SHAPE));
     expect(result.answerShape).toEqual(VALID_SHAPE);
+  });
+
+  it('flag ON, coach turn rewritten by the STEP 6.6 honesty gate: ships a matching sidecar or NONE (P1 — stale-sidecar fail-closed)', async () => {
+    await setFlag('true');
+    // A shape whose derived text is a tightly-bound first-person structural
+    // COMPLETION claim with NO committed mutation this turn — exactly the
+    // input the STEP 6.6 honesty gate swaps for V5_STRUCTURAL_DECLINE_TEXT.
+    // The swap runs AFTER the STEP 6.7 shape capture, so without the
+    // finalise-time re-verification the run would surface a sidecar
+    // describing text the user never receives (guarantee-theatre class).
+    const CLAIM_SHAPE = {
+      headline: "I've added the churn factor to your model.",
+      bullets: [],
+      detail:
+        'The churn factor now feeds the revenue goal directly, which is why ' +
+        'retention work moves the outcome most.',
+    };
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-shape-coach-swapped', {
+      routingAdapter: mockAdapter(
+        toolResult(
+          { intent_class: 'coach', coaching_mode: 'reframe', answer_shape: CLAIM_SHAPE },
+          'Orientation sentence.',
+        ),
+      ),
+    });
+
+    // Positive control for the mechanism: the rewriter DID fire — the final
+    // text is the honesty-swap decline, not the shape-derived text. Without
+    // this, the absence assertion below would be vacuous.
+    expect(result.response.assistant_text).toBe(V5_STRUCTURAL_DECLINE_TEXT);
+    expect(result.response.assistant_text).not.toBe(deriveAnswerTextFromShape(CLAIM_SHAPE));
+    // The invariant under test: a turn whose text was rewritten AFTER shape
+    // capture must ship either a matching sidecar or none. The derived text
+    // no longer matches, so the shape must be dropped.
+    expect(result.answerShape).toBeUndefined();
   });
 
   it('flag OFF (default), legacy coach turn: assistant_text is BYTE-IDENTICAL to the model answer_text; run.answerShape is absent', async () => {
