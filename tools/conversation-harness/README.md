@@ -457,17 +457,29 @@ Specific traps worth knowing about:
   function before lookup — otherwise a faithful `62.5%` restating a canonical
   `0.625` (surfaced as `63`) would score 0. This tolerates restated precision,
   never an invented value.
-- **G4's extractor fails closed BY CONSTRUCTION (round 6).** After five review
-  rounds each found new invisible figure shapes, extraction moved to two-layer
-  anchor accounting: a deliberately dumb Layer-1 detector finds *every*
-  percent-anchor token (`%`, `％`, percent / per cent / per-cent /
-  percentage point(s) / pp / pct — any case, hyphen/newline-separated), and
-  every Layer-1 anchor must be consumed by exactly one Layer-2 outcome (a
-  traced value or an explicit `unparseable`). An unconsumed anchor counts
-  untraceable — so an unknown future phrasing *blocks* instead of vanishing.
-  Percentage-point figures are a distinct unit and never trace against a `%`
-  canonical. See the module doc in `scorer/figure-scanner.ts` for the full
-  doctrine and the deliberate calibration costs.
+- **G4's extractor fails closed BY CONSTRUCTION (rounds 6–7).** After five
+  review rounds each found new invisible figure shapes, extraction moved to
+  reconciliation invariants: a deliberately dumb Layer-1 detector finds *every*
+  percent-anchor token (`%`, `％`, `٪`, `﹪`, `‰`, percent / per cent /
+  per-cent / percentage point(s) / percent pt(s) / basis point(s) / pp / pct /
+  pts / bps — any case, hyphen/newline-separated), and every Layer-1 anchor
+  must be consumed by exactly one Layer-2 outcome (a traced value or an
+  explicit `unparseable`) — an unconsumed anchor counts untraceable, so an
+  unknown future phrasing *blocks* instead of vanishing. Round 7 added
+  **numeric-token accounting** after review proved anchor accounting alone was
+  still fail-open for figures *sharing* one anchor (`between ninety and 95%`
+  scanned as a clean `[95]`): every numeric token — digit runs, common Unicode
+  numerals/fractions, and a closed word-number lexicon — must ALSO be consumed
+  by exactly one outcome when it shares a clause with an anchor. Word-number
+  and foreign-numeral bounds make the whole anchored form refuse; a stranded
+  bare token in an anchor-bearing clause fails closed (clause commas shield,
+  Oxford-list commas do not). Percentage-point figures (including `percent
+  pts`, `bps`) are a distinct unit and never trace against a `%` canonical —
+  and a pp delta glued to a `%` level (`dropped 3 percentage points to 55%`)
+  refuses the delta while still extracting the level. See the module doc in
+  `scorer/figure-scanner.ts` for the full doctrine, the deliberate calibration
+  costs (a bare number sharing a clause with an anchor now over-blocks by
+  design) and the documented out-of-contract residuals.
 - **G5 is a count, not a rate**, so padding a run with silent turns cannot
   dilute a violation.
 - **G2 is symmetric** — "always mutate" fails the coach direction and "never
