@@ -266,8 +266,81 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
     expect(d!.subject).toBe("remove the link from 'Marketing' to 'Goal'");
   });
 
-  it('remove_edge with an unresolvable path is honestly generic', () => {
+  it("remove_edge resolves endpoints from a CEE-canonical '::' path — the live-wire format", () => {
+    // normalisePath (orchestrator/tools/edit-graph.ts) mints `from::to` from
+    // the LLM's `/edges/from->to` paths — this is the format the referee
+    // gate actually receives. RED on the '->'-only parser: it degraded to
+    // the generic 'remove a link'.
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: 'fac-marketing::goal-g' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("remove the link from 'Marketing' to 'Goal'");
+  });
+
+  it("update_edge resolves endpoints from a CEE-canonical '::' path", () => {
+    const d = describeChangeset(
+      [
+        {
+          op: 'update_edge',
+          path: 'fac-marketing::goal-g',
+          value: { strength: { mean: 0.4 } },
+        },
+      ],
+      GRAPH,
+    );
+    expect(d!.subject).toBe(
+      "change the strength of the link from 'Marketing' to 'Goal' to 0.4",
+    );
+  });
+
+  it('remove_edge with an unparseable path names the op AND the path — never a silent generic', () => {
     const d = describeChangeset([{ op: 'remove_edge', path: 'garbage' }], GRAPH);
+    expect(d!.subject).toBe("remove a link with an unrecognised reference 'garbage'");
+  });
+
+  it('update_edge with an unparseable path names the op AND the path', () => {
+    const d = describeChangeset(
+      [{ op: 'update_edge', path: 'e1', value: { strength: { mean: 0.4 } } }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe("adjust a link with an unrecognised reference 'e1'");
+  });
+
+  it("a three-part edge-id path (from::to::index) is unparseable — parity with the applier's parseEdgePath", () => {
+    // patch-applier's parseEdgePath throws INVALID_OPERATION on 3-part
+    // paths; describing one as a real link would claim more than the
+    // apply path can honour.
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: 'fac-marketing::goal-g::0' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe(
+      "remove a link with an unrecognised reference 'fac-marketing::goal-g::0'",
+    );
+  });
+
+  it('an unparseable path with unsafe tokens is NOT echoed into user copy', () => {
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: '{"weird": true}' }],
+      GRAPH,
+    );
+    expect(d!.subject).toBe('remove a link with an unrecognised reference');
+    // 'prop_' is on SAFETY_FORBIDDEN_TOKENS — an unparseable path carrying
+    // it must not be echoed (it would collapse the whole subject to the
+    // generic swept copy at the surface sanitiser).
+    const d2 = describeChangeset(
+      [{ op: 'update_edge', path: 'prop_123', value: {} }],
+      GRAPH,
+    );
+    expect(d2!.subject).toBe('adjust a link with an unrecognised reference');
+  });
+
+  it("a parseable path whose endpoints are not in the graph stays the honest op-shaped generic (ids never leak as labels)", () => {
+    const d = describeChangeset(
+      [{ op: 'remove_edge', path: 'ghost-a::ghost-b' }],
+      GRAPH,
+    );
     expect(d!.subject).toBe('remove a link');
   });
 
@@ -362,6 +435,33 @@ describe('all three surfaces render the SAME specific copy (the never-diverge pi
     );
     expect(text).toContain('Run the analysis again');
     expect(text).not.toMatch(/\d+\s+more\s+change/i);
+  });
+
+  it("a held '::'-path remove_edge renders REAL node names on all three surfaces", () => {
+    const s = describeHeldOperationsSubject(
+      [{ op: 'remove_edge', path: 'fac-marketing::goal-g' }],
+      GRAPH,
+    )!;
+    expect(s).toBe("remove the link from 'Marketing' to 'Goal'");
+    const ask = buildGmHeldAssistantText(s, 1);
+    const chip = buildGmHeldPublicCopy(s);
+    const receipt = buildGmHeldAppliedReceipt([s]);
+    for (const text of [ask, chip.label, chip.message, receipt]) {
+      expect(text).toContain("'Marketing'");
+      expect(text).toContain("'Goal'");
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    }
+  });
+
+  it('the unrecognised-reference fallback copy stays outside the value-update gate', () => {
+    const s = describeHeldOperationsSubject(
+      [{ op: 'remove_edge', path: 'garbage' }],
+      GRAPH,
+    )!;
+    const copy = buildGmHeldPublicCopy(s);
+    expect(isValueUpdatePhrasing(copy.message)).toBe(false);
+    expect(isValueUpdatePhrasing(copy.label)).toBe(false);
+    expect(findForbiddenPhraseHit(copy.message)).toBeNull();
   });
 
   it('the referee gate re-exports the SAME function — no second same-named implementation can drift', () => {

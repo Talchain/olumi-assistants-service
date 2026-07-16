@@ -40,6 +40,8 @@
  */
 
 import { formatFactorValue } from '../compose/format-factor-value.js';
+import { parseEdgeTargetPath } from '../graph-management/adapters/edit-graph-producer.js';
+import { SAFETY_FORBIDDEN_TOKENS } from '../compose/proposed-change.js';
 
 /** Structural view of a patch operation — enough to name its subject. */
 export interface ChangesetOpLike {
@@ -148,11 +150,62 @@ function formatChangeValue(value: unknown, unit: unknown): string | null {
   return null;
 }
 
-/** Split an edge path (`from-><to>` per the patch producers) into endpoints. */
-function edgeEndpointsFromPath(path: string): { from: string; to: string } | null {
-  const idx = path.indexOf('->');
-  if (idx <= 0 || idx + 2 >= path.length) return null;
-  return { from: path.slice(0, idx), to: path.slice(idx + 2) };
+/**
+ * Edge-path parsing — DERIVED, not re-guessed. The paths reaching this
+ * module on the live wire are minted by exactly two producers:
+ *
+ *   1. `from::to` (CEE canonical) — `normalisePath` in
+ *      `orchestrator/tools/edit-graph.ts` converts the LLM's v2
+ *      `/edges/from->to` paths to this form before validation, and
+ *      `patch-validation.ts` checks it against `${from}::${to}` edge keys.
+ *      This is the format the referee gate actually receives from
+ *      `handleEditGraph`.
+ *   2. `from->to` (v2 bare) — deterministic actions
+ *      (`adjust-edge-strength.ts`, `remove-factor.ts`) mint it directly,
+ *      and bare LLM paths without a `/` prefix pass through
+ *      `normalisePath` unchanged.
+ *
+ * `parseEdgeTargetPath` (edit-graph-producer.ts) is the pipeline's own
+ * parser for BOTH — the very producer that projects these held operations
+ * into referee envelopes uses it, and the applier's `parseEdgePath`
+ * accepts the same two shapes (rejecting everything else, including
+ * 3-part `from::to::index` edge ids). Reusing it here means the describe
+ * layer can never again recognise fewer formats than the pipeline mints.
+ * Anything it cannot parse gets the explicit unrecognised-reference
+ * fallback below — naming the op and (when safe) the path, never a
+ * silent generic.
+ */
+
+/**
+ * A path token safe to echo into user copy: a short machine identifier
+ * (the two minted edge-path shapes fit), screened against the SAME
+ * `SAFETY_FORBIDDEN_TOKENS` list every surface's sanitiser enforces —
+ * derived, not hand-mirrored, so a token added there is honoured here.
+ * An unsafe path would otherwise trip `sanitisePublicCopyOrFallback`
+ * downstream and silently collapse the WHOLE changeset description to
+ * the generic swept copy.
+ */
+function safeEchoPath(path: string): string | null {
+  const trimmed = path.trim();
+  if (!/^[A-Za-z0-9_.:>-]{1,80}$/.test(trimmed)) return null;
+  const lower = trimmed.toLowerCase();
+  for (const token of SAFETY_FORBIDDEN_TOKENS) {
+    if (lower.includes(token.toLowerCase())) return null;
+  }
+  return trimmed;
+}
+
+/**
+ * The honest fallback for an edge op whose path no pipeline parser
+ * recognises: names the action and, when safe to echo, the reference —
+ * never a silent generic. (`change`-family verbs avoided: clause-A of the
+ * value-update gate.)
+ */
+function describeUnparseableEdgeOp(action: 'remove' | 'adjust', path: string): string {
+  const echo = safeEchoPath(path);
+  return echo !== null
+    ? `${action} a link with an unrecognised reference '${echo}'`
+    : `${action} a link with an unrecognised reference`;
 }
 
 /** The honest fallback for an op the vocabulary does not know. */
@@ -237,19 +290,20 @@ function describeOp(
       return from !== null && to !== null ? `link '${from}' to '${to}'` : 'add a link';
     }
     case 'remove_edge': {
-      const endpoints = edgeEndpointsFromPath(op.path);
-      if (endpoints !== null) {
-        const from = resolveNode(endpoints.from, graph, batchAdds).label;
-        const to = resolveNode(endpoints.to, graph, batchAdds).label;
-        if (from !== null && to !== null) return `remove the link from '${from}' to '${to}'`;
-      }
+      const endpoints = parseEdgeTargetPath(op.path);
+      if (endpoints === null) return describeUnparseableEdgeOp('remove', op.path);
+      const from = resolveNode(endpoints.from, graph, batchAdds).label;
+      const to = resolveNode(endpoints.to, graph, batchAdds).label;
+      if (from !== null && to !== null) return `remove the link from '${from}' to '${to}'`;
+      // Parseable path, endpoints absent from the graph: internal ids
+      // must not leak as labels, so the op-shaped generic stands.
       return 'remove a link';
     }
     case 'update_edge': {
-      const endpoints = edgeEndpointsFromPath(op.path);
-      const from =
-        endpoints !== null ? resolveNode(endpoints.from, graph, batchAdds).label : null;
-      const to = endpoints !== null ? resolveNode(endpoints.to, graph, batchAdds).label : null;
+      const endpoints = parseEdgeTargetPath(op.path);
+      if (endpoints === null) return describeUnparseableEdgeOp('adjust', op.path);
+      const from = resolveNode(endpoints.from, graph, batchAdds).label;
+      const to = resolveNode(endpoints.to, graph, batchAdds).label;
       const strength = asRecord(asRecord(op.value).strength);
       const mean = formatChangeValue(strength.mean, undefined);
       if (from !== null && to !== null) {
