@@ -1336,9 +1336,15 @@ function computeDecisionReviewOutputDensity(
   const keyAssumptions = Array.isArray(output.key_assumptions)
     ? output.key_assumptions
     : [];
-  const storyHeadlines = Array.isArray(output.story_headlines)
-    ? output.story_headlines
-    : [];
+  // ROADMAP 1.78 residual: the served prompt contract (defaults.ts
+  // OUTPUT_SCHEMA) emits story_headlines as a Record<option_id, string>, so
+  // an Array.isArray-only count read 0 on every live turn while headlines
+  // shipped. Count map keys on the live shape; keep array tolerance for
+  // legacy/test envelopes.
+  const storyHeadlinesRecord = readRecord(output.story_headlines);
+  const storyHeadlinesCount = storyHeadlinesRecord !== null
+    ? Object.keys(storyHeadlinesRecord).length
+    : countArray(output.story_headlines);
   const dqPrompts = Array.isArray(output.decision_quality_prompts)
     ? output.decision_quality_prompts
     : [];
@@ -1354,7 +1360,7 @@ function computeDecisionReviewOutputDensity(
     output_flip_thresholds_count: flipThresholds.length,
     output_bias_findings_count: biasFindings.length,
     output_key_assumptions_count: keyAssumptions.length,
-    output_story_headlines_count: storyHeadlines.length,
+    output_story_headlines_count: storyHeadlinesCount,
     output_decision_quality_prompts_count: dqPrompts.length,
     output_has_pre_mortem: readRecord(output.pre_mortem) !== null,
     output_has_framing_check: readRecord(output.framing_check) !== null,

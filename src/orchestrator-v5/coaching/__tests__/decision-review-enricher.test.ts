@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
@@ -1075,7 +1078,9 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
       winner: { option_id: 'opt-1', option_label: 'Option A' },
       runner_up: { option_id: 'opt-2', option_label: 'Option B' },
       narrative_summary: 'Option A leads with a 70% win probability driven by factor A.',
-      story_headlines: ['Headline one', 'Headline two'],
+      // Live shape per the served prompt contract (defaults.ts OUTPUT_SCHEMA):
+      // story_headlines is a Record<option_id, string>, never an array.
+      story_headlines: { 'opt-1': 'Headline one', 'opt-2': 'Headline two' },
       robustness_explanation: {
         summary: 'The result is reasonably stable but watch factor B.',
         primary_risk: 'Factor B reversal',
@@ -1242,6 +1247,86 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
     expect(data!.output_decision_quality_prompts_count).toBe(0);
     expect(data!.output_has_pre_mortem).toBe(false);
     expect(data!.output_has_framing_check).toBe(false);
+  });
+
+  // ==========================================================================
+  // ROADMAP 1.78 residual — output_story_headlines_count map-shape mis-count.
+  //
+  // The served prompt contract (defaults.ts OUTPUT_SCHEMA) emits
+  // story_headlines as a Record<option_id, string>, but the density helper
+  // counted it via Array.isArray — so output_story_headlines_count was
+  // permanently 0 on every live turn while headlines actually shipped
+  // (proven live 2026-07-16: wire had 3 headlines, telemetry logged 0).
+  // ==========================================================================
+
+  it('counts MAP-shaped story_headlines (real staging capture: 4 headlines, not 0)', async () => {
+    // REAL staging capture: the persisted coaching payload carries
+    // story_headlines in exactly the live map shape keyed by option_id.
+    // Provenance: tests/fixtures/cross-service/*.metadata.json. Never hand-edit.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const fixturePath = join(
+      here, '..', '..', '..', '..',
+      'tests', 'fixtures', 'cross-service', 'v5-turn.run-analysis.staging.json',
+    );
+    const turn = JSON.parse(readFileSync(fixturePath, 'utf-8')) as {
+      blocks: Array<Record<string, unknown>>;
+    };
+    const block = turn.blocks.find((b) => b.type === 'analysis_result');
+    if (!block) throw new Error('fixture: no analysis_result block');
+    const coaching = (block.enrichment as Record<string, unknown>)
+      .m1_coaching as Record<string, unknown>;
+    const fixtureHeadlines = coaching.story_headlines as Record<string, string>;
+
+    // Pin the fixture facts this test's proof rests on: the live shape is a
+    // plain object keyed by option_id (NOT an array) with 4 entries.
+    expect(Array.isArray(fixtureHeadlines)).toBe(false);
+    expect(typeof fixtureHeadlines).toBe('object');
+    expect(Object.keys(fixtureHeadlines)).toHaveLength(4);
+
+    mockInvokeReturning({
+      winner: { option_id: 'opt-1', option_label: 'Option A' },
+      story_headlines: fixtureHeadlines,
+    });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-headlines-map',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-headlines-map');
+    expect(data).not.toBeNull();
+    // THE BUG: this read 0 on the live path while 4 headlines shipped.
+    expect(data!.output_story_headlines_count).toBe(4);
+  });
+
+  it('still counts legacy ARRAY-shaped story_headlines (shape tolerance preserved)', async () => {
+    mockInvokeReturning({
+      winner: { option_id: 'opt-1', option_label: 'Option A' },
+      story_headlines: ['h1', 'h2', 'h3'],
+    });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-headlines-array',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-headlines-array');
+    expect(data).not.toBeNull();
+    expect(data!.output_story_headlines_count).toBe(3);
   });
 
   it('never includes prose, labels, raw IDs, or any string content in the payload', async () => {
