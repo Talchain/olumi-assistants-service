@@ -1131,6 +1131,15 @@ export async function loadScenarioSnapshotForRunAnalysis(
   scenarioId: string,
   requestId: string,
   sessionStore?: SessionStore,
+  /**
+   * #343 CEE half — adopt-on-empty candidate: the request-supplied
+   * `graph_state` (boundary `extensions.graphState`), threaded from the
+   * dispatch site (chip-click pre-load / `invocation.graphForTurn` on the
+   * routed path). Consulted ONLY when the strict persisted read returns a
+   * GENUINELY-null graph and `cee.runAnalysisAdoptIngressGraph` is on — a
+   * present persisted graph always wins and the candidate is ignored.
+   */
+  ingressGraph?: unknown,
 ): Promise<RunAnalysisScenarioSnapshot> {
   // STRICT read: a store/RPC failure must PROPAGATE (→ the handler's retryable
   // `scenario_read_failed`), NOT be swallowed to null. The non-strict
@@ -1155,22 +1164,71 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // not missing — it falls through to GraphV3.safeParse below and fails into
   // scenario_read_failed like any other malformed graph, so we never tell a user who
   // has a (corrupt) graph to "draft a model first".
+  // #343 CEE half — adopt-on-empty marker. Set ONLY on the genuinely-null-
+  // persisted branch below when a request-supplied graph passes the full
+  // readiness core; the commit seams (chip-click dispatch / TurnExecutor
+  // STEP 7) read it off the snapshot to persist the adopted graph atomically
+  // with the turn (CAS first_write, commit-time strict re-verify).
+  let adoptedIngressGraph = false;
+  let graphForSnapshot: unknown = persistedGraph;
   if (persistedGraph == null) {
     // GENUINELY no persisted graph (store reachable, scenarios.graph absent) — e.g. a
-    // guest scenario that never drafted/saved a model; deployed V5 run_analysis sends
-    // no graph_state to fall back to. Convert the legacy raw-500 into a typed
-    // RECOVERABLE failure: AnalysisNotReadyError → the run_analysis handler maps it to
-    // `analysis_not_ready` (a 200 with an honest "draft a model first" next-step +
-    // recovery chip). This throw is BEFORE the PLoT payload build and before any
-    // run_analysis handler fact. INDEPENDENT of EP2 (`analysisReadyGuardEnabled`) — the
-    // deployed path runs EP2 OFF — and gated only by its own default-ON kill-switch
-    // (`runAnalysisNullGraphRecoverable`) so a code-free rollback to the raw 500 stays
-    // available. A store/RPC failure does NOT reach here (it threw above → propagates
-    // to scenario_read_failed). The EP2 guard below still runs only on a non-null graph.
-    if (config.cee.runAnalysisNullGraphRecoverable) {
+    // guest scenario that never drafted/saved a model. A store/RPC failure does NOT
+    // reach here (it threw above → propagates to scenario_read_failed).
+    //
+    // #343 adopt-on-empty (CEE_RUN_ANALYSIS_ADOPT_INGRESS_GRAPH, default ON):
+    // when the request carried a graph_state (the client-built model — starter/
+    // template inserts and hand-built canvas models exist ONLY client-side; the
+    // V5 wire historically carried no graph, so this seam starved and every
+    // first-CTA analyse dead-ended on NO_GRAPH), assess the INGRESS graph with
+    // the SAME neutral readiness core EP2 uses:
+    //   - ready/repaired  → adopt the canonical ingress graph as this run's
+    //     graph. Persistence happens at the COMMIT seam (never here — a read
+    //     path must not write), gated by a strict re-verify so a concurrent
+    //     canonical write is never overwritten. Mirrors the edit-graph-dispatch
+    //     ingress-base fallback doctrine ("a client that sent graph_state for a
+    //     never-persisted scenario — there is nothing to lose").
+    //   - unrecoverable   → the SPECIFIC verdict (missing cap / structure /
+    //     options not configured), NEVER the false "Draft or save a model
+    //     first" copy — the user HAS a model; telling them to draft one
+    //     contradicts the canvas.
+    if (config.cee.runAnalysisAdoptIngressGraph && ingressGraph != null) {
+      const verdict = assessAnalysisReadiness(ingressGraph);
+      if (verdict.status === 'unrecoverable') {
+        throw new AnalysisNotReadyError(verdict);
+      }
+      graphForSnapshot = verdict.canonicalGraph ?? ingressGraph;
+      adoptedIngressGraph = true;
+      log.info(
+        {
+          event: 'v5.run_analysis.ingress_graph_adopted',
+          request_id: requestId,
+          scenario_id: scenarioId,
+          readiness_status: verdict.status,
+          node_count: Array.isArray((graphForSnapshot as { nodes?: unknown[] })?.nodes)
+            ? (graphForSnapshot as { nodes: unknown[] }).nodes.length
+            : null,
+          edge_count: Array.isArray((graphForSnapshot as { edges?: unknown[] })?.edges)
+            ? (graphForSnapshot as { edges: unknown[] }).edges.length
+            : null,
+        },
+        'V5 run_analysis — no persisted graph; adopted the request-supplied ingress graph (#343 adopt-on-empty)',
+      );
+    } else if (config.cee.runAnalysisNullGraphRecoverable) {
+      // No adoptable ingress graph (none sent, or the adopt kill-switch is
+      // off). Convert the legacy raw-500 into a typed RECOVERABLE failure:
+      // AnalysisNotReadyError → the run_analysis handler maps it to
+      // `analysis_not_ready` (a 200 with an honest "draft a model first"
+      // next-step + recovery chip). This throw is BEFORE the PLoT payload
+      // build and before any run_analysis handler fact. INDEPENDENT of EP2
+      // (`analysisReadyGuardEnabled`) — the deployed path runs EP2 OFF — and
+      // gated only by its own default-ON kill-switch
+      // (`runAnalysisNullGraphRecoverable`) so a code-free rollback to the
+      // raw 500 stays available.
       throw new AnalysisNotReadyError(assessAnalysisReadiness(null));
+    } else {
+      throw new Error(`No persisted graph found for scenario ${scenarioId}`);
     }
-    throw new Error(`No persisted graph found for scenario ${scenarioId}`);
   }
 
   // EP2 (V5 Edit Safety Core) — read-boundary analysis-ready guard. Behind
@@ -1182,8 +1240,10 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // `rawPersistedGraph` so `graph_hash_at_run` is computed from the SAME canonical
   // projection the freshness side hashes (brief §6 consistency). Flag OFF ⇒
   // `graphForSnapshot === persistedGraph` ⇒ byte-identical to today.
-  let graphForSnapshot: unknown = persistedGraph;
-  if (config.cee.analysisReadyGuardEnabled) {
+  // An ADOPTED ingress graph already went through the same core above, so the
+  // guard is skipped for it (running it twice would be a no-op by idempotence,
+  // but skipping keeps the adopted path's semantics independent of EP2's flag).
+  if (!adoptedIngressGraph && config.cee.analysisReadyGuardEnabled) {
     const verdict = assessAnalysisReadiness(persistedGraph);
     if (verdict.status === 'unrecoverable') {
       throw new AnalysisNotReadyError(verdict);
@@ -1228,7 +1288,14 @@ export async function loadScenarioSnapshotForRunAnalysis(
     goal_node_id: readiness.goal_node_id,
     // EP2: canonical graph when the guard is on (graphForSnapshot === persistedGraph
     // when off) — keeps graph_hash_at_run consistent with the freshness-side hash.
+    // #343: when adopted, this IS the canonical ingress graph — the commit seams
+    // persist exactly this value, so graph_hash_at_run, the persisted graph, and
+    // every later freshness hash agree by construction.
     rawPersistedGraph: graphForSnapshot,
+    // #343 adopt-on-empty marker (omitted on every non-adopted load so existing
+    // snapshots are byte-identical). Commit seams key the atomic graph write +
+    // strict re-verify off this.
+    ...(adoptedIngressGraph ? { adoptedIngressGraph: true as const } : {}),
     // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
     // constraints added via `add_constraint`. Omitted when absent so
     // run-analysis can use the existing optional-field idiom.

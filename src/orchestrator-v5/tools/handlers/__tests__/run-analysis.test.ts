@@ -864,7 +864,10 @@ describe('run_analysis handler — AbortSignal + budget propagation', () => {
     });
     const externalController = new AbortController();
     await handler(makeInvocation({ signal: externalController.signal }));
-    expect(reader).toHaveBeenCalledWith(TEST_SCENARIO_ID, externalController.signal);
+    // #343: the reader now also receives the adopt-on-empty candidate
+    // (invocation.graphForTurn) — undefined here because this invocation
+    // carried none, pinning that absence stays absence.
+    expect(reader).toHaveBeenCalledWith(TEST_SCENARIO_ID, externalController.signal, undefined);
   });
 });
 

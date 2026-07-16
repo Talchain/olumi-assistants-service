@@ -256,9 +256,14 @@ describe('chip-click-dispatch — analysisReady surfacing (V5 finaliser brief)',
     // Persistence read is a single call against the SAME scenario_id the
     // handler is dispatched for.
     expect(loadScenarioSnapshotForRunAnalysisMock).toHaveBeenCalledTimes(1);
+    // #343: the pre-load now also threads (sessionStore=undefined,
+    // ingressGraphState) — undefined here because this dispatch carried no
+    // graph_state, pinning that absence stays absence (byte-parity mode).
     expect(loadScenarioSnapshotForRunAnalysisMock).toHaveBeenCalledWith(
       SCENARIO_ID,
       expect.any(String),
+      undefined,
+      undefined,
     );
 
     // The injected scenarioReader returns the SAME snapshot OBJECT IDENTITY

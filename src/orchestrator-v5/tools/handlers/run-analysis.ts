@@ -192,6 +192,17 @@ export interface RunAnalysisScenarioSnapshot {
    * (default OFF — doctrine ask D5, brief-to-PLoT privacy, is Paul-gated).
    */
   readonly briefText?: string;
+  /**
+   * #343 CEE half — adopt-on-empty marker. True ONLY when the persisted
+   * `scenarios.graph` was GENUINELY null and the reader adopted the
+   * request-supplied ingress graph (after the full readiness core passed).
+   * `rawPersistedGraph` then carries the canonical ADOPTED graph, and the
+   * commit seams (chip-click dispatch / TurnExecutor STEP 7) persist it
+   * atomically with the turn — behind a commit-time strict re-verify so a
+   * concurrent canonical write is never overwritten. Omitted (never false)
+   * on every non-adopted load, keeping existing snapshots byte-identical.
+   */
+  readonly adoptedIngressGraph?: true;
 }
 
 /**
@@ -210,6 +221,15 @@ export interface RunAnalysisScenarioSnapshot {
 export type ScenarioReader = (
   scenarioId: string,
   signal?: AbortSignal,
+  /**
+   * #343 CEE half — adopt-on-empty candidate: the request-supplied graph
+   * (`invocation.graphForTurn` on the routed path; the boundary
+   * `extensions.graphState` on the chip-click pre-load). Readers that
+   * support adoption (the production `loadScenarioSnapshotForRunAnalysis`)
+   * consult it ONLY when the strict persisted read returns a genuinely-null
+   * graph; stub/one-shot readers may ignore it.
+   */
+  ingressGraph?: unknown,
 ) => Promise<RunAnalysisScenarioSnapshot>;
 
 // ============================================================================
@@ -258,9 +278,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const args: RunAnalysisArgs = argsResult.data;
 
     // --- 2. Load scenario snapshot ----------------------------------------
+    // #343 adopt-on-empty: thread the per-turn ingress graph
+    // (`invocation.graphForTurn` — the request graph_state when present) as
+    // the adoption candidate. The production reader consults it ONLY when
+    // the strict persisted read returns a genuinely-null graph; a present
+    // persisted graph always wins (canonical-state doctrine intact).
     let snapshot: RunAnalysisScenarioSnapshot;
     try {
-      snapshot = await deps.scenarioReader(args.scenario_id, invocation.signal);
+      snapshot = await deps.scenarioReader(
+        args.scenario_id,
+        invocation.signal,
+        invocation.graphForTurn,
+      );
     } catch (readError) {
       // EP2 (V5 Edit Safety Core): the read-boundary guard found the persisted
       // graph unrecoverable. Map to a typed RECOVERABLE failure (200 + honest
@@ -845,6 +874,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       handler_facts: [parsed.data],
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
+      // #343 adopt-on-empty: when the reader adopted the ingress graph (no
+      // persisted model existed), surface the canonical adopted graph so the
+      // commit seam persists it atomically with this turn. Internal channel
+      // (same pattern as __plot_timings) — DELIBERATELY NOT `mutated_graph`:
+      // that channel carries D1 ingress-echo-mutation semantics (persisted-
+      // base merge, emitter enumeration pinned by the d1-mutated-graph-
+      // emitters invariant), while this is a FIRST write onto a genuinely
+      // empty scenarios.graph. Absent on every non-adopted run.
+      ...(snapshot.adoptedIngressGraph === true && snapshot.rawPersistedGraph != null
+        ? { __adopted_ingress_graph: snapshot.rawPersistedGraph }
+        : {}),
     };
   };
 }

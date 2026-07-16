@@ -594,4 +594,62 @@ describe('POST /orchestrate/v2/turn — chip_click run_analysis dispatch', () =>
     expect(res.statusCode).toBe(200);
     expect(dispatchChipClickRunAnalysisMock).toHaveBeenCalledTimes(1);
   });
+
+  // #343 CEE half — adopt-on-empty: the boundary-parsed graph_state extension
+  // must reach the dispatch as `ingressGraphState` (and stay absent when the
+  // request carries none — the V5 UI ships no graph_state today, so absence
+  // is the byte-parity mode).
+  it('chip_click run_analysis WITH body graph_state → dispatch receives the parsed extension as ingressGraphState', async () => {
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce(makeMockResult());
+    const graphState = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Goal' },
+        { id: 'opt_a', kind: 'option', label: 'A' },
+      ],
+      edges: [{ from: 'opt_a', to: 'goal_1' }],
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111cc10',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+        graph_state: graphState,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchChipClickRunAnalysisMock).toHaveBeenCalledTimes(1);
+    const params = dispatchChipClickRunAnalysisMock.mock.calls[0][0] as {
+      ingressGraphState?: { nodes?: Array<{ id: string }> };
+    };
+    expect(params.ingressGraphState).toBeDefined();
+    expect(params.ingressGraphState!.nodes?.map((n) => n.id)).toEqual(['goal_1', 'opt_a']);
+  });
+
+  it('chip_click run_analysis WITHOUT body graph_state → dispatch params carry NO ingressGraphState (byte-parity mode)', async () => {
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce(makeMockResult());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111cc11',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const params = dispatchChipClickRunAnalysisMock.mock.calls[0][0] as Record<string, unknown>;
+    expect('ingressGraphState' in params).toBe(false);
+  });
 });

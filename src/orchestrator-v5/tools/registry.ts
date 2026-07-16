@@ -326,6 +326,24 @@ export interface HandlerOutcome {
    * the same pattern as `__plot_timings` above.
    */
   readonly __validation_beat?: import('../coaching/validation-priority.js').ValidationBeatDecision;
+  /**
+   * #343 CEE half — adopt-on-empty channel. Populated ONLY by `run_analysis`
+   * when the scenario had NO persisted graph and the reader adopted the
+   * request-supplied ingress graph (after the full readiness core passed):
+   * carries the canonical adopted graph for the commit seam to persist
+   * atomically with the turn (`SessionTurnWrite.graph`, CAS first_write).
+   *
+   * DELIBERATELY DISTINCT from `mutated_graph`: that channel carries D1
+   * ingress-echo-mutation semantics — STEP 7 merges it onto a strict-read
+   * persisted base, and its emitter set is pinned by the
+   * d1-mutated-graph-emitters invariant. This channel is a FIRST write onto
+   * a genuinely-empty `scenarios.graph`; STEP 7 strict-re-verifies the base
+   * is STILL empty and WITHHOLDS the write if a concurrent canonical write
+   * landed (never overwrite), failing closed on a degraded re-verify.
+   * Underscore-prefixed internal channel (same pattern as `__plot_timings`)
+   * — never crosses to the wire envelope.
+   */
+  readonly __adopted_ingress_graph?: unknown;
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;
@@ -364,8 +382,17 @@ export interface RegistryOverrides {
  * The error message is deliberately explicit so production logs pinpoint
  * the missing wiring rather than surfacing a generic `TypeError`.
  */
-const DEFAULT_SCENARIO_READER: ScenarioReader = (scenarioId) => {
-  return loadScenarioSnapshotForRunAnalysis(scenarioId, `run_analysis:${scenarioId}`);
+const DEFAULT_SCENARIO_READER: ScenarioReader = (scenarioId, _signal, ingressGraph) => {
+  // #343 adopt-on-empty: forward the per-turn ingress graph (candidate) so a
+  // routed run_analysis on a never-persisted scenario can adopt the client
+  // model instead of dead-ending on NO_GRAPH. The reader consults it ONLY
+  // when the strict persisted read returns a genuinely-null graph.
+  return loadScenarioSnapshotForRunAnalysis(
+    scenarioId,
+    `run_analysis:${scenarioId}`,
+    undefined,
+    ingressGraph,
+  );
 };
 
 /**

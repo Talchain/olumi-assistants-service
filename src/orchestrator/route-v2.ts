@@ -1394,6 +1394,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         const cc = await dispatchDeterministicChipClick(chipActionType, {
           payload: ingress,
           requestId,
+          // #343 adopt-on-empty candidate: the boundary-parsed graph_state
+          // extension. Consumed ONLY by the run_analysis dispatch, and only
+          // when the strict persisted read finds scenarios.graph genuinely
+          // null (a client-built model that never reached CEE) — a present
+          // persisted graph always wins. Null/absent → byte-identical to
+          // today (the V5 UI half that attaches graph_state ships separately).
+          ...(extensions.graphState != null
+            ? { ingressGraphState: extensions.graphState }
+            : {}),
         });
         // Discriminated outcome — each case maps to a distinct wire
         // response. Parallels TurnExecutor's catch ladder so chip-click

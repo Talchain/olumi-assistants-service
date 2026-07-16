@@ -56,9 +56,11 @@ import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { composeToolCallResponse } from '../compose.js';
 import {
   buildTurnContext,
+  loadPersistedGraphStrict,
   loadScenarioSnapshotForRunAnalysis,
   type EnrichedTurnContext,
 } from '../build-turn-context.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -109,17 +111,29 @@ import type { ComposeContext } from '../compose/types.js';
  * Note on ingress state (graphState / analysisState):
  * The run_analysis handler reads its scenario state via the injected
  * `scenarioReader` (see createRunAnalysisHandler in tools/handlers/
- * run-analysis.ts) — NOT from the HTTP request body. A chip-click
- * payload does not need to thread graph_state or analysis_state into
- * the handler; passing them here would have been dead weight and
- * invited drift between ingress state and the scenario-read truth.
- * This interface therefore does not accept those fields. If a future
- * handler DOES need ingress-state passthrough, add the fields then,
- * not now.
+ * run-analysis.ts) — NOT from the HTTP request body; a PRESENT persisted
+ * graph is always the scenario-read truth and ingress state never
+ * overrides it.
+ *
+ * #343 CEE half (the "add the fields then" future arrived): the ONE
+ * ingress field accepted is `ingressGraphState` — the boundary
+ * `extensions.graphState` — consumed EXCLUSIVELY as the adopt-on-empty
+ * candidate when the strict persisted read finds a GENUINELY-null
+ * `scenarios.graph` (a starter/template-inserted or hand-built canvas
+ * model that exists only client-side). It is assessed with the full
+ * readiness core before anything runs, and persisted only at the commit
+ * behind a strict re-verify. `analysis_state` remains deliberately
+ * unaccepted.
  */
 export interface DispatchChipClickRunAnalysisParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
+  /**
+   * #343 adopt-on-empty candidate — the request's `graph_state` extension
+   * (already boundary-parsed by route-v2). Ignored entirely when a
+   * persisted graph exists or `cee.runAnalysisAdoptIngressGraph` is off.
+   */
+  readonly ingressGraphState?: unknown;
   /** Injectable registry for tests. Production uses the default singleton. */
   readonly handlerRegistry?: HandlerRegistry;
 }
@@ -405,6 +419,10 @@ export async function dispatchChipClickRunAnalysis(
       cachedSnapshot = await loadScenarioSnapshotForRunAnalysis(
         payload.scenario_id,
         requestId,
+        undefined,
+        // #343 adopt-on-empty candidate — consulted by the reader ONLY when
+        // the strict persisted read returns a genuinely-null graph.
+        params.ingressGraphState,
       );
     } catch (err) {
       // Persistence read failed. Cache the error so the handler invocation
@@ -743,6 +761,44 @@ export async function dispatchChipClickRunAnalysis(
     );
 
     try {
+      // #343 adopt-on-empty — atomic FIRST write of the adopted graph with the
+      // turn commit. Keyed off the snapshot marker (set only when the pre-load
+      // strict read found scenarios.graph genuinely null and the ingress graph
+      // passed the full readiness core). The PLoT run above takes seconds, so
+      // the pre-load's null is stale by construction: STRICT-RE-VERIFY the base
+      // is STILL empty and WITHHOLD the write if a concurrent canonical write
+      // landed (never overwrite; the analysis facts stay honest — they hash the
+      // adopted graph, and later freshness derivation compares against whatever
+      // is actually persisted). A degraded re-verify THROWS here, inside the
+      // commit try → 'commit_failed' (fail closed: a graph-bearing commit is
+      // never taken on an unverifiable base — same rule as V5-D1-SHAPE-01).
+      // CAS expecteds: the server base read was null → {null, null} →
+      // `first_write` category (observe-mode; never a conflict).
+      let adoptedGraphCommitFields: Record<string, unknown> = {};
+      if (
+        cachedSnapshot?.adoptedIngressGraph === true &&
+        cachedSnapshot.rawPersistedGraph != null
+      ) {
+        const baseAtCommit = await loadPersistedGraphStrict(payload.scenario_id);
+        if (baseAtCommit == null) {
+          adoptedGraphCommitFields = {
+            graph: cachedSnapshot.rawPersistedGraph,
+            ...(config.features.graphCasMode !== 'off'
+              ? computeExpectedGraphCasHashes(null)
+              : {}),
+          };
+        } else {
+          log.warn(
+            {
+              event: 'v5.run_analysis.adopted_graph_write_withheld',
+              request_id: requestId,
+              scenario_id: payload.scenario_id,
+              dispatch_path: 'chip_click_run_analysis',
+            },
+            'V5 run_analysis — adopted ingress graph write WITHHELD: a persisted graph appeared between the pre-load strict read and the commit (concurrent canonical write wins)',
+          );
+        }
+      }
       await commitDirectAnswer(response, {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
@@ -752,6 +808,7 @@ export async function dispatchChipClickRunAnalysis(
         llm_calls_used: outcome.llm_calls_used,
         duration_ms: Date.now() - startedAt,
         handler_facts: enrichedFacts,
+        ...adoptedGraphCommitFields,
         // V5 Stage 2B-1b: persist the turn-start (pre-dispatch) coaching snapshot.
         coaching_state: context.coaching_state,
         // V5 Conversation Context Reliability: persist the user's turn text;
