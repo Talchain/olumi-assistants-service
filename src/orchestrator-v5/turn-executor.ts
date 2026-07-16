@@ -176,10 +176,9 @@ import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './t
 
 
 import { readCoachingCache } from './coaching/coaching-cache-reader.js';
+import { applyCoachingSignal } from './coaching/coaching-signal-application.js';
 import { enrichRunAnalysisWithDecisionReview } from './coaching/decision-review-enricher.js';
-import { appendLastCoachingSignal } from './coaching/last-coaching-signal-log.js';
 import type { CoachingSignalId } from './coaching/types.js';
-import { detectCoachingSignal } from './signals/coaching-signals.js';
 import {
   assembleContextPackWithSummary,
   CONTEXT_PACK_RECENT_TURNS_CAP,
@@ -6482,44 +6481,29 @@ export async function runTurnExecutor(
       // coach, converse) never reach this branch. coaching_mode is set by
       // routing; Step 5 emits coaching_signal_id which is distinct.
       // contextPackForLog is always assigned by the time EXECUTE succeeds.
-      const coachingDetection = contextPackForLog
-        ? detectCoachingSignal({
-            proposedHandlerId,
-            outcome: handlerOutcome,
-            contextPack: contextPackForLog,
-            priorFacts: context.prior_facts,
-          })
-        : null;
-      const coachingText = coachingDetection?.coaching_text ?? null;
-      coachingSignalId = coachingDetection?.signal_id ?? null;
-      if (coachingDetection) {
-        emit(TelemetryEvents.V5CoachingSignalFired, {
-          request_id: requestId,
-          scenario_id: context.session_id,
-          signal_id: coachingDetection.signal_id,
-          handler_id: proposedHandlerId,
-        });
-        // Persist signal metadata into enrichment on run_analysis facts
-        // (frozen schema has enrichment only there) so the next turn's
-        // CoachingCache.last_coaching_signal can surface it.
-        if (proposedHandlerId === 'run_analysis') {
-          handlerFactsForCommit = attachCoachingSignalToRunAnalysisFact(
-            handlerFactsForCommit,
-            coachingDetection.signal_id,
-            requestId,
-          );
-        }
-        // Also write to the per-scenario sidecar. This is the only
-        // persistence path for edit-handler signals (STALE_*, HIGH_*)
-        // because edit HandlerFact variants have no enrichment field.
-        // Fire-and-forget; the sidecar helper swallows I/O failures.
-        void appendLastCoachingSignal({
-          scenario_id: context.session_id,
-          signal_id: coachingDetection.signal_id,
-          turn_id: requestId,
-          produced_at: new Date().toISOString(),
-        });
-      }
+      //
+      // ROADMAP 2.73: the detector + telemetry + fact-attach + sidecar
+      // sequence is the SHARED applyCoachingSignal helper — the chip-click
+      // dispatch path invokes the same helper, so the two dispatch paths
+      // cannot drift on coaching-signal behaviour.
+      const coachingApplication = applyCoachingSignal({
+        proposedHandlerId,
+        outcome: handlerOutcome,
+        contextPack: contextPackForLog ?? null,
+        priorFacts: context.prior_facts,
+        handlerFacts: handlerFactsForCommit,
+        requestId,
+        scenarioId: context.session_id,
+        // Spine A backstop for the rerun delta: same collector + same
+        // persisted-first form as the executor's other authority sites
+        // (guarded by controlled-factor-authority.guard.test.ts).
+        interventionControlledFactorIds: collectInterventionControlledFactorIds(
+          context.persistedGraph ?? options.graphState,
+        ),
+      });
+      const coachingText = coachingApplication.coachingText;
+      coachingSignalId = coachingApplication.signalId;
+      handlerFactsForCommit = coachingApplication.handlerFacts;
       stagesCompleted.push('coach');
 
       // STEP 6 — COMPOSE (execute). Orientation is sanitised in-band like
@@ -8880,40 +8864,6 @@ function buildSafeValidatorLogDetails(
   }
   if (typeof raw.delta === 'number') safe.delta = raw.delta;
   return safe;
-}
-
-/**
- * V5 Group 1 Task C: attach a coaching signal marker to the run_analysis
- * handler fact's enrichment so the next turn's coaching-cache reader can
- * surface it as last_coaching_signal. For edit handlers (set_factor_value
- * et al.), enrichment does not exist on the fact shape, so signal_id is
- * carried only via the routing log.
- */
-function attachCoachingSignalToRunAnalysisFact(
-  facts: readonly HandlerFact[],
-  signalId: CoachingSignalId,
-  turnId: string,
-): readonly HandlerFact[] {
-  const idx = facts.findIndex((f) => f.fact_type === 'run_analysis');
-  if (idx < 0) return facts;
-  const fact = facts[idx];
-  if (fact.fact_type !== 'run_analysis') return facts;
-  const base = fact.result.enrichment ?? {};
-  const next: HandlerFact = {
-    ...fact,
-    result: {
-      ...fact.result,
-      enrichment: {
-        ...base,
-        coaching_signal_id: signalId,
-        coaching_signal_turn_id: turnId,
-        coaching_signal_produced_at: new Date().toISOString(),
-      },
-    },
-  };
-  const out = facts.slice();
-  out[idx] = next;
-  return out;
 }
 
 /**

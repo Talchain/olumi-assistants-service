@@ -134,9 +134,12 @@ export interface V5TurnTimings {
    * actually awaited a decision_review that RETURNED a result — i.e. under
    * `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true` on a run_analysis turn whose
    * enricher reached and completed the LLM call. Absent on the production
-   * default (flag off → enricher short-circuited), on chip-click / non-analysis
-   * turns, and on enricher skip/abort paths that never made the call (so a
+   * default (flag off → enricher short-circuited), on non-analysis turns,
+   * and on enricher skip/abort paths that never made the call (so a
    * phantom LLM call is never attributed to a call that did not happen).
+   * ROADMAP 2.73 Fix C: the chip-click run_analysis dispatch now threads
+   * the same four fields (chip-click-dispatch.ts), so chip-path
+   * decision_review calls are dashboard-visible like routed ones.
    */
   decision_review_ms?: number;
   /**

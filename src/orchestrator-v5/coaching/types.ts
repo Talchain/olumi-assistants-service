@@ -22,10 +22,36 @@ import type { StrengthenItem } from '../../orchestrator/tools/draft-graph.js';
 
 export type { StrengthenItem };
 
-export type CoachingSignalId =
-  | 'STALE_ANALYSIS_AFTER_EDIT'
-  | 'HIGH_SENSITIVITY_EDIT'
-  | 'FIRST_ANALYSIS_COMPLETE';
+/**
+ * Single source of truth for the coaching-signal vocabulary. The
+ * `CoachingSignalId` union DERIVES from this array, and the runtime
+ * `isCoachingSignalId` guard below derives from the same array — so a new
+ * signal added here is automatically accepted by every consumer, and the
+ * `COACHING_TEXT` bank in `signals/coaching-signals.ts` (typed
+ * `Record<CoachingSignalId, ...>`) fails to compile until it carries the
+ * new entry. This replaces the previous hand-listed guard in
+ * `coaching-cache-reader.ts`, which silently dropped any signal id it had
+ * not been manually taught (trap-12: the hand-maintained mirror).
+ */
+export const COACHING_SIGNAL_IDS = [
+  'STALE_ANALYSIS_AFTER_EDIT',
+  'HIGH_SENSITIVITY_EDIT',
+  'FIRST_ANALYSIS_COMPLETE',
+  'RERUN_ANALYSIS_COMPLETE',
+] as const;
+
+export type CoachingSignalId = (typeof COACHING_SIGNAL_IDS)[number];
+
+/**
+ * Runtime guard derived from `COACHING_SIGNAL_IDS` — cannot drift from the
+ * union because both share the one array above.
+ */
+export function isCoachingSignalId(value: unknown): value is CoachingSignalId {
+  return (
+    typeof value === 'string' &&
+    (COACHING_SIGNAL_IDS as readonly string[]).includes(value)
+  );
+}
 
 export interface DraftCoaching {
   readonly scenario_id: string;

@@ -70,6 +70,56 @@ function runAnalysisOutcome(): SuccessfulHandlerOutcome {
   return { assistant_text: 'done', handler_facts: [fact], llm_calls_used: 0 };
 }
 
+// ── ROADMAP 2.73 rerun fixtures — PLoT V2 envelope shape accepted by
+//    compactAnalysis (mirrors compare-runs.test.ts's `envelope`) ──────────
+
+function runEnvelope(opts: {
+  options: Array<{ id: string; label: string; win: number }>;
+}): Record<string, unknown> {
+  return {
+    analysis_status: 'completed',
+    results: opts.options.map((o) => ({
+      option_id: o.id,
+      option_label: o.label,
+      win_probability: o.win,
+      factor_sensitivity: [],
+    })),
+  };
+}
+
+function runAnalysisOutcomeWithEnvelope(
+  env: Record<string, unknown>,
+): SuccessfulHandlerOutcome {
+  const fact: HandlerFact = {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: 'scen-a',
+      leading_option_id: 'opt-1',
+      summary: 'Ran analysis',
+      enrichment: env,
+    },
+  } as unknown as HandlerFact;
+  return { assistant_text: 'done', handler_facts: [fact], llm_calls_used: 0 };
+}
+
+function priorRunAnalysisFactWithEnvelope(env: Record<string, unknown>): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: 'scen-a',
+      leading_option_id: 'opt-1',
+      summary: 'prior',
+      enrichment: env,
+      computed_at: '2026-07-01T00:00:00.000Z',
+      graph_hash_at_run: 'hash-prior',
+    },
+  } as unknown as HandlerFact;
+}
+
 function setFactorOutcome(targetId: string): SuccessfulHandlerOutcome {
   const fact: HandlerFact = {
     fact_type: 'set_factor_value',
@@ -161,14 +211,16 @@ describe('detectCoachingSignal', () => {
       expect(detection?.coaching_text).toMatch(/first analysis/i);
     });
 
-    it('does not fire on a subsequent run_analysis', () => {
+    it('yields to RERUN_ANALYSIS_COMPLETE on a subsequent run_analysis (ROADMAP 2.73)', () => {
+      // Pre-2.73 this returned null, so every rerun turn shipped zero
+      // coaching prose by construction.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
       });
-      expect(detection).toBeNull();
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
     });
 
     it('fires on first success even when prior run_analysis turn failed (no fact emitted)', () => {
@@ -182,6 +234,110 @@ describe('detectCoachingSignal', () => {
         priorFacts: [], // prior failed attempt produced no fact
       });
       expect(detection?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+    });
+  });
+
+  describe('RERUN_ANALYSIS_COMPLETE (ROADMAP 2.73)', () => {
+    it('fires with comparison-free copy when the runs cannot be projected', () => {
+      // Prior fact has no enrichment envelope (legacy shape) → projectRunFact
+      // returns null → the copy acknowledges the rerun without a comparison.
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text).toMatch(/re-run/i);
+      expect(detection?.coaching_text.length).toBeGreaterThan(0);
+    });
+
+    it('names the unchanged leader when the delta shows no movement', () => {
+      const env = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcomeWithEnvelope(env),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(env)],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text).toContain('unchanged');
+      expect(detection?.coaching_text).toContain('Offshore still leads');
+    });
+
+    it('names the delta when the leading option changed', () => {
+      const priorEnv = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const currentEnv = runEnvelope({
+        options: [
+          { id: 'b', label: 'Onshore', win: 0.55 },
+          { id: 'a', label: 'Offshore', win: 0.45 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text).toContain('Offshore led before');
+      expect(detection?.coaching_text).toContain('Onshore now leads');
+    });
+
+    it('fires with a NULL contextPack (chip-click path assembles no pack)', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcome(),
+        contextPack: null,
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text.length).toBeGreaterThan(0);
+    });
+
+    it('FIRST_ANALYSIS_COMPLETE still wins when no prior run fact exists (first-run behaviour unchanged)', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcome(),
+        contextPack: null,
+        priorFacts: [],
+      });
+      expect(detection?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+    });
+
+    it('never emits em-dashes or raw decimals in rerun copy', () => {
+      const priorEnv = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const currentEnv = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.7 },
+          { id: 'b', label: 'Onshore', win: 0.3 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
+      });
+      expect(detection).not.toBeNull();
+      expect(detection!.coaching_text).not.toContain('—');
+      expect(detection!.coaching_text).not.toContain('–');
+      expect(detection!.coaching_text).not.toMatch(/0\.\d/);
     });
   });
 
