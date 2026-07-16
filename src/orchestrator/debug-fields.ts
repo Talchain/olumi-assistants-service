@@ -32,6 +32,7 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
 import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import type { V5ContextSummary } from '../orchestrator-v5/context/build-context-summary.js';
+import type { AnswerShape } from '../orchestrator-v5/routing/answer-shape.js';
 
 const DEBUG_HEADER_NAME = 'x-olumi-debug';
 
@@ -137,6 +138,24 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    * two-gate `X-Olumi-Debug` header model does NOT apply to it.
    */
   readonly _reasoning?: string;
+  /**
+   * ROADMAP 1.132 (F2) — flag-gated PRODUCT sidecar (same class as
+   * `_reasoning` above, NOT a debug/diagnostic surface): the validated
+   * coach/converse structured answer shape
+   * `{ headline: 1 sentence, bullets: ≤3, detail }` enforced by
+   * CEE_ANSWER_SHAPE_ENFORCED. Populated only when that flag is on AND the
+   * turn-executor captured a shape whose derived text is exactly the final
+   * assistant_text (fail-closed — see TurnExecutorRunResult.answerShape).
+   * Stripped before strict `OlumiResponseSchema` validation, re-attached
+   * after — same mechanic as `_reasoning`. Content is user-facing answer
+   * text (already on the wire as assistant_text), never internal state.
+   *
+   * Pending formalisation as a named field on the shared @talchain/schemas
+   * contract (the `reasoning` field precedent: sidecar first, schema field
+   * once the UI surface lands). Intended to reach the client UI; the
+   * two-gate `X-Olumi-Debug` header model does NOT apply.
+   */
+  readonly _answer_shape?: AnswerShape;
 };
 
 /**

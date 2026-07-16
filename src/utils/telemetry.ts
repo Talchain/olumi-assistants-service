@@ -772,6 +772,29 @@ export const TelemetryEvents = {
   //   orientation_length: number
   V5CoachingAnswerSource: "v5.coaching.answer_source",
 
+  // ROADMAP 1.132 (F2) — CEE_ANSWER_SHAPE_ENFORCED. Emitted on coach/converse
+  // turns when the validated `answer_shape` is captured for the `_answer_shape`
+  // wire sidecar (turn-executor compose branches). Lengths/counts ONLY — never
+  // the shape's content (PII discipline).
+  //   intent_class: 'coach' | 'converse'
+  //   headline_length: number
+  //   bullet_count: number   (≤3 by schema)
+  //   detail_length: number
+  V5AnswerShapeEmitted: "v5.answer_shape.emitted",
+
+  // ROADMAP 1.132 (F2) hardening — the captured answer_shape no longer
+  // describes the FINAL assistant_text: a post-capture rewriter fired (STEP
+  // 6.6 structural-claim honesty swap, goal-receipt swap, empty-answer
+  // backstop, the finaliser egress guards, a commit-failure response
+  // replacement, or the route-level egress entity-id scrub). The sidecar is
+  // DROPPED rather than shipped stale (fail closed) — a shape describing
+  // text the user never sees is guarantee-theatre. Lengths + seam only —
+  // never the text content (PII discipline).
+  //   dispatch_path: 'turn_executor_finalise' | 'route_egress'
+  //   final_text_length: number
+  //   derived_text_length: number
+  V5AnswerShapeDroppedStale: "v5.answer_shape.dropped_stale",
+
   // V5 Coaching State Spine — Stage 2B-1b. Emitted once per turn AFTER the turn's
   // state is successfully persisted (post-append_turn_atomic). Same privacy
   // contract as V5CoachingStateDerived: correlation IDs + counts / closed-enum

@@ -114,6 +114,7 @@ import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-disp
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
+import { deriveAnswerTextFromShape } from '../orchestrator-v5/routing/answer-shape.js';
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import { getRequestId } from '../utils/request-id.js';
@@ -341,6 +342,15 @@ function sendFinalised200(
      */
     readonly reasoning?: string;
     /**
+     * ROADMAP 1.132 (F2) — validated coach/converse answer shape, threaded
+     * from `run.answerShape` (turn-executor; fail-closed capture — only
+     * present when the final assistant_text IS the shape-derived text).
+     * Attached to the wire body as `_answer_shape` AFTER egress validation
+     * when `config.features.answerShapeEnforced` is set — same re-attach
+     * mechanic as `_reasoning` — and NEVER on the fallback envelope.
+     */
+    readonly answerShape?: import('../orchestrator-v5/routing/answer-shape.js').AnswerShape;
+    /**
      * The user's message for THIS turn, verbatim, or `null` when the turn
      * carries none (system events). Threaded to the egress sanitiser's
      * looping-chip guard, which drops any pure-text-replay chip that would
@@ -415,7 +425,13 @@ function sendFinalised200(
     // gate at the re-attach block below is the sole authority, and the
     // strict `OlumiResponseSchema` must not see an unknown key.
     const hasReasoning = '_reasoning' in asRecord;
-    if (!hasTimings && !hasTrace && !hasContextSummary && !hasReasoning) {
+    // ROADMAP 1.132 — `_answer_shape` is threaded via `ctx`, never
+    // body-attached by any dispatch path today. Stripped defensively anyway
+    // (same defence-in-depth posture as `_reasoning`): the route's flag
+    // gate at the re-attach block below is the sole authority, and the
+    // strict `OlumiResponseSchema` must not see an unknown key.
+    const hasAnswerShape = '_answer_shape' in asRecord;
+    if (!hasTimings && !hasTrace && !hasContextSummary && !hasReasoning && !hasAnswerShape) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
     const cloned = { ...asRecord };
@@ -425,6 +441,7 @@ function sendFinalised200(
     delete cloned._diagnostic_trace;
     delete cloned._context_summary;
     delete cloned._reasoning;
+    delete cloned._answer_shape;
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -660,6 +677,50 @@ function sendFinalised200(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
       ctx,
     );
+  }
+  // Re-attach `_answer_shape` post-validation on the success path AND only
+  // when `config.features.answerShapeEnforced` is set (ROADMAP 1.132, same
+  // single-flag re-attach shape as `_reasoning` above). `ctx.answerShape`
+  // is threaded from `run.answerShape` (turn-executor) — the VALIDATED
+  // coach/converse shape whose derived text was the final assistant_text
+  // when the executor finalised. The fallback envelope never carries it; an
+  // upstream body-attach was dropped by the strip step above. Re-finalise
+  // for WeakSet membership, same as the other surfaces.
+  //
+  // Stale-sidecar fail-closed (P1 hardening): this block is the LAST body
+  // mutation before send, so the tie between the shape and the text the
+  // user actually receives is verified HERE, at the true final egress —
+  // covering every rewriter between the executor's compose-time capture and
+  // the wire (the executor's own STEP 6.6 / goal-receipt / backstop /
+  // finaliser guards are re-checked in finalizeRun; THIS check additionally
+  // covers the route-level sanitiseOlumiResponseForEgress entity-id scrub
+  // and any future mutator on this path). Mismatch ⇒ ship the body WITHOUT
+  // the sidecar, never a shape describing text the user never sees. The
+  // comparison runs on the POST-sanitise augmented body, i.e. the exact
+  // bytes `reply.send` would carry.
+  if (egress.ok && config.features.answerShapeEnforced && ctx.answerShape) {
+    const augmented: OlumiResponseWithDebugFields = {
+      ...wireBody,
+      _answer_shape: ctx.answerShape,
+    };
+    const withShape = finaliseV5Response(
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+      ctx,
+    );
+    const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
+    const finalText =
+      typeof withShape.assistant_text === 'string' ? withShape.assistant_text : '';
+    if (finalText === derivedText) {
+      wireBody = withShape;
+    } else {
+      emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+        request_id: requestId,
+        exit_path: exitPath,
+        dispatch_path: 'route_egress',
+        final_text_length: finalText.length,
+        derived_text_length: derivedText.length,
+      });
+    }
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);
@@ -2335,6 +2396,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // into the flag-gated `_reasoning` sidecar (see sendFinalised200 ctx
       // jsdoc). Undefined when the flag was off or no thinking was captured.
       ...(run.reasoning ? { reasoning: run.reasoning } : {}),
+      // ROADMAP 1.132: thread the turn-executor's validated answer shape
+      // into the flag-gated `_answer_shape` sidecar (see sendFinalised200
+      // ctx docs above).
+      ...(run.answerShape ? { answerShape: run.answerShape } : {}),
     });
   });
 }
