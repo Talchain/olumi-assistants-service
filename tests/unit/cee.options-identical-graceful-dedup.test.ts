@@ -54,7 +54,10 @@ import {
   runOptionsIdenticalBypass,
 } from "../../src/cee/unified-pipeline/stages/repair/options-identical-bypass.js";
 import type { StageContext, PipelineOutcome } from "../../src/cee/unified-pipeline/types.js";
-import type { GraphT } from "../../src/schemas/graph.js";
+// StageContext.graph is GraphV1 (the pipeline's mutable graph), so these
+// fixtures must be typed GraphV1 — not the passthrough Zod output GraphT —
+// to be assignable as makeCtx({ graph }) overrides.
+import type { GraphV1 } from "../../src/contracts/plot/engine.js";
 
 const DROPPED_DUPLICATE_EVENT = "cee.options_identical.dropped_duplicate";
 const BYPASS_EVENT = "cee.options_identical.pre_repair_bypass";
@@ -82,7 +85,7 @@ function makeOutcome(): PipelineOutcome {
  * options — no is_baseline flag, no baseline-shaped label/id, no
  * extractionType marker.
  */
-function makeObservedShapeGraph(): GraphT {
+function makeObservedShapeGraph(): GraphV1 {
   return {
     version: "1",
     default_seed: 42,
@@ -149,7 +152,7 @@ function makeObservedShapeGraph(): GraphT {
       { from: "outcome_1", to: "goal_1", strength_mean: 0.9, belief_exists: 1 },
     ],
     meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
-  } as unknown as GraphT;
+  } as unknown as GraphV1;
 }
 
 /**
@@ -158,11 +161,11 @@ function makeObservedShapeGraph(): GraphT {
  * is the genuine duplicate the F4-narrowed rescue still absorbs (a same-label
  * collapse carries no user-traceable content the drop would lose).
  */
-function makeMatchingLabelGraph(): GraphT {
+function makeMatchingLabelGraph(): GraphV1 {
   const graph = makeObservedShapeGraph() as any;
   const hybrid = graph.nodes.find((n: any) => n.id === "opt_hybrid");
   hybrid.label = "Focus on SMB"; // identical to opt_smb — a true same-label duplicate
-  return graph as GraphT;
+  return graph as GraphV1;
 }
 
 /**
@@ -172,7 +175,7 @@ function makeMatchingLabelGraph(): GraphT {
  * keeper=group[0] rule would keep B and silently drop A. All three options
  * carry distinct labels and no baseline flag/marker.
  */
-function makeABCReproGraph(): GraphT {
+function makeABCReproGraph(): GraphV1 {
   return {
     version: "1",
     default_seed: 42,
@@ -202,7 +205,7 @@ function makeABCReproGraph(): GraphT {
       { from: "outcome_1", to: "goal_1", strength_mean: 0.9, belief_exists: 1 },
     ],
     meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
-  } as unknown as GraphT;
+  } as unknown as GraphV1;
 }
 
 const OBSERVED_SIGNATURE = "fac_enterprise_focus:0.0000|fac_smb_focus:1.0000";

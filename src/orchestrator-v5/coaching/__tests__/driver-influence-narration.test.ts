@@ -52,7 +52,23 @@ import { tryPostAnalysisAdviceGate } from '../../routing/post-analysis-advice-ga
 // Fixtures — minimal reconstruction of the DGAI #341 wire
 // ============================================================================
 
-const FACTOR_SENSITIVITY_341 = [
+// `zero_reason` is optional: the influence-top factors carry an
+// intervention_override pin, the least-influential (Market Timing Pressure)
+// does not — that asymmetry is load-bearing for the tests below (the
+// "pin lifted" case strips it), so the element type must allow it to be absent.
+interface FactorSensitivity341 {
+  factor_id: string;
+  factor_label: string;
+  influence_score: number;
+  influence_rank: number;
+  sensitivity_score: number;
+  elasticity: number;
+  direction: 'positive' | 'negative';
+  confidence: number;
+  zero_reason?: string;
+}
+
+const FACTOR_SENSITIVITY_341: readonly FactorSensitivity341[] = [
   {
     factor_id: 'fac_tlc',
     factor_label: 'Technical Leadership Capacity',
@@ -85,7 +101,7 @@ const FACTOR_SENSITIVITY_341 = [
     direction: 'positive',
     confidence: 0.3,
   },
-] as const;
+];
 
 const ENRICHMENT_341: Record<string, unknown> = {
   option_comparison: [
