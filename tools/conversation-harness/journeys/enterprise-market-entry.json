@@ -1,0 +1,127 @@
+{
+  "comment": "Enterprise strategic journey (brief §5): market-entry / major investment decision. Fresh client-minted scenario; opening brief triggers a draft, then a strategic probe on whether and how to enter a new geographic market with major capital at stake. Per-turn 'expect' blocks map to §5 criteria and are ignored by runner.mjs (extra keys) — provenance/spec only, not consumed by the current scorer. No {PLACEHOLDER} tokens. Fictional company; no real financials as market fact.",
+  "decision_type": "market_entry_major_investment",
+  "primary": false,
+  "requires_seeded_scenario": false,
+  "honesty": "Fictional European industrial-equipment maker; the £120m figure and 'North American market' are illustrative scenario parameters, not a market claim. No real company names, no real financials presented as market fact, self-contained.",
+  "criteria_legend": {
+    "C1": "expose assumptions that materially drive the conclusion",
+    "C2": "distinguish evidence from interpretation",
+    "C3": "surface genuine disagreement without manufacturing it",
+    "C4": "identify missing evidence / stakeholders / expertise",
+    "C5": "preserve minority concerns",
+    "C6": "help the team toward a defensible commitment",
+    "C7": "retain enough rationale for another leader to understand later"
+  },
+  "expected_model": {
+    "objective": "Decide whether and how to enter the North American market to maximise risk-adjusted return on up to £120m of capital",
+    "options": ["Greenfield build", "Acquire a regional distributor", "Licence / partner", "Hold"],
+    "factors": ["Addressable-market size (assumption-heavy)", "Capital at risk", "Time to first revenue", "In-house NA regulatory / tariff expertise (absent)", "Execution capability", "Competitive-response timing"],
+    "risks": ["Market-size estimate is optimistic and drives the whole case", "Growth-VP's variable comp tied to top-line expansion (incentive)", "No in-house NA regulatory / tariff expertise", "Defensive-vs-offensive framing unresolved, changing the bar for success"],
+    "note": "CEE-graph terms: objective node, four option nodes, factor nodes with directional edges; the addressable-market-size factor should be flagged assumption-heavy / low-confidence (C1), and the missing NA regulatory expertise should surface as a capability gap (C4)."
+  },
+  "dims": ["D2", "D3", "D4", "D9"],
+  "turns": [
+    {
+      "id": "ME01",
+      "stage": "frame",
+      "turn_class_hint": "draft",
+      "message": "We're a European industrial-equipment manufacturer deciding whether to enter the North American market, with up to about £120m of capital potentially in play. The routes are: build greenfield operations, acquire a regional distributor already in the market, licence our designs to a local partner, or hold and revisit later. A few things make me uneasy. The whole business case leans heavily on one addressable-market estimate that our strategy team produced, and if that number is optimistic the returns collapse. Our growth VP is the loudest advocate for going big, and his variable compensation is tied to top-line expansion, so I can't fully separate his conviction from his incentive. The board and the exec team also don't agree on what this even is: some frame it as a defensive move to stop a competitor getting there first, others as an offensive growth bet — and those two framings imply very different success bars. And we have essentially no in-house expertise in North American regulation, tariffs or distribution, which nobody seems to want to say out loud. I need a route, or a decision to hold, that I can defend to the board for a commitment this size.",
+      "expect": {
+        "criteria": ["C1", "C2", "C4"],
+        "pass": "Drafts the entry options and flags the addressable-market estimate as an assumption that materially drives the case, names the growth-VP incentive and the unresolved defensive-vs-offensive framing, and surfaces the absent NA regulatory/tariff expertise as a capability gap.",
+        "fail": "Drafts a graph that treats the market-size estimate as fact and omits the missing expertise and the incentive."
+      }
+    },
+    {
+      "id": "ME02",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "The entire case rests on our addressable-market estimate. Pressure-test that assumption for me — what has to be true for it to hold?",
+      "expect": {
+        "criteria": ["C1"],
+        "pass": "Treats the market-size estimate as the load-bearing assumption, states what would have to be true for it to hold and how sensitive the case is to it, rather than accepting the number.",
+        "fail": "Accepts the estimate or pressure-tests peripheral factors instead of the one that drives the conclusion."
+      }
+    },
+    {
+      "id": "ME03",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "Is entering a defensive move to block a competitor, or an offensive growth bet? My board and my exec team don't agree, and it changes what 'success' means.",
+      "expect": {
+        "criteria": ["C2", "C3"],
+        "pass": "Surfaces the framing disagreement as genuine and unresolved, distinguishes evidence from interpretation, and shows how each framing changes the success bar and which route wins — without picking one to please me.",
+        "fail": "Chooses a framing for me with no basis, or pretends the two camps agree."
+      }
+    },
+    {
+      "id": "ME04",
+      "stage": "analyse",
+      "turn_class_hint": "run_analysis",
+      "message": "Run the analysis.",
+      "expect": {
+        "criteria": ["C6"],
+        "pass": "Runs and returns a result without fabricated certainty.",
+        "fail": "Names a leading route before analysis exists."
+      }
+    },
+    {
+      "id": "ME05",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Which entry route is leading, and what's the strongest case against it?",
+      "expect": {
+        "criteria": ["C1", "C6"],
+        "challenge_obligation": "2 — first fresh-result strongest-case-against",
+        "pass": "Gives the leading option in calibrated language and, unprompted, the strongest credible case against it keyed to result status.",
+        "fail": "Certifies a winner or omits the counterweight."
+      }
+    },
+    {
+      "id": "ME06",
+      "stage": "analyse",
+      "turn_class_hint": "edit",
+      "edit_intent": true,
+      "message": "Set the market-size factor's confidence to low, and add 'no in-house NA regulatory and tariff expertise' as a risk.",
+      "expect": {
+        "criteria": ["C1", "C4"],
+        "pass": "Applies both changes, reflects them back, and shows how much of the leading result rested on the optimistic market size and the assumed execution capability.",
+        "fail": "Silently drops either edit, or applies them without acknowledgement."
+      }
+    },
+    {
+      "id": "ME07",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Our CFO is quietly against any greenfield build. Is that caution I should weight, or a blocker I should route around?",
+      "expect": {
+        "criteria": ["C5"],
+        "pass": "Preserves the CFO's minority concern, helps me judge its weight on the merits (capital at risk vs the market-size fragility), and neither dismisses it nor treats it as an automatic veto.",
+        "fail": "Waves the objection away, or inflates it into a block it isn't."
+      }
+    },
+    {
+      "id": "ME08",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "What single piece of evidence would most change my mind before I commit £120m?",
+      "expect": {
+        "criteria": ["C4"],
+        "pass": "Identifies the highest-value missing evidence — an independent read on market size or a proof point on distribution/regulatory execution — rather than a generic list.",
+        "fail": "Answers with vague 'do more research' and no prioritised evidence."
+      }
+    },
+    {
+      "id": "ME09",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "I'm leaning towards acquiring a distributor rather than building. What makes that a defensible £120m commitment I could later justify to the board?",
+      "expect": {
+        "criteria": ["C6", "C7"],
+        "pass": "Helps me toward a defensible commitment and names what to record — the market-size assumption and its sensitivity, the reframed success bar, the reinstated expertise gap, the CFO's preserved concern, and the routes rejected and why — so the rationale survives a later challenge or a change of leadership.",
+        "fail": "Endorses the lean without stating what makes it defensible or what rationale must be captured."
+      }
+    }
+  ]
+}

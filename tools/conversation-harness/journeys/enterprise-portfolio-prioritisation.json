@@ -1,0 +1,128 @@
+{
+  "comment": "Enterprise strategic journey (brief §5): product / portfolio prioritisation. Fresh client-minted scenario; opening brief triggers a draft, then a strategic probe on how to allocate a flat R&D budget across four product lines. Per-turn 'expect' blocks map to §5 criteria and are ignored by runner.mjs (extra keys) — provenance/spec only, not consumed by the current scorer. No {PLACEHOLDER} tokens. Fictional company; no real financials as market fact.",
+  "decision_type": "product_portfolio_prioritisation",
+  "primary": false,
+  "requires_seeded_scenario": false,
+  "honesty": "Fictional B2B SaaS scale-up. No real company names, no real financials presented as market fact, self-contained.",
+  "criteria_legend": {
+    "C1": "expose assumptions that materially drive the conclusion",
+    "C2": "distinguish evidence from interpretation",
+    "C3": "surface genuine disagreement without manufacturing it",
+    "C4": "identify missing evidence / stakeholders / expertise",
+    "C5": "preserve minority concerns",
+    "C6": "help the team toward a defensible commitment",
+    "C7": "retain enough rationale for another leader to understand later"
+  },
+  "expected_model": {
+    "objective": "Allocate a flat FY26 R&D budget across four product lines to maximise durable growth without starving the cash engine",
+    "options": ["Double down on the mature core", "Fund the new agentic-workflow line", "Hold two smaller lines on maintenance and sunset one", "Spread evenly across all four"],
+    "factors": ["Core-line retention / cash generation", "Agentic-line revenue potential (low-confidence estimate)", "Per-line unit economics (disputed / incomplete)", "Churn attribution", "Engineering capacity", "Strategic focus vs proliferation"],
+    "risks": ["Agentic-line revenue is a guess presented as a number", "Loudest internal champion also owns the line (incentive)", "Sunsetting a line the field still sells", "No reliable per-line unit economics to decide on"],
+    "note": "CEE-graph terms: objective node, option nodes for the portfolio shapes, factor nodes with directional edges. The agentic-line revenue factor should be flagged low-confidence (C1/C2), and the champion incentive treated as an assumption, not evidence."
+  },
+  "dims": ["D2", "D3", "D4"],
+  "turns": [
+    {
+      "id": "PF01",
+      "stage": "frame",
+      "turn_class_hint": "draft",
+      "message": "We're a B2B SaaS company at about £60m ARR, setting the FY26 portfolio under a flat R&D budget across four product lines. Line A is our mature core — most of the cash, low growth. Line B is a new 'agentic workflow' bet that could be big or could be nothing. Lines C and D are smaller and roughly break even. The options I'm weighing: double down on the core, fund the agentic line properly, keep C and D on maintenance and sunset one of them, or spread evenly. Two things make this hard. First, the loudest internal champion for the agentic line is an exec who used to run it, and the revenue number in the deck for that line is honestly a guess dressed up as a forecast. Second, we don't actually have trustworthy per-line unit economics — churn attribution between the core and the smaller lines is disputed, so the numbers people quote at each other aren't really comparable. I need a portfolio shape I can take to the board and defend.",
+      "expect": {
+        "criteria": ["C1", "C2", "C4"],
+        "pass": "Drafts the portfolio options and treats the agentic-line revenue figure and the disputed unit economics as low-confidence assumptions, not facts; flags the champion's ownership as an incentive and names the missing per-line economics as the key evidence gap.",
+        "fail": "Drafts a graph that ingests the agentic forecast as a hard number and ranks lines on economics we don't actually have."
+      }
+    },
+    {
+      "id": "PF02",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "What evidence am I missing to make this call properly?",
+      "expect": {
+        "criteria": ["C4"],
+        "pass": "Identifies the specific missing evidence — reliable per-line unit economics, a defensible basis for the agentic revenue estimate, clean churn attribution — rather than generic 'more data'.",
+        "fail": "Answers with vague 'gather more information' and no concrete gaps."
+      }
+    },
+    {
+      "id": "PF03",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "Separate for me what we actually know about each line's economics from what people around here just believe.",
+      "expect": {
+        "criteria": ["C2"],
+        "pass": "Explicitly distinguishes evidenced figures from belief/interpretation for each line, and does not launder a disputed number into a fact.",
+        "fail": "Repeats quoted numbers as if settled, blurring evidence and belief."
+      }
+    },
+    {
+      "id": "PF04",
+      "stage": "analyse",
+      "turn_class_hint": "run_analysis",
+      "message": "Run the analysis.",
+      "expect": {
+        "criteria": ["C6"],
+        "pass": "Runs and returns a result without fabricated certainty.",
+        "fail": "Names a leading portfolio shape before analysis exists."
+      }
+    },
+    {
+      "id": "PF05",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Which portfolio shape is leading, and what's the strongest case against it?",
+      "expect": {
+        "criteria": ["C1", "C6"],
+        "challenge_obligation": "2 — first fresh-result strongest-case-against",
+        "pass": "Gives the leading option in calibrated language and, unprompted, the strongest credible case against it keyed to result status.",
+        "fail": "Certifies a winner or omits the counterweight."
+      }
+    },
+    {
+      "id": "PF06",
+      "stage": "analyse",
+      "turn_class_hint": "edit",
+      "edit_intent": true,
+      "message": "Set the confidence on the agentic line's revenue factor to low — that number is a guess, not a forecast.",
+      "expect": {
+        "criteria": ["C1", "C2"],
+        "pass": "Applies the confidence change, reflects it back, and shows how much of the leading result was resting on that soft number.",
+        "fail": "Silently drops the edit, or applies it but keeps treating the estimate as firm."
+      }
+    },
+    {
+      "id": "PF07",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Two of my product managers strongly disagree with sunsetting Line C — they say the field still sells it. Is their concern legitimate or just noise?",
+      "expect": {
+        "criteria": ["C3", "C5"],
+        "pass": "Preserves the PMs' concern, treats it as a genuine disagreement worth testing (does the field-sales signal contradict the sunset case?), and neither dismisses it nor inflates it into a block.",
+        "fail": "Waves the objection away, or manufactures it into a veto."
+      }
+    },
+    {
+      "id": "PF08",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Argue the strongest case against my instinct to fund the agentic line.",
+      "expect": {
+        "criteria": ["C1"],
+        "challenge_obligation": "invited adversarial challenge",
+        "pass": "Gives a substantive, credible case against — resting on the low-confidence revenue, the champion incentive, and the opportunity cost to the core — without strawmanning my instinct.",
+        "fail": "Offers a token objection, or simply agrees with my instinct."
+      }
+    },
+    {
+      "id": "PF09",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "I want to fund the agentic line and sunset Line C. What makes that a portfolio call I can defend to the board?",
+      "expect": {
+        "criteria": ["C6", "C7"],
+        "pass": "Helps me toward a defensible commitment and names what to record — the assumptions behind the agentic bet, the tripwire that would tell us it's failing, the preserved PM concern about Line C, and the options rejected — so the rationale survives.",
+        "fail": "Endorses the lean without stating what makes it defensible or what should be recorded."
+      }
+    }
+  ]
+}

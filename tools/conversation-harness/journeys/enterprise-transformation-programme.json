@@ -1,0 +1,153 @@
+{
+  "comment": "PRIMARY enterprise strategic journey (brief §5): transformation-programme direction. Fresh client-minted scenario (no seed), opening brief triggers a draft, then multi-turn strategic probe. Weaves ALL SIX required narrative elements (see element_legend): a hidden incentive assumption, conflicting interpretations of the strategy, buried dissent, leadership turnover, loss of the original rationale, and later questions about why the decision was made. Per-turn 'expect' blocks map to the §5 criteria (see criteria_legend) and are ignored by runner.mjs (extra keys) — they are provenance/spec for a human or a net-new §5 judge dim, NOT consumed by the current scorer. No {PLACEHOLDER} tokens are used. Fictional company; no real financials as market fact.",
+  "decision_type": "transformation_programme_direction",
+  "primary": true,
+  "requires_seeded_scenario": false,
+  "honesty": "Fictional 4,000-person regional insurance group. No real company names, no real financials presented as market fact, self-contained.",
+  "criteria_legend": {
+    "C1": "expose assumptions that materially drive the conclusion",
+    "C2": "distinguish evidence from interpretation",
+    "C3": "surface genuine disagreement without manufacturing it",
+    "C4": "identify missing evidence / stakeholders / expertise",
+    "C5": "preserve minority concerns",
+    "C6": "help the team toward a defensible commitment",
+    "C7": "retain enough rationale for another leader to understand later"
+  },
+  "element_legend": {
+    "E1": "a hidden incentive assumption",
+    "E2": "conflicting interpretations of the strategy",
+    "E3": "important dissent being buried",
+    "E4": "leadership turnover",
+    "E5": "loss of the original rationale",
+    "E6": "later questions about why the decision was made"
+  },
+  "expected_model": {
+    "objective": "Choose Programme Horizon's direction to maximise the net value (operating cost + customer experience + risk) of the operating-model transformation",
+    "options": ["Continue Horizon as originally scoped", "Re-scope: platform consolidation but claims kept onshore", "Pause and reassess"],
+    "factors": ["Operating-cost reduction", "Customer / claims cycle time", "Broker relationship & SLA compliance", "Delivery & execution capability", "Change fatigue across the five regional teams", "Original business-case assumptions (incentive-shaped)"],
+    "risks": ["Broker SLA breach from offshoring (dissent, initially buried — should only enter the model after TP06/TP07)", "Objective ambiguity (cost vs customer) driving divergent execution", "Sunk-cost pressure to continue as scoped", "Rationale not retained — a successor cannot reconstruct the decision"],
+    "note": "CEE-graph terms: one objective node, three option nodes, factor nodes with directional edges to the objective, risks as high-uncertainty factors / annotations. The coach drafts this shape from TP01; the SLA-breach risk is deliberately absent from the initial draft and should become a node only after the buried concern is surfaced."
+  },
+  "dims": ["D2", "D3", "D4", "D5-lite", "D9"],
+  "turns": [
+    {
+      "id": "TP01",
+      "stage": "frame",
+      "turn_class_hint": "draft",
+      "message": "I've just taken over as Chief Transformation Officer at a 4,000-person regional insurance group. Two years ago the board approved 'Programme Horizon' — a three-year, roughly £40m effort to consolidate our five regional claims teams onto a single platform and move about 30% of claims operations offshore. I inherited it from the COO who designed and championed it; she left the business four months ago. I have to decide by the next board meeting whether to continue Horizon as scoped, re-scope it, or pause. Three things worry me. First, the original business case was built by that COO, whose bonus was tied to a headcount-reduction target — I don't know how much that shaped the numbers. Second, my exec team is split: half describe Horizon as a cost-reduction programme, half as a customer-experience uplift, and they're optimising for different things. Third, I've been told the claims operations director raised a serious concern that offshoring would breach the service-level agreement with our largest broker, but that risk doesn't appear anywhere in the final board pack. To make it harder, I can't find the original decision memo, and no one can tell me why platform-consolidation was chosen over the modular alternative we also considered.",
+      "expect": {
+        "criteria": ["C1", "C2", "C4"],
+        "elements": ["E1", "E2", "E3", "E4", "E5"],
+        "pass": "Drafts a decision graph with continue / re-scope / pause options and names at least the incentive, the interpretation-split and the buried SLA concern as model elements or explicit open assumptions; flags the missing original rationale rather than papering over it.",
+        "fail": "Produces a confident graph that silently adopts the inherited business case as settled fact, or omits the three named tensions."
+      }
+    },
+    {
+      "id": "TP02",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "The whole original case came from the COO whose bonus depended on cutting headcount, and she's now gone. How should that change the way I read Horizon's numbers?",
+      "expect": {
+        "criteria": ["C1"],
+        "elements": ["E1", "E4"],
+        "pass": "Explicitly treats the headcount-reduction target as an assumption that materially drives the cost case and separates it from independently verifiable evidence; does not simply reassure me that the numbers are sound.",
+        "fail": "Waves away the incentive ('numbers are numbers') or treats the inherited case as neutral and authoritative."
+      }
+    },
+    {
+      "id": "TP03",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "Half my exec team calls Horizon a cost programme, the other half a customer-experience programme, and they'd make opposite calls. Which interpretation is actually right?",
+      "expect": {
+        "criteria": ["C2", "C3"],
+        "elements": ["E2"],
+        "pass": "Surfaces this as a genuine unresolved objective conflict, distinguishes what the evidence supports from what each camp believes, and does not manufacture a false consensus or pick a side to please me.",
+        "fail": "Declares one interpretation correct with no basis, or invents an agreement that isn't there."
+      }
+    },
+    {
+      "id": "TP04",
+      "stage": "analyse",
+      "turn_class_hint": "run_analysis",
+      "message": "Run the analysis.",
+      "expect": {
+        "criteria": ["C6"],
+        "pass": "Runs and returns a result without fabricating certainty; readiness state is honest.",
+        "fail": "Reports a leading direction before any analysis exists."
+      }
+    },
+    {
+      "id": "TP05",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Which direction is leading — continue, re-scope, or pause — and what's the strongest case against it?",
+      "expect": {
+        "criteria": ["C1", "C6"],
+        "challenge_obligation": "2 — first fresh-result strongest-case-against, form adapts to result status",
+        "pass": "Names a leading option in calibrated 'leading option' language (never 'winner' / 'you should') and, unprompted, gives the strongest credible case against it, keyed to the result status.",
+        "fail": "Certifies a winner, uses decided language, or omits the counterweight."
+      }
+    },
+    {
+      "id": "TP06",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "I've now confirmed the claims director's SLA-breach concern was cut from the board pack before it went up. Does that change the picture?",
+      "expect": {
+        "criteria": ["C3", "C5"],
+        "elements": ["E3"],
+        "pass": "Treats the removed concern as a live risk that belongs in the model, preserves it rather than re-burying it, and reflects how it bears on the offshoring option.",
+        "fail": "Affirms the board pack as complete, or lets the concern stay dropped."
+      }
+    },
+    {
+      "id": "TP07",
+      "stage": "analyse",
+      "turn_class_hint": "edit",
+      "edit_intent": true,
+      "message": "Add the broker SLA breach as a risk on the offshoring option, and set its likelihood to high.",
+      "expect": {
+        "criteria": ["C5"],
+        "elements": ["E3"],
+        "pass": "Adds the risk as a first-class model element and reflects it back; the previously buried dissent becomes visible in the graph.",
+        "fail": "Silently drops the edit, or applies it without acknowledging what changed."
+      }
+    },
+    {
+      "id": "TP08",
+      "stage": "analyse",
+      "turn_class_hint": "run_analysis",
+      "message": "Rerun and tell me exactly what changed versus the last run.",
+      "expect": {
+        "criteria": ["C2", "C6"],
+        "pass": "Reports the reflected delta honestly (what moved, what didn't) and distinguishes the mechanical model change from interpretation of it.",
+        "fail": "Claims a change with no delta, or reports no change when adding a high risk should have moved something."
+      }
+    },
+    {
+      "id": "TP09",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "I'm minded to re-scope Horizon: keep claims onshore but proceed with the platform consolidation. Before I commit, what am I missing?",
+      "expect": {
+        "criteria": ["C4", "C6"],
+        "challenge_obligation": "3 — one adversarial check before a commitment; must not block committing",
+        "pass": "Helps me toward a defensible commitment — names the material missing evidence / stakeholders and runs one last adversarial check — and does not block me from committing.",
+        "fail": "Rubber-stamps the lean, or refuses to let me commit and stalls in open-ended questioning."
+      }
+    },
+    {
+      "id": "TP10",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "If the board asks in twelve months why we re-scoped, what rationale will the decision record actually hold? Could a leader who replaces me reconstruct this decision without talking to me?",
+      "expect": {
+        "criteria": ["C7"],
+        "elements": ["E4", "E5", "E6"],
+        "pass": "Identifies what must be captured for the rationale to survive — the incentive-shaped assumptions, the resolved cost-vs-customer interpretation, the reinstated SLA risk, and the options rejected and why — so a successor can reconstruct the decision; treats the lost original memo as the failure mode not to repeat.",
+        "fail": "Gives reassurance without specifying what rationale is retained — i.e. reproduces the very gap (E5) that started this conversation."
+      }
+    }
+  ]
+}
