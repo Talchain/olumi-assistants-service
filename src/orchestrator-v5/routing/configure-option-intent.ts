@@ -21,7 +21,7 @@
  * Triggers (any one):
  *   1. `chip_prefix` — the message starts with the shared chip prefix
  *      ("Help me configure …"). Chips replay their message as user text;
- *      the prefix comes from `configure-option-copy.ts`, the SAME module
+ *      the prefix comes from `configure-option-chip-text.ts`, the SAME module
  *      the chip composers build from, so chip copy and route cannot drift
  *      apart (trap-12: derive, don't mirror). Deliberately label-free: the
  *      chip only exists when options exist, and the intent is unambiguous
@@ -43,7 +43,7 @@
  * question, state query — before dispatching.
  */
 
-import { CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX } from '../configure-option-copy.js';
+import { CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX } from '../configure-option-chip-text.js';
 import { containsPhrase } from './option-intervention-guard.js';
 
 export type ConfigureOptionIntentTrigger =
@@ -71,11 +71,16 @@ const OPTION_WORD = /\boptions?\b/;
  * (either signal alone suffices): configure INTENT is imperative, and
  * mutating the graph on a question ("what did you just configure on my
  * options?", "could configuring an option help?") is the worst failure
- * mode. A suppressed polite question falls through to the LLM router,
- * where the turn-executor's adjust_edge_strength misroute backstop keeps
- * it from writing the wrong field. The chip-prefix trigger is checked
- * BEFORE this suppressor: chip messages are the product's own copy and
- * never question-shaped.
+ * mode. HONEST LIMIT: a suppressed question falls through to the LLM
+ * router with NO deterministic backstop — the turn-executor's
+ * adjust_edge_strength misroute guard calls THIS detector, so the same
+ * question-lead suppression fires there too. A question-shaped configure
+ * message the LLM router misroutes to adjust_edge_strength is refused
+ * only if the router's own gates catch it. A question-tolerant backstop
+ * (vocabulary-only match at the refusal site) is a deliberate follow-up,
+ * not built here. The chip-prefix trigger is checked BEFORE this
+ * suppressor: chip messages are the product's own copy and never
+ * question-shaped.
  */
 const QUESTION_LEAD_PATTERN =
   /^(?:what|how|why|when|where|who|which|can|could|would|should|does|do|is|are|will)\b/;

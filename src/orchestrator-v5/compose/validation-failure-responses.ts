@@ -552,15 +552,18 @@ function composeOptionInterventionMisroute(error: ValidationError): BranchResult
   // ROADMAP 2.11 / P1-3 — the guard now also refuses adjust_edge_strength
   // proposals for configure-option intent (the live A5/A7 loop wrote edge
   // strength while READING as configuration). The clarify names the right
-  // contrast per refused handler.
+  // contrast per refused handler. The advised exemplar MUST carry the
+  // deterministic gate's own vocabulary ("configure … option") so the
+  // promised follow-up routes without the LLM router — pinned by
+  // configure-option-copy-detector-contract.test.ts.
   if (readString(details.handler_id) === 'adjust_edge_strength') {
     return {
       body: {
         assistant_text:
           `That looks like setting an option's effect rather than adjusting ` +
           `the strength of a link, so I haven't changed anything. Tell me ` +
-          `which option and what it should change, for example 'the ` +
-          `acquisition option sets Setup Cost to £2m', and I'll write it in.`,
+          `which option and what it should change, for example 'configure ` +
+          `the acquisition option: set Setup Cost to £2m', and I'll write it in.`,
         suggested_actions: [fallbackPrompt('Describe the option\'s effect')],
       },
       template_id: 'option_intervention_misroute',

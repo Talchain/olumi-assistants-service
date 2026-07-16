@@ -30,7 +30,7 @@ import {
   buildConfigureOptionChipMessage,
   buildConfigureOptionChip,
   CONFIGURE_OPTION_GENERIC_CHIP,
-} from '../../configure-option-copy.js';
+} from '../../configure-option-chip-text.js';
 
 const SCENARIO_A_OPTION_LABELS = [
   'Open Berlin Office',

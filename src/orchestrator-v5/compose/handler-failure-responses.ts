@@ -33,7 +33,7 @@ import { safeLabel, sanitiseForUser } from './helpers.js';
 import {
   buildConfigureOptionChip,
   CONFIGURE_OPTION_GENERIC_CHIP,
-} from '../configure-option-copy.js';
+} from '../configure-option-chip-text.js';
 
 export interface ComposedHandlerFailure {
   readonly response: OlumiResponse;

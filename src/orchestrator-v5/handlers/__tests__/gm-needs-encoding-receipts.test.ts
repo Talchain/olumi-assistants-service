@@ -26,7 +26,7 @@ import {
   deriveUnconfiguredOptionLabels,
   GM_HELD_APPLIED_RERUN_CHIP,
 } from '../gm-held-execute.js';
-import { buildConfigureOptionChip } from '../../configure-option-copy.js';
+import { buildConfigureOptionChip } from '../../configure-option-chip-text.js';
 import { detectConfigureOptionIntent } from '../../routing/configure-option-intent.js';
 
 // ---------------------------------------------------------------------------

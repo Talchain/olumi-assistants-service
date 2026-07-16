@@ -63,7 +63,7 @@ import {
 } from './edit-graph-referee-gate.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
-import { buildConfigureOptionChip } from '../configure-option-copy.js';
+import { buildConfigureOptionChip } from '../configure-option-chip-text.js';
 import { log } from '../../utils/telemetry.js';
 
 // ---------------------------------------------------------------------------
@@ -113,8 +113,12 @@ export function buildGmHeldAppliedReceipt(
 }
 
 /**
- * One-sentence honest notice for options that block analysis. Null when
- * every option is configured (copy byte-identical to the pre-2.11 receipt).
+ * Honest notice for options that block analysis. Null when every option is
+ * configured (copy byte-identical to the pre-2.11 receipt). The advised
+ * phrasing MUST carry the deterministic configure-option gate's own
+ * vocabulary ("configure … option") so a user who echoes it routes to the
+ * edit lane without the LLM router — pinned by
+ * configure-option-copy-detector-contract.test.ts.
  */
 export function buildUnconfiguredOptionsNotice(
   unconfiguredOptionLabels: readonly string[],
@@ -129,8 +133,24 @@ export function buildUnconfiguredOptionsNotice(
   return (
     `Note: ${named} ${labels.length === 1 ? 'does' : 'do'} not have effect values yet, ` +
     `so the analysis cannot run until they are set. ` +
-    `Tell me what ${labels.length === 1 ? 'it' : 'each one'} changes and I'll write it in.`
+    `Say 'configure the ${labels[0]} option' and tell me what ` +
+    `${labels.length === 1 ? 'it' : 'each one'} changes, and I'll write it in.`
   );
+}
+
+/**
+ * Structural view of one option row from the readiness payload
+ * (`computeStructuralReadiness` → `AnalysisReadyPayload['options']`). The
+ * real payload carries `option_id` alongside `label`/`status`; the shape is
+ * declared here (rather than `{label, status}` only) so callers passing the
+ * genuine payload — including test fixtures shaped like it — satisfy the
+ * type without excess-property errors. `option_id` is deliberately unread:
+ * ids must never leak into user copy.
+ */
+export interface GmReadinessOption {
+  readonly option_id?: string;
+  readonly label?: string;
+  readonly status?: string;
 }
 
 /**
@@ -143,7 +163,11 @@ export function buildUnconfiguredOptionsNotice(
  */
 export function deriveUnconfiguredOptionLabels(
   readiness:
-    | { readonly options: ReadonlyArray<{ readonly label?: string; readonly status?: string }> }
+    | {
+        /** Top-level readiness status; unread here but part of the real payload. */
+        readonly status?: string;
+        readonly options: ReadonlyArray<GmReadinessOption>;
+      }
     | undefined,
 ): string[] {
   if (!readiness) return [];
@@ -171,7 +195,7 @@ export function buildGmHeldAppliedChips(
   readiness:
     | {
         readonly status?: string;
-        readonly options: ReadonlyArray<{ readonly label?: string; readonly status?: string }>;
+        readonly options: ReadonlyArray<GmReadinessOption>;
       }
     | undefined,
 ): Array<{ id: string; label: string; message: string; action_type?: 'run_analysis' }> {
