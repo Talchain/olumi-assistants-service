@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "**/*.ts",
+    // Ambient module shims that live alongside the runtime sources this tool
+    // imports (e.g. src/orchestrator-v5/context/cqe/compromise-numbers.d.ts).
+    // tsc only honours declaration shims that are in the include set, and this
+    // config's own include is scoped to tools/orchestrator-eval.
+    "../../src/**/*.d.ts"
+  ]
+}
