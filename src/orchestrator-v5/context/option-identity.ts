@@ -7,8 +7,13 @@
  * cover the HASH-IMPOSSIBLE paths — `legacy_fact_missing_hash` and
  * `current_graph_hash_unavailable` (recovered-session / unparseable-graph
  * reloads) — where the hash comparison cannot run and freshness would
- * otherwise fall to the lenient `unknown` verdict, plus a defence-in-depth
- * check on the `fresh` path.
+ * otherwise fall to the lenient `unknown` verdict. It is deliberately NOT
+ * consulted on the hash-proven `fresh` path (identical-hash ⇒ fresh, by
+ * construction — F10 root, ROADMAP 1.133): the identifiers this module reads
+ * from the fact live in the PLoT enrichment namespace and can legitimately
+ * differ from graph option IDs on byte-identical input, so a "defence-in-
+ * depth" comparison there manufactured false staleness against a run's own
+ * response (verified live, 16 Jul).
  *
  * It compares the option IDENTITIES the analysis was computed against (carried
  * on the persisted run_analysis fact) with the current graph's option IDs. IDs

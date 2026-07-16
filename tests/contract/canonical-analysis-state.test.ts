@@ -620,13 +620,47 @@ describe('selectCanonicalAnalysisState — option-identity guard', () => {
     expect(summariseCanonicalAnalysisState(state).option_identity).toBeUndefined();
   });
 
-  it('divergent option IDs → stale + requiresRerun + !usableForChips, prose still usable (caveated)', () => {
+  it('IDENTICAL hashes + divergent enrichment identifiers → FRESH (F10 invariant: identical-hash ⇒ fresh, by construction)', () => {
+    // The exact live F10 failure shape: a run's own response carries
+    // graph_hash_at_run equal to the current hash, but its PLoT-enrichment
+    // option identifiers live in a different namespace than graph option IDs.
+    // The hash already covers options[].id, so equal hashes prove the option
+    // set unchanged — the guard must not stamp this stale.
     const state = selectCanonicalAnalysisState({
       handlerFacts: [],
       priorFacts: [
-        mkFactWithOptions({ graph_hash_at_run: 'same', leader: 'X', optionIds: ['X', 'Y', 'C'] }),
+        mkFactWithOptions({
+          graph_hash_at_run: '595d1a7b7ec9272b',
+          leader: 'X',
+          optionIds: ['X', 'Y', 'C'],
+        }),
       ],
-      currentGraphHash: 'same', // hashes match → would be fresh without the guard
+      currentGraphHash: '595d1a7b7ec9272b',
+      currentGraphOptionIds: ['A', 'B', 'C'],
+    });
+    expect(state.freshness).toBe('fresh');
+    expect(state.freshness_reason).toBe('graph_hash_match');
+    expect(state.requiresRerun).toBe(false);
+    // The diagnostic surface still RECORDS the namespace mismatch (counts +
+    // closed enum, no IDs) — observability without a false verdict.
+    expect(state.option_identity).toEqual({
+      checked: true,
+      match: false,
+      reason: 'leader_absent',
+      analysed_option_count: 3,
+      current_option_count: 3,
+    });
+  });
+
+  it('divergent option IDs on the hash-impossible path → stale + requiresRerun + !usableForChips, prose still usable (caveated)', () => {
+    const state = selectCanonicalAnalysisState({
+      handlerFacts: [],
+      priorFacts: [
+        // No graph_hash_at_run: legacy/recovered fact → hash comparison
+        // impossible → the option-identity guard is decisive.
+        mkFactWithOptions({ leader: 'X', optionIds: ['X', 'Y', 'C'] }),
+      ],
+      currentGraphHash: 'current-hash',
       currentGraphOptionIds: ['A', 'B', 'C'],
     });
     expect(state.freshness).toBe('stale');
