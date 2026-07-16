@@ -476,10 +476,28 @@ Specific traps worth knowing about:
   Oxford-list commas do not). Percentage-point figures (including `percent
   pts`, `bps`) are a distinct unit and never trace against a `%` canonical —
   and a pp delta glued to a `%` level (`dropped 3 percentage points to 55%`)
-  refuses the delta while still extracting the level. See the module doc in
+  refuses the delta while still extracting the level. Round 8 closed three
+  recognizer edges without weakening the construction: the **fraction-word
+  carve-out is glue-conditioned** (`between a third and 95%` refuses whole;
+  partitive prose like `half the users churned` / `a third of users hit 40%`
+  stays clean), the **foreign-numeral class is derived from Unicode
+  properties** (`\p{Nd}` minus ASCII + `\p{No}`) instead of a hand-enumerated
+  3-range mirror (Devanagari/Thai/Bengali/Tamil/superscript runs were
+  invisible while the Arabic-Indic control passed — mirror drift reading as
+  green), and **bare `point`/`points` joins the pp family in both layers**
+  (`up 12 points` was invisible across a comma/sentence boundary while
+  `12 pts` refused). See the module doc in
   `scorer/figure-scanner.ts` for the full doctrine, the deliberate calibration
   costs (a bare number sharing a clause with an anchor now over-blocks by
-  design) and the documented out-of-contract residuals.
+  design; prose `point(s)` is recognised-and-refused like `pts`) and the
+  documented out-of-contract residuals. **Out-of-contract residuals, accepted
+  scope (round 8):** ordinal/quantity words outside the closed cardinal
+  lexicon (`fifth`, `dozen`, `twice`) are not numeric tokens — growing the
+  lexicon word-by-word is the hand-maintained-mirror trap; they are pinned in
+  tests as known residuals exactly like `halved` and `one in five`. The
+  comma **clause-straddle escape** (`roughly a third, maybe 95%` — identical
+  for its digit twin `roughly 33, maybe 95%`) is round-5 shield doctrine,
+  filed as a follow-up, deliberately untouched here.
 - **G5 is a count, not a rate**, so padding a run with silent turns cannot
   dilute a violation.
 - **G2 is symmetric** — "always mutate" fails the coach direction and "never

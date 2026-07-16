@@ -669,6 +669,9 @@ describe('round 6 INVARIANT: an anchor token can never vanish', () => {
     'percent', 'Percent', 'PERCENT', 'per cent', 'per-cent', 'per\ncent',
     'percentage points', 'percentage point', 'percentage-points',
     'percent points', 'pct', 'PCT', 'pp', 'PP',
+    // ROUND 8: bare point/points joined the pp family — the invariant must
+    // cover them like every other anchor token.
+    'points', 'point',
   ];
   const SYMBOL_TOKENS = ['%', '％'];
   // Number renderings: clean digits, decimals, word-numbers, malformed
@@ -1161,5 +1164,118 @@ describe('round 7 INVARIANT v2: a numeric token in an anchor-bearing clause neve
       }),
       { numRuns: 200 },
     );
+  });
+});
+
+// ============================================================
+// ROUND 8 — GENERATOR v3 (the standing meta-lesson: every blindness becomes
+// a PERMANENT generator class the moment it is found). Round 8's three
+// blindnesses join the generator: fraction words in the sharing shapes
+// (the P0 — the round-7 word pool held only CORE words, so the carve-out
+// class was invisible to 800 runs), multi-script numerals (the P1 mirror —
+// the round-7 pool held only enumerated-range scripts), and the points
+// family (the P1 — no pp-anchor shape ever rendered bare 'points').
+// ============================================================
+
+describe('round 8 GENERATOR v3: fraction words, multi-script numerals, the points family', () => {
+  // Fraction words join the SHARING shapes (not the breaker arm: an unglued
+  // fraction word is partitive prose by doctrine — the carve-out — where an
+  // unglued CORE word is a stranded numeric token).
+  const FRACTION_NUMS = ['half', 'a third', 'a quarter'];
+  const SHARED_GLUE = [' and ', ' or ', ' to ', '–', '-', ', and ', ', or '];
+  const PREFIXES = ['', 'between ', 'expect ', 'roughly ', 'the payload shows '];
+  const SUFFIXES = ['', ' overall.', ' of the time.', ' either way.'];
+
+  const digitArb = fc.integer({ min: 2, max: 95 });
+  const fractionArb = fc.constantFrom(...FRACTION_NUMS);
+  const glueArb = fc.constantFrom(...SHARED_GLUE);
+  const preArb = fc.constantFrom(...PREFIXES);
+  const sufArb = fc.constantFrom(...SUFFIXES);
+
+  it('a fraction word sharing one anchor refuses WHOLE, in both orders', () => {
+    fc.assert(
+      fc.property(preArb, sufArb, fractionArb, glueArb, digitArb, fc.boolean(), (pre, suf, w, glue, d, wordFirst) => {
+        const bare = w.replace(/^an? /, '');
+        const text = wordFirst
+          ? `${pre}${w}${glue}${d}%${suf}`
+          : `${pre}${d}${glue}${bare} percent${suf}`;
+        // Same accounting as the core-word arm: one whole-form refusal —
+        // EXCEPT '<word>-<digit>%' (ASCII hyphen reads as a sign, the
+        // preceding letter trips the identifier guard, and BOTH invariants
+        // fire: 2). The digit bound must NEVER surface as a clean value.
+        const expected = wordFirst && glue === '-' ? 2 : 1;
+        expect(scanProseFigures(text)).toEqual({ values: [], unparseable: expected });
+      }),
+      { numRuns: 300 },
+    );
+  });
+
+  it('a fraction word inside an Oxford list refuses the whole list', () => {
+    fc.assert(
+      fc.property(fractionArb, digitArb, digitArb, fc.boolean(), (w, d1, d2, wordMiddle) => {
+        const text = wordMiddle
+          ? `outcomes of ${d1}, ${w} and ${d2}%`
+          : `outcomes of ${w}, ${d1} and ${d2}%`;
+        expect(scanProseFigures(text)).toEqual({ values: [], unparseable: 1 });
+      }),
+      { numRuns: 150 },
+    );
+  });
+
+  it('partitive fraction prose stays clean under every generated suffix (the carve-out counterweight)', () => {
+    fc.assert(
+      fc.property(fractionArb, digitArb, fc.boolean(), (w, d, anchored) => {
+        // 'of'/'the' context is NOT glue — the fraction word stays carved
+        // out whether or not a faithful anchored figure shares the clause.
+        const text = anchored ? `${w} of users hit ${d}%` : `${w} the users churned`;
+        expect(scanProseFigures(text)).toEqual(
+          anchored ? { values: [d], unparseable: 0 } : { values: [], unparseable: 0 },
+        );
+      }),
+      { numRuns: 150 },
+    );
+  });
+
+  // Multi-script numerals: every script by construction, not by enumeration.
+  const NUMERALS = ['२५', '๒๕', '৪৫', '௪௫', '²⁵', '٤٥', '۲۵', '６２', '¼'];
+
+  it('an anchor-distant numeral run fails closed in EVERY script', () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...NUMERALS), digitArb, (n, d) => {
+        expect(scanProseFigures(`a ${n} share of the ${d}% pool`)).toEqual({ values: [d], unparseable: 1 });
+        expect(scanProseFigures(`${n} and ${d}%`)).toEqual({ values: [], unparseable: 1 });
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  // The points family: comma-separated, sentence-boundary and bare shapes.
+  it('a points figure never vanishes and never values, in every separation shape', () => {
+    fc.assert(
+      fc.property(digitArb, digitArb, fc.constantFrom(', up ', '. Up '), fc.constantFrom('points', 'point', 'pts', 'pt'), (d1, d2, sep, unit) => {
+        expect(scanProseFigures(`The win rate rose ${d1}%${sep}${d2} ${unit} since last week.`)).toEqual({
+          values: [d1],
+          unparseable: 1,
+        });
+        expect(scanProseFigures(`up ${d2} ${unit}`)).toEqual({ values: [], unparseable: 1 });
+      }),
+      { numRuns: 150 },
+    );
+  });
+});
+
+// ============================================================
+// ROUND 8 — P2 dispositions: documented, not built. Ordinal/quantity words
+// OUTSIDE the closed cardinal lexicon are ACCEPTED scope — enumerating them
+// word-by-word is the hand-maintained-mirror trap. Pinned exactly like
+// 'halved' / 'one in five' so any future lexicon change is a visible,
+// deliberate diff.
+// ============================================================
+
+describe('round 8: out-of-contract residuals (accepted scope, pinned)', () => {
+  it("ordinal/quantity words outside the closed lexicon ('fifth', 'dozen', 'twice') are not numeric tokens", () => {
+    expect(scanProseFigures('a fifth of users churned at 40%')).toEqual({ values: [40], unparseable: 0 });
+    expect(scanProseFigures('a dozen options at 40%')).toEqual({ values: [40], unparseable: 0 });
+    expect(scanProseFigures('it twice hit 40%')).toEqual({ values: [40], unparseable: 0 });
   });
 });
