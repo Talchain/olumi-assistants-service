@@ -54,6 +54,14 @@ import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
 // source of truth, shared with the projection layer). Distinct from the
 // one-argument `sanitiseLabel` in src/utils/label-sanitiser.ts.
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
+// D-ask-1 (2.11 P0-1): scaffold-disclosure grammar + budget. The suffix copy
+// and this allowlist must accept each other or the disclosure is silently
+// replaced by the locked-template fallback — the drift pin lives in
+// scaffold-disclosure.test.ts.
+import {
+  SCAFFOLD_DISCLOSURE_RE_SRC,
+  SCAFFOLD_DISCLOSURE_MAX_CHARS,
+} from './scaffold-disclosure.js';
 
 export const MAX_HEADLINE_CHARS = 220;
 
@@ -120,7 +128,11 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   MAX_HEADLINE_CHARS +
   NOT_ROBUST_SENTENCE.length +
   ELIMINATED_SENTENCE_MAX_CHARS +
-  REDUCED_SAMPLES_SUFFIX.length;
+  REDUCED_SAMPLES_SUFFIX.length +
+  // D-ask-1 (2.11 P0-1): the scaffold disclosure suffix rides AFTER every
+  // other tail. Budgeted from the builder's own worst case so an honest
+  // disclosure can never knock the summary back to the bland fallback.
+  SCAFFOLD_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -1352,7 +1364,18 @@ const NOT_ROBUST_RE_SRC = escapeForRegex(NOT_ROBUST_SENTENCE);
 const ELIMINATED_RE_SRC =
   ' \\d{1,3} options are effectively eliminated \\(each has less than a 1% chance of winning\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}`;
+// D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
+// narration tail and status suffix — mirroring the handler's
+// `summary + buildScaffoldDisclosureSuffix(...)` append order.
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_DISCLOSURE_RE_SRC})?`;
+
+/**
+ * Anchored form of the scaffold-disclosure grammar, for the locked-template
+ * branch of {@link isAllowedRunAnalysisAssistantText}: a template-shaped
+ * text may carry EXACTLY one whole disclosure suffix after the template
+ * literal — nothing else.
+ */
+const SCAFFOLD_SUFFIX_ONLY_REGEX = new RegExp(`^(?:${SCAFFOLD_DISCLOSURE_RE_SRC})$`);
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three
 // claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
@@ -1455,11 +1478,35 @@ export function isAllowedRunAnalysisAssistantText(text: unknown): boolean {
   if (text.length === 0 || text.length > MAX_ASSISTANT_TEXT_CHARS) return false;
   if (text.includes('\n') || text.includes('\r')) return false;
   if (RUN_ANALYSIS_LOCKED_TEMPLATES.has(text)) return true;
+  // D-ask-1 (2.11 P0-1): a locked template may carry EXACTLY one scaffold
+  // disclosure suffix (the headline path composes it via TAIL_PATTERN
+  // instead). The content defences still bite on the label slot — a
+  // disclosure whose label smuggles an internal id / raw decimal /
+  // forbidden vocabulary is rejected whole, and the builder's
+  // safeScaffoldOptionLabel is what keeps honest labels out of that trap.
+  for (const template of RUN_ANALYSIS_LOCKED_TEMPLATES) {
+    if (
+      text.length > template.length &&
+      text.startsWith(template) &&
+      SCAFFOLD_SUFFIX_ONLY_REGEX.test(text.slice(template.length))
+    ) {
+      return passesAssistantTextContentDefences(text);
+    }
+  }
   if (!matchesHeadlineGrammar(text)) return false;
   // Defence-in-depth: grammar-shaped but content-leaky strings still
   // fail. A slot filler that happens to contain forbidden vocabulary
   // or an internal ID is caught here even though the surrounding
   // grammar matched.
+  return passesAssistantTextContentDefences(text);
+}
+
+/**
+ * Shared defence-in-depth content rules applied AFTER a structural match
+ * (headline grammar or template+scaffold-disclosure): no forbidden
+ * vocabulary, no internal-ID tokens, no raw decimals.
+ */
+function passesAssistantTextContentDefences(text: string): boolean {
   if (FORBIDDEN_HEADLINE_VOCABULARY_REGEX.test(text)) return false;
   if (ASSISTANT_TEXT_ID_REGEX.test(text)) return false;
   if (RAW_DECIMAL_REGEX.test(text)) return false;

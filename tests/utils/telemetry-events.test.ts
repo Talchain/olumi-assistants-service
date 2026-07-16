@@ -610,6 +610,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ProposalContinuationResumed: "v5.proposal_continuation.resumed",
         V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+        V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
         V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
         V5RunAnalysisTimings: "v5.run_analysis.timings",
         V5TurnStageTimings: "v5.turn_executor.stage_timings",
@@ -1350,6 +1351,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Track S 0.13c-1 — run_analysis intercept guard summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5RunAnalysisInterceptGuard,
+        // D-ask-1 (2.11 P0-1) — run_analysis scaffolded-placeholder disclosure
+        // summary (diagnostic-only, no Datadog metric; redacted option ids +
+        // factor counts). Live emit site: run-analysis.ts step 2.55.
+        TelemetryEvents.V5RunAnalysisOptionsScaffolded,
         // Track S 0.13c-4 — persist-site intercept repair summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5GraphPersistInterceptRepair,
@@ -1939,6 +1944,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.proposal_continuation.resumed",
         "v5.routing_bounded_fallback",
         "v5.run_analysis.intercept_guard",
+        "v5.run_analysis.options_scaffolded",
         "v5.graph_persist.intercept_repair",
         "v5.run_analysis.timings",
         "v5.turn_executor.stage_timings",

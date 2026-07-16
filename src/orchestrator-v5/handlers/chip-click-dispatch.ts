@@ -712,6 +712,12 @@ export async function dispatchChipClickRunAnalysis(
       priorFacts: context.prior_facts,
       analysis: null,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
+      // D-ask-1 (2.11 P0-1): scaffolded-placeholder disclosure channel —
+      // same threading as the routed path, so a chip-click run that only
+      // completed on disclosed defaults offers the configure chip first.
+      ...(outcome.__scaffolded_options !== undefined
+        ? { scaffoldedOptions: outcome.__scaffolded_options }
+        : {}),
     });
 
     // Compose the response using the same composer TurnExecutor uses. The

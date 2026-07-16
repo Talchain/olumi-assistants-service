@@ -72,6 +72,8 @@ import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { AnalysisNotReadyError } from './analysis-ready-core.js';
+import { scaffoldUnconfiguredOptions } from './scaffold-unconfigured-options.js';
+import { buildScaffoldDisclosureSuffix } from '../../coaching/scaffold-disclosure.js';
 import {
   buildAnalysisResultHeadline,
   describeAnalysisHeadline,
@@ -329,6 +331,34 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
+    // --- 2.55. D-ask-1 scaffold (ROADMAP 2.11 P0-1) ------------------------
+    // Paul-ratified backstop: an option added WITHOUT configuration gets
+    // scaffolded, DISCLOSED placeholder interventions so the analysis keeps
+    // running instead of one unconfigured option 422-blocking everything at
+    // the PLoT preflight. Fires only in the mixed state (≥1 configured AND
+    // ≥1 unconfigured); never overwrites a configured option or an option
+    // with persisted intervention intent; purely an outbound-projection
+    // change (the persisted graph, and therefore graph_hash_at_run /
+    // freshness, is untouched). Disclosure rides the summary suffix below +
+    // the __scaffolded_options outcome channel (receipt chip + telemetry).
+    const scaffoldOutcome = scaffoldUnconfiguredOptions({
+      options: snapshot.options,
+      graph: snapshot.graph,
+      rawPersistedGraph: snapshot.rawPersistedGraph,
+    });
+    if (scaffoldOutcome.scaffolded.length > 0) {
+      emit(TelemetryEvents.V5RunAnalysisOptionsScaffolded, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        // Redacted: ids + counts only — no labels, no magnitudes.
+        scaffolded_option_ids: scaffoldOutcome.scaffolded.map((s) => s.option_id),
+        scaffolded_factor_counts: scaffoldOutcome.scaffolded.map(
+          (s) => s.factor_ids.length,
+        ),
+        option_count: snapshot.options.length,
+      });
+    }
+
     // --- 2.6. Load-time intercept guard (Track S 0.13c-1) -----------------
     // Legacy persisted graphs (drafted before #263 / Track S 0.13a) can carry
     // the duplicate observed-root pattern `intercept === observed_state.value`.
@@ -351,7 +381,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // transformation beyond the 0.13c-1 intercept guard above.
     const plotPayload: Record<string, unknown> = {
       graph: graphForAnalysis,
-      options: snapshot.options,
+      // D-ask-1 (2.11 P0-1): scaffolded projection — identical to
+      // snapshot.options unless the scaffold filled placeholder
+      // interventions for an unconfigured option (disclosed below).
+      options: scaffoldOutcome.options,
       goal_node_id: snapshot.goal_node_id,
       request_id: invocation.requestId,
     };
@@ -765,7 +798,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ),
     };
     const headline = buildAnalysisResultHeadline(headlineInput);
-    const summary = headline ?? template;
+    // D-ask-1 (2.11 P0-1) disclosure — claim-safety-critical: when the run
+    // only completed because the scaffold filled placeholder interventions,
+    // the summary MUST say those numbers are defaults and point at the
+    // configure route. Appended LAST (after every headline tail / status
+    // suffix), matching the registry egress grammar in
+    // analysis-result-headline.ts so the disclosure survives to the wire on
+    // both the chat receipt and the analysis_result block.
+    const scaffoldDisclosure =
+      scaffoldOutcome.scaffolded.length > 0
+        ? buildScaffoldDisclosureSuffix(scaffoldOutcome.scaffolded)
+        : '';
+    const summary = `${headline ?? template}${scaffoldDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -845,6 +889,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       handler_facts: [parsed.data],
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
+      // D-ask-1 (2.11 P0-1): internal channel (never the wire envelope
+      // directly) — the turn-executor / chip-click dispatch thread this to
+      // the chip generator so the success turn offers the configure chip.
+      ...(scaffoldOutcome.scaffolded.length > 0
+        ? { __scaffolded_options: scaffoldOutcome.scaffolded }
+        : {}),
     };
   };
 }

@@ -6735,6 +6735,12 @@ export async function runTurnExecutor(
         // contradiction-aware requiresRerun — so chips read the composed
         // authority instead of local scans.
         canonicalState: canonicalStateForRun,
+        // D-ask-1 (2.11 P0-1): scaffolded-placeholder disclosure channel —
+        // the run only completed on disclosed defaults, so the chip
+        // generator offers the configure chip first.
+        ...(handlerOutcome?.__scaffolded_options !== undefined
+          ? { scaffoldedOptions: handlerOutcome.__scaffolded_options }
+          : {}),
       });
 
       // V5 P0.2 — flip-threshold proposal emission (Seam 1). On a
