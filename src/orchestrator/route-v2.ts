@@ -159,7 +159,11 @@ import {
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
 } from '../orchestrator-v5/session/pending-action.js';
 import { randomUUID } from 'node:crypto';
-import { commitDirectAnswer, computeRequestHash } from '../orchestrator-v5/commit.js';
+import {
+  commitDirectAnswer,
+  computeRequestHash,
+  computeSurvivingPriorPendings,
+} from '../orchestrator-v5/commit.js';
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
@@ -230,9 +234,16 @@ const DRAFT_OFFER_CHIP_MESSAGE = 'Yes, build the model from what I have shared.'
  * captured (so the offer is never made with nothing to build from). The
  * guard's original first sentence is preserved verbatim: existing tests and
  * dashboards key on it.
+ *
+ * P1-1 (adversarial review, #488): the ", or just reply yes" clause is
+ * DERIVED from the pendings state (`willDraftOfferBeSoleLivePending`), never
+ * asserted unconditionally — see that helper's doc for the mechanism.
  */
-const DRAFT_OFFER_GUARD_SENTENCE =
-  "Or I can draft a first model from what you've shared so far: choose 'Build the model' below, or just reply yes.";
+function draftOfferGuardSentence(offerWillBeSoleLive: boolean): string {
+  const base =
+    "Or I can draft a first model from what you've shared so far: choose 'Build the model' below";
+  return offerWillBeSoleLive ? `${base}, or just reply yes.` : `${base}.`;
+}
 
 /** C4 — graph-present decline offer chip (text-replay chip). */
 const REDRAFT_OFFER_CHIP_LABEL = 'Redraft the model';
@@ -253,12 +264,82 @@ const REDRAFT_OFFER_CHIP_MESSAGE_ALT = 'Yes, start the redraft from my brief.';
  * doctrine (Paul, 16 Jul): decline-with-redraft-offer, consistent with the
  * held-proposal consent posture (never a silent replace, never a silent
  * ignore). Consenting to the offer chip / replying yes REPLACES the model.
+ *
+ * P1-1 (adversarial review, #488): the "or reply yes" clause is DERIVED from
+ * the pendings state (`willDraftOfferBeSoleLivePending`), never asserted
+ * unconditionally — see that helper's doc for the mechanism.
  */
-const EXPLICIT_GENERATE_GRAPH_PRESENT_TEXT =
-  'This decision already has a model, so I have not replaced it. ' +
-  "If you want a fresh draft instead, choose 'Redraft the model' below or reply yes, " +
-  'and I will rebuild it from your brief. Otherwise tell me what to change and ' +
-  'I will edit the existing model.';
+function explicitGenerateGraphPresentText(offerWillBeSoleLive: boolean): string {
+  return (
+    'This decision already has a model, so I have not replaced it. ' +
+    (offerWillBeSoleLive
+      ? "If you want a fresh draft instead, choose 'Redraft the model' below or reply yes, " +
+        'and I will rebuild it from your brief. '
+      : "If you want a fresh draft instead, choose 'Redraft the model' below and I will " +
+        'rebuild it from your brief. ') +
+    'Otherwise tell me what to change and I will edit the existing model.'
+  );
+}
+
+/**
+ * P1-1 (adversarial review, #488) — will the freshly-minted draft/redraft
+ * offer be the SOLE live pending after this commit?
+ *
+ * `resolveDraftOfferResume` accepts a bare confirmation ("yes") ONLY when the
+ * offer is the sole live pending; with any other live pending (a
+ * chip-suggestion `run_analysis` / `what_would_flip`, TTL 2 turns, which
+ * SURVIVES this commit's carry-forward) the next turn's "yes" falls to the
+ * deterministic-short-confirm machinery's RESUMABLE_KINDS and executes THAT
+ * action instead — so copy promising "reply yes" would promise the wrong
+ * action (reproduced in review: dispatchDraftGraph 0 calls, analysis ran).
+ *
+ * MECHANISM (ratified direction — derive the promise from the state, never
+ * mirror it): reuse the commit seam's OWN carry-forward
+ * (`computeSurvivingPriorPendings`) with the same inputs the emit site's
+ * `commitDirectAnswer` call will pass (no consumed refs, no
+ * `metadata.graph_hash` at either offer-emit site), so the survivor set here
+ * IS the set the next turn's resume will read. Any survivor is
+ * non-`draft_graph` by construction (a fresh offer supersedes carried offers
+ * kind-level), so zero survivors ⟺ the offer stands alone. This also covers
+ * the live `proposed_concept` case (review P2-a): a surviving concept hold
+ * suppresses the "reply yes" clause the same way.
+ *
+ * Error direction is safe by construction: a survivor counted here that
+ * wall-expires before the next read (or is cap-evicted at persist) only makes
+ * the copy OMIT "reply yes" where it would in fact have worked — the named
+ * chip route always works.
+ */
+function willDraftOfferBeSoleLivePending(
+  priorPendings: readonly PendingAction[],
+  offer: PendingAction,
+  nowMs: number,
+): boolean {
+  return (
+    computeSurvivingPriorPendings(priorPendings, [offer], [], undefined, nowMs)
+      .length === 0
+  );
+}
+
+/**
+ * P1-2 (adversarial review, #488) — is the ingress `graph_state` a POPULATED
+ * graph? `GraphStateIngressSchema` accepts `{nodes:[],edges:[]}` (a
+ * structurally-valid EMPTY canvas), and the C4 arms must treat that as "no
+ * model": declining with "This decision already has a model" over zero nodes
+ * is false, and the redraft offer it seeds would target a model that does not
+ * exist. LOCAL twin of `isPopulatedGraphCandidate` (#473's run_analysis
+ * adopt-on-empty lane — same judgement: plain object with a non-empty `nodes`
+ * array), not importable while that lane is unmerged; when both land, keep
+ * one and delete the other.
+ */
+function isPopulatedIngressGraph(g: unknown): boolean {
+  return (
+    g !== null &&
+    typeof g === 'object' &&
+    !Array.isArray(g) &&
+    Array.isArray((g as { nodes?: unknown }).nodes) &&
+    (g as { nodes: unknown[] }).nodes.length > 0
+  );
+}
 
 type DraftOfferAction = Extract<PendingActionAction, { readonly kind: 'draft_graph' }>;
 
@@ -1951,7 +2032,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         | 'declined_no_brief'
         | 'declined_graph_present'
         | 'state_read_failed_fallthrough';
-      if (extensions.graphState != null) {
+      // P1-2 — a zero-node request graph_state is ABSENT here: the schema
+      // accepts {nodes:[],edges:[]} and declining over an empty canvas would
+      // be false ("already has a model"). The persisted read below still
+      // decides graph presence server-side.
+      if (isPopulatedIngressGraph(extensions.graphState)) {
         outcome = 'declined_graph_present';
         explicitGenerateGraphPresent = { graphForHash: extensions.graphState };
       } else {
@@ -2041,7 +2126,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         | 'state_read_failed_fallthrough';
       try {
         const persisted = await loadPersistedScenarioStateStrict(ingress.scenario_id);
-        const graphNow: unknown = extensions.graphState ?? persisted.graph ?? null;
+        // P1-2 — same emptiness rule as the flag arm above: a zero-node
+        // request graph_state never counts as a present model here.
+        const graphNow: unknown = isPopulatedIngressGraph(extensions.graphState)
+          ? extensions.graphState
+          : persisted.graph ?? null;
         const assembleResumeBrief = async (): Promise<AssembledExplicitGenerateBrief | null> => {
           let assembled = assembleExplicitGenerateBrief({
             message: ingress.message,
@@ -2215,9 +2304,19 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         graphHash: offerGraphHash,
         nowMs: offerNowMs,
       });
+      // P1-1 — read the carried pendings BEFORE composing the copy: the
+      // "or reply yes" promise is derived from the very set this commit's
+      // carry-forward will persist (the same array is threaded to the
+      // commit below, so copy and state cannot diverge).
+      const offerPriorPendings = await ensureDraftOfferPriorPendings();
+      const offerWillBeSoleLive = willDraftOfferBeSoleLivePending(
+        offerPriorPendings,
+        offerPending,
+        offerNowMs,
+      );
       const declineCandidate: import('@talchain/schemas/boundary').OlumiResponse = {
         response_version: 2,
-        assistant_text: EXPLICIT_GENERATE_GRAPH_PRESENT_TEXT,
+        assistant_text: explicitGenerateGraphPresentText(offerWillBeSoleLive),
         blocks: [],
         suggested_actions: [offerChip],
         insights: [],
@@ -2237,9 +2336,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           handler_facts: [],
           pending_actions: [offerPending],
           // Never wipe live holds: thread the prior pendings through this
-          // commit's carry-forward (HOLD-WIPE fix pattern). Read lazily —
-          // a composer flag turn may not have paid the pre-route read.
-          priorPendingActions: await ensureDraftOfferPriorPendings(),
+          // commit's carry-forward (HOLD-WIPE fix pattern). Same array the
+          // copy derivation above consumed (read lazily there — a composer
+          // flag turn may not have paid the pre-route read).
+          priorPendingActions: offerPriorPendings,
           coaching_state: null,
           userMessage: ingress.message,
           contentGraph: explicitGenerateGraphPresent.graphForHash,
@@ -2994,9 +3094,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           briefSeed: guardOfferSeed,
           nowMs: guardNowMs,
         });
+        // P1-1 — same derivation as the C4 site (one derivation, two
+        // consumers): `draftOfferPriorPendings` is exactly what the commit
+        // below threads, so the ", or just reply yes" clause is only made
+        // when the offer will stand alone after this commit.
+        const guardOfferWillBeSoleLive = willDraftOfferBeSoleLivePending(
+          draftOfferPriorPendings,
+          guardPending,
+          guardNowMs,
+        );
         const offerResponse: import('@talchain/schemas/boundary').OlumiResponse = {
           ...guardResponse,
-          assistant_text: `${assistantText} ${DRAFT_OFFER_GUARD_SENTENCE}`,
+          assistant_text: `${assistantText} ${draftOfferGuardSentence(guardOfferWillBeSoleLive)}`,
           suggested_actions: [guardChip],
         } as import('@talchain/schemas/boundary').OlumiResponse;
         try {

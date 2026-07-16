@@ -228,6 +228,26 @@ function offerPending(overrides: {
   } as PendingAction;
 }
 
+/**
+ * A live chip-suggestion pending (run_analysis, TTL 2 turns) — the review
+ * P1-1 probe shape: it survives the C4 commit's carry-forward, so a bare
+ * "yes" on the next turn falls to deterministic-short-confirm's
+ * RESUMABLE_KINDS (executes ANALYSIS), never to the draft-offer resume.
+ */
+function liveRunAnalysisPending(): PendingAction {
+  const now = Date.now();
+  return {
+    id: 'pa-run-analysis-1',
+    scenario_id: SCENARIO_ID,
+    chip_id: 'run-analysis-chip-1',
+    action: { kind: 'run_analysis' },
+    preconditions: {},
+    expires_at_turn_count: 2,
+    expires_at_iso: new Date(now + 10 * 60 * 1000).toISOString(),
+    emitted_at_iso: new Date(now).toISOString(),
+  } as PendingAction;
+}
+
 /** A live consent hold (apply_proposed_change) for the non-shadowing golden. */
 function liveConsentHold(): PendingAction {
   const now = Date.now();
@@ -581,5 +601,159 @@ describe('POST /orchestrate/v2/turn — draft/redraft offer (ROADMAP 2.63 C3+C4)
     const offers = write.pending_actions.filter((pa) => pa.action.kind === 'draft_graph');
     expect(offers).toHaveLength(1);
     expect(offers[0]!.action.brief_seed).toBeUndefined();
+  });
+
+  // ── P1-1 (adversarial review) — the "reply yes" promise is DERIVED from
+  //    the carried pendings, never asserted unconditionally. A bare confirm
+  //    resumes the offer ONLY when it is the sole live pending
+  //    (resolveDraftOfferResume); with a live chip-suggestion pending
+  //    surviving the commit's carry-forward, "yes" at the next turn executes
+  //    ANALYSIS via deterministic-short-confirm — so copy promising "reply
+  //    yes" would promise the wrong action. ─────────────────────────────────
+  it('P1-1 C4: decline copy with a live run_analysis pending carried through names the chip as the ONLY route (no "reply yes" promise)', async () => {
+    persistedGraphForRead = STRICT_GRAPH;
+    persistedBriefTextForRead = REAL_BRIEF;
+    hasPriorTurnsForRead = true;
+    pendingActionsForRead = [liveRunAnalysisPending()];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: CANNED_CHIP_MESSAGE,
+        source: 'chip_click',
+        chip: {},
+        generate_model: true,
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('already has a model');
+    // The chip route is named; the bare-confirm route is NOT promised.
+    expect(body.assistant_text).toContain('Redraft the model');
+    expect(body.assistant_text).not.toMatch(/reply yes/i);
+    // Premise pin: the carried run_analysis pending SURVIVES this commit
+    // alongside the fresh offer — exactly why "yes" cannot reach the offer.
+    expect(appendMock).toHaveBeenCalledTimes(1);
+    const write = appendMock.mock.calls[0]![0] as AppendWrite;
+    const kinds = write.pending_actions.map((pa) => pa.action.kind).sort();
+    expect(kinds).toEqual(['draft_graph', 'run_analysis']);
+  });
+
+  it('P1-1 C4 / review P2-a: a live proposed_concept hold carried through likewise suppresses the "reply yes" promise', async () => {
+    persistedGraphForRead = STRICT_GRAPH;
+    persistedBriefTextForRead = REAL_BRIEF;
+    hasPriorTurnsForRead = true;
+    const now = Date.now();
+    pendingActionsForRead = [
+      {
+        id: 'pa-concept-1',
+        scenario_id: SCENARIO_ID,
+        chip_id: 'concept-chip-1',
+        action: {
+          kind: 'proposed_concept',
+          concept: 'churn risk',
+          preferred_kind: 'risk',
+          public_label: 'Add churn risk',
+          public_message: 'Add churn risk to the model.',
+        },
+        preconditions: {},
+        expires_at_turn_count: 2,
+        expires_at_iso: new Date(now + 10 * 60 * 1000).toISOString(),
+        emitted_at_iso: new Date(now).toISOString(),
+      } as PendingAction,
+    ];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: CANNED_CHIP_MESSAGE,
+        source: 'chip_click',
+        chip: {},
+        generate_model: true,
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('already has a model');
+    expect(body.assistant_text).not.toMatch(/reply yes/i);
+  });
+
+  it('P1-1 C4 golden: decline copy keeps the "reply yes" promise when the offer WILL be the sole live pending', async () => {
+    persistedGraphForRead = STRICT_GRAPH;
+    persistedBriefTextForRead = REAL_BRIEF;
+    hasPriorTurnsForRead = true;
+    pendingActionsForRead = [];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: CANNED_CHIP_MESSAGE,
+        source: 'chip_click',
+        chip: {},
+        generate_model: true,
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('already has a model');
+    expect(body.assistant_text).toContain('or reply yes');
+  });
+
+  it('P1-1 C3: guard re-fire with another live pending derives the guard sentence chip-only (no "just reply yes")', async () => {
+    hasPriorTurnsForRead = true;
+    pendingActionsForRead = [
+      offerPending({ brief_seed: UNSHAPED_CONTEXT }),
+      liveRunAnalysisPending(),
+    ];
+    const secondContext =
+      'Also worth knowing: the enterprise tier depends on a partner integration landing first.';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({ message: secondContext }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('draft a first model');
+    expect(body.assistant_text).toContain('Build the model');
+    expect(body.assistant_text).not.toMatch(/reply yes/i);
+  });
+
+  it('P1-1 C3 golden: guard offer on a fresh scenario (sole-live) keeps "just reply yes"', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload(),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('draft a first model');
+    expect(body.assistant_text).toContain('just reply yes');
+  });
+
+  // ── P1-2 (adversarial review) — GraphStateIngressSchema accepts
+  //    {nodes:[],edges:[]}; a zero-node request graph_state must be treated
+  //    as ABSENT by the C4 arms, never as "this decision already has a
+  //    model". ────────────────────────────────────────────────────────────
+  it('P1-2: build-offer consent ("yes") with an EMPTY request graph_state and no persisted graph dispatches the FIRST draft — never a redraft re-offer for a nonexistent model', async () => {
+    hasPriorTurnsForRead = true;
+    persistedGraphForRead = null;
+    pendingActionsForRead = [offerPending({ brief_seed: UNSHAPED_CONTEXT })];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'yes',
+        graph_state: { nodes: [], edges: [] },
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(args.briefOverride).toBe(UNSHAPED_CONTEXT);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
   });
 });

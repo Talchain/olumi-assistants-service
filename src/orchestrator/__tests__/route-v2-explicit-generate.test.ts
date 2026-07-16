@@ -369,6 +369,29 @@ describe('POST /orchestrate/v2/turn — explicit-generate wire flag (ROADMAP 2.6
     expect(write.pending_actions[0]!.chip_id).toBe(body.suggested_actions[0].id);
   });
 
+  // ── P1-2 (adversarial review): GraphStateIngressSchema accepts
+  //    {nodes:[],edges:[]} — the flag gate must treat a zero-node request
+  //    graph_state as ABSENT (build path), never claim "already has a
+  //    model" over an empty canvas. ──────────────────────────────────────
+  it('P1-2: flag + EMPTY request graph_state + persisted brief drafts (build path) — never the graph-present decline', async () => {
+    persistedBriefTextForRead = REAL_BRIEF;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: p2Payload({
+        generate_model: true,
+        graph_state: { nodes: [], edges: [] },
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(args.briefOverride).toBe(REAL_BRIEF);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(String(body.assistant_text)).not.toContain('already has a model');
+  });
+
   // ── No-flag regression pin: the P2 shape WITHOUT the flag keeps landing
   //    in frame_no_brief_guard (today's behaviour, live P2) ────────────────
   it('P2 wire shape WITHOUT the flag still gets the frame_no_brief_guard framing prompt', async () => {
