@@ -73,7 +73,6 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
       : undefined,
     details: meta?.details,
   }),
-  integrateClarifier: vi.fn(),
   isAdminAuthorized: () => false,
 }));
 
@@ -175,7 +174,6 @@ function makeCtx(graph: any): StageContext {
     draftAdapter: { name: "openai", model: "gpt-4o" },
     llmMeta: { model: "gpt-4o" },
     confidence: 0.85,
-    clarifierStatus: "confident",
     effectiveBrief: "Test brief for repair pipeline validation",
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
@@ -194,7 +192,6 @@ function makeCtx(graph: any): StageContext {
     constraintStrpResult: undefined,
     repairCost: 0,
     repairFallbackReason: undefined,
-    clarifierResult: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
 

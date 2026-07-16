@@ -221,16 +221,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         ClarificationRequired: "cee.clarification.required",
         ClarificationBypassAllowed: "cee.clarification.bypass_allowed",
 
-        // CEE Multi-turn Clarifier events (Phase 1)
-        CeeClarifierSessionStart: "cee.clarifier.session_start",
-        CeeClarifierQuestionAsked: "cee.clarifier.question_asked",
-        CeeClarifierAnswerReceived: "cee.clarifier.answer_received",
-        CeeClarifierAnswerIncorporated: "cee.clarifier.answer_incorporated",
-        CeeClarifierConverged: "cee.clarifier.converged",
-        CeeClarifierQuestionCached: "cee.clarifier.question_cached",
-        CeeClarifierQuestionRetrieved: "cee.clarifier.question_retrieved",
-        CeeClarifierFailed: "cee.clarifier.failed",
-        CeeClarifierSkipped: "cee.clarifier.skipped",
+        // (CEE Multi-turn Clarifier events removed 2026-07-16 — Stage-4
+        // clarifier retired under ROADMAP 1.94 Option A.)
 
         // Prompt Management events (v2.0)
         PromptStoreError: "prompt.store_error",
@@ -1065,16 +1057,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.GoalGeneration,
         TelemetryEvents.ClarificationRequired,
         TelemetryEvents.ClarificationBypassAllowed,
-        // Multi-turn clarifier events (Phase 1 - diagnostic only)
-        TelemetryEvents.CeeClarifierSessionStart,
-        TelemetryEvents.CeeClarifierQuestionAsked,
-        TelemetryEvents.CeeClarifierAnswerReceived,
-        TelemetryEvents.CeeClarifierAnswerIncorporated,
-        TelemetryEvents.CeeClarifierConverged,
-        TelemetryEvents.CeeClarifierQuestionCached,
-        TelemetryEvents.CeeClarifierQuestionRetrieved,
-        TelemetryEvents.CeeClarifierFailed,
-        TelemetryEvents.CeeClarifierSkipped,
         // Bias mitigation events (diagnostic only)
         TelemetryEvents.BiasPatchesGenerated,
         TelemetryEvents.BiasPatchesApplied,
@@ -1577,15 +1559,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.clarification.bypass_allowed",
 
         // Multi-turn clarifier integration events (v1.15)
-        "cee.clarifier.session_start",
-        "cee.clarifier.question_asked",
-        "cee.clarifier.answer_received",
-        "cee.clarifier.answer_incorporated",
-        "cee.clarifier.converged",
-        "cee.clarifier.question_cached",
-        "cee.clarifier.question_retrieved",
-        "cee.clarifier.failed",
-        "cee.clarifier.skipped",
 
         // CEE verification events (v1.14)
         "cee.verification.succeeded",

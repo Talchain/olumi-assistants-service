@@ -8,7 +8,7 @@
  *  1.  Parse           — LLM draft + adapter normalisation
  *  2.  Normalise       — STRP + risk coefficients (field transforms only)
  *  3.  Enrich          — Factor enrichment (ONCE, try/catch wrapped for degenerate graphs)
- *  4.  Repair          — Validation + repair + goal merge + connectivity + clarifier
+ *  4.  Repair          — Validation + repair + goal merge + connectivity
  *  4b. Threshold Sweep — Deterministic goal threshold hygiene (non-critical, try/catch wrapped)
  *  5.  Package         — Caps + warnings + quality + trace assembly
  *  6.  Boundary        — V3 transform + analysis_ready + model_adjustments
@@ -60,7 +60,6 @@ function buildInitialContext(
     draftAdapter: undefined,
     llmMeta: undefined,
     confidence: undefined,
-    clarifierStatus: undefined,
     effectiveBrief: input.brief,
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
@@ -82,7 +81,6 @@ function buildInitialContext(
     constraintStrpResult: undefined,
     repairCost: 0,
     repairFallbackReason: undefined,
-    clarifierResult: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
 
@@ -623,7 +621,7 @@ export async function runUnifiedPipeline(
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
     ctx.planAnnotation = capturePlanAnnotation(ctx);
 
-    // Stage 4: Repair — Validation + goal merge + connectivity + clarifier
+    // Stage 4: Repair — Validation + goal merge + connectivity
     const t4 = stageStart();
     await runStageRepair(ctx);
     timings.repair_ms = stageElapsed(t4);

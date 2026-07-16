@@ -112,7 +112,6 @@ function makeCtx(overrides?: Partial<Record<string, any>>): any {
     draftAdapter: undefined,
     llmMeta: undefined,
     confidence: undefined,
-    clarifierStatus: undefined,
     effectiveBrief: "A sufficiently long brief for testing",
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
@@ -347,32 +346,16 @@ describe("runStageParse", () => {
     expect(ctx.repairTimeoutMs).toBeGreaterThan(0);
   });
 
-  // ── Confidence / clarifier ────────────────────────────────────────────
+  // ── Confidence ────────────────────────────────────────────────────────
+  // (ctx.clarifierStatus derivation removed 2026-07-16 with the Stage-4
+  // clarifier retirement — the field was write-only, zero readers.)
 
-  it("sets clarifierStatus to 'confident' when confidence >= 0.9", async () => {
+  it("sets ctx.confidence from calcConfidence", async () => {
     setupMocks({ confidence: 0.95 });
     const ctx = makeCtx();
     await runStageParse(ctx);
 
     expect(ctx.confidence).toBe(0.95);
-    expect(ctx.clarifierStatus).toBe("confident");
-  });
-
-  it("sets clarifierStatus to 'max_rounds' when shouldClarify returns true", async () => {
-    setupMocks({ confidence: 0.5, shouldClarifyResult: true });
-    const ctx = makeCtx();
-    await runStageParse(ctx);
-
-    expect(ctx.confidence).toBe(0.5);
-    expect(ctx.clarifierStatus).toBe("max_rounds");
-  });
-
-  it("sets clarifierStatus to 'complete' when low confidence but shouldClarify is false", async () => {
-    setupMocks({ confidence: 0.5, shouldClarifyResult: false });
-    const ctx = makeCtx();
-    await runStageParse(ctx);
-
-    expect(ctx.clarifierStatus).toBe("complete");
   });
 
   // ── Refinement brief ──────────────────────────────────────────────────

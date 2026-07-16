@@ -42,7 +42,6 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
   buildCeeErrorResponse: vi.fn((code: string, msg: string, _meta?: any) => ({
     error: { code, message: msg },
   })),
-  integrateClarifier: vi.fn(),
   isAdminAuthorized: vi.fn(() => false),
 }));
 

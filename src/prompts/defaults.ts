@@ -2134,17 +2134,10 @@ Respond to the user's message in plain prose.
 - Do not fabricate numbers, citations, or analysis results.
 - If the question asks for something requiring analysis, say so plainly.`;
 
-// V5 slice A2 — clarification narrate placeholder. Paul is sole prompt
-// author. Used when the pre-narrate classifier returns turn_class=clarify.
-// Fragment is intentionally short so the prompt store can override without
-// code changes.
-const CLARIFY_NARRATE_PROMPT = `You are a concise decision coach.
-The user's message is ambiguous. Ask one short clarifying question in plain prose.
-- No XML-like tags.
-- No em-dashes. Use commas or short sentences instead.
-- One or two sentences is plenty.
-- Do not answer the original question, only ask the follow-up.
-- Do not fabricate numbers, citations, or analysis results.`;
+// (The clarify_narrate placeholder was removed 2026-07-16 with the Stage-4
+// clarifier retirement (ROADMAP 1.94 Option A): it had zero live callers —
+// the V5 clarify turn class is composed by the routing prompt, not by a
+// narrate fragment.)
 
 // V5 slice A2 — pre-narrate turn classifier placeholder. Paul is sole prompt
 // author. Returns a single JSON object: {"turn_class": "direct_answer"} or
@@ -2319,9 +2312,8 @@ export function registerAllDefaultPrompts(): void {
   // can override it without code changes. Additive entry; pre-existing callers
   // unaffected.
   registerDefaultPrompt('direct_answer_narrate', DIRECT_ANSWER_NARRATE_PROMPT);
-  // V5 slice A2 — clarification narrate + pre-narrate turn classifier.
-  // Both placeholders; Paul authors final content. Additive entries.
-  registerDefaultPrompt('clarify_narrate', CLARIFY_NARRATE_PROMPT);
+  // V5 slice A2 — pre-narrate turn classifier placeholder; Paul authors
+  // final content. (clarify_narrate removed 2026-07-16 — zero live callers.)
   registerDefaultPrompt('turn_classifier', TURN_CLASSIFIER_PROMPT);
   // V5 slices C2 + D1 + D2 (Phase 0 wiring) — handler-narrate placeholders.
   // Handler modules do not land until the relevant tranche. Registering

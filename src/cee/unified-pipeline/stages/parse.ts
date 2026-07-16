@@ -10,7 +10,7 @@ import type { DraftGraphResult } from "../../../adapters/llm/types.js";
 import type { DocPreview } from "../../../services/docProcessing.js";
 import type { GraphT } from "../../../schemas/graph.js";
 import { groundAttachments, buildRefinementBrief } from "../../../routes/assist.draft-graph.js";
-import { calcConfidence, shouldClarify } from "../../../utils/confidence.js";
+import { calcConfidence } from "../../../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../../../utils/costGuard.js";
 import { getAdapterWithResolution } from "../../../adapters/llm/router.js";
 import { recordModelResolution } from "../../../orchestrator-v5/debug/turn-debug-store.js";
@@ -68,14 +68,10 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     return;
   }
 
-  // ── Step 2: Confidence + clarifier ──────────────────────────────────────
+  // ── Step 2: Confidence ──────────────────────────────────────────────────
+  // (The write-only ctx.clarifierStatus that used to be derived here was
+  // removed with the Stage-4 clarifier retirement — it had zero readers.)
   ctx.confidence = calcConfidence({ goal: ctx.input.brief });
-  // Inline determineClarifier logic (Pipeline B line 567-570)
-  if (ctx.confidence >= 0.9) {
-    ctx.clarifierStatus = "confident";
-  } else {
-    ctx.clarifierStatus = shouldClarify(ctx.confidence, 0) ? "max_rounds" : "complete";
-  }
 
   // ── Step 3: Refinement brief ────────────────────────────────────────────
   if (config.cee.refinementEnabled && ctx.input.previous_graph !== undefined) {

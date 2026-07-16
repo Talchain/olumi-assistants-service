@@ -186,7 +186,6 @@ function makeCtx() {
     checkpointsEnabled: false,
     validationSummary: undefined,
     structuralMeta: undefined,
-    clarifierResult: undefined,
     quality: undefined,
     archetype: undefined,
     draftWarnings: [],

@@ -81,7 +81,6 @@ export interface StageContext {
   draftAdapter: any;
   llmMeta: any;
   confidence: number | undefined;
-  clarifierStatus: string | undefined;
   effectiveBrief: string;
   edgeFieldStash: EdgeFieldStash | undefined;
   skipRepairDueToBudget: boolean;
@@ -126,7 +125,6 @@ export interface StageContext {
   constraintStrpResult: any;
   repairCost: number;
   repairFallbackReason: string | undefined;
-  clarifierResult: any;
   structuralMeta: any;
   validationSummary: any;
   orchestratorRepairUsed?: boolean;

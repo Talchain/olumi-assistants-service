@@ -75,7 +75,9 @@ export const DraftGraphInput = z.object({
   preserve_nodes: z.array(z.string()).max(50).optional(),
   // Clarification enforcement (Phase 5)
   clarification_rounds_completed: z.number().int().min(0).max(3).optional(),
-  // Multi-turn clarifier integration
+  // Multi-turn clarifier integration — INERT since 2026-07-16: the Stage-4
+  // clarifier was retired (ROADMAP 1.94 Option A). These request fields are
+  // still accepted for wire compatibility but are ignored by the pipeline.
   clarifier_response: z.object({
     question_id: z.string(),
     answer: z.string(),
@@ -182,6 +184,8 @@ export const DraftGraphOutput = z.object({
     )
     .default([]),
   issues: z.array(z.string()).optional(),
+  // clarifier_status is retained for wire compatibility; since the Stage-4
+  // clarifier retirement (2026-07-16) the pipeline always emits "complete".
   clarifier_status: z.enum(["complete", "max_rounds", "confident"]).optional(),
   layout: z
     .object({

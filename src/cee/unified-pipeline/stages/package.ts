@@ -240,7 +240,6 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   }
 
   // ── Step 2: Quality computation (canonical) ──────────────────────────────
-  // Canonical quality — substep 9's was a clarifier precondition only
   ctx.quality = computeQuality({
     graph: ctx.graph!,
     confidence: ctx.confidence ?? 0.7,
@@ -667,10 +666,11 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   }
 
   // ── Step 10: Clarifier status ────────────────────────────────────────────
-  let clarifierStatus: string | undefined;
-  if (!ctx.clarifierResult?.clarifier) {
-    clarifierStatus = ctx.clarifierResult?.convergenceStatus ?? "complete";
-  }
+  // Stage-4 clarifier RETIRED 2026-07-16 (ROADMAP 1.94 Option A). The wire
+  // field is kept for client compatibility at its only observed live value:
+  // the retired stage converged round-1 with status "complete" on 100% of
+  // firings (and "complete" was also the disabled-flag fallback).
+  const clarifierStatus = "complete";
 
   // ── Step 11: Assemble V1 response ────────────────────────────────────────
   const ceeResponse: any = {
@@ -685,7 +685,6 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     draft_warnings: draftWarnings,
     confidence_flags: confidenceFlags,
     guidance,
-    clarifier: ctx.clarifierResult?.clarifier,
     clarifier_status: clarifierStatus,
     goal_connectivity: goalConnectivity,
     model_quality_factors: modelQualityFactors,
@@ -908,7 +907,11 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       enforceSingleGoal: config.cee.enforceSingleGoal,
       draftArchetypesEnabled: config.cee.draftArchetypesEnabled,
       clarificationEnforced: config.cee.clarificationEnforced,
-      clarifierEnabled: config.cee.clarifierEnabled,
+      // Stage-4 clarifier retired (2026-07-16, ROADMAP 1.94 Option A). The
+      // field stays in the ContextPack config fingerprint at its permanent
+      // truth (no in-pipeline clarifier) so context_hash provenance remains
+      // stable for configs that never enabled it.
+      clarifierEnabled: false,
     },
     clarificationRound: (ctx.input as any).clarification_rounds_completed,
     clarificationAnswers: (ctx.input as any).conversation_history?.map(

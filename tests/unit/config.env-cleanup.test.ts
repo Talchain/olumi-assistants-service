@@ -97,18 +97,6 @@ describe("checkDeprecatedEnvVars", () => {
     expect(hmacWarning!.message).toContain("HMAC_SECRET");
   });
 
-  it("should warn when CLARIFIER_ENABLED is used without CEE_CLARIFIER_ENABLED", async () => {
-    process.env = { ...originalEnv, CLARIFIER_ENABLED: "true" };
-    delete process.env.CEE_CLARIFIER_ENABLED;
-
-    const { checkDeprecatedEnvVars } = await import("../../src/config/index.js");
-    const warnings = checkDeprecatedEnvVars();
-
-    const w = warnings.find(w => w.key === "CLARIFIER_ENABLED");
-    expect(w).toBeDefined();
-    expect(w!.replacement).toBe("CEE_CLARIFIER_ENABLED");
-  });
-
   it("should warn when CEE_MODEL_DRAFT_GRAPH is used without CEE_MODEL_DRAFT", async () => {
     process.env = { ...originalEnv, CEE_MODEL_DRAFT_GRAPH: "gpt-4.1" };
     delete process.env.CEE_MODEL_DRAFT;

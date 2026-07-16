@@ -36,7 +36,6 @@ vi.mock("../../src/config/index.js", () => ({
     cee: {
       orchestratorValidationEnabled: false,
       enforceSingleGoal: true,
-      clarifierEnabled: false,
       deterministicEnforcementEnabled: true,
     },
     features: { optionShortcutRepair: true },
@@ -56,7 +55,6 @@ vi.mock("../../src/utils/telemetry.js", () => ({
     RepairFallback: "RepairFallback",
     CeeGraphGoalsMerged: "CeeGraphGoalsMerged",
     CeeGoalInferred: "CeeGoalInferred",
-    CeeClarifierFailed: "CeeClarifierFailed",
     CeeInboundSumRescaled: "cee.draft_graph.inbound_sum_rescaled",
     CeeBridgeChainRepaired: "cee.draft_graph.bridge_chain_repaired",
     CeeEnforcementCompleted: "cee.draft_graph.enforcement_completed",
@@ -74,7 +72,6 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
     trace: meta?.requestId ? { request_id: meta.requestId, correlation_id: meta.requestId } : undefined,
     details: meta?.details,
   }),
-  integrateClarifier: vi.fn(),
   isAdminAuthorized: () => false,
 }));
 
@@ -162,7 +159,6 @@ import { runCompoundGoals } from "../../src/cee/unified-pipeline/stages/repair/c
 import { runLateStrp } from "../../src/cee/unified-pipeline/stages/repair/late-strp.js";
 import { runEdgeRestoration } from "../../src/cee/unified-pipeline/stages/repair/edge-restoration.js";
 import { runConnectivity } from "../../src/cee/unified-pipeline/stages/repair/connectivity.js";
-import { runClarifier } from "../../src/cee/unified-pipeline/stages/repair/clarifier.js";
 import { runStructuralParse } from "../../src/cee/unified-pipeline/stages/repair/structural-parse.js";
 
 import { validateAndRepairGraph, GraphValidationError } from "../../src/cee/graph-orchestrator.js";
@@ -176,8 +172,6 @@ import { extractCompoundGoals, toGoalConstraints, remapConstraintTargets } from 
 import { reconcileStructuralTruth } from "../../src/validators/structural-reconciliation.js";
 import { restoreEdgeFields } from "../../src/cee/unified-pipeline/edge-identity.js";
 import { validateMinimumStructure } from "../../src/cee/transforms/structure-checks.js";
-import { integrateClarifier } from "../../src/cee/validation/pipeline.js";
-import { computeQuality } from "../../src/cee/quality/index.js";
 import { DraftGraphOutput } from "../../src/schemas/assist.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -209,7 +203,6 @@ function makeCtx(overrides?: Partial<Record<string, any>>): any {
     draftAdapter: { name: "openai", model: "gpt-4o" },
     llmMeta: { model: "gpt-4o" },
     confidence: 0.85,
-    clarifierStatus: "confident",
     effectiveBrief: "Test brief for compound goals",
     edgeFieldStash: {
       byEdgeId: { e1: { strength_mean: 0.7 } },
@@ -228,7 +221,6 @@ function makeCtx(overrides?: Partial<Record<string, any>>): any {
     constraintStrpResult: undefined,
     repairCost: 0,
     repairFallbackReason: undefined,
-    clarifierResult: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
     quality: undefined,
@@ -355,7 +347,7 @@ describe("Stage 4: Repair Orchestrator", () => {
     expect(callOrder[5]).toBe("6_late_strp");
     expect(callOrder[6]).toBe("7_restore");
     expect(callOrder[7]).toBe("8_connectivity");
-    // Note: substep 9 (clarifier) is no-op when config.cee.clarifierEnabled=false
+    // Note: substep 9 (clarifier) was retired 2026-07-16 (ROADMAP 1.94 Option A)
     expect(callOrder[8]).toBe("10_structural");
 
     (config as any).cee.orchestratorValidationEnabled = false;
@@ -440,106 +432,8 @@ describe("Stage 4: Repair Orchestrator", () => {
 
     runEdgeRestoration(ctx);
     expect(ctx.earlyReturn).toBeUndefined();
-
-    await runClarifier(ctx);
-    expect(ctx.earlyReturn).toBeUndefined();
   });
 
-  it("enforcement runs AFTER clarifier replaces ctx.graph (P0 ordering guard)", async () => {
-    // The clarifier can mutate ctx.graph by setting it to a refinedGraph with
-    // over-budget inbound sums. Enforcement must observe and repair the FINAL
-    // graph, not the pre-clarifier graph.
-    (config as any).cee.clarifierEnabled = true;
-
-    // PLoT validation passes through (no-op)
-    (validateAndRepairGraph as any).mockResolvedValue({
-      graph: { ...validGraph }, repairUsed: false, repairAttempts: 0, warnings: [],
-    });
-
-    // The refined graph reintroduces a budget violation: causal inbound sum 1.4
-    const refinedGraph = {
-      version: "1",
-      default_seed: 17,
-      meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
-      nodes: [
-        { id: "fac_a", kind: "factor", label: "A" },
-        { id: "fac_b", kind: "factor", label: "B" },
-        { id: "out_1", kind: "outcome", label: "Out" },
-        { id: "g1", kind: "goal", label: "Goal" },
-      ],
-      edges: [
-        { id: "e_a", from: "fac_a", to: "out_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.9 },
-        { id: "e_b", from: "fac_b", to: "out_1", strength_mean: 0.6, strength_std: 0.1, belief_exists: 0.9 },
-        { id: "e_g", from: "out_1", to: "g1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9 },
-      ],
-    };
-    (integrateClarifier as any).mockResolvedValue({ refinedGraph });
-
-    const ctx = makeCtx();
-    await runStageRepair(ctx);
-
-    // Enforcement (substep 9b) must run AFTER clarifier replaced ctx.graph,
-    // so the inbound sum on out_1 should now be ≤ 0.95 (was 1.4 pre-rescale).
-    const inboundToOut1 = (ctx.graph.edges as any[]).filter(
-      (e) => e.to === "out_1" && (e.from === "fac_a" || e.from === "fac_b"),
-    );
-    const sum = inboundToOut1.reduce((acc, e) => acc + Math.abs(e.strength_mean), 0);
-    expect(sum).toBeLessThanOrEqual(0.95 + 1e-6);
-    expect(ctx.repairTrace?.deterministic_enforcement?.nodes_rescaled).toBe(1);
-
-    (config as any).cee.clarifierEnabled = false;
-  });
-
-  it("re-detects edge format when clarifier returns a different shape", async () => {
-    // Pre-clarifier graph is V1_FLAT (the validGraph default). Clarifier
-    // returns a LEGACY-shaped refinedGraph (weight + belief). Enforcement
-    // must re-detect from the live graph; using the captured V1_FLAT format
-    // would cause readEdgeMean to read strength_mean (undefined) and skip
-    // every edge, leaving the budget violation unrepaired.
-    (config as any).cee.clarifierEnabled = true;
-
-    (validateAndRepairGraph as any).mockResolvedValue({
-      graph: { ...validGraph }, repairUsed: false, repairAttempts: 0, warnings: [],
-    });
-
-    const refinedLegacyGraph = {
-      version: "1",
-      default_seed: 17,
-      meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
-      nodes: [
-        { id: "fac_a", kind: "factor", label: "A" },
-        { id: "fac_b", kind: "factor", label: "B" },
-        { id: "out_1", kind: "outcome", label: "Out" },
-        { id: "g1", kind: "goal", label: "Goal" },
-      ],
-      edges: [
-        // LEGACY shape: weight/belief instead of strength_mean/belief_exists
-        { id: "le_a", from: "fac_a", to: "out_1", weight: 0.8, belief: 0.9 },
-        { id: "le_b", from: "fac_b", to: "out_1", weight: 0.6, belief: 0.9 },
-        { id: "le_g", from: "out_1", to: "g1", weight: 0.7, belief: 0.9 },
-      ],
-    };
-    (integrateClarifier as any).mockResolvedValue({ refinedGraph: refinedLegacyGraph });
-
-    const ctx = makeCtx();
-    // Capture pre-clarifier (V1_FLAT) format on context to simulate the real
-    // pipeline state Stage 4 entry would set.
-    ctx.detectedEdgeFormat = "V1_FLAT";
-
-    await runStageRepair(ctx);
-
-    // Inbound budget on out_1 was 1.4 in LEGACY shape → must be rescaled.
-    const inbound = (ctx.graph.edges as any[]).filter(
-      (e) => e.to === "out_1" && (e.from === "fac_a" || e.from === "fac_b"),
-    );
-    const sum = inbound.reduce((acc, e) => acc + Math.abs(e.weight ?? 0), 0);
-    expect(sum).toBeLessThanOrEqual(0.95 + 1e-6);
-    expect(ctx.repairTrace?.deterministic_enforcement?.nodes_rescaled).toBe(1);
-    // The post-rescale telemetry must report the live LEGACY format, not V1_FLAT.
-    // (Validated indirectly: rescale only succeeds if readEdgeMean used "weight".)
-
-    (config as any).cee.clarifierEnabled = false;
-  });
 });
 
 // ── Substep 1: Orchestrator validation ──────────────────────────────────────
@@ -1016,62 +910,6 @@ describe("Substep 8: Connectivity", () => {
   });
 });
 
-// ── Substep 9: Clarifier ────────────────────────────────────────────────────
-
-describe("Substep 9: Clarifier", () => {
-  beforeEach(setupDefaults);
-
-  it("no-op when feature flag off", async () => {
-    (config as any).cee.clarifierEnabled = false;
-    const ctx = makeCtx();
-    await runClarifier(ctx);
-
-    expect(integrateClarifier).not.toHaveBeenCalled();
-    expect(ctx.quality).toBeUndefined();
-  });
-
-  it("computes quality before calling clarifier", async () => {
-    (config as any).cee.clarifierEnabled = true;
-    (integrateClarifier as any).mockResolvedValue({});
-
-    const ctx = makeCtx();
-    await runClarifier(ctx);
-
-    expect(computeQuality).toHaveBeenCalledOnce();
-    expect(ctx.quality).toBeDefined();
-    expect(integrateClarifier).toHaveBeenCalledOnce();
-
-    (config as any).cee.clarifierEnabled = false;
-  });
-
-  it("updates graph on clarifier success with refinedGraph", async () => {
-    (config as any).cee.clarifierEnabled = true;
-    const refinedGraph = { ...validGraph, nodes: [...validGraph.nodes, { id: "new", kind: "factor", label: "New" }] };
-    (integrateClarifier as any).mockResolvedValue({ refinedGraph });
-
-    const ctx = makeCtx();
-    await runClarifier(ctx);
-
-    expect(ctx.clarifierResult).toBeDefined();
-    expect(ctx.graph).toBeDefined();
-
-    (config as any).cee.clarifierEnabled = false;
-  });
-
-  it("catches error and continues (non-fatal)", async () => {
-    (config as any).cee.clarifierEnabled = true;
-    (integrateClarifier as any).mockRejectedValue(new Error("clarifier boom"));
-
-    const ctx = makeCtx();
-    await runClarifier(ctx);
-
-    expect(ctx.earlyReturn).toBeUndefined();
-    // Quality was still computed before the error
-    expect(ctx.quality).toBeDefined();
-
-    (config as any).cee.clarifierEnabled = false;
-  });
-});
 
 // ── Substep 10: Structural parse ────────────────────────────────────────────
 

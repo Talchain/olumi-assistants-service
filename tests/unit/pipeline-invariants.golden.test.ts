@@ -75,7 +75,6 @@ vi.mock("../../src/config/index.js", () => ({
   config: {
     cee: {
       orchestratorValidationEnabled: false,
-      clarifierEnabled: false,
       enforceSingleGoal: true,
       draftArchetypesEnabled: false,
       draftStructuralWarningsEnabled: true,
@@ -105,7 +104,6 @@ vi.mock("../../src/utils/telemetry.js", () => ({
     GuardViolation: "GuardViolation",
     CeeGraphGoalsMerged: "CeeGraphGoalsMerged",
     CeeGoalInferred: "CeeGoalInferred",
-    CeeClarifierFailed: "CeeClarifierFailed",
   },
 }));
 
@@ -120,7 +118,6 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
   buildCeeErrorResponse: (code: string, msg: string, _meta?: any) => ({
     error: { code, message: msg },
   }),
-  integrateClarifier: vi.fn(),
   isAdminAuthorized: () => false,
 }));
 
@@ -484,7 +481,6 @@ function makeGoldenCtx(): any {
       provider_latency_ms: 0,
     },
     confidence: 0.82,
-    clarifierStatus: "complete",
     effectiveBrief: "Should we pursue organic growth or acquisition?",
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
@@ -507,7 +503,6 @@ function makeGoldenCtx(): any {
     constraintStrpResult: undefined,
     repairCost: 0,
     repairFallbackReason: undefined,
-    clarifierResult: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
 
@@ -572,42 +567,6 @@ describe("Network tripwire", () => {
     ).toThrow(TRIPWIRE_MSG);
   });
 
-  it("tripwire fires when clarifier config enables LLM-dependent code path", async () => {
-    setupDefaults();
-
-    const { config } = await import("../../src/config/index.js");
-    (config as any).cee.clarifierEnabled = true;
-
-    try {
-      // Make integrateClarifier simulate what the real one does: call the adapter.
-      // The clarifier substep wraps this in try/catch (swallows errors), so we
-      // verify: (1) integrateClarifier was called, (2) the tripwire error was
-      // emitted via CeeClarifierFailed telemetry with the TRIPWIRE_MSG.
-      const { integrateClarifier } = await import("../../src/cee/validation/pipeline.js");
-      (integrateClarifier as any).mockImplementationOnce(async () => {
-        const adapter = getAdapter();
-        adapter.clarifyBrief({} as any, {} as any);
-      });
-
-      const ctx = makeGoldenCtx();
-      await runStageRepair(ctx);
-
-      // integrateClarifier was called — proves clarifierEnabled routes to substep 9
-      expect(integrateClarifier).toHaveBeenCalledTimes(1);
-
-      // Tripwire error was caught by clarifier's try/catch and emitted as telemetry.
-      // Assert the emitted CeeClarifierFailed event contains the TRIPWIRE_MSG.
-      const { emit } = await import("../../src/utils/telemetry.js");
-      const emitCalls = (emit as any).mock.calls;
-      const clarifierFailedCall = emitCalls.find(
-        (call: any[]) => call[0] === "CeeClarifierFailed",
-      );
-      expect(clarifierFailedCall).toBeDefined();
-      expect(clarifierFailedCall[1].error_message).toContain(TRIPWIRE_MSG);
-    } finally {
-      (config as any).cee.clarifierEnabled = false;
-    }
-  });
 });
 
 describe("Golden pipeline invariants (stages 2–6)", () => {

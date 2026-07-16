@@ -26,7 +26,6 @@ import {
   NAN_FIX_SIGNATURE_STD,
 } from "../../src/cee/constants.js";
 import { detectStrengthDefaults } from "../../src/cee/validation/integrity-sentinel.js";
-import { ANSWER_INCORPORATION_SYSTEM_PROMPT } from "../../src/cee/clarifier/prompts.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -306,12 +305,6 @@ describe("Wave 2 Integration — Wave 1 regression: Default signature detection"
 });
 
 // ---------------------------------------------------------------------------
-// F10: Clarifier factor exclusion — content assertion
+// F10: Clarifier factor exclusion — RETIRED 2026-07-16 with the Stage-4
+// clarifier (ROADMAP 1.94 Option A); the prompt no longer exists.
 // ---------------------------------------------------------------------------
-
-describe("Wave 2 Integration — F10: Clarifier factor exclusion", () => {
-  it("ANSWER_INCORPORATION_SYSTEM_PROMPT lists allowed kinds without factor", () => {
-    expect(ANSWER_INCORPORATION_SYSTEM_PROMPT).toContain("goal, decision, option, outcome, risk, action");
-    expect(ANSWER_INCORPORATION_SYSTEM_PROMPT).toContain("intentionally excluded");
-  });
-});

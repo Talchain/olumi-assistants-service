@@ -30,7 +30,6 @@ const {
   runLateStrpMock,
   runEdgeRestorationMock,
   runConnectivityMock,
-  runClarifierMock,
   runStructuralParseMock,
   applyDeterministicEnforcementMock,
 } = vi.hoisted(() => ({
@@ -43,7 +42,6 @@ const {
   runLateStrpMock: vi.fn(),
   runEdgeRestorationMock: vi.fn(),
   runConnectivityMock: vi.fn(),
-  runClarifierMock: vi.fn(),
   runStructuralParseMock: vi.fn(),
   applyDeterministicEnforcementMock: vi.fn(),
 }));
@@ -74,9 +72,6 @@ vi.mock("../../src/cee/unified-pipeline/stages/repair/edge-restoration.js", () =
 }));
 vi.mock("../../src/cee/unified-pipeline/stages/repair/connectivity.js", () => ({
   runConnectivity: runConnectivityMock,
-}));
-vi.mock("../../src/cee/unified-pipeline/stages/repair/clarifier.js", () => ({
-  runClarifier: runClarifierMock,
 }));
 vi.mock("../../src/cee/unified-pipeline/stages/repair/structural-parse.js", () => ({
   runStructuralParse: runStructuralParseMock,
@@ -161,7 +156,6 @@ describe("runStageRepair — OPTIONS_IDENTICAL bypass wiring", () => {
     expect(runLateStrpMock).not.toHaveBeenCalled();
     expect(runEdgeRestorationMock).not.toHaveBeenCalled();
     expect(runConnectivityMock).not.toHaveBeenCalled();
-    expect(runClarifierMock).not.toHaveBeenCalled();
     expect(applyDeterministicEnforcementMock).not.toHaveBeenCalled();
     expect(runStructuralParseMock).not.toHaveBeenCalled();
   });
