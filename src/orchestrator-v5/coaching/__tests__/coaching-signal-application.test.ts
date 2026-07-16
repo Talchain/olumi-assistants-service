@@ -11,9 +11,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
+import type { LastCoachingSignalRecord } from '../last-coaching-signal-log.js';
 
+// Typed at the real appendLastCoachingSignal signature so mock.calls carries
+// the record argument (an untyped `vi.fn(async () => {})` types calls as `[]`,
+// which cannot be indexed). Type-only import above is erased, so referencing
+// it inside the hoisted factory is safe.
 const { appendLastCoachingSignalMock } = vi.hoisted(() => ({
-  appendLastCoachingSignalMock: vi.fn(async () => {}),
+  appendLastCoachingSignalMock: vi.fn(
+    async (_record: LastCoachingSignalRecord, _filePath?: string): Promise<void> => {},
+  ),
 }));
 
 vi.mock('../last-coaching-signal-log.js', async () => {
