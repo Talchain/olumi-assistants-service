@@ -1,169 +1,148 @@
 /**
  * figure-scanner.ts — numeric-literal scanner for %-anchored figures in prose
- * (conversation-harness, Wave1-L3 round 4).
+ * (conversation-harness, Wave1-L3 rounds 4–7).
  *
  * WHY A SCANNER AND NOT A REGEX
  * -----------------------------
  * G4 (canonical-state use) is the promotion-gate dimension that blocks a coach
  * prompt from shipping when it states figures that do not exist in the
- * canonical analysis payload. Its extraction step has now been through two
- * rounds of "fix the regex":
+ * canonical analysis payload. Its extraction step has now been through six
+ * review rounds:
  *
  *   round 2: /(\d{1,3})\s?%/ captured the digits abutting '%', so a decimal
  *            figure surfaced as its FRACTION ('62.5%' -> 5) — inverting the
  *            gate in both directions.
  *   round 3: fixed decimals/thousands, and review found the SAME regex still
- *            inverted on NEGATIVE figures (sign dropped: a sign-flipped
- *            "you LOSE 20%" vs canonical +20 scored a perfect 1.000) and on
- *            HYPHENATED RANGES ('60-70%': only the upper bound anchored, so a
- *            fabricated lower bound never entered the denominator).
+ *            inverted on NEGATIVE figures and HYPHENATED RANGES.
+ *   round 4: replaced the regex with this scanner + the FAIL-CLOSED policy.
+ *   round 5: closed 4 extraction-semantics holes (word-numbers, BY-vs-TO,
+ *            signed 'to'-ranges, clause commas).
+ *   round 6: TWO-LAYER ANCHOR ACCOUNTING — a dumb over-matching anchor
+ *            detector reconciled against the strict extractor, so an anchor
+ *            no outcome consumed fails closed by construction.
+ *   round 7: NUMERIC-TOKEN ACCOUNTING (below) — anchor accounting was still
+ *            fail-open for figures that SHARE one anchor.
  *
- * Two rounds, same regex, new holes. An anchored regex is structurally the
- * wrong tool: every syntactic form it does not enumerate is silently DROPPED,
- * and a dropped figure cannot block — so every gap fails OPEN. This module
- * replaces it with an explicit left-to-right scanner over numeric literals
- * (sign, decimals, thousands grouping, ranges, conjunction lists,
- * currency-adjacent forms) plus a FAIL-CLOSED policy:
+ * The FAIL-CLOSED CONTRACT (round 4, unchanged):
  *
  *   ANY %-ANCHORED FIGURE THE SCANNER CANNOT PARSE UNAMBIGUOUSLY IS REPORTED
  *   AS `unparseable` — the caller must count it as an UNTRACEABLE figure
  *   (gate-relevant), NEVER as absent.
  *
- * That flips the failure direction: a syntactic form nobody anticipated now
- * BLOCKS a candidate instead of waving it through, and the block is visible in
- * the details (someone investigates), where a silent drop was invisible.
- *
  * WHAT COUNTS AS A FIGURE
  * -----------------------
- * A figure must be ANCHORED to '%' or the word 'percent' / 'per cent' (word
- * boundary: 'percentile'/'percentage' do not anchor). Bare numbers are
- * ambiguous (dates, counts, the user's own figures) and a false positive here
- * degrades a real candidate, so '1,250' with no anchor yields nothing.
- * Currency-marked literals ('$1,250', '£62.5') are consumed as complete tokens
- * and are never percent figures: they cannot inherit an anchor from a
- * neighbour, and a directly-anchored currency ('$5%') is malformed ⇒
- * unparseable.
+ * A figure must be ANCHORED to '%' or a percent-family word (word boundary:
+ * 'percentile'/bare 'percentage' do not anchor). Currency-marked literals
+ * ('$1,250') are consumed as complete tokens and are never percent figures;
+ * a directly-anchored currency ('$5%') is malformed ⇒ unparseable.
+ * Identifier-glued digit runs ('utf8', 'v2', 'top-10') are classified as
+ * identifier fragments, never figures — a fabricated 'win62%' still fails
+ * closed because its ANCHOR goes unconsumed.
  *
- * WORD-NUMBERS (round 5): an anchor preceded by a NUMBER WORD ('ninety
- * percent', 'twenty-five per cent', 'half %') is a stated figure the
- * digit-based scanner cannot value. Round 4 left these INVISIBLE — neither
- * value nor unparseable — so a fabricated 'ninety percent' passed G4 at 1.000,
- * violating this module's own fail-closed contract. They are now RECOGNISED
- * and counted `unparseable` (untraceable, gate-relevant). Full word-number
- * parsing is deliberately NOT attempted: a mis-parse would trace or fabricate
- * silently, whereas a block is visible and investigated.
+ * SIGN — literal and directional (rounds 4–5, unchanged)
+ * ------------------------------------------------------
+ * Explicit signs immediately adjacent are honoured ('-20%', '−20%', '+20%',
+ * '±5%' both values). A directional cue in the 3 words before the figure
+ * (lose/down/fell/…) applies a negative sign; 'fell TO 20%' is a LEVEL (+20)
+ * where 'fell BY 20%' is a change (-20); 'up to' is neutral. Contradictions
+ * are unparseable, not guessed. HONEST LIMIT: the cue window looks BACKWARD
+ * only — "a 20% drop" extracts +20 (post-nouns more often name the metric).
  *
- * SIGN — literal and directional
- * ------------------------------
- * An explicit sign character immediately adjacent to the literal is honoured:
- * '-20%', '−20%' (U+2212), '+20%', '±5%' (both values). A hyphen with
- * whitespace before the digits is NOT a sign ('- 20%' is a bullet, '60 - 70%'
- * is a range). Additionally, a directional cue in the 3 words immediately
- * before the figure (lose / down / fell / drop / decline / minus / negative …)
- * applies a negative sign, so the sign-flipped "you LOSE 20%" is extracted as
- * -20 and cannot trace to a canonical +20. Contradictions (an explicit sign
- * against an opposite cue, or both cue directions in the window) are
- * unparseable, not guessed. The hedge bigram 'up to' is neutralised before cue
- * matching so "fell by up to 20%" stays negative.
+ * RANGES AND LISTS (rounds 4–5, unchanged)
+ * ----------------------------------------
+ * '60-70%' / '60 to 70%' / '60%-70%' expand to BOTH bounds; a conjunction
+ * list sharing one anchor ('10, 20 and 30%') distributes it. Malformed forms
+ * (descending bounds, sign inside a hyphen range, three-bound chains,
+ * asymmetric dash spacing) are unparseable. Explicit signs in a 'to'-range
+ * are unambiguous ('from -20% to 35%'). A bare comma with no conjunction
+ * later in the cluster is a CLAUSE boundary the anchor must not cross
+ * ('In 2024, 25% of users churned' yields [25]).
  *
- * BY vs TO (round 5): 'fell BY 20%' states a CHANGE (-20); 'fell TO 20%'
- * states a LEVEL (+20 — where the metric now sits). Round 4 sign-flipped
- * both, so a faithful level restatement hard-blocked AND a fabricated
- * negative could trace through the flip. When the word immediately before
- * the figure is 'to' (after 'up to' neutralisation), the directional cue is
- * a level verb and applies NO sign; an explicit sign character still does.
- *
- * HONEST LIMIT: the cue window looks BACKWARD only. A post-noun form like
- * "a 20% drop" is extracted as +20 — post-nouns more often name the metric
- * ("21% downside probability") than sign the value, and signing them would
- * false-block faithful restatements. So the sign handling is a floor on
- * directional fabrication, not a proof of its absence.
- *
- * RANGES AND LISTS
- * ----------------
- * '60-70%' (and '60 – 70%', '60 to 70%', '60%-70%') expands to BOTH bounds:
- * each bound enters the caller's denominator and must trace independently.
- * A conjunction list sharing one anchor ('10, 20 and 30%') distributes the
- * anchor across the listed literals — the same shared-anchor hole as ranges,
- * closed the same way. Malformed range-like forms — descending bounds
- * ('70-60%'), a sign inside a HYPHEN range, three-bound chains ('10-20-30%'),
- * asymmetric dash spacing ('60- 70%') — are unparseable.
- *
- * SIGNED 'to'-RANGES (round 5): explicit signs in a 'to'-glued range are
- * UNAMBIGUOUS — 'outcomes range from -20% to 35%' is the natural phrasing for
- * this product's signed p10–p90 percentile surface, and round 4 hard-blocked
- * it. Both bounds now resolve with their signs (ascending required; a
- * directional cue against an explicit range sign is still a contradiction).
- * The refusal stands for sign-in-HYPHEN-range forms ('-20-35%'), which are
- * genuinely ambiguous typography.
- *
- * CLAUSE BOUNDARIES (round 5): a bare comma with no conjunction later in the
- * cluster is a CLAUSE boundary, not a list separator — the anchor must not
- * distribute backward across it. 'In 2024, 25% of users churned' yields [25];
- * round 4 extracted [2024, 25] and the year hard-blocked faithful prose. The
- * Oxford-list shape ('10, 20 and 30%') still distributes: its commas are
- * followed by a conjunction glue. (Semicolons and sentence stops already
- * break clusters outright.) HONEST LIMIT: a comma whose right-hand side
- * contains both a conjunction and its own anchors ('in 2024, 25% and 30%')
- * still chains — the conjunction is indistinguishable from a list without
- * real parsing; that direction fails CLOSED (over-blocks), never open.
+ * ROUND 6 — TWO-LAYER ANCHOR ACCOUNTING (kept as invariant v1)
+ * ------------------------------------------------------------
+ * LAYER 1 finds EVERY percent-anchor token, deliberately over-matching;
+ * LAYER 2 (this extractor) records the span of every anchor it consumed.
+ * RECONCILIATION INVARIANT v1: any Layer-1 anchor no outcome consumed
+ * increments `unparseable`. Bare anchors ('expressed as a percent', a '(%)'
+ * header) therefore fail closed. PERCENTAGE POINTS are a DISTINCT UNIT: a
+ * pp-anchored figure ('12 percentage points', '12pp') must NEVER trace
+ * against a % canonical — the canonical surface carries no pp values, so
+ * every pp figure is an explicit unparseable. The change-then-level idiom
+ * ('revenue fell 10% to 55%') extracts a negative change and a positive
+ * level; clause commas bound the cue window.
  *
  * ==========================================================================
- * ROUND 6 — TWO-LAYER ANCHOR ACCOUNTING (the architectural inversion)
+ * ROUND 7 — NUMERIC-TOKEN ACCOUNTING (replaces anchor accounting as the
+ * mechanism that kills the invisible-figure class)
  * ==========================================================================
- * Rounds 2-5 each patched the holes a review found, and each review found NEW
- * ones: the extractor enumerated the figure shapes it understood, so every
- * shape nobody had anticipated was INVISIBLE — neither valued nor unparseable
- * — and invisible fails OPEN. Round 6 stops enumerating the hole class:
+ * Round-6 review proved anchor accounting fail-OPEN for figures that SHARE
+ * one anchor: reconciliation counted ANCHORS, so 'between ninety and 95%'
+ * scanned {values:[95], unparseable:0} — the fabricated word bound
+ * contributed NOTHING ('ninety or 95%', 'either eighty or 95%', 'a
+ * ninety–95% chance', 'outcomes of ten, 20 and 30%', '10, twenty and 30%'
+ * all leaked the same way, the last even dropping a DIGIT bound). The
+ * round-6 800-run invariant test could not see this because its generator
+ * rendered exactly ONE number per anchor.
  *
- *   LAYER 1 — ANCHOR DETECTOR, deliberately over-matching and dumb: find
- *   EVERY occurrence of a percent-anchor token in the text — '%', '％'
- *   (full-width), 'percent' / 'per cent' / 'per-cent' / 'percentage point(s)'
- *   / 'percent point(s)' / 'pp' / 'pct' — any case, hyphen- or
- *   newline-separated, with or without an adjacent numeral. False positives
- *   are acceptable BY DESIGN (they fail closed, visibly).
+ * Round 7 accounts NUMERIC TOKENS, which are enumerable where phrasings are
+ * not:
  *
- *   LAYER 2 — this strict extractor: values what it can parse unambiguously,
- *   refuses (unparseable) what it recognises but cannot, and records the text
- *   span of every anchor it CONSUMED either way.
+ *   TOKEN DETECTOR: every numeric token in the text — ASCII digit runs,
+ *   common Unicode digit runs (Arabic-Indic, Extended Arabic-Indic,
+ *   full-width) and Unicode vulgar-fraction chars, plus the CLOSED
+ *   word-number lexicon (units, teens, tens, hyphenated compounds like
+ *   'twenty-five', scales, and 'half'/'third'/'quarter' when %-adjacent).
+ *   Word-number and foreign-numeral tokens enter the SAME literal stream the
+ *   cluster grammar chews, as recognised-but-unvaluable literals — so
+ *   'between ninety and 95%' is ONE anchored form containing an unvaluable
+ *   bound and the WHOLE form refuses (fail closed, one outcome).
  *
- *   RECONCILIATION INVARIANT: every Layer-1 anchor must be consumed by
- *   exactly one Layer-2 outcome (a traced value OR an explicit unparseable).
- *   Any UNCONSUMED anchor increments `unparseable` — so an unknown future
- *   phrasing fails CLOSED BY CONSTRUCTION. The invisible-figure class is
- *   eliminated, not enumerated.
+ *   RECONCILIATION INVARIANT v2: within any ANCHOR-BEARING CLAUSE, EVERY
+ *   numeric token must be consumed by exactly one Layer-2 outcome (a valued
+ *   figure or an explicit unparseable). Any unconsumed numeric token in an
+ *   anchor-bearing clause increments `unparseable` — untraceable, fail
+ *   closed, by construction. Clause boundaries are sentence stops plus
+ *   commas, EXCEPT commas that chained as list glue inside a literal cluster
+ *   ('wins 10%, 20, and 30' — those commas do not shield, so the trailing
+ *   bare members round 6 silently dropped now fail closed; 'In 2024, 25%'
+ *   keeps its round-5 shield). Digit-flanked '.'/',' (decimals, thousands)
+ *   are not boundaries.
  *
- * Consequences to know about (deliberate calibration costs, all fail-closed):
- *  - a bare anchor with no figure at all ('expressed as a percent', a '(%)'
- *    column header) now counts one untraceable figure;
- *  - abbreviation anchors Layer 2 does not value ('12 pct', full-width
- *    '62％') count untraceable rather than being invisible.
+ * Deliberate calibration costs (all fail-closed, all visible):
+ *  - a bare number sharing a clause with an anchor now counts untraceable
+ *    ('Option 3 gives a 40% win rate' → 40 traces, 3 blocks). Over-blocking
+ *    faithful prose beats an invisible fabricated figure; the shield for the
+ *    clause-comma shape is pinned in tests.
+ *  - '3/4%' no longer silently values the 4 alone — the 3 fails closed.
+ *  - a non-ASCII numeral or vulgar fraction near an anchor fails closed
+ *    (recognised, never valued).
  *
- * PERCENTAGE POINTS ARE A DISTINCT UNIT (round 6): 'X percentage points' /
- * 'X percent points' / 'Xpp' state a pp DELTA, not a % level — 9pp != 9%. A
- * pp-anchored figure must NEVER trace against a % canonical. The canonical
- * surface carries no pp values, so every pp figure is an explicit
- * unparseable (recognised, counted, visible). If a pp canonical surface is
- * ever added, FigureScan must grow a unit field rather than folding pp into
- * `values`.
+ * P1 (round-6 verified): 'pts'/'pt'/'bps'/'basis point(s)' join the pp-unit
+ * anchor set in BOTH the Layer-1 detector and the Layer-2 extractor, so
+ * 'rose 12 percent pts' parses as unit pp (refused) instead of backtracking
+ * to bare 'percent' and valuing 12% — the pp-as-% conflation is dead. pp
+ * figures still NEVER trace against % canonicals.
  *
- * CHANGE-THEN-LEVEL (round 6): '<neg-cue> X% to Y%' — 'revenue fell 10% to
- * 55%' — is the financial change-then-level idiom: X is a negative CHANGE,
- * Y is a positive LEVEL, never a sign-flipped range. The idiom needs BOTH
- * bounds self-anchored and no leading 'from' ('down from 30% to 20%' is a
- * level transition and keeps its round-5 treatment); an idiom-shaped form
- * whose level bound lacks its own anchor is ambiguous ⇒ unparseable.
+ * UNIT SUB-SPLITTING (round-6 P2(c)): adjacent SELF-ANCHORED figures whose
+ * units differ — 'dropped 3 percentage points to 55%' — resolve
+ * independently: the pp delta refuses (honest untraceable) AND the 55%
+ * level is extracted; the level is no longer swallowed. Self-anchored
+ * list/comma neighbours also resolve independently ('ninety percent, and
+ * 20% elsewhere' → the word figure refuses, the 20 values).
  *
- * MIXED WORD/DIGIT RANGES (round 6): '<number-word> to X%' ('from ninety to
- * 95%') states a range whose word bound this digit scanner cannot value —
- * the bound must enter the range or the WHOLE form fails closed. Round 5
- * valued the digit bound alone, so the fabricated word bound vanished.
+ * OTHER ROUND-7 PICKUPS: '٪' (U+066A), '﹪' (U+FE6A), '‰' (U+2030) join the
+ * anchor set as recognise-and-refuse glyphs (like full-width '％' and
+ * 'pct' since round 6 — never valued, never invisible); soft hyphens
+ * (U+00AD) are normalised away before scanning.
  *
- * CLAUSE-BOUNDED CUES (round 6): the directional-cue window stops at the
- * SAME clause boundaries as the round-5 anchor rule (comma / semicolon /
- * sentence stops), so the two rules can never disagree about where a clause
- * ends ('Margins fell 5%, 30% of users churned' — the cue cannot cross the
- * comma and sign the 30).
+ * DOCUMENTED RESIDUALS — OUTSIDE the contract, pinned out-of-scope in tests:
+ *  - bare numbers in clauses with NO anchor ('we ran 3 scenarios.') are not
+ *    figures; a clause comma shields ('Across 3 cohorts, 40% converted').
+ *  - implicit/ratio figures with no anchor token: 'your win probability
+ *    halved', 'one in five runs fails'.
+ *  - compound modifiers ('a one-off gain', 'ten-fold') are not numeric
+ *    tokens; currency amounts ('$1,250') are never percent figures.
+ *  - the cue window stays backward-only ('a 20% drop' → +20).
  *
  * PII: this module returns numbers and counts only — never text fragments.
  * Callers must not emit scanned prose into details/notes.
@@ -194,6 +173,13 @@ const CUE_BOUNDARY = new Set([...SENTENCE_STOP, ',']);
 
 const isDigit = (c: string): boolean => c >= '0' && c <= '9';
 
+interface Span {
+  start: number;
+  end: number;
+}
+
+const spansOverlap = (a: Span, b: Span): boolean => a.start < b.end && a.end > b.start;
+
 // ---------- LAYER 1: the anchor detector (round 6 — see module doc) ----------
 
 /**
@@ -202,19 +188,16 @@ const isDigit = (c: string): boolean => c >= '0' && c <= '9';
  * longest ('percentage points') alternatives come first. Word-boundary
  * rules: the percent-family needs no letter AFTER it ('percentile' and bare
  * 'percentage' do not anchor; a letter merged BEFORE — 'ninetypercent' —
- * still anchors, and fails closed via reconciliation); 'pp'/'pct' need
- * non-letters on BOTH sides (ordinary words contain 'pp').
+ * still anchors, and fails closed via reconciliation); 'pp'/'pct'/'pts'/
+ * 'bps' need non-letters on BOTH sides (ordinary words contain 'pp'/'pt').
+ * ROUND 7: 'pts'/'pt'/'bps'/'basis point(s)' join the pp family in BOTH
+ * layers; '٪'/'﹪'/'‰' join the glyph set (recognise-and-refuse).
  */
 const ANCHOR_TOKEN_RE =
-  /％|%|percentage[\s-]*points?(?![a-z])|per[\s-]+cent(?:[\s-]*points?)?(?![a-z])|percent(?:[\s-]*points?)?(?![a-z])|(?<![a-z])pp(?![a-z])|(?<![a-z])pct(?![a-z])/gi;
+  /％|%|٪|﹪|‰|percentage[\s-]*(?:points?|pts?)(?![a-z])|per[\s-]+cent(?:[\s-]*(?:points?|pts?))?(?![a-z])|percent(?:[\s-]*(?:points?|pts?))?(?![a-z])|basis[\s-]+points?(?![a-z])|(?<![a-z])bps(?![a-z])|(?<![a-z])pp(?![a-z])|(?<![a-z])pct(?![a-z])|(?<![a-z])pts?(?![a-z])/gi;
 
-interface AnchorToken {
-  start: number;
-  end: number;
-}
-
-function detectAnchorTokens(text: string): AnchorToken[] {
-  const out: AnchorToken[] = [];
+function detectAnchorTokens(text: string): Span[] {
+  const out: Span[] = [];
   for (const m of text.matchAll(ANCHOR_TOKEN_RE)) {
     out.push({ start: m.index, end: m.index + m[0].length });
   }
@@ -243,46 +226,32 @@ const POS_CUES = new Set([
   'plus', 'positive', 'up',
 ]);
 
-// ---------- word-number figures (recognise-and-fail-closed — see module doc) ----------
+// ---------- word-number tokens (round 7: literals in the cluster grammar) ----------
 
-const NUMBER_WORDS = new Set([
+/** The CLOSED word-number lexicon: units, teens, tens, scales. Hyphenated
+ * compounds ('twenty-five') and space-joined runs ('ninety five') merge into
+ * ONE token via WORD_SEQ_RE. */
+const CORE_NUMBER_WORDS = [
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
   'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
   'seventeen', 'eighteen', 'nineteen',
   'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
   'hundred', 'thousand', 'million', 'billion',
-  'half', 'third', 'thirds', 'quarter', 'quarters',
-]);
+];
+/** Fraction words are numeric tokens ONLY when %-adjacent ('half a percent'
+ * yes; 'half the users' no — see module doc). */
+const FRACTION_WORDS = ['half', 'third', 'thirds', 'quarter', 'quarters'];
+const FRACTION_SET = new Set(FRACTION_WORDS);
 
-/** Anchors whose immediately-preceding word is a NUMBER WORD ('ninety
- * percent', 'twenty-five per cent', 'ninety%', round 6: 'a ninety-percent
- * chance', 'twenty percentage points'). Each is a stated figure this
- * digit-based scanner cannot value ⇒ the caller adds each to `unparseable`
- * (UNTRACEABLE, never absent) and marks its span CONSUMED for the round-6
- * reconciliation. No word-number VALUE parsing is attempted.
- * Digit-anchored figures never reach here: the char before their anchor is a
- * digit, not a letter, so the two passes cannot double-count one anchor. */
-function findWordNumberFigures(text: string): AnchorToken[] {
-  const out: AnchorToken[] = [];
-  const patterns = [
-    // word '%'  ('ninety%', 'ninety %', round 6: 'ninety-%', 'ninety\n%')
-    /([a-z]+(?:-[a-z]+)*)[\s-]*%/gi,
-    // word 'percent' / 'per cent' / pp-forms, hyphen/newline-separable
-    // (round 6), with an optional article between ('half a percent').
-    // Word-bounded on the right: 'percentile' does not anchor.
-    /([a-z]+(?:-[a-z]+)*?)(?:[ \t]+(?:a|an))?[\s-]+(?:percentage[\s-]*points?|per[\s-]+cent(?:[\s-]*points?)?|percent(?:[\s-]*points?)?)(?![a-z])/gi,
-  ];
-  for (const re of patterns) {
-    for (const m of text.matchAll(re)) {
-      const parts = m[1].toLowerCase().split('-');
-      // 'twenty-five percent': the token ADJACENT to the anchor decides.
-      if (NUMBER_WORDS.has(parts[parts.length - 1])) {
-        out.push({ start: m.index, end: m.index + m[0].length });
-      }
-    }
-  }
-  return out;
-}
+const WORD_ALT = [...CORE_NUMBER_WORDS, ...FRACTION_WORDS]
+  .sort((a, b) => b.length - a.length)
+  .join('|');
+/** A maximal run of number words joined by spaces/tabs or single hyphens:
+ * 'ninety', 'twenty-five', 'ninety five', 'three quarters'. */
+const WORD_SEQ_RE = new RegExp(
+  `\\b(?:${WORD_ALT})(?:(?:[ \\t]+|-)(?:${WORD_ALT}))*\\b`,
+  'gi',
+);
 
 /** Last `n` words immediately before `pos`, lowercased, not crossing a
  * clause boundary (the shared CUE_BOUNDARY set — round 6). Hyphenated words
@@ -316,14 +285,18 @@ interface Literal {
   /** Index just past the anchor when anchored, else === end. */
   anchorEnd: number;
   value: number;
+  /** False for malformed digit runs AND for word-number / foreign-numeral
+   * tokens (round 7): recognised, never valuable — an anchored form
+   * containing one refuses whole (fail closed). */
   valid: boolean;
   sign: '' | '-' | '+' | '±';
   currency: boolean;
   anchored: boolean;
-  /** ROUND 6: '%'-family anchors value as percentages; 'pp'-family anchors
-   * (percentage point(s) / percent point(s) / pp) are a DISTINCT UNIT that
-   * must never trace against a % canonical. */
-  unit: '%' | 'pp';
+  /** ROUND 6/7: '%'-family anchors value as percentages; 'pp'-family anchors
+   * (percentage point(s) / percent point(s)/pt(s) / pp / bps / basis points)
+   * are a DISTINCT UNIT that must never trace against a % canonical;
+   * 'other' anchors (pct, ％, ٪, ﹪, ‰) are recognised-and-refused. */
+  unit: '%' | 'pp' | 'other';
   /** True when the anchor sits on the far side of released trailing
    * punctuation ('62.%') — malformed typography around an anchor. */
   anchorAfterReleasedPunct: boolean;
@@ -360,19 +333,32 @@ interface AnchorMatch {
   start: number;
   /** Index just past the anchor token. */
   end: number;
-  unit: '%' | 'pp';
+  unit: Literal['unit'];
 }
 
 /** Word-form anchors Layer 2 understands, matched stickily at one position.
  * Longest alternatives first. 'percentile' / bare 'percentage' do not anchor
- * (letter follows / no 'point'); pp-forms carry unit 'pp'. */
+ * (letter follows / no 'point'). ROUND 7: the points-suffix alternation
+ * includes 'pts'/'pt' so 'percent pts' can never backtrack to bare 'percent'
+ * (the pp-as-% conflation); standalone 'pts'/'pt'/'bps'/'basis point(s)'
+ * anchor as pp; 'pct' anchors as recognise-and-refuse. */
 const WORD_ANCHOR_STICKY =
-  /(?:percentage[\s-]*points?|per[\s-]+cent(?:[\s-]*points?)?|percent(?:[\s-]*points?)?|pp)(?![a-z])/iy;
+  /(?:percentage[\s-]*(?:points?|pts?)|per[\s-]+cent(?:[\s-]*(?:points?|pts?))?|percent(?:[\s-]*(?:points?|pts?))?|basis[\s-]+points?|bps|pp|pct|pts?)(?![a-z])/iy;
 
-/** Match an anchor at/after `pos`. ROUND 6: skips whitespace INCLUDING
- * newlines plus at most one hyphen ('a 25-percent drop', '62\npercent',
- * 'a 9-per-cent gain' — the compound-modifier forms round 5 could not see),
- * and returns the matched span + unit, or null. */
+function wordAnchorUnit(tok: string): Literal['unit'] {
+  const t = tok.toLowerCase();
+  if (t === 'pct') return 'other';
+  if (t === 'pp' || t === 'bps' || t.startsWith('basis') || /point|(?:^|[\s-])pts?$/.test(t)) {
+    return 'pp';
+  }
+  return '%';
+}
+
+/** Match an anchor at/after `pos`. Skips whitespace INCLUDING newlines plus
+ * at most one hyphen ('a 25-percent drop', '62\npercent', 'a 9-per-cent
+ * gain'), and returns the matched span + unit, or null. ROUND 7: non-ASCII
+ * percent glyphs and per-mille are RECOGNISED and always refused (unit
+ * 'other') — never valued, never invisible. */
 function matchAnchor(text: string, pos: number): AnchorMatch | null {
   let i = pos;
   while (i < text.length && /[ \t\r\n]/.test(text[i])) i++;
@@ -381,14 +367,81 @@ function matchAnchor(text: string, pos: number): AnchorMatch | null {
     while (i < text.length && /[ \t\r\n]/.test(text[i])) i++;
   }
   if (text[i] === '%') return { start: i, end: i + 1, unit: '%' };
+  if (text[i] === '％' || text[i] === '٪' || text[i] === '﹪' || text[i] === '‰') {
+    return { start: i, end: i + 1, unit: 'other' };
+  }
   WORD_ANCHOR_STICKY.lastIndex = i;
   const m = WORD_ANCHOR_STICKY.exec(text);
   if (m) {
-    const tok = m[0].toLowerCase();
-    const unit: AnchorMatch['unit'] = tok === 'pp' || tok.includes('point') ? 'pp' : '%';
-    return { start: i, end: i + m[0].length, unit };
+    return { start: i, end: i + m[0].length, unit: wordAnchorUnit(m[0]) };
   }
   return null;
+}
+
+/** matchAnchor for word-number tokens: one article may sit between the word
+ * and its anchor ('half a percent', 'a hundred percent' needs none). */
+function matchAnchorAfterWord(text: string, pos: number): AnchorMatch | null {
+  const direct = matchAnchor(text, pos);
+  if (direct !== null) return direct;
+  const art = /^[ \t\r\n]+an?(?![a-z])/i.exec(text.slice(pos, pos + 12));
+  if (art !== null) return matchAnchor(text, pos + art[0].length);
+  return null;
+}
+
+function unvaluableLiteral(start: number, end: number, anchor: AnchorMatch | null): Literal {
+  return {
+    start,
+    end,
+    anchorStart: anchor === null ? end : anchor.start,
+    anchorEnd: anchor === null ? end : anchor.end,
+    value: NaN,
+    valid: false,
+    sign: '',
+    currency: false,
+    anchored: anchor !== null,
+    unit: anchor === null ? '%' : anchor.unit,
+    anchorAfterReleasedPunct: false,
+    malformedPrefix: false,
+  };
+}
+
+/** ROUND 7: word-number tokens from the CLOSED lexicon become literals in the
+ * same stream the cluster grammar chews — recognised, never valuable. */
+function scanWordNumberLiterals(text: string): Literal[] {
+  const out: Literal[] = [];
+  for (const m of text.matchAll(WORD_SEQ_RE)) {
+    const start = m.index;
+    const end = start + m[0].length;
+    // 'x-one': a number word hyphen-glued onto a preceding real word is a
+    // compound fragment, not a numeric token.
+    if (text[start - 1] === '-' && /[a-z]/i.test(text[start - 2] ?? '')) continue;
+    const anchor = matchAnchorAfterWord(text, end);
+    if (anchor === null) {
+      // Fraction words are numeric tokens only when %-adjacent.
+      const words = m[0].toLowerCase().split(/[^a-z]+/).filter(Boolean);
+      if (words.every((w) => FRACTION_SET.has(w))) continue;
+      // Compound modifiers ('one-off', 'ten-fold') are not numeric tokens.
+      // (An anchored hyphen form — 'ninety-percent' — was caught above.)
+      if (text[end] === '-' && /[a-z]/i.test(text[end + 1] ?? '')) continue;
+    }
+    out.push(unvaluableLiteral(start, end, anchor));
+  }
+  return out;
+}
+
+/** ROUND 7: common non-ASCII numerals (Arabic-Indic, Extended Arabic-Indic,
+ * full-width) and Unicode vulgar fractions — recognised, never valuable. */
+const FOREIGN_NUMERAL_RE =
+  /[\u0660-\u0669\u06F0-\u06F9\uFF10-\uFF19]+|[\u00BC-\u00BE\u2150-\u215E]/g;
+
+function scanForeignNumeralLiterals(text: string): Literal[] {
+  const out: Literal[] = [];
+  for (const m of text.matchAll(FOREIGN_NUMERAL_RE)) {
+    const start = m.index;
+    const end = start + m[0].length;
+    out.push(unvaluableLiteral(start, end, matchAnchor(text, end)));
+  }
+  return out;
 }
 
 function scanLiterals(text: string): Literal[] {
@@ -427,7 +480,10 @@ function scanLiterals(text: string): Literal[] {
       malformedPrefix = false;
       p = i - 1;
     }
-    // Identifier guard: 'v2', 'utf8', 'CAGR20%' are fragments, not figures.
+    // Identifier guard: 'v2', 'utf8', 'CAGR20%' are fragments, not figures —
+    // an enumerable CLASSIFICATION (letter-glued digits), not a silent drop;
+    // a directly-anchored fragment still fails closed via the unconsumed
+    // ANCHOR (invariant v1).
     if (p >= 0 && /[A-Za-z0-9_]/.test(text[p])) {
       while (i < n && /[0-9.,]/.test(text[i])) i++;
       continue;
@@ -559,6 +615,42 @@ function cueSign(text: string, clusterStart: number): 'neg' | 'pos' | 'none' | '
   return 'none';
 }
 
+// ---------- clause boundaries for the round-7 token reconciliation ----------
+
+/** Positions of clause-boundary chars: sentence stops plus commas — EXCEPT
+ * digit-flanked '.'/',' (decimals, thousands grouping) and commas that
+ * CHAINED as list glue inside a literal cluster (an Oxford-list comma must
+ * not shield the members it lists — see module doc, round 7). */
+function clauseBoundaries(src: string, chainedGlueSpans: Span[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (SENTENCE_STOP.has(c)) {
+      if (c === '.' && isDigit(src[i - 1] ?? '') && isDigit(src[i + 1] ?? '')) continue;
+      out.push(i);
+    } else if (c === ',') {
+      if (isDigit(src[i - 1] ?? '') && isDigit(src[i + 1] ?? '')) continue;
+      if (chainedGlueSpans.some((s) => i >= s.start && i < s.end)) continue;
+      out.push(i);
+    }
+  }
+  return out;
+}
+
+function clauseAround(boundaries: number[], len: number, pos: number): Span {
+  let lo = 0;
+  let hi = len;
+  for (const b of boundaries) {
+    if (b < pos) {
+      lo = b + 1;
+    } else {
+      hi = b;
+      break;
+    }
+  }
+  return { start: lo, end: hi };
+}
+
 // ---------- cluster classification ----------
 
 const LIST_MEMBER_CAP = 5;
@@ -568,29 +660,35 @@ const LIST_MEMBER_CAP = 5;
  * the fail-closed contract on `unparseable`.
  */
 export function scanProseFigures(text: string): FigureScan {
-  const src = text ?? '';
+  // ROUND 7: soft hyphens are invisible typography — normalise before
+  // scanning so they cannot split a token or an anchor.
+  const src = (text ?? '').replace(/\u00AD/g, '');
   const values: number[] = [];
   let unparseable = 0;
 
-  // ROUND 6: spans of every Layer-1 anchor CONSUMED by a Layer-2 outcome.
-  // Reconciled against detectAnchorTokens() at the end — any anchor no
-  // outcome consumed fails closed there.
-  const consumedSpans: AnchorToken[] = [];
+  // ROUND 6/7: spans of every Layer-1 anchor consumed by a Layer-2 outcome,
+  // and every numeric-token literal consumed likewise. Reconciled at the end
+  // — anything unconsumed fails closed there.
+  const consumedAnchors: Span[] = [];
+  const consumedLits = new Set<Literal>();
   const consume = (ms: Literal[]): void => {
     for (const m of ms) {
-      if (m.anchored) consumedSpans.push({ start: m.anchorStart, end: m.anchorEnd });
+      if (m.anchored) consumedAnchors.push({ start: m.anchorStart, end: m.anchorEnd });
+      consumedLits.add(m);
     }
   };
 
-  // WORD-NUMBERS (round 5): '%'/'percent' anchored to a number WORD is a
-  // stated figure this digit-based scanner cannot value — fail closed.
-  // Round 6: each match consumes its anchor span.
-  for (const wf of findWordNumberFigures(src)) {
-    unparseable++;
-    consumedSpans.push(wf);
-  }
+  // ROUND 7: digit literals, word-number tokens and foreign numerals enter
+  // ONE literal stream — the numeric-token enumeration IS this list.
+  const lits = [
+    ...scanLiterals(src),
+    ...scanWordNumberLiterals(src),
+    ...scanForeignNumeralLiterals(src),
+  ].sort((a, b) => a.start - b.start);
 
-  const lits = scanLiterals(src);
+  // Commas that chained as list glue (recorded pre-pop so a popped trailing
+  // member's comma still reads as list glue for the clause reconciliation).
+  const chainedGlueSpans: Span[] = [];
 
   // Group consecutive literals into clusters. Currency literals never chain
   // (they cannot inherit or donate an anchor), so glue into/out of one breaks.
@@ -608,9 +706,21 @@ export function scanProseFigures(text: string): FigureScan {
     }
     k++;
 
+    // ROUND 7: record which commas CHAINED — a 'list' glue's comma always,
+    // a bare-comma glue's only when a conjunction glue follows later in the
+    // cluster (the round-5 Oxford-list rule, applied to the PRE-POP shape).
+    for (let g = 0; g < glues.length; g++) {
+      if (glues[g] === 'list' || (glues[g] === 'comma' && glues.slice(g + 1).includes('list'))) {
+        chainedGlueSpans.push({ start: members[g].anchorEnd, end: members[g + 1].start });
+      }
+    }
+
     // Trailing unanchored members of a LIST get no anchor to inherit — they
-    // are bare and drop off the cluster ("wins 10%, 20, and 9 times…"). Range
-    // glue keeps both sides: '60%-70' inherits across the dash.
+    // are not figures this form states. ROUND 7: they are no longer silently
+    // dropped — they stay UNCONSUMED, and the token reconciliation fails
+    // them closed when an anchor shares their clause ('wins 10%, 20, and 30'
+    // — the chained commas do not shield; 'sold 10%, 20 units' — the clause
+    // comma does). Range glue keeps both sides: '60%-70' inherits.
     while (
       members.length > 1 &&
       !members[members.length - 1].anchored &&
@@ -643,29 +753,71 @@ export function scanProseFigures(text: string): FigureScan {
       segments.push({ members: segMembers, glues: segGlues });
     }
 
+    // ROUND 7 — UNIT SUB-SPLITTING: adjacent members that are BOTH
+    // self-anchored are independent stated figures when list/comma-glued or
+    // when their units differ — 'dropped 3 percentage points to 55%' must
+    // yield the pp refusal AND the 55% level; 'ninety percent, and 20%' must
+    // not let the word figure poison the digit one. Range/'to' glue between
+    // same-unit self-anchored bounds still binds ('60% to 70%', the
+    // change-then-level idiom).
+    const finalSegments: Array<{ members: Literal[]; glues: Glue[] }> = [];
     for (const seg of segments) {
+      let cur: Literal[] = [seg.members[0]];
+      let curGlues: Glue[] = [];
+      for (let g = 0; g < seg.glues.length; g++) {
+        const a = seg.members[g];
+        const b = seg.members[g + 1];
+        const bothAnchored = a.anchored && b.anchored;
+        const split =
+          bothAnchored &&
+          (seg.glues[g] === 'list' || seg.glues[g] === 'comma' || a.unit !== b.unit);
+        if (split) {
+          finalSegments.push({ members: cur, glues: curGlues });
+          cur = [seg.members[g + 1]];
+          curGlues = [];
+        } else {
+          cur.push(seg.members[g + 1]);
+          curGlues.push(seg.glues[g]);
+        }
+      }
+      finalSegments.push({ members: cur, glues: curGlues });
+    }
+
+    for (const seg of finalSegments) {
       const segMembers = seg.members;
       const segGlues = seg.glues;
 
       const anchoredAny = segMembers.some((m) => m.anchored);
-      if (!anchoredAny) continue; // bare numbers / currency amounts: not figures
+      if (!anchoredAny) {
+        // Bare numbers stay unconsumed (reconciliation decides); currency
+        // amounts are CLASSIFIED non-figures — consumed by that
+        // classification, never percent figures ('$5 and 20%').
+        for (const m of segMembers) {
+          if (m.currency) consumedLits.add(m);
+        }
+        continue;
+      }
 
       // From here on, this segment IS a stated figure (or several) and every
       // path below yields EXACTLY ONE outcome (values or unparseable), so its
-      // anchors are consumed for the round-6 reconciliation here, once.
+      // anchors and tokens are consumed for the reconciliation here, once.
       consume(segMembers);
 
-      // ROUND 6 — PERCENTAGE POINTS ARE A DISTINCT UNIT: a pp-anchored figure
-      // ('12 percentage points', '9 percent points', '12pp') is a DELTA in
-      // points, not a % level — it must never trace against a % canonical.
-      // The canonical surface carries no pp values, so it is an explicit
-      // unparseable (recognised, counted, visible), never a valued 9%.
-      if (segMembers.some((m) => m.anchored && m.unit === 'pp')) {
+      // ROUND 6/7 — NON-% UNITS NEVER VALUE: a pp-anchored figure
+      // ('12 percentage points', '12 percent pts', '12pp', '12 bps') is a
+      // DELTA in points, not a % level — it must never trace against a %
+      // canonical; 'other' anchors (pct, ％, ٪, ﹪, ‰) are recognised
+      // typography this scanner refuses to value. Explicit unparseable
+      // (recognised, counted, visible), never a valued %.
+      if (segMembers.some((m) => m.anchored && m.unit !== '%')) {
         unparseable++;
         continue;
       }
 
       // Every malformation below counts as unparseable — never a silent drop.
+      // ROUND 7: an anchored form containing a word-number / foreign-numeral
+      // bound (valid === false) refuses WHOLE here — 'between ninety and
+      // 95%' is one untraceable figure-form, not a clean [95].
       const malformed =
         segGlues.includes('ambiguous') ||
         segMembers.some(
@@ -684,21 +836,6 @@ export function scanProseFigures(text: string): FigureScan {
         continue;
       }
       if (!isRange && segMembers.length > LIST_MEMBER_CAP) {
-        unparseable++;
-        continue;
-      }
-
-      // ROUND 6 (mixed word/digit range): '<number-word> to X%' — 'from
-      // ninety to 95%' — states a range whose word bound this digit scanner
-      // cannot value. The bound must enter the range or the WHOLE form fails
-      // closed; round 5 valued the digit bound alone and the fabricated word
-      // bound vanished. ('up to X%' is safe: 'up' is not a number word.)
-      const pre = precedingWords(src, segMembers[0].start, 2);
-      if (
-        pre.length >= 2 &&
-        pre[pre.length - 1] === 'to' &&
-        NUMBER_WORDS.has(pre[pre.length - 2])
-      ) {
         unparseable++;
         continue;
       }
@@ -780,15 +917,28 @@ export function scanProseFigures(text: string): FigureScan {
     }
   }
 
-  // ---------- ROUND 6: LAYER-1 ⇄ LAYER-2 RECONCILIATION ----------
-  // THE INVARIANT: every anchor token the dumb detector finds must have been
-  // consumed by exactly one Layer-2 outcome above (a traced value or an
-  // explicit unparseable). Any anchor left unconsumed is a figure shape this
-  // extractor never anticipated — the class that leaked fail-open through
-  // five review rounds — and it fails CLOSED here, by construction.
-  for (const t of detectAnchorTokens(src)) {
-    const covered = consumedSpans.some((s) => t.start < s.end && t.end > s.start);
+  const anchors = detectAnchorTokens(src);
+
+  // ---------- ROUND 6: ANCHOR RECONCILIATION (invariant v1) ----------
+  // Every anchor token the dumb detector finds must have been consumed by
+  // exactly one Layer-2 outcome above. Any anchor left unconsumed is a
+  // figure shape this extractor never anticipated — fail CLOSED here.
+  for (const t of anchors) {
+    const covered = consumedAnchors.some((s) => spansOverlap(t, s));
     if (!covered) unparseable++;
+  }
+
+  // ---------- ROUND 7: NUMERIC-TOKEN RECONCILIATION (invariant v2) ----------
+  // Within any anchor-bearing clause, EVERY numeric token must be consumed
+  // by exactly one Layer-2 outcome. An unconsumed token sharing a clause
+  // with an anchor is exactly the class round 6 leaked ('between ninety and
+  // 95%' — the 'ninety' vanished): fail CLOSED, by construction. Clause
+  // commas shield ('In 2024, 25%…'); chained list commas do not.
+  const boundaries = clauseBoundaries(src, chainedGlueSpans);
+  for (const lit of lits) {
+    if (consumedLits.has(lit)) continue;
+    const clause = clauseAround(boundaries, src.length, lit.start);
+    if (anchors.some((a) => spansOverlap(a, clause))) unparseable++;
   }
 
   return { values, unparseable };
