@@ -528,19 +528,24 @@ export const TelemetryEvents = {
   // Fields per §4.4: boundary, direction, validator, contract_version, pass, error_code?, request_id
   BoundaryValidation: "boundary.validation",
 
-  // W2E-2 — SIGMA FLOOR at the COMPUTE boundary (PLoTClient.run).
-  // Fires once per floored field when an outbound PLoT run payload carries a
-  // sigma <= 0 (edge strength.std / node observed_state.std) and CEE floors it
-  // to COMPUTE_SIGMA_FLOOR. Deliberately NOT at ingress: ingress preserves
-  // graph identity exactly, because strength.std is in the analysis-affecting
-  // hash projection and rewriting it there desyncs every hash token. Full
-  // rationale: src/validators/numeric-bounds.ts module header.
+  // W2E-2 — SIGMA FLOOR at the persisted-load boundary
+  // (loadScenarioSnapshotForRunAnalysis, build-turn-context.ts — round 4;
+  // round 3 placed it in PLoTClient.run, AFTER the GraphV3 parse that rejects
+  // std <= 0, where it was dead code on every live path).
+  // Fires once per floored field when the persisted graph carries a
+  // sigma <= 0 (edge strength.std / node observed_state.std) and CEE floors
+  // the compute-side copy to COMPUTE_SIGMA_FLOOR, BEFORE the GraphV3 parse.
+  // Deliberately NOT at ingress and NEVER touching rawPersistedGraph: ingress
+  // and the hash input preserve graph identity exactly, because strength.std
+  // is in the analysis-affecting hash projection and rewriting it there
+  // desyncs every hash token. Full rationale: src/validators/numeric-bounds.ts
+  // module header.
   //
   // This is the meter for how much invalid persisted state exists in the wild:
   // the UI's own writer floors outbound std at ZERO, so affected scenarios emit
   // this on EVERY analysis run. Expect a non-zero baseline that decays only as
   // scenarios are re-saved. A sustained rise means a NEW writer is producing
-  // zero-sigma state — find it. Fields: path, repaired_to, request_id.
+  // zero-sigma state — find it. Fields: path, kind, repaired_to, request_id.
   // Never carries the offending value or any label (PII rule).
   ComputeSigmaFloor: "cee.compute.sigma_floor",
 
