@@ -11,6 +11,18 @@
  * The full draft_graph builder (`buildV5DiagnosticTrace`) is exercised end-
  * to-end by `draft-graph-dispatch-diagnostic-trace.test.ts`; this file
  * focuses on the lighter helpers.
+ *
+ * WIRING NOTE (observability lane): the cases here call the BUILDER directly.
+ * They prove the builder's contract given its inputs — NOT that production
+ * threads those inputs. The empty-`llm_calls` case below is the builder's
+ * no-timings edge case, NOT the shape a real turn_executor turn emits: before
+ * the fix, production DID emit `[]` because its only call site
+ * (`route-v2 sendFinalised200`) omitted `turnTimings`, and a builder-only test
+ * that asserted `[]` silently ratified that defect. The REAL production wiring
+ * — a runTurnExecutor turn surfacing a non-empty `llm_calls[]` on the wire —
+ * is proven and mutation-checked in
+ * `orchestrator-v5/__tests__/turn-executor-diagnostic-llm-calls.test.ts` and
+ * `orchestrator/__tests__/route-v2-diagnostic-trace-llm-calls.test.ts`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -72,12 +84,15 @@ describe('buildMinimalV5DiagnosticTrace', () => {
     expect(trace!.correlation_ids.scenario_id).toBe(SCENARIO_ID);
     expect(trace!.correlation_ids.turn_id).toBe(TURN_ID);
     expect(trace!.trace_version).toBe(1);
-    // No upstream telemetry → empty llm_calls + null structured_output_config
+    // Builder EDGE CASE: called with no `turnTimings`, the builder has nothing
+    // to record so `llm_calls` is empty. This is the builder's honest no-input
+    // contract — NOT the turn_executor production shape (production threads
+    // `turnTimings`; see the WIRING NOTE at the top of this file).
     expect(trace!.llm_calls).toEqual([]);
     expect(trace!.structured_output_config).toBeNull();
   });
 
-  it('maps V5TurnTimings substages into benchmarking when provided', async () => {
+  it('records the routing LLM call (real model/tokens/prompt identity) from V5TurnTimings — the shape production now emits', async () => {
     process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
     const startedAt = Date.now() - 100;
     const trace = buildMinimalV5DiagnosticTrace({
@@ -93,19 +108,51 @@ describe('buildMinimalV5DiagnosticTrace', () => {
         commit_ms: 120,
         total_input_tokens: 5000,
         cache_read_input_tokens: 200,
+        routing_model: 'claude-sonnet-4-6',
+        routing_output_tokens: 321,
+        routing_prompt_hash: 'sha256:routingdeadbeef',
+        routing_prompt_version: 'v40',
       },
     });
     expect(trace!.benchmarking.substage_timings.route_classification_ms).toBe(800);
     expect(trace!.benchmarking.substage_timings.prompt_assembly_ms).toBe(50);
     expect(trace!.benchmarking.substage_timings.total_handler_duration_ms).toBe(4200);
     expect(trace!.benchmarking.substage_timings.persistence_ms).toBe(120);
-    // Synthetic routing-call record uses the routing timings.
+    // Routing-call record carries REAL data (no more 'unknown' model / 0 output).
     expect(trace!.llm_calls.length).toBe(1);
     const call = trace!.llm_calls[0]!;
     expect(call.role).toBe('routing');
+    expect(call.provider).toBe('anthropic');
+    expect(call.model).toBe('claude-sonnet-4-6');
     expect(call.input_tokens).toBe(5000);
+    expect(call.output_tokens).toBe(321);
     expect(call.cache_read_tokens).toBe(200);
     expect(call.latency_ms).toBe(800);
+    // Prompt identity + correlation prompt_hash threaded from the routing call.
+    expect(trace!.prompt_identity.length).toBe(1);
+    expect(trace!.prompt_identity[0]!.task_id).toBe('routing');
+    expect(trace!.prompt_identity[0]!.hash).toBe('sha256:routingdeadbeef');
+    expect(trace!.correlation_ids.prompt_hash).toBe('sha256:routingdeadbeef');
+  });
+
+  it('falls back to an honest model sentinel when the routing model is absent (never zero-fills a fabricated id)', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'turn_executor',
+      // Only latency + input tokens captured (e.g. recovery short-circuit).
+      turnTimings: { routing_llm_ms: 12, total_input_tokens: 1000 },
+    });
+    expect(trace!.llm_calls.length).toBe(1);
+    const call = trace!.llm_calls[0]!;
+    expect(call.model).toBe('unknown');
+    expect(call.output_tokens).toBe(0);
+    // No prompt hash captured → no fabricated prompt identity, no correlation.
+    expect(trace!.prompt_identity).toEqual([]);
+    expect(trace!.correlation_ids.prompt_hash).toBeUndefined();
   });
 
   it('threads a coaching_delivery section onto the trace when provided (Scope C)', async () => {

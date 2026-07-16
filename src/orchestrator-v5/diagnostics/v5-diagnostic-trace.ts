@@ -279,6 +279,10 @@ export function buildMinimalV5DiagnosticTrace(
     scenario_id: input.scenarioId,
     turn_id: input.turnId,
     graph_hash: safeGraphHash(input.graph) ?? undefined,
+    // Served routing prompt hash (when captured) — mirrors the draft_graph
+    // builder's correlation prompt_hash so a bundle can join a turn_executor
+    // turn to its prompt identity.
+    ...(tt?.routing_prompt_hash ? { prompt_hash: tt.routing_prompt_hash } : {}),
   };
 
   return assembleTrace({
@@ -442,17 +446,22 @@ function populateCollectorFromTurnTimings(
   collector: DiagnosticTraceCollector,
   turnTimings: V5TurnTimings,
 ): void {
-  // Synthetic routing-call record so the trace has a non-empty
-  // llm_calls[] for turn_executor turns. Provider / model details are
-  // not directly on V5TurnTimings; we fall back to "unknown" rather
-  // than guess. Token counts come from the routing call.
+  // Routing-call record so the trace has a non-empty llm_calls[] for
+  // turn_executor turns. All values are REAL data captured at the routing
+  // site (turn-executor's `if (timingsEnabled)` block): wall-clock latency,
+  // model, input/output tokens, cache split, and served-prompt identity.
+  // `model` falls back to 'unknown' ONLY when the routing layer genuinely did
+  // not expose it (test injectors / recovery) — an honest sentinel, not a
+  // fabricated id. This is the routing/orient LLM call; additional per-turn
+  // calls (e.g. an awaited decision_review) carry their own telemetry events
+  // and are not reconstructed here without real timing data.
   if (turnTimings.routing_llm_ms != null || turnTimings.total_input_tokens != null) {
     collector.recordLLMCall({
       role: 'routing',
       provider: 'anthropic',
-      model: 'unknown',
+      model: turnTimings.routing_model ?? 'unknown',
       input_tokens: turnTimings.total_input_tokens ?? 0,
-      output_tokens: 0,
+      output_tokens: turnTimings.routing_output_tokens ?? 0,
       cache_read_tokens: turnTimings.cache_read_input_tokens ?? null,
       cache_creation_tokens: turnTimings.cache_creation_input_tokens ?? null,
       latency_ms: turnTimings.routing_llm_ms ?? 0,
@@ -460,6 +469,16 @@ function populateCollectorFromTurnTimings(
       thinking_enabled: false,
       error: null,
     });
+    if (turnTimings.routing_prompt_hash) {
+      collector.recordPromptIdentity({
+        task_id: 'routing',
+        prompt_id: turnTimings.routing_prompt_version ?? 'unknown',
+        version: turnTimings.routing_prompt_version ?? 'unknown',
+        hash: turnTimings.routing_prompt_hash,
+        source: 'pms',
+        is_staging: config.server.nodeEnv !== 'production',
+      });
+    }
   }
 }
 

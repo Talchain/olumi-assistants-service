@@ -376,6 +376,18 @@ export interface TurnExecutorRunResult {
    */
   effectiveGraph?: GraphV3T | null;
   /**
+   * V5 per-stage turn timings (observability). Populated only when timings
+   * capture is enabled (`V5_TIMING_DEBUG` OR `CEE_DIAGNOSTIC_TRACE_ENABLED`);
+   * absent otherwise so the production-default RunResult is byte-identical.
+   * route-v2 threads this into the flag-gated minimal `_diagnostic_trace` so
+   * `llm_calls[]` reflects the REAL routing call (model, tokens, wall-clock)
+   * instead of the empty array the trace emitted before this was wired. This
+   * is the SAME object attached to the wire body as `_timings.turn`; exposing
+   * it typed here is the diagnostic-trace threading channel (never a second
+   * derivation) and never reaches the wire body directly via this field.
+   */
+  turnTimings?: V5TurnTimings;
+  /**
    * ROADMAP 1.42 — VERBATIM Sonnet-5 extended-thinking text captured from
    * the routing call's `ChatWithToolsResult.reasoning`, when
    * CEE_REASONING_CAPTURE_ENABLED is on and the model emitted thinking
@@ -5277,6 +5289,26 @@ export async function runTurnExecutor(
         }
         if (timingsEnabled) {
           turnTimings.routing_llm_ms = Date.now() - routingStartedAt;
+          // Per-call attribution for `_diagnostic_trace.llm_calls`: the routing
+          // call's REAL model + served-prompt identity, captured from the same
+          // `rawResult` / cached-prompt sources the context-budget emit above
+          // reads. Guarded so a missing datum is omitted (not zero-filled): the
+          // synthetic call record falls back to 'unknown' only when the model is
+          // genuinely absent. Never throws into the turn.
+          const routingModel = routingResult.rawResult?.model;
+          if (typeof routingModel === 'string' && routingModel.length > 0) {
+            turnTimings.routing_model = routingModel;
+          }
+          try {
+            const servedPromptForTimings = getCachedRoutingPromptIdentity();
+            turnTimings.routing_prompt_hash =
+              servedPromptForTimings?.sent_hash ?? ROUTING_PROMPT_HASH;
+            turnTimings.routing_prompt_version = String(
+              servedPromptForTimings?.version ?? ROUTING_PROMPT_VERSION,
+            );
+          } catch {
+            // Prompt identity is best-effort; absence is honest.
+          }
           // Fix 4: mirror routing cache state from rawResult.usage so the
           // harness can read it from the response envelope without a log
           // join. cache_hit semantics match emitV5PromptCache: read>0 → hit,
@@ -5288,11 +5320,13 @@ export async function runTurnExecutor(
                   cache_read_input_tokens?: number;
                   cache_creation_input_tokens?: number;
                   input_tokens?: number;
+                  output_tokens?: number;
                 }
               | undefined;
             const cacheRead = usage?.cache_read_input_tokens;
             const cacheCreate = usage?.cache_creation_input_tokens;
             const inputTokens = usage?.input_tokens;
+            const outputTokens = usage?.output_tokens;
             if (typeof cacheRead === 'number') {
               turnTimings.routing_cache = cacheRead > 0 ? 'hit' : 'miss';
               turnTimings.cache_read_input_tokens = cacheRead;
@@ -5304,6 +5338,9 @@ export async function runTurnExecutor(
             }
             if (typeof inputTokens === 'number') {
               turnTimings.total_input_tokens = inputTokens;
+            }
+            if (typeof outputTokens === 'number') {
+              turnTimings.routing_output_tokens = outputTokens;
             }
           } catch {
             turnTimings.routing_cache = 'unknown';
@@ -8031,6 +8068,12 @@ export async function runTurnExecutor(
       // Authoritative per-turn graph for the wire egress sanitiser (route-v2),
       // so wire label resolution matches the durable-text scrub at commit.
       effectiveGraph: effectiveTurnGraph,
+      // Observability: expose the fully-populated per-stage timings (total_ms,
+      // routing_llm_ms, tokens, routing model/prompt identity) so route-v2 can
+      // thread them into the flag-gated minimal diagnostic trace. Only present
+      // when timings capture is enabled — production default stays byte-
+      // identical (turnTimings is `{}` and omitted).
+      ...(timingsEnabled ? { turnTimings } : {}),
       // ROADMAP 1.42 — VERBATIM reasoning captured from the routing call
       // (flag-gated, see `capturedReasoning` above). NEVER attached to
       // `response` — route-v2 attaches it to the wire envelope as a

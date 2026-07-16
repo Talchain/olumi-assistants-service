@@ -89,7 +89,7 @@ import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/b
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { debugFieldRequested, type OlumiResponseWithDebugFields } from './debug-fields.js';
-import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
+import type { TurnTimingsBlock, V5TurnTimings } from '../orchestrator-v5/telemetry/turn-timings.js';
 import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import {
@@ -293,6 +293,16 @@ function sendFinalised200(
      */
     readonly coachingDelivery?: import('../orchestrator-v5/diagnostics/v5-diagnostic-trace.js').V5CoachingDelivery;
     /**
+     * V5 per-stage turn timings threaded by the turn_executor path from
+     * `run.turnTimings`. Folded into the flag-gated minimal diagnostic trace
+     * below so `_diagnostic_trace.llm_calls` carries the turn's REAL routing
+     * call (model, tokens, wall-clock) instead of the empty array the minimal
+     * builder emitted when this input was omitted. Undefined for paths that do
+     * not capture per-stage timings; the builder then emits an empty
+     * `llm_calls[]` honestly. Never reaches the wire body outside the trace.
+     */
+    readonly turnTimings?: V5TurnTimings;
+    /**
      * V5 canonical analysis state for the redacted `_context_summary`
      * surface. When a dispatch path threads the FULL verdict (with degraded
      * detection — M5, turn-executor), it is used verbatim. Otherwise the
@@ -442,6 +452,10 @@ function sendFinalised200(
           requestId,
           exitPath,
           graph: ctx.graph,
+          // Thread the turn's real per-stage timings so the minimal trace
+          // records the routing LLM call in `llm_calls[]` (previously always
+          // empty — the sole production call site omitted this input).
+          ...(ctx.turnTimings ? { turnTimings: ctx.turnTimings } : {}),
           ...(ctx.coachingDelivery ? { coachingDelivery: ctx.coachingDelivery } : {}),
         })
       : undefined;
@@ -2303,6 +2317,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       turnId: ingress.turn_id,
       userMessage: ingress.message,
       ...(run.coachingDelivery ? { coachingDelivery: run.coachingDelivery } : {}),
+      // Observability: thread the turn's real per-stage timings so the
+      // flag-gated minimal diagnostic trace records the routing LLM call in
+      // `_diagnostic_trace.llm_calls` (was structurally always empty on
+      // turn_executor turns). Present only when timings capture is enabled.
+      ...(run.turnTimings ? { turnTimings: run.turnTimings } : {}),
       // V5 M5 (read-only): thread the turn-executor's full canonical analysis
       // state into the flag-gated `_context_summary` diagnostic. When present
       // it supersedes the route's freshness-derived partial state (adds
