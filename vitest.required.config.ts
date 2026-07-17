@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { STANDALONE_TOOL_EXCLUSIONS } from "./vitest.shared.js";
 
 /**
  * Vitest config for the REQUIRED CI gate (`Lint, TypeCheck, Unit Tests` →
@@ -15,7 +16,7 @@ import { defineConfig } from "vitest/config";
  *      they showed `LLMTimeoutError` / `422` in CI run 26750031968). They run in
  *      `Integration Tests (advisory)` and `Full Test Suite (advisory)`.
  *
- *   2. STANDALONE_TOOL_EXCLUSIONS below — `tools/graph-evaluator/**`, a
+ *   2. STANDALONE_TOOL_EXCLUSIONS (vitest.shared.ts) — `tools/graph-evaluator/**`, a
  *      self-contained tool package with its own deps and runner. Excluded from
  *      the product gate as a package boundary, NOT because it is red. Its proper
  *      home is the tool's own runner (`cd tools/graph-evaluator && npm test`);
@@ -39,10 +40,15 @@ import { defineConfig } from "vitest/config";
  *   - src/orchestrator-v5/coaching/__tests__/decision-context.test.ts
  *   - src/orchestrator-v5/tools/handlers/__tests__/integration-precondition-fail-chip.test.ts
  *
- * Kept self-contained (no `import "./vitest.config"`) on purpose: this file is
- * in the `*.config.ts` typecheck scope, and a Node16 relative import would trip
- * the full-typecheck ratchet. BASE_EXCLUDE / setupFiles below mirror
- * vitest.config.ts — keep them in sync if the base config changes.
+ * This file deliberately does NOT `import "./vitest.config"` (extensionless
+ * relative imports fail node16 module resolution and would trip the
+ * full-typecheck ratchet; importing the built config object would also couple
+ * the gate to the advisory config's coverage block). The shared exclusion
+ * fragments it CAN safely consume live in vitest.shared.ts, imported with an
+ * explicit `.js` extension, which node16 accepts — STANDALONE_TOOL_EXCLUSIONS
+ * comes from there, single-sourced with vitest.config.ts. RESIDUAL MIRROR:
+ * BASE_EXCLUDE / setupFiles below still mirror vitest.config.ts — keep them
+ * in sync if the base config changes.
  */
 
 // Mirrors vitest.config.ts `test.exclude` (keep in sync).
@@ -63,17 +69,11 @@ const BASE_EXCLUDE = [
 // Service-like category — excluded from the required gate, visible in advisory.
 const REQUIRED_GATE_CATEGORY_EXCLUSIONS = ["tests/integration/**"];
 
-// Standalone tool package — `tools/graph-evaluator` is a self-contained
-// evaluator with its OWN package.json, dependencies (e.g. gray-matter) and
-// vitest runner. Its tests must not be collected by the repo-root required
-// gate, which installs only product deps — collecting them throws
-// ERR_MODULE_NOT_FOUND on the tool-local imports. Excluded as a package
-// boundary (supersedes the earlier exact-path `adapters.test.ts` carve-out and
-// its "do NOT broaden to tools/**" note, per the Phase 1 follow-up decision).
-// These tool tests are CI-invisible from this required gate by design until the
-// dedicated graph-evaluator CI/pre-push wiring lands in Phase 2; they still run
-// in the tool's own runner (`cd tools/graph-evaluator && npm test`).
-const STANDALONE_TOOL_EXCLUSIONS = ["tools/graph-evaluator/**"];
+// Standalone tool package (`tools/graph-evaluator`, a package boundary):
+// STANDALONE_TOOL_EXCLUSIONS is imported from vitest.shared.ts — single-
+// sourced with vitest.config.ts, full rationale on the constant. (It
+// supersedes the earlier exact-path `adapters.test.ts` carve-out and its
+// "do NOT broaden to tools/**" note, per the Phase 1 follow-up decision.)
 
 // Currently-red in-process test files — exact paths only (no globs).
 // 2026-07-07 (lane CEE-W4 test hygiene): five files fixed green and
@@ -119,7 +119,7 @@ const STANDALONE_TOOL_EXCLUSIONS = ["tools/graph-evaluator/**"];
 const REQUIRED_GATE_RED_EXCLUSIONS: string[] = [
   // NOTE: tool tests (incl. the former exact-path `tools/graph-evaluator/tests/
   // adapters.test.ts` collection error) are handled by the package-level
-  // STANDALONE_TOOL_EXCLUSIONS above, not enumerated here.
+  // STANDALONE_TOOL_EXCLUSIONS (vitest.shared.ts), not enumerated here.
 ];
 
 export default defineConfig({
