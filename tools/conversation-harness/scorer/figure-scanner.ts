@@ -485,13 +485,22 @@ function numericNeighbourBefore(text: string, pos: number, anchorToken: string):
  * — the correct outcome for a pp-family figure, which never values. */
 function numericNeighbourAfter(text: string, pos: number): boolean {
   let i = pos;
+  let crossedNewline = false;
   const skip = (): void => {
-    while (i < text.length && /[ \t\r\n]/.test(text[i])) i++;
+    while (i < text.length && /[ \t\r\n]/.test(text[i])) {
+      if (text[i] === '\n') crossedNewline = true;
+      i++;
+    }
   };
   skip();
   if (text[i] === '-' || text[i] === ':') {
+    const colon = text[i] === ':';
     i++;
     skip();
+    // ROUND 11 (ruling 2): the colon connective NEVER anchors across a
+    // newline — 'Key points:\n1. Your win rate is 62%.' is canonical coach
+    // list formatting, not points-unit adjacency.
+    if (colon && crossedNewline) return false;
   } else {
     const cop = /^(?:was|is|are|were)(?![a-z])/i.exec(text.slice(i, i + 5));
     if (cop !== null) {
@@ -499,6 +508,12 @@ function numericNeighbourAfter(text: string, pos: number): boolean {
       skip();
     }
   }
+  // ROUND 11 (ruling 2): a numeric token that immediately follows a newline
+  // is on its own line — the list-item shape — and is NEVER a forward
+  // numeric neighbour. (A LIST-MARKER-SHAPED token — ^\d+[.)] at a line
+  // start — necessarily follows a newline too, so this check subsumes the
+  // marker case here; the marker CLASSIFICATION lives in scanLiterals.)
+  if (i > 0 && text[i - 1] === '\n') return false;
   if (i < text.length && SIGN_CHARS.has(text[i])) i++;
   const c = text[i];
   if (c === undefined) return false;
@@ -875,6 +890,18 @@ function scanLiterals(text: string): Literal[] {
     const startsLiteral = isDigit(c) || (c === '.' && isDigit(text[i + 1] ?? ''));
     if (!startsLiteral) {
       i++;
+      continue;
+    }
+    // ROUND 11 (ruling 2): a LIST-MARKER-SHAPED digit run — ^\d+[.)] at a
+    // line start (position 0 or immediately after a newline) — is list
+    // formatting, CLASSIFIED as a marker: never a figure, never a numeric
+    // token that can strand ('A few points:\n1) run it again\n2) check the
+    // 40% figure' must not strand the 2 in the 40% clause). The (?!digit)
+    // lookahead keeps line-start decimals real figures ('62.5% remains').
+    // Marker digits can carry no prefix — nothing precedes them on the line.
+    if ((i === 0 || text[i - 1] === '\n') && /^\d+(?:\)|\.(?!\d))/.test(text.slice(i, i + 32))) {
+      while (i < n && isDigit(text[i])) i++;
+      i++; // the marker's '.' / ')'
       continue;
     }
     // Attached prefix (sign/currency immediately adjacent, any order).

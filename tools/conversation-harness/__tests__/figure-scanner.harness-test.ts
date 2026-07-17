@@ -1650,3 +1650,45 @@ describe('round 11 corpus: ruling 1 — FORWARD anchoring requires PLURAL "point
     expect(scanProseFigures('Good point about the 3 scenarios.')).toEqual({ values: [], unparseable: 1 });
   });
 });
+
+describe('round 11 corpus: ruling 2 — list markers never forward-anchor; the colon never anchors across a newline', () => {
+  it('RULING clean set: canonical coach list formatting scans clean', () => {
+    // Under r10+r11.1 these scanned {[62],1} and {[40],2}: the colon
+    // connective reached across the newline to the list marker, and the
+    // '2)' marker stranded in the 40% clause. list-marker-guard-off turns
+    // both RED.
+    expect(scanProseFigures('Key points:\n1. Your win rate is 62%.')).toEqual({ values: [62], unparseable: 0 });
+    expect(scanProseFigures('A few points:\n1) run it again\n2) check the 40% figure')).toEqual({
+      values: [40],
+      unparseable: 0,
+    });
+  });
+
+  it('each half discriminates: colon-across-newline (spaces around the break) and the bare newline neighbour', () => {
+    // Token preceded by a space, not the newline itself — only the
+    // colon-crossing guard can see this one (kills colon-newline-guard-off).
+    expect(scanProseFigures('points: \n 62% of runs pass')).toEqual({ values: [62], unparseable: 0 });
+    // No colon at all — the token immediately follows the newline (kills
+    // newline-neighbour-guard-off). The cross-line 12 is invisible:
+    // documented residual, README register.
+    expect(scanProseFigures('points\n12')).toEqual({ values: [], unparseable: 0 });
+  });
+
+  it('a line-start decimal is a FIGURE, not a marker (the (?!digit) boundary of the marker shape)', () => {
+    expect(scanProseFigures('points fell.\n62.5% remains')).toEqual({ values: [62.5], unparseable: 0 });
+    // Control: a real marker ahead of an anchored figure, no points token.
+    expect(scanProseFigures('1. Your win rate is 62%.')).toEqual({ values: [62], unparseable: 0 });
+  });
+
+  it('DELIBERATE COSTS (ruling 5, pinned — documented, not mechanism\'d further): same-line colon shapes', () => {
+    // 'Two quick points: 60% of runs pass.' — same-line colon, plural,
+    // non-list-marker number: the 60% values and the phantom points figure
+    // refuses. Two refusal counts: the unconsumed forward-anchored points
+    // token (invariant v1) + the stranded word-number 'Two' sharing the
+    // anchor-bearing clause (invariant v2). ACCEPTED cost.
+    expect(scanProseFigures('Two quick points: 60% of runs pass.')).toEqual({ values: [60], unparseable: 2 });
+    // Enumeration-count: 'are 3' forward-anchors the plural token and the 3
+    // strands beside it. ACCEPTED cost — blocks, fail-closed.
+    expect(scanProseFigures('The key points are 3: cost, speed, and risk.')).toEqual({ values: [], unparseable: 2 });
+  });
+});
