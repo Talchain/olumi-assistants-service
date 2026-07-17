@@ -205,23 +205,20 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
 }));
 
 // Slice B: mock the V5 session store so the integration tests don't try to
-// reach Supabase. Every mocked method is a no-op; Slice B behaviour is
-// covered by dedicated session unit + integration tests.
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    // Upsert-on-append pre-flight: A1 fixtures don't send user_id, so the
-    // preflight short-circuits to skipped before this stub is reached. The
-    // method is declared to satisfy the SessionStore interface.
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
+// reach Supabase. Slice B behaviour is covered by dedicated session unit +
+// integration tests.
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () => createMockSessionStore(),
+    resetSessionStoreForTests: () => {},
+  };
+});
 
 let v5Enabled = true;
 vi.mock('../../src/config/index.js', async (importOriginal) => {
@@ -305,9 +302,16 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     const parsed = OlumiResponseSchema.parse(body);
     expect(parsed.assistant_text).toBe(fx.expected.body!.assistant_text);
     expect(parsed.blocks).toEqual([]);
-    expect(parsed.suggested_actions).toEqual([]);
+    // ROADMAP 1.148 C3 re-pin: at stage 'analyse' with no analysable graph
+    // the deterministic chip floor offers the curated set-option-values
+    // prompt chip (was `[]` when this fixture ran at frame stage).
+    expect(parsed.suggested_actions.map((a) => a.id)).toEqual([
+      'chip_prompt_set_option_values',
+    ]);
     expect(parsed.insights).toEqual([]);
-    expect(parsed.stage_indicator).toBe('frame');
+    // ROADMAP 1.148 C3: fixture now runs at stage 'analyse' (see the
+    // fixture's note_roadmap_1148) so it genuinely reaches the LLM path.
+    expect(parsed.stage_indicator).toBe('analyse');
 
     expect(turnExecutorEvents('started')).toHaveLength(1);
     const completed = turnExecutorEvents('completed');

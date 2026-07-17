@@ -14,7 +14,8 @@
     "expected_result_class": "pass",
     "replay_suite": "N/A",
     "original_failure_mode": "N/A - synthetic",
-    "expected_v5_outcome_class": "direct_answer_success"
+    "expected_v5_outcome_class": "direct_answer_success",
+    "note_roadmap_1148": "ROADMAP 1.148 C3 (2026-07-17): re-pointed from stage 'frame' to stage 'analyse'. The frame-stage no-brief guard (PR #203/#484) now answers brief-less frame turns deterministically pre-LLM, which orphaned this fixture's coverage (timeout/budget/contamination/telemetry paths never ran). At 'analyse' the turn genuinely reaches ORIENT/the mocked LLM. The guard's deterministic answer for the OLD frame-stage input is pinned separately in tests/integration/orchestrator/route-v2-frame-no-brief-guard.test.ts."
   },
   "request": {
     "kind": "message",
@@ -22,7 +23,7 @@
     "scenario_id": "a2222222-2222-4222-8222-222222222222",
     "message": "Give me a short framing for this decision.",
     "turn_class": "frame",
-    "stage": "frame",
+    "stage": "analyse",
     "source": "composer"
   },
   "mock": {
@@ -34,20 +35,26 @@
       "response_version": 2,
       "assistant_text": "Framing the decision means naming the choice, the goal it serves, and the key uncertainty. Start with one sentence for each.",
       "blocks": [],
-      "suggested_actions": [],
+      "suggested_actions": [
+        {
+          "id": "chip_prompt_set_option_values",
+          "label": "Set values for options",
+          "message": "Help me set up the options for this decision so the analysis can run."
+        }
+      ],
       "insights": [],
-      "stage_indicator": "frame"
+      "stage_indicator": "analyse"
     },
     "telemetry": {
       "turn_executor_started_count": 1,
       "turn_executor_completed_count": 1,
       "response_emitted": true,
-      "llm_calls_used": 2,
+      "llm_calls_used": 1,
       "commit_performed": true,
       "failure_type": null,
       "contamination_detected": false,
       "turn_class": "direct_answer",
-      "note_a2_update": "llm_calls_used bumped from 1 to 2 in A2: classify + narrate. Turn_class resolved post-classification."
+      "note_phase1": "Phase 1 tool-use routing: single ORIENT call (llm_calls_used 1); the pre-Phase-1 classify+narrate pair note removed."
     }
   }
 }

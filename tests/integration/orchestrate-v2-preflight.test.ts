@@ -66,35 +66,39 @@ class MockStateCommitFailedError extends Error {
   }
 }
 
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async () => {
-      if (storeState.throwOnAppend) throw storeState.throwOnAppend;
-      return { id: 'mock-row-id' };
-    },
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (
-      scenarioId: string,
-      userId: string | null,
-    ): Promise<{ user_id: string | null }> => {
-      if (storeState.throwOnEnsure) throw storeState.throwOnEnsure;
-      const existing = storeState.rows.get(scenarioId);
-      if (existing !== undefined) return { user_id: existing };
-      // Simulate the RPC's INSERT ... ON CONFLICT DO NOTHING.
-      // userId is null for guest sessions.
-      storeState.rows.set(scenarioId, userId);
-      return { user_id: userId };
-    },
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {
-    constructor(msg: string) { super(msg); this.name = 'SessionReadError'; }
-  },
-  StateCommitFailedError: MockStateCommitFailedError,
-}));
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): real module exports (SessionReadError,
+// StateCommitFailedError, constants) stay real; the store double
+// implements the FULL SessionStore interface. Only the seams this suite
+// controls (append / ensureScenarioExists) are overridden.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () =>
+      createMockSessionStore({
+        append: async () => {
+          if (storeState.throwOnAppend) throw storeState.throwOnAppend;
+          return { id: 'mock-row-id' };
+        },
+        ensureScenarioExists: async (
+          scenarioId: string,
+          userId: string | null,
+        ): Promise<{ user_id: string | null }> => {
+          if (storeState.throwOnEnsure) throw storeState.throwOnEnsure;
+          const existing = storeState.rows.get(scenarioId);
+          if (existing !== undefined) return { user_id: existing };
+          // Simulate the RPC's INSERT ... ON CONFLICT DO NOTHING.
+          // userId is null for guest sessions.
+          storeState.rows.set(scenarioId, userId);
+          return { user_id: userId };
+        },
+      }),
+    resetSessionStoreForTests: () => {},
+  };
+});
 
 // LLM adapter mock: permissive so happy-path tests run all the way through.
 const preflightMockAdapter = {
@@ -163,7 +167,12 @@ function buildRequest(scenarioId: string, userId?: string) {
     scenario_id: scenarioId,
     message: 'pre-flight test message',
     turn_class: 'frame' as const,
-    stage: 'frame' as const,
+    // ROADMAP 1.148 C4: stage 'analyse', NOT 'frame'. The frame-stage
+    // no-brief guard (PR #203/#484) answers brief-less frame turns
+    // deterministically BEFORE TurnExecutor; the pre-flight→TurnExecutor
+    // sequencing this suite proves needs the turn to actually reach
+    // TurnExecutor (turn_executor.started assertions).
+    stage: 'analyse' as const,
     source: 'composer' as const,
     ...(userId !== undefined ? { user_id: userId } : {}),
   };
