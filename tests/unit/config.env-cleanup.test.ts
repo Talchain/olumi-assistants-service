@@ -31,12 +31,21 @@ describe("checkDeadEnvVars", () => {
       VITE_ENABLE_ORCHESTRATOR_V2: "1",
       CEE_UNIFIED_PIPELINE_ENABLED: "true",
       CEE_MODEL_REPAIR_GRAPH: "gpt-4.1",
+      // Stage-4 clarifier retirement (ROADMAP 1.94 Option A, #486): the
+      // readers were deleted; a deployment still setting these should be
+      // told they are inert.
+      CEE_CLARIFIER_ENABLED: "true",
+      CEE_CLARIFIER_MAX_ROUNDS_DEFAULT: "5",
+      CEE_CLARIFIER_QUALITY_THRESHOLD: "8.0",
+      CEE_CLARIFIER_STABILITY_THRESHOLD: "2",
+      CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD: "0.5",
+      CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS: "3600",
     };
 
     const { checkDeadEnvVars } = await import("../../src/config/index.js");
     const warnings = checkDeadEnvVars();
 
-    expect(warnings).toHaveLength(7);
+    expect(warnings).toHaveLength(13);
     const keys = warnings.map(w => w.key);
     expect(keys).toEqual(
       expect.arrayContaining([
@@ -47,6 +56,12 @@ describe("checkDeadEnvVars", () => {
         "VITE_ENABLE_ORCHESTRATOR_V2",
         "CEE_UNIFIED_PIPELINE_ENABLED",
         "CEE_MODEL_REPAIR_GRAPH",
+        "CEE_CLARIFIER_ENABLED",
+        "CEE_CLARIFIER_MAX_ROUNDS_DEFAULT",
+        "CEE_CLARIFIER_QUALITY_THRESHOLD",
+        "CEE_CLARIFIER_STABILITY_THRESHOLD",
+        "CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD",
+        "CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS",
       ]),
     );
     for (const w of warnings) {
@@ -65,6 +80,12 @@ describe("checkDeadEnvVars", () => {
     delete process.env.VITE_ENABLE_ORCHESTRATOR_V2;
     delete process.env.CEE_UNIFIED_PIPELINE_ENABLED;
     delete process.env.CEE_MODEL_REPAIR_GRAPH;
+    delete process.env.CEE_CLARIFIER_ENABLED;
+    delete process.env.CEE_CLARIFIER_MAX_ROUNDS_DEFAULT;
+    delete process.env.CEE_CLARIFIER_QUALITY_THRESHOLD;
+    delete process.env.CEE_CLARIFIER_STABILITY_THRESHOLD;
+    delete process.env.CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD;
+    delete process.env.CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS;
 
     const { checkDeadEnvVars } = await import("../../src/config/index.js");
     const warnings = checkDeadEnvVars();

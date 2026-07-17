@@ -134,6 +134,11 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
       return { ...base, action: { kind, factor_id: 'fac_x', value: 1, operator: 'set' } };
     case 'edit_graph_add_risk':
       return { ...base, action: { kind, label: 'Risk' } };
+    case 'clarify_v2_round':
+      return {
+        ...base,
+        action: { kind, brief: 'Should we expand into the German market?', asked_dimensions: ['goal'], round: 1 },
+      };
     case 'proposed_concept':
       return {
         ...base,
@@ -172,6 +177,7 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     ['apply_proposed_change', 1],
     ['proposed_concept', 1],
     ['set_factor_value', 0],
+    ['clarify_v2_round', 0],
     ['edit_graph_add_risk', 0],
     ['run_analysis', 0],
     ['what_would_flip', 0],

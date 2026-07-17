@@ -504,6 +504,10 @@ describe('tryClarificationResume — kind classification regression', () => {
     // MUTATING fail-closed: the C4 variant's consent REPLACES the persisted
     // graph, and the offer pins preconditions.graph_hash.
     draft_graph: 'mutating',
+    // Clarify v2 (E0-B) — draft-preflight round state. Resuming re-runs
+    // the deterministic brief rubric (ask again or proceed to draft);
+    // there is no graph at the pre-draft stage and no mutation applies.
+    clarify_v2_round: 'non_mutating',
   };
 
   it('every PendingAction kind has the expected safety classification (semantic regression)', () => {

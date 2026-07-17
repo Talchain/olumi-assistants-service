@@ -801,6 +801,14 @@ const ConfigSchema = z.object({
     // (Multi-turn Stage-4 clarifier settings removed 2026-07-16 — ROADMAP 1.94
     // Option A retirement. CEE_CLARIFIER_ENABLED and CEE_CLARIFIER_* env vars
     // are now inert; they can be deleted from deployment dashboards.)
+    // Clarify v2 (E0-B — the 1.94 Option A REPLACEMENT, 2026-07-16). DARK,
+    // default OFF. When true, draft-preflight runs a deterministic
+    // brief-completeness rubric on the V5 turn surface and asks up to 3
+    // tap-able clarifying questions (existing `clarify` turn class) before
+    // drafting; complete briefs proceed silently. Env: CEE_CLARIFY_V2_ENABLED.
+    // Flip gates on the clarify-v2 eval floors (tools/conversation-harness)
+    // + Paul; flag-off is byte-identical to today (pinned).
+    clarifyV2Enabled: booleanString.default(false),
     // Bias detection confidence thresholding (Phase 6)
     biasConfidenceThreshold: z.coerce.number().min(0).max(1).default(0.3), // Minimum confidence to report bias finding
     // Response caching (Phase 7)
@@ -1406,6 +1414,8 @@ function parseConfig(): Config {
       clarificationThresholdOneRound: env.CEE_CLARIFICATION_THRESHOLD_ONE_ROUND,
       // Pre-decision checklist and framing nudges
       preDecisionChecksEnabled: env.CEE_PRE_DECISION_CHECKS_ENABLED,
+      // Clarify v2 (E0-B) — dark, default off
+      clarifyV2Enabled: env.CEE_CLARIFY_V2_ENABLED,
       // Bias detection confidence thresholding
       biasConfidenceThreshold: env.CEE_BIAS_CONFIDENCE_THRESHOLD,
       // Response caching
@@ -1926,6 +1936,16 @@ const DEAD_ENV_VARS: string[] = [
   'VITE_ENABLE_ORCHESTRATOR_V2',       // Frontend-only (Vite prefix); not read by backend
   'CEE_UNIFIED_PIPELINE_ENABLED',      // Unified pipeline is always-on; flag retired
   'CEE_MODEL_REPAIR_GRAPH',            // Never existed; canonical name is CEE_MODEL_REPAIR
+  // Stage-4 draft clarifier retired 2026-07-16 (ROADMAP 1.94 Option A, #486).
+  // These readers were deleted; the vars are inert and safe to remove from
+  // deployment dashboards. (CLARIFIER_ENABLED itself stays LIVE — it gates
+  // the standalone /assist/clarify-brief route only.)
+  'CEE_CLARIFIER_ENABLED',
+  'CEE_CLARIFIER_MAX_ROUNDS_DEFAULT',
+  'CEE_CLARIFIER_QUALITY_THRESHOLD',
+  'CEE_CLARIFIER_STABILITY_THRESHOLD',
+  'CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD',
+  'CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS',
 ];
 
 /**
