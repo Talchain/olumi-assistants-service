@@ -1729,3 +1729,55 @@ describe('round 11 corpus: ruling 4 — the article variant admits ONE closed-li
     expect(scanProseFigures("that's the whole point")).toEqual({ values: [], unparseable: 0 });
   });
 });
+
+// ============================================================
+// ROUND 11.5 — bounded bigram closure (the r11-review P1, ratified) + two
+// register rows (P2). NOT a new calibration round: the cue+'to' hedge
+// neutralisation cueSign has carried since round 5 is applied to the
+// article-variant window that never inherited it (a pre-existing gap since
+// r10), and two plausible-coach-prose members of the demote-backstop cost
+// class get their register rows + pins. Nothing else.
+// ============================================================
+
+describe("round 11.5: cue+'to' bigram closure — the article-variant window inherits the cueSign hedge neutralisation (P1)", () => {
+  it('honest hedging idioms scan CLEAN: a movement cue immediately followed by "to" is a hedge, not movement', () => {
+    // Pre-fix these scanned {[],1}: the article-cue rule read the 'up'/
+    // 'down' of 'up to a point' / 'down to a point' as movement cues.
+    // The cue+'to' bigram has been neutral in cueSign since round 5
+    // ('fell by up to 20%'); the article window now derives the SAME drop
+    // (shared dropCueToBigrams mechanism, MOVEMENT_CUES as its cue set —
+    // no second hand-maintained list). article-bigram-neutralisation-off
+    // regresses every one of these to {[],1}.
+    expect(scanProseFigures('Up to a point, more simulations help')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('That is true up to a point.')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('It comes down to a point of principle.')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('Everything narrowed down to a point.')).toEqual({ values: [], unparseable: 0 });
+  });
+
+  it('movement-cue refusals WITHOUT a following "to" keep refusing — the bigram is the discriminator', () => {
+    // Deliberately doubles the r10/r11 pins: these are the closure's own
+    // controls — over-neutralising the cue window (dropping cues that are
+    // NOT 'to'-followed) regresses each to {[],0}.
+    expect(scanProseFigures('their score rose a point')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('improved by a point')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('gained a full point')).toEqual({ values: [], unparseable: 1 });
+  });
+});
+
+describe('round 11.5: register rows — plausible-coach-prose members of the demote-backstop cost class (P2, existing behaviour pinned)', () => {
+  it('ACCEPTED COSTS (registered): a stranded numeric token beside a demoted points token blocks — fail-closed, visible', () => {
+    // Same class as 'Good point about the 3 scenarios.' (r10 cost, kept):
+    // the word-number 'three' / the bare '3' strands in the demoted-points
+    // clause (invariant v2 via the ruling-2b backstop). ACCEPTED costs per
+    // the residual-by-default convention — rows in the README register, no
+    // code change. demoted-stranded-off regresses both to {[],0}.
+    expect(scanProseFigures('You make three good points.')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('It all points to option 3.')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('contrast: a CONSUMED figure in the demoted-points clause stays clean', () => {
+    // The backstop only bites STRANDED tokens: the 30% values, nothing
+    // strands — the r10 'Good point about the 40% figure' doctrine.
+    expect(scanProseFigures('Everything points to a 30% shortfall.')).toEqual({ values: [30], unparseable: 0 });
+  });
+});

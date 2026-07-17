@@ -298,6 +298,27 @@
  *  - a GENUINE figure typed as a line-start marker ('62.' opening a line,
  *    no abutting anchor) is read as list formatting and is invisible.
  *
+ * ==========================================================================
+ * ROUND 11.5 — bounded bigram closure (the r11-review P1, ratified — NOT a
+ * new calibration round: an EXISTING neutralisation applied to the one
+ * window that missed it, plus two register rows).
+ * ==========================================================================
+ * (1) P1 (pre-existing since r10): the article-cue rule read the 'up'/
+ *     'down' of 'up to a point' / 'comes down to a point' as movement
+ *     cues, blocking honest hedging idioms. cueSign has neutralised the
+ *     cue+'to' hedge bigram since round 5; the article-variant window
+ *     never inherited it. The mechanism is now SHARED (dropCueToBigrams,
+ *     applied before the 3-word slice in both windows; each window keeps
+ *     its own closed cue set — cueSign 'up'-only, article MOVEMENT_CUES).
+ *     'Up to a point, more simulations help' / 'That is true up to a
+ *     point.' / 'It comes down to a point of principle.' now scan {[],0};
+ *     'rose a point' / 'down a point on the week' keep refusing.
+ * (2) P2 (register completeness, no code change): the two plausible-coach-
+ *     prose members of the demote-backstop cost class are registered +
+ *     pinned — 'You make three good points.' → {[],1} and 'It all points
+ *     to option 3.' → {[],1} (accepted costs; 'Everything points to a 30%
+ *     shortfall.' → {[30],0} is the consumed-figure contrast).
+ *
  * DOCUMENTED RESIDUALS — OUTSIDE the contract, pinned out-of-scope in tests:
  *  - bare numbers in clauses with NO anchor ('we ran 3 scenarios.') are not
  *    figures; a clause comma shields ('Across 3 cohorts, 40% converted').
@@ -519,8 +540,15 @@ function numericNeighbourBefore(text: string, pos: number, anchorToken: string):
   // SINGULAR 'point' counts as the number one ONLY when a movement/delta
   // cue from the closed list is in the adjacency window (3 words,
   // clause-bounded — the cueSign convention).
+  // ROUND 11.5 (bigram closure — the r11-review P1, ratified): the cue+'to'
+  // hedge bigram is neutralised BEFORE the window is taken, the cueSign
+  // convention this window never inherited — 'up to a point' / 'comes down
+  // to a point' are honest hedging idioms, not movement. Shared mechanism
+  // (dropCueToBigrams), MOVEMENT_CUES as its own cue set — no second list.
+  // Movement cues NOT followed by 'to' keep refusing ('rose a point',
+  // 'down a point on the week').
   if (articleStart >= 0 && /^point$/i.test(anchorToken)) {
-    const words = precedingWords(text, articleStart, 3);
+    const words = dropCueToBigrams(precedingClauseWords(text, articleStart), MOVEMENT_CUES).slice(-3);
     if (words.some((w) => MOVEMENT_CUES.has(w))) return true;
   }
   // ROUND 11 (ruling 4 — article variant, adjective form): ONE adjective
@@ -726,10 +754,10 @@ function compoundGlueContext(text: string, start: number, end: number): boolean 
   );
 }
 
-/** Last `n` words immediately before `pos`, lowercased, not crossing a
- * clause boundary (the shared CUE_BOUNDARY set — round 6). Hyphenated words
- * split into their parts ('twenty-five' → 'twenty', 'five'). */
-function precedingWords(text: string, pos: number, n: number): string[] {
+/** ALL words immediately before `pos`, lowercased, not crossing a clause
+ * boundary (the shared CUE_BOUNDARY set — round 6). Hyphenated words split
+ * into their parts ('twenty-five' → 'twenty', 'five'). */
+function precedingClauseWords(text: string, pos: number): string[] {
   let boundary = 0;
   for (let k = pos - 1; k >= 0; k--) {
     if (CUE_BOUNDARY.has(text[k])) {
@@ -741,9 +769,39 @@ function precedingWords(text: string, pos: number, n: number): string[] {
     .slice(boundary, pos)
     .toLowerCase()
     .split(/[^a-z']+/)
-    .filter(Boolean)
-    .slice(-n);
+    .filter(Boolean);
 }
+
+/** Last `n` of those words. */
+function precedingWords(text: string, pos: number, n: number): string[] {
+  return precedingClauseWords(text, pos).slice(-n);
+}
+
+/** ROUND 11.5 (bigram closure): drop every cue+'to' hedge bigram from a
+ * word list — the cueSign neutralisation mechanism ('up to 20%' is a hedge,
+ * not a positive cue; round 5), EXTRACTED so both cue windows share ONE
+ * implementation. Applied BEFORE the window slice, so an earlier true cue
+ * still signs ('rose up to …' keeps 'rose'). The cue set is the CALLER's
+ * own closed list (cueSign keeps its 'up'-only hedge semantics; the
+ * article variant passes MOVEMENT_CUES) — deriving a second hand-maintained
+ * list here is the mirror trap. */
+function dropCueToBigrams(words: string[], cues: ReadonlySet<string>): string[] {
+  const kept: string[] = [];
+  for (let k = 0; k < words.length; k++) {
+    if (cues.has(words[k]) && words[k + 1] === 'to') {
+      k++;
+      continue;
+    }
+    kept.push(words[k]);
+  }
+  return kept;
+}
+
+/** cueSign's hedge-bigram cue set — EXACTLY the round-5 semantics ('up to'
+ * only). NOT extended to the full POS/NEG cue lists: 'fell down to 20%'
+ * must keep its trailing-'to' LEVEL reading (sign 'none'), which a
+ * 'down'+'to' drop would overwrite with 'fell' → 'neg'. */
+const CUE_SIGN_HEDGE_CUES: ReadonlySet<string> = new Set(['up']);
 
 // ---------- literal token ----------
 
@@ -1125,16 +1183,11 @@ function cueSign(text: string, clusterStart: number): 'neg' | 'pos' | 'none' | '
     .toLowerCase()
     .split(/[^a-z']+/)
     .filter(Boolean);
-  // Neutralise 'up to' so the hedge cannot read as a positive cue.
-  const dropped: string[] = [];
-  for (let k = 0; k < words.length; k++) {
-    if (words[k] === 'up' && words[k + 1] === 'to') {
-      k++;
-      continue;
-    }
-    dropped.push(words[k]);
-  }
-  words = dropped.slice(-3);
+  // Neutralise 'up to' so the hedge cannot read as a positive cue — the
+  // shared cue+'to' bigram mechanism (round 11.5 extracted it so the
+  // article-variant window inherits the same treatment; semantics here are
+  // unchanged, 'up'-only — see CUE_SIGN_HEDGE_CUES).
+  words = dropCueToBigrams(words, CUE_SIGN_HEDGE_CUES).slice(-3);
   // BY vs TO (round 5): '<fell/dropped/down> TO X%' is a LEVEL restatement —
   // the figure names where the metric sits, not the change — so no
   // directional sign applies. 'up to' was neutralised above, so a surviving

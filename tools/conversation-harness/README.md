@@ -533,7 +533,19 @@ Specific traps worth knowing about:
   an entire point` / `gained a full point` refuse; `an important point
   about scope` stays prose. From round 11 the default disposition for any
   new points-family shape is **DOCUMENTED RESIDUAL** (register below),
-  not a new mechanism. Round-10 accepted residuals (pinned): word-number-free
+  not a new mechanism. **Round 11.5 (bounded bigram closure — the
+  r11-review P1, ratified; NOT a new calibration round):** the article-cue
+  window inherits the **cue+`to` hedge-bigram neutralisation** cueSign has
+  carried since round 5, via ONE shared mechanism (`dropCueToBigrams` —
+  each window keeps its own closed cue set, no second list): `Up to a
+  point, more simulations help` / `That is true up to a point.` / `It
+  comes down to a point of principle.` now scan `{[],0}` while `rose a
+  point` / `down a point on the week` keep refusing; plus two register
+  rows (P2, existing behaviour pinned) for the plausible-coach-prose
+  members of the demote-backstop cost class — `You make three good
+  points.` and `It all points to option 3.` block (accepted costs;
+  `Everything points to a 30% shortfall.` stays clean, the figure is
+  consumed). Round-10 accepted residuals (pinned): word-number-free
   movement prose (`points slid modestly`, `shed a few points`), movement
   verbs outside the closed cue list (`they won a point`), cues outside the
   3-word window, and cue-after-the-token shapes (`a point higher`). See the
@@ -566,7 +578,10 @@ Specific traps worth knowing about:
 Round 11 is the **final calibration round for the points-family**: from here,
 the default disposition for any newly found shape is **DOCUMENTED RESIDUAL**
 (a row here + a pin in `figure-scanner.harness-test.ts`), **not a new
-mechanism**. Every row is pinned.
+mechanism**. Every row is pinned. Round 11.5 is the one **ratified
+exception** — a bounded closure applying the EXISTING cueSign cue+`to`
+neutralisation to the article window that had missed it (a pre-existing r10
+gap; shared mechanism, no new list) — plus the two P2 rows below.
 
 **Known over-blocks (deliberate costs — fail-closed, visible, ACCEPTED):**
 
@@ -575,6 +590,8 @@ mechanism**. Every row is pinned.
 | `Two quick points: 60% of runs pass.` | `{[60],2}` | same-line colon + plural + non-list-marker number forward-anchors; the 60 still values (ruling 5) |
 | `The key points are 3: cost, speed, and risk.` | `{[],2}` | enumeration-count reads as a points figure (ruling 5) |
 | `Good point about the 3 scenarios.` | `{[],1}` | r10 demote-backstop cost, kept — a stranded bare number beside a demoted `point` blocks |
+| `You make three good points.` | `{[],1}` | same demote-backstop class (r11.5 row): the word-number `three` strands beside the demoted plural — accepted cost, plausible coach prose |
+| `It all points to option 3.` | `{[],1}` | same demote-backstop class (r11.5 row): the option ordinal strands beside the demoted verb `points` — accepted cost; `Everything points to a 30% shortfall.` → `{[30],0}` (consumed figure, contrast pin) |
 | `Option 3 gives a 40% win rate` | `{[40],1}` | round-7 bare-number cost, kept |
 
 **Known invisibles (accepted — the rulings' letter):**
