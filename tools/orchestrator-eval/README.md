@@ -16,7 +16,7 @@ For each fixture it:
    `target_fit` as two distinct percent vocabularies. The eval uses the runtime
    formatter itself, not a re-specified copy, so it cannot drift from what the
    prompt is actually grounded on.
-2. **Scores each candidate response deterministically** on five dimensions:
+2. **Scores each candidate response deterministically** on six dimensions:
    - `no_forbidden_terms` — the runtime's `findForbiddenMatches` (forbidden
      user-facing phrases + raw-id / graph-hash / dev-phrase leaks).
    - `no_mutation_language` — the runtime's `containsMutationLanguage` (prose
@@ -35,6 +35,11 @@ For each fixture it:
    - `no_false_success_claim` (**D6**) — the runtime's `findSuccessClaimHit`
      (the mutation-receipt honesty class: "done / updated / applied" claimed
      before any confirmation exists).
+   - `substance_present` — non-empty, non-whitespace prose. The five checks
+     above are all ABSENCE checks, which an EMPTY answer passes vacuously —
+     without this floor, ranking (SEAM-1) literally rewards emptiness, and
+     empty `answer_text` is the live prompt-defect class measured pre-v42.2g
+     (0/6 populated). An empty answer is a failed turn, not a clean one.
 3. **Checks each verdict against the fixture's `expected` map** and exits
    non-zero on any disagreement.
 
@@ -124,11 +129,14 @@ during this lane.
 ## Run it
 
 ```bash
-pnpm eval:orchestrator        # run the chassis over every fixture (offline, deterministic)
-pnpm eval:orchestrator:test   # run the vitest suite (assembly fidelity + gate + guard wiring)
+pnpm eval:orchestrator             # run the chassis over every fixture (offline, deterministic)
+pnpm eval:orchestrator:test        # run the vitest suite (assembly fidelity + gate + guard wiring + SEAM-1)
+pnpm eval:orchestrator:candidates  # rank prompt CANDIDATES (SEAM-1) — see "Candidate A/B" below
+pnpm eval:orchestrator:typecheck   # tool-local tsc (tools/ is outside tsconfig.build.json's scope)
 ```
 
-Both are **offline** — no paid LLM call in the default path.
+All are **offline by default** — no paid LLM call without the explicit
+double opt-in described under "Candidate A/B".
 
 ## Add a fixture
 
@@ -145,25 +153,149 @@ No code change is needed for a new fixture that reuses the existing dimensions.
 A fixture that needs a new scenario-specific assertion adds it under `src/` and
 wires it into `scorer.ts`.
 
-## Where a live model / paid judge plugs in
+## Candidate A/B (SEAM-1, wired) — rank prompt CANDIDATES, not recordings
 
-The default path is deterministic and offline. Two seams (typed and documented
-in `src/judge-seam.ts`) let a fuller eval go live **without changing the gate**:
+`pnpm eval:orchestrator` scores RECORDED fixture responses; it structurally
+cannot evaluate a prompt candidate. **SEAM-1 closes that gap**: a candidate
+PROMPT produces responses at run time and the produced text is scored by the
+SAME deterministic dimensions (plus the extraction contract, below), so two
+candidates become RANKABLE on identical scenarios.
 
-- **Live candidate** — instead of reading `candidates[*].text`, produce the
-  response from a real model at run time. Reuse
-  `tools/graph-evaluator/src/providers/*` (openai/anthropic) and its
-  `adapters/orchestrator.ts` request shaping. The produced text is scored by the
-  same deterministic scorer.
+```bash
+pnpm eval:orchestrator:candidates -- --prompt <label>=<ref> [--prompt <label>=<ref> ...] \
+    [--live --model <id>] [--max-turns <n>] [--fixtures-dir <path>] [--out report.json]
+```
+
+Candidate refs:
+
+| ref | meaning | network |
+|---|---|---|
+| `<path>` | file containing the FULL candidate prompt text | live mode only |
+| `pms:<version>` | that version of the PMS `routing` task, resolved through the repo's own prompt store (`getCompiled('routing', {}, {version})` — needs the store backend env) | live mode only |
+| `mock:<label>` | offline plumbing proof: plays back the fixture's recorded candidate with that label through the full produce → extract → score → rank pipeline | none |
+
+### The coach-arm A/B (the use case this seam exists for)
+
+To rank a coach-arm candidate prompt against the served baseline on the
+checked-in scenario pack:
+
+```bash
+# 1. Put the candidate prompt text in a file (or use its PMS version ref).
+# 2. Double opt-in + explicit model (see "Live-mode safety" below):
+export ORCHESTRATOR_EVAL_LIVE_CANDIDATES=1
+pnpm eval:orchestrator:candidates -- \
+  --prompt baseline=pms:115 \
+  --prompt coach-arm=/path/to/coach-arm-candidate.txt \
+  --live --model <the model the orchestrator actually serves> \
+  --out coach-arm-ab.json
+```
+
+The report prints per-fixture PASS/FAIL with the failing dimension and detail
+for each arm, then a ranking (pass-count desc, then fewest substance-failed
+turns, then fewest flagged `raw_unparsed` turns, then fewest failed
+dimensions). The substance-failed key — turns that answered EMPTY, counted
+fail-closed so an unparseable or errored turn is an empty turn — sits
+directly after pass-count so that, among arms passing equally many turns,
+emptiness can never win a tie by failing FEWER dimensions than a
+substantive-but-flawed answer; it deliberately does NOT sit above pass-count,
+because substance failure already fails the turn (it is priced into
+pass-count) and an arm that actually passes turns must not lose to one that
+never does. The flagged-turn key sits ahead of failed-dimensions so a flagged
+arm can never break a tie past an unflagged one — a flagged turn never ranks
+above an unflagged honest one. Every ranking key is pinned by
+`__tests__/candidate-ranking.test.ts`: deleting or reordering any key turns a
+named test RED.
+`--model` has **no default on purpose**: the eval must run the model the
+orchestrator actually serves — check `CEE_MODEL_ORCHESTRATOR` on the target
+environment. A tie is reported as a tie, not silently broken.
+
+**Ranking ≠ shipping.** This tool ranks candidates; **uploading a prompt to
+PMS, re-pinning `stagingVersion`, and reloading remain orchestrator+Paul-gated
+decisions** (see UPLOAD-RUNBOOK-v42.2g.md for that separate, human-gated flow).
+
+### Live-mode safety (OFF by default, fail-closed)
+
+Live production requires **both** halves of a double opt-in — the env key
+`ORCHESTRATOR_EVAL_LIVE_CANDIDATES=1` **and** the `--live` flag. Either alone
+is refused with a reason naming the missing half. The default path makes
+**zero network calls**: the test suite proves it with a fetch counter, and —
+because an absence assertion is vacuous without a presence — a positive
+control proves the same counter registers calls when the pipeline is opted in
+(`__tests__/candidate-eval.test.ts`). The shipped mutation-check: delete the
+env-key check in `src/live-gate.ts` and the zero-network test goes RED
+(verified during this lane: the pipeline then constructs the real provider and
+hits the instrumented fetch seam).
+
+**Cost guard:** live turns per run (prompts × fixtures) are hard-capped at
+`HARD_MAX_LIVE_TURNS_PER_RUN = 24` (`src/live-gate.ts`); `--max-turns` can
+only LOWER the cap. A plan over the cap is refused before the first call —
+never silently truncated, because a partial fixture set would bias the
+ranking.
+
+**Cost expectations:** each live turn sends the candidate prompt (a v42-scale
+orchestrator prompt is roughly 10–15K tokens) plus a small turn context
+(~1–2K tokens) and returns a short JSON response (≤16K token cap, typically a
+few hundred). The coach-arm A/B (2 candidates × 6 fixtures = 12 turns) is
+therefore on the order of ~200K input + ~10K output tokens — around a dollar
+at current Sonnet/Opus-tier pricing, and bounded by the turn cap either way.
+
+**Determinism:** the scorer is fully deterministic; live model output is not
+(current Anthropic models accept no sampling parameters, so there is no seed
+to pin). The JSON report records the model id and prompt refs so a run is
+re-runnable and re-scorable; treat a single live ranking as one sample.
+
+### Offline dry-run (zero paid calls — the plumbing proof)
+
+```bash
+pnpm eval:orchestrator:candidates -- --prompt good-arm=mock:good --prompt regression-arm=mock:regression
+```
+
+plays back each fixture's recorded `good` / `regression` candidates through
+the full pipeline (v30.3 JSON envelope → extraction → scorer → ranking) and
+ranks `good-arm > regression-arm` (6/6 vs 0/6). Exit code note: the run exits
+non-zero because `stale-and-recommendation-vocabulary` has no candidate
+labelled exactly `regression` (its regressions are `regression_stale` /
+`regression_recommendation`), and a missing playback label surfaces as a
+VISIBLE `model_error`, never a silent skip. A fully-green offline demo is the
+single-arm run: `--prompt good-arm=mock:good` (exit 0). The CLI exits non-zero
+whenever any turn was unscorable (`model_error`); the ranking itself is
+advisory output, not a gate.
+
+### Response contract + extraction
+
+Requests are shaped per the seam's documented reuse of the graph-evaluator
+orchestrator adapter: `system` = candidate prompt + `<TURN_CONTEXT>` carrying
+the **assembled** analysis (production `formatAnalysisForContext` output — the
+same projection stage the floor pack grounds on), `user` = the fixture's user
+message + the v30.3 JSON-forcing suffix. The user-facing prose is extracted
+from the `text` field of the JSON envelope; when the envelope does not parse,
+the RAW output is scored and flagged `raw_unparsed` — visible, never silent,
+and **scored**: a flagged turn fails the `extraction_contract` dimension (it
+can never PASS), and its `substance_present` is forced to FAIL — fail-closed:
+unextractable output counts as EMPTY, never as absent-from-scoring. A scored
+dimension was chosen over a hard non-zero exit on any flagged turn because a
+hard exit discards the whole run's ranking signal (live turns already paid
+for) the moment one arm misbehaves, and an always-red exit trains operators
+to ignore it; the scored dimension + the flagged-turn ranking key make the
+same invariant structural where the ranking actually looks.
+Eligible-actions shaping and the full context-pack → system-prompt compose
+stay deferred (below), so rankings are comparable BETWEEN candidates run the
+same way, not absolute predictions of staging behaviour.
+
+## Where a paid judge plugs in (SEAM-2, still open)
+
 - **Paid judge** — layer an LLM judge (reuse
   `tools/graph-evaluator/src/orchestrator-judge.ts`) on top for subjective
   quality signal. Off by default; the deterministic verdict always stands alone.
+  Typed in `src/judge-seam.ts` (`PaidJudge`), still unwired.
 
 ## Layout
 
 ```
 tools/orchestrator-eval/
 ├── cli.ts                       # chassis entry (pnpm eval:orchestrator)
+├── candidate-cli.ts             # SEAM-1 candidate A/B entry (pnpm eval:orchestrator:candidates)
+├── tsconfig.json                # tool-local typecheck (pnpm eval:orchestrator:typecheck)
 ├── fixtures/
 │   ├── goal-fit-conflation.json          # the worked defect (D3)
 │   ├── goal-fit-values-withheld.json
@@ -177,11 +309,15 @@ tools/orchestrator-eval/
 │   ├── guards.ts                # re-exports of PRODUCTION guards (never re-specified)
 │   ├── goal-fit-conflation.ts   # the worked win%-vs-target-fit assertion (D3)
 │   ├── held-science.ts          # the worked held-science eval-assertion (D5)
-│   ├── scorer.ts                # deterministic scorer wrapper (5 dimensions)
+│   ├── scorer.ts                # deterministic scorer wrapper (6 dimensions)
 │   ├── run.ts                   # the chassis: load → assemble → score → agree
-│   └── judge-seam.ts            # live-model / paid-judge seams (documented)
+│   ├── judge-seam.ts            # seam docs: SEAM-1 wired ↓, SEAM-2 (paid judge) still open
+│   ├── live-gate.ts             # SEAM-1: fail-closed double opt-in + hard turn cap
+│   ├── prompt-source.ts         # SEAM-1: candidate refs (file | pms:<version> | mock:<label>)
+│   └── candidate-run.ts         # SEAM-1: produce → extract → score → rank
 └── __tests__/
-    └── orchestrator-eval.test.ts
+    ├── orchestrator-eval.test.ts
+    └── candidate-eval.test.ts   # gate/cap/zero-network(+positive control)/mock-pipeline
 ```
 
 ## Deliberately deferred (co-owned with the prompt workstream / "Brief I")
