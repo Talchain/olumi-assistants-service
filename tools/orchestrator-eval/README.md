@@ -191,10 +191,20 @@ pnpm eval:orchestrator:candidates -- \
 ```
 
 The report prints per-fixture PASS/FAIL with the failing dimension and detail
-for each arm, then a ranking (pass-count desc, then fewest flagged
-`raw_unparsed` turns, then fewest failed dimensions). The flagged-turn key
-sits ahead of failed-dimensions so a flagged arm can never break a tie past
-an unflagged one — a flagged turn never ranks above an unflagged honest one.
+for each arm, then a ranking (pass-count desc, then fewest substance-failed
+turns, then fewest flagged `raw_unparsed` turns, then fewest failed
+dimensions). The substance-failed key — turns that answered EMPTY, counted
+fail-closed so an unparseable or errored turn is an empty turn — sits
+directly after pass-count so that, among arms passing equally many turns,
+emptiness can never win a tie by failing FEWER dimensions than a
+substantive-but-flawed answer; it deliberately does NOT sit above pass-count,
+because substance failure already fails the turn (it is priced into
+pass-count) and an arm that actually passes turns must not lose to one that
+never does. The flagged-turn key sits ahead of failed-dimensions so a flagged
+arm can never break a tie past an unflagged one — a flagged turn never ranks
+above an unflagged honest one. Every ranking key is pinned by
+`__tests__/candidate-ranking.test.ts`: deleting or reordering any key turns a
+named test RED.
 `--model` has **no default on purpose**: the eval must run the model the
 orchestrator actually serves — check `CEE_MODEL_ORCHESTRATOR` on the target
 environment. A tie is reported as a tie, not silently broken.

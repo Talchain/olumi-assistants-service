@@ -75,6 +75,16 @@ export interface CandidateReport {
   readonly kind: CandidatePromptSpec['kind'];
   readonly results: readonly CandidateFixtureResult[];
   readonly passCount: number;
+  /**
+   * Turns that produced NO substance: the scored `substance_present`
+   * dimension failed (empty/whitespace text, or fail-closed on raw_unparsed),
+   * plus — fail-closed — every `model_error` turn (no score exists, so
+   * nothing proves substance was present; a turn that produced nothing is an
+   * EMPTY turn, not an unscored one — without this, an arm whose every call
+   * failed would carry zero failed dimensions and rank as the cleanest
+   * candidate in the run).
+   */
+  readonly substanceFailedTurnCount: number;
   /** Turns whose raw output did not parse as the v30.3 envelope (raw_unparsed). */
   readonly flaggedTurnCount: number;
   readonly failedDimensionCount: number;
@@ -88,11 +98,22 @@ export interface CandidateEvalReport {
   readonly turnsUsed: number;
   readonly candidates: readonly CandidateReport[];
   /**
-   * Labels best-first: passCount desc, flaggedTurnCount asc,
-   * failedDimensionCount asc, label asc. flaggedTurnCount sorts BEFORE
-   * failedDimensionCount so a candidate flagged raw_unparsed can never break
-   * a tie past an unflagged one — the direction invariant: a flagged turn
-   * never ranks above an unflagged honest one.
+   * Labels best-first: passCount desc, substanceFailedTurnCount asc,
+   * flaggedTurnCount asc, failedDimensionCount asc, label asc.
+   *
+   * substanceFailedTurnCount sorts immediately AFTER passCount: among arms
+   * passing equally many turns, one that answered EMPTY (or errored) on more
+   * turns can never out-rank one that answered with flawed substance — an
+   * empty answer fails ONE dimension where a flawed answer may fail several,
+   * so without this key failedDimensionCount would reward emptiness all over
+   * again, one key lower than the defect the substance dimension killed. It
+   * deliberately does NOT sort above passCount: substance failure already
+   * forces the turn to fail (it is priced into passCount), and an arm that
+   * actually passes turns must not lose to one that never does.
+   *
+   * flaggedTurnCount sorts BEFORE failedDimensionCount so a candidate flagged
+   * raw_unparsed can never break a tie past an unflagged one — the direction
+   * invariant: a flagged turn never ranks above an unflagged honest one.
    */
   readonly ranking: readonly string[];
 }
@@ -331,6 +352,13 @@ export async function runCandidateEval(options: RunCandidateEvalOptions): Promis
       results.push({ fixtureId: fixture.id, extraction, score, pass: score.pass, error: null });
     }
     const passCount = results.filter((r) => r.pass).length;
+    // Fail-closed: a model_error turn (score === null) produced nothing, so
+    // it counts as substance-failed — see CandidateReport for the why.
+    const substanceFailedTurnCount = results.filter(
+      (r) =>
+        r.score === null ||
+        r.score.dimensions.some((d) => d.name === 'substance_present' && !d.pass),
+    ).length;
     const flaggedTurnCount = results.filter((r) => r.extraction === 'raw_unparsed').length;
     const failedDimensionCount = results.reduce(
       (n, r) => n + (r.score ? r.score.dimensions.filter((d) => !d.pass).length : 0),
@@ -342,18 +370,23 @@ export async function runCandidateEval(options: RunCandidateEvalOptions): Promis
       kind: spec.kind,
       results,
       passCount,
+      substanceFailedTurnCount,
       flaggedTurnCount,
       failedDimensionCount,
     });
   }
 
   // Ranking keys, in order (see CandidateEvalReport.ranking for the why):
-  // flaggedTurnCount sits ahead of failedDimensionCount so a flagged arm can
-  // never break a tie past an unflagged one.
+  // substanceFailedTurnCount sits directly after passCount so emptiness can
+  // never win a tie via fewer failed dimensions; flaggedTurnCount sits ahead
+  // of failedDimensionCount so a flagged arm can never break a tie past an
+  // unflagged one. Every key is pinned by __tests__/candidate-ranking.test.ts
+  // — deleting or reordering any of them turns a named test RED.
   const ranking = [...candidates]
     .sort(
       (a, b) =>
         b.passCount - a.passCount ||
+        a.substanceFailedTurnCount - b.substanceFailedTurnCount ||
         a.flaggedTurnCount - b.flaggedTurnCount ||
         a.failedDimensionCount - b.failedDimensionCount ||
         a.label.localeCompare(b.label),

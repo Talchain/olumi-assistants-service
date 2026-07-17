@@ -116,13 +116,13 @@ async function runTwoArms(
   });
 }
 
-/** First half / second half of the fixture pack, deterministic by sorted id. */
-function fixtureHalves(): { first: Set<string>; second: Set<string> } {
+/** The first half of the fixture pack, deterministic by sorted id (the rest
+ * of the pack is "everything not in this set"). */
+function firstFixtureHalf(): Set<string> {
   const ids = loadFixtures()
     .map((f) => f.id)
     .sort();
-  const mid = Math.ceil(ids.length / 2);
-  return { first: new Set(ids.slice(0, mid)), second: new Set(ids.slice(mid)) };
+  return new Set(ids.slice(0, Math.ceil(ids.length / 2)));
 }
 
 describe('flaggedTurnCount is a LOAD-BEARING ranking key (P2-1)', () => {
@@ -176,7 +176,7 @@ describe('flaggedTurnCount is a LOAD-BEARING ranking key (P2-1)', () => {
     // Both arms fail substance on the SAME number of turns (3 each), so no
     // substance-level key can order them — this pair keeps flaggedTurnCount
     // pinned independently of the substance ranking key.
-    const { first, second } = fixtureHalves();
+    const first = firstFixtureHalf();
     const report = await runTwoArms({ alpha: 'z-part-flagged', beta: 'a-unflagged' }, (arm, fixtureId) => {
       if (arm === 'alpha') {
         // 3 flagged turns (2 dims each) + 3 single-trip turns (1 dim each) = 9.
@@ -207,5 +207,111 @@ describe('flaggedTurnCount is a LOAD-BEARING ranking key (P2-1)', () => {
     // unflagged arm fails MORE dimensions — only flaggedTurnCount puts it
     // first. Delete that sort term and failedDimensionCount inverts this.
     expect(report.ranking).toEqual(['a-unflagged', 'z-part-flagged']);
+  });
+});
+
+describe('substanceFailedTurnCount ranking key (P2-2, option a): emptiness never wins a tie', () => {
+  it('among all-failing arms, an EMPTY arm ranks strictly below a substantive-but-flawed one — even with far fewer failed dimensions and an alphabetical win (RED if the substanceFailedTurnCount sort term is deleted)', async () => {
+    // THE ROUND-2 RESIDUAL (P2-2): with substance priced only into per-turn
+    // pass/fail, an empty-envelope arm (1 failed dimension per turn) could
+    // still out-rank a substantive-but-flawed arm (3 failed dimensions per
+    // turn) on the failedDimensionCount key — emptiness winning by failing
+    // FEWER checks, the exact defect class the substance dimension exists to
+    // kill, resurfacing one key lower.
+    const report = await runTwoArms(
+      { alpha: 'a-empty', beta: 'z-substantive-flawed' },
+      (arm) => (arm === 'alpha' ? { ok: true, text: envelope('') } : { ok: true, text: envelope(TRIPLE_TRIP_TEXT) }),
+    );
+    expect(fetchCalls).toBe(0);
+
+    const empty = report.candidates.find((c) => c.label === 'a-empty');
+    const substantive = report.candidates.find((c) => c.label === 'z-substantive-flawed');
+    if (!empty || !substantive) throw new Error('missing candidate reports');
+
+    // Empty arm: unflagged, 1 failed dimension per turn (substance only) = 6.
+    expect(empty.passCount).toBe(0);
+    expect(empty.flaggedTurnCount).toBe(0);
+    expect(empty.substanceFailedTurnCount).toBe(6);
+    expect(empty.failedDimensionCount).toBe(6);
+
+    // Substantive arm: unflagged, substance PASSES everywhere, 3 failed
+    // dimensions per turn = 18 — three times the empty arm's count.
+    expect(substantive.passCount).toBe(0);
+    expect(substantive.flaggedTurnCount).toBe(0);
+    expect(substantive.substanceFailedTurnCount).toBe(0);
+    expect(substantive.failedDimensionCount).toBe(18);
+
+    // THE PIN: the substantive arm ranks first despite losing on BOTH
+    // downstream keys (failed dimensions AND alphabetical order). Delete
+    // `a.substanceFailedTurnCount - b.substanceFailedTurnCount ||` and the
+    // empty arm wins again via failedDimensionCount.
+    expect(report.ranking).toEqual(['z-substantive-flawed', 'a-empty']);
+  });
+
+  it('a model_error turn counts as substance-failed (fail-closed): an arm that produced NOTHING cannot out-rank one that produced flawed substance (RED if model_error turns stop counting as substance-failed)', async () => {
+    // A model_error turn has NO score, so it contributes ZERO failed
+    // dimensions — without fail-closed substance counting, an arm whose every
+    // call failed would carry the LOWEST failedDimensionCount in the run and
+    // rank above every substantive all-failing arm: total production failure
+    // scored as the cleanest candidate. Producing nothing is the emptiness
+    // defect class in its purest form.
+    const report = await runTwoArms(
+      { alpha: 'a-model-error', beta: 'z-substantive-flawed' },
+      (arm) => (arm === 'alpha' ? { ok: false, text: null } : { ok: true, text: envelope(TRIPLE_TRIP_TEXT) }),
+    );
+    expect(fetchCalls).toBe(0);
+
+    const errored = report.candidates.find((c) => c.label === 'a-model-error');
+    const substantive = report.candidates.find((c) => c.label === 'z-substantive-flawed');
+    if (!errored || !substantive) throw new Error('missing candidate reports');
+
+    expect(errored.passCount).toBe(0);
+    expect(errored.flaggedTurnCount).toBe(0);
+    expect(errored.failedDimensionCount).toBe(0); // no scores at all
+    for (const r of errored.results) expect(r.extraction).toBe('model_error');
+    // Fail-closed: every unscored turn counts as an EMPTY turn.
+    expect(errored.substanceFailedTurnCount).toBe(6);
+
+    expect(report.ranking).toEqual(['z-substantive-flawed', 'a-model-error']);
+  });
+
+  it('PLACEMENT pin: the substance key sits BELOW passCount — an arm that actually passes turns beats an arm that never does, empty turns notwithstanding (RED if substanceFailedTurnCount is hoisted above passCount, or passCount is deleted)', async () => {
+    // The deliberate deviation from the review's literal "highest-priority
+    // key" phrasing, pinned so it cannot drift silently: substance failure
+    // already forces the TURN to fail (it is priced into passCount), so the
+    // substance key only needs to adjudicate between arms passing EQUALLY
+    // MANY turns. Hoisted above passCount it would rank an arm that never
+    // produced a single clean turn above one that passed 1/6 — inverting the
+    // pack's primary signal in the name of a tie-breaker.
+    const goodTextById = new Map(
+      loadFixtures().map((f) => {
+        const good = f.candidates.find((c) => c.label === 'good');
+        if (!good) throw new Error(`fixture ${f.id} has no recorded good candidate`);
+        return [f.id, good.text] as const;
+      }),
+    );
+    const passingFixtureId = [...goodTextById.keys()].sort()[0]!;
+    const report = await runTwoArms({ alpha: 'a-mostly-empty', beta: 'z-never-passes' }, (arm, fixtureId) => {
+      if (arm === 'alpha') {
+        return fixtureId === passingFixtureId
+          ? { ok: true, text: envelope(goodTextById.get(fixtureId)!) } // 1 clean pass
+          : { ok: true, text: envelope('') }; // 5 empty turns
+      }
+      return { ok: true, text: envelope(TRIPLE_TRIP_TEXT) }; // substantive, never passes
+    });
+    expect(fetchCalls).toBe(0);
+
+    const mostlyEmpty = report.candidates.find((c) => c.label === 'a-mostly-empty');
+    const neverPasses = report.candidates.find((c) => c.label === 'z-never-passes');
+    if (!mostlyEmpty || !neverPasses) throw new Error('missing candidate reports');
+
+    expect(mostlyEmpty.passCount).toBe(1);
+    expect(mostlyEmpty.substanceFailedTurnCount).toBe(5);
+    expect(neverPasses.passCount).toBe(0);
+    expect(neverPasses.substanceFailedTurnCount).toBe(0);
+
+    // passCount stays primary: 1 real pass beats 0, five empty turns
+    // notwithstanding.
+    expect(report.ranking).toEqual(['a-mostly-empty', 'z-never-passes']);
   });
 });

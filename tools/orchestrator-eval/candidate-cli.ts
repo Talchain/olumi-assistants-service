@@ -84,8 +84,9 @@ function printReport(report: CandidateEvalReport): void {
   console.log(`turns used: ${report.turnsUsed}`);
 
   for (const c of report.candidates) {
+    const empty = c.substanceFailedTurnCount > 0 ? `, ${c.substanceFailedTurnCount} turn(s) EMPTY (substance failed)` : '';
     const flagged = c.flaggedTurnCount > 0 ? `, ${c.flaggedTurnCount} turn(s) FLAGGED raw_unparsed` : '';
-    console.log(`\n━━ candidate ${c.label} (${c.kind}: ${c.ref}) — ${c.passCount}/${c.results.length} fixtures pass${flagged} ━━`);
+    console.log(`\n━━ candidate ${c.label} (${c.kind}: ${c.ref}) — ${c.passCount}/${c.results.length} fixtures pass${empty}${flagged} ━━`);
     for (const r of c.results) {
       const verdict = r.pass ? 'PASS' : 'FAIL';
       console.log(`  - ${r.fixtureId}: ${verdict}  [extraction: ${r.extraction}]`);
@@ -107,6 +108,7 @@ function printReport(report: CandidateEvalReport): void {
       a &&
       b &&
       a.passCount === b.passCount &&
+      a.substanceFailedTurnCount === b.substanceFailedTurnCount &&
       a.flaggedTurnCount === b.flaggedTurnCount &&
       a.failedDimensionCount === b.failedDimensionCount
     ) {
