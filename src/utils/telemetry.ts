@@ -155,6 +155,28 @@ export const TelemetryEvents = {
   // the flag is still not crossing the wire.
   V5ExplicitGenerateReceived: "v5.explicit_generate_received",
 
+  // ROADMAP 2.63 C3/C4 — deterministic draft/redraft offer lifecycle.
+  // `seeded` fires when an offer chip + `draft_graph` pending are emitted
+  // (`site`: frame_no_brief_guard / explicit_generate_graph_present;
+  // `persisted` false = commit failed and the chip was withheld).
+  // `resumed` fires when a consent-shaped turn resolved against a live
+  // offer (`outcome`: dispatch_draft / declined_no_brief /
+  // reoffered_graph_changed / reoffered_graph_present /
+  // state_read_failed_fallthrough; `trigger`: copy_replay / bare_confirm).
+  V5DraftOfferSeeded: "v5.draft_offer.seeded",
+  V5DraftOfferResumed: "v5.draft_offer.resumed",
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
+  // CEE_CLARIFY_V2_ENABLED. `questions_emitted` fires once per clarify
+  // response (fields: round, phase, question_count, dimensions) —
+  // questions_emitted / drafts is the ask-rate counter the 1.94 promotion
+  // path requires, so the next "it never asks" regression is a dashboard
+  // fact, not a 7-day log dig. `proceeded` fires when preflight/resume
+  // hands the turn to the draft (fields: reason: complete /
+  // all_missing_already_asked / round_budget_exhausted / user_proceed /
+  // explicit_generate; resumed: bool).
+  V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
+  V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
+
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
   CeeSensitivityCoachFailed: "cee.sensitivity_coach.failed",
@@ -527,6 +549,27 @@ export const TelemetryEvents = {
   // Emitted by B1 ingress/egress validators on /orchestrate/v2/turn (slice A0).
   // Fields per §4.4: boundary, direction, validator, contract_version, pass, error_code?, request_id
   BoundaryValidation: "boundary.validation",
+
+  // W2E-2 — SIGMA FLOOR at the persisted-load boundary
+  // (loadScenarioSnapshotForRunAnalysis, build-turn-context.ts — round 4;
+  // round 3 placed it in PLoTClient.run, AFTER the GraphV3 parse that rejects
+  // std <= 0, where it was dead code on every live path).
+  // Fires once per floored field when the persisted graph carries a
+  // sigma <= 0 (edge strength.std / node observed_state.std) and CEE floors
+  // the compute-side copy to COMPUTE_SIGMA_FLOOR, BEFORE the GraphV3 parse.
+  // Deliberately NOT at ingress and NEVER touching rawPersistedGraph: ingress
+  // and the hash input preserve graph identity exactly, because strength.std
+  // is in the analysis-affecting hash projection and rewriting it there
+  // desyncs every hash token. Full rationale: src/validators/numeric-bounds.ts
+  // module header.
+  //
+  // This is the meter for how much invalid persisted state exists in the wild:
+  // the UI's own writer floors outbound std at ZERO, so affected scenarios emit
+  // this on EVERY analysis run. Expect a non-zero baseline that decays only as
+  // scenarios are re-saved. A sustained rise means a NEW writer is producing
+  // zero-sigma state — find it. Fields: path, kind, repaired_to, request_id.
+  // Never carries the offending value or any label (PII rule).
+  ComputeSigmaFloor: "cee.compute.sigma_floor",
 
   // V5 TurnExecutor lifecycle (slice A1, addendum §2.1.9).
   // Started emits when runTurnExecutor enters. Completed emits in `finally`.

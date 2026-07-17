@@ -409,6 +409,15 @@ export function computeSurvivingPriorPendingsDetailed(
   const thisTurnHasFreshProposedConcept = thisTurn.some(
     (pa) => pa.action.kind === 'proposed_concept',
   );
+  // ROADMAP 2.63 C3/C4 — the draft/redraft offer is likewise a SINGLE-SLOT
+  // store: each guard re-fire / graph-present decline mints a fresh offer
+  // with a fresh chip_id, so key-level supersession can never fire for the
+  // kind and a carried stale offer would otherwise survive alongside the
+  // fresh one (two live `draft_graph` pendings, ambiguous resume target).
+  // Any fresh offer this turn supersedes every carried one.
+  const thisTurnHasFreshDraftOffer = thisTurn.some(
+    (pa) => pa.action.kind === 'draft_graph',
+  );
   const survivors: PendingAction[] = [];
   const lapsedConfirmationExpecting: PendingAction[] = [];
   let consumedCount = 0;
@@ -422,7 +431,8 @@ export function computeSurvivingPriorPendingsDetailed(
     if (
       thisTurnKeys.has(key)
       || (pa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
-    ) { supersededCount += 1; continue; } // 2. superseded (same key, or fresher concept capture)
+      || (pa.action.kind === 'draft_graph' && thisTurnHasFreshDraftOffer)
+    ) { supersededCount += 1; continue; } // 2. superseded (same key, or fresher concept/offer capture)
     const expiresMs = Date.parse(pa.expires_at_iso);
     if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
     // 4. graph-hash invalidation — only when both hashes are known.

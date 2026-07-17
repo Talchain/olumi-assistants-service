@@ -175,6 +175,19 @@ export type V5DiagnosticExitPath =
   // user turns). Distinct from frame_no_brief_guard by design: the user
   // explicitly asked to generate, so the copy names what is missing.
   | 'explicit_generate_no_brief'
+  // ROADMAP 2.63 C4 — deterministic decline-with-redraft-offer when an
+  // explicit generate (or a stale build-offer consent) arrives on a
+  // scenario that already has a graph (request graph_state or persisted).
+  // The turn commits a `draft_graph` (redraft) pending + offer chip; the
+  // consent turn resumes through the draft-offer pre-route and exits as
+  // a normal `draft_graph`.
+  | 'explicit_generate_graph_present'
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — flag-gated
+  // (CEE_CLARIFY_V2_ENABLED) draft-preflight clarification response: the
+  // deterministic brief rubric found the brief thin and the route replied
+  // with up to 3 tap-able questions instead of dispatching the draft.
+  // Zero LLM calls on this path.
+  | 'clarify_v2'
   | 'draft_graph_error';
 
 // ─── Inputs ────────────────────────────────────────────────────────────────

@@ -401,6 +401,12 @@ class PLoTClientImpl implements PLoTClient {
   ) {}
 
   async run(payload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<V2RunResponseEnvelope> {
+    // W2E-2 (round 4): non-positive persisted sigma is floored UPSTREAM, in
+    // `loadScenarioSnapshotForRunAnalysis` (build-turn-context.ts) — BEFORE
+    // the `GraphV3.safeParse` there, which rejects `strength.std <= 0` and
+    // would otherwise fail the turn before any code here could run. A floor
+    // at this seam is unreachable for that class on every live path (the only
+    // live caller passes a GraphV3-validated graph), so none is wired here.
     // H.5: Outbound structural validation
     validateRunPayload(payload);
 

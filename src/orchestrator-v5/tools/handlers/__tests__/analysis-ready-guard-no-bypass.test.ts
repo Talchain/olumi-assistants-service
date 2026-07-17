@@ -61,10 +61,16 @@ describe('EP2 §11 — V5 graph→PLoT no-bypass', () => {
     const seam = readFileSync(join(V5_ROOT, 'build-turn-context.ts'), 'utf8');
     expect(seam).toContain('assessAnalysisReadiness');
     expect(seam).toContain('analysisReadyGuardEnabled');
-    // the guard must wrap the run payload's graph BEFORE GraphV3.safeParse strips node.data.
+    // Ordering inside the seam: EP2 guard → sigma floor → GraphV3 parse.
+    // The guard must wrap the run payload's graph BEFORE GraphV3.safeParse
+    // strips node.data, and the W2E-2 round-4 sigma floor must sit BEFORE the
+    // parse too — a post-parse floor is unreachable for the std<=0 class the
+    // parse rejects (the round-3 dead-code regression this ordering pins out).
     const guardIdx = seam.indexOf('assessAnalysisReadiness');
-    const parseIdx = seam.indexOf('GraphV3.safeParse(graphForSnapshot)');
+    const floorIdx = seam.indexOf('floorGraphSigmaForCompute(graphForSnapshot)');
+    const parseIdx = seam.indexOf('GraphV3.safeParse(sigmaFloor.graph)');
     expect(guardIdx).toBeGreaterThan(0);
-    expect(parseIdx).toBeGreaterThan(guardIdx);
+    expect(floorIdx).toBeGreaterThan(guardIdx);
+    expect(parseIdx).toBeGreaterThan(floorIdx);
   });
 });

@@ -2023,21 +2023,26 @@ describe("V5 H5 follow-up — handleEditGraph appliedGraph synthesis", () => {
   });
 
   // Backstop for the staging failure on PR #165. Patch-validation
-  // (src/orchestrator/patch-validation.ts) accepts UpdateEdgeValue as
-  // `z.record(z.string(), z.unknown())` so any shape passes structural
-  // validation. EdgeStrengthV3 requires `std: z.number().positive()`,
-  // so an update setting `std: 0` produces a candidate that passes
+  // (src/orchestrator/patch-validation.ts) accepts UpdateEdgeValue as a
+  // record with numeric-bounds checks only (W2E-2), so non-numeric shape
+  // violations still pass structural validation. EdgeV3 requires
+  // `effect_direction: z.enum(["positive", "negative"])`, so an update
+  // setting an out-of-vocabulary enum produces a candidate that passes
   // patch-validation and applyPatchOperations but fails GraphV3 strict
   // parse — the exact gap the Layer 2 backstop is for.
+  // (The original fixture here — `strength: { std: 0 }` — is now caught
+  // one layer earlier by the W2E-2 numeric-bounds gate in patch-validation
+  // and rejects as STRUCTURAL_VALIDATION_FAILED; see
+  // tests/unit/orchestrator/patch-validation-numeric-bounds.test.ts.)
   it("refuses to persist candidateGraph that fails GraphV3 strict parse (SYNTHESIZED_GRAPH_INVALID)", async () => {
     const adapter = makeAdapter([
       {
         op: "update_edge",
         path: "factor_1::goal_1",
-        // Layer 1 merges into existing { mean: 0.5, std: 0.1 } so the
-        // resulting strength is { mean: 0.5, std: 0 }. GraphV3 requires
-        // std > 0; safeParse rejects; the backstop must catch it.
-        value: { strength: { std: 0 } },
+        // Layer 1 merges into the existing edge so the resulting
+        // effect_direction is "sideways". GraphV3 requires
+        // positive|negative; safeParse rejects; the backstop must catch it.
+        value: { effect_direction: "sideways" },
       },
     ]);
 

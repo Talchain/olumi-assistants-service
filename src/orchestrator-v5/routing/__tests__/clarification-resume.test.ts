@@ -500,6 +500,14 @@ describe('tryClarificationResume — kind classification regression', () => {
     // Graph-hash divergence is observed at the resume site but does
     // NOT use this classification's divergence guard.
     proposed_concept: 'non_mutating',
+    // ROADMAP 2.63 C3/C4 — draft/redraft offer, resumed at route level only.
+    // MUTATING fail-closed: the C4 variant's consent REPLACES the persisted
+    // graph, and the offer pins preconditions.graph_hash.
+    draft_graph: 'mutating',
+    // Clarify v2 (E0-B) — draft-preflight round state. Resuming re-runs
+    // the deterministic brief rubric (ask again or proceed to draft);
+    // there is no graph at the pre-draft stage and no mutation applies.
+    clarify_v2_round: 'non_mutating',
   };
 
   it('every PendingAction kind has the expected safety classification (semantic regression)', () => {

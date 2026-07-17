@@ -226,6 +226,13 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // mutating now so they fail closed by default when wired.
   apply_proposed_change: 'mutating',
   edit_graph_add_risk: 'mutating',
+  // ROADMAP 2.63 C3/C4 — the draft/redraft offer. Never resumed by this
+  // module (route-v2's draft-offer pre-route owns it; here it falls
+  // through like any unclassified-for-resume kind), but classified
+  // MUTATING fail-closed: consenting to the C4 variant REPLACES the
+  // persisted graph, and the offer pins `preconditions.graph_hash` so
+  // divergence guards fire by default anywhere the kind is evaluated.
+  draft_graph: 'mutating',
   // Non-mutating: resuming reads from analysis state but does not
   // change the graph; hash divergence is not a safety concern.
   run_analysis: 'non_mutating',
@@ -240,6 +247,13 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // non-mutating because applying the persisted concept does not
   // change the graph.
   proposed_concept: 'non_mutating',
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement). Draft-preflight
+  // clarification round state, claimed exclusively by the flag-gated
+  // clarify-v2 pre-route in route-v2. Resuming re-runs the deterministic
+  // brief rubric and either asks again or proceeds to draft — it never
+  // applies a persisted operator/value to the graph (there IS no graph at
+  // the pre-draft stage), so hash divergence is not a safety concern.
+  clarify_v2_round: 'non_mutating',
 };
 
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(
