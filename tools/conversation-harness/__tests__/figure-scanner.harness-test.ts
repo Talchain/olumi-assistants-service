@@ -1680,6 +1680,17 @@ describe('round 11 corpus: ruling 2 — list markers never forward-anchor; the c
     expect(scanProseFigures('1. Your win rate is 62%.')).toEqual({ values: [62], unparseable: 0 });
   });
 
+  it('anchor-follow guard: a marker-shaped run abutting an anchor keeps its fail-closed refusal', () => {
+    // LIVE counterexample from the round-6 invariant generator against the
+    // unguarded marker rule (seed 447900536): '62. points overall.' at a
+    // line start classified the 62 as a marker, demoted the points token,
+    // and accounted an anchor-bearing snippet to ZERO outcomes. A
+    // marker-shaped run whose punct is followed by an anchor is the
+    // released-punctuation malformed shape, never list formatting.
+    expect(scanProseFigures('62. points overall.')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('62.% of runs')).toEqual({ values: [], unparseable: 1 });
+  });
+
   it('DELIBERATE COSTS (ruling 5, pinned — documented, not mechanism\'d further): same-line colon shapes', () => {
     // 'Two quick points: 60% of runs pass.' — same-line colon, plural,
     // non-list-marker number: the 60% values and the phantom points figure
@@ -1690,5 +1701,31 @@ describe('round 11 corpus: ruling 2 — list markers never forward-anchor; the c
     // Enumeration-count: 'are 3' forward-anchors the plural token and the 3
     // strands beside it. ACCEPTED cost — blocks, fail-closed.
     expect(scanProseFigures('The key points are 3: cost, speed, and risk.')).toEqual({ values: [], unparseable: 2 });
+  });
+});
+
+describe('round 11 corpus: ruling 4 — the article variant admits ONE closed-list adjective (full|entire|whole|single|half)', () => {
+  it('RULING refuse set: one closed-list adjective between a/an and singular "point" under a movement cue', () => {
+    // ruling 4: full|entire|whole|single|half — each refusal is the
+    // anchored points token via invariant v1. adjective-article-off
+    // regresses every one of these to {[],0}.
+    expect(scanProseFigures('rose an entire point')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('gained a full point')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('dropped a whole point')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('up a single point')).toEqual({ values: [], unparseable: 1 });
+    // 'half' overlaps the word-number lexicon: 'a half point' anchors via
+    // the compound/word-number path EVEN WITHOUT a cue (long-standing
+    // 'half a point' doctrine) — coverage, not an adjective-branch
+    // discriminator.
+    expect(scanProseFigures('slipped a half point')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('RULING clean set: rhetorical controls — adjectives OUTSIDE the closed list, and cue-less shapes, stay prose', () => {
+    // 'important' is NOT in the list (pinned per the ruling's letter).
+    expect(scanProseFigures('that raises an important point about scope')).toEqual({ values: [], unparseable: 0 });
+    // No movement cue in the window: the adjective variant needs one.
+    expect(scanProseFigures('they made a full point of it')).toEqual({ values: [], unparseable: 0 });
+    // 'the' is not a/an — the article variant never fires on it.
+    expect(scanProseFigures("that's the whole point")).toEqual({ values: [], unparseable: 0 });
   });
 });

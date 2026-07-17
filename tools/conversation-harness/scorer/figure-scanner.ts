@@ -471,6 +471,25 @@ function numericNeighbourBefore(text: string, pos: number, anchorToken: string):
     const words = precedingWords(text, articleStart, 3);
     if (words.some((w) => MOVEMENT_CUES.has(w))) return true;
   }
+  // ROUND 11 (ruling 4 — article variant, adjective form): ONE adjective
+  // from the CLOSED ruling list (full|entire|whole|single|half) may sit
+  // between the article and SINGULAR 'point' — 'rose an entire point' /
+  // 'gained a full point' refuse under the same movement-cue rule, the cue
+  // window measured from the article (the ruling-3 convention). The list is
+  // CLOSED by ruling: 'important' and every other adjective stays prose;
+  // growing it word-by-word is the hand-maintained-mirror trap.
+  if (articleStart < 0 && /^point$/i.test(anchorToken)) {
+    const adj = /(?:^|[^a-z])(full|entire|whole|single|half)$/i.exec(text.slice(Math.max(0, i - 7), i));
+    if (adj !== null) {
+      let j = i - adj[1].length;
+      while (j > 0 && /[ \t\r\n]/.test(text[j - 1])) j--;
+      const art = /(?:^|[^a-z])(an?)$/i.exec(text.slice(Math.max(0, j - 4), j));
+      if (art !== null) {
+        const words = precedingWords(text, j - art[1].length, 3);
+        if (words.some((w) => MOVEMENT_CUES.has(w))) return true;
+      }
+    }
+  }
   return false;
 }
 
@@ -900,9 +919,19 @@ function scanLiterals(text: string): Literal[] {
     // lookahead keeps line-start decimals real figures ('62.5% remains').
     // Marker digits can carry no prefix — nothing precedes them on the line.
     if ((i === 0 || text[i - 1] === '\n') && /^\d+(?:\)|\.(?!\d))/.test(text.slice(i, i + 32))) {
-      while (i < n && isDigit(text[i])) i++;
-      i++; // the marker's '.' / ')'
-      continue;
+      let k = i;
+      while (k < n && isDigit(text[k])) k++;
+      k++; // the marker's '.' / ')'
+      // Anchor-follow guard (the round-6 invariant generator caught the
+      // unguarded version live: '62. points overall.' at a line start
+      // accounted to ZERO outcomes): a marker-shaped run whose punct is
+      // followed by an ANCHOR ('62. points', '62.%') is the long-standing
+      // released-punctuation malformed-typography shape, NOT list
+      // formatting — it keeps its fail-closed refusal.
+      if (matchAnchor(text, k) === null) {
+        i = k;
+        continue;
+      }
     }
     // Attached prefix (sign/currency immediately adjacent, any order).
     let p = i - 1;
