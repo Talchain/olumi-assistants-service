@@ -584,6 +584,18 @@ const ConfigSchema = z.object({
     // containment argument (VERBATIM reasoning bypasses the egress
     // claim-safety/forbidden-phrase cage by ruling).
     reasoningCaptureEnabled: booleanString.default(false),
+    // CEE_COACH_THINKING_DISABLED — latency lever (POC-BOARD item 9). When ON,
+    // the V5 coach/routing turn (orchestrator-v5/routing/route-with-tool-use)
+    // sends `thinking: { type: 'disabled' }` on its chatWithTools call to
+    // suppress Sonnet-5 ADAPTIVE thinking on THAT CALL ONLY (initial +
+    // max_tokens retry + REPAIR_ONCE, via the firstCallArgs spread). The
+    // measurement spike (real staging, N=5) put median coach wall time at
+    // ~26s with adaptive thinking vs ~9s disabled, but output tokens dropped
+    // sharply — so enablement is Paul-gated behind a coaching-quality verdict
+    // (speed must not outrank correctness). Default OFF; flag-off is
+    // byte-identical (the routing call omits `thinking`, exactly as today).
+    // See acceptance-evidence/latency-thinking-disable-2026-07-17/.
+    coachThinkingDisabled: booleanString.default(false),
     // CEE_ANSWER_TEXT_REQUIRED — belt-and-braces hardening for the
     // coach/converse `answer_text` channel (PR #380 / ROADMAP 1.38). Default
     // OFF; sequenced BEHIND the prompt track's prompt-only fix for the same
@@ -1400,6 +1412,7 @@ function parseConfig(): Config {
       graphCasRpc: env.CEE_V5_GRAPH_CAS_RPC,
       graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
+      coachThinkingDisabled: env.CEE_COACH_THINKING_DISABLED,
       answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
       answerShapeEnforced: env.CEE_ANSWER_SHAPE_ENFORCED,
       uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,

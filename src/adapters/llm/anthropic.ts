@@ -2754,7 +2754,15 @@ export async function chatWithToolsAnthropic(
       model,
       max_tokens: maxTokens,
       temperature,
-      thinking: thinkingEnabled ? 'enabled' : 'none',
+      // 'disabled' distinguishes an EXPLICIT suppression (adaptive thinking off,
+      // e.g. CEE_COACH_THINKING_DISABLED) from 'none' (no thinking field →
+      // adaptive thinking on by default on Sonnet 5). Byte-identical when no
+      // caller passes {type:'disabled'} (today's default) — still 'none'.
+      thinking: thinkingEnabled
+        ? 'enabled'
+        : args.thinking?.type === 'disabled'
+          ? 'disabled'
+          : 'none',
       system_chars: args.system_cache_blocks
         ? args.system_cache_blocks.reduce((sum: number, b: { text: string }) => sum + b.text.length, 0)
         : args.system.length,
@@ -2836,7 +2844,19 @@ export async function chatWithToolsAnthropic(
       messages: anthropicMessages,
       tools: anthropicTools,
       ...(toolChoice ? { tool_choice: toolChoice } : {}),
-      ...(thinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : {}),
+      // {type:'disabled'} must be TRANSMITTED, not dropped: models with adaptive
+      // thinking on by default (Sonnet 5) think unless the request explicitly
+      // disables it, and the tool-use routing turn omits `thinking` on the
+      // common path (so adaptive fires). An explicit disable is the only way to
+      // suppress it — mirrors chatWithAnthropic's handling. No production caller
+      // passes {type:'disabled'} here today except the coach turn under
+      // CEE_COACH_THINKING_DISABLED, so this is byte-identical when that flag is
+      // off. Live-probed 2026-07-14: the API accepts thinking:{type:'disabled'}.
+      ...(thinkingEnabled
+        ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } }
+        : args.thinking?.type === 'disabled'
+          ? { thinking: { type: 'disabled' } }
+          : {}),
     };
 
     const response = await withRetry(
