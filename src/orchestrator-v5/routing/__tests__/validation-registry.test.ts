@@ -346,3 +346,46 @@ describe('run_analysis confirmation_template forwarder', () => {
     expect(fwd({ assistant_text: '' })).toBe(FALLBACK);
   });
 });
+
+// Review fix B6 (17 Jul) — honesty floor: a rejected composed summary that
+// carried a scaffold disclosure must NOT lose the disclosure in the fallback.
+import { buildScaffoldDisclosureSuffix } from '../../coaching/scaffold-disclosure.js';
+
+describe('B6 — fallback preserves the scaffold disclosure', () => {
+  const template = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
+  if (typeof template !== 'function') {
+    throw new Error('expected function-form confirmation_template');
+  }
+
+  it('allowlist-rejected summary WITH a disclosure → fallback + disclosure (never undisclosed)', () => {
+    const disclosure = buildScaffoldDisclosureSuffix([
+      { option_id: 'opt_new', label: 'New option', factor_ids: ['fac_a'], value_defaulted: true },
+    ]);
+    expect(disclosure).not.toBe('');
+    // A headline that fails the allowlist (raw decimal in free text) with the
+    // valid disclosure appended — pre-fix the WHOLE string was replaced by
+    // the bare fallback, silently dropping the disclosure.
+    const rejected = `Leading option sits at 0.6234 exactly.${disclosure}`;
+    const out = template({ assistant_text: rejected });
+    expect(out).toContain('Placeholder values were used');
+    expect(out).not.toContain('0.6234');
+  });
+
+  it('a POISONED disclosure-shaped slice (decimal inside the label slot) is NOT smuggled — bare fallback', () => {
+    // The grammar's label slot accepts digits; the backstop must re-check
+    // the combined output, not trust disclosure-shaped structure.
+    const poisoned =
+      "Leading option sits at 0.6234 exactly. Placeholder values were used for 'Option at 0.6234' " +
+      'because it has no values set — ' +
+      'the whole comparison is illustrative until you configure it. ' +
+      "To set real values, say 'Help me configure Option at 0.6234.'";
+    const out = template({ assistant_text: poisoned });
+    expect(out).toBe('Ran analysis on your current scenario.');
+    expect(out).not.toContain('0.6234');
+  });
+
+  it('allowlist-rejected summary WITHOUT a disclosure → bare fallback (unchanged)', () => {
+    const out = template({ assistant_text: 'Leading option sits at 0.6234 exactly.' });
+    expect(out).toBe('Ran analysis on your current scenario.');
+  });
+});

@@ -14,6 +14,7 @@
 
 import type { HandlerValidationRegistry, PreconditionCheck } from './validator.js';
 import { SetFactorValueValueSchema } from '../tools/handlers/set-factor-value.js';
+import { SCAFFOLD_DISCLOSURE_RE_SRC } from '../coaching/scaffold-disclosure.js';
 import {
   AddConstraintLabelSchema,
   AddConstraintTypeSchema,
@@ -90,6 +91,8 @@ const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
 // stricter allowlist after the PR #210 review flagged the substring
 // match as too permissive.
 const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
+// Compiled once; source is the disclosure's own published grammar.
+const SCAFFOLD_DISCLOSURE_EXTRACT_RE = new RegExp(SCAFFOLD_DISCLOSURE_RE_SRC);
 const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   if (
     outcome === null ||
@@ -101,6 +104,22 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   const candidate = (outcome as { assistant_text: unknown }).assistant_text;
   if (isAllowedRunAnalysisAssistantText(candidate)) {
     return candidate as string;
+  }
+  // Review fix B6 (honesty floor): if the rejected composed summary carried a
+  // scaffold disclosure, the fallback must KEEP it — a scaffolded run may
+  // never render undisclosed (D-ask-1). The grammar match is STRUCTURE-only
+  // (its label slots accept digits/vocab), and this forwarder is the second
+  // line of defence precisely against upstream regressions — so the COMBINED
+  // output is re-checked against the allowlist before shipping (review-of-
+  // review P1: an unchecked append could smuggle the very content the
+  // allowlist rejected through the backstop itself). Genuine builder
+  // disclosures pass; a poisoned disclosure-shaped slice falls back bare.
+  if (typeof candidate === 'string') {
+    const disclosure = candidate.match(SCAFFOLD_DISCLOSURE_EXTRACT_RE);
+    if (disclosure) {
+      const combined = RUN_ANALYSIS_FALLBACK_TEXT + disclosure[0];
+      if (isAllowedRunAnalysisAssistantText(combined)) return combined;
+    }
   }
   return RUN_ANALYSIS_FALLBACK_TEXT;
 };

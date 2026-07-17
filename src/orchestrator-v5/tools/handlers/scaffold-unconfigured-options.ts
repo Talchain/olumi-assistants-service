@@ -164,7 +164,17 @@ function buildNeutralFactorValues(
     const rangeMin = prior ? finiteNum(prior.range_min) : undefined;
     const rangeMax = prior ? finiteNum(prior.range_max) : undefined;
     if (rangeMin !== undefined && rangeMax !== undefined) {
-      candidates.push({ value: (rangeMin + rangeMax) / 2 });
+      // Review fix B3 (fail-closed): on the scale-net-OFF wire the midpoint is
+      // forwarded VERBATIM with no scale/ambiguity check downstream, so a
+      // raw-magnitude prior (e.g. range 100000..500000 on a money factor)
+      // would inject a wrong-scale "neutral" beside [0,1]-convention siblings.
+      // Only trust the midpoint on net-OFF when the prior itself sits inside
+      // the sibling convention; otherwise skip the candidate — the option
+      // stays unconfigured and takes the existing honest configure path.
+      // Net-ON keeps its own resolveRawInterventionValue ambiguity rejection.
+      if (scaleNetEnabled || (rangeMin >= 0 && rangeMax <= 1)) {
+        candidates.push({ value: (rangeMin + rangeMax) / 2 });
+      }
     }
     for (const candidate of candidates) {
       const wire = projectNeutralCandidate(candidate, scaleById?.get(node.id), scaleNetEnabled);
@@ -289,8 +299,14 @@ export function scaffoldUnconfiguredOptions(
       if (!hasEmptyInterventions(opt)) return opt;
       const optionId = optionIdOf(opt);
       if (optionId === null || intentIds.has(optionId)) return opt;
-      const connected = (edgeTargets.get(optionId) ?? []).filter((f) => neutral.has(f));
-      const targets = connected.length > 0 ? connected : comparisonBasis;
+      const ownEdges = edgeTargets.get(optionId) ?? [];
+      const connected = ownEdges.filter((f) => neutral.has(f));
+      // Review fix B4 (doctrine scope): the ratified D-ask-1 comparison-basis
+      // fallback covers ONLY options with NO edges at all. An option WITH
+      // edges whose targets lack projectable neutrals is not silently
+      // switched to the sibling basis (that would misdescribe what ran) —
+      // it stays on the honest configure path.
+      const targets = connected.length > 0 ? connected : ownEdges.length === 0 ? comparisonBasis : [];
       if (targets.length === 0) return opt; // nothing safe → honest 422 recovery
       const interventions: Record<string, number> = {};
       for (const factorId of targets) {
@@ -307,9 +323,17 @@ export function scaffoldUnconfiguredOptions(
 
     if (scaffolded.length === 0) return untouched;
     return { options: outOptions, scaffolded };
-  } catch {
+  } catch (err) {
     // TOTAL: fail-safe is today's behaviour (the run blocks; nothing is
-    // half-scaffolded, nothing undisclosed reaches PLoT).
+    // half-scaffolded, nothing undisclosed reaches PLoT). Review fix B5:
+    // the fallback is right, the SILENCE was the bug — a future regression
+    // in here would revert every mixed-configured run to 422-blocking with
+    // zero signal. Log loudly (error class only, no graph content — PII rule).
+    // eslint-disable-next-line no-console -- deliberate stderr signal: this
+    // module has no logger dependency and must never throw from its catch.
+    console.error(
+      `[scaffold-unconfigured-options] scaffold crashed; falling back to unscaffolded input: ${err instanceof Error ? err.name + ': ' + err.message : 'non-Error throw'}`,
+    );
     return untouched;
   }
 }

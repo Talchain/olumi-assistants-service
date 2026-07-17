@@ -369,13 +369,21 @@ export function assertIngressGraphNumericBounds<T>(graph: T): GraphNumericIngres
 /**
  * Sigma floor for the persisted-load boundary
  * (`loadScenarioSnapshotForRunAnalysis`, build-turn-context.ts) — the point
- * where the persisted graph crosses into the compute projection, applied
- * BEFORE the `GraphV3.safeParse` there so the parse cannot reject the graph
- * this floor exists to save.
+ * where the persisted graph crosses into the compute projection.
  *
  * Floors non-positive `strength.std` / `observed_state.std` to
  * COMPUTE_SIGMA_FLOOR and reports each floor so we can see how much invalid
- * persisted state exists. Everything else is left exactly as-is: by the time a
+ * persisted state exists. Justification is SPLIT (review fix B7 — the old
+ * claim that GraphV3.safeParse rejects both was false):
+ *   - `strength.std`: cee-v3's `EdgeStrengthV3.std` is `.positive()`, so the
+ *     local compute parse WOULD reject it — the floor runs before that parse.
+ *   - `observed_state.std`: cee-v3's `ObservedStateV3` has NO std bound
+ *     (passthrough) — the local parse accepts 0. The floor here serves the
+ *     VENDORED wire contract (@talchain/schemas bounds observed_state.std
+ *     positive), keeping the egress payload contract-valid. Whether a
+ *     deliberate exact std=0 should instead be REFUSED (it is user-stated
+ *     certainty, silently inflated to 0.001 today) is an open doctrine
+ *     question — ROADMAP 1.153; do not widen the floor meanwhile. Everything else is left exactly as-is: by the time a
  * graph reaches compute, the no-safe-reading classes have already been
  * rejected at ingress, and this guard's job is narrow.
  *
