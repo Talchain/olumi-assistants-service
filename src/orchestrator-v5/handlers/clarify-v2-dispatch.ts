@@ -44,7 +44,7 @@ import {
 } from '../../schemas/assist.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import {
-  loadMostRecentPendingActions,
+  loadMostRecentPendingActionsStrict,
   loadPersistedScenarioStateStrict,
 } from '../build-turn-context.js';
 import {
@@ -161,9 +161,13 @@ async function commitClarifyTurn(
   requestId: string,
   startedAtMs: number,
   priorPendings: readonly PendingAction[],
-): Promise<boolean> {
+): Promise<OlumiResponse | null> {
   try {
-    await commitDirectAnswer(response, {
+    // Review fix A7 (17 Jul): the chokepoint may APPEND to the committed
+    // response (F-HELD lapse notices, consent-priority caps). Return ITS
+    // response so the wire carries exactly what was persisted — discarding
+    // it made store and wire silently diverge on a consent surface.
+    const result = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'clarify',
@@ -191,7 +195,7 @@ async function commitClarifyTurn(
       coaching_state: null,
       userMessage: payload.message,
     });
-    return true;
+    return result.response;
   } catch (err) {
     log.warn(
       {
@@ -201,7 +205,7 @@ async function commitClarifyTurn(
       },
       'clarify_v2 — clarify-turn commit failed; degrading to not-engaged (draft proceeds as with the flag off)',
     );
-    return false;
+    return null;
   }
 }
 
@@ -244,7 +248,25 @@ export async function tryClarifyV2Turn(
   const startedAtMs = Date.now();
 
   // ── RESUME: a live clarify round claims the reply ────────────────────
-  const pendings = await loadMostRecentPendingActions(payload.scenario_id, requestId);
+  // Review fix A6 (17 Jul, HOLD-WIPE class): STRICT read — the non-strict
+  // loader degrades to [] on a store failure, and threading that fabricated
+  // empty list into the commit's carry-forward would silently wipe live
+  // holds. On failure we cannot prove the prior set, so we do NOT claim the
+  // turn (falls through to normal routing, holds untouched).
+  let pendings: readonly PendingAction[];
+  try {
+    pendings = await loadMostRecentPendingActionsStrict(payload.scenario_id, requestId);
+  } catch (err) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      'clarify_v2 — pendings read failed; not claiming the turn (hold-wipe guard)',
+    );
+    return null;
+  }
   const livePending = latestLiveClarifyPending(pendings, startedAtMs);
   if (livePending !== null) {
     const state = roundStateFromPending(livePending);
@@ -273,12 +295,12 @@ export async function tryClarifyV2Turn(
         messageIsDraftShaped: isDraftShapedMessage(payload.message),
         explicitGenerate: params.explicitGenerateBrief !== null,
       });
-      emitDecisionTelemetry(decision, payload, requestId, true);
       if (decision.kind === 'proceed') {
+        emitDecisionTelemetry(decision, payload, requestId, true);
         return { kind: 'draft', briefOverride: decision.brief };
       }
       const response = composeClarifyV2Response(decision.questions, decision.phase);
-      const committed = await commitClarifyTurn(
+      const finalResponse = await commitClarifyTurn(
         response,
         decision.state,
         payload,
@@ -288,11 +310,15 @@ export async function tryClarifyV2Turn(
       );
       // Commit failure on RESUME degrades to proceed-with-what-we-have
       // rather than null: the reply was an answer to OUR question; letting
-      // it fall through to generic routing would strand it.
-      if (!committed) {
+      // it fall through to generic routing would strand it. Review fix A8:
+      // the questions-emitted telemetry now fires AFTER a successful commit
+      // only — a failed commit no longer reports a clarify round that never
+      // persisted (the silent-draft fallback was invisible in telemetry).
+      if (finalResponse === null) {
         return { kind: 'draft', briefOverride: decision.state.brief };
       }
-      return { kind: 'respond', response };
+      emitDecisionTelemetry(decision, payload, requestId, true);
+      return { kind: 'respond', response: finalResponse };
     }
   }
 
@@ -302,14 +328,14 @@ export async function tryClarifyV2Turn(
     return null;
   }
   const decision = decideClarifyV2Round1(effectiveBrief);
-  emitDecisionTelemetry(decision, payload, requestId, false);
   if (decision.kind === 'proceed') {
     // Complete brief: proceed SILENTLY — return null so the route's draft
     // dispatch runs bit-identically to the flag-off path.
+    emitDecisionTelemetry(decision, payload, requestId, false);
     return null;
   }
   const response = composeClarifyV2Response(decision.questions, decision.phase);
-  const committed = await commitClarifyTurn(
+  const finalResponse = await commitClarifyTurn(
     response,
     decision.state,
     payload,
@@ -317,6 +343,12 @@ export async function tryClarifyV2Turn(
     startedAtMs,
     pendings,
   );
-  if (!committed) return null;
-  return { kind: 'respond', response };
+  // Round-1 commit failure → silent draft (unchanged). Review fix A8: the
+  // questions-emitted telemetry fires only AFTER a successful commit, so a
+  // failed commit no longer reports a clarify round that never persisted.
+  if (finalResponse === null) return null;
+  emitDecisionTelemetry(decision, payload, requestId, false);
+  // Review fix A7: respond with the chokepoint's FINAL response (it may have
+  // appended F-HELD lapse notices) — wire and store must not diverge.
+  return { kind: 'respond', response: finalResponse };
 }

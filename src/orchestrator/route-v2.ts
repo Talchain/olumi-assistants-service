@@ -2411,7 +2411,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // failure returns null and this turn routes exactly as with the flag
     // off. See handlers/clarify-v2-dispatch.ts.
     let clarifyV2DraftBrief: string | null = null;
-    if (config.cee.clarifyV2Enabled && extensions.graphState == null) {
+    // Review fix A5 (17 Jul): an EMPTY canvas ({nodes:[],edges:[]}) passes
+    // ingress as non-null but is 'no model' by this file's own predicate —
+    // gate on POPULATION, not nullness, so clarify v2 engages for exactly
+    // the empty-canvas users it was built for.
+    if (config.cee.clarifyV2Enabled && !isPopulatedIngressGraph(extensions.graphState)) {
       const { tryClarifyV2Turn } = await import(
         '../orchestrator-v5/handlers/clarify-v2-dispatch.js'
       );
