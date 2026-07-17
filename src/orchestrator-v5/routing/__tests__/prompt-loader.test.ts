@@ -2,7 +2,9 @@
  * V5 alpha hardening Phase 2.1 — prompt-loader unit tests.
  *
  * Covers:
- *   - Sanity range check (correction 5): systemChars in [18500, 20500].
+ *   - Sanity range check (correction 5): systemChars within
+ *     [EXPECTED_SYSTEM_CHARS_MIN, EXPECTED_SYSTEM_CHARS_MAX] (absolute
+ *     values pinned by prompt-size-guard-absolute.test.ts).
  *   - Hash + version are the primary proof of installation.
  *   - Load-failure isolation via the `resolvePath` test seam (correction 7)
  *     — no global fs mutation, no child process, no env mutation.

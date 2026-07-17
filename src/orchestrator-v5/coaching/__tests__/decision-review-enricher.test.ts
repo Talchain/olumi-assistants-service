@@ -1793,3 +1793,126 @@ describe('enricher — CEE_DECISION_REVIEW_DECOMPOSE flag branch (B1)', () => {
     expect(monolith).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// D-ask-1 (2.11 P0-1) — P1-2: scaffold disclosure channel into the DR prompt.
+// Without this, decision_review narrates a scaffolded option's placeholder
+// numbers as real user data. A disclosed review beats a silently-skipped
+// one, so DR stays ON — the invoke input carries an explicit disclosure the
+// prompt renders in its own <SCAFFOLDED_OPTIONS> section.
+// ---------------------------------------------------------------------------
+
+describe('D-ask-1 scaffold disclosure channel (P1-2)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const SUCCESS_RESULT = {
+    output: { narrative_summary: 'option A wins' },
+    raw: '{}',
+    model: 'gpt-4.1',
+    provider: 'openai',
+    llm_latency_ms: 200,
+    input_tokens: 100,
+    output_tokens: 200,
+    prompt_version: 'v1',
+    resolution: MOCK_RESOLUTION,
+  };
+
+  it('DISCLOSURE: a scaffolded run’s DR invoke input carries the scaffold disclosure, and the assembled prompt renders it', async () => {
+    const spy = vi
+      .spyOn(invokeMod, 'invokeDecisionReview')
+      .mockResolvedValue(SUCCESS_RESULT);
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment() })],
+      requestId: 'req-scaffold-dr',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+      scaffoldedOptions: [
+        {
+          option_id: 'opt-2',
+          label: 'New Option',
+          factor_ids: ['fac_price', 'fac_volume'],
+          value_defaulted: true,
+        },
+      ],
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const input = spy.mock.calls[0][0] as invokeMod.DecisionReviewInvokeInput;
+    expect(input.scaffold_disclosure).toBeDefined();
+    expect(input.scaffold_disclosure).toMatch(/[Pp]laceholder/);
+    expect(input.scaffold_disclosure).toContain('New Option');
+    expect(input.scaffold_disclosure).toMatch(/illustrative/);
+
+    // The prompt context the LLM actually sees renders the disclosure in an
+    // explicit section — not buried in _meta (which never reaches the
+    // user message).
+    const message = invokeMod.buildDecisionReviewUserMessage(input, null);
+    expect(message).toContain('<SCAFFOLDED_OPTIONS>');
+    expect(message).toContain('New Option');
+    expect(message).toMatch(/[Pp]laceholder/);
+  });
+
+  it('no scaffolded options → no disclosure field and no SCAFFOLDED_OPTIONS section (byte-identical prompt)', async () => {
+    const spy = vi
+      .spyOn(invokeMod, 'invokeDecisionReview')
+      .mockResolvedValue(SUCCESS_RESULT);
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment() })],
+      requestId: 'req-no-scaffold-dr',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const input = spy.mock.calls[0][0] as invokeMod.DecisionReviewInvokeInput;
+    expect(input.scaffold_disclosure).toBeUndefined();
+    const message = invokeMod.buildDecisionReviewUserMessage(input, null);
+    expect(message).not.toContain('<SCAFFOLDED_OPTIONS>');
+  });
+
+  it('the decomposed path receives the same disclosure on its invoke input', async () => {
+    process.env.CEE_DECISION_REVIEW_DECOMPOSE = 'true';
+    _resetConfigCache();
+    try {
+      const decomposed = vi
+        .spyOn(decomposeMod, 'invokeDecomposedDecisionReview')
+        .mockResolvedValue(SUCCESS_RESULT);
+
+      await enrichRunAnalysisWithDecisionReview({
+        handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment() })],
+        requestId: 'req-scaffold-dr-decomposed',
+        scenarioId: 'scen-a',
+        signal: notAbortedSignal(),
+        brief: DEFAULT_BRIEF,
+        scaffoldedOptions: [
+          {
+            option_id: 'opt-2',
+            label: 'New Option',
+            factor_ids: ['fac_price'],
+            value_defaulted: true,
+          },
+        ],
+      });
+
+      expect(decomposed).toHaveBeenCalledTimes(1);
+      const input = decomposed.mock.calls[0][0] as invokeMod.DecisionReviewInvokeInput;
+      expect(input.scaffold_disclosure).toMatch(/[Pp]laceholder/);
+      // The headline slice (R1) — the one that narrates option numbers —
+      // must carry the disclosure block.
+      const { slices } = decomposeMod.buildSlices(input);
+      expect(slices.r1).toContain('<SCAFFOLDED_OPTIONS>');
+    } finally {
+      delete process.env.CEE_DECISION_REVIEW_DECOMPOSE;
+      _resetConfigCache();
+    }
+  });
+});

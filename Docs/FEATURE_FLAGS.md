@@ -2,7 +2,7 @@
 
 **Generated:** 2026-03-07
 **Source:** `src/config/index.ts` + full `src/` grep audit
-**Total flags:** 58 declared, 6 undeclared consumption
+**Total flags:** 59 declared, 6 undeclared consumption (2026-07-16: +`CEE_CLARIFY_V2_ENABLED`)
 
 ---
 
@@ -63,7 +63,8 @@
 | `CEE_PREFLIGHT_ENABLED` | `false` | assist.v1.draft-graph.ts, assist.v1.draft-graph-stream.ts | Yes | |
 | `CEE_PREFLIGHT_STRICT` | `false` | assist.v1.draft-graph.ts, assist.v1.draft-graph-stream.ts | No | |
 | `CEE_CLARIFICATION_ENFORCED` | `false` | assist.v1.draft-graph.ts, assist.v1.draft-graph-stream.ts, unified-pipeline/stages/package.ts | Commented | |
-| `CEE_CLARIFIER_ENABLED` | — | (removed) | No | INERT since 2026-07-16 — Stage-4 clarifier retired (ROADMAP 1.94 Option A); safe to delete from deployment dashboards |
+| `CEE_CLARIFIER_ENABLED` | — | (removed) | No | INERT since 2026-07-16 — Stage-4 clarifier retired (ROADMAP 1.94 Option A); safe to delete from deployment dashboards (now listed in `DEAD_ENV_VARS` alongside the other `CEE_CLARIFIER_*` settings) |
+| `CEE_CLARIFY_V2_ENABLED` | `false` | orchestrator/route-v2.ts, orchestrator-v5/handlers/clarify-v2-dispatch.ts | No | **DARK (E0-B, ROADMAP 1.94 Option A replacement, 2026-07-16).** Deterministic draft-preflight brief-completeness rubric on the V5 turn surface: thin briefs get up to 3 tap-able clarifying questions (existing `clarify` turn class, zero LLM calls); complete briefs proceed silently; answers incorporate via the normal turn flow (`clarify_v2_round` pending action). Flag-off is byte-identical to today (pinned by route-v2-clarify-v2.test.ts). Flip gates on the clarify-v2 eval floors (tools/conversation-harness/fixtures/clarify-v2-briefs.json) + Paul |
 | `CEE_ORCHESTRATOR_VALIDATION_ENABLED` | `false` | unified-pipeline/stages/repair/orchestrator-validation.ts, assist.draft-graph.ts | No | |
 
 ## CEE Bias & Review

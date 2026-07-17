@@ -1,0 +1,322 @@
+/**
+ * Clarify v2 — V5 route dispatch (ROADMAP 1.94 Option A replacement;
+ * E0-B lane, 2026-07-16). DARK behind CEE_CLARIFY_V2_ENABLED (the route
+ * wiring never imports this module when the flag is off — same lazy-import
+ * containment pattern as the V6 dual-draft stage).
+ *
+ * The I/O half of the capability. Two claims, both deterministic (zero
+ * LLM calls):
+ *
+ *  ROUND 1 (draft preflight) — the turn would dispatch `draft_graph`
+ *  (brief-shape heuristic or explicit-generate). The rubric
+ *  (`clarify-v2/rubric.ts`) assesses the effective brief; a thin brief
+ *  gets up to 3 tap-able questions via the existing `clarify` turn class,
+ *  a complete brief proceeds silently (return null → the route's draft
+ *  dispatch runs untouched).
+ *
+ *  RESUME — a live `clarify_v2_round` pending action exists from a prior
+ *  clarify turn and the user replied. Answers incorporate into the
+ *  working brief via the NORMAL turn flow (chip tap or typed text — both
+ *  arrive as ordinary message turns); the decision core then either asks
+ *  a follow-up round or PROCEEDS, returning a `briefOverride` the route
+ *  threads into the ordinary `dispatchDraftGraph`.
+ *
+ * Fail-open contract: every read/commit failure degrades to `null`
+ * (= not engaged; the route continues exactly as with the flag off) with
+ * a structured warn log. A clarification capability must never be able to
+ * take the draft path down.
+ *
+ * Commit shape: ask-turns COMMIT (turn_class 'clarify', llm_calls_used 0)
+ * so (a) the round state persists on `pending_actions`, (b) the working
+ * brief seeds `scenarios.brief_text` (write-once RPC), and (c) the
+ * conversation record carries the question turn. The egress-side response
+ * this module returns ships through the route's `sendFinalised200`
+ * chokepoint, so the universal looping-chip guard (#464) and the id-leak
+ * scrub cover it BY CONSTRUCTION.
+ */
+
+import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
+
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  DRAFT_GRAPH_DECISION_BRIEF_REGEX,
+  DRAFT_GRAPH_MIN_BRIEF_LENGTH,
+} from '../../schemas/assist.js';
+import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import {
+  loadMostRecentPendingActions,
+  loadPersistedScenarioStateStrict,
+} from '../build-turn-context.js';
+import {
+  filterLivePendingActions,
+  type PendingAction,
+} from '../session/pending-action.js';
+import { normaliseBriefText } from '../session/normalise-brief-text.js';
+import { isClarifyDimension, type ClarifyDimension } from '../clarify-v2/rubric.js';
+import {
+  CLARIFY_V2_PROCEED_CHIP_ID,
+  composeClarifyV2Response,
+  decideClarifyV2Resume,
+  decideClarifyV2Round1,
+  type ClarifyV2Decision,
+  type ClarifyV2RoundState,
+} from '../clarify-v2/preflight.js';
+
+/**
+ * Wall-clock TTL for a clarify round. Longer than the 10-minute pending
+ * default: a user reading three questions and thinking about their brief
+ * is the expected case, not an abandonment signal. Turn TTL stays at the
+ * commit carry-forward's default decrement (the pending is emitted with
+ * count 2 — it survives exactly the answer turn it exists for).
+ */
+export const CLARIFY_V2_WALL_TTL_MS = 30 * 60 * 1000;
+export const CLARIFY_V2_TURN_TTL = 2;
+
+export interface TryClarifyV2Params {
+  readonly payload: MessageTurnPayload;
+  readonly requestId: string;
+  /** The route's own brief-shape heuristic verdict for this turn. */
+  readonly draftShaped: boolean;
+  /**
+   * The server-assembled brief when this turn is an explicit-generate
+   * draft (route C2 assembly); null otherwise.
+   */
+  readonly explicitGenerateBrief: string | null;
+}
+
+export type ClarifyV2Outcome =
+  | {
+      /** Reply with clarifying questions; the route must NOT draft. */
+      readonly kind: 'respond';
+      readonly response: OlumiResponse;
+    }
+  | {
+      /** Proceed to the ordinary draft dispatch with this brief. */
+      readonly kind: 'draft';
+      readonly briefOverride: string;
+    };
+
+function isDraftShapedMessage(message: string): boolean {
+  return (
+    message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
+    DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(message)
+  );
+}
+
+function latestLiveClarifyPending(
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): PendingAction | null {
+  const live = filterLivePendingActions(pendings, nowMs).filter(
+    (pa) => pa.action.kind === 'clarify_v2_round',
+  );
+  if (live.length === 0) return null;
+  return [...live].sort(
+    (a, b) => Date.parse(b.emitted_at_iso) - Date.parse(a.emitted_at_iso),
+  )[0]!;
+}
+
+function roundStateFromPending(pa: PendingAction): ClarifyV2RoundState | null {
+  const action = pa.action;
+  if (action.kind !== 'clarify_v2_round') return null;
+  // parsePendingAction already validated shape; the dimension filter here
+  // is defence-in-depth that also narrows the string[] to the typed union.
+  const asked: ClarifyDimension[] = action.asked_dimensions.filter(isClarifyDimension);
+  return { brief: action.brief, asked, round: action.round };
+}
+
+function buildClarifyPending(
+  state: ClarifyV2RoundState,
+  payload: MessageTurnPayload,
+  nowMs: number,
+): PendingAction {
+  return {
+    id: `cv2_${payload.turn_id}`,
+    scenario_id: payload.scenario_id,
+    // The pending rides alongside the default-forward chip — the one chip
+    // that is always present on a clarify response.
+    chip_id: CLARIFY_V2_PROCEED_CHIP_ID,
+    action: {
+      kind: 'clarify_v2_round',
+      brief: state.brief,
+      asked_dimensions: state.asked,
+      round: state.round,
+    },
+    preconditions: {},
+    expires_at_turn_count: CLARIFY_V2_TURN_TTL,
+    expires_at_iso: new Date(nowMs + CLARIFY_V2_WALL_TTL_MS).toISOString(),
+    emitted_at_iso: new Date(nowMs).toISOString(),
+  };
+}
+
+/**
+ * Commit the clarify turn: question response + round-state pending +
+ * write-once brief seed. Returns false on failure (caller degrades to
+ * not-engaged).
+ */
+async function commitClarifyTurn(
+  response: OlumiResponse,
+  state: ClarifyV2RoundState,
+  payload: MessageTurnPayload,
+  requestId: string,
+  startedAtMs: number,
+  priorPendings: readonly PendingAction[],
+): Promise<boolean> {
+  try {
+    await commitDirectAnswer(response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      turn_class: 'clarify',
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      // Deterministic path — no LLM call is made anywhere in clarify v2.
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAtMs,
+      handler_facts: [],
+      // Seed the write-once brief column with the WORKING brief so the
+      // explicit-generate assembly and downstream enrichers can find it
+      // even if the user never completes the clarify flow.
+      briefText: normaliseBriefText(state.brief).value,
+      pending_actions: [buildClarifyPending(state, payload, startedAtMs)],
+      // HOLD-WIPE class (same fix as draft-graph-dispatch, task_2e1b8c87):
+      // thread the prior turn's pendings so this commit's carry-forward
+      // runs over the REAL prior set instead of silently wiping it. The
+      // explicit-generate continuation arm CAN carry live pre-graph holds
+      // (e.g. a `proposed_concept` minted by a frame conversation); the
+      // commit's carry-forward handles the lifecycle — supersession
+      // retires the previous clarify round (same chip_id), wall/turn TTLs
+      // decrement once, and lapses surface honestly. Non-mutating turn:
+      // no graph_hash is threaded, so hash invalidation never fires here.
+      priorPendingActions: priorPendings,
+      coaching_state: null,
+      userMessage: payload.message,
+    });
+    return true;
+  } catch (err) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'clarify_v2 — clarify-turn commit failed; degrading to not-engaged (draft proceeds as with the flag off)',
+    );
+    return false;
+  }
+}
+
+function emitDecisionTelemetry(
+  decision: ClarifyV2Decision,
+  payload: MessageTurnPayload,
+  requestId: string,
+  resumed: boolean,
+): void {
+  if (decision.kind === 'ask') {
+    emit(TelemetryEvents.V5ClarifyV2QuestionsEmitted, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      round: decision.state.round,
+      phase: decision.phase,
+      question_count: decision.questions.length,
+      dimensions: decision.questions.map((q) => q.dimension),
+    });
+  } else {
+    emit(TelemetryEvents.V5ClarifyV2Proceeded, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      reason: decision.reason,
+      resumed,
+    });
+  }
+}
+
+/**
+ * The single route entry point. Returns:
+ *   - `{kind:'respond'}` — send this clarify response (via sendFinalised200);
+ *   - `{kind:'draft'}`   — dispatch the ordinary draft with `briefOverride`;
+ *   - `null`             — not engaged; the route proceeds exactly as if
+ *                          the flag were off.
+ */
+export async function tryClarifyV2Turn(
+  params: TryClarifyV2Params,
+): Promise<ClarifyV2Outcome | null> {
+  const { payload, requestId } = params;
+  const startedAtMs = Date.now();
+
+  // ── RESUME: a live clarify round claims the reply ────────────────────
+  const pendings = await loadMostRecentPendingActions(payload.scenario_id, requestId);
+  const livePending = latestLiveClarifyPending(pendings, startedAtMs);
+  if (livePending !== null) {
+    const state = roundStateFromPending(livePending);
+    if (state !== null) {
+      // Post-draft safety: never claim a reply once a graph exists (the
+      // clarify flow is strictly pre-draft). STRICT read — on failure we
+      // cannot prove there is no graph, so we do NOT claim the turn.
+      try {
+        const persisted = await loadPersistedScenarioStateStrict(payload.scenario_id);
+        if (persisted.graph != null) return null;
+      } catch (err) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'clarify_v2 — persisted-state read failed on resume; not claiming the turn',
+        );
+        return null;
+      }
+
+      const decision = decideClarifyV2Resume({
+        state,
+        message: payload.message,
+        messageIsDraftShaped: isDraftShapedMessage(payload.message),
+        explicitGenerate: params.explicitGenerateBrief !== null,
+      });
+      emitDecisionTelemetry(decision, payload, requestId, true);
+      if (decision.kind === 'proceed') {
+        return { kind: 'draft', briefOverride: decision.brief };
+      }
+      const response = composeClarifyV2Response(decision.questions, decision.phase);
+      const committed = await commitClarifyTurn(
+        response,
+        decision.state,
+        payload,
+        requestId,
+        startedAtMs,
+        pendings,
+      );
+      // Commit failure on RESUME degrades to proceed-with-what-we-have
+      // rather than null: the reply was an answer to OUR question; letting
+      // it fall through to generic routing would strand it.
+      if (!committed) {
+        return { kind: 'draft', briefOverride: decision.state.brief };
+      }
+      return { kind: 'respond', response };
+    }
+  }
+
+  // ── ROUND 1: draft preflight ─────────────────────────────────────────
+  const effectiveBrief = params.explicitGenerateBrief ?? payload.message;
+  if (!params.draftShaped && params.explicitGenerateBrief === null) {
+    return null;
+  }
+  const decision = decideClarifyV2Round1(effectiveBrief);
+  emitDecisionTelemetry(decision, payload, requestId, false);
+  if (decision.kind === 'proceed') {
+    // Complete brief: proceed SILENTLY — return null so the route's draft
+    // dispatch runs bit-identically to the flag-off path.
+    return null;
+  }
+  const response = composeClarifyV2Response(decision.questions, decision.phase);
+  const committed = await commitClarifyTurn(
+    response,
+    decision.state,
+    payload,
+    requestId,
+    startedAtMs,
+    pendings,
+  );
+  if (!committed) return null;
+  return { kind: 'respond', response };
+}

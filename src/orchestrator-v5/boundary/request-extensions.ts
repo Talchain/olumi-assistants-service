@@ -41,6 +41,7 @@ import { z } from 'zod';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
 
 export const REQUEST_EXTENSIONS_VALIDATOR_NAME = 'V5RequestExtensions';
 
@@ -234,7 +235,60 @@ export function parseRequestExtensions(
         },
       };
     }
-    graphState = parsed.data;
+    // W2E-2 numeric-bounds gate (schema-hard-boundary): the shape schema above
+    // is deliberately permissive (passthrough), so numeric graph values need an
+    // explicit check against the vendored @talchain/schemas ranges before they
+    // can flow onwards to PLoT/ISL. Contract-declared ranges (exists_probability
+    // [0,1], strength.mean [-1,1], strength.std > 0, observed_state.std > 0)
+    // plus universal finiteness (NaN/±Infinity — JSON.parse("1e999") yields
+    // Infinity, so this IS reachable from the wire).
+    //
+    // This is path (a): PERSISTED state re-entering CEE on every turn. Per the
+    // doctrine (src/validators/numeric-bounds.ts header), this gate is
+    // IDENTITY-PRESERVING: it rejects or it hands the graph straight back, and
+    // it NEVER rewrites a value. `strength.std` is part of the
+    // analysis-affecting hash projection, and every hash token is minted off
+    // the UNREPAIRED persisted graph at other parse sites — so repairing here
+    // would fork graph identity and silently desync those tokens
+    // (clarify_hash_mismatch on every pending proposal). A sigma <= 0 therefore
+    // passes through untouched and is floored at the persisted-load boundary
+    // instead (loadScenarioSnapshotForRunAnalysis → floorGraphSigmaForCompute,
+    // build-turn-context.ts — copy-on-write, BEFORE the GraphV3 parse there),
+    // where it is actually consumed and where nothing hashes the result.
+    //
+    // Values with no safe reading (non-finite, out-of-range probability/mean)
+    // reject here, with the same BoundaryError shape as a structural failure so
+    // the UI's existing CEE-validation-error handling renders them. Messages
+    // carry field paths and bounds only — no values, no labels (PII rule).
+    const bounds = assertIngressGraphNumericBounds(parsed.data);
+    if (!bounds.ok) {
+      emit(TelemetryEvents.BoundaryValidation, {
+        boundary: 'B1',
+        direction: 'ingress',
+        validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+        contract_version: '1.5.0',
+        pass: false,
+        request_id: requestId,
+        field: 'graph_state',
+        reason: 'numeric_bounds',
+      });
+      return {
+        ok: false,
+        error: {
+          error: 'INGRESS_CONTRACT_VIOLATION',
+          boundary: 'B1',
+          direction: 'ingress',
+          validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+          details: {
+            field: 'graph_state',
+            issues: bounds.issues,
+          },
+          request_id: requestId,
+          retryable: false,
+        },
+      };
+    }
+    graphState = bounds.graph;
   }
 
   let analysisState: AnalysisStateIngress | null = null;

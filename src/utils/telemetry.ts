@@ -165,6 +165,17 @@ export const TelemetryEvents = {
   // state_read_failed_fallthrough; `trigger`: copy_replay / bare_confirm).
   V5DraftOfferSeeded: "v5.draft_offer.seeded",
   V5DraftOfferResumed: "v5.draft_offer.resumed",
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
+  // CEE_CLARIFY_V2_ENABLED. `questions_emitted` fires once per clarify
+  // response (fields: round, phase, question_count, dimensions) —
+  // questions_emitted / drafts is the ask-rate counter the 1.94 promotion
+  // path requires, so the next "it never asks" regression is a dashboard
+  // fact, not a 7-day log dig. `proceeded` fires when preflight/resume
+  // hands the turn to the draft (fields: reason: complete /
+  // all_missing_already_asked / round_budget_exhausted / user_proceed /
+  // explicit_generate; resumed: bool).
+  V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
+  V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
 
   CeeSensitivityCoachRequested: "cee.sensitivity_coach.requested",
   CeeSensitivityCoachSucceeded: "cee.sensitivity_coach.succeeded",
@@ -539,6 +550,27 @@ export const TelemetryEvents = {
   // Fields per §4.4: boundary, direction, validator, contract_version, pass, error_code?, request_id
   BoundaryValidation: "boundary.validation",
 
+  // W2E-2 — SIGMA FLOOR at the persisted-load boundary
+  // (loadScenarioSnapshotForRunAnalysis, build-turn-context.ts — round 4;
+  // round 3 placed it in PLoTClient.run, AFTER the GraphV3 parse that rejects
+  // std <= 0, where it was dead code on every live path).
+  // Fires once per floored field when the persisted graph carries a
+  // sigma <= 0 (edge strength.std / node observed_state.std) and CEE floors
+  // the compute-side copy to COMPUTE_SIGMA_FLOOR, BEFORE the GraphV3 parse.
+  // Deliberately NOT at ingress and NEVER touching rawPersistedGraph: ingress
+  // and the hash input preserve graph identity exactly, because strength.std
+  // is in the analysis-affecting hash projection and rewriting it there
+  // desyncs every hash token. Full rationale: src/validators/numeric-bounds.ts
+  // module header.
+  //
+  // This is the meter for how much invalid persisted state exists in the wild:
+  // the UI's own writer floors outbound std at ZERO, so affected scenarios emit
+  // this on EVERY analysis run. Expect a non-zero baseline that decays only as
+  // scenarios are re-saved. A sustained rise means a NEW writer is producing
+  // zero-sigma state — find it. Fields: path, kind, repaired_to, request_id.
+  // Never carries the offending value or any label (PII rule).
+  ComputeSigmaFloor: "cee.compute.sigma_floor",
+
   // V5 TurnExecutor lifecycle (slice A1, addendum §2.1.9).
   // Started emits when runTurnExecutor enters. Completed emits in `finally`.
   // Exactly-one-response invariant: every started MUST have a matching completed
@@ -625,6 +657,11 @@ export const TelemetryEvents = {
   // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
   // Redacted: corrected_count + node IDs only, no observed magnitudes.
   V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+  // D-ask-1 (ROADMAP 2.11 P0-1) — run_analysis scaffolded DISCLOSED
+  // placeholder interventions for unconfigured options so the analysis
+  // completed instead of 422-blocking. Redacted: option ids + per-option
+  // factor counts only — no labels, no magnitudes.
+  V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
   // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
   V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",

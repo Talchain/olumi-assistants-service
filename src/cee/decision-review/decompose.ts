@@ -222,6 +222,15 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
       : null,
   };
 
+  // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder disclosure block,
+  // present in EVERY slice that narrates option numbers (all four — the
+  // caveat governs the whole review). Empty array when the run scaffolded
+  // nothing → byte-identical slices.
+  const scaffoldBlocks =
+    typeof input.scaffold_disclosure === 'string' && input.scaffold_disclosure.length > 0
+      ? [block('SCAFFOLDED_OPTIONS', input.scaffold_disclosure)]
+      : [];
+
   // R1 HEADLINE — verdict + per-option lines + readiness rationale.
   const r1 = [
     block('BRIEF', briefSlice(input.brief)),
@@ -230,6 +239,7 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
     block('READINESS', { readiness, headline_type: headlineType }),
     block('DRIVER_HINT', driverHint),
     block('STABILITY_HINT', stabilityHint),
+    ...scaffoldBlocks,
   ].join('\n\n');
 
   // R2 DRIVER — evidence enhancements + key assumptions.
@@ -238,6 +248,7 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
     block('EVIDENCE_GAPS', evidenceGaps),
     block('FACTOR_SENSITIVITY', factorSensitivity),
     block('WINNER_LABEL', input.winner.label),
+    ...scaffoldBlocks,
   ].join('\n\n');
 
   // R3 FRAGILITY — robustness + scenarios + flip thresholds + pre-mortem.
@@ -252,6 +263,7 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
     block('FLIP_THRESHOLD_DATA', flipData),
     block('OPTION_COMPARISON', optionComparison),
     block('READINESS', { readiness, headline_type: headlineType }),
+    ...scaffoldBlocks,
   ].join('\n\n');
 
   // R4 CALIBRATION — bias findings + decision-quality prompts + framing check.
@@ -266,6 +278,7 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
       readiness,
       option_count: optionComparison.length,
     }),
+    ...scaffoldBlocks,
   ].join('\n\n');
 
   // Structural context for composition + the consistency check.

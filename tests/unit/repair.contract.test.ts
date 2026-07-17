@@ -69,7 +69,9 @@ vi.mock("../../src/utils/telemetry.js", () => ({
     GuardViolation: "GuardViolation",
     CeeGraphGoalsMerged: "CeeGraphGoalsMerged",
     CeeGoalInferred: "CeeGoalInferred",
-    CeeClarifierFailed: "CeeClarifierFailed",
+    // (CeeClarifierFailed removed 2026-07-16 — the Stage-4 clarifier and its
+    // telemetry constants were retired in #486; the key no longer exists on
+    // the real TelemetryEvents.)
   },
 }));
 

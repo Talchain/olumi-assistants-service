@@ -433,6 +433,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         AnalysisFreshnessInvariantFailed: "v5.analysis_freshness.invariant_failed",
         AnalysisFreshnessOptionsDiverged: "v5.analysis_freshness.options_diverged",
         BoundaryValidation: "boundary.validation",
+        // W2E-2 — persisted-sigma floor at the persisted-load boundary
+        // (loadScenarioSnapshotForRunAnalysis), fired per floored field.
+        ComputeSigmaFloor: "cee.compute.sigma_floor",
         ContextPackAssembled: "v5.context_pack.assembled",
         // Context Architecture v2 S0 (ROADMAP 1.73) — measure-first events.
         // Log-only (see debugOnlyEvents); telemetry-additive, no flag.
@@ -602,6 +605,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ROADMAP 2.63 C3/C4 — draft/redraft offer lifecycle (route-v2).
         V5DraftOfferSeeded: "v5.draft_offer.seeded",
         V5DraftOfferResumed: "v5.draft_offer.resumed",
+        // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — dark
+        // behind CEE_CLARIFY_V2_ENABLED. questions_emitted/drafts is the
+        // ask-rate counter the 1.94 promotion path requires.
+        V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
+        V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
         V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
         V5Phase3BlockLifecycle: "v5.phase3.block_lifecycle",
         V5Phase3LifecycleIndexMismatch: "v5.phase3.lifecycle_index_mismatch",
@@ -613,6 +621,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ProposalContinuationResumed: "v5.proposal_continuation.resumed",
         V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+        V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
         V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
         V5RunAnalysisTimings: "v5.run_analysis.timings",
         V5TurnStageTimings: "v5.turn_executor.stage_timings",
@@ -643,7 +652,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|session|summary)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|session|summary)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1329,6 +1338,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // for the same reason as V5ExplicitGenerateReceived.
         TelemetryEvents.V5DraftOfferSeeded,
         TelemetryEvents.V5DraftOfferResumed,
+        // Clarify v2 (E0-B) — dark flag; diagnostic-only until the flip
+        // (no Datadog metric mapping while firings are not expected).
+        TelemetryEvents.V5ClarifyV2QuestionsEmitted,
+        TelemetryEvents.V5ClarifyV2Proceeded,
         TelemetryEvents.V5FreshAnalysisFollowupGuard,
         TelemetryEvents.V5Phase3BlockLifecycle,
         TelemetryEvents.V5Phase3LifecycleIndexMismatch,
@@ -1357,6 +1370,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Track S 0.13c-1 — run_analysis intercept guard summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5RunAnalysisInterceptGuard,
+        // D-ask-1 (2.11 P0-1) — run_analysis scaffolded-placeholder disclosure
+        // summary (diagnostic-only, no Datadog metric; redacted option ids +
+        // factor counts). Live emit site: run-analysis.ts step 2.55.
+        TelemetryEvents.V5RunAnalysisOptionsScaffolded,
         // Track S 0.13c-4 — persist-site intercept repair summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5GraphPersistInterceptRepair,
@@ -1394,6 +1411,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.UserJwtRefused,
         TelemetryEvents.UserJwtIdentityMismatch,
         TelemetryEvents.UserJwtServiceCallerLegacy,
+        // W2E-2 — persisted-sigma floor meter (diagnostic-only structured
+        // logs: path + kind + floor written + request_id, never a value or
+        // label). Measures how much invalid persisted zero-sigma state exists
+        // in the wild; no Datadog metric mapping until a dashboard consumes it.
+        TelemetryEvents.ComputeSigmaFloor,
       ];
 
       for (const event of allEvents) {
@@ -1568,6 +1590,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // CEE Clarification enforcement events (Phase 5)
         "cee.clarification.required",
         "cee.clarification.bypass_allowed",
+
+        // W2E-2 — persisted-sigma floor at the persisted-load boundary
+        "cee.compute.sigma_floor",
 
         // Multi-turn clarifier integration events (v1.15)
 
@@ -1938,6 +1963,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ROADMAP 2.63 C3/C4 — draft/redraft offer lifecycle (route-v2).
         "v5.draft_offer.seeded",
         "v5.draft_offer.resumed",
+        // Clarify v2 (E0-B) — dark flag; ask-rate + stop-rule telemetry.
+        "v5.clarify_v2.questions_emitted",
+        "v5.clarify_v2.proceeded",
         "v5.fresh_analysis_followup_guard",
         "v5.phase3.block_lifecycle",
         "v5.phase3.lifecycle_index_mismatch",
@@ -1949,6 +1977,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.proposal_continuation.resumed",
         "v5.routing_bounded_fallback",
         "v5.run_analysis.intercept_guard",
+        "v5.run_analysis.options_scaffolded",
         "v5.graph_persist.intercept_repair",
         "v5.run_analysis.timings",
         "v5.turn_executor.stage_timings",

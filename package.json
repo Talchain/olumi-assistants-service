@@ -68,6 +68,8 @@
     "assurance:v5:staging": "tsx tools/v5-journey-replay/assurance/index.ts",
     "eval:orchestrator": "tsx tools/orchestrator-eval/cli.ts",
     "eval:orchestrator:test": "vitest run tools/orchestrator-eval",
+    "eval:orchestrator:candidates": "tsx tools/orchestrator-eval/candidate-cli.ts",
+    "eval:orchestrator:typecheck": "tsc -p tools/orchestrator-eval/tsconfig.json --noEmit",
     "preharness:typecheck": "pnpm openapi:generate",
     "harness:typecheck": "tsc -p tools/conversation-harness/tsconfig.json --noEmit",
     "harness:test": "vitest run --config tools/conversation-harness/vitest.config.ts"

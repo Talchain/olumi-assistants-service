@@ -73,7 +73,15 @@ import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
  * `at_most`; the validator rejects others as PARAMETER_INVALID.
  */
 export const AddConstraintTypeSchema = z.enum(['at_least', 'at_most']);
-export const AddConstraintValueSchema = z.number();
+// W2E-2: `.finite()` — constraint thresholds are contract-silent on range (any
+// finite number is a legal threshold, so no bound is invented here), but zod's
+// bare `z.number()` ACCEPTS ±Infinity: only NaN is rejected by the base type.
+// An Infinity threshold lands in `graph.goal_constraints` and is forwarded
+// verbatim to PLoT by the run_analysis handler. Same channel and same closure
+// as SetFactorValueValueSchema; a failure rides the existing PARAMETER_INVALID
+// rejection mechanism. The complete channel manifest is swept in
+// __tests__/proposal-parameter-finiteness.test.ts.
+export const AddConstraintValueSchema = z.number().finite();
 export const AddConstraintLabelSchema = z.string().min(1);
 export const AddConstraintUnitSchema = z.string().min(1);
 

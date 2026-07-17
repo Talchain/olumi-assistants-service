@@ -47,6 +47,13 @@
  *                                 level action_type is introduced.
  */
 
+// Clarify v2 (E0-B): the closed dimension set for `clarify_v2_round`
+// validation is DERIVED from the rubric (the source of truth), never
+// hand-mirrored here. `clarify-v2/rubric.ts` is itself a zero-dependency
+// leaf module, so this import keeps pending-action.ts dependency-light
+// and cycle-free.
+import { isClarifyDimension } from '../clarify-v2/rubric.js';
+
 export type PendingActionId = string;
 
 export type PendingActionAction =
@@ -188,6 +195,38 @@ export type PendingActionAction =
     }
   | {
       /**
+       * Clarify v2 round state (ROADMAP 1.94 Option A replacement, E0-B).
+       * Carries the draft-preflight clarification round across the answer
+       * turn: the WORKING BRIEF (original + incorporated answers), the
+       * REAL asked-history (`asked_dimensions` — the retired clarifier's
+       * history was always empty, B1.4), and the round counter that
+       * enforces the ready-to-draft stop rule.
+       *
+       * Server-only (NOT chip-derivable): emitted by
+       * `handlers/clarify-v2-dispatch.ts` via
+       * `CommitMetadata.pending_actions` alongside the question chips,
+       * and claimed on the next user turn by the same module's resume
+       * pre-route in route-v2 (BEFORE TurnExecutor). Non-mutating: the
+       * scenario has no graph yet, and resuming only re-runs the
+       * deterministic rubric — no graph mutation, so no
+       * `preconditions.graph_hash` is persisted.
+       *
+       * DARK behind CEE_CLARIFY_V2_ENABLED: with the flag off nothing
+       * emits this kind; a persisted row read with the flag off is
+       * ignored by every other consumer (short-confirm's local
+       * RESUMABLE_KINDS excludes it; tryClarificationResume filters on
+       * set_factor_value / edit_graph_add_risk) and dies by TTL.
+       */
+      readonly kind: 'clarify_v2_round';
+      /** Working brief, ≤ DRAFT_GRAPH_MAX_BRIEF_LENGTH (5000). */
+      readonly brief: string;
+      /** Rubric dimensions asked so far (closed set, validated at parse). */
+      readonly asked_dimensions: readonly string[];
+      /** Rounds asked so far, 1-based. */
+      readonly round: number;
+    }
+  | {
+      /**
        * V5 P0 proposal-memory continuation. Captures a noun-phrase
        * concept extracted from the prior assistant turn's Sonnet-emitted
        * "add X as a factor" / "would you like me to add X" proposal.
@@ -236,6 +275,12 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // NOT by TurnExecutor's bare-confirm resumer (which cannot draft and
   // falls through with `kind_not_yet_resumable`).
   'draft_graph',
+  // Clarify v2 (E0-B): resumed exclusively by the clarify-v2 pre-route in
+  // route-v2 (flag-gated). Deliberately ABSENT from the short-confirm
+  // resumer's local RESUMABLE_KINDS — a bare "yes" against a live clarify
+  // round is claimed by the clarify-v2 resume itself (proceed-with-defaults),
+  // never by TurnExecutor's pending-action synthesis.
+  'clarify_v2_round',
 ]);
 
 /**
@@ -556,6 +601,26 @@ export function parsePendingAction(input: unknown): PendingAction | null {
       return null;
     }
     if (a.redraft !== undefined && typeof a.redraft !== 'boolean') return null;
+  }
+  if (a.kind === 'clarify_v2_round') {
+    // Clarify v2 (E0-B). The working brief must be a non-empty string
+    // within the draft pipeline's max (5000 — mirrored numerically here so
+    // this leaf module stays dependency-free, same convention as the 120
+    // cap on proposed_concept). asked_dimensions is a closed-set string
+    // array (the rubric dimension names); round is a small positive int.
+    // Anything else is unresumable and refused at parse time.
+    if (typeof a.brief !== 'string' || a.brief.trim().length === 0) return null;
+    if (a.brief.length > 5000) return null;
+    if (!Array.isArray(a.asked_dimensions) || a.asked_dimensions.length > 8) return null;
+    if (!a.asked_dimensions.every(isClarifyDimension)) return null;
+    if (
+      typeof a.round !== 'number' ||
+      !Number.isInteger(a.round) ||
+      a.round < 1 ||
+      a.round > 5
+    ) {
+      return null;
+    }
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.
