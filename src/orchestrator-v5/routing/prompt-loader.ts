@@ -19,9 +19,11 @@
  * resolver so load-failure tests can point at a missing file without
  * mutating the filesystem or destabilising unrelated module imports.
  *
- * Sanity range [18500, 20500] is a range check, not a correctness field.
- * Hash + version are the primary proof of installation. The check exists
- * to catch "wrong file copied" or "accidental truncation" at init.
+ * The sanity range (EXPECTED_SYSTEM_CHARS_MIN..MAX below — absolute values
+ * pinned by prompt-size-guard-absolute.test.ts) is a range check, not a
+ * correctness field. Hash + version are the primary proof of installation.
+ * The check exists to catch "wrong file copied" or "accidental truncation"
+ * at init.
  */
 
 import { readFileSync } from 'node:fs';
