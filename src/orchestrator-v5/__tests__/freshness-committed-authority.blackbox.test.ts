@@ -82,7 +82,9 @@ const DIVERGED_COMMITTED_GRAPH = {
 function analysisHash(raw: unknown): string {
   const parsed = GraphStateIngressSchema.safeParse(raw);
   if (!parsed.success) throw new Error('fixture must ingress-parse');
-  return computeAnalysisAffectingGraphHash(parsed.data);
+  const hash = computeAnalysisAffectingGraphHash(parsed.data);
+  if (hash === null) throw new Error('fixture must produce an analysis hash');
+  return hash;
 }
 
 function mkRunAnalysisFact(graphHashAtRun: string): RunAnalysisHandlerFact {
