@@ -60,6 +60,31 @@ export const NAN_FIX_SIGNATURE_STD = DEFAULT_STRENGTH_STD;
 export const LLM_STRENGTH_STD_FLOOR = 0.001;
 
 /**
+ * Floor applied to a non-positive sigma (edge `strength.std`, node
+ * `observed_state.std`) at the PERSISTED-LOAD boundary —
+ * loadScenarioSnapshotForRunAnalysis (build-turn-context.ts), copy-on-write
+ * BEFORE the GraphV3 parse, so a persisted std=0 scenario loads instead of
+ * bricking. (Round-3 placed this in PLoTClient.run, AFTER the parse — dead
+ * code; do not move it back. See numeric-bounds.ts for the authoritative
+ * doctrine.)
+ *
+ * Named for the compute seam, NOT for ingress: ingress deliberately does not
+ * repair. Rewriting sigma at ingress forks graph identity (`strength.std` is
+ * in the analysis-affecting hash projection) and desyncs every hash token
+ * minted off the unrepaired persisted graph. See the doctrine in
+ * src/validators/numeric-bounds.ts for the full account.
+ *
+ * Deliberately the same number as LLM_STRENGTH_STD_FLOOR — one source of
+ * truth for "the smallest sigma CEE lets into the pipeline".
+ *
+ * Magnitude rationale: sigma <= 0 means "no uncertainty stated", so the floor
+ * must preserve "essentially certain" rather than fabricate uncertainty the
+ * user never expressed. A large floor (e.g. the 0.15 weak-guess floor) would
+ * silently change analysis results.
+ */
+export const COMPUTE_SIGMA_FLOOR = LLM_STRENGTH_STD_FLOOR;
+
+/**
  * Nudge appended to the user message when retrying due to default strength
  * detection. Instructs the LLM to differentiate edge strengths rather than
  * using the same value for every relationship.

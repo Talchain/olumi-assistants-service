@@ -45,7 +45,8 @@ import {
   summaryIsNoteworthy,
   type InterventionConversion,
 } from './tools/plot-intervention-scale.js';
-import { assessAnalysisReadiness, AnalysisNotReadyError } from './tools/handlers/analysis-ready-core.js';
+import { assessAnalysisReadiness, AnalysisNotReadyError, type ReadinessResult } from './tools/handlers/analysis-ready-core.js';
+import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from './coaching/coaching-state-snapshot.js';
@@ -1191,8 +1192,72 @@ export async function loadScenarioSnapshotForRunAnalysis(
     graphForSnapshot = verdict.canonicalGraph ?? persistedGraph;
   }
 
-  const parsedGraph = GraphV3.safeParse(graphForSnapshot);
+  // W2E-2 round 4 — persisted-sigma floor, BEFORE the GraphV3 parse that
+  // used to kill the turn. `EdgeStrengthV3.std` is `z.number().positive()`,
+  // but the live UI writer floors at ZERO (`Math.max(0, strengthStdValue)`),
+  // so persisted `std = 0` is continuously produced and has an unambiguous
+  // safe reading ("no uncertainty stated"). Constraint order (rounds 1–3):
+  //   (1) never brick a persisted scenario → repair, don't reject;
+  //   (2) never fork graph identity → the floor is COPY-ON-WRITE and applies
+  //       ONLY to the compute projection parsed below. `rawPersistedGraph`
+  //       (the graph_hash_at_run input, run-analysis.ts) and the persisted
+  //       object stay byte-identical to what every freshness hash site reads.
+  //       Round 3 placed this floor inside PLoTClient.run, where the parse
+  //       below had already thrown before it could ever execute (dead code on
+  //       every live path — the only other plotClient.run caller hangs off
+  //       the 410 V1 route / unregistered V4 pipeline).
+  //   (3) never let bad numerics reach computation → repaired sigma is
+  //       contract-valid; anything still out of range refuses honestly below.
+  // Telemetry is code-keyed: field path + floor written, never the offending
+  // value, never a label (PII rule).
+  const sigmaFloor = floorGraphSigmaForCompute(graphForSnapshot);
+  for (const repair of sigmaFloor.repairs) {
+    emit(TelemetryEvents.ComputeSigmaFloor, {
+      path: repair.path,
+      kind: repair.kind,
+      repaired_to: repair.repaired_to,
+      request_id: requestId,
+    });
+  }
+
+  const parsedGraph = GraphV3.safeParse(sigmaFloor.graph);
   if (!parsedGraph.success) {
+    // Numeric range violations with NO safe reading (exists_probability
+    // outside [0,1] — we cannot know whether 1.4 meant 1.0 or 0.14) must be
+    // an HONEST refusal: a typed AnalysisNotReadyError that run_analysis maps
+    // to `analysis_not_ready` (non-retryable, actionable next step), not the
+    // generic `scenario_read_failed, retryable: true` — which promises a
+    // retry that can never succeed. Persisted values are NOT repaired here:
+    // rewriting a hash-projected field on a persisted graph forks its
+    // identity from every token minted off the unrepaired bytes (round-2
+    // regression). The user self-heals by fixing the value on the canvas.
+    // Zod's too_small/too_big with type 'number' is exactly the
+    // range-violation class; shape/structural failures stay on the existing
+    // scenario_read_failed path (a user who HAS a graph must never be told
+    // to "draft a model first").
+    const numericRangeIssues = parsedGraph.error.issues.filter(
+      (issue) =>
+        (issue.code === 'too_small' || issue.code === 'too_big') &&
+        'type' in issue &&
+        issue.type === 'number',
+    );
+    if (numericRangeIssues.length > 0) {
+      const verdict: ReadinessResult = {
+        status: 'unrecoverable',
+        reasonCodes: ['SCHEMA_INVALID'],
+        reasonCategory: 'numeric_integrity',
+        deterministicRecovery: false,
+        safeToAnalyse: false,
+        safeToPersist: false,
+        userActionRequired: true,
+        canonicalGraph: null,
+        // User-safe: names the violation class only — never the offending
+        // value, never a node/edge label (PII rule).
+        nextStep:
+          'A probability or uncertainty value in this model is outside its valid range. Fix the value on the canvas, then run the analysis again.',
+      };
+      throw new AnalysisNotReadyError(verdict);
+    }
     throw new Error(`Persisted graph failed GraphV3 validation for scenario ${scenarioId}`);
   }
 

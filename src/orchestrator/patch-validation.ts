@@ -11,6 +11,11 @@
 
 import { z } from "zod";
 
+import {
+  refineEdgeNumericBounds,
+  refineNodeNumericBounds,
+} from "../validators/numeric-bounds.js";
+
 // ============================================================================
 // Valid operation types (must match PatchOperation.op in types.ts)
 // ============================================================================
@@ -31,37 +36,56 @@ const _PatchOp = z.enum([
 /**
  * Node value for add_node — requires id, kind, label at minimum.
  * .passthrough() allows additional fields (data, category, etc.)
+ *
+ * W2E-2: numeric bounds enforced via superRefine — finiteness everywhere
+ * plus the vendored-contract range observed_state.std > 0. A failure feeds
+ * the existing edit-graph repair loop (formatPatchValidationErrors → repair
+ * prompt) and, after attempts are exhausted, the existing rejection block —
+ * never a silent drop or clamp.
  */
 const AddNodeValue = z.object({
   id: z.string().min(1),
   kind: z.string().min(1),
   label: z.string().min(1),
-}).passthrough();
+}).passthrough().superRefine(refineNodeNumericBounds);
 
 /**
  * Edge value for add_edge — requires full canonical edge payload.
  * Uses nested `strength: { mean, std }` per PLoT's canonical contract.
  * .passthrough() allows additional fields (provenance, origin, etc.)
+ *
+ * W2E-2: strength bounds match the vendored @talchain/schemas pin exactly
+ * (mean ∈ [-1, 1], std > 0 — StrengthSchema in dist/graph.js); the
+ * superRefine adds universal finiteness (reject NaN/±Infinity) over the
+ * passthrough surface.
  */
 const AddEdgeValue = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
-  strength: z.object({ mean: z.number(), std: z.number() }).passthrough(),
+  strength: z.object({
+    mean: z.number().min(-1).max(1),
+    std: z.number().positive(),
+  }).passthrough(),
   exists_probability: z.number().min(0).max(1),
   effect_direction: z.enum(["positive", "negative"]),
-}).passthrough();
+}).passthrough().superRefine(refineEdgeNumericBounds);
 
-/** Partial node update value — at least one field required */
+/** Partial node update value — at least one field required.
+ *  W2E-2: numeric bounds (finiteness + observed_state.std > 0) enforced on
+ *  whatever numeric fields the partial update carries. */
 const UpdateNodeValue = z.record(z.string(), z.unknown()).refine(
   (v) => Object.keys(v).length > 0,
   { message: "update_node value must have at least one field" },
-);
+).superRefine(refineNodeNumericBounds);
 
-/** Partial edge update value — at least one field required */
+/** Partial edge update value — at least one field required.
+ *  W2E-2: numeric bounds (finiteness + exists_probability [0,1] +
+ *  strength.mean [-1,1] + strength.std > 0) enforced on whatever numeric
+ *  fields the partial update carries. */
 const UpdateEdgeValue = z.record(z.string(), z.unknown()).refine(
   (v) => Object.keys(v).length > 0,
   { message: "update_edge value must have at least one field" },
-);
+).superRefine(refineEdgeNumericBounds);
 
 // ============================================================================
 // Discriminated Union Schema

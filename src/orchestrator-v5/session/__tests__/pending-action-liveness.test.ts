@@ -126,6 +126,10 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
     case 'run_analysis':
     case 'what_would_flip':
       return { ...base, action: { kind } };
+    case 'draft_graph':
+      // C3/C4 (#488): public_label + public_message are REQUIRED on this
+      // variant (brief_seed/redraft optional) — mirror route-v2's emitter.
+      return { ...base, action: { kind, public_label: 'Build the model', public_message: 'Build the model?' } };
     case 'set_factor_value':
       return { ...base, action: { kind, factor_id: 'fac_x', value: 1, operator: 'set' } };
     case 'edit_graph_add_risk':
