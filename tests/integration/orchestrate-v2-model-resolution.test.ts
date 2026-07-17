@@ -80,18 +80,18 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'test system prompt',
 }));
 
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () => createMockSessionStore(),
+    resetSessionStoreForTests: () => {},
+  };
+});
 
 let v5Enabled = true;
 let turnDebugEnabled = true;
@@ -138,7 +138,12 @@ function buildRequest(turnId: string) {
     scenario_id: SCENARIO,
     message: 'test message for task c resolution',
     turn_class: 'frame' as const,
-    stage: 'frame' as const,
+    // ROADMAP 1.148 C6: stage 'analyse', NOT 'frame'. The frame-stage
+    // no-brief guard (PR #203/#484) answers brief-less frame turns
+    // deterministically BEFORE ORIENT, so getAdapterWithResolution was
+    // never invoked and this suite's model-resolution assertions never
+    // reached the mechanism they pin.
+    stage: 'analyse' as const,
     source: 'composer' as const,
   };
 }

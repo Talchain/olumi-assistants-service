@@ -46,7 +46,15 @@ vi.mock('../../../src/orchestrator-v5/commit.js', () => ({
 const { priorFactsOverrideRef } = vi.hoisted(() => ({
   priorFactsOverrideRef: { current: null as unknown[] | null },
 }));
-vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
+// ROADMAP 1.148 C2 — importOriginal-spread (derive, don't mirror): the old
+// hand-listed factory silently LACKED every export it didn't enumerate, so
+// when PR #212 added a live `loadMostRecentPendingActions` call to
+// edit-graph-dispatch the suite crashed with "is not a function". Spreading
+// the real module keeps current AND future exports present (the real
+// loaders degrade gracefully to [] without Supabase env); only the seams
+// this suite controls are overridden.
+vi.mock('../../../src/orchestrator-v5/build-turn-context.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/orchestrator-v5/build-turn-context.js')>()),
   buildTurnContext: vi.fn(async () => ({
     goal_node_id: 'goal_growth',
     prior_facts: priorFactsOverrideRef.current ?? [],
@@ -64,6 +72,8 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
   // conversation-slice feed. Empty — this suite exercises no-op recovery,
   // not conversation history.
   loadRecentConversationTurns: vi.fn(async () => []),
+  // Proposal-memory continuation (PR #212): no pending actions in this suite.
+  loadMostRecentPendingActions: vi.fn(async () => []),
 }));
 
 // Stub handleEditGraph: returns a legitimate no-op (zero operations,

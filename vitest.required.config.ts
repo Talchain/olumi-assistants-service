@@ -19,10 +19,11 @@ import { defineConfig } from "vitest/config";
  *      self-contained tool package with its own deps and runner. Excluded from
  *      the product gate as a package boundary, NOT because it is red. Its proper
  *      home is the tool's own runner (`cd tools/graph-evaluator && npm test`);
- *      it has no first-class CI job until the Phase 2 wiring lands. (Until then
- *      the advisory Full Test Suite, which uses the default config, still
- *      incidentally collects it and reports a tool-local-dep collection error —
- *      noise, not a product signal.)
+ *      it has no first-class CI job until the Phase 2 wiring lands. (As of
+ *      ROADMAP 1.148 C8 the default config carries the same package-boundary
+ *      exclusion, so the advisory Full Test Suite no longer incidentally
+ *      collects it either — the tool currently has NO CI execution at all
+ *      until the dedicated job lands.)
  *
  *   3. REQUIRED_GATE_RED_EXCLUSIONS below — the in-process test files that are
  *      currently red (captured from CI run 26750031968). They run in

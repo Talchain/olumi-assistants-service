@@ -83,65 +83,76 @@ const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 // In-memory session state. Tests mutate the let-bindings to seed
 // per-failure fixtures.
-const appendCalls: Array<Record<string, unknown>> = [];
+const appendCalls: Array<unknown> = [];
 let mockedPriorRunAnalysisGraphHash: string | null = null;
 let mockedMostRecentPendingActions: ReadonlyArray<PendingAction> = [];
 
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async (write: Record<string, unknown>) => {
-      appendCalls.push(write);
-      // Mirror production: latest write determines what the next turn
-      // reads as "most recent pending actions".
-      const pending = (write as { pending_actions?: ReadonlyArray<PendingAction> })
-        .pending_actions;
-      mockedMostRecentPendingActions = pending ?? [];
-      return { id: `row-${appendCalls.length}` };
-    },
-    readRecent: async () => [
-      {
-        id: 'prior-handler-row',
-        scenario_id: SCENARIO_ID,
-        user_id: null,
-        turn_id: 'prior-turn-id',
-        turn_class: 'handler' as const,
-        handler_id: 'run_analysis' as const,
-        request_hash: 'sha256:prior',
-        response_emitted: true,
-        llm_calls_used: 1,
-        duration_ms: 100,
-        created_at: '2026-05-04T00:00:00.000Z',
-      },
-    ],
-    readFactsFor: async () => [
-      {
-        fact_type: 'run_analysis' as const,
-        fact_version: 1,
-        noop: false,
-        result: {
-          scenario_id: SCENARIO_ID,
-          leading_option_id: 'opt-a',
-          summary: 'Prior analysis summary.',
-          win_probabilities: { 'opt-a': 0.62, 'opt-b': 0.38 },
-          ...(mockedPriorRunAnalysisGraphHash != null
-            ? { graph_hash_at_run: mockedPriorRunAnalysisGraphHash }
-            : {}),
-          computed_at: '2026-05-04T00:00:00.000Z',
-          enrichment: { analysis_status: 'success' },
+// ROADMAP 1.148 C7 — the anti-false-fresh doctrine (PR #306/#298) derives
+// the CURRENT graph hash for chip-click freshness ONLY from the server-side
+// PERSISTED graph, never from the wire `graph_state`. Tests that want
+// freshness='fresh' must mock a persisted graph matching the prior fact.
+let mockedPersistedGraph: unknown = null;
+
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore, makeSessionTurnRow } = await import(
+    '../utils/mock-session-store.js'
+  );
+  return {
+    ...original,
+    getSessionStore: () =>
+      createMockSessionStore({
+        append: async (write) => {
+          appendCalls.push(write);
+          // Mirror production: latest write determines what the next turn
+          // reads as "most recent pending actions".
+          const pending = (write as { pending_actions?: ReadonlyArray<PendingAction> })
+            .pending_actions;
+          mockedMostRecentPendingActions = pending ?? [];
+          return { id: `row-${appendCalls.length}` };
         },
-      },
-    ],
-    invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
-    loadGraph: async () => null,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
-    ensureScenarioExists: async () => ({ user_id: null }),
-    readMostRecentPendingActions: async () => mockedMostRecentPendingActions,
-  }),
-  resetSessionStoreForTests: () => undefined,
-  SessionReadError: class SessionReadError extends Error {},
-}));
+        readRecent: async () => [
+          makeSessionTurnRow({
+            id: '66666666-6666-4666-8666-666666666666',
+            scenario_id: SCENARIO_ID,
+            turn_id: 'prior-turn-id',
+            turn_class: 'handler',
+            handler_id: 'run_analysis',
+          }),
+        ],
+        readFactsFor: async () =>
+          [
+            {
+              fact_type: 'run_analysis' as const,
+              fact_version: 1,
+              noop: false,
+              result: {
+                scenario_id: SCENARIO_ID,
+                leading_option_id: 'opt-a',
+                summary: 'Prior analysis summary.',
+                win_probabilities: { 'opt-a': 0.62, 'opt-b': 0.38 },
+                ...(mockedPriorRunAnalysisGraphHash != null
+                  ? { graph_hash_at_run: mockedPriorRunAnalysisGraphHash }
+                  : {}),
+                computed_at: '2026-05-04T00:00:00.000Z',
+                enrichment: { analysis_status: 'success' },
+              },
+            },
+          ] as never,
+        loadGraph: async () => mockedPersistedGraph,
+        loadGraphAndBriefText: async () => ({
+          graph: mockedPersistedGraph,
+          briefText: null,
+        }),
+        ensureScenarioExists: async () => ({ user_id: null }),
+        readMostRecentPendingActions: async () => mockedMostRecentPendingActions,
+      }),
+    resetSessionStoreForTests: () => undefined,
+  };
+});
 
 let v5Enabled = true;
 vi.mock('../../src/config/index.js', async (importOriginal) => {
@@ -254,6 +265,7 @@ describe('Wave 6 — journey replay across the four named brief failures', () =>
     appendCalls.length = 0;
     mockedPriorRunAnalysisGraphHash = null;
     mockedMostRecentPendingActions = [];
+    mockedPersistedGraph = null;
     llmCallTracker.count = 0;
   });
 
@@ -266,6 +278,10 @@ describe('Wave 6 — journey replay across the four named brief failures', () =>
     const liveHash = computeAnalysisAffectingGraphHash(graphState as never);
     expect(liveHash).not.toBeNull();
     mockedPriorRunAnalysisGraphHash = liveHash;
+    // ROADMAP 1.148 C7: 'fresh' requires the PERSISTED graph to match the
+    // prior fact's hash — the wire graph_state is deliberately ignored by
+    // the freshness derivation (anti-false-fresh doctrine, PR #306/#298).
+    mockedPersistedGraph = graphState;
     mockedMostRecentPendingActions = [
       {
         id: `pa-${randomUUID()}`,
@@ -374,6 +390,11 @@ describe('Wave 6 — journey replay across the four named brief failures', () =>
     const liveHash = computeAnalysisAffectingGraphHash(graphState as never);
     expect(liveHash).not.toBeNull();
     mockedPriorRunAnalysisGraphHash = liveHash;
+    // ROADMAP 1.148 C7: persist the graph so this test exercises the
+    // SUCCESS branch it documents ("same fixture as failure 1"), not the
+    // recovery branch — see failure 1's note on the anti-false-fresh
+    // doctrine (PR #306/#298).
+    mockedPersistedGraph = graphState;
     mockedMostRecentPendingActions = [
       {
         id: `pa-${randomUUID()}`,

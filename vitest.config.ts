@@ -25,6 +25,17 @@ export default defineConfig({
       // Exclude staging smoke tests (require RUN_STAGING_SMOKE=1 and PLOT_BASE_URL)
       // Run with: pnpm test:staging
       "tests/staging/**",
+      // Exclude the standalone graph-evaluator tool package (ROADMAP 1.148 C8).
+      // It has its OWN package.json/deps (npm, e.g. gray-matter) and its own
+      // vitest runner; the repo-root install never provides its deps, so
+      // collecting it here throws ERR_MODULE_NOT_FOUND. Mirrors
+      // STANDALONE_TOOL_EXCLUSIONS in vitest.required.config.ts (package
+      // boundary, deliberately NOT broadened to tools/** — other tools' tests
+      // resolve against product deps and keep running here). NOTE: this
+      // removes the tool's only (accidental) CI execution via the advisory
+      // Full Test Suite; a dedicated job that npm-installs inside the tool is
+      // a separate decision (Phase 2 wiring per the required-config note).
+      "tools/graph-evaluator/**",
     ],
     coverage: {
       provider: "v8",

@@ -60,25 +60,30 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
 // Mutable: lets tests flip between "commit succeeds" and "commit fails".
 let commitShouldFail = false;
 
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async () => {
-      if (commitShouldFail) {
-        const err = new Error('append_turn_atomic RPC failed: simulated persistence outage');
-        err.name = 'StateCommitFailedError';
-        throw err;
-      }
-      return { id: 'mock-row-id' };
-    },
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): real module exports stay real; the store double
+// implements the FULL SessionStore interface so interface growth can't
+// silently break this suite again. Only `append` is suite-specific.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () =>
+      createMockSessionStore({
+        append: async () => {
+          if (commitShouldFail) {
+            const err = new Error('append_turn_atomic RPC failed: simulated persistence outage');
+            err.name = 'StateCommitFailedError';
+            throw err;
+          }
+          return { id: 'mock-row-id' };
+        },
+      }),
+    resetSessionStoreForTests: () => {},
+  };
+});
 
 let v5Enabled = true;
 vi.mock('../../src/config/index.js', async (importOriginal) => {
@@ -113,7 +118,12 @@ function buildRequest(turnId: string) {
     scenario_id: SCENARIO,
     message: 'fail-closed test message',
     turn_class: 'frame' as const,
-    stage: 'frame' as const,
+    // ROADMAP 1.148 C4: stage 'analyse', NOT 'frame'. The frame-stage
+    // no-brief guard (PR #203/#484) answers brief-less frame turns
+    // deterministically BEFORE TurnExecutor, so a 'frame' fixture never
+    // reaches the commit path this suite exists to prove fail-closed.
+    // At 'analyse' the turn reaches ORIENT → narrate → commit for real.
+    stage: 'analyse' as const,
     source: 'composer' as const,
   };
 }

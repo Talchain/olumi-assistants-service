@@ -14,7 +14,8 @@
     "expected_result_class": "pass",
     "replay_suite": "N/A",
     "original_failure_mode": "N/A - synthetic",
-    "expected_v5_outcome_class": "typed_error"
+    "expected_v5_outcome_class": "typed_error",
+    "note_roadmap_1148": "ROADMAP 1.148 C3 (2026-07-17): re-pointed from stage 'frame' to stage 'analyse'. The frame-stage no-brief guard (PR #203/#484) now answers brief-less frame turns deterministically pre-LLM, which orphaned this fixture's coverage (timeout/budget/contamination/telemetry paths never ran). At 'analyse' the turn genuinely reaches ORIENT/the mocked LLM. The guard's deterministic answer for the OLD frame-stage input is pinned separately in tests/integration/orchestrator/route-v2-frame-no-brief-guard.test.ts."
   },
   "request": {
     "kind": "message",
@@ -22,7 +23,7 @@
     "scenario_id": "a2222222-2222-4222-8222-222222222223",
     "message": "Narrate a long-running answer.",
     "turn_class": "frame",
-    "stage": "frame",
+    "stage": "analyse",
     "source": "composer"
   },
   "mock": {
@@ -35,7 +36,7 @@
       "response_version": 2,
       "blocks_contains_error_code": "UPSTREAM_TIMEOUT",
       "blocks_severity": "error",
-      "stage_indicator": "frame"
+      "stage_indicator": "analyse"
     },
     "telemetry": {
       "turn_executor_started_count": 1,
