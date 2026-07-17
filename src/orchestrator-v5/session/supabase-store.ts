@@ -44,9 +44,12 @@ import {
 } from './store.js';
 import {
   categoriseGraphCasWrite,
+  computeExpectedGraphCasHashes,
   unavailableGraphCasEvaluation,
+  GRAPH_CAS_RPC_CONFLICT_SQLSTATE,
   type GraphCasEvaluation,
   type GraphCasMode,
+  type GraphCasRpcMode,
 } from '../context/graph-cas-conflict.js';
 import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
@@ -93,6 +96,15 @@ export interface SupabaseSessionStoreOptions {
    * graph-cas-conflict.ts for semantics and the coverage caveat.
    */
   readonly graphCasMode?: GraphCasMode;
+  /**
+   * ATOMIC graph CAS commit RPC (`CEE_V5_GRAPH_CAS_RPC`). Absent → 'off'
+   * (call append_turn_atomic_v2 exactly as today — safe against the
+   * un-migrated schema). 'shadow'/'enforce' route graph-bearing writes to
+   * append_turn_atomic_v3 (migration 20260717120000; Paul-gated). See
+   * `GraphCasRpcMode` and the RPC-v3 proposal doc. Independent of
+   * `graphCasMode` — the observe hook and the atomic RPC are orthogonal.
+   */
+  readonly graphCasRpc?: GraphCasRpcMode;
 }
 
 /** Telemetry hash-prefix length for the 64-hex identity hashes. */
@@ -170,7 +182,9 @@ export class SupabaseSessionStore implements SessionStore {
     // migration is absent surfaces as StateCommitFailedError, never silent
     // data loss. Content columns are nullable and meaningfully NULL: write
     // NULL when the turn carried no user/assistant text.
-    const { data, error } = await this.client.rpc('append_turn_atomic_v2', {
+    // The 15 named args are identical for v2 and v3 (v3 is a strict superset:
+    // v2's params + 3 trailing CAS params). Build once, spread into both.
+    const baseRpcArgs = {
       p_scenario_id: write.scenario_id,
       p_turn_id: write.turn_id,
       p_turn_class: write.turn_class,
@@ -187,17 +201,58 @@ export class SupabaseSessionStore implements SessionStore {
         write.coaching_state == null ? null : toPreDispatchSnapshot(write.coaching_state),
       p_user_message: write.userMessage ?? null,
       p_assistant_message: write.assistantMessage ?? null,
-    });
+    };
+
+    // ATOMIC graph CAS (CEE_V5_GRAPH_CAS_RPC). Route graph-bearing writes to
+    // append_turn_atomic_v3 (in-transaction FOR UPDATE + compare) when the
+    // flag is not 'off'. Non-graph writes and flag-'off' always call v2 —
+    // this is what keeps the DEFAULT path byte-identical to today AND safe
+    // against the un-migrated schema (v3 need not exist). See GraphCasRpcMode.
+    const rpcMode: GraphCasRpcMode = this.options.graphCasRpc ?? 'off';
+    const useV3 = rpcMode !== 'off' && write.graph != null;
+    const rpcName = useV3 ? 'append_turn_atomic_v3' : 'append_turn_atomic_v2';
+
+    const { data, error } = useV3
+      ? await this.client.rpc('append_turn_atomic_v3', {
+          ...baseRpcArgs,
+          // Trusted server-read base captured at turn start (undefined =
+          // uninstrumented, null = server-read-but-empty → both map to
+          // SQL NULL = no base to compare = unconditional, v2-equivalent).
+          p_expected_graph_identity_hash: write.expectedGraphIdentityHash ?? null,
+          // Identity of the graph BEING written (the exact JSONB in p_graph),
+          // via the single normaliser authority. Stamped into
+          // scenarios.graph_identity_hash so the column tracks the persisted
+          // graph in lock-step, and used by v3's self-noop guard.
+          p_incoming_graph_identity_hash:
+            computeExpectedGraphCasHashes(write.graph).expectedGraphIdentityHash,
+          // enforce → real CAS (OLGC1 on divergence); shadow → unconditional.
+          p_cas_enforce: rpcMode === 'enforce',
+        })
+      : await this.client.rpc('append_turn_atomic_v2', baseRpcArgs);
 
     if (error) {
+      // v3 atomic CAS conflict → typed 409-class refusal, NEVER a silent
+      // clobber. The whole transaction (turn row included) rolled back in the
+      // DB, so no partial state survives; surface GraphStaleWriteError so the
+      // TurnExecutor's existing `instanceof StateCommitFailedError` catch maps
+      // it onto the typed failure envelope (refresh-reconfirm).
+      if (useV3 && errCode(error) === GRAPH_CAS_RPC_CONFLICT_SQLSTATE) {
+        this.emitRpcCasConflict(write, rpcMode, errCode(error));
+        throw new GraphStaleWriteError(
+          `append_turn_atomic_v3 rejected a stale graph write for scenario ${write.scenario_id} ` +
+            `(SQLSTATE ${GRAPH_CAS_RPC_CONFLICT_SQLSTATE}) — refresh and reconfirm. ` +
+            'Atomic in-transaction CAS: the whole turn rolled back, nothing clobbered.',
+          { conflict_category: 'rpc_cas_conflict', cause: error },
+        );
+      }
       throw new StateCommitFailedError(
-        `append_turn_atomic_v2 RPC failed: ${errMsg(error)}`,
+        `${rpcName} RPC failed: ${errMsg(error)}`,
         { cause: error, rpc_code: errCode(error) },
       );
     }
     if (typeof data !== 'string') {
       throw new StateCommitFailedError(
-        `append_turn_atomic_v2 returned non-string id: ${JSON.stringify(data)}`,
+        `${rpcName} returned non-string id: ${JSON.stringify(data)}`,
       );
     }
 
@@ -330,6 +385,36 @@ export class SupabaseSessionStore implements SessionStore {
         select_ms: null,
         select_failed: false,
       };
+    }
+  }
+
+  /**
+   * Emit the atomic-CAS conflict telemetry (append_turn_atomic_v3 OLGC1).
+   * Guarded: a telemetry fault must never mask the GraphStaleWriteError the
+   * caller is about to throw. Content-free — closed enums + 16-hex hash
+   * prefixes + the rpc_code only, mirroring the A3 observe payload's privacy
+   * contract.
+   */
+  private emitRpcCasConflict(
+    write: SessionTurnWrite,
+    mode: GraphCasRpcMode,
+    rpcCode: string | undefined,
+  ): void {
+    try {
+      emit(TelemetryEvents.V5GraphCasRpcConflict, {
+        scenario_id: write.scenario_id,
+        turn_id: write.turn_id,
+        mode,
+        conflict_category: 'rpc_cas_conflict',
+        expected_identity_hash: identityHashPrefix(write.expectedGraphIdentityHash),
+        incoming_identity_hash: identityHashPrefix(
+          computeExpectedGraphCasHashes(write.graph).expectedGraphIdentityHash,
+        ),
+        rpc_code: rpcCode ?? null,
+      });
+    } catch {
+      // Never let telemetry convert an atomic-CAS rejection into a different
+      // failure — the GraphStaleWriteError throw is the load-bearing outcome.
     }
   }
 
