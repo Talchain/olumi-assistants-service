@@ -481,21 +481,35 @@ Specific traps worth knowing about:
   carve-out is glue-conditioned** (`between a third and 95%` refuses whole;
   partitive prose like `half the users churned` / `a third of users hit 40%`
   stays clean), the **foreign-numeral class is derived from Unicode
-  properties** (`\p{Nd}` minus ASCII + `\p{No}`) instead of a hand-enumerated
-  3-range mirror (Devanagari/Thai/Bengali/Tamil/superscript runs were
-  invisible while the Arabic-Indic control passed — mirror drift reading as
-  green), and **bare `point`/`points` joins the pp family in both layers**
-  (`up 12 points` was invisible across a comma/sentence boundary while
-  `12 pts` refused). See the module doc in
+  properties** instead of a hand-enumerated 3-range mirror
+  (Devanagari/Thai/Bengali/Tamil/superscript runs were invisible while the
+  Arabic-Indic control passed — mirror drift reading as green), and **bare
+  `point`/`points` joins the pp family in both layers** (`up 12 points` was
+  invisible across a comma/sentence boundary while `12 pts` refused). Round 9
+  closed the same two edge classes inside the round-8 fixes themselves: the
+  **two hyphen carve-outs are glue-conditioned** exactly like the
+  fraction-word carve-out (`between twenty-odd and 95%` / `a sub-ten–95%
+  range` had discarded the word token; `a one-off gain` stays clean), and the
+  foreign-numeral derivation now carries **the full `\p{N}` = Nd ∪ Nl ∪ No**
+  (round 8 omitted `\p{Nl}`, so Roman glyphs `Ⅳ`/`Ⅻ` and Han `〇` were
+  invisible). Round 9 also implements a **calibration ruling on bare
+  `point(s)`**: it anchors ONLY with a numeric neighbour in the adjacency
+  window (`12 points` still refuses; `that is a good point to consider` is
+  prose and scans clean — under round 8 it hard-blocked G4's `= 1.0` floor,
+  making the gate unusable on honest coaching prose). See the module doc in
   `scorer/figure-scanner.ts` for the full doctrine, the deliberate calibration
-  costs (a bare number sharing a clause with an anchor now over-blocks by
-  design; prose `point(s)` is recognised-and-refused like `pts`) and the
-  documented out-of-contract residuals. **Out-of-contract residuals, accepted
-  scope (round 8):** ordinal/quantity words outside the closed cardinal
-  lexicon (`fifth`, `dozen`, `twice`) are not numeric tokens — growing the
-  lexicon word-by-word is the hand-maintained-mirror trap; they are pinned in
-  tests as known residuals exactly like `halved` and `one in five`. The
-  comma **clause-straddle escape** (`roughly a third, maybe 95%` — identical
+  costs (a bare number sharing a clause with an anchor still over-blocks by
+  design) and the documented out-of-contract residuals. **Out-of-contract
+  residuals, accepted scope (rounds 8–9):** ordinal/quantity words outside
+  the closed cardinal lexicon (`fifth`, `dozen`, `twice`) are not numeric
+  tokens — growing the lexicon word-by-word is the hand-maintained-mirror
+  trap — and round 9 pins the **glue shapes** explicitly (`between a fifth
+  and 95%` stays out of contract; glue-shape dispositions do not inherit
+  from partitive ones). **Lo-script numerals** (Han ideographs `九五`) are
+  letters, not numbers, to Unicode — no property isolates them, and the
+  glyphs double as ordinary words in CJK text — pinned as the residual's
+  boundary next to the covered `Nl` class (`〇` refuses). The comma
+  **clause-straddle escape** (`roughly a third, maybe 95%` — identical
   for its digit twin `roughly 33, maybe 95%`) is round-5 shield doctrine,
   filed as a follow-up, deliberately untouched here.
 - **G5 is a count, not a rate**, so padding a run with silent turns cannot

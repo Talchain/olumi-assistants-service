@@ -1401,3 +1401,31 @@ describe('round 9 corpus: the round-8 P1 — \\p{Nl} letter numbers join the der
     expect(scanProseFigures('Ⅳ% of runs')).toEqual({ values: [], unparseable: 1 });
   });
 });
+
+// ============================================================
+// ROUND 9 — (4a) GLUE-SHAPE dispositions for out-of-lexicon tokens,
+// decided and pinned EXPLICITLY (the round-8 P0 proved partitive-shape
+// dispositions do not transfer to glue shapes — so these are not inherited
+// from the round-8 partitive pins, they are their own ruling). Both are
+// ACCEPTED residuals, documented in the module doc: no cheap-and-safe fix
+// exists (ordinals = growing an OPEN vocabulary word-by-word, the
+// hand-maintained-mirror trap; Han ideograph numerals are \p{Lo} — letters
+// to Unicode, no property isolates them, and the glyphs double as ordinary
+// words in running CJK text).
+// ============================================================
+
+describe('round 9: glue-shape dispositions for out-of-lexicon tokens (accepted residuals, pinned)', () => {
+  it("out-of-lexicon ordinals stay invisible even GLUED ('between a fifth and 95%') — accepted scope", () => {
+    // If the lexicon ever grows, this pin forces the change to be a
+    // visible, deliberate diff.
+    expect(scanProseFigures('between a fifth and 95%')).toEqual({ values: [95], unparseable: 0 });
+    expect(scanProseFigures('either a dozen or 95%')).toEqual({ values: [95], unparseable: 0 });
+  });
+
+  it("Lo-script numerals stay invisible even GLUED ('between 九五 and 95%') — accepted scope", () => {
+    expect(scanProseFigures('between 九五 and 95%')).toEqual({ values: [95], unparseable: 0 });
+    // ...while the Nl neighbour class (〇, Roman glyphs) IS covered — the
+    // boundary of the residual is the Unicode letter/number property line.
+    expect(scanProseFigures('between 〇 and 95%')).toEqual({ values: [], unparseable: 1 });
+  });
+});

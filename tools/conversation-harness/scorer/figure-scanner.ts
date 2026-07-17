@@ -209,6 +209,19 @@
  *    'twice') are not numeric tokens — ACCEPTED scope (round 8): the lexicon
  *    is closed on cardinal number words + %-adjacent fractions; growing it
  *    word-by-word is the hand-maintained-mirror trap. Pinned in tests.
+ *    ROUND 9 makes the GLUE-SHAPE disposition explicit (the round-8 P0
+ *    proved partitive-shape dispositions do not transfer to glue shapes,
+ *    so it is decided and pinned separately, not inherited): 'between a
+ *    fifth and 95%' scans {[95], 0} — the out-of-lexicon bound is invisible
+ *    even glued. ACCEPTED, same doctrine, same reason: the only fix is
+ *    growing the open ordinal/quantity vocabulary word-by-word.
+ *  - Lo-SCRIPT NUMERALS: Han ideograph numerals ('九五') are \p{Lo} —
+ *    LETTERS, not numbers, to Unicode — so no property escape isolates
+ *    them (unlike Nd/Nl/No, round 9) and 'between 九五 and 95%' scans
+ *    {[95], 0} even glued. ACCEPTED (round 9): a hand-listed ideograph set
+ *    is the mirror trap AND the same glyphs double as ordinary words in
+ *    running CJK text. Pinned in tests as the explicit glue-shape
+ *    disposition.
  *  - implicit/ratio figures with no anchor token: 'your win probability
  *    halved', 'one in five runs fails'.
  *  - compound modifiers ('a one-off gain', 'ten-fold') are not numeric
