@@ -6457,6 +6457,12 @@ export async function runTurnExecutor(
               signal: turnAbort.signal,
               brief: resolvedBrief,
               ...(timingsEnabled ? { callTelemetrySink } : {}),
+              // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
+              // disclosure channel — the review must never narrate a
+              // scaffolded option's placeholder numbers as real user data.
+              ...(handlerOutcome.__scaffolded_options !== undefined
+                ? { scaffoldedOptions: handlerOutcome.__scaffolded_options }
+                : {}),
             });
           } catch (err) {
             // D-T orphaned-commit guard (Codex finding 3). The enricher
@@ -6735,6 +6741,12 @@ export async function runTurnExecutor(
         // contradiction-aware requiresRerun — so chips read the composed
         // authority instead of local scans.
         canonicalState: canonicalStateForRun,
+        // D-ask-1 (2.11 P0-1): scaffolded-placeholder disclosure channel —
+        // the run only completed on disclosed defaults, so the chip
+        // generator offers the configure chip first.
+        ...(handlerOutcome?.__scaffolded_options !== undefined
+          ? { scaffoldedOptions: handlerOutcome.__scaffolded_options }
+          : {}),
       });
 
       // V5 P0.2 — flip-threshold proposal emission (Seam 1). On a

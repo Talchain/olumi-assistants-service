@@ -326,6 +326,20 @@ export interface HandlerOutcome {
    * the same pattern as `__plot_timings` above.
    */
   readonly __validation_beat?: import('../coaching/validation-priority.js').ValidationBeatDecision;
+  /**
+   * D-ask-1 (ROADMAP 2.11 P0-1) — set by `run_analysis` when the scaffold
+   * filled DISCLOSED placeholder interventions for options added without
+   * configuration. Internal channel on the same pattern as `__plot_timings`
+   * above (never crosses to the wire envelope directly): the turn-executor
+   * and the chip-click dispatch thread it to the chip generator so the
+   * analysis-success turn offers the deterministic configure chip for the
+   * scaffolded option. The user-facing disclosure itself rides
+   * `assistant_text` / the fact's `summary` (registry egress grammar in
+   * coaching/analysis-result-headline.ts).
+   */
+  readonly __scaffolded_options?: ReadonlyArray<
+    import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
+  >;
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;

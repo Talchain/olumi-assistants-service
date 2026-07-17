@@ -252,19 +252,20 @@ src/cee/unified-pipeline/
 4. **Connectivity validation:**
    - Ensure all options connect to goal
    - Prune unreachable nodes
-5. **Optional clarifier:**
-   - If `CEE_CLARIFIER_ENABLED=true` and quality below threshold
-   - Ask user clarifying questions (up to 3 rounds)
+
+*(The former substep 5, the optional multi-turn clarifier, was retired
+2026-07-16 — ROADMAP 1.94 Option A, #486. `src/cee/clarifier/` and
+`runClarifier()` no longer exist; the CEE_CLARIFIER_* env vars are inert.
+Its replacement lives OUTSIDE this pipeline: the flag-gated clarify-v2
+draft preflight in route-v2 — see `src/orchestrator-v5/clarify-v2/`.)*
 
 **Inputs:**
 - `ctx.graph` — Graph from Stage 3
-- `ctx.input.clarificationAnswers` — Optional answers from previous round
 
 **Outputs:**
 - `ctx.validationSummary` — Validation result (errors, warnings, fixes)
 - `ctx.repairCost` — Token cost of LLM repair
 - `ctx.repairFallbackReason` — If LLM repair was skipped, why?
-- `ctx.clarifierResult` — Clarifier result (questions asked, answers)
 - `ctx.structuralMeta` — Structural analysis metadata
 - `ctx.goalConstraints` — Extracted compound goal constraints
 - `ctx.graph` — Repaired graph
@@ -273,7 +274,6 @@ src/cee/unified-pipeline/
 - `runDeterministicSweep()` from `src/cee/repair/deterministic-sweep.ts`
 - `repairGraph()` from `src/cee/repair/index.ts`
 - `validateAndFixGraph()` from `src/cee/structure/index.ts`
-- `runClarifier()` from `src/cee/clarifier/index.ts` (if enabled)
 
 **Telemetry Events:**
 ```typescript
@@ -450,7 +450,7 @@ export interface StageContext {
   draftAdapter: "anthropic" | "openai" | "fixtures" | undefined;
   llmMeta: Record<string, unknown> | undefined;
   confidence: number | undefined;
-  clarifierStatus: "skipped" | "ran" | "failed" | undefined;
+  // (clarifierStatus removed 2026-07-16 — Stage-4 clarifier retired, #486)
   effectiveBrief: string;
   edgeFieldStash: Record<string, unknown> | undefined;
   skipRepairDueToBudget: boolean;
@@ -472,7 +472,7 @@ export interface StageContext {
   constraintStrpResult: unknown | undefined;
   repairCost: number;
   repairFallbackReason: string | undefined;
-  clarifierResult: ClarifierResult | undefined;
+  // (clarifierResult removed 2026-07-16 — Stage-4 clarifier retired, #486)
   structuralMeta: StructuralMeta | undefined;
   validationSummary: ValidationSummary | undefined;
 
@@ -529,7 +529,7 @@ ctx.enrichmentResult = { called_count: 1 };
 │   - brief: string                                            │
 │   - docs?: Document[]                                        │
 │   - previous_graph?: GraphV1                                 │
-│   - clarificationAnswers?: ClarificationAnswer[]             │
+│   - clarificationAnswers?  (accepted, INERT since #486)      │
 └──────────────────────────────────────────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────────────┐
@@ -552,8 +552,8 @@ ctx.enrichmentResult = { called_count: 1 };
                          ↓
 ┌──────────────────────────────────────────────────────────────┐
 │ STAGE 4: Repair                                              │
-│   GraphT → [Validate + Fix + Merge + Clarify] → GraphT       │
-│   Output: validationSummary, repairCost, clarifierResult     │
+│   GraphT → [Validate + Fix + Merge] → GraphT                 │
+│   Output: validationSummary, repairCost                      │
 └──────────────────────────────────────────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────────────┐

@@ -264,6 +264,28 @@ function scaleNumeric(
 }
 
 /**
+ * Legacy (scale-net OFF) per-entry numeric intervention projection — the
+ * EXACT rule `loadScenarioSnapshotForRunAnalysis` applies to configured
+ * options when `cee.plotEgressScaleNetEnabled` is false: a bare finite
+ * number passes through; an object contributes its finite numeric `.value`;
+ * anything else is dropped. Lives in THIS module (the single home of both
+ * outbound wire conventions) so every producer of PLoT intervention numbers
+ * — the snapshot loader's sibling projection AND the D-ask-1 scaffold —
+ * derives from the same function instead of mirroring it (P1-1: one scale
+ * convention, not two).
+ */
+export function extractNumericInterventionValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = (value as Record<string, unknown>).value;
+  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
+}
+
+/**
  * Build a `factorId → FactorScaleInfo` map from graph nodes. Reads the factor
  * cap PLoT uses (`observed_state.cap`), with defensive fallbacks to alternate
  * persisted shapes (`data.cap`, top-level `cap`) — all representing the SAME

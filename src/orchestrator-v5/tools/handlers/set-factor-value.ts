@@ -106,8 +106,11 @@ const STALENESS_NARRATIVE =
  * dead documentation that risked silent double-normalisation) fail
  * validation loudly.
  */
+// W2E-2: `.finite()` on every number — factor values are contract-silent on
+// range (no bound invented) but NaN/±Infinity must never enter the graph.
+// A failure here rides the existing proposal-validation rejection mechanism.
 export const SetFactorValueValueSchema = z.union([
-  z.number(),
+  z.number().finite(),
   z
     .object({
       // V5 D1 golden-path closure (A3.1 Task 4): `raw_value` was
@@ -116,9 +119,9 @@ export const SetFactorValueValueSchema = z.union([
       // schema closes the silent-strip footgun: a proposal carrying
       // `{ value: 5, raw_value: 0.05 }` now fails Zod validation with
       // "Unrecognized key(s)" rather than silently picking `value`.
-      value: z.number(),
+      value: z.number().finite(),
       unit: z.string().optional(),
-      cap: z.number().optional(),
+      cap: z.number().finite().optional(),
     })
     .strict(),
 ]);

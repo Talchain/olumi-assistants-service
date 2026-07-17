@@ -49,6 +49,10 @@ import {
   isUsableWinProbability,
 } from '../../orchestrator/context/option-result-source.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
+import {
+  buildScaffoldPromptDisclosure,
+  type ScaffoldedOptionRecord,
+} from './scaffold-disclosure.js';
 
 import type { DecisionReviewOutput } from './types.js';
 
@@ -102,6 +106,19 @@ export interface EnrichDecisionReviewInput {
     input_tokens?: number;
     output_tokens?: number;
   };
+  /**
+   * D-ask-1 (2.11 P0-1) — P1-2: options the CURRENT run_analysis scaffolded
+   * with disclosed placeholder interventions, threaded from
+   * `HandlerOutcome.__scaffolded_options` by BOTH call sites (turn-executor
+   * decision-review block, chip-click-dispatch). When non-empty, the DR
+   * invoke input carries an explicit disclosure line
+   * (`scaffold_disclosure`) rendered into the prompt's
+   * `<SCAFFOLDED_OPTIONS>` section — otherwise the review narrates the
+   * scaffolded numbers as real user data. DR stays ON for scaffolded runs:
+   * a disclosed review beats a silently-skipped one. Optional + additive:
+   * omitted/empty → byte-identical invoke input and prompt.
+   */
+  readonly scaffoldedOptions?: ReadonlyArray<ScaffoldedOptionRecord>;
 }
 
 type SkipReason =
@@ -163,7 +180,19 @@ export async function enrichRunAnalysisWithDecisionReview(
     return input.handlerFacts;
   }
 
-  const invokeInput = buildInvokeInput(input.brief, enrichment, fact.result.leading_option_id);
+  // P1-2: explicit scaffold disclosure for the prompt context (undefined
+  // when the run scaffolded nothing — byte-identical invoke input).
+  const scaffoldDisclosure =
+    input.scaffoldedOptions !== undefined && input.scaffoldedOptions.length > 0
+      ? buildScaffoldPromptDisclosure(input.scaffoldedOptions)
+      : undefined;
+
+  const invokeInput = buildInvokeInput(
+    input.brief,
+    enrichment,
+    fact.result.leading_option_id,
+    scaffoldDisclosure,
+  );
   if (!invokeInput) {
     skipTelemetry(input, 'no_winner', {
       brief_present: true,
@@ -407,14 +436,16 @@ export function buildInvokeInputForTests(
   brief: string,
   enrichment: Record<string, unknown>,
   leadingOptionId: string | null,
+  scaffoldDisclosure?: string,
 ): DecisionReviewInvokeInput | null {
-  return buildInvokeInput(brief, enrichment, leadingOptionId);
+  return buildInvokeInput(brief, enrichment, leadingOptionId, scaffoldDisclosure);
 }
 
 function buildInvokeInput(
   brief: string,
   enrichment: Record<string, unknown>,
   leadingOptionId: string | null,
+  scaffoldDisclosure?: string,
 ): DecisionReviewInvokeInput | null {
   // Phase 3A fix (2026-05-17): walk every available results source until
   // one can match `leading_option_id`. The previous "first non-empty
@@ -501,6 +532,12 @@ function buildInvokeInput(
     winner,
     runner_up: runnerUp,
     ...(flipThresholdData ? { flip_threshold_data: flipThresholdData } : {}),
+    // P1-2 (D-ask-1): explicit scaffold disclosure — rendered by the prompt
+    // builders in a <SCAFFOLDED_OPTIONS> section (monolith AND decomposed
+    // slices). Omitted when the run scaffolded nothing.
+    ...(scaffoldDisclosure !== undefined && scaffoldDisclosure.length > 0
+      ? { scaffold_disclosure: scaffoldDisclosure }
+      : {}),
     _meta: meta,
   };
 }

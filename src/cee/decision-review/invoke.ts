@@ -112,6 +112,17 @@ export interface DecisionReviewInvokeInput {
     readonly [k: string]: unknown;
   } | null;
   readonly flip_threshold_data?: ReadonlyArray<Record<string, unknown>>;
+  /**
+   * D-ask-1 (2.11 P0-1) — P1-2: explicit disclosure that the analysed run
+   * contains SCAFFOLDED options (placeholder interventions, not user
+   * values). Built by `buildScaffoldPromptDisclosure` from the
+   * `__scaffolded_options` outcome channel and rendered into the user
+   * message's `<SCAFFOLDED_OPTIONS>` section (monolith path here; the
+   * decomposed slices carry the same block) — without it, the review
+   * narrates placeholder numbers as real user data. Absent on
+   * non-scaffolded runs (byte-identical message).
+   */
+  readonly scaffold_disclosure?: string;
   /** Adapter-side diagnostics — never injected into the user message. */
   readonly _meta?: DecisionReviewMeta;
 }
@@ -376,6 +387,17 @@ export function buildDecisionReviewUserMessage(
   }
   sections.push(`margin: ${JSON.stringify(margin)}`);
   sections.push('</DECISION_CONTEXT>');
+
+  // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder disclosure. Emitted
+  // ONLY when the run scaffolded at least one option, so non-scaffolded
+  // runs assemble a byte-identical message. Free text (already bounded by
+  // construction: one short line per scaffolded option + a fixed caveat),
+  // guarded by the same hard per-section ceiling as every other block.
+  if (typeof input.scaffold_disclosure === 'string' && input.scaffold_disclosure.length > 0) {
+    sections.push('<SCAFFOLDED_OPTIONS>');
+    sections.push(boundedTextBlock(input.scaffold_disclosure, DECISION_REVIEW_SECTION_MAX_CHARS));
+    sections.push('</SCAFFOLDED_OPTIONS>');
+  }
 
   sections.push('<FLIP_THRESHOLD_DATA>');
   if (input.flip_threshold_data && input.flip_threshold_data.length > 0) {
