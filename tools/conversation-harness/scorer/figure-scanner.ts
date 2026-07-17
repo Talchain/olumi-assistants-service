@@ -178,6 +178,11 @@
  *     and the form refuses whole or reconciliation v2 flags it. Plain
  *     compound prose ('a one-off gain', 'phase-two hit 40%') keeps the
  *     carve-out; the round-5 clause shield is untouched.
+ * (2) P1 — the round-8 foreign-numeral derivation omitted \p{Nl}: \p{N} is
+ *     Nd ∪ Nl ∪ No, and Roman-numeral glyphs (Ⅳ/Ⅻ) and Han 〇 are Nl, so
+ *     'between Ⅳ and 95%' was invisible and the round-8 'every script
+ *     covered by construction' claim was false as written. The regex now
+ *     carries the full derivation (see FOREIGN_NUMERAL_RE).
  *
  * DOCUMENTED RESIDUALS — OUTSIDE the contract, pinned out-of-scope in tests:
  *  - bare numbers in clauses with NO anchor ('we ran 3 scenarios.') are not
@@ -588,13 +593,23 @@ function scanWordNumberLiterals(text: string): Literal[] {
  * 3 digit ranges (Arabic-Indic, Extended Arabic-Indic, full-width) plus the
  * vulgar-fraction block, so Devanagari/Thai/Bengali/Tamil digit runs and
  * superscripts were invisible to the token stream — the hand-maintained-
- * mirror defect class, again. Unicode property escapes cover every script
- * by construction: \p{Nd} is ANY script's decimal digits (ASCII excluded —
- * the main scanner owns 0-9), \p{No} is every other-number form (vulgar
- * fractions, superscripts, circled numbers, ...). A maximal run is ONE
- * token, mirroring the digit scanner. Mutation hook: regressing this to the
- * round-7 enumeration turns the multi-script corpus RED. */
-const FOREIGN_NUMERAL_RE = /(?:(?![0-9])\p{Nd})+|\p{No}+/gu;
+ * mirror defect class, again.
+ *
+ * ROUND 9 (P1): the round-8 derivation was ITSELF incomplete — \p{N} is
+ * Nd ∪ Nl ∪ No, and round 8 took only Nd (minus ASCII) + No, omitting Nl
+ * (LETTER NUMBERS: Roman-numeral glyphs Ⅳ/Ⅻ, Han 〇, Suzhou numerals), so
+ * 'between Ⅳ and 95%' was invisible in glue shapes and the round-8 'every
+ * script covered by construction' doc claim was FALSE as written. The full
+ * derivation is now spelled out: \p{Nd} = ANY script's decimal digits
+ * (ASCII excluded — the main scanner owns 0-9); \p{Nl} = letter numbers;
+ * \p{No} = every other-number form (vulgar fractions, superscripts, circled
+ * numbers, ...). Together: every \p{N} codepoint, by construction. A
+ * maximal run is ONE token, mirroring the digit scanner. (Han IDEOGRAPH
+ * numerals 九/五 are \p{Lo} — letters, not numbers, to Unicode — and stay a
+ * documented residual; see the module doc.) Mutation hook: regressing this
+ * to the round-7 enumeration, or dropping the Nl branch, turns the
+ * multi-script corpus RED. */
+const FOREIGN_NUMERAL_RE = /(?:(?![0-9])\p{Nd})+|[\p{Nl}\p{No}]+/gu;
 
 function scanForeignNumeralLiterals(text: string): Literal[] {
   const out: Literal[] = [];

@@ -1237,7 +1237,9 @@ describe('round 8 GENERATOR v3: fraction words, multi-script numerals, the point
   });
 
   // Multi-script numerals: every script by construction, not by enumeration.
-  const NUMERALS = ['२५', '๒๕', '৪৫', '௪௫', '²⁵', '٤٥', '۲۵', '６２', '¼'];
+  // ROUND 9: \p{Nl} letter numbers (Roman glyphs, Han 〇) join the pool — the
+  // round-8 derivation omitted the Nl third of \p{N} = Nd ∪ Nl ∪ No.
+  const NUMERALS = ['२५', '๒๕', '৪৫', '௪௫', '²⁵', '٤٥', '۲۵', '６２', '¼', 'Ⅳ', 'Ⅻ', '〇'];
 
   it('an anchor-distant numeral run fails closed in EVERY script', () => {
     fc.assert(
@@ -1327,5 +1329,34 @@ describe('round 9 corpus: the round-8 P1 — hyphen carve-outs re-opened the sha
     // The round-5 clause shield covers compound fragments like every other
     // token kind.
     expect(scanProseFigures('sixty-odd people churned, 40% of the total')).toEqual({ values: [40], unparseable: 0 });
+  });
+});
+
+// ============================================================
+// ROUND 9 — (2) P1: the round-8 'derived, not mirrored' claim was itself
+// incomplete. \p{N} is Nd ∪ Nl ∪ No; the round-8 regex took Nd (minus ASCII)
+// and No but OMITTED Nl (LETTER NUMBERS: Roman-numeral glyphs Ⅳ/Ⅻ, Han 〇,
+// Suzhou numerals) — so 'every script covered by construction' was a false
+// doc claim and Nl numerals were invisible in glue shapes.
+// ============================================================
+
+describe('round 9 corpus: the round-8 P1 — \\p{Nl} letter numbers join the derivation', () => {
+  it('P1 family (verbatim from the round-8 verdict): Nl numerals in glue shapes fail closed', () => {
+    // Round 8 scanned each of these {values:[95], unparseable:0} — the Nl
+    // bound was invisible to the token stream.
+    expect(scanProseFigures('between Ⅳ and 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a Ⅻ–95% chance')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('〇 and 95%')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('anchor-distant Nl runs fail closed via reconciliation v2 (the mutation-visible shape)', () => {
+    // Adjacent-to-anchor cases are masked by invariant v1 under a regressed
+    // derivation (same count) — these are visible ONLY as numeric tokens.
+    expect(scanProseFigures('a Ⅳ share of the 40% pool')).toEqual({ values: [40], unparseable: 1 });
+    expect(scanProseFigures('a 〇 share of the 40% pool')).toEqual({ values: [40], unparseable: 1 });
+  });
+
+  it('directly-anchored Nl numerals refuse too (recognised, never valued)', () => {
+    expect(scanProseFigures('Ⅳ% of runs')).toEqual({ values: [], unparseable: 1 });
   });
 });
