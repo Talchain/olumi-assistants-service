@@ -703,12 +703,17 @@ describe('round 6 INVARIANT: an anchor token can never vanish', () => {
 
   /** Build a snippet guaranteed to contain >= 1 Layer-1 anchor token: a word
    * token is always detached from letters (never glued to a word), matching
-   * the detector's word-boundary; a symbol token anchors anywhere. */
+   * the detector's word-boundary; a symbol token anchors anywhere.
+   * ROUND 9 (calibration ruling): bare 'point(s)' with no numeric neighbour
+   * is PROSE, not an anchor — the anchor guarantee needs a number on the
+   * points tokens (every separator in SEPS_NONEMPTY stays inside the
+   * adjacency window: whitespace + at most one hyphen). */
   function buildSnippet(it: Item): string {
     const seps = it.word ? SEPS_NONEMPTY : SEPS_ANY;
     const sep = seps[it.sepIdx % seps.length];
     const pre = it.pre === '' ? '' : `${it.pre} `;
-    const body = it.num === '' ? `${pre}${it.token}` : `${pre}${it.num}${sep}${it.token}`;
+    const num = it.num === '' && /^points?$/i.test(it.token) ? '62' : it.num;
+    const body = num === '' ? `${pre}${it.token}` : `${pre}${num}${sep}${it.token}`;
     return `${body}${it.suf}`;
   }
 
@@ -1041,17 +1046,53 @@ describe("round 8 corpus: the round-7 P1 — bare 'point'/'points' joins the pp 
     expect(scanProseFigures('12 points')).toEqual({ values: [], unparseable: 1 });
   });
 
-  it('a BARE points anchor fails closed via Layer 1 (mutation-killer: the standalone alternative)', () => {
-    // Same construction as the round-7 'shown in pts' pin: no number, so
-    // only the Layer-1 detector can see the token.
-    expect(scanProseFigures('shown in points')).toEqual({ values: [], unparseable: 1 });
+  it('a NUMERIC-NEIGHBOURED points anchor fails closed via Layer 1 (mutation-killer: the standalone alternative)', () => {
+    // 'win12' is an identifier fragment (letter-glued digits), so Layer 2
+    // never produces a literal here and only the Layer-1 detector can see
+    // the token — removing the standalone points alternative from
+    // ANCHOR_TOKEN_RE turns exactly this RED. (ROUND 9: 'shown in points'
+    // stopped being the Layer-1 killer — with no numeric neighbour, bare
+    // 'points' is prose by ruling; see the calibration block below.)
+    expect(scanProseFigures('win12 points')).toEqual({ values: [], unparseable: 1 });
   });
 
-  it('DELIBERATE CALIBRATION COST (documented): prose "point(s)" is recognised-and-refused', () => {
-    // The same treatment as pts/pt/bps means the same cost as 'expressed as
-    // a percent' (round 6) and 'shown in pts' (round 7): a bare token from
-    // the anchor family fails closed rather than being invisible.
-    expect(scanProseFigures('That is a good point to consider.')).toEqual({ values: [], unparseable: 1 });
+  it("ROUND 9 CALIBRATION RULING: bare prose 'point(s)' with NO numeric neighbour is PROSE, not a unit", () => {
+    // Round 8 gave bare 'point(s)' the same treatment as pts/bps, so ANY
+    // candidate whose coach said 'that is a good point' hard-blocked at
+    // G4's =1.0 floor — the gate was unusable on honest coaching prose.
+    // RULING (round 9, orchestrator): points-family tokens are
+    // anchors/refusals ONLY when a numeric neighbour (digit or word-number
+    // literal) is in the adjacency window — 'points' is a unit only when
+    // attached to a number. This UPDATES the round-8 pin that enshrined the
+    // over-block ({values:[], unparseable:1} for the first case below) —
+    // the pin change is part of the defect fix, disclosed in the PR body,
+    // same convention as the round-8 G3 test fix.
+    expect(scanProseFigures('That is a good point to consider.')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('at this point we should run it')).toEqual({ values: [], unparseable: 0 });
+    // BOTH directions pinned: attached to a number, points figures stay
+    // recognised-and-refused.
+    expect(scanProseFigures('12 points')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('rose 12 percent pts')).toEqual({ values: [], unparseable: 1 });
+    // The adjacency window mirrors the forward anchor tolerance: at most
+    // one hyphen, whitespace, one optional article.
+    expect(scanProseFigures('a 3-point drop')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('gained half a point')).toEqual({ values: [], unparseable: 1 });
+    // Word-number neighbours count as numbers.
+    expect(scanProseFigures('twelve points')).toEqual({ values: [], unparseable: 1 });
+    // The OTHER family members keep invariant-v1 fail-closed treatment:
+    // 'pts'/'bps'/'pct'/'percent' and the multi-word forms are unit tokens
+    // with no prose reading — the ruling is scoped to bare 'point(s)'.
+    expect(scanProseFigures('shown in pts')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('measured in percentage points')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('ruling gate pin: honest coaching prose no longer hard-blocks G4', () => {
+    // Pre-ruling this scored 0.5 (1 phantom untraceable from 'point') and
+    // hard-blocked at the =1.0 floor.
+    const d = gateCanonicalStateUse([gateTurn('That is a good point to consider. Your win rate is 62%.', [62])]);
+    expect(d.details.figures_stated).toBe(1);
+    expect(d.details.traceable).toBe(1);
+    expect(d.value).toBe(1);
   });
 
   it("the round-6 'percent pts' backtracking pin HOLDS (no %-unit backtracking reintroduced)", () => {

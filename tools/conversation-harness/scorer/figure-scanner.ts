@@ -160,9 +160,10 @@
  * (3) P1 — bare 'point'/'points' joins the pp anchor family in BOTH layers
  *     with the SAME treatment as pts/pt/bps ('up 12 points' was invisible
  *     whenever a comma/sentence boundary separated it from a %-anchor).
- *     Same calibration cost as every pp token: recognised, refused, never
- *     valued — and a bare prose 'point' with no number fails closed via
- *     invariant v1, exactly like 'shown in pts'.
+ *     [ROUND 9 RECALIBRATED the no-number case — see below: a bare prose
+ *     'point' with NO numeric neighbour is prose, not a unit; round 8 had
+ *     it fail closed via invariant v1 like 'shown in pts', which made G4's
+ *     =1.0 floor hard-block every candidate whose coach said 'good point'.]
  *
  * ==========================================================================
  * ROUND 9 — recognizer-edge holes in the ROUND-8 fixes themselves
@@ -183,6 +184,20 @@
  *     'between Ⅳ and 95%' was invisible and the round-8 'every script
  *     covered by construction' claim was false as written. The regex now
  *     carries the full derivation (see FOREIGN_NUMERAL_RE).
+ * (3) CALIBRATION RULING (orchestrator) — bare prose 'point(s)' with no
+ *     number was counted unparseable by round 8 ('That is a good point to
+ *     consider.' → {[], 1}), and G4's =1.0 floor made ANY candidate whose
+ *     coach said 'good point' hard-block: the gate was unusable on honest
+ *     coaching prose. RULING: points-family tokens are anchors/refusals
+ *     ONLY when a numeric neighbour (digit or word-number literal) is in
+ *     the adjacency window — 'points' is a unit only when attached to a
+ *     number. Scope: the standalone 'point'/'points' token (the only family
+ *     member that is ordinary English); 'pts'/'pp'/'bps'/'pct'/'percent'
+ *     and the multi-word forms keep invariant-v1 fail-closed treatment.
+ *     '12 points' / 'rose 12 percent pts' stay recognised-and-refused;
+ *     'at this point we should run it' is clean. Implemented in Layer 1
+ *     (numericNeighbourBefore); Layer 2 already requires a numeric literal
+ *     by construction.
  *
  * DOCUMENTED RESIDUALS — OUTSIDE the contract, pinned out-of-scope in tests:
  *  - bare numbers in clauses with NO anchor ('we ran 3 scenarios.') are not
@@ -254,16 +269,65 @@ const spansOverlap = (a: Span, b: Span): boolean => a.start < b.end && a.end > b
  * from a %-anchor). The multi-word alternatives ('percentage points',
  * 'basis points', 'percent points') still match FIRST at their own start
  * positions, so they are never split by the standalone token.
+ * ROUND 9: a standalone 'point'/'points' MATCH is demoted to prose (not an
+ * anchor) when no numeric neighbour precedes it — see detectAnchorTokens
+ * and the calibration ruling in the module doc.
  */
 const ANCHOR_TOKEN_RE =
   /％|%|٪|﹪|‰|percentage[\s-]*(?:points?|pts?)(?![a-z])|per[\s-]+cent(?:[\s-]*(?:points?|pts?))?(?![a-z])|percent(?:[\s-]*(?:points?|pts?))?(?![a-z])|basis[\s-]+points?(?![a-z])|(?<![a-z])points?(?![a-z])|(?<![a-z])bps(?![a-z])|(?<![a-z])pp(?![a-z])|(?<![a-z])pct(?![a-z])|(?<![a-z])pts?(?![a-z])/gi;
 
+/** ROUND 9 (calibration ruling): the standalone 'point'/'points' token only.
+ * Never matches the multi-word forms — the longest-first alternation in
+ * ANCHOR_TOKEN_RE consumes 'percentage points'/'basis points'/'percent
+ * points' whole, so a bare-points match is exactly the standalone token. */
+const BARE_POINTS_RE = /^points?$/i;
+
 function detectAnchorTokens(text: string): Span[] {
   const out: Span[] = [];
   for (const m of text.matchAll(ANCHOR_TOKEN_RE)) {
+    // ROUND 9 (calibration ruling — orchestrator): bare 'point'/'points' is
+    // ordinary prose far more often than it is a unit ('a good point to
+    // consider'), and G4's =1.0 floor hard-blocked every candidate whose
+    // coach used the idiom. The standalone points token is an anchor ONLY
+    // when a numeric neighbour sits in the adjacency window before it —
+    // 'points' is a unit only when attached to a number. Every OTHER anchor
+    // family member keeps invariant-v1 fail-closed treatment ('shown in
+    // pts', 'expressed as a percent', 'measured in percentage points'):
+    // those are unit tokens with no prose reading.
+    if (BARE_POINTS_RE.test(m[0]) && !numericNeighbourBefore(text, m.index)) continue;
     out.push({ start: m.index, end: m.index + m[0].length });
   }
   return out;
+}
+
+/** True when a numeric token — a digit in any script, a letter/other-number
+ * form, or a word-number from the closed lexicon — sits immediately before
+ * `pos` in the adjacency window: whitespace, at most one hyphen, one
+ * optional article (mirroring the forward tolerance matchAnchor /
+ * matchAnchorAfterWord give a number looking toward its anchor, so the two
+ * layers agree on '12 points', '3-point', '62\npoints', 'half a point').
+ * Layer 2 needs no equivalent check: it only ever matches an anchor FORWARD
+ * from a numeric literal, so its numeric neighbour holds by construction. */
+function numericNeighbourBefore(text: string, pos: number): boolean {
+  let i = pos;
+  const skipBack = (): void => {
+    while (i > 0 && /[ \t\r\n]/.test(text[i - 1])) i--;
+    if (i > 0 && text[i - 1] === '-') {
+      i--;
+      while (i > 0 && /[ \t\r\n]/.test(text[i - 1])) i--;
+    }
+  };
+  skipBack();
+  const art = /(?:^|[^a-z])(an?)$/i.exec(text.slice(Math.max(0, i - 4), i));
+  if (art !== null) {
+    i -= art[1].length;
+    skipBack();
+  }
+  if (i <= 0) return false;
+  const c = text[i - 1];
+  if (isDigit(c) || /[\p{Nd}\p{Nl}\p{No}]/u.test(c)) return true;
+  const w = /([a-z]+)$/i.exec(text.slice(Math.max(0, i - 16), i));
+  return w !== null && WORD_NUMBER_SET.has(w[1].toLowerCase());
 }
 
 // ---------- directional cues (backward window only — see module doc) ----------
@@ -306,6 +370,10 @@ const CORE_NUMBER_WORDS = [
  * see module doc. */
 const FRACTION_WORDS = ['half', 'third', 'thirds', 'quarter', 'quarters'];
 const FRACTION_SET = new Set(FRACTION_WORDS);
+/** ROUND 9: the whole closed lexicon, for the points-token neighbour check
+ * (numericNeighbourBefore) — derived from the same two arrays WORD_ALT is
+ * built from, never a re-enumeration. */
+const WORD_NUMBER_SET = new Set([...CORE_NUMBER_WORDS, ...FRACTION_WORDS]);
 
 const WORD_ALT = [...CORE_NUMBER_WORDS, ...FRACTION_WORDS]
   .sort((a, b) => b.length - a.length)
