@@ -93,8 +93,10 @@ jobs:
 
   # Full Test Suite (advisory): the complete `pnpm test -- --coverage` + Codecov
   # upload, relocated verbatim from the required job. NON-REQUIRED — surfaces the
-  # full baseline (currently 64 failing files / 274 failing tests) and coverage
-  # without blocking merges. Nothing here is skipped or weakened.
+  # full suite (all test files green since #493) and coverage without blocking
+  # merges. Coverage thresholds are a regression RATCHET at the measured
+  # baseline (see vitest.config.ts), so a red here means a REAL regression —
+  # new test failures or a coverage drop — not a stale aspiration.
   full-test-suite:
     name: Full Test Suite (advisory)
     runs-on: ubuntu-latest
@@ -119,6 +121,16 @@ jobs:
       - name: Upload coverage reports
         uses: codecov/codecov-action@v3
         if: always()
+        # NON-BLOCKING: tokenless v3 uploads are rate-limited by codecov.io
+        # (observed: exit 255, "429 Rate limit reached. Please upload with the
+        # Codecov repository upload token", run 29550676845) and no
+        # CODECOV_TOKEN secret exists in this repo, so this step fails on most
+        # runs regardless of test/coverage health. continue-on-error keeps the
+        # upload attempt (it sometimes lands) and keeps the failure VISIBLE as
+        # a step annotation, without letting upload flake redden the suite
+        # signal. To make it reliable: add a CODECOV_TOKEN secret and pass
+        # `token:` (and upgrade the action) — then remove this escape hatch.
+        continue-on-error: true
         with:
           files: ./coverage/coverage-final.json
           fail_ci_if_error: true
