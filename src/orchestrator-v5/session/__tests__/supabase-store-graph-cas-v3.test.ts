@@ -187,7 +187,7 @@ function makeStore(client: SupabaseClient, graphCasRpc?: GraphCasRpcMode): Supab
 const BASE_WRITE: SessionTurnWrite = {
   scenario_id: SCENARIO,
   turn_id: 'turn-1',
-  turn_class: 'draft_graph',
+  turn_class: 'handler',
   handler_id: null,
   request_hash: 'sha256:abc',
   response_emitted: true,
