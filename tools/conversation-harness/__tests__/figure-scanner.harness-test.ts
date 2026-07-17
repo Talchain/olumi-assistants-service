@@ -1526,13 +1526,11 @@ describe('round 10 corpus: ruling 2 — digit-bearing compound neighbours + the 
     expect(scanProseFigures('Good point about the 40% figure')).toEqual({ values: [40], unparseable: 0 });
   });
 
-  it('deliberate cost (fail-closed, visible): copula-adjacent %-figures anchor a singular point token', () => {
-    // 'the tipping point is 62%' is the same adjacency shape as 'points
-    // was 12%' — the ruling is direction-agnostic and unit-blind, so this
-    // honest idiom over-blocks. FLAGGED for recalibration if G4 starts
-    // blocking honest coaching prose on it (the r9 ruling's motive).
-    expect(scanProseFigures('The tipping point is 62%.')).toEqual({ values: [62], unparseable: 1 });
-  });
+  // The round-10 deliberate-cost pin that sat here ('The tipping point is
+  // 62%.' → {[62],1} — a copula-adjacent %-figure anchoring a singular point
+  // token) was SUPERSEDED by the round-11 ruling 1: the flagged recalibration
+  // happened, and singular 'point' NEVER forward-anchors. See the round 11
+  // corpus below for the replacement pins.
 });
 
 describe('round 10 corpus: ruling 3 — the article variant (a/an + singular point + movement cue)', () => {
@@ -1590,5 +1588,65 @@ describe('round 10: accepted residuals OUTSIDE the rulings (documented + pinned)
     // Mirrors the scanner's long-standing backward-only cue doctrine
     // ('a 20% drop' extracts +20).
     expect(scanProseFigures('their score is a point higher')).toEqual({ values: [], unparseable: 0 });
+  });
+});
+
+// ============================================================
+// ROUND 11 — FINAL CALIBRATION for the points-family. The r10 review found
+// the FORWARD window over-blocking canonical coach formatting ('The tipping
+// point is 62%.', 'Key points:\n1. ...'). Orchestrator rulings, implemented
+// EXACTLY (r10's copula extension beyond the ruling's letter is what caused
+// this round — no extensions here):
+//   (1) forward anchoring requires PLURAL 'points'; singular 'point' NEVER
+//       forward-anchors — and a forward-only-neighboured singular is FULLY
+//       prose (no demote-backstop), so 'The score at that point was 45.'
+//       stays clean;
+//   (2) a LIST-MARKER-SHAPED numeric token (^\d+[.)] at a line start) is
+//       never a forward numeric neighbour and never a figure; the colon
+//       connective never anchors across a newline;
+//   (3) the copula set (was/is/are/were) is retro-ratified for the PLURAL
+//       case only;
+//   (4) one adjective from the CLOSED list (full|entire|whole|single|half)
+//       may sit between a/an and singular 'point' in the article variant.
+// Anything new found from here defaults to DOCUMENTED RESIDUAL, not a new
+// mechanism.
+// ============================================================
+
+describe('round 11 corpus: ruling 1 — FORWARD anchoring requires PLURAL "points"', () => {
+  it('RULING clean set: singular "point" never forward-anchors (kills the r10 idiom over-blocks)', () => {
+    // Under r10 these scanned {[62],1} / {[],2} / {[],2} — the forward
+    // copula window anchored the singular token and G4 over-blocked
+    // canonical coach formatting. plural-only-forward-off (the r10
+    // regression) turns every one of these RED.
+    expect(scanProseFigures('The tipping point is 62%.')).toEqual({ values: [62], unparseable: 0 });
+    expect(scanProseFigures('The score at that point was 45.')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('the decimal point is 2 places left')).toEqual({ values: [], unparseable: 0 });
+  });
+
+  it('plural "points" keeps the forward window — ruling 3 retro-ratifies the copula set for the plural case', () => {
+    // 'the drop in points is 12' is the same leak as 'was' (r10 pin): the
+    // copula set (was/is/are/were) survives, scoped to PLURAL 'points'.
+    expect(scanProseFigures('the drop in points is 12')).toEqual({ values: [], unparseable: 2 });
+    expect(scanProseFigures('the drop in points was 12')).toEqual({ values: [], unparseable: 2 });
+    expect(scanProseFigures('points: 12')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('gate pin: the singular idiom no longer blocks G4 (the recalibration motive)', () => {
+    const d = gateCanonicalStateUse([gateTurn('The tipping point is 62%.', [62])]);
+    expect(d.details.figures_stated).toBe(1);
+    expect(d.details.traceable).toBe(1);
+    expect(d.value).toBe(1);
+  });
+
+  it('DOCUMENTED RESIDUAL (ruling 1 letter): a forward-only-neighboured singular is fully prose — its number is invisible', () => {
+    // 'the point was 12' has a genuine points-score reading, but the ruling
+    // is categorical (singular NEVER forward-anchors) and the fully-prose
+    // treatment is what keeps 'The score at that point was 45.' clean. The
+    // invisible number is the accepted price of un-blocking the idiom;
+    // registered in the README residual register.
+    expect(scanProseFigures('the point was 12')).toEqual({ values: [], unparseable: 0 });
+    // The backstop still bites when there is NO forward numeric neighbour:
+    // a demoted singular strands its clause-mates (r10 cost, kept pin).
+    expect(scanProseFigures('Good point about the 3 scenarios.')).toEqual({ values: [], unparseable: 1 });
   });
 });

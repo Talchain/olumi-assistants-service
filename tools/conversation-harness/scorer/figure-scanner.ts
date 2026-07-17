@@ -365,18 +365,28 @@ function detectAnchorTokens(text: string): AnchorDetection {
     // ordinary prose far more often than it is a unit ('a good point to
     // consider'), and G4's =1.0 floor hard-blocked every candidate whose
     // coach used the idiom. The standalone points token is an anchor ONLY
-    // when a numeric neighbour sits in the adjacency window — ROUND 10: in
-    // EITHER direction (the ruling's letter is direction-agnostic) —
-    // 'points' is a unit only when attached to a number. Every OTHER anchor
-    // family member keeps invariant-v1 fail-closed treatment ('shown in
-    // pts', 'expressed as a percent', 'measured in percentage points'):
-    // those are unit tokens with no prose reading.
-    if (
-      BARE_POINTS_RE.test(m[0]) &&
-      !numericNeighbourBefore(text, m.index, m[0]) &&
-      !numericNeighbourAfter(text, span.end)
-    ) {
-      demotedPoints.push(span);
+    // when a numeric neighbour sits in the adjacency window — 'points' is a
+    // unit only when attached to a number. Every OTHER anchor family member
+    // keeps invariant-v1 fail-closed treatment ('shown in pts', 'expressed
+    // as a percent', 'measured in percentage points'): those are unit
+    // tokens with no prose reading.
+    // ROUND 10 extended the window forward (direction-agnostic); ROUND 11
+    // (ruling 1) scopes the FORWARD window to PLURAL 'points': the singular
+    // forward-copula shape is the canonical coach idiom ('the tipping point
+    // is 62%'), and r10 over-blocked it. A singular 'point' whose ONLY
+    // numeric adjacency is forward is FULLY prose — not even demoted, so
+    // the ruling-2b backstop cannot strand its trailing number ('The score
+    // at that point was 45.' stays clean per the ruling's letter; the
+    // invisible-number price is a documented residual). Ruling 3
+    // retro-ratifies the copula set (was/is/are/were) for the plural case.
+    if (BARE_POINTS_RE.test(m[0]) && !numericNeighbourBefore(text, m.index, m[0])) {
+      const plural = /s$/i.test(m[0]);
+      if (!numericNeighbourAfter(text, span.end)) {
+        demotedPoints.push(span);
+      } else if (plural) {
+        anchors.push(span);
+      }
+      // else: singular + forward-only neighbour — fully prose (ruling 1).
       continue;
     }
     anchors.push(span);
