@@ -55,6 +55,8 @@ import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { isClarifyDimension, type ClarifyDimension } from '../clarify-v2/rubric.js';
 import {
   CLARIFY_V2_PROCEED_CHIP_ID,
+  composeClarifyV2DeclineResponse,
+  composeClarifyV2ReofferResponse,
   composeClarifyV2Response,
   decideClarifyV2Resume,
   decideClarifyV2Round1,
@@ -122,7 +124,13 @@ function roundStateFromPending(pa: PendingAction): ClarifyV2RoundState | null {
   // parsePendingAction already validated shape; the dimension filter here
   // is defence-in-depth that also narrows the string[] to the typed union.
   const asked: ClarifyDimension[] = action.asked_dimensions.filter(isClarifyDimension);
-  return { brief: action.brief, asked, round: action.round };
+  return {
+    brief: action.brief,
+    asked,
+    round: action.round,
+    // 1.152 (A1/A4): absent on pre-1.152 rows → not reoffered.
+    ...(action.reoffered === true ? { reoffered: true } : {}),
+  };
 }
 
 function buildClarifyPending(
@@ -141,6 +149,7 @@ function buildClarifyPending(
       brief: state.brief,
       asked_dimensions: state.asked,
       round: state.round,
+      ...(state.reoffered === true ? { reoffered: true } : {}),
     },
     preconditions: {},
     expires_at_turn_count: CLARIFY_V2_TURN_TTL,
@@ -149,18 +158,50 @@ function buildClarifyPending(
   };
 }
 
+interface ClarifyCommitOptions {
+  /** This turn's own pendings ([] releases; the ask arms persist the round). */
+  readonly pendingActions: readonly PendingAction[];
+  /** The prior turn's pendings for the carry-forward (hold-wipe class). */
+  readonly priorPendings: readonly PendingAction[];
+  /**
+   * Review fix A9 (1.152) — `scenarios.brief_text` is WRITE-ONCE at the
+   * RPC (`WHERE brief_text IS NULL OR brief_text = ''`; see
+   * supabase-store.ts append + migration 20260502120000): the FIRST write
+   * is permanent and every later write silently no-ops. The old ask-time
+   * seed therefore froze the PRE-ANSWER thin brief forever — the final
+   * answered brief could never land. Seeding now happens only at the
+   * flow's TERMINAL points:
+   *   - PROCEED: no seed here at all — the route threads `briefOverride`
+   *     into `dispatchDraftGraph`, whose commit already seeds
+   *     `effectiveBrief = briefOverride ?? message` (draft-graph-
+   *     dispatch.ts) — i.e. the FINAL answered brief, by construction.
+   *   - DECLINE: this option seeds the WORKING brief (the decline arm's
+   *     terminal state) so "draft it" later finds it via the C2
+   *     assembly's persisted_brief source.
+   * Ask commits pass nothing. Accepted residual (documented, not hidden):
+   * a round abandoned by pure TTL lapse leaves brief_text unseeded for
+   * that window — its only pre-draft reader, the C2 explicit-generate
+   * assembly, then falls back to its recent_turn source (the round-1 user
+   * message, brief-shaped by construction on the heuristic path);
+   * decision_review reads brief_text only post-analysis, unreachable
+   * before a draft exists.
+   */
+  readonly briefText?: string;
+  /** Review fix A1 (1.152): retire the released round on decline. */
+  readonly consumedPendingRefs?: readonly string[];
+}
+
 /**
- * Commit the clarify turn: question response + round-state pending +
- * write-once brief seed. Returns false on failure (caller degrades to
- * not-engaged).
+ * Commit a clarify-flow turn (ask / re-offer / decline) through the
+ * commit chokepoint. Returns the chokepoint's FINAL response, or null on
+ * failure (callers degrade per-arm).
  */
 async function commitClarifyTurn(
   response: OlumiResponse,
-  state: ClarifyV2RoundState,
   payload: MessageTurnPayload,
   requestId: string,
   startedAtMs: number,
-  priorPendings: readonly PendingAction[],
+  options: ClarifyCommitOptions,
 ): Promise<OlumiResponse | null> {
   try {
     // Review fix A7 (17 Jul): the chokepoint may APPEND to the committed
@@ -177,11 +218,8 @@ async function commitClarifyTurn(
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAtMs,
       handler_facts: [],
-      // Seed the write-once brief column with the WORKING brief so the
-      // explicit-generate assembly and downstream enrichers can find it
-      // even if the user never completes the clarify flow.
-      briefText: normaliseBriefText(state.brief).value,
-      pending_actions: [buildClarifyPending(state, payload, startedAtMs)],
+      ...(options.briefText !== undefined ? { briefText: options.briefText } : {}),
+      pending_actions: options.pendingActions,
       // HOLD-WIPE class (same fix as draft-graph-dispatch, task_2e1b8c87):
       // thread the prior turn's pendings so this commit's carry-forward
       // runs over the REAL prior set instead of silently wiping it. The
@@ -191,7 +229,10 @@ async function commitClarifyTurn(
       // retires the previous clarify round (same chip_id), wall/turn TTLs
       // decrement once, and lapses surface honestly. Non-mutating turn:
       // no graph_hash is threaded, so hash invalidation never fires here.
-      priorPendingActions: priorPendings,
+      priorPendingActions: options.priorPendings,
+      ...(options.consumedPendingRefs !== undefined
+        ? { consumedPendingRefs: options.consumedPendingRefs }
+        : {}),
       coaching_state: null,
       userMessage: payload.message,
     });
@@ -203,7 +244,7 @@ async function commitClarifyTurn(
         scenario_id: payload.scenario_id,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
-      'clarify_v2 — clarify-turn commit failed; degrading to not-engaged (draft proceeds as with the flag off)',
+      'clarify_v2 — clarify-turn commit failed; degrading (per-arm fallback; draft path never blocked)',
     );
     return null;
   }
@@ -224,12 +265,24 @@ function emitDecisionTelemetry(
       question_count: decision.questions.length,
       dimensions: decision.questions.map((q) => q.dimension),
     });
-  } else {
+  } else if (decision.kind === 'proceed') {
     emit(TelemetryEvents.V5ClarifyV2Proceeded, {
       request_id: requestId,
       scenario_id: payload.scenario_id,
       reason: decision.reason,
       resumed,
+    });
+  } else {
+    // 1.152 (A1/A4): decline + re-offer share one deflection event —
+    // `action` says what happened (release vs reoffer), `cue` says why
+    // (decline cue / question reply / bare ack). Fired AFTER a successful
+    // commit only, same A8 discipline as the ask event.
+    emit(TelemetryEvents.V5ClarifyV2Deflected, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      action: decision.kind === 'decline' ? 'release' : 'reoffer',
+      cue: decision.cue,
+      round: decision.kind === 'reoffer' ? decision.state.round : null,
     });
   }
 }
@@ -293,20 +346,71 @@ export async function tryClarifyV2Turn(
         state,
         message: payload.message,
         messageIsDraftShaped: isDraftShapedMessage(payload.message),
-        explicitGenerate: params.explicitGenerateBrief !== null,
+        explicitGenerateBrief: params.explicitGenerateBrief,
       });
       if (decision.kind === 'proceed') {
         emitDecisionTelemetry(decision, payload, requestId, true);
         return { kind: 'draft', briefOverride: decision.brief };
       }
+      if (decision.kind === 'decline') {
+        // Review fix A1 (1.152): release the round honestly. The commit
+        // retires the clarify pending (consumedPendingRefs — supersession
+        // cannot fire here because this turn persists no clarify pending),
+        // carries unrelated holds, and seeds the WORKING brief into the
+        // write-once brief_text column (the decline arm's terminal state,
+        // A9) so a later "draft it" finds it. Commit failure → null: the
+        // turn falls to normal routing (the LLM answers a "not now"
+        // conversationally); the live pending then dies by TTL.
+        const finalResponse = await commitClarifyTurn(
+          composeClarifyV2DeclineResponse(),
+          payload,
+          requestId,
+          startedAtMs,
+          {
+            pendingActions: [],
+            priorPendings: pendings,
+            consumedPendingRefs: [livePending.chip_id],
+            ...(normaliseBriefText(decision.brief).value !== undefined
+              ? { briefText: normaliseBriefText(decision.brief).value! }
+              : {}),
+          },
+        );
+        if (finalResponse === null) return null;
+        emitDecisionTelemetry(decision, payload, requestId, true);
+        return { kind: 'respond', response: finalResponse };
+      }
+      if (decision.kind === 'reoffer') {
+        // Review fixes A1/A4 (1.152): re-present the default-forward
+        // choice once per round. The re-persisted pending (same chip_id →
+        // supersession, no zombie twin) marks the re-offer spent; brief /
+        // asked / round are untouched, and NO brief_text seeds here (A9 —
+        // ask-class commit). Commit failure → null: falling to normal
+        // routing lets the LLM handle the user's question/ack; the prior
+        // pending was not consumed, so the round stays live.
+        const finalResponse = await commitClarifyTurn(
+          composeClarifyV2ReofferResponse(decision.cue),
+          payload,
+          requestId,
+          startedAtMs,
+          {
+            pendingActions: [buildClarifyPending(decision.state, payload, startedAtMs)],
+            priorPendings: pendings,
+          },
+        );
+        if (finalResponse === null) return null;
+        emitDecisionTelemetry(decision, payload, requestId, true);
+        return { kind: 'respond', response: finalResponse };
+      }
       const response = composeClarifyV2Response(decision.questions, decision.phase);
       const finalResponse = await commitClarifyTurn(
         response,
-        decision.state,
         payload,
         requestId,
         startedAtMs,
-        pendings,
+        {
+          pendingActions: [buildClarifyPending(decision.state, payload, startedAtMs)],
+          priorPendings: pendings,
+        },
       );
       // Commit failure on RESUME degrades to proceed-with-what-we-have
       // rather than null: the reply was an answer to OUR question; letting
@@ -337,11 +441,14 @@ export async function tryClarifyV2Turn(
   const response = composeClarifyV2Response(decision.questions, decision.phase);
   const finalResponse = await commitClarifyTurn(
     response,
-    decision.state,
     payload,
     requestId,
     startedAtMs,
-    pendings,
+    {
+      // Review fix A9 (1.152): NO briefText here — see ClarifyCommitOptions.
+      pendingActions: [buildClarifyPending(decision.state, payload, startedAtMs)],
+      priorPendings: pendings,
+    },
   );
   // Round-1 commit failure → silent draft (unchanged). Review fix A8: the
   // questions-emitted telemetry fires only AFTER a successful commit, so a

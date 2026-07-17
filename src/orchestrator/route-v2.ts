@@ -2419,10 +2419,23 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       const { tryClarifyV2Turn } = await import(
         '../orchestrator-v5/handlers/clarify-v2-dispatch.js'
       );
+      // A5 completion (1.152 behavioural pin): `isDraftGraphShape` collapses
+      // to false whenever ANY graph_state object is on the wire (its own
+      // `== null` term), so with only the gate fix above an EMPTY canvas
+      // still defeated round 1 via draftShaped:false — the pin went RED on
+      // exactly the target audience. Inside this flag-gated block the same
+      // shape heuristic is re-derived with the POPULATION judgement instead;
+      // the flag-off wire (and `isDraftGraphShape` itself) is untouched.
+      const clarifyDraftShaped =
+        isDraftGraphShape ||
+        (ingress.stage === 'frame' &&
+          (!isContinuationScenario || draftOfferMarker !== null) &&
+          ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
+          DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message));
       const cv2 = await tryClarifyV2Turn({
         payload: ingress,
         requestId,
-        draftShaped: isDraftGraphShape,
+        draftShaped: clarifyDraftShaped,
         explicitGenerateBrief:
           explicitGenerateDraft && explicitGenerateBrief !== null
             ? explicitGenerateBrief.brief

@@ -224,6 +224,12 @@ export type PendingActionAction =
       readonly asked_dimensions: readonly string[];
       /** Rounds asked so far, 1-based. */
       readonly round: number;
+      /**
+       * 1.152 (A1/A4): true once this round's single re-offer is spent
+       * (bare-ack calibration / not-an-answer guard). OPTIONAL so rows
+       * persisted before 1.152 parse as not-reoffered — never refused.
+       */
+      readonly reoffered?: boolean;
     }
   | {
       /**
@@ -621,6 +627,9 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     ) {
       return null;
     }
+    // 1.152 (A1/A4): optional re-offer marker; anything but a boolean (or
+    // absence) is a corrupted row and refused like the other fields.
+    if (a.reoffered !== undefined && typeof a.reoffered !== 'boolean') return null;
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.

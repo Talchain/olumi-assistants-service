@@ -258,16 +258,60 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     const chipIds = (body.suggested_actions as Array<{ id: string }>).map((a) => a.id);
     expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
     expect(chipIds.length).toBeGreaterThanOrEqual(3);
-    // The clarify turn COMMITS (turn_class clarify, round-state pending,
-    // write-once brief seed) so the next turn can resume.
+    // The clarify turn COMMITS (turn_class clarify, round-state pending)
+    // so the next turn can resume. Review fix A9 (1.152): the ask commit
+    // seeds NO brief_text — the column is write-once at the RPC, so an
+    // ask-time seed would freeze the PRE-ANSWER brief forever; the FINAL
+    // brief seeds at the flow's terminal points (draft dispatch / decline).
     expect(appendMock).toHaveBeenCalledTimes(1);
     const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
     expect(committed.turn_class).toBe('clarify');
     expect(committed.llm_calls_used).toBe(0);
-    expect(committed.briefText).toBe(THIN_BRIEF);
+    expect(committed.briefText).toBeUndefined();
     const pendings = committed.pending_actions as PendingAction[];
     expect(pendings).toHaveLength(1);
     expect(pendings[0]!.action.kind).toBe('clarify_v2_round');
+  });
+
+  // ── Review fix A5 (17 Jul) — behavioural pin (deferred from #497) ───────
+  it('A5: an EMPTY canvas ({nodes:[],edges:[]}) does NOT defeat clarify v2 — questions still engage', async () => {
+    clarifyV2EnabledForTest = true;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(THIN_BRIEF, {
+        graph_state: { nodes: [], edges: [] },
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    // Before A5 the gate was `graphState == null`, so the empty canvas the
+    // capability was built for silently disabled it (straight to draft).
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('?');
+    const chipIds = (body.suggested_actions as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+  });
+
+  it('A5 control: a POPULATED canvas keeps clarify v2 out (gate is population, not nullness)', async () => {
+    clarifyV2EnabledForTest = true;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(THIN_BRIEF, {
+        graph_state: {
+          nodes: [{ id: 'n1', kind: 'decision', label: 'Expand?' }],
+          edges: [],
+        },
+      }),
+    });
+    // A populated graph means the scenario has a model: clarify v2 (a
+    // strictly pre-draft capability) must not claim the turn. The pin is
+    // the ROUTING: no clarify chips on the wire.
+    expect(res.statusCode).toBeGreaterThanOrEqual(200);
+    const body = JSON.parse(res.body);
+    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).not.toContain(CLARIFY_V2_PROCEED_CHIP_ID);
   });
 
   it('FLAG ON: a complete brief proceeds SILENTLY — the draft dispatch is bit-identical to flag-off', async () => {
