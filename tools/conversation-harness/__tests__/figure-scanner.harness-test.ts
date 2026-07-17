@@ -1429,3 +1429,166 @@ describe('round 9: glue-shape dispositions for out-of-lexicon tokens (accepted r
     expect(scanProseFigures('between 〇 and 95%')).toEqual({ values: [], unparseable: 1 });
   });
 });
+
+// ============================================================
+// ROUND 10 — the r9-review P1: the calibration ruling was implemented
+// BACKWARD-ONLY. The ruling's letter said "a numeric neighbour in the
+// ADJACENCY WINDOW" — direction-agnostic — and round 9 built only
+// numericNeighbourBefore, so one family leaked in three shapes:
+//   (1) a numeric neighbour AFTER the points token ('The drop in points
+//       was 12.' scanned {[],0});
+//   (2) DIGIT-BEARING COMPOUND neighbours ('up 20-odd points' — '20-odd'
+//       starts with a digit, but only the last char/word was inspected);
+//   (3) the ARTICLE variant ('their score rose a point' — 'a' = one).
+// Plus the demote-path hazard: a demoted points token removed its clause
+// from reconciliation-v2 coverage, so 'points dropped from 12' left the
+// stranded 12 invisible.
+// ============================================================
+
+describe('round 10 corpus: ruling 1 — BIDIRECTIONAL adjacency (numeric neighbour AFTER the points token)', () => {
+  it('P1 family (verbatim from the r9 verdict): a number after the points token anchors it', () => {
+    // Round 9 scanned this {values:[], unparseable:0} — the points figure
+    // was invisible. EXACT COUNT 2 = the unconsumed anchor (invariant v1)
+    // + the stranded 12 in the anchor-bearing clause (invariant v2);
+    // bidirectional-off regresses this to 1 (demote-path backstop only).
+    expect(scanProseFigures('The drop in points was 12.')).toEqual({ values: [], unparseable: 2 });
+    expect(scanProseFigures('points was 12')).toEqual({ values: [], unparseable: 2 });
+    // Copula + word-number neighbour.
+    expect(scanProseFigures('the score in points is twelve')).toEqual({ values: [], unparseable: 2 });
+  });
+
+  it("the colon shape ('points: 12') anchors too — and ONLY the forward window can see it", () => {
+    // ':' is a clause boundary, so the demote-path backstop (ruling 2b)
+    // cannot reach across it: bidirectional-off regresses this to {[],0}.
+    // The forward-anchored token refuses via invariant v1.
+    expect(scanProseFigures('points: 12')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('a forward neighbour that is ITSELF %-anchored still anchors the points token (mutation-killer: bidirectional-off)', () => {
+    // The 12% values (consumed), so neither invariant-v2 nor the demote-path
+    // backstop fires — the forward adjacency window is the ONLY mechanism
+    // that refuses here. bidirectional-off regresses this to {[12],0}.
+    expect(scanProseFigures('the gap in points was 12%')).toEqual({ values: [12], unparseable: 1 });
+  });
+
+  it('both directions pinned side by side (the ruling is direction-agnostic)', () => {
+    expect(scanProseFigures('12 points')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('points was 12')).toEqual({ values: [], unparseable: 2 });
+    expect(scanProseFigures('points: 12')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('gate pin: the forward-shape points figure blocks G4 (was invisible = fail-open)', () => {
+    const d = gateCanonicalStateUse([gateTurn('The drop in points was 12. Your win rate is 62%.', [62])]);
+    expect(d.details.figures_stated).toBe(3);
+    expect(d.details.traceable).toBe(1);
+    expect(d.value).toBeCloseTo(1 / 3, 3);
+  });
+
+  it('a copula with NO number after it does not anchor (honest prose stays clean)', () => {
+    expect(scanProseFigures('the point is that we should decide')).toEqual({ values: [], unparseable: 0 });
+  });
+});
+
+describe('round 10 corpus: ruling 2 — digit-bearing compound neighbours + the demote-path backstop', () => {
+  it("P1 family: '20-odd' starts with a digit — a digit-bearing compound is a numeric neighbour", () => {
+    // Round 9 inspected only the last char/word before the token ('odd'),
+    // so 'up 20-odd points' scanned {[],0}. EXACT COUNT 2 = unconsumed
+    // anchor (v1) + stranded '20' (v2); compound-neighbour-off regresses
+    // this to 1 (demote-path backstop only).
+    expect(scanProseFigures('up 20-odd points')).toEqual({ values: [], unparseable: 2 });
+  });
+
+  it("word-number-bearing compounds count too ('up twenty-odd points' — the r9 disclosure gap)", () => {
+    // 'twenty-odd' carries a lexicon word. The compound-modifier carve-out
+    // keeps 'twenty' out of the literal stream (no cluster glue here), so
+    // the ONLY refusal is the anchored points token (v1): exact count 1.
+    // compound-neighbour-off regresses this to {[],0} — the r10
+    // mutation-killer for the word half of the compound branch.
+    expect(scanProseFigures('up twenty-odd points')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('demote-path backstop: a DEMOTED points token cannot disarm reconciliation v2', () => {
+    // 'dropped' is not in the forward window (it is not a copula), so the
+    // points token is demoted to prose — but the stranded 12 in its clause
+    // must still reconcile: {[], >=1}, never {[], 0}. Kills
+    // demoted-stranded-off.
+    expect(scanProseFigures('points dropped from 12 last week')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('points dropped from twelve last week')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('deliberate cost (fail-closed, visible): a bare number sharing a clause with a demoted points token blocks', () => {
+    // Same calibration cost class as 'Option 3 gives a 40% win rate' →
+    // 3 blocks: over-blocking faithful prose beats an invisible points
+    // figure ('points dropped from 12' is the leak this pays for).
+    expect(scanProseFigures('Good point about the 3 scenarios.')).toEqual({ values: [], unparseable: 1 });
+    // A CONSUMED (valued) figure sharing the clause stays clean — the cost
+    // is scoped to STRANDED tokens.
+    expect(scanProseFigures('Good point about the 40% figure')).toEqual({ values: [40], unparseable: 0 });
+  });
+
+  it('deliberate cost (fail-closed, visible): copula-adjacent %-figures anchor a singular point token', () => {
+    // 'the tipping point is 62%' is the same adjacency shape as 'points
+    // was 12%' — the ruling is direction-agnostic and unit-blind, so this
+    // honest idiom over-blocks. FLAGGED for recalibration if G4 starts
+    // blocking honest coaching prose on it (the r9 ruling's motive).
+    expect(scanProseFigures('The tipping point is 62%.')).toEqual({ values: [62], unparseable: 1 });
+  });
+});
+
+describe('round 10 corpus: ruling 3 — the article variant (a/an + singular point + movement cue)', () => {
+  it('RULING refuse set: a movement/delta cue in the adjacency window makes "a point" a figure (value = one)', () => {
+    // Each refusal is the anchored points token via invariant v1 (no
+    // literal exists — 'a' is the number). article-cue-off regresses every
+    // one of these to {[],0}.
+    expect(scanProseFigures('their score rose a point')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('improved by a point')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('the forecast slipped a point')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('down a point on the week')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('they added a point of margin')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('RULING clean set: bare rhetorical prose stays CLEAN (no regression on the calibration ruling)', () => {
+    expect(scanProseFigures('that raises a point about scope')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures("that's a point worth considering")).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('at this point we should run it')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('good point')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('That is a good point to consider.')).toEqual({ values: [], unparseable: 0 });
+  });
+});
+
+// ============================================================
+// ROUND 10 — (4) residual shapes OUTSIDE the three rulings, constructed
+// honestly and pinned per the round-9 4a disposition convention: every
+// known-invisible shape gets a pin or a fix — NO undocumented accepted
+// residuals (the r9-review complaint).
+// ============================================================
+
+describe('round 10: accepted residuals OUTSIDE the rulings (documented + pinned)', () => {
+  it('word-number-free movement prose stays invisible — no numeric token exists anywhere', () => {
+    // The rulings key on a NUMERIC NEIGHBOUR; prose that names no number
+    // at all has nothing to anchor. Fixing this means treating movement
+    // verbs alone as anchors — the round-8/9 over-block class again.
+    expect(scanProseFigures('points slid modestly')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('the score shed a few points')).toEqual({ values: [], unparseable: 0 });
+    expect(scanProseFigures('gained several points')).toEqual({ values: [], unparseable: 0 });
+  });
+
+  it('movement verbs OUTSIDE the closed ruling cue list stay invisible (article variant only)', () => {
+    // The ruling names a CLOSED cue list; growing it verb-by-verb is the
+    // hand-maintained-mirror trap. If the list ever grows, this pin forces
+    // the change to be a visible, deliberate diff.
+    expect(scanProseFigures('they won a point')).toEqual({ values: [], unparseable: 0 });
+  });
+
+  it('a cue outside the 3-word adjacency window stays invisible', () => {
+    // Same window convention as the directional-cue rule (cueSign): 3
+    // words, clause-bounded. 'rose' sits 4 words back here.
+    expect(scanProseFigures('the score rose by more than a point')).toEqual({ values: [], unparseable: 0 });
+  });
+
+  it('cue-AFTER-the-token article shapes stay invisible (the cue window looks backward from the article)', () => {
+    // Mirrors the scanner's long-standing backward-only cue doctrine
+    // ('a 20% drop' extracts +20).
+    expect(scanProseFigures('their score is a point higher')).toEqual({ values: [], unparseable: 0 });
+  });
+});

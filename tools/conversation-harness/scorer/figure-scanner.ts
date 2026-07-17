@@ -199,6 +199,56 @@
  *     (numericNeighbourBefore); Layer 2 already requires a numeric literal
  *     by construction.
  *
+ * ==========================================================================
+ * ROUND 10 — the r9 calibration ruling was implemented BACKWARD-ONLY; the
+ * ruling's letter ("a numeric neighbour in the ADJACENCY WINDOW") is
+ * direction-agnostic. One family, three shapes, plus a demote-path hazard —
+ * all closed per orchestrator rulings, implemented exactly:
+ * ==========================================================================
+ * (1) BIDIRECTIONAL adjacency (ruling 1): a numeric neighbour AFTER the
+ *     points token also anchors — numericNeighbourAfter mirrors the backward
+ *     window (whitespace, ≤1 hyphen) plus at most ONE connective: a copula
+ *     (was/is/are/were) or a colon. 'The drop in points was 12.' /
+ *     'points: 12' / 'the gap in points was 12%' all refuse. Forward
+ *     anchors are never consumed by Layer 2 (it only matches anchors forward
+ *     FROM a literal), so they refuse via invariant v1 — the correct outcome
+ *     for a pp-family figure, which never values.
+ * (2) DIGIT-BEARING COMPOUND neighbours (ruling 2): the backward check now
+ *     inspects the whole compound token before the points token, not its
+ *     last char/word — '20-odd' starts with a digit, so 'up 20-odd points'
+ *     refuses; word-number-bearing compounds ('twenty-odd') count too
+ *     (fail-closed direction; closes the r9 'up twenty-odd points'
+ *     disclosure gap).
+ *     DEMOTE-PATH BACKSTOP (ruling 2b): a DEMOTED points token keeps its
+ *     clause anchor-bearing for reconciliation v2 — demotion can never
+ *     disarm the stranded-token check ('points dropped from 12' fails
+ *     closed even though the points token itself is prose by the ruling).
+ * (3) ARTICLE variant (ruling 3): 'a'/'an' immediately before SINGULAR
+ *     'point' counts as a numeric neighbour (value = one) ONLY when a
+ *     movement/delta cue from the CLOSED ruling list (rose/fell/up/down/
+ *     gain(ed)/lost/improve(d)/drop(ped)/climb(ed)/slip(ped)/shed/added)
+ *     sits in the adjacency window — 3 words, clause-bounded, the same
+ *     convention as the directional-cue rule. 'their score rose a point' /
+ *     'improved by a point' refuse; 'that raises a point about scope' /
+ *     'good point' stay clean.
+ *
+ * Round-10 deliberate costs (fail-closed, visible, pinned):
+ *  - a bare number sharing a clause with a DEMOTED points token blocks
+ *    ('Good point about the 3 scenarios.') — same class as the round-7
+ *    bare-number cost; a CONSUMED figure in the clause stays clean ('Good
+ *    point about the 40% figure').
+ *  - a copula-adjacent %-figure anchors a singular point token ('The
+ *    tipping point is 62%.' → {[62], 1}) — the ruling is direction-agnostic
+ *    and unit-blind. FLAGGED for recalibration if G4 starts blocking honest
+ *    coaching prose on it.
+ * Round-10 accepted residuals (outside the rulings, pinned):
+ *  - word-number-free movement prose ('points slid modestly', 'shed a few
+ *    points') — no numeric token exists anywhere;
+ *  - movement verbs outside the CLOSED cue list ('they won a point');
+ *  - cues outside the 3-word window ('rose by more than a point');
+ *  - cue-after-the-token shapes ('a point higher') — the cue window looks
+ *    backward, mirroring the long-standing sign-cue doctrine.
+ *
  * DOCUMENTED RESIDUALS — OUTSIDE the contract, pinned out-of-scope in tests:
  *  - bare numbers in clauses with NO anchor ('we ran 3 scenarios.') are not
  *    figures; a clause comma shields ('Across 3 cohorts, 40% converted').
@@ -295,33 +345,85 @@ const ANCHOR_TOKEN_RE =
  * points' whole, so a bare-points match is exactly the standalone token. */
 const BARE_POINTS_RE = /^points?$/i;
 
-function detectAnchorTokens(text: string): Span[] {
-  const out: Span[] = [];
+interface AnchorDetection {
+  anchors: Span[];
+  /** ROUND 10 (ruling 2b): bare points tokens DEMOTED to prose — no numeric
+   * neighbour on either side, no article-cue. NOT anchors (invariant v1
+   * never fires on them — that was the round-8 over-block), but
+   * reconciliation v2 still treats their clauses as anchor-bearing for
+   * UNCONSUMED numeric tokens, so the demote-path can never disarm the
+   * stranded-token check ('points dropped from 12' fails closed). */
+  demotedPoints: Span[];
+}
+
+function detectAnchorTokens(text: string): AnchorDetection {
+  const anchors: Span[] = [];
+  const demotedPoints: Span[] = [];
   for (const m of text.matchAll(ANCHOR_TOKEN_RE)) {
+    const span = { start: m.index, end: m.index + m[0].length };
     // ROUND 9 (calibration ruling — orchestrator): bare 'point'/'points' is
     // ordinary prose far more often than it is a unit ('a good point to
     // consider'), and G4's =1.0 floor hard-blocked every candidate whose
     // coach used the idiom. The standalone points token is an anchor ONLY
-    // when a numeric neighbour sits in the adjacency window before it —
+    // when a numeric neighbour sits in the adjacency window — ROUND 10: in
+    // EITHER direction (the ruling's letter is direction-agnostic) —
     // 'points' is a unit only when attached to a number. Every OTHER anchor
     // family member keeps invariant-v1 fail-closed treatment ('shown in
     // pts', 'expressed as a percent', 'measured in percentage points'):
     // those are unit tokens with no prose reading.
-    if (BARE_POINTS_RE.test(m[0]) && !numericNeighbourBefore(text, m.index)) continue;
-    out.push({ start: m.index, end: m.index + m[0].length });
+    if (
+      BARE_POINTS_RE.test(m[0]) &&
+      !numericNeighbourBefore(text, m.index, m[0]) &&
+      !numericNeighbourAfter(text, span.end)
+    ) {
+      demotedPoints.push(span);
+      continue;
+    }
+    anchors.push(span);
   }
-  return out;
+  return { anchors, demotedPoints };
 }
 
+/** ROUND 10 (ruling 3): the CLOSED movement/delta cue list, verbatim from
+ * the orchestrator ruling — rose|fell|up|down|gain(ed)?|lost|improved?|
+ * dropp(ed)?|climb(ed)?|slipp(ed)?|shed|added (doubled-consonant stems read
+ * as their dictionary pairs: drop/dropped, climb/climbed, slip/slipped).
+ * CLOSED by ruling: growing it verb-by-verb is the hand-maintained-mirror
+ * trap; out-of-list movement verbs are a pinned accepted residual ('they
+ * won a point'). */
+const MOVEMENT_CUES = new Set([
+  'rose', 'fell', 'up', 'down',
+  'gain', 'gained', 'lost',
+  'improve', 'improved',
+  'drop', 'dropped',
+  'climb', 'climbed',
+  'slip', 'slipped',
+  'shed', 'added',
+]);
+
+/** ROUND 10 (ruling 2): the maximal compound token immediately before a
+ * position — letters/digits/letter-numbers/apostrophes joined by single
+ * hyphens ('20-odd', 'twenty-odd', "o'clock"). Inspected WHOLE: the round-9
+ * check looked only at the last char/word, so the digit head of '20-odd'
+ * was invisible. */
+const COMPOUND_TOKEN_BEFORE_RE =
+  /[\p{L}\p{Nd}\p{Nl}\p{No}'’](?:[\p{L}\p{Nd}\p{Nl}\p{No}'’]|-(?=[\p{L}\p{Nd}\p{Nl}\p{No}'’]))*$/u;
+
 /** True when a numeric token — a digit in any script, a letter/other-number
- * form, or a word-number from the closed lexicon — sits immediately before
+ * form, a word-number from the closed lexicon, or (ROUND 10, ruling 2) a
+ * COMPOUND carrying one ('20-odd', 'twenty-odd') — sits immediately before
  * `pos` in the adjacency window: whitespace, at most one hyphen, one
  * optional article (mirroring the forward tolerance matchAnchor /
  * matchAnchorAfterWord give a number looking toward its anchor, so the two
  * layers agree on '12 points', '3-point', '62\npoints', 'half a point').
+ * ROUND 10 (ruling 3): when the only thing before the token is an article
+ * ('a'/'an') and the token is SINGULAR 'point', a movement/delta cue in the
+ * 3-word clause-bounded window makes the article itself the number (one) —
+ * 'their score rose a point' anchors; 'that raises a point about scope'
+ * stays prose.
  * Layer 2 needs no equivalent check: it only ever matches an anchor FORWARD
  * from a numeric literal, so its numeric neighbour holds by construction. */
-function numericNeighbourBefore(text: string, pos: number): boolean {
+function numericNeighbourBefore(text: string, pos: number, anchorToken: string): boolean {
   let i = pos;
   const skipBack = (): void => {
     while (i > 0 && /[ \t\r\n]/.test(text[i - 1])) i--;
@@ -331,16 +433,68 @@ function numericNeighbourBefore(text: string, pos: number): boolean {
     }
   };
   skipBack();
+  let articleStart = -1;
   const art = /(?:^|[^a-z])(an?)$/i.exec(text.slice(Math.max(0, i - 4), i));
   if (art !== null) {
     i -= art[1].length;
+    articleStart = i;
     skipBack();
   }
-  if (i <= 0) return false;
-  const c = text[i - 1];
+  if (i > 0) {
+    // ROUND 10 (ruling 2): inspect the WHOLE compound token, not its last
+    // char/word. Digit-bearing compounds ('20-odd') and word-number-bearing
+    // compounds ('twenty-odd', 'mid-forty') are numeric neighbours — the
+    // fail-closed direction. The 64-char window is safe: a truncated head
+    // can only under-match, and a stranded digit head still fails closed
+    // via the demote-path backstop (ruling 2b).
+    const tok = COMPOUND_TOKEN_BEFORE_RE.exec(text.slice(Math.max(0, i - 64), i));
+    if (tok !== null) {
+      if (/[0-9\p{Nd}\p{Nl}\p{No}]/u.test(tok[0])) return true;
+      if (tok[0].toLowerCase().split(/[-'’]/).some((w) => WORD_NUMBER_SET.has(w))) return true;
+    }
+  }
+  // ROUND 10 (ruling 3 — article variant): 'a'/'an' immediately before
+  // SINGULAR 'point' counts as the number one ONLY when a movement/delta
+  // cue from the closed list is in the adjacency window (3 words,
+  // clause-bounded — the cueSign convention).
+  if (articleStart >= 0 && /^point$/i.test(anchorToken)) {
+    const words = precedingWords(text, articleStart, 3);
+    if (words.some((w) => MOVEMENT_CUES.has(w))) return true;
+  }
+  return false;
+}
+
+/** ROUND 10 (ruling 1 — the calibration ruling is direction-agnostic): true
+ * when a numeric token sits immediately AFTER `pos` in the adjacency
+ * window: whitespace, at most one hyphen, plus at most ONE connective — a
+ * copula (was/is/are/were) or a colon — so 'points was 12', 'points: 12'
+ * and 'the gap in points was 12%' anchor exactly like '12 points'. An
+ * explicit sign is transparent ('points was -12'). Forward anchors are
+ * never consumed by Layer 2 (it only matches anchors forward FROM a
+ * literal), so a forward-neighboured points token refuses via invariant v1
+ * — the correct outcome for a pp-family figure, which never values. */
+function numericNeighbourAfter(text: string, pos: number): boolean {
+  let i = pos;
+  const skip = (): void => {
+    while (i < text.length && /[ \t\r\n]/.test(text[i])) i++;
+  };
+  skip();
+  if (text[i] === '-' || text[i] === ':') {
+    i++;
+    skip();
+  } else {
+    const cop = /^(?:was|is|are|were)(?![a-z])/i.exec(text.slice(i, i + 5));
+    if (cop !== null) {
+      i += cop[0].length;
+      skip();
+    }
+  }
+  if (i < text.length && SIGN_CHARS.has(text[i])) i++;
+  const c = text[i];
+  if (c === undefined) return false;
   if (isDigit(c) || /[\p{Nd}\p{Nl}\p{No}]/u.test(c)) return true;
-  const w = /([a-z]+)$/i.exec(text.slice(Math.max(0, i - 16), i));
-  return w !== null && WORD_NUMBER_SET.has(w[1].toLowerCase());
+  const w = /^[a-z]+/i.exec(text.slice(i, i + 16));
+  return w !== null && WORD_NUMBER_SET.has(w[0].toLowerCase());
 }
 
 // ---------- directional cues (backward window only — see module doc) ----------
@@ -1175,7 +1329,7 @@ export function scanProseFigures(text: string): FigureScan {
     }
   }
 
-  const anchors = detectAnchorTokens(src);
+  const { anchors, demotedPoints } = detectAnchorTokens(src);
 
   // ---------- ROUND 6: ANCHOR RECONCILIATION (invariant v1) ----------
   // Every anchor token the dumb detector finds must have been consumed by
@@ -1196,7 +1350,18 @@ export function scanProseFigures(text: string): FigureScan {
   for (const lit of lits) {
     if (consumedLits.has(lit)) continue;
     const clause = clauseAround(boundaries, src.length, lit.start);
-    if (anchors.some((a) => spansOverlap(a, clause))) unparseable++;
+    // ROUND 10 (ruling 2b): a DEMOTED bare-points token keeps its clause
+    // anchor-bearing for this check — demotion can never disarm the
+    // stranded-token reconciliation ('points dropped from 12' fails closed
+    // even though the points token itself is prose by the calibration
+    // ruling). A CONSUMED (valued) figure sharing the clause stays clean
+    // ('Good point about the 40% figure').
+    if (
+      anchors.some((a) => spansOverlap(a, clause)) ||
+      demotedPoints.some((d) => spansOverlap(d, clause))
+    ) {
+      unparseable++;
+    }
   }
 
   return { values, unparseable };

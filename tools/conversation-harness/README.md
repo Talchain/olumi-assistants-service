@@ -496,7 +496,28 @@ Specific traps worth knowing about:
   `point(s)`**: it anchors ONLY with a numeric neighbour in the adjacency
   window (`12 points` still refuses; `that is a good point to consider` is
   prose and scans clean — under round 8 it hard-blocked G4's `= 1.0` floor,
-  making the gate unusable on honest coaching prose). See the module doc in
+  making the gate unusable on honest coaching prose). Round 10 makes that
+  ruling **direction-agnostic**, per its letter: a numeric neighbour AFTER
+  the token anchors too (`The drop in points was 12.` / `points: 12` /
+  `the gap in points was 12%` refuse — the forward window tolerates one
+  copula or colon), **digit-bearing and word-number-bearing compounds count
+  as neighbours** (`up 20-odd points`, `up twenty-odd points`), the
+  **article variant** makes `a`/`an` + singular `point` the number one when
+  a movement/delta cue from the closed ruling list is in the 3-word window
+  (`their score rose a point` refuses; `that raises a point about scope`
+  stays clean), and a **demoted points token keeps its clause anchor-bearing
+  for reconciliation v2** so demotion can never disarm the stranded-token
+  check (`points dropped from 12` fails closed; `Good point about the 40%
+  figure` stays clean because the 40 is consumed). Round-10 deliberate
+  costs (pinned): a stranded bare number in a demoted-points clause blocks
+  (`Good point about the 3 scenarios.`), and a copula-adjacent %-figure
+  anchors a singular `point` (`The tipping point is 62%.` → one phantom
+  untraceable — flagged for recalibration if G4 starts blocking honest
+  prose on it). Round-10 accepted residuals (pinned): word-number-free
+  movement prose (`points slid modestly`, `shed a few points`), movement
+  verbs outside the closed cue list (`they won a point`), cues outside the
+  3-word window, and cue-after-the-token shapes (`a point higher`). See the
+  module doc in
   `scorer/figure-scanner.ts` for the full doctrine, the deliberate calibration
   costs (a bare number sharing a clause with an anchor still over-blocks by
   design) and the documented out-of-contract residuals. **Out-of-contract
