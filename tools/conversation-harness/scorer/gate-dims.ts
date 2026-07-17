@@ -265,14 +265,14 @@ export function gateEntityResolution(turns: GateTurn[]): PromptDimScore {
   let resolved = 0;
   for (const t of act) {
     const labels = t.surfaces.optionLabels.filter((l) => l && l.trim().length > 2);
-    const named = labels.filter((l) => new RegExp(`\\b${escapeRe(l)}\\b`, 'i').test(t.userMessage));
+    const named = labels.filter((l) => wholeLabelRe(l).test(t.userMessage));
     if (named.length === 0) continue;
     denom++;
     // Chips ONLY (plus heldProposal below). Deliberately NOT the payload's own
     // label listing — see the anti-gaming note above: the payload names every
     // option on every analysed turn, so it certifies nothing about THIS mention.
     const structured = t.row.chips.map((c) => `${c.label} ${c.action ?? ''}`).join('   ');
-    const tiedInStructure = named.some((l) => new RegExp(`\\b${escapeRe(l)}\\b`, 'i').test(structured));
+    const tiedInStructure = named.some((l) => wholeLabelRe(l).test(structured));
     // Structure ONLY. A held proposal used to grant an unconditional pass here,
     // but heldProposal is a STAGING fact carrying no entity: the row is not
     // evidence that what was staged concerns the entity the user just named.
@@ -301,6 +301,25 @@ export function gateEntityResolution(turns: GateTurn[]): PromptDimScore {
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Whole-label regex with boundary assertions that work for ARBITRARY labels.
+ *
+ * `\b` asserts a word<->non-word TRANSITION, so wrapping a label in `\b…\b`
+ * silently never matches when the label's own edge is a non-word char: for
+ * '£50k plan' the leading `\b` needs a word char BEFORE the '£' (a space
+ * fails it), and for 'Option (B)' the trailing `\b` needs a word char AFTER
+ * the ')'. Such labels vanished from the G3 denominator — a turn that named
+ * them was scored as if it had named nothing.
+ *
+ * The boundary assertion is applied ONLY where the label's edge is a word
+ * char (there `\b` is exactly right, and word-char-edged labels behave
+ * precisely as before — no new matches inside longer words). A non-word edge
+ * is its own delimiter and gets no assertion. */
+function wholeLabelRe(label: string): RegExp {
+  const lead = /^\w/.test(label) ? '\\b' : '';
+  const trail = /\w$/.test(label) ? '\\b' : '';
+  return new RegExp(`${lead}${escapeRe(label)}${trail}`, 'i');
 }
 
 // ---------- G4: canonical-state use ----------

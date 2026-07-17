@@ -253,6 +253,37 @@ async function produceRawResponse(
   return model(system, user);
 }
 
+/** Fixture-level parallelism within one candidate spec. Bounded so a large
+ * fixture set cannot burst-open unbounded live-model connections; specs stay
+ * sequential so arms never contend with each other for the provider. */
+const FIXTURE_CONCURRENCY = 4;
+
+/**
+ * Map `items` through `fn` with at most `limit` calls in flight, returning
+ * results in ITEM ORDER (each result is written to its item's own slot, so
+ * completion order can never reorder the output). A rejection from `fn`
+ * propagates — same behaviour as the sequential `await` loop this replaces.
+ */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, () => worker()),
+  );
+  return out;
+}
+
 export interface RunCandidateEvalOptions {
   readonly specs: readonly CandidatePromptSpec[];
   readonly fixtures: readonly OrchestratorEvalFixture[];
@@ -325,32 +356,38 @@ export async function runCandidateEval(options: RunCandidateEvalOptions): Promis
   let turnsUsed = 0;
   const candidates: CandidateReport[] = [];
   for (const spec of specs) {
-    const results: CandidateFixtureResult[] = [];
-    for (const fixture of fixtures) {
-      turnsUsed += 1;
-      const raw = await produceRawResponse(spec, promptTexts.get(spec.label) ?? null, fixture, model);
-      if (!raw.ok || raw.text === null) {
-        results.push({
-          fixtureId: fixture.id,
-          extraction: 'model_error',
-          score: null,
-          pass: false,
-          error: raw.error ?? 'model returned no text',
-        });
-        continue;
-      }
-      const { text, extraction } = extractAssistantText(raw.text);
-      const score = applyExtractionContract(
-        scoreCandidate(fixture.analysis, {
-          label: spec.label,
-          note: `SEAM-1 ${spec.kind} candidate (${spec.ref})`,
-          source: spec.kind === 'mock' ? 'recorded' : 'live',
-          text,
-        }),
-        extraction,
-      );
-      results.push({ fixtureId: fixture.id, extraction, score, pass: score.pass, error: null });
-    }
+    // Fixtures run CONCURRENTLY within a spec (bounded — see
+    // FIXTURE_CONCURRENCY); mapWithConcurrency assembles results in fixture
+    // order regardless of completion order, so reports and ranking inputs are
+    // byte-identical to the sequential loop this replaces.
+    const results: CandidateFixtureResult[] = await mapWithConcurrency(
+      fixtures,
+      FIXTURE_CONCURRENCY,
+      async (fixture): Promise<CandidateFixtureResult> => {
+        turnsUsed += 1;
+        const raw = await produceRawResponse(spec, promptTexts.get(spec.label) ?? null, fixture, model);
+        if (!raw.ok || raw.text === null) {
+          return {
+            fixtureId: fixture.id,
+            extraction: 'model_error',
+            score: null,
+            pass: false,
+            error: raw.error ?? 'model returned no text',
+          };
+        }
+        const { text, extraction } = extractAssistantText(raw.text);
+        const score = applyExtractionContract(
+          scoreCandidate(fixture.analysis, {
+            label: spec.label,
+            note: `SEAM-1 ${spec.kind} candidate (${spec.ref})`,
+            source: spec.kind === 'mock' ? 'recorded' : 'live',
+            text,
+          }),
+          extraction,
+        );
+        return { fixtureId: fixture.id, extraction, score, pass: score.pass, error: null };
+      },
+    );
     const passCount = results.filter((r) => r.pass).length;
     // Fail-closed: a model_error turn (score === null) produced nothing, so
     // it counts as substance-failed — see CandidateReport for the why.

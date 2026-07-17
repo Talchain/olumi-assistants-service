@@ -226,6 +226,43 @@ describe('G3 entity-resolution', () => {
     expect(d.notes[0]).toMatch(/silence is not evidence/i);
   });
 
+  // \b asserts a word<->non-word TRANSITION, so \b…\b around a label whose
+  // edge is itself a non-word char ('£…', '…)') can never match — the turn
+  // silently vanished from the denominator and the gate scored a run that
+  // named entities as if it had named none (an unearned UNMEASURABLE, which
+  // the promotion verdict at least fails; worse, with one word-char-edged
+  // mention elsewhere the denominator undercounts and the ratio inflates).
+  it('label with a non-word LEADING edge (£50k plan) enters the denominator and resolves via a chip', () => {
+    const sCurrency = { optionLabels: ['£50k plan', 'Plan Beta'] };
+    const d = gateEntityResolution([
+      turn({ turn: 'T1', assistantText: 'Sure.', chips: [chip('Compare £50k plan')] }, 'tell me about the £50k plan', sCurrency),
+    ]);
+    expect(d.details.turns_naming_an_entity).toBe(1);
+    expect(d.value).toBe(1);
+  });
+
+  it('label with a non-word TRAILING edge (Option (B)) enters the denominator; prose echo still scores 0', () => {
+    const sParen = { optionLabels: ['Option (B)', 'Option (A)'] };
+    const d = gateEntityResolution([
+      turn(
+        { turn: 'T1', assistantText: 'Option (B) is an interesting option.', chips: [] },
+        'what about Option (B)?',
+        sParen,
+      ),
+    ]);
+    expect(d.details.turns_naming_an_entity).toBe(1);
+    expect(d.value).toBe(0);
+  });
+
+  it('word-char-edged labels keep strict \\b behaviour: no new matches inside longer words', () => {
+    // 'Plan Alpha' must NOT match inside 'Plan Alphabet' — the arbitrary-label
+    // boundary fix must not loosen the word-char edge.
+    const d = gateEntityResolution([
+      turn({ turn: 'T1', assistantText: 'x', chips: [chip('Compare Plan Alpha')] }, 'tell me about Plan Alphabet', s),
+    ]);
+    expect(d.value).toBeNull(); // nothing named => denominator 0 => UNMEASURABLE
+  });
+
   it('PII: no labels leak into details', () => {
     const d = gateEntityResolution([
       turn({ turn: 'T1', assistantText: 'x', chips: [chip('Compare Plan Alpha')] }, 'about Plan Alpha', s),

@@ -1171,18 +1171,10 @@ function glueKind(s: string): Glue {
  * (comma/semicolon/sentence stops), so a cue can never sign a figure the
  * anchor rule places in the next clause. The hedge bigram 'up to' is neutral. */
 function cueSign(text: string, clusterStart: number): 'neg' | 'pos' | 'none' | 'ambiguous' {
-  let boundary = 0;
-  for (let k = clusterStart - 1; k >= 0; k--) {
-    if (CUE_BOUNDARY.has(text[k])) {
-      boundary = k + 1;
-      break;
-    }
-  }
-  let words = text
-    .slice(boundary, clusterStart)
-    .toLowerCase()
-    .split(/[^a-z']+/)
-    .filter(Boolean);
+  // Clause-bounded word extraction is precedingClauseWords' job (same
+  // CUE_BOUNDARY set, same tokenisation) — consumed, not re-inlined, so the
+  // boundary/tokenisation rules cannot drift between the two call sites.
+  let words = precedingClauseWords(text, clusterStart);
   // Neutralise 'up to' so the hedge cannot read as a positive cue — the
   // shared cue+'to' bigram mechanism (round 11.5 extracted it so the
   // article-variant window inherits the same treatment; semantics here are

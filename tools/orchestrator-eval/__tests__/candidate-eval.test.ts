@@ -247,6 +247,51 @@ describe('POSITIVE CONTROL — the fetch counter can see a presence', () => {
   });
 });
 
+describe('bounded fixture concurrency — order-stable assembly', () => {
+  it('results stay in FIXTURE order under adversarial completion order, with 1 < in-flight <= 4', async () => {
+    vi.stubEnv(LIVE_ENV_KEY, '1');
+    const fixtures = loadFixtures();
+    expect(fixtures.length).toBeGreaterThanOrEqual(5); // need > the bound to see it
+
+    // Adversarial latency: the FIRST fixture takes longest, so completion
+    // order is roughly the REVERSE of fixture order. If results were pushed
+    // in completion order the first fixtureId would land last.
+    let arrivals = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const staggered: CandidateModel = async () => {
+      const arrival = arrivals++;
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, (fixtures.length - arrival) * 10));
+      inFlight--;
+      return {
+        ok: true,
+        text: JSON.stringify({ text: `answer ${arrival}`, insights: [], recommended_actions: [] }),
+        error: null,
+      };
+    };
+
+    const report = await runCandidateEval({
+      specs: [parsePromptSpec(`A=${promptFile}`)],
+      fixtures,
+      gateInput: { env: { [LIVE_ENV_KEY]: '1' }, argv: ['--live'] },
+      modelId: 'probe-model',
+      createLiveModel: async () => staggered,
+    });
+
+    // Order-stable: each result sits in its own fixture's slot, regardless of
+    // which call finished first.
+    expect(report.candidates[0]?.results.map((r) => r.fixtureId)).toEqual(fixtures.map((f) => f.id));
+    expect(report.turnsUsed).toBe(fixtures.length);
+    // Bounded concurrency, proven in BOTH directions: >1 (a sequential revert
+    // fails here), <=4 (an unbounded Promise.all over 5+ fixtures fails here).
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(4);
+    expect(fetchCalls).toBe(0);
+  });
+});
+
 describe('END-TO-END offline mock pipeline (the dry-run proof)', () => {
   it('a good-candidate arm passes on EVERY checked-in fixture, zero network', async () => {
     // Every fixture ships a recorded `good` candidate with expected=true.
