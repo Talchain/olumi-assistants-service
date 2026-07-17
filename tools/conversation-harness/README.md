@@ -46,6 +46,14 @@ scorer/dims.ts           v0 property-based dims (pure, self-tested)
 scorer/prompt-dims.ts    prompt-quality dims (1.70 v1): comparable scalars for A/B
 scorer/score-run.ts      per-run scorer — imports PRODUCTION guards from src/ (never copies)
 scorer/ab-verdict.ts     A/B verdict (1.70 v1): baseline vs candidate deltas + call
+                         (RANKING — use on the ITERATION partition only)
+scorer/holdout.ts        deterministic seeded iteration/holdout split + structural
+                         isolation (Wave1-L3) — see "Promotion gate" below
+scorer/gate-dims.ts      G1-G7 promotion gate dims with explicit floors (Wave1-L3)
+scorer/promotion-verdict.ts  THE promotion entrypoint (Wave1-L3): candidate vs
+                         baseline on the HOLDOUT -> machine-readable pass/fail
+scorer/unsupported-claim-adapter.ts  G5's checker — imports the PRODUCTION
+                         coaching-output-postcheck (never copies its patterns)
 scorer/llm-judge.ts      OPT-IN rubric LLM-judge (1.70 v1): specificity/actionability/
                          depth/no-filler, N reruns, mean+variance delta (live model)
 scorer/localize.ts       localization reporter v0
@@ -297,6 +305,347 @@ CANDIDATE_DIRS=runs/cand-1,runs/cand-2,runs/cand-3 \
   pnpm exec tsx scorer/ab-verdict.ts
 ```
 
+## Promotion gate: may this coach prompt ship? (Wave1-L3)
+
+`ab-verdict.ts` answers *"is A better than B?"*. That is a **ranking**, and a
+ranking cannot tell you whether the winner is good enough to put in front of a
+user. The promotion gate answers the other question — *"does this clear the
+floor?"* — and it is the thing that stands between a candidate prompt and the
+founder's manual test.
+
+### Doctrine: the holdout is a pass/fail FLOOR, never a ranking
+
+The scenario set is split in two:
+
+| partition | who reads it | what for |
+|---|---|---|
+| **iteration** (5 scenarios) | anyone, freely | tuning, staring at transcripts, `ab-verdict` ranking |
+| **holdout** (3 scenarios) | `promotion-verdict.ts` only | one pass/fail floor check per candidate |
+
+**The holdout answers exactly one question: is this candidate good enough to
+ship?** It does *not* answer "which candidate is best". The moment you rank
+candidates on the holdout you have begun tuning against it — pick the best of K
+on the holdout and the holdout is now training data, and its floor no longer
+generalises to anything.
+
+Two consequences, both enforced in code rather than asked for politely:
+
+- `computePromotionVerdict` takes **exactly one candidate**. There is no
+  array-of-candidates form, so best-of-K on the holdout is not expressible.
+- A **failed promotion is not a signal to iterate against**. Read the failing
+  dimension *name*, go back to the iteration partition, and fix that class of
+  problem there. Do not open the holdout transcripts. Every look costs you some
+  of the floor's meaning, and nothing tells you when it is spent.
+
+To compare candidates: `ab-verdict.ts` on the iteration partition. Bring the
+winner here, once.
+
+### Structural exclusion (code, not convention)
+
+`openScenarioSet('iterate')` returns a `ScenarioSet` in which holdout scenarios
+**do not exist**: absent from `ids()`, and `resolve(id)` / `load(id)` throw
+`HoldoutIsolationError` rather than returning a path or bytes. The mode is fixed
+at construction, the instance is frozen, and there is no setter, no override
+flag and no env escape hatch. An iterate-mode run has no function available to
+it that yields a holdout scenario — it cannot read one by accident, by loop, or
+by a well-meaning refactor.
+
+The exclusion is **symmetric**: `'holdout'` mode cannot read iteration
+scenarios either, so a promotion run cannot pad its floor with scenarios the
+prompt was tuned on. That is the leak everyone forgets.
+
+### The split is hash-bucketed, not shuffled — deliberately
+
+A scenario's partition is a pure function of `(seed, scenarioId)` **alone**:
+
+```ts
+partitionFor(id, seed) // -> 'iteration' | 'holdout'
+```
+
+It does not depend on which other scenarios exist. Adding, renaming or deleting
+a scenario **cannot** move a different scenario across the boundary.
+
+That property is the anti-gaming one. Under the obvious alternative
+(seeded-shuffle-then-take-N) every scenario's partition depends on the whole
+set — so anyone who overfits the prompt to a scenario, then finds it landed in
+the holdout, can add a throwaway scenario, reshuffle, and walk it back into the
+iteration partition. Hash-bucketing makes that impossible: the only ways to move
+scenario X are to rename X (visible in the diff — exactly the review signal we
+want) or to change the seed (which invalidates every prior verdict).
+
+The price is that holdout **size** is approximate, not an exact N.
+`assertSplitIntegrity` refuses a split too small to be a floor rather than
+letting a 1-scenario "holdout" quietly pass a candidate.
+
+**Changing `DEFAULT_SPLIT_SEED` re-partitions everything and invalidates every
+previously-recorded verdict.** It is a breaking change to the evidence base, not
+a tuning knob.
+
+### The gate dimensions
+
+Each is a scored dimension with an explicit floor. Aggregation across holdout
+scenarios is **worst-case, not mean**: the holdout asks "does this ever fail?",
+and the honest aggregator for that is the worst case. (A mean would also let you
+lift a failing candidate over the floor by padding the holdout with easy
+scenarios.)
+
+| dim | direction | floor | measures |
+|---|---|---|---|
+| `G1-decision-advancement` | higher | ≥ 0.6 | fraction of turns that moved the decision (L0 oracle / newly-staged proposal / genuinely new affordance) |
+| `G2-dispatch-accuracy` | higher | ≥ 0.9 | declared intent vs actual state effect, both directions |
+| `G3-entity-resolution` | higher | ≥ 0.9 | named entity tied to canonical state via structured output |
+| `G4-canonical-state-use` | higher | = 1.0 | every stated figure traceable to the turn's payload |
+| `G5-unsupported-claim` | lower | = 0 | production coaching-postcheck violations |
+| `G6-dead-end` | lower | ≤ 0.1 | turns leaving no next action |
+| `G7-correction-burden` | lower | ≤ 0.5 | redundant re-asks per coach turn |
+| `OPS-latency-median` | lower | non-inferiority | vs baseline, within existing `NOISE_THRESHOLD` |
+| `OPS-cost-tokens` | lower | non-inferiority | vs baseline; **reuses** `ab-verdict.totalTokensFromRows` (F14) |
+
+Latency and cost have no absolute floor — "2400ms" is only good or bad relative
+to what we ship today — so they are gated as **non-inferiority vs the baseline**,
+using `ab-verdict`'s existing per-dim noise thresholds so rerun jitter does not
+block a good prompt.
+
+**Cost reuses the F14 accounting; it does not reimplement it.** A run is
+cost-unmeasurable if *any* cost-bearing turn is incomplete — a partial total is
+not a comparable total, and the F14 bug (the *less-measured* arm ranking
+*cheaper*) would be at its most expensive on the promotion path, the one path
+where being wrong ships a prompt. There must be exactly one answer to "what did
+this run cost, and is that answer trustworthy?"
+
+### Anti-gaming: how each dimension resists a letter-vs-intent transcript
+
+An adversarial reviewer will try to build a transcript that satisfies the letter
+of each dimension while violating its intent. Three rules, obeyed by every dim:
+
+1. **Score state, not prose.** No dimension is satisfied by the assistant
+   *saying* it did something. Advancement and dispatch are read off the L0
+   mutation oracle (the DB graph sha actually moved). `"I've updated your
+   model"` advances nothing. Prose is scored only where prose is the artifact
+   under test (G5), and there only negatively.
+2. **Silence is not a pass.** The classic gaming move is an empty transcript: no
+   numbers ⇒ no untraceable numbers ⇒ "perfect" grounding. So every ratio dim is
+   **UNMEASURABLE (null)** when its denominator is empty, and the verdict
+   **fails on null**. A silent transcript fails; it does not ace.
+3. **Repetition is not progress.** Re-offering the same chip or re-asking the
+   same question scores as a dead end / correction burden, never as an
+   affordance. Grounded in an observed live defect (identical chip 6× in one
+   conversation). Semantic chip keys are used, so regenerated chip ids cannot
+   disguise a repeat.
+
+Specific traps worth knowing about:
+
+- **G3 does not accept the analysis payload as evidence of resolution.** The
+  payload lists *every* option on every analysed turn, so accepting it would
+  auto-resolve every entity on every analysed turn — a 1.000 that means nothing.
+  Evidence must be something the system could only have produced *by* resolving
+  the user's specific mention — in practice a chip that NAMES the entity. Prose
+  echo is string handling, not resolution — it is exactly what a model does when
+  it has *not* looked anything up. A bare `held_proposal` is **not** evidence
+  either: it is a staging fact with no entity attached, so it certifies nothing
+  about the mention on this turn. (It granted an unconditional pass until the
+  review of this lane; that was the same entity-blind free pass G3 refuses for
+  the payload. A held proposal concerning the named entity still scores, via the
+  chip that offers it.)
+- **G4 is scored per figure, not per turn**, so one turn inventing nine numbers
+  cannot hide behind eight clean turns. Only the turn's *own* payload counts — a
+  number that was canonical three turns ago is a staleness leak.
+- **G4 reads the whole numeric literal, and compares it rounded.** The figure
+  scanner parses integers, decimals and thousands-grouped figures, anchored on
+  `%` or "percent" (`62.5%` → `62.5`, not `5`). Because `payloadPercentages` is
+  built with `Math.round`, the stated figure is rounded through the *same*
+  function before lookup — otherwise a faithful `62.5%` restating a canonical
+  `0.625` (surfaced as `63`) would score 0. This tolerates restated precision,
+  never an invented value.
+- **G4's extractor fails closed BY CONSTRUCTION (rounds 6–7).** After five
+  review rounds each found new invisible figure shapes, extraction moved to
+  reconciliation invariants: a deliberately dumb Layer-1 detector finds *every*
+  percent-anchor token (`%`, `％`, `٪`, `﹪`, `‰`, percent / per cent /
+  per-cent / percentage point(s) / percent pt(s) / basis point(s) / pp / pct /
+  pts / bps — any case, hyphen/newline-separated), and every Layer-1 anchor
+  must be consumed by exactly one Layer-2 outcome (a traced value or an
+  explicit `unparseable`) — an unconsumed anchor counts untraceable, so an
+  unknown future phrasing *blocks* instead of vanishing. Round 7 added
+  **numeric-token accounting** after review proved anchor accounting alone was
+  still fail-open for figures *sharing* one anchor (`between ninety and 95%`
+  scanned as a clean `[95]`): every numeric token — digit runs, common Unicode
+  numerals/fractions, and a closed word-number lexicon — must ALSO be consumed
+  by exactly one outcome when it shares a clause with an anchor. Word-number
+  and foreign-numeral bounds make the whole anchored form refuse; a stranded
+  bare token in an anchor-bearing clause fails closed (clause commas shield,
+  Oxford-list commas do not). Percentage-point figures (including `percent
+  pts`, `bps`) are a distinct unit and never trace against a `%` canonical —
+  and a pp delta glued to a `%` level (`dropped 3 percentage points to 55%`)
+  refuses the delta while still extracting the level. Round 8 closed three
+  recognizer edges without weakening the construction: the **fraction-word
+  carve-out is glue-conditioned** (`between a third and 95%` refuses whole;
+  partitive prose like `half the users churned` / `a third of users hit 40%`
+  stays clean), the **foreign-numeral class is derived from Unicode
+  properties** instead of a hand-enumerated 3-range mirror
+  (Devanagari/Thai/Bengali/Tamil/superscript runs were invisible while the
+  Arabic-Indic control passed — mirror drift reading as green), and **bare
+  `point`/`points` joins the pp family in both layers** (`up 12 points` was
+  invisible across a comma/sentence boundary while `12 pts` refused). Round 9
+  closed the same two edge classes inside the round-8 fixes themselves: the
+  **two hyphen carve-outs are glue-conditioned** exactly like the
+  fraction-word carve-out (`between twenty-odd and 95%` / `a sub-ten–95%
+  range` had discarded the word token; `a one-off gain` stays clean), and the
+  foreign-numeral derivation now carries **the full `\p{N}` = Nd ∪ Nl ∪ No**
+  (round 8 omitted `\p{Nl}`, so Roman glyphs `Ⅳ`/`Ⅻ` and Han `〇` were
+  invisible). Round 9 also implements a **calibration ruling on bare
+  `point(s)`**: it anchors ONLY with a numeric neighbour in the adjacency
+  window (`12 points` still refuses; `that is a good point to consider` is
+  prose and scans clean — under round 8 it hard-blocked G4's `= 1.0` floor,
+  making the gate unusable on honest coaching prose). Round 10 makes that
+  ruling **direction-agnostic**, per its letter: a numeric neighbour AFTER
+  the token anchors too (`The drop in points was 12.` / `points: 12` /
+  `the gap in points was 12%` refuse — the forward window tolerates one
+  copula or colon), **digit-bearing and word-number-bearing compounds count
+  as neighbours** (`up 20-odd points`, `up twenty-odd points`), the
+  **article variant** makes `a`/`an` + singular `point` the number one when
+  a movement/delta cue from the closed ruling list is in the 3-word window
+  (`their score rose a point` refuses; `that raises a point about scope`
+  stays clean), and a **demoted points token keeps its clause anchor-bearing
+  for reconciliation v2** so demotion can never disarm the stranded-token
+  check (`points dropped from 12` fails closed; `Good point about the 40%
+  figure` stays clean because the 40 is consumed). Round-10 deliberate
+  costs (pinned): a stranded bare number in a demoted-points clause blocks
+  (`Good point about the 3 scenarios.`), and a copula-adjacent %-figure
+  anchored a singular `point` (`The tipping point is 62%.` → one phantom
+  untraceable — **recalibrated in round 11: that over-block is dead**).
+  **Round 11 (FINAL points-family calibration, orchestrator rulings
+  implemented exactly):** forward anchoring requires **PLURAL `points`** —
+  singular `point` never forward-anchors, and a singular whose only
+  numeric adjacency is forward is FULLY prose (`The tipping point is
+  62%.` → `{[62],0}`, `The score at that point was 45.` clean); the
+  copula set (was/is/are/were) is retro-ratified for the plural case only
+  (`the drop in points is 12` refuses). **List markers never
+  forward-anchor**: a `^\d+[.)]`-shaped token at a line start is
+  classified a marker (never a figure, never strandable), a numeric token
+  immediately after a newline is never a forward neighbour, and the colon
+  connective never anchors across a newline (`Key points:\n1. Your win
+  rate is 62%.` → `{[62],0}`; `A few points:\n1) run it again\n2) check
+  the 40% figure` → `{[40],0}`) — with an **anchor-follow guard** (a
+  marker-shaped run abutting an anchor — `62. points`, `62.%` — keeps its
+  released-punct fail-closed refusal; the round-6 invariant generator
+  caught the unguarded rule live). The **article variant admits ONE
+  adjective from the closed list** (full|entire|whole|single|half): `rose
+  an entire point` / `gained a full point` refuse; `an important point
+  about scope` stays prose. From round 11 the default disposition for any
+  new points-family shape is **DOCUMENTED RESIDUAL** (register below),
+  not a new mechanism. **Round 11.5 (bounded bigram closure — the
+  r11-review P1, ratified; NOT a new calibration round):** the article-cue
+  window inherits the **cue+`to` hedge-bigram neutralisation** cueSign has
+  carried since round 5, via ONE shared mechanism (`dropCueToBigrams` —
+  each window keeps its own closed cue set, no second list): `Up to a
+  point, more simulations help` / `That is true up to a point.` / `It
+  comes down to a point of principle.` now scan `{[],0}` while `rose a
+  point` / `down a point on the week` keep refusing; plus two register
+  rows (P2, existing behaviour pinned) for the plausible-coach-prose
+  members of the demote-backstop cost class — `You make three good
+  points.` and `It all points to option 3.` block (accepted costs;
+  `Everything points to a 30% shortfall.` stays clean, the figure is
+  consumed). Round-10 accepted residuals (pinned): word-number-free
+  movement prose (`points slid modestly`, `shed a few points`), movement
+  verbs outside the closed cue list (`they won a point`), cues outside the
+  3-word window, and cue-after-the-token shapes (`a point higher`). See the
+  module doc in
+  `scorer/figure-scanner.ts` for the full doctrine, the deliberate calibration
+  costs (a bare number sharing a clause with an anchor still over-blocks by
+  design) and the documented out-of-contract residuals. **Out-of-contract
+  residuals, accepted scope (rounds 8–9):** ordinal/quantity words outside
+  the closed cardinal lexicon (`fifth`, `dozen`, `twice`) are not numeric
+  tokens — growing the lexicon word-by-word is the hand-maintained-mirror
+  trap — and round 9 pins the **glue shapes** explicitly (`between a fifth
+  and 95%` stays out of contract; glue-shape dispositions do not inherit
+  from partitive ones). **Lo-script numerals** (Han ideographs `九五`) are
+  letters, not numbers, to Unicode — no property isolates them, and the
+  glyphs double as ordinary words in CJK text — pinned as the residual's
+  boundary next to the covered `Nl` class (`〇` refuses). The comma
+  **clause-straddle escape** (`roughly a third, maybe 95%` — identical
+  for its digit twin `roughly 33, maybe 95%`) is round-5 shield doctrine,
+  filed as a follow-up, deliberately untouched here.
+- **G5 is a count, not a rate**, so padding a run with silent turns cannot
+  dilute a violation.
+- **G2 is symmetric** — "always mutate" fails the coach direction and "never
+  mutate" fails the edit direction, so there is no trivially-safe policy.
+- **The floors interlock.** A prompt that avoids numbers to dodge G4 must still
+  clear G1 and G6 on its own merits; a prompt that asks nothing to dodge G7 is a
+  dead end under G6. No single-dimension policy clears all of them.
+
+### Figure-scanner RESIDUAL REGISTER (points-family, final calibration — round 11)
+
+Round 11 is the **final calibration round for the points-family**: from here,
+the default disposition for any newly found shape is **DOCUMENTED RESIDUAL**
+(a row here + a pin in `figure-scanner.harness-test.ts`), **not a new
+mechanism**. Every row is pinned. Round 11.5 is the one **ratified
+exception** — a bounded closure applying the EXISTING cueSign cue+`to`
+neutralisation to the article window that had missed it (a pre-existing r10
+gap; shared mechanism, no new list) — plus the two P2 rows below.
+
+**Known over-blocks (deliberate costs — fail-closed, visible, ACCEPTED):**
+
+| shape | scan | why accepted |
+|---|---|---|
+| `Two quick points: 60% of runs pass.` | `{[60],2}` | same-line colon + plural + non-list-marker number forward-anchors; the 60 still values (ruling 5) |
+| `The key points are 3: cost, speed, and risk.` | `{[],2}` | enumeration-count reads as a points figure (ruling 5) |
+| `Good point about the 3 scenarios.` | `{[],1}` | r10 demote-backstop cost, kept — a stranded bare number beside a demoted `point` blocks |
+| `You make three good points.` | `{[],1}` | same demote-backstop class (r11.5 row): the word-number `three` strands beside the demoted plural — accepted cost, plausible coach prose |
+| `It all points to option 3.` | `{[],1}` | same demote-backstop class (r11.5 row): the option ordinal strands beside the demoted verb `points` — accepted cost; `Everything points to a 30% shortfall.` → `{[30],0}` (consumed figure, contrast pin) |
+| `It comes down to a single point of principle.` / `up to a single point` | `{[],1}` | adjective-interposed idiom (r11.5 orchestrator row): the closed-list adjective re-arms the movement-cue read past the bigram neutralisation — accepted cost (rare double-idiom shape), pinned |
+| `Option 3 gives a 40% win rate` | `{[40],1}` | round-7 bare-number cost, kept |
+
+**Known invisibles (accepted — the rulings' letter):**
+
+| shape | scan | why accepted |
+|---|---|---|
+| `the point was 12` / `The score at that point was 45.` | `{[],0}` | singular never forward-anchors (ruling 1); the fully-prose treatment is what un-blocks the coach idiom `The tipping point is 62%.` |
+| `points\n12` | `{[],0}` | a token immediately after a newline is never a forward neighbour (ruling 2) |
+| line-start `62.` reading as a genuine figure with no abutting anchor | marker | classified list formatting (ruling 2); a marker-shaped run **abutting an anchor** (`62. points`, `62.%`) still refuses |
+| `points slid modestly` / `shed a few points` / `gained several points` | `{[],0}` | no numeric token exists anywhere (r10) |
+| `they won a point` (verbs outside the closed cue list) | `{[],0}` | closed list by ruling — growing it is the mirror trap (r10) |
+| `rose by more than a point` (cue outside the 3-word window) | `{[],0}` | window convention shared with `cueSign` (r10) |
+| `a point higher` (cue after the token) | `{[],0}` | backward-only cue doctrine (r10) |
+
+Out-of-contract residuals for the wider scanner (ordinal words, Lo-script
+numerals, the comma clause-straddle) are documented in the G4 bullet above and
+in the `figure-scanner.ts` module doc — they predate round 11 and are pinned.
+
+### Fail-closed
+
+Every path that is not an affirmative, fully-measured pass is a **BLOCK**:
+
+| condition | outcome |
+|---|---|
+| any dim null (unmeasurable) on the candidate | BLOCK |
+| no unsupported-claim checker wired | BLOCK ("we did not check" ≠ clean) |
+| a holdout scenario missing from either side | BLOCK |
+| candidate supplies non-holdout scenarios | BLOCK |
+| cost-bearing turn incomplete (F14) | BLOCK, never "cheaper" |
+| mode is not `'holdout'` | throws |
+| split is degenerate | throws |
+
+`promote` is only ever `true` when every floor was affirmatively cleared on
+measured data. There is no "inconclusive ⇒ ship" edge.
+
+### Running it
+
+```bash
+# each side is a dir of per-scenario run dirs: <side>/<scenario-id>/{turns,l0,journey.json,scores.json}
+# score-run.ts must have been run on each (the OPS metrics read scores.json rows)
+BASELINE_RUNS=runs/base CANDIDATE_RUNS=runs/cand \
+  pnpm exec tsx tools/conversation-harness/scorer/promotion-verdict.ts
+```
+
+Writes `promotion-verdict.json` + `.md` to `PROMOTION_OUT` (default:
+`CANDIDATE_RUNS`). **Exits 0 only on PROMOTE, 1 on BLOCK**, so CI cannot ignore
+it. The holdout ids come from the split over the real `journeys/` dir opened in
+`'holdout'` mode — the CLI has no flag to widen that, by design.
+
+**PII:** the verdict artifact carries dim names, counts and turn ids only —
+never factor labels, label-derived node ids, or decision values. G5 returns the
+production violation *tag* (a closed telemetry-safe enum), never prose.
+
 ## Staging-mode discipline (when you must)
 
 1. **Quiesce**: no open canvas tab on a harness scenario — a live UI tab
@@ -325,8 +674,19 @@ script here.
 
 ## Gates
 
-- `tsconfig.build.json` includes `src/**` only — this directory is outside the
-  build/typecheck gate (verified).
+- **Typecheck (Wave1-L3): `pnpm harness:typecheck`.** `tsconfig.build.json`
+  includes `src/**` only, and the root `tsconfig.json` includes `src`, `tests`,
+  `*.config.ts` and `sdk` — `tools/**` appears in NEITHER, and vitest runs this
+  code through esbuild (types stripped, never checked). So until Wave1-L3 a type
+  error in `scorer/` could not fail any gate. `tsconfig.json` in this directory
+  closes that for the harness; it is verified by injecting a deliberate type
+  error and confirming the new gate fails while both repo gates stay green.
+  ```bash
+  pnpm harness:typecheck   # tsc -p tools/conversation-harness/tsconfig.json --noEmit
+  pnpm harness:test        # vitest run --config tools/conversation-harness/vitest.config.ts
+  ```
+  The rest of `tools/**` remains outside any typecheck gate — out of this lane's
+  scope, but worth a lane of its own.
 - `test:required` DOES collect `tools/**` test globs, so the self-tests are
   named `*.harness-test.ts` (not collected by `**/*.{test,spec}.*`) and run via
   their own config — deliberately NOT wired into the required gate:
