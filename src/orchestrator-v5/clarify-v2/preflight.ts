@@ -104,9 +104,41 @@ export const CLARIFY_V2_BARE_ACK_PATTERN = /^\s*(?:ok(?:ay)?|sure|fine)\s*[.!]?\
  * accepts process objects (answer / do this / continue) — "I don't want
  * to expand into Germany" is a statement about the DECISION and must fold
  * into the brief, not release the round.
+ *
+ * 1.152(i) (#498-review P2) — widened for genuine declines the first cut
+ * missed, still anchored, still process-object-only:
+ *   - bare no-forms ("no", "No.", "nope", "nah") and "no thanks" /
+ *     "no thank you" (the politeness TAIL now carries the whole decline
+ *     when the cue is a bare no);
+ *   - "cancel it/this/that" (process object on the cancel arm — "the
+ *     options are to cancel the contract or…" stays an answer because the
+ *     pattern is anchored and 'the contract' is not an accepted object);
+ *   - "let's not (do this/that | continue | bother) (now/yet)?" — bare
+ *     "let's not" included; "let's not expand into Germany" is about the
+ *     DECISION and still folds as an answer (unaccepted object);
+ *   - a leading softener adverb ("actually/honestly hold off",
+ *     "Actually, no").
  */
 export const CLARIFY_V2_DECLINE_PATTERN =
-  /^\s*(?:no[,.\s]+)?(?:i\s+)?(?:(?:please\s+)?hold\s+off(?:\s+for\s+now)?|not\s+(?:now|yet|right\s+now)|don'?t\s+want\s+to(?:\s+answer(?:\s+(?:these|those|the|any))?(?:\s+questions?)?|\s+do\s+this(?:\s+(?:now|yet))?|\s+continue)?|stop|cancel|(?:maybe\s+)?later|wait)\s*[,.!]?\s*(?:please|thanks|thank\s+you)?\s*[.!]?\s*$/i;
+  /^\s*(?:(?:actually|honestly)[,\s]+)?(?:no[,.\s]+)?(?:i\s+)?(?:(?:please\s+)?hold\s+off(?:\s+for\s+now)?|not\s+(?:now|yet|right\s+now)|don'?t\s+want\s+to(?:\s+answer(?:\s+(?:these|those|the|any))?(?:\s+questions?)?|\s+do\s+this(?:\s+(?:now|yet))?|\s+continue)?|let'?s\s+not(?:\s+(?:do\s+(?:this|that)|continue|bother)(?:\s+(?:now|yet|right\s+now))?)?|stop|cancel(?:\s+(?:it|this|that))?|(?:maybe\s+)?later|wait|no|nope|nah)\s*[,.!]?\s*(?:please|thanks|thank\s+you)?\s*[.!]?\s*$/i;
+
+/**
+ * 1.152(i) (#498-review P3, decision PINNED here): a HEDGED proceed —
+ * "not sure — maybe just draft it?" — is proceed-INTENT without clear
+ * consent. It is deliberately:
+ *   - NOT a decline (the user is leaning toward drafting, not away);
+ *   - NOT an answer-fold (the hedge is about OUR questions, not the
+ *     decision — folding it in would pollute the working brief);
+ *   - NOT an immediate proceed (a trailing '?' is a request for the
+ *     assistant's judgement, not consent to skip the questions).
+ * It takes the SAME calibration as the bare ack (A4): one direct yes/no
+ * re-offer ("shall I draft with sensible defaults?"), after which the
+ * same hedge — or any ack — IS consent and proceeds. Anchored: a hedge
+ * opener is REQUIRED and the tail must be a recognised proceed phrase, so
+ * "maybe we should expand into France" still folds as an answer.
+ */
+export const CLARIFY_V2_HEDGED_PROCEED_PATTERN =
+  /^\s*(?:(?:i'?m\s+|i\s+am\s+)?not\s+sure|unsure|maybe|perhaps|i\s+guess)[\s,.…—–-]*(?:maybe\s+|perhaps\s+)?(?:just\s+)?(?:draft\s+(?:it|the\s+model)|go\s+ahead|proceed|use\s+(?:sensible\s+)?defaults)\s*[.!?]?\s*$/i;
 
 /**
  * Review fix A1 (1.152), not-an-answer guard: a reply that is itself a
@@ -174,7 +206,11 @@ export type ClarifyV2ProceedReason =
   | 'explicit_generate';
 
 /** Why a re-offer / decline fired (also the telemetry `cue` field). */
-export type ClarifyV2DeflectionCue = 'bare_ack' | 'question_reply' | 'decline';
+export type ClarifyV2DeflectionCue =
+  | 'bare_ack'
+  | 'question_reply'
+  | 'decline'
+  | 'hedged_proceed';
 
 export type ClarifyV2Decision =
   | {
@@ -357,6 +393,21 @@ export function decideClarifyV2Resume(
     }
     return { kind: 'reoffer', state: { ...state, reoffered: true }, cue: 'bare_ack' };
   }
+  // 1.152(i) (P3, pinned): a hedged proceed ("not sure — maybe just draft
+  // it?") is proceed-intent without clear consent — same one-per-round
+  // re-offer calibration as the bare ack; after the re-offer's direct
+  // yes/no, the hedge IS consent. Checked BEFORE decline so the decline
+  // set can never claim a leaning-forward reply.
+  if (CLARIFY_V2_HEDGED_PROCEED_PATTERN.test(message)) {
+    if (state.reoffered === true) {
+      return { kind: 'proceed', brief: state.brief, reason: 'user_proceed' };
+    }
+    return {
+      kind: 'reoffer',
+      state: { ...state, reoffered: true },
+      cue: 'hedged_proceed',
+    };
+  }
   // Review fix A1 (1.152): an explicit decline releases the round.
   if (CLARIFY_V2_DECLINE_PATTERN.test(message)) {
     return { kind: 'decline', brief: state.brief, cue: 'decline' };
@@ -513,19 +564,20 @@ export function composeClarifyV2DeclineResponse(): OlumiResponse {
  * Review fixes A1/A4 (1.152) — the one-per-round re-offer. Keeps the
  * round alive (the dispatch re-persists the pending with `reoffered`
  * spent; same chip_id → supersession, no zombie twin) and re-presents the
- * default-forward choice. Copy is cue-specific: a bare ack gets a direct
+ * default-forward choice. Copy is cue-specific: a bare ack — and a hedged
+ * proceed ("not sure — maybe just draft it?", 1.152(i) P3) — gets a direct
  * yes/no ("shall I draft with sensible defaults?") so the NEXT ack is
  * unambiguous consent; a question back to us gets the honest meta-answer
  * (the questions are optional) — this path is deterministic and must not
  * pretend to answer an arbitrary question.
  */
 export function composeClarifyV2ReofferResponse(
-  cue: 'bare_ack' | 'question_reply',
+  cue: Exclude<ClarifyV2DeflectionCue, 'decline'>,
 ): OlumiResponse {
   const assistantText =
-    cue === 'bare_ack'
-      ? 'Just to check — shall I draft with sensible defaults, or would you like to answer any of the questions above first?'
-      : "Happy to clarify — the questions are optional and each one just sharpens the draft. Answer whichever you like above, or say 'go ahead' and I'll draft with sensible defaults.";
+    cue === 'question_reply'
+      ? "Happy to clarify — the questions are optional and each one just sharpens the draft. Answer whichever you like above, or say 'go ahead' and I'll draft with sensible defaults."
+      : 'Just to check — shall I draft with sensible defaults, or would you like to answer any of the questions above first?';
   const proceedChip: SuggestedAction = {
     id: CLARIFY_V2_PROCEED_CHIP_ID,
     label: 'Use sensible defaults',

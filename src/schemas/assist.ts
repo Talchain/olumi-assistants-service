@@ -44,6 +44,26 @@ export const DRAFT_GRAPH_MAX_BRIEF_LENGTH = 5000;
 export const DRAFT_GRAPH_DECISION_BRIEF_REGEX =
   /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
 
+/**
+ * Draft-shaped TEXT predicate — the length + decision-regex core of the
+ * draft heuristic (ROADMAP 1.152(i), maintained-twin fix). This is the
+ * SINGLE definition; the null/population-of-graph term is deliberately NOT
+ * here — each call site applies its own graph judgement:
+ *   - route-v2 `isDraftGraphShape` adds `graphState == null` (plus the
+ *     stage/continuation terms);
+ *   - route-v2's clarify-v2 gate judges POPULATION instead (A5,
+ *     `isPopulatedIngressGraph`);
+ *   - clarify-v2-dispatch's resume replacement check uses the text
+ *     predicate alone (the round is pre-graph by construction).
+ * Previously each of those hand-duplicated the two terms below.
+ */
+export function isDraftShapedText(message: string): boolean {
+  return (
+    message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
+    DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(message)
+  );
+}
+
 export const DraftGraphInput = z.object({
   brief: z.string().min(DRAFT_GRAPH_MIN_BRIEF_LENGTH).max(DRAFT_GRAPH_MAX_BRIEF_LENGTH),
   attachments: z
