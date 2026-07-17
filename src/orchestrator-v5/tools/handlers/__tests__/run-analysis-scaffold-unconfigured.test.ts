@@ -276,7 +276,11 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
     expect(sentNew.interventions).toEqual({
       fac_volume: 0.4, // observed_state.value rung (no raw_value on the factor)
-      fac_range: 20, // centre-of-range: (10 + 30) / 2
+      // fac_range ABSENT — RE-PINNED by review fix B3 (17 Jul): its prior
+      // (10..30) is OUTSIDE the [0,1] sibling convention, and on the
+      // net-OFF wire the midpoint (20) was forwarded VERBATIM — a raw-scale
+      // "neutral" beside normalised siblings. Out-of-convention priors no
+      // longer scaffold on net-OFF (fail-closed; honest configure path).
       // fac_dead absent: no value provenance → never invented
     });
   });
@@ -492,9 +496,12 @@ describe('run_analysis D-ask-1 scaffold — P1-1 scale-net-ON convention parity'
     // scaffold sent 0.4 as the final wire number; PLoT normalises by cap →
     // 0.4/5000 ≈ 0.00008: the "neutral placeholder" slams the factor to
     // zero. Post-fix the factor is rejected as scaffold provenance (same
-    // evidence gate as a sibling intervention — ambiguous_no_evidence), and
-    // the scaffold falls back to the configured siblings' comparison basis
-    // where safe provenance exists (fac_price raw_value 100).
+    // evidence gate as a sibling intervention — ambiguous_no_evidence).
+    // RE-PINNED by review fix B4 (17 Jul): this option HAS an edge, so the
+    // ratified comparison-basis fallback (scope: edge-LESS options only) no
+    // longer fires — the option stays unscaffolded and the run takes the
+    // honest configure-recovery path instead of scaffolding factors the
+    // user's own edges never touch.
     const graph = makeGraph(
       [{ id: 'opt_new', kind: 'option', label: 'New Option' }],
       [{ from: 'opt_new', to: 'fac_volume' }],
@@ -514,17 +521,19 @@ describe('run_analysis D-ask-1 scaffold — P1-1 scale-net-ON convention parity'
         }),
       ),
     });
-    await handler(makeInvocation());
-
+    await expect(handler(makeInvocation())).rejects.toThrow(
+      /missing interventions|options_not_configured/,
+    );
+    // The wire attempt (which PLoT's preflight then 422s) carries opt_new
+    // UNSCAFFOLDED — the ambiguous cap-bearing factor is skipped AND no
+    // sibling-basis values are fabricated for an option whose own edges the
+    // basis doesn't cover.
     const sentOptions = (run.mock.calls[0][0] as Record<string, unknown>).options as Array<{
       option_id: string;
-      interventions: Record<string, number>;
+      interventions?: Record<string, number>;
     }>;
     const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
-    expect(sentNew.interventions).not.toHaveProperty('fac_volume');
-    // raw_value rung on fac_price: 100 IS the raw user-scale value — the
-    // same convention the raw siblings (120 / 2500) are on.
-    expect(sentNew.interventions).toEqual({ fac_price: 100 });
+    expect(Object.keys(sentNew.interventions ?? {})).toHaveLength(0);
   });
 
   it('net-ON rungs route through the sibling projection: raw_value wins; a capless value passes through; proven convention denormalises', async () => {

@@ -346,3 +346,33 @@ describe('run_analysis confirmation_template forwarder', () => {
     expect(fwd({ assistant_text: '' })).toBe(FALLBACK);
   });
 });
+
+// Review fix B6 (17 Jul) — honesty floor: a rejected composed summary that
+// carried a scaffold disclosure must NOT lose the disclosure in the fallback.
+import { buildScaffoldDisclosureSuffix } from '../../coaching/scaffold-disclosure.js';
+
+describe('B6 — fallback preserves the scaffold disclosure', () => {
+  const template = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
+  if (typeof template !== 'function') {
+    throw new Error('expected function-form confirmation_template');
+  }
+
+  it('allowlist-rejected summary WITH a disclosure → fallback + disclosure (never undisclosed)', () => {
+    const disclosure = buildScaffoldDisclosureSuffix([
+      { option_id: 'opt_new', label: 'New option', factor_ids: ['fac_a'], value_defaulted: true },
+    ]);
+    expect(disclosure).not.toBe('');
+    // A headline that fails the allowlist (raw decimal in free text) with the
+    // valid disclosure appended — pre-fix the WHOLE string was replaced by
+    // the bare fallback, silently dropping the disclosure.
+    const rejected = `Leading option sits at 0.6234 exactly.${disclosure}`;
+    const out = template({ assistant_text: rejected });
+    expect(out).toContain('Placeholder values were used');
+    expect(out).not.toContain('0.6234');
+  });
+
+  it('allowlist-rejected summary WITHOUT a disclosure → bare fallback (unchanged)', () => {
+    const out = template({ assistant_text: 'Leading option sits at 0.6234 exactly.' });
+    expect(out).toBe('Ran analysis on your current scenario.');
+  });
+});

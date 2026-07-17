@@ -228,10 +228,13 @@ export function buildScaffoldPromptDisclosure(
  * also breaks the grammar (and the contract test) loudly.
  */
 export const SCAFFOLD_DISCLOSURE_RE_SRC =
-  " Placeholder values were used for (?:'[^'\\n]{1,40}'|one of your options|\\d{1,2} of your options) " +
+  // Review fix B12 (derive-don't-mirror): the label slots interpolate
+  // SCAFFOLD_LABEL_MAX_CHARS instead of hand-mirroring {1,40}/{1,41} — the
+  // chip slot is +1 for the trailing period the builder appends inside it.
+  ` Placeholder values were used for (?:'[^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS}}'|one of your options|\\d{1,2} of your options) ` +
   'because (?:it has|they have) no values set — ' +
   'the whole comparison is illustrative until you configure (?:it|them)\\. ' +
-  "To set real values, say 'Help me configure [^'\\n]{1,41}\\.'";
+  `To set real values, say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'`;
 
 /**
  * Egress budget the allowlist length cap is extended by — computed from the
