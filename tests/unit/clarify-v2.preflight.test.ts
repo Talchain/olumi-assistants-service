@@ -14,11 +14,13 @@ import { describe, it, expect } from "vitest";
 import { OlumiResponseSchema } from "@talchain/schemas/boundary";
 
 import {
+  CLARIFY_V2_HEDGED_PROCEED_PATTERN,
   CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
   CLARIFY_V2_MAX_ROUNDS,
   CLARIFY_V2_PROCEED_CHIP_ID,
   CLARIFY_V2_PROCEED_MESSAGE,
   CLARIFY_V2_PROCEED_PATTERN,
+  composeClarifyV2ReofferResponse,
   composeClarifyV2Response,
   decideClarifyV2Resume,
   decideClarifyV2Round1,
@@ -548,6 +550,171 @@ describe('1.152 A4 — bare single-word acks are calibrated, not auto-proceeds',
       });
       expect(d.kind).toBe('proceed');
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ROADMAP 1.152(i) — #498-review P2/P3: widened decline cue set + hedged
+// proceed, RED-first (every decline probe below folded as an ANSWER at
+// #498's head; the hedged-proceed probe folded too).
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('1.152(i) P2 — widened decline cues (RED-first at #498 head)', () => {
+  const round1 = decideClarifyV2Round1(THIN_BRIEF);
+  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+  const state1 = round1.state;
+
+  it.each([
+    'no thanks',
+    'no',
+    'No.',
+    'nope',
+    'nah',
+    'no thank you',
+    'cancel it',
+    "let's not do this now",
+    "Let's not.",
+    'actually hold off',
+    'Actually, hold off for now',
+    'honestly, not now',
+    'Actually, no',
+  ])("genuine decline '%s' → DECLINE (round released, brief kept)", (msg) => {
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: msg,
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(d.kind).toBe('decline');
+    if (d.kind !== 'decline') return;
+    expect(d.cue).toBe('decline');
+    expect(d.brief).toBe(THIN_BRIEF);
+  });
+});
+
+describe('1.152(i) — the 24-case answer battery (danger direction: every one MUST fold as an answer)', () => {
+  const round1 = decideClarifyV2Round1(THIN_BRIEF);
+  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+  const state1 = round1.state;
+
+  // Each case carries a decline/hedge cue WORD or shape that the widened
+  // patterns must NOT claim. Asserting the incorporated brief CONTAINS the
+  // message proves the fold (not merely "not declined").
+  const ANSWER_BATTERY: readonly string[] = [
+    // The four named danger pins (#498 review):
+    "I don't want to expand into Germany",
+    'we want to stop customer churn',
+    'the options are to cancel the contract or renegotiate it',
+    'Wait, the budget is £2m',
+    // Cue words INSIDE real answers:
+    'We should wait until Q3 before committing the budget.',
+    'No, the budget is £2m not £200k',
+    'We should stop hiring contractors first.',
+    'Stop-loss is capped at £50k.',
+    'No more than three new hires this quarter.',
+    'Cancel culture is hurting our brand in the US market.',
+    'Later this year we plan to open the Berlin office.',
+    'Not now, but within six months we must decide.',
+    "Let's not forget the Berlin team depends on this decision.",
+    // Leading-adverb answers (the new softener prefix must not claim them):
+    'Actually the goal is to cut costs, not grow revenue.',
+    'Honestly we just want to survive the next 12 months.',
+    // Hedge words INSIDE real answers (the hedged-proceed pattern's
+    // required proceed-phrase tail must not claim them):
+    "Maybe France, maybe Germany — we're torn.",
+    'I guess the biggest risk is churn in the enterprise segment.',
+    'maybe we should expand into France instead',
+    // Ordinary answers (regression floor from the A1 battery):
+    'The goal is to increase revenue.',
+    'The main alternative is doing nothing and keeping things as they are.',
+    'It depends on whether Sam accepts.',
+    'The board meets soon and morale is low.',
+    'The timeframe is 18 months.',
+    'Our budget is £2m and the deadline is Q4.',
+  ];
+
+  it('battery integrity: exactly 24 cases', () => {
+    expect(ANSWER_BATTERY).toHaveLength(24);
+  });
+
+  it.each(ANSWER_BATTERY.map((m) => [m] as const))(
+    "'%s' folds as an ANSWER (never decline / re-offer; the brief carries it)",
+    (msg) => {
+      const d = decideClarifyV2Resume({
+        state: state1,
+        message: msg,
+        messageIsDraftShaped: false,
+        explicitGenerateBrief: null,
+      });
+      expect(d.kind === 'ask' || d.kind === 'proceed').toBe(true);
+      const brief = d.kind === 'ask' ? d.state.brief : d.kind === 'proceed' ? d.brief : '';
+      expect(brief).toContain(msg.trim());
+      expect(brief).toContain(THIN_BRIEF); // appended, not replaced
+    },
+  );
+});
+
+describe("1.152(i) P3 — hedged proceed ('not sure — maybe just draft it?') is proceed-INTENT → one re-offer, then consent (pinned decision)", () => {
+  const round1 = decideClarifyV2Round1(THIN_BRIEF);
+  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+  const state1 = round1.state;
+
+  it.each(['not sure — maybe just draft it?', 'Maybe just draft it?', "I'm not sure, just go ahead"])(
+    "hedged proceed '%s' → RE-OFFER with cue hedged_proceed (not decline, not fold)",
+    (msg) => {
+      const d = decideClarifyV2Resume({
+        state: state1,
+        message: msg,
+        messageIsDraftShaped: false,
+        explicitGenerateBrief: null,
+      });
+      expect(d.kind).toBe('reoffer');
+      if (d.kind !== 'reoffer') return;
+      expect(d.cue).toBe('hedged_proceed');
+      // The hedge is about OUR questions, not the decision: never folded.
+      expect(d.state.brief).toBe(THIN_BRIEF);
+      expect(d.state.reoffered).toBe(true);
+    },
+  );
+
+  it('after the re-offer (a direct yes/no), the same hedge IS consent → proceed', () => {
+    const d = decideClarifyV2Resume({
+      state: { ...state1, reoffered: true },
+      message: 'not sure — maybe just draft it?',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(d).toEqual({ kind: 'proceed', brief: THIN_BRIEF, reason: 'user_proceed' });
+  });
+
+  it("the hedged re-offer copy is the DIRECT yes/no (same as bare-ack), with the default-forward chip", () => {
+    const response = composeClarifyV2ReofferResponse('hedged_proceed');
+    expect(response.assistant_text).toContain('shall I draft with sensible defaults');
+    expect(response.suggested_actions.map((a) => a.id)).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+  });
+
+  it("boundary: 'maybe later' is a DECLINE, an unhedged 'just draft it' still proceeds immediately, and a bare hedge folds as an answer", () => {
+    expect(CLARIFY_V2_HEDGED_PROCEED_PATTERN.test('maybe later')).toBe(false);
+    const declined = decideClarifyV2Resume({
+      state: state1,
+      message: 'maybe later',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(declined.kind).toBe('decline');
+
+    expect(CLARIFY_V2_HEDGED_PROCEED_PATTERN.test('just draft it')).toBe(false);
+    const proceeded = decideClarifyV2Resume({
+      state: state1,
+      message: 'just draft it',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(proceeded.kind).toBe('proceed');
+
+    // Documented residual: a bare "not sure" (no proceed phrase) is not a
+    // hedged proceed — it folds as an answer, same as at #498 head.
+    expect(CLARIFY_V2_HEDGED_PROCEED_PATTERN.test('not sure')).toBe(false);
   });
 });
 

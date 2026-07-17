@@ -177,7 +177,8 @@ export const TelemetryEvents = {
   V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
   V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
   // 1.152 (A1/A4): a resume reply deflected instead of answering — fields:
-  // action: release / reoffer; cue: decline / question_reply / bare_ack;
+  // action: release / reoffer; cue: decline / question_reply / bare_ack /
+  // hedged_proceed (1.152(i) P3);
   // round (null on release). Emitted AFTER a successful commit only (A8).
   V5ClarifyV2Deflected: "v5.clarify_v2.deflected",
 

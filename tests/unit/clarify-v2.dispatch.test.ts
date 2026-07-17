@@ -222,6 +222,40 @@ describe('clarify v2 dispatch — 1.152 design fixes (A1 / A4 / A9)', () => {
     expect(eventNames(events)).not.toContain(DEFLECTED);
   });
 
+  it('1.152(i) FIX 3: REOFFER commit-fail: not claimed (null), no deflection telemetry (dedicated pin — the decline arm had one, this arm did not)', async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    clarifyV2Harness.commitError = new Error('append failed');
+    const { outcome, events } = await runClarifyV2Turn({ message: 'ok' });
+    // Reoffer commit failure → null: normal routing answers the ack; the
+    // prior pending was NOT consumed, so the round stays live for TTL.
+    expect(outcome).toBeNull();
+    expect(eventNames(events)).not.toContain(DEFLECTED);
+  });
+
+  it("1.152(i) P3 end-to-end: 'not sure — maybe just draft it?' re-offers the direct yes/no with cue hedged_proceed (brief untouched)", async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    const { outcome, appends, events } = await runClarifyV2Turn({
+      message: 'not sure — maybe just draft it?',
+    });
+    if (outcome === null || outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${outcome?.kind}`);
+    }
+    expect(outcome.response.assistant_text).toContain('shall I draft with sensible defaults');
+    const pendings = (appends[0]!.pending_actions ?? []) as PendingAction[];
+    const roundPending = pendings.find((p) => p.action.kind === 'clarify_v2_round');
+    expect(roundPending).toBeDefined();
+    if (roundPending!.action.kind !== 'clarify_v2_round') throw new Error('narrow');
+    expect(roundPending!.action.brief).toBe(THIN_BRIEF); // never folded
+    expect(roundPending!.action.reoffered).toBe(true);
+    const deflections = events.filter((e) => e.name === DEFLECTED);
+    expect(deflections).toHaveLength(1);
+    expect(deflections[0]!.data).toMatchObject({ action: 'reoffer', cue: 'hedged_proceed' });
+  });
+
   it('A1 not-an-answer: a question back to us re-offers ONCE (brief untouched, reoffer marked), then declines', async () => {
     clarifyV2Harness.seededPendings = [
       seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),

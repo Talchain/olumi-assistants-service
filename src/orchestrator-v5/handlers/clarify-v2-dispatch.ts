@@ -38,10 +38,7 @@
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
-import {
-  DRAFT_GRAPH_DECISION_BRIEF_REGEX,
-  DRAFT_GRAPH_MIN_BRIEF_LENGTH,
-} from '../../schemas/assist.js';
+import { isDraftShapedText } from '../../schemas/assist.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import {
   loadMostRecentPendingActionsStrict,
@@ -97,13 +94,6 @@ export type ClarifyV2Outcome =
       readonly kind: 'draft';
       readonly briefOverride: string;
     };
-
-function isDraftShapedMessage(message: string): boolean {
-  return (
-    message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
-    DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(message)
-  );
-}
 
 function latestLiveClarifyPending(
   pendings: readonly PendingAction[],
@@ -345,7 +335,7 @@ export async function tryClarifyV2Turn(
       const decision = decideClarifyV2Resume({
         state,
         message: payload.message,
-        messageIsDraftShaped: isDraftShapedMessage(payload.message),
+        messageIsDraftShaped: isDraftShapedText(payload.message),
         explicitGenerateBrief: params.explicitGenerateBrief,
       });
       if (decision.kind === 'proceed') {
@@ -361,6 +351,9 @@ export async function tryClarifyV2Turn(
         // A9) so a later "draft it" finds it. Commit failure → null: the
         // turn falls to normal routing (the LLM answers a "not now"
         // conversationally); the live pending then dies by TTL.
+        // 1.152(i) FIX 3: normalise ONCE (the double call was a benign but
+        // pointless twin — same input, same pure function, two evaluations).
+        const declinedBriefText = normaliseBriefText(decision.brief).value;
         const finalResponse = await commitClarifyTurn(
           composeClarifyV2DeclineResponse(),
           payload,
@@ -370,8 +363,8 @@ export async function tryClarifyV2Turn(
             pendingActions: [],
             priorPendings: pendings,
             consumedPendingRefs: [livePending.chip_id],
-            ...(normaliseBriefText(decision.brief).value !== undefined
-              ? { briefText: normaliseBriefText(decision.brief).value! }
+            ...(declinedBriefText !== undefined
+              ? { briefText: declinedBriefText }
               : {}),
           },
         );

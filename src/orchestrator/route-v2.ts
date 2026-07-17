@@ -126,8 +126,8 @@ import {
   isDeterministicChipClickActionType,
 } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import {
-  DRAFT_GRAPH_DECISION_BRIEF_REGEX,
   DRAFT_GRAPH_MIN_BRIEF_LENGTH,
+  isDraftShapedText,
 } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
 import {
@@ -1918,9 +1918,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ? await loadHasPriorTurns(ingress.scenario_id, requestId)
       : false;
     if (isContinuationScenario) {
-      const wouldDraft =
-        ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
-        DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
+      const wouldDraft = isDraftShapedText(ingress.message);
       emit(TelemetryEvents.V5ContinuationGuardApplied, {
         request_id: requestId,
         scenario_id: ingress.scenario_id,
@@ -2386,9 +2384,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         },
       );
     }
-    const isDraftGraphShape =
+    // 1.152(i) maintained-twin fix: the stage / continuation / text-shape
+    // terms are computed ONCE here; `isDraftGraphShape` adds the no-graph
+    // NULLNESS term, and the clarify-v2 gate below applies its POPULATION
+    // judgement instead (A5) — previously it hand-duplicated all four
+    // terms minus nullness.
+    const draftShapedTurn =
       ingress.stage === 'frame' &&
-      extensions.graphState == null &&
       // V5 Signature Loop — a scenario with prior committed turns is a
       // continuation, not a first brief; let it reach TurnExecutor's memory.
       // ROADMAP 2.63 C3 — EXCEPT when the last committed turn was a
@@ -2398,8 +2400,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // drafting a full shaped brief the user just typed carries no consent
       // risk, so a wall-expired offer still un-strands it.
       (!isContinuationScenario || draftOfferMarker !== null) &&
-      ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
-      DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
+      isDraftShapedText(ingress.message);
+    const isDraftGraphShape = extensions.graphState == null && draftShapedTurn;
     // ── Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
     // CEE_CLARIFY_V2_ENABLED (default off; flag-off skips the import
     // entirely, same containment as V6 dual-draft). Two deterministic
@@ -2423,15 +2425,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // to false whenever ANY graph_state object is on the wire (its own
       // `== null` term), so with only the gate fix above an EMPTY canvas
       // still defeated round 1 via draftShaped:false — the pin went RED on
-      // exactly the target audience. Inside this flag-gated block the same
-      // shape heuristic is re-derived with the POPULATION judgement instead;
-      // the flag-off wire (and `isDraftGraphShape` itself) is untouched.
-      const clarifyDraftShaped =
-        isDraftGraphShape ||
-        (ingress.stage === 'frame' &&
-          (!isContinuationScenario || draftOfferMarker !== null) &&
-          ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
-          DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message));
+      // exactly the target audience. Inside this flag-gated block the shape
+      // judgement is `draftShapedTurn` WITHOUT the nullness term — the
+      // enclosing `!isPopulatedIngressGraph` gate already made the
+      // POPULATION judgement; the flag-off wire (and `isDraftGraphShape`
+      // itself) is untouched. (1.152(i): previously a hand-maintained
+      // re-derivation of the same four terms.)
+      const clarifyDraftShaped = draftShapedTurn;
       const cv2 = await tryClarifyV2Turn({
         payload: ingress,
         requestId,
