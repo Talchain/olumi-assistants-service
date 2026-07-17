@@ -610,6 +610,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ask-rate counter the 1.94 promotion path requires.
         V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
         V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
+        V5ClarifyV2Deflected: "v5.clarify_v2.deflected",
         V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
         V5Phase3BlockLifecycle: "v5.phase3.block_lifecycle",
         V5Phase3LifecycleIndexMismatch: "v5.phase3.lifecycle_index_mismatch",
@@ -1342,6 +1343,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // (no Datadog metric mapping while firings are not expected).
         TelemetryEvents.V5ClarifyV2QuestionsEmitted,
         TelemetryEvents.V5ClarifyV2Proceeded,
+        TelemetryEvents.V5ClarifyV2Deflected,
         TelemetryEvents.V5FreshAnalysisFollowupGuard,
         TelemetryEvents.V5Phase3BlockLifecycle,
         TelemetryEvents.V5Phase3LifecycleIndexMismatch,
@@ -1966,6 +1968,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Clarify v2 (E0-B) — dark flag; ask-rate + stop-rule telemetry.
         "v5.clarify_v2.questions_emitted",
         "v5.clarify_v2.proceeded",
+        "v5.clarify_v2.deflected",
         "v5.fresh_analysis_followup_guard",
         "v5.phase3.block_lifecycle",
         "v5.phase3.lifecycle_index_mismatch",

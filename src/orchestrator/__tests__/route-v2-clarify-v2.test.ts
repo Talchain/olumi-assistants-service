@@ -258,13 +258,16 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     const chipIds = (body.suggested_actions as Array<{ id: string }>).map((a) => a.id);
     expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
     expect(chipIds.length).toBeGreaterThanOrEqual(3);
-    // The clarify turn COMMITS (turn_class clarify, round-state pending,
-    // write-once brief seed) so the next turn can resume.
+    // The clarify turn COMMITS (turn_class clarify, round-state pending)
+    // so the next turn can resume. Review fix A9 (1.152): the ask commit
+    // seeds NO brief_text — the column is write-once at the RPC, so an
+    // ask-time seed would freeze the PRE-ANSWER brief forever; the FINAL
+    // brief seeds at the flow's terminal points (draft dispatch / decline).
     expect(appendMock).toHaveBeenCalledTimes(1);
     const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
     expect(committed.turn_class).toBe('clarify');
     expect(committed.llm_calls_used).toBe(0);
-    expect(committed.briefText).toBe(THIN_BRIEF);
+    expect(committed.briefText).toBeUndefined();
     const pendings = committed.pending_actions as PendingAction[];
     expect(pendings).toHaveLength(1);
     expect(pendings[0]!.action.kind).toBe('clarify_v2_round');

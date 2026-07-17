@@ -92,14 +92,14 @@ describe("clarify_v2 round 1 (draft preflight)", () => {
       state: d.state,
       message: "The goal is to increase revenue.",
       messageIsDraftShaped: false,
-      explicitGenerate: false,
+      explicitGenerateBrief: null,
     });
     expect(answered.kind === "ask" || answered.kind === "proceed").toBe(true);
     const escaped = decideClarifyV2Resume({
       state: d.state,
       message: CLARIFY_V2_PROCEED_MESSAGE,
       messageIsDraftShaped: false,
-      explicitGenerate: false,
+      explicitGenerateBrief: null,
     });
     expect(escaped).toEqual({ kind: "proceed", brief: d.state.brief, reason: "user_proceed" });
   });
@@ -118,7 +118,7 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
       state: state1,
       message: answer,
       messageIsDraftShaped: false,
-      explicitGenerate: false,
+      explicitGenerateBrief: null,
     });
     expect(d.kind).toBe("proceed");
     if (d.kind !== "proceed") return;
@@ -136,7 +136,7 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
       state: state1,
       message: "The goal is to increase revenue.",
       messageIsDraftShaped: false,
-      explicitGenerate: false,
+      explicitGenerateBrief: null,
     });
     if (d.kind === "ask") {
       // Any follow-up round may only ask never-asked dimensions.
@@ -148,6 +148,8 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
         expect(d.state.asked).toContain(dim);
       }
     } else {
+      expect(d.kind).toBe("proceed");
+      if (d.kind !== "proceed") return;
       expect(["all_missing_already_asked", "complete"]).toContain(d.reason);
     }
   });
@@ -162,7 +164,7 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
       state: stateAllAsked,
       message: "The goal is to increase revenue.",
       messageIsDraftShaped: false,
-      explicitGenerate: false,
+      explicitGenerateBrief: null,
     });
     expect(d.kind).toBe("proceed");
     if (d.kind !== "proceed") return;
@@ -179,7 +181,7 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
       state: stateAtBudget,
       message: "The goal is to increase revenue.",
       messageIsDraftShaped: false,
-      explicitGenerate: false,
+      explicitGenerateBrief: null,
     });
     expect(d.kind).toBe("proceed");
     if (d.kind !== "proceed") return;
@@ -191,12 +193,12 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
       state: state1,
       message: CLARIFY_V2_PROCEED_MESSAGE,
       messageIsDraftShaped: false,
-      explicitGenerate: false,
+      explicitGenerateBrief: null,
     });
     expect(d).toEqual({ kind: "proceed", brief: THIN_BRIEF, reason: "user_proceed" });
   });
 
-  it.each(["yes", "OK", "go ahead", "just draft it", "use sensible defaults", "Proceed."])(
+  it.each(["yes", "go ahead", "just draft it", "use sensible defaults", "Proceed."])(
     "STOP RULE: typed go-ahead '%s' proceeds immediately",
     (msg) => {
       expect(CLARIFY_V2_PROCEED_PATTERN.test(msg)).toBe(true);
@@ -204,7 +206,7 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
         state: state1,
         message: msg,
         messageIsDraftShaped: false,
-        explicitGenerate: false,
+        explicitGenerateBrief: null,
       });
       expect(d.kind).toBe("proceed");
       if (d.kind !== "proceed") return;
@@ -224,7 +226,7 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
       state: state1,
       message: "Yes, build the model now please",
       messageIsDraftShaped: false,
-      explicitGenerate: true,
+      explicitGenerateBrief: THIN_BRIEF,
     });
     expect(d).toEqual({ kind: "proceed", brief: THIN_BRIEF, reason: "explicit_generate" });
   });
@@ -234,7 +236,7 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
       state: state1,
       message: COMPLETE_BRIEF,
       messageIsDraftShaped: true,
-      explicitGenerate: false,
+      explicitGenerateBrief: null,
     });
     expect(d.kind).toBe("proceed");
     if (d.kind !== "proceed") return;
@@ -303,5 +305,263 @@ import {
 describe('A10 — proceed pattern covers the canned proceed message', () => {
   it('CLARIFY_V2_PROCEED_PATTERN matches CLARIFY_V2_PROCEED_MESSAGE', () => {
     expect(A10_PATTERN.test(A10_MESSAGE)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ROADMAP 1.152 — design-bearing review fixes (17 Jul record), RED-first.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('1.152 A1 — decline releases the round honestly', () => {
+  const round1 = decideClarifyV2Round1(THIN_BRIEF);
+  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+  const state1 = round1.state;
+
+  it.each(['not now', 'Hold off', "I don't want to answer these questions", 'stop', 'cancel', 'later', 'wait', 'No, not right now thanks'])(
+    "decline cue '%s' → DECLINE (round released, brief kept), never a forced draft",
+    (msg) => {
+      const d = decideClarifyV2Resume({
+        state: state1,
+        message: msg,
+        messageIsDraftShaped: false,
+        explicitGenerateBrief: null,
+      });
+      expect(d.kind).toBe('decline');
+      if (d.kind !== 'decline') return;
+      expect(d.cue).toBe('decline');
+      // The working brief is KEPT for a later resume.
+      expect(d.brief).toBe(THIN_BRIEF);
+    },
+  );
+
+  it('a decline-word inside a real ANSWER is not mis-claimed (anchored cues)', () => {
+    // 'wait' inside a timeframe answer; 'stop' inside a goal answer.
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: 'We should wait until Q3 before committing the budget.',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(d.kind === 'ask' || d.kind === 'proceed').toBe(true);
+  });
+
+  it("a statement of preference about the DECISION ('I don't want to expand into Germany') is an answer, not a decline", () => {
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: "I don't want to expand into Germany",
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(d.kind === 'ask' || d.kind === 'proceed').toBe(true);
+  });
+});
+
+describe('1.152 A1 — not-an-answer guard (question-shaped replies never fold in)', () => {
+  const round1 = decideClarifyV2Round1(THIN_BRIEF);
+  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+  const state1 = round1.state;
+
+  it('a question back to the assistant → RE-OFFER (not folded into the brief)', () => {
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: 'What do you mean by timeframe?',
+      messageIsDraftShaped: true, // ≥30 chars + trailing '?' satisfies the route regex
+      explicitGenerateBrief: null,
+    });
+    expect(d.kind).toBe('reoffer');
+    if (d.kind !== 'reoffer') return;
+    expect(d.cue).toBe('question_reply');
+    // Brief untouched; round/asked untouched; reoffer marked.
+    expect(d.state.brief).toBe(THIN_BRIEF);
+    expect(d.state.round).toBe(state1.round);
+    expect(d.state.asked).toEqual(state1.asked);
+    expect(d.state.reoffered).toBe(true);
+  });
+
+  it('a SECOND question-shaped reply in the same round → DECLINE (re-offer once per round)', () => {
+    const d = decideClarifyV2Resume({
+      state: { ...state1, reoffered: true },
+      message: 'Why do you need to know that?',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(d.kind).toBe('decline');
+    if (d.kind !== 'decline') return;
+    expect(d.cue).toBe('question_reply');
+    expect(d.brief).toBe(THIN_BRIEF);
+  });
+
+  it('doctrine preserved: a brief-shaped NON-answer statement still folds in and proceeds via the stop rules', () => {
+    // Not a question, not a decline, not draft-shaped: appends, and the
+    // assessment machinery (complete / all-asked / budget) decides.
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: 'The board meets soon and morale is low.',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(d.kind === 'ask' || d.kind === 'proceed').toBe(true);
+    const brief = d.kind === 'ask' ? d.state.brief : d.kind === 'proceed' ? d.brief : '';
+    expect(brief).toContain('morale is low');
+  });
+});
+
+describe('1.152 A2 — wholesale replacement needs a genuinely standalone restatement', () => {
+  const round1 = decideClarifyV2Round1(THIN_BRIEF);
+  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+  const state1 = round1.state;
+
+  it("the 33-char 'whether' fragment APPENDS (the review's canonical probe) — the working brief survives", () => {
+    const fragment = 'It depends on whether Sam accepts.'; // 34 chars, 'whether' → route-draft-shaped
+    expect(fragment.length).toBeLessThan(60);
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: fragment,
+      messageIsDraftShaped: true,
+      explicitGenerateBrief: null,
+    });
+    const brief = d.kind === 'ask' ? d.state.brief : d.kind === 'proceed' ? d.brief : '';
+    expect(brief).toContain(THIN_BRIEF); // NOT wholesale-discarded
+    expect(brief).toContain('whether Sam accepts');
+  });
+
+  it('a ≥60-char standalone draft-shaped restatement REPLACES', () => {
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: COMPLETE_BRIEF,
+      messageIsDraftShaped: true,
+      explicitGenerateBrief: null,
+    });
+    expect(d.kind).toBe('proceed');
+    if (d.kind !== 'proceed') return;
+    expect(d.brief).toBe(COMPLETE_BRIEF);
+  });
+
+  it('a short standalone decision QUESTION restatement also replaces', () => {
+    const restatement = 'Should we focus on France instead?'; // <60 but a standalone decision question
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: restatement,
+      messageIsDraftShaped: true,
+      explicitGenerateBrief: null,
+    });
+    const brief = d.kind === 'ask' ? d.state.brief : d.kind === 'proceed' ? d.brief : '';
+    expect(brief).toContain('France');
+    expect(brief).not.toContain('German');
+  });
+
+  it('a meta-question that happens to clear the route regex NEVER replaces (precision bias protects the destructive action)', () => {
+    const meta = 'Should I answer all of the questions you listed?';
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: meta,
+      messageIsDraftShaped: true,
+      explicitGenerateBrief: null,
+    });
+    expect(d.kind).toBe('reoffer');
+  });
+});
+
+describe('1.152 A3 — explicit-generate brief is incorporated, not discarded', () => {
+  const round1 = decideClarifyV2Round1(THIN_BRIEF);
+  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+  const state1 = round1.state;
+
+  it('an assembled brief that is a SUBSET of the working brief adds nothing (no duplication)', () => {
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: 'Yes, build the model now please',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: THIN_BRIEF, // e.g. persisted brief == round-1 seed
+    });
+    expect(d).toEqual({ kind: 'proceed', brief: THIN_BRIEF, reason: 'explicit_generate' });
+  });
+
+  it('an assembled brief that is a SUPERSET restatement wins outright', () => {
+    const superset = `${THIN_BRIEF} The stakes are around £2m and it must land this year.`;
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: 'Yes, build the model now please',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: superset,
+    });
+    expect(d.kind).toBe('proceed');
+    if (d.kind !== 'proceed') return;
+    expect(d.brief).toBe(superset);
+  });
+
+  it('genuinely NEW assembled content merges into the working brief (C2 append convention, capped)', () => {
+    const extra = 'Our runway is about £500,000 and hiring freezes start next quarter.';
+    const d = decideClarifyV2Resume({
+      state: state1,
+      message: 'Yes, build the model now please',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: extra,
+    });
+    expect(d.kind).toBe('proceed');
+    if (d.kind !== 'proceed') return;
+    expect(d.reason).toBe('explicit_generate');
+    expect(d.brief).toContain(THIN_BRIEF);
+    expect(d.brief).toContain('£500,000');
+    expect(d.brief.length).toBeLessThanOrEqual(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+  });
+});
+
+describe('1.152 A4 — bare single-word acks are calibrated, not auto-proceeds', () => {
+  const round1 = decideClarifyV2Round1(THIN_BRIEF);
+  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+  const state1 = round1.state;
+
+  it.each(['ok', 'OK.', 'sure', 'fine'])(
+    "bare ack '%s' while questions are pending → RE-OFFER of the default-forward choice",
+    (msg) => {
+      const d = decideClarifyV2Resume({
+        state: state1,
+        message: msg,
+        messageIsDraftShaped: false,
+        explicitGenerateBrief: null,
+      });
+      expect(d.kind).toBe('reoffer');
+      if (d.kind !== 'reoffer') return;
+      expect(d.cue).toBe('bare_ack');
+      expect(d.state.reoffered).toBe(true);
+    },
+  );
+
+  it("after the re-offer, a bare ack IS the answer to 'shall I draft with defaults?' → proceed", () => {
+    const d = decideClarifyV2Resume({
+      state: { ...state1, reoffered: true },
+      message: 'ok',
+      messageIsDraftShaped: false,
+      explicitGenerateBrief: null,
+    });
+    expect(d).toEqual({ kind: 'proceed', brief: THIN_BRIEF, reason: 'user_proceed' });
+  });
+
+  it("strong go-aheads ('yes', 'go ahead', 'draft it') still proceed immediately — A4 demotes only weak acks", () => {
+    for (const msg of ['yes', 'go ahead', 'just draft it']) {
+      const d = decideClarifyV2Resume({
+        state: state1,
+        message: msg,
+        messageIsDraftShaped: false,
+        explicitGenerateBrief: null,
+      });
+      expect(d.kind).toBe('proceed');
+    }
+  });
+});
+
+describe('1.152 A12 — proceed vocabulary vs SHORT_CONFIRM: deliberate divergence, pinned', () => {
+  it('weak acks live in SHORT_CONFIRM (single-offer consent) but NOT in the clarify proceed set (A4)', async () => {
+    const { SHORT_CONFIRM_PATTERN } = await import(
+      '../../src/orchestrator-v5/routing/deterministic-short-confirm.js'
+    );
+    for (const ack of ['ok', 'sure']) {
+      expect(SHORT_CONFIRM_PATTERN.test(ack)).toBe(true);
+      expect(CLARIFY_V2_PROCEED_PATTERN.test(ack)).toBe(false);
+    }
+    // Draft-domain phrases are meaningless to short-confirm and stay local.
+    expect(CLARIFY_V2_PROCEED_PATTERN.test('use sensible defaults')).toBe(true);
+    expect(SHORT_CONFIRM_PATTERN.test('use sensible defaults')).toBe(false);
   });
 });

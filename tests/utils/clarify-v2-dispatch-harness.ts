@@ -206,14 +206,21 @@ export function seedClarifyPending(
   brief: string,
   asked: readonly string[],
   round: number,
-  overrides: Partial<PendingAction> = {},
+  opts: { readonly reoffered?: boolean } & Partial<PendingAction> = {},
 ): PendingAction {
+  const { reoffered, ...overrides } = opts;
   const now = Date.now();
   return {
     id: 'cv2_prior-turn',
     scenario_id: HARNESS_SCENARIO_ID,
     chip_id: 'cv2_proceed_default',
-    action: { kind: 'clarify_v2_round', brief, asked_dimensions: asked, round },
+    action: {
+      kind: 'clarify_v2_round',
+      brief,
+      asked_dimensions: asked,
+      round,
+      ...(reoffered === true ? { reoffered: true } : {}),
+    },
     preconditions: {},
     expires_at_turn_count: 2,
     expires_at_iso: new Date(now + 60_000).toISOString(),

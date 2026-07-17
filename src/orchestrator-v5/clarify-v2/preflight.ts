@@ -64,14 +64,89 @@ export const CLARIFY_V2_PROCEED_MESSAGE =
   'Go ahead and draft the model with sensible defaults.';
 
 /**
- * Typed go-ahead detection for the resume path. Bare confirmations
- * ("yes", "ok") count: the ask-copy explicitly offers "say 'go ahead'",
- * and a bare yes to a question LIST is a proceed signal, not an answer to
- * any single question. Anchored ^…$ so an answer that merely contains
- * "ok" is never mis-claimed.
+ * Typed go-ahead detection for the resume path. STRONG confirmations
+ * ("yes", "go ahead", "draft it") count: the ask-copy explicitly offers
+ * "say 'go ahead'", and a bare yes to a question LIST is a proceed
+ * signal, not an answer to any single question. Anchored ^…$ so an
+ * answer that merely contains "yes" is never mis-claimed.
+ *
+ * Review fix A4 (1.152): the WEAK acks (ok / okay / sure / fine) are
+ * deliberately NOT here — a bare "ok" to a three-question list is an
+ * acknowledgement, not consent to skip the questions. They live in
+ * `CLARIFY_V2_BARE_ACK_PATTERN` and get a one-time re-offer of the
+ * default-forward choice; after that re-offer (a direct yes/no question)
+ * the same ack IS consent and proceeds.
+ *
+ * Review fix A12 (1.152) — why this vocabulary is NOT derived from
+ * `SHORT_CONFIRM_PATTERN` (routing/deterministic-short-confirm.ts): the
+ * two patterns answer different consent questions. SHORT_CONFIRM
+ * confirms a SINGLE concrete offered action ("apply it", "do that"), so
+ * weak acks are rightly consent there and its vocabulary carries
+ * apply/confirm verbs that would be wrong here; this pattern consents to
+ * "skip the remaining questions and draft with defaults", so it carries
+ * draft-domain phrases (draft it, use sensible defaults, skip the
+ * questions) meaningless to short-confirm — and, after A4, deliberately
+ * EXCLUDES the weak acks short-confirm accepts. Deriving either from the
+ * other would re-couple two different consent surfaces; the divergence
+ * is pinned in clarify-v2.preflight.test.ts (1.152 A12).
  */
 export const CLARIFY_V2_PROCEED_PATTERN =
-  /^\s*(?:yes|yep|yeah|ok(?:ay)?|sure|fine|go ahead(?:\s+and\s+draft(?:\s+the\s+model)?(?:\s+with\s+sensible\s+defaults)?)?|proceed|continue|carry on|just draft(?:\s+it|\s+the\s+model)?|draft (?:it|the model)|use (?:sensible\s+)?defaults|skip(?:\s+the\s+questions)?)\s*[.!]?\s*$/i;
+  /^\s*(?:yes|yep|yeah|go ahead(?:\s+and\s+draft(?:\s+the\s+model)?(?:\s+with\s+sensible\s+defaults)?)?|proceed|continue|carry on|just draft(?:\s+it|\s+the\s+model)?|draft (?:it|the model)|use (?:sensible\s+)?defaults|skip(?:\s+the\s+questions)?)\s*[.!]?\s*$/i;
+
+/** Review fix A4 (1.152): weak single-word acks — re-offer, don't assume. */
+export const CLARIFY_V2_BARE_ACK_PATTERN = /^\s*(?:ok(?:ay)?|sure|fine)\s*[.!]?\s*$/i;
+
+/**
+ * Review fix A1 (1.152): the closed DECLINE cue set (hold off / not now /
+ * don't want / stop / cancel / later / wait). Anchored ^…$ with only
+ * politeness tails tolerated, so a cue word INSIDE a real answer ("we
+ * should wait until Q3…") is never mis-claimed. The don't-want arm only
+ * accepts process objects (answer / do this / continue) — "I don't want
+ * to expand into Germany" is a statement about the DECISION and must fold
+ * into the brief, not release the round.
+ */
+export const CLARIFY_V2_DECLINE_PATTERN =
+  /^\s*(?:no[,.\s]+)?(?:i\s+)?(?:(?:please\s+)?hold\s+off(?:\s+for\s+now)?|not\s+(?:now|yet|right\s+now)|don'?t\s+want\s+to(?:\s+answer(?:\s+(?:these|those|the|any))?(?:\s+questions?)?|\s+do\s+this(?:\s+(?:now|yet))?|\s+continue)?|stop|cancel|(?:maybe\s+)?later|wait)\s*[,.!]?\s*(?:please|thanks|thank\s+you)?\s*[.!]?\s*$/i;
+
+/**
+ * Review fix A1 (1.152), not-an-answer guard: a reply that is itself a
+ * question TO the assistant (interrogative opener + trailing '?'). Never
+ * folded into the working brief; re-offered once per round, then treated
+ * as a decline.
+ */
+export const CLARIFY_V2_QUESTION_REPLY_PATTERN =
+  /^\s*(?:what|why|how|who|whom|whose|when|where|which|can|could|do|does|did|is|are|was|were|will|would|should|shall|whether)\b[\s\S]*\?\s*$/i;
+
+/**
+ * Review fix A2 (1.152) — the REPLACEMENT bar. Wholesale brief
+ * replacement is the one destructive move in this flow (it discards the
+ * working brief, answers and all), so it demands a genuinely STANDALONE
+ * draft-shaped restatement, not any ≥30-char message that clears the
+ * route's loose regex (whose bare `\?$` arm lets "What do you mean by
+ * timeframe?" through). Bar: route-draft-shaped AND no meta-reference to
+ * the assistant/questions AND (≥60 chars OR a standalone decision
+ * QUESTION — trailing '?' plus a decision word, so "Should we focus on
+ * France instead?" replaces while the 33-char "It depends on whether Sam
+ * accepts." appends). Precision bias runs TOWARD append: a false
+ * negative costs a slightly redundant brief; a false positive destroys
+ * the user's answers.
+ */
+const CLARIFY_V2_REPLACEMENT_MIN_LENGTH = 60;
+const CLARIFY_V2_DECISION_WORD_PATTERN =
+  /\b(?:should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b/i;
+const CLARIFY_V2_META_REFERENCE_PATTERN =
+  /\b(?:you|your|question|questions|answer|answers|mean|clarify|explain)\b/i;
+
+export function isStandaloneBriefRestatement(
+  message: string,
+  messageIsDraftShaped: boolean,
+): boolean {
+  if (!messageIsDraftShaped) return false;
+  const trimmed = message.trim();
+  if (CLARIFY_V2_META_REFERENCE_PATTERN.test(trimmed)) return false;
+  if (trimmed.length >= CLARIFY_V2_REPLACEMENT_MIN_LENGTH) return true;
+  return /\?\s*$/.test(trimmed) && CLARIFY_V2_DECISION_WORD_PATTERN.test(trimmed);
+}
 
 /** Round state persisted on the `clarify_v2_round` pending action. */
 export interface ClarifyV2RoundState {
@@ -81,6 +156,14 @@ export interface ClarifyV2RoundState {
   readonly asked: readonly ClarifyDimension[];
   /** Rounds asked so far (1-based after the first ask). */
   readonly round: number;
+  /**
+   * Review fixes A1/A4 (1.152): true once THIS round has spent its single
+   * re-offer (bare-ack calibration or not-an-answer guard). After it, a
+   * bare ack proceeds (it answers the re-offer's direct yes/no) and a
+   * second question-shaped reply declines. Optional: rows persisted
+   * before 1.152 parse as not-reoffered.
+   */
+  readonly reoffered?: boolean;
 }
 
 export type ClarifyV2ProceedReason =
@@ -89,6 +172,9 @@ export type ClarifyV2ProceedReason =
   | 'round_budget_exhausted'
   | 'user_proceed'
   | 'explicit_generate';
+
+/** Why a re-offer / decline fired (also the telemetry `cue` field). */
+export type ClarifyV2DeflectionCue = 'bare_ack' | 'question_reply' | 'decline';
 
 export type ClarifyV2Decision =
   | {
@@ -103,6 +189,29 @@ export type ClarifyV2Decision =
       /** The state to persist for the next turn's resume. */
       readonly state: ClarifyV2RoundState;
       readonly phase: 'initial' | 'follow_up';
+    }
+  | {
+      /**
+       * Review fix A1 (1.152): the user declined the round (explicit cue,
+       * or a second deflection after the one re-offer). The round is
+       * RELEASED — never a forced draft, never a re-ask — and the working
+       * brief is kept for a later resume.
+       */
+      readonly kind: 'decline';
+      /** The working brief to preserve (terminal `brief_text` seed, A9). */
+      readonly brief: string;
+      readonly cue: Exclude<ClarifyV2DeflectionCue, 'bare_ack'>;
+    }
+  | {
+      /**
+       * Review fixes A1/A4 (1.152): the reply was neither an answer nor
+       * consent (a bare ack, or a question back to us). Re-present the
+       * default-forward choice ONCE per round; the state to persist marks
+       * the re-offer as spent (brief / asked / round untouched).
+       */
+      readonly kind: 'reoffer';
+      readonly state: ClarifyV2RoundState;
+      readonly cue: Exclude<ClarifyV2DeflectionCue, 'decline'>;
     };
 
 /**
@@ -128,8 +237,18 @@ export function incorporateAnswerIntoBrief(brief: string, answer: string): strin
   return `${brief.trim().slice(0, room)} ${trimmed}`;
 }
 
+/**
+ * Round 1 can only proceed or ask — decline / re-offer are resume-only
+ * (they need a live round to release or re-present). The narrow type
+ * keeps the dispatch's round-1 arm exhaustive without dead branches.
+ */
+export type ClarifyV2Round1Decision = Extract<
+  ClarifyV2Decision,
+  { kind: 'proceed' | 'ask' }
+>;
+
 /** Round 1: assess the brief at draft preflight. */
-export function decideClarifyV2Round1(brief: string): ClarifyV2Decision {
+export function decideClarifyV2Round1(brief: string): ClarifyV2Round1Decision {
   // PRODUCER/READER CONTRACT — cap at the WRITE. The round state persists
   // on a `clarify_v2_round` pending whose reader (`parsePendingAction`)
   // REFUSES briefs over DRAFT_GRAPH_MAX_BRIEF_LENGTH fail-closed; an
@@ -166,15 +285,40 @@ export interface DecideClarifyV2ResumeInput {
   readonly message: string;
   /**
    * True when the reply is itself a full draft-shaped brief (length +
-   * decision-regex, per the route's own heuristic) — treated as a
-   * REPLACEMENT brief rather than an appended answer.
+   * decision-regex, per the route's own heuristic). Necessary but NOT
+   * sufficient for replacement — see `isStandaloneBriefRestatement`
+   * (review fix A2, 1.152).
    */
   readonly messageIsDraftShaped: boolean;
   /**
-   * True when the reply arrived with the explicit-generate wire flag —
-   * the strongest possible ready-to-draft signal; always proceeds.
+   * Review fix A3 (1.152): the server-ASSEMBLED brief when the reply
+   * arrived with the explicit-generate wire flag (route C2 assembly);
+   * null otherwise. The strongest possible ready-to-draft signal — always
+   * proceeds, and the assembled brief is INCORPORATED into the working
+   * brief (it may carry content the round never saw, e.g. a draft-shaped
+   * message typed alongside the Generate click) rather than discarded.
    */
-  readonly explicitGenerate: boolean;
+  readonly explicitGenerateBrief: string | null;
+}
+
+/**
+ * Review fix A3 (1.152) — merge the C2-assembled explicit-generate brief
+ * into the working brief. Containment first (the assembled brief is
+ * usually the persisted seed or the original message, both already inside
+ * the working brief — appending would duplicate), superset restatement
+ * wins outright, genuinely new content appends via the same
+ * answer-preserving cap convention as `incorporateAnswerIntoBrief`.
+ */
+export function mergeExplicitGenerateBrief(
+  workingBrief: string,
+  assembled: string,
+): string {
+  const w = workingBrief.trim();
+  const a = assembled.trim();
+  if (a.length === 0) return w;
+  if (w.includes(a)) return w;
+  if (a.includes(w)) return a.slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+  return incorporateAnswerIntoBrief(w, a);
 }
 
 /** Resume: the user replied while a clarify round was live. */
@@ -183,10 +327,19 @@ export function decideClarifyV2Resume(
 ): ClarifyV2Decision {
   const { state, message } = input;
 
-  if (input.explicitGenerate) {
+  // `?? null` is deliberate: if a JS caller ever omits the field,
+  // `undefined !== null` would silently turn EVERY resume reply into an
+  // explicit-generate proceed — fail toward "not a generate turn" instead.
+  const assembledGenerateBrief = input.explicitGenerateBrief ?? null;
+  if (assembledGenerateBrief !== null) {
     // The wire message on an explicit generate is often canned chip text;
-    // draft from the working brief, not from it.
-    return { kind: 'proceed', brief: state.brief, reason: 'explicit_generate' };
+    // draft from the working brief MERGED with the assembled brief (A3),
+    // never from the message.
+    return {
+      kind: 'proceed',
+      brief: mergeExplicitGenerateBrief(state.brief, assembledGenerateBrief),
+      reason: 'explicit_generate',
+    };
   }
   // Review fix A10: the exact-constant check was dead code — the pattern's
   // 'go ahead…' alternation matches CLARIFY_V2_PROCEED_MESSAGE exactly
@@ -195,8 +348,39 @@ export function decideClarifyV2Resume(
   if (CLARIFY_V2_PROCEED_PATTERN.test(message)) {
     return { kind: 'proceed', brief: state.brief, reason: 'user_proceed' };
   }
+  // Review fix A4 (1.152): a weak ack is consent only AFTER the re-offer
+  // turned the choice into a direct yes/no; before that it gets the
+  // one-per-round re-offer.
+  if (CLARIFY_V2_BARE_ACK_PATTERN.test(message)) {
+    if (state.reoffered === true) {
+      return { kind: 'proceed', brief: state.brief, reason: 'user_proceed' };
+    }
+    return { kind: 'reoffer', state: { ...state, reoffered: true }, cue: 'bare_ack' };
+  }
+  // Review fix A1 (1.152): an explicit decline releases the round.
+  if (CLARIFY_V2_DECLINE_PATTERN.test(message)) {
+    return { kind: 'decline', brief: state.brief, cue: 'decline' };
+  }
 
-  const workingBrief = input.messageIsDraftShaped
+  // Review fix A2 (1.152): replacement only for a genuinely standalone
+  // restatement; the bar is checked BEFORE the not-an-answer guard so a
+  // standalone decision QUESTION ("Should we focus on France instead?")
+  // replaces rather than deflects.
+  const replaces = isStandaloneBriefRestatement(message, input.messageIsDraftShaped);
+  if (!replaces && CLARIFY_V2_QUESTION_REPLY_PATTERN.test(message)) {
+    // Review fix A1 (1.152), not-an-answer guard: a question back to us is
+    // never folded into the brief. One re-offer per round, then decline.
+    if (state.reoffered === true) {
+      return { kind: 'decline', brief: state.brief, cue: 'question_reply' };
+    }
+    return {
+      kind: 'reoffer',
+      state: { ...state, reoffered: true },
+      cue: 'question_reply',
+    };
+  }
+
+  const workingBrief = replaces
     ? message.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH)
     : incorporateAnswerIntoBrief(state.brief, message);
 
@@ -297,6 +481,61 @@ export function composeClarifyV2Response(
     assistant_text: assistantText,
     blocks: [],
     suggested_actions: [...candidateChips, proceedChip],
+    insights: [],
+    stage_indicator: 'frame',
+  } as OlumiResponse;
+}
+
+/**
+ * Review fix A1 (1.152) — the honest decline reply. The round is released
+ * (the dispatch retires the pending via `consumedPendingRefs`), the
+ * working brief is preserved server-side (terminal `brief_text` seed,
+ * A9), and the copy names the way back in. Deliberately NO chips: the
+ * released round means a proceed chip here would replay through round-1
+ * preflight where its canned message is not draft-shaped — a dead chip is
+ * dishonest, so the escape hatch is named in prose instead.
+ */
+export const CLARIFY_V2_DECLINE_MESSAGE =
+  "Okay — I'll hold off. Say 'draft it' whenever you're ready.";
+
+export function composeClarifyV2DeclineResponse(): OlumiResponse {
+  return {
+    response_version: 2,
+    assistant_text: CLARIFY_V2_DECLINE_MESSAGE,
+    blocks: [],
+    suggested_actions: [],
+    insights: [],
+    stage_indicator: 'frame',
+  } as OlumiResponse;
+}
+
+/**
+ * Review fixes A1/A4 (1.152) — the one-per-round re-offer. Keeps the
+ * round alive (the dispatch re-persists the pending with `reoffered`
+ * spent; same chip_id → supersession, no zombie twin) and re-presents the
+ * default-forward choice. Copy is cue-specific: a bare ack gets a direct
+ * yes/no ("shall I draft with sensible defaults?") so the NEXT ack is
+ * unambiguous consent; a question back to us gets the honest meta-answer
+ * (the questions are optional) — this path is deterministic and must not
+ * pretend to answer an arbitrary question.
+ */
+export function composeClarifyV2ReofferResponse(
+  cue: 'bare_ack' | 'question_reply',
+): OlumiResponse {
+  const assistantText =
+    cue === 'bare_ack'
+      ? 'Just to check — shall I draft with sensible defaults, or would you like to answer any of the questions above first?'
+      : "Happy to clarify — the questions are optional and each one just sharpens the draft. Answer whichever you like above, or say 'go ahead' and I'll draft with sensible defaults.";
+  const proceedChip: SuggestedAction = {
+    id: CLARIFY_V2_PROCEED_CHIP_ID,
+    label: 'Use sensible defaults',
+    message: CLARIFY_V2_PROCEED_MESSAGE,
+  };
+  return {
+    response_version: 2,
+    assistant_text: assistantText,
+    blocks: [],
+    suggested_actions: [proceedChip],
     insights: [],
     stage_indicator: 'frame',
   } as OlumiResponse;

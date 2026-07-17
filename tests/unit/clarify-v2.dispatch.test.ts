@@ -172,3 +172,164 @@ describe('clarify v2 dispatch — #497 mechanical-fix behavioural pins', () => {
     expect(eventNames(events)).not.toContain(QUESTIONS_EMITTED);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ROADMAP 1.152 — design-fix dispatch pins (A1 / A4 / A9 end-to-end).
+// Decision-core semantics are pinned RED-first in clarify-v2.preflight
+// .test.ts; these pin the I/O half: what commits, what releases, what
+// seeds brief_text, what telemetry fires, and what the wire carries.
+// ─────────────────────────────────────────────────────────────────────────
+
+const DEFLECTED = TelemetryEvents.V5ClarifyV2Deflected;
+
+describe('clarify v2 dispatch — 1.152 design fixes (A1 / A4 / A9)', () => {
+  beforeEach(async () => {
+    await resetClarifyV2Harness();
+  });
+
+  it("A1 decline: 'not now' releases the round (pending retired, holds carried, brief seeded) with the honest reply", async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+      seedProposedConceptHold({ expires_at_turn_count: 3 }),
+    ];
+    const { outcome, appends, events } = await runClarifyV2Turn({ message: 'not now' });
+    if (outcome === null || outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${outcome?.kind}`);
+    }
+    expect(outcome.response.assistant_text).toContain("I'll hold off");
+    expect(outcome.response.assistant_text).toContain("Say 'draft it'");
+    // Released, not superseded: NO clarify round survives the commit…
+    expect(appends).toHaveLength(1);
+    const pendings = (appends[0]!.pending_actions ?? []) as PendingAction[];
+    expect(pendings.map((p) => p.action.kind)).not.toContain('clarify_v2_round');
+    // …while the unrelated hold is carried, not wiped.
+    expect(pendings.map((p) => p.action.kind)).toContain('proposed_concept');
+    // A9 terminal seed: the working brief is preserved for a later resume.
+    expect(appends[0]!.briefText).toBe(THIN_BRIEF);
+    // Telemetry: one deflection (release/decline), after the commit.
+    const deflections = events.filter((e) => e.name === DEFLECTED);
+    expect(deflections).toHaveLength(1);
+    expect(deflections[0]!.data).toMatchObject({ action: 'release', cue: 'decline' });
+  });
+
+  it('A1 decline commit-fail: not claimed (null), no deflection telemetry', async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    clarifyV2Harness.commitError = new Error('append failed');
+    const { outcome, events } = await runClarifyV2Turn({ message: 'not now' });
+    expect(outcome).toBeNull();
+    expect(eventNames(events)).not.toContain(DEFLECTED);
+  });
+
+  it('A1 not-an-answer: a question back to us re-offers ONCE (brief untouched, reoffer marked), then declines', async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    const first = await runClarifyV2Turn({ message: 'What do you mean by timeframe?' });
+    if (first.outcome === null || first.outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${first.outcome?.kind}`);
+    }
+    expect(first.outcome.response.assistant_text).toContain('optional');
+    const pendings = (first.appends[0]!.pending_actions ?? []) as PendingAction[];
+    const roundPending = pendings.find((p) => p.action.kind === 'clarify_v2_round');
+    expect(roundPending).toBeDefined();
+    if (roundPending!.action.kind !== 'clarify_v2_round') throw new Error('narrow');
+    // The question was NOT folded into the brief; round/asked untouched.
+    expect(roundPending!.action.brief).toBe(THIN_BRIEF);
+    expect(roundPending!.action.round).toBe(1);
+    expect(roundPending!.action.reoffered).toBe(true);
+    expect(first.appends[0]!.briefText).toBeUndefined(); // A9: ask-class commit
+    const deflections = first.events.filter((e) => e.name === DEFLECTED);
+    expect(deflections[0]!.data).toMatchObject({ action: 'reoffer', cue: 'question_reply' });
+
+    // Second deflection in the same round → decline (re-offer once per round).
+    await resetClarifyV2Harness();
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1, { reoffered: true }),
+    ];
+    const second = await runClarifyV2Turn({ message: 'Why do you need to know?' });
+    if (second.outcome === null || second.outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${second.outcome?.kind}`);
+    }
+    expect(second.outcome.response.assistant_text).toContain("I'll hold off");
+    const secondPendings = (second.appends[0]!.pending_actions ?? []) as PendingAction[];
+    expect(secondPendings.map((p) => p.action.kind)).not.toContain('clarify_v2_round');
+  });
+
+  it("A4 bare-ack: 'ok' with questions pending re-offers the default-forward choice; 'ok' after the re-offer proceeds", async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    const first = await runClarifyV2Turn({ message: 'ok' });
+    if (first.outcome === null || first.outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${first.outcome?.kind}`);
+    }
+    expect(first.outcome.response.assistant_text).toContain('sensible defaults');
+    const chipIds = (
+      (first.outcome.response.suggested_actions ?? []) as Array<{ id: string }>
+    ).map((c) => c.id);
+    expect(chipIds).toContain('cv2_proceed_default');
+    const deflections = first.events.filter((e) => e.name === DEFLECTED);
+    expect(deflections[0]!.data).toMatchObject({ action: 'reoffer', cue: 'bare_ack' });
+
+    // After the re-offer (a direct yes/no), the same ack IS consent.
+    await resetClarifyV2Harness();
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1, { reoffered: true }),
+    ];
+    const second = await runClarifyV2Turn({ message: 'ok' });
+    if (second.outcome === null || second.outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${second.outcome?.kind}`);
+    }
+    expect(second.outcome.briefOverride).toBe(THIN_BRIEF);
+  });
+
+  it('A9: ask-class commits (round 1 AND resume follow-up) seed NO brief_text — the write-once column stays free for the terminal brief', async () => {
+    // Round 1 ask.
+    const round1 = await runClarifyV2Turn({ message: THIN_BRIEF });
+    expect(round1.outcome?.kind).toBe('respond');
+    expect(round1.appends[0]!.briefText).toBeUndefined();
+
+    // Resume follow-up ask.
+    await resetClarifyV2Harness();
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    const resume = await runClarifyV2Turn({ message: PARTIAL_ANSWER });
+    expect(resume.outcome?.kind).toBe('respond');
+    expect(resume.appends[0]!.briefText).toBeUndefined();
+  });
+
+  it('A9 proceed control: the completing answer proceeds as a draft with the FINAL brief as briefOverride (the draft commit seeds it)', async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    const answer =
+      'The goal is to increase revenue; the alternative is doing nothing; the stakes are around £200,000; it plays out within this year.';
+    const { outcome } = await runClarifyV2Turn({ message: answer });
+    if (outcome === null || outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${outcome?.kind}`);
+    }
+    // dispatchDraftGraph commits briefText from effectiveBrief =
+    // briefOverride (draft-graph-dispatch.ts) — the FINAL answered brief.
+    expect(outcome.briefOverride).toContain(THIN_BRIEF);
+    expect(outcome.briefOverride).toContain('£200,000');
+  });
+
+  it('A3 dispatch: an explicit-generate resume threads the ASSEMBLED brief into the merge (not discarded)', async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    const extra = 'Our runway is about £500,000 and hiring freezes start next quarter.';
+    const { outcome } = await runClarifyV2Turn({
+      message: 'Yes, build the model now please',
+      explicitGenerateBrief: extra,
+    });
+    if (outcome === null || outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${outcome?.kind}`);
+    }
+    expect(outcome.briefOverride).toContain(THIN_BRIEF);
+    expect(outcome.briefOverride).toContain('£500,000');
+  });
+});
