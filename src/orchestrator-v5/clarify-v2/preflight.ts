@@ -188,10 +188,11 @@ export function decideClarifyV2Resume(
     // draft from the working brief, not from it.
     return { kind: 'proceed', brief: state.brief, reason: 'explicit_generate' };
   }
-  if (
-    CLARIFY_V2_PROCEED_PATTERN.test(message) ||
-    message.trim() === CLARIFY_V2_PROCEED_MESSAGE
-  ) {
+  // Review fix A10: the exact-constant check was dead code — the pattern's
+  // 'go ahead…' alternation matches CLARIFY_V2_PROCEED_MESSAGE exactly
+  // (pinned in clarify-v2.preflight.test.ts so a pattern edit that breaks
+  // the constant's coverage goes RED, not silently dead again).
+  if (CLARIFY_V2_PROCEED_PATTERN.test(message)) {
     return { kind: 'proceed', brief: state.brief, reason: 'user_proceed' };
   }
 

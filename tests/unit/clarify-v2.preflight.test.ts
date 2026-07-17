@@ -291,3 +291,17 @@ describe("clarify_v2 response composition (wire shape)", () => {
     expect(response.stage_indicator).toBe("frame");
   });
 });
+
+// Review fix A10 (17 Jul) — the proceed PATTERN must cover the canned
+// proceed MESSAGE exactly (the redundant exact-string check was removed as
+// dead code; this pin keeps it dead rather than silently uncovered).
+import {
+  CLARIFY_V2_PROCEED_PATTERN as A10_PATTERN,
+  CLARIFY_V2_PROCEED_MESSAGE as A10_MESSAGE,
+} from '../../src/orchestrator-v5/clarify-v2/preflight.js';
+
+describe('A10 — proceed pattern covers the canned proceed message', () => {
+  it('CLARIFY_V2_PROCEED_PATTERN matches CLARIFY_V2_PROCEED_MESSAGE', () => {
+    expect(A10_PATTERN.test(A10_MESSAGE)).toBe(true);
+  });
+});
