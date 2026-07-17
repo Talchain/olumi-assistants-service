@@ -371,6 +371,19 @@ describe('B6 — fallback preserves the scaffold disclosure', () => {
     expect(out).not.toContain('0.6234');
   });
 
+  it('a POISONED disclosure-shaped slice (decimal inside the label slot) is NOT smuggled — bare fallback', () => {
+    // The grammar's label slot accepts digits; the backstop must re-check
+    // the combined output, not trust disclosure-shaped structure.
+    const poisoned =
+      "Leading option sits at 0.6234 exactly. Placeholder values were used for 'Option at 0.6234' " +
+      'because it has no values set — ' +
+      'the whole comparison is illustrative until you configure it. ' +
+      "To set real values, say 'Help me configure Option at 0.6234.'";
+    const out = template({ assistant_text: poisoned });
+    expect(out).toBe('Ran analysis on your current scenario.');
+    expect(out).not.toContain('0.6234');
+  });
+
   it('allowlist-rejected summary WITHOUT a disclosure → bare fallback (unchanged)', () => {
     const out = template({ assistant_text: 'Leading option sits at 0.6234 exactly.' });
     expect(out).toBe('Ran analysis on your current scenario.');
