@@ -237,10 +237,10 @@
  *    ('Good point about the 3 scenarios.') — same class as the round-7
  *    bare-number cost; a CONSUMED figure in the clause stays clean ('Good
  *    point about the 40% figure').
- *  - a copula-adjacent %-figure anchors a singular point token ('The
- *    tipping point is 62%.' → {[62], 1}) — the ruling is direction-agnostic
- *    and unit-blind. FLAGGED for recalibration if G4 starts blocking honest
- *    coaching prose on it.
+ *  - [SUPERSEDED by ROUND 11 ruling 1] a copula-adjacent %-figure anchored
+ *    a singular point token ('The tipping point is 62%.' → {[62], 1}); the
+ *    flagged recalibration happened — singular 'point' never forward-anchors
+ *    and the idiom now scans {[62], 0}.
  * Round-10 accepted residuals (outside the rulings, pinned):
  *  - word-number-free movement prose ('points slid modestly', 'shed a few
  *    points') — no numeric token exists anywhere;
@@ -248,6 +248,55 @@
  *  - cues outside the 3-word window ('rose by more than a point');
  *  - cue-after-the-token shapes ('a point higher') — the cue window looks
  *    backward, mirroring the long-standing sign-cue doctrine.
+ *
+ * ==========================================================================
+ * ROUND 11 — FINAL CALIBRATION for the points-family (orchestrator rulings,
+ * implemented exactly; r10's copula extension beyond the ruling's letter is
+ * what caused this round). The r10 forward window over-blocked canonical
+ * coach formatting; from here the DEFAULT disposition for any new shape is
+ * DOCUMENTED RESIDUAL (register below + pins), not a new mechanism.
+ * ==========================================================================
+ * (1) FORWARD anchoring requires PLURAL 'points' (ruling 1). Singular
+ *     'point' NEVER forward-anchors; a singular whose ONLY numeric
+ *     adjacency is forward is FULLY prose — not even demoted, so the
+ *     ruling-2b backstop cannot strand its trailing number: 'The tipping
+ *     point is 62%.' → {[62],0} · 'The score at that point was 45.' →
+ *     clean · 'the decimal point is 2 places left' → clean. Backward +
+ *     article rules from r10 are unchanged for singular. Ruling 3
+ *     retro-ratifies the copula set (was/is/are/were) for the PLURAL case
+ *     only ('the drop in points is 12' refuses, same leak as 'was').
+ * (2) LIST MARKERS never forward-anchor (ruling 2). A numeric token that
+ *     is LIST-MARKER-SHAPED (^\d+[.)] at a line start) is CLASSIFIED a
+ *     marker in scanLiterals — never a figure, never a strandable token —
+ *     and a numeric token immediately after a newline is never a forward
+ *     neighbour; the colon connective never anchors across a newline:
+ *     'Key points:\n1. Your win rate is 62%.' → {[62],0} · 'A few
+ *     points:\n1) run it again\n2) check the 40% figure' → {[40],0}.
+ *     ANCHOR-FOLLOW GUARD (the round-6 invariant generator caught the
+ *     unguarded rule live): a marker-shaped run whose punct abuts an
+ *     anchor ('62. points', '62.%') keeps its released-punct fail-closed
+ *     refusal — malformed typography, not list formatting.
+ * (3) The article variant admits ONE adjective from the CLOSED ruling list
+ *     (full|entire|whole|single|half) between a/an and singular 'point'
+ *     (ruling 4): 'rose an entire point' / 'gained a full point' refuse
+ *     under the movement-cue rule; 'that raises an important point about
+ *     scope' stays prose ('important' is NOT in the list).
+ *
+ * Round-11 deliberate costs (fail-closed, visible, pinned — ruling 5):
+ *  - same-line colon, plural, non-list-marker number: 'Two quick points:
+ *    60% of runs pass.' → the 60 values, the phantom points figure refuses
+ *    (2 counts: unconsumed forward anchor v1 + stranded 'Two' v2);
+ *  - enumeration-count: 'The key points are 3: cost, speed, and risk.' →
+ *    blocks ({[],2} — same two invariants);
+ *  - 'Good point about the 3 scenarios.' keeps its r10 pin.
+ * Round-11 accepted residuals (the rulings' letter, pinned + registered):
+ *  - a forward-only-neighboured SINGULAR is fully prose, so its number is
+ *    invisible ('the point was 12' → {[],0}) — the price of un-blocking
+ *    the idiom;
+ *  - cross-line forward shapes are invisible ('points\n12' → {[],0}) —
+ *    the newline guard is categorical;
+ *  - a GENUINE figure typed as a line-start marker ('62.' opening a line,
+ *    no abutting anchor) is read as list formatting and is invisible.
  *
  * DOCUMENTED RESIDUALS — OUTSIDE the contract, pinned out-of-scope in tests:
  *  - bare numbers in clauses with NO anchor ('we ran 3 scenarios.') are not
@@ -352,7 +401,10 @@ interface AnchorDetection {
    * never fires on them — that was the round-8 over-block), but
    * reconciliation v2 still treats their clauses as anchor-bearing for
    * UNCONSUMED numeric tokens, so the demote-path can never disarm the
-   * stranded-token check ('points dropped from 12' fails closed). */
+   * stranded-token check ('points dropped from 12' fails closed).
+   * ROUND 11 (ruling 1): a SINGULAR 'point' whose only numeric adjacency
+   * is FORWARD is fully prose — in NEITHER list, so the backstop cannot
+   * strand its trailing number ('The score at that point was 45.' clean). */
   demotedPoints: Span[];
 }
 
@@ -501,7 +553,11 @@ function numericNeighbourBefore(text: string, pos: number, anchorToken: string):
  * explicit sign is transparent ('points was -12'). Forward anchors are
  * never consumed by Layer 2 (it only matches anchors forward FROM a
  * literal), so a forward-neighboured points token refuses via invariant v1
- * — the correct outcome for a pp-family figure, which never values. */
+ * — the correct outcome for a pp-family figure, which never values.
+ * ROUND 11: the CALLER gates this to PLURAL 'points' (ruling 1), and the
+ * window never crosses a newline to a list item (ruling 2): the colon
+ * connective never anchors across a newline, and a token immediately after
+ * a newline is never a forward neighbour. */
 function numericNeighbourAfter(text: string, pos: number): boolean {
   let i = pos;
   let crossedNewline = false;

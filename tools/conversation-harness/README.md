@@ -511,9 +511,29 @@ Specific traps worth knowing about:
   figure` stays clean because the 40 is consumed). Round-10 deliberate
   costs (pinned): a stranded bare number in a demoted-points clause blocks
   (`Good point about the 3 scenarios.`), and a copula-adjacent %-figure
-  anchors a singular `point` (`The tipping point is 62%.` → one phantom
-  untraceable — flagged for recalibration if G4 starts blocking honest
-  prose on it). Round-10 accepted residuals (pinned): word-number-free
+  anchored a singular `point` (`The tipping point is 62%.` → one phantom
+  untraceable — **recalibrated in round 11: that over-block is dead**).
+  **Round 11 (FINAL points-family calibration, orchestrator rulings
+  implemented exactly):** forward anchoring requires **PLURAL `points`** —
+  singular `point` never forward-anchors, and a singular whose only
+  numeric adjacency is forward is FULLY prose (`The tipping point is
+  62%.` → `{[62],0}`, `The score at that point was 45.` clean); the
+  copula set (was/is/are/were) is retro-ratified for the plural case only
+  (`the drop in points is 12` refuses). **List markers never
+  forward-anchor**: a `^\d+[.)]`-shaped token at a line start is
+  classified a marker (never a figure, never strandable), a numeric token
+  immediately after a newline is never a forward neighbour, and the colon
+  connective never anchors across a newline (`Key points:\n1. Your win
+  rate is 62%.` → `{[62],0}`; `A few points:\n1) run it again\n2) check
+  the 40% figure` → `{[40],0}`) — with an **anchor-follow guard** (a
+  marker-shaped run abutting an anchor — `62. points`, `62.%` — keeps its
+  released-punct fail-closed refusal; the round-6 invariant generator
+  caught the unguarded rule live). The **article variant admits ONE
+  adjective from the closed list** (full|entire|whole|single|half): `rose
+  an entire point` / `gained a full point` refuse; `an important point
+  about scope` stays prose. From round 11 the default disposition for any
+  new points-family shape is **DOCUMENTED RESIDUAL** (register below),
+  not a new mechanism. Round-10 accepted residuals (pinned): word-number-free
   movement prose (`points slid modestly`, `shed a few points`), movement
   verbs outside the closed cue list (`they won a point`), cues outside the
   3-word window, and cue-after-the-token shapes (`a point higher`). See the
@@ -540,6 +560,38 @@ Specific traps worth knowing about:
 - **The floors interlock.** A prompt that avoids numbers to dodge G4 must still
   clear G1 and G6 on its own merits; a prompt that asks nothing to dodge G7 is a
   dead end under G6. No single-dimension policy clears all of them.
+
+### Figure-scanner RESIDUAL REGISTER (points-family, final calibration — round 11)
+
+Round 11 is the **final calibration round for the points-family**: from here,
+the default disposition for any newly found shape is **DOCUMENTED RESIDUAL**
+(a row here + a pin in `figure-scanner.harness-test.ts`), **not a new
+mechanism**. Every row is pinned.
+
+**Known over-blocks (deliberate costs — fail-closed, visible, ACCEPTED):**
+
+| shape | scan | why accepted |
+|---|---|---|
+| `Two quick points: 60% of runs pass.` | `{[60],2}` | same-line colon + plural + non-list-marker number forward-anchors; the 60 still values (ruling 5) |
+| `The key points are 3: cost, speed, and risk.` | `{[],2}` | enumeration-count reads as a points figure (ruling 5) |
+| `Good point about the 3 scenarios.` | `{[],1}` | r10 demote-backstop cost, kept — a stranded bare number beside a demoted `point` blocks |
+| `Option 3 gives a 40% win rate` | `{[40],1}` | round-7 bare-number cost, kept |
+
+**Known invisibles (accepted — the rulings' letter):**
+
+| shape | scan | why accepted |
+|---|---|---|
+| `the point was 12` / `The score at that point was 45.` | `{[],0}` | singular never forward-anchors (ruling 1); the fully-prose treatment is what un-blocks the coach idiom `The tipping point is 62%.` |
+| `points\n12` | `{[],0}` | a token immediately after a newline is never a forward neighbour (ruling 2) |
+| line-start `62.` reading as a genuine figure with no abutting anchor | marker | classified list formatting (ruling 2); a marker-shaped run **abutting an anchor** (`62. points`, `62.%`) still refuses |
+| `points slid modestly` / `shed a few points` / `gained several points` | `{[],0}` | no numeric token exists anywhere (r10) |
+| `they won a point` (verbs outside the closed cue list) | `{[],0}` | closed list by ruling — growing it is the mirror trap (r10) |
+| `rose by more than a point` (cue outside the 3-word window) | `{[],0}` | window convention shared with `cueSign` (r10) |
+| `a point higher` (cue after the token) | `{[],0}` | backward-only cue doctrine (r10) |
+
+Out-of-contract residuals for the wider scanner (ordinal words, Lo-script
+numerals, the comma clause-straddle) are documented in the G4 bullet above and
+in the `figure-scanner.ts` module doc — they predate round 11 and are pinned.
 
 ### Fail-closed
 
