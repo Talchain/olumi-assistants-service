@@ -1279,3 +1279,53 @@ describe('round 8: out-of-contract residuals (accepted scope, pinned)', () => {
     expect(scanProseFigures('it twice hit 40%')).toEqual({ values: [40], unparseable: 0 });
   });
 });
+
+// ============================================================
+// ROUND 9 — permanent corpus for the round-8 review verdicts.
+// (1) P1: the TWO HYPHEN CARVE-OUTS (the prefix 'x-one' compound-fragment
+// guard and the suffix 'one-off' modifier guard) were not glue-conditioned —
+// the exact defect class the round-8 P0 closed for fraction words, one
+// carve-out over. 'between twenty-odd and 95%' discarded the word token and
+// the fabricated bound scanned invisibly ({values:[95], unparseable:0}).
+// The carve-outs are now conditioned on COMPOUND GLUE CONTEXT: the glue test
+// looks PAST the hyphen fragments to the real neighbour, so a glued token
+// enters the stream (whole-form refusal, or a stranded token reconciliation
+// v2 fails closed); plain compound prose keeps the carve-out.
+// ============================================================
+
+describe('round 9 corpus: the round-8 P1 — hyphen carve-outs re-opened the shared-anchor class', () => {
+  it('P1 family (verbatim from the round-8 verdict): glued compound fragments fail closed', () => {
+    // Round 8 scanned every one of these {values:[95], unparseable:0} — the
+    // fabricated word bound contributed NOTHING and scored 1.000.
+    // Broken glue ('-odd and ' is not cluster glue): the stranded token is
+    // visible to reconciliation v2.
+    expect(scanProseFigures('between twenty-odd and 95%')).toEqual({ values: [95], unparseable: 1 });
+    expect(scanProseFigures('either thirty-something or 95%')).toEqual({ values: [95], unparseable: 1 });
+    // Intact glue (' and ' / en dash): the whole anchored form refuses.
+    expect(scanProseFigures('between mid-forty and 95%')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('a sub-ten–95% range')).toEqual({ values: [], unparseable: 1 });
+  });
+
+  it('...and in the OTHER direction (anchored literal first)', () => {
+    expect(scanProseFigures('between 95% and twenty-odd')).toEqual({ values: [95], unparseable: 1 });
+    expect(scanProseFigures('either 95% or thirty-something')).toEqual({ values: [95], unparseable: 1 });
+    expect(scanProseFigures('between 95% and mid-forty')).toEqual({ values: [95], unparseable: 1 });
+    expect(scanProseFigures('a 95%–sub-ten range')).toEqual({ values: [95], unparseable: 1 });
+  });
+
+  it('P1 gate: the fabricated compound bound now blocks (was 1.000 fail-open)', () => {
+    const d = gateCanonicalStateUse([gateTurn('Expect between twenty-odd and 95% success.', [95])]);
+    expect(d.details.figures_stated).toBe(2);
+    expect(d.details.traceable).toBe(1);
+    expect(d.value).toBe(0.5);
+  });
+
+  it('the carve-out protections stay clean (compound modifiers are prose, not tokens)', () => {
+    expect(scanProseFigures('a one-off gain at 40%')).toEqual({ values: [40], unparseable: 0 });
+    expect(scanProseFigures('a ten-fold increase to 40%')).toEqual({ values: [40], unparseable: 0 });
+    expect(scanProseFigures('phase-two hit 40%')).toEqual({ values: [40], unparseable: 0 });
+    // The round-5 clause shield covers compound fragments like every other
+    // token kind.
+    expect(scanProseFigures('sixty-odd people churned, 40% of the total')).toEqual({ values: [40], unparseable: 0 });
+  });
+});

@@ -164,6 +164,21 @@
  *     valued — and a bare prose 'point' with no number fails closed via
  *     invariant v1, exactly like 'shown in pts'.
  *
+ * ==========================================================================
+ * ROUND 9 — recognizer-edge holes in the ROUND-8 fixes themselves
+ * ==========================================================================
+ * (1) P1 — the two HYPHEN CARVE-OUTS (the prefix 'x-one' compound-fragment
+ *     guard and the suffix 'one-off' modifier guard) were not
+ *     glue-conditioned — the same class as the round-8 P0, one carve-out
+ *     over: 'between twenty-odd and 95%', 'either thirty-something or 95%',
+ *     'between mid-forty and 95%', 'a sub-ten–95% range' all discarded the
+ *     word token and the fabricated bound scanned invisibly. Both carve-outs
+ *     now apply COMPOUND GLUE CONTEXT (the round-8 glue classes, tested past
+ *     the hyphen fragments on both sides): a glued token enters the stream
+ *     and the form refuses whole or reconciliation v2 flags it. Plain
+ *     compound prose ('a one-off gain', 'phase-two hit 40%') keeps the
+ *     carve-out; the round-5 clause shield is untouched.
+ *
  * DOCUMENTED RESIDUALS — OUTSIDE the contract, pinned out-of-scope in tests:
  *  - bare numbers in clauses with NO anchor ('we ran 3 scenarios.') are not
  *    figures; a clause comma shields ('Across 3 cohorts, 40% converted').
@@ -331,6 +346,46 @@ function fractionGlueContext(text: string, start: number, end: number): boolean 
   return FRACTION_RIGHT_GLUE_RE.test(text.slice(end)) || FRACTION_LEFT_GLUE_RE.test(text.slice(0, start));
 }
 
+// ---------- ROUND 9 (P1): glue-context condition on the hyphen carve-outs --
+
+/** Extend a token span across single-hyphen-joined letter fragments on both
+ * sides ('forty' out to 'mid-forty'; 'twenty' out to 'twenty-odd') so the
+ * glue test can look PAST the compound fragment to the real neighbour. */
+function hyphenCompoundSpan(text: string, start: number, end: number): Span {
+  let s = start;
+  while (text[s - 1] === '-' && /[a-z]/i.test(text[s - 2] ?? '')) {
+    let k = s - 2;
+    while (k >= 0 && /[a-z']/i.test(text[k])) k--;
+    s = k + 1;
+  }
+  let e = end;
+  while (text[e] === '-' && /[a-z]/i.test(text[e + 1] ?? '')) {
+    let k = e + 1;
+    while (k < text.length && /[a-z']/i.test(text[k])) k++;
+    e = k;
+  }
+  return { start: s, end: e };
+}
+
+/** ROUND 9 (P1): the round-8 hyphen carve-outs (the prefix 'x-one'
+ * compound-fragment guard and the suffix 'one-off' modifier guard) were NOT
+ * glue-conditioned — the exact defect class the round-8 P0 closed for
+ * fraction words, one carve-out over: 'between twenty-odd and 95%' /
+ * 'a sub-ten–95% range' discarded the word token and the fabricated bound
+ * scanned invisibly. A compound-fragment word that is list/range-glued to a
+ * numeric neighbour (looking past its hyphen fragments) must enter the token
+ * stream — the cluster grammar refuses the form whole, or reconciliation v2
+ * flags the stranded token. Plain compound prose ('a one-off gain',
+ * 'phase-two hit 40%') keeps the carve-out. Mutation hook: forcing this to
+ * `false` restores the round-8 unconditioned carve-outs (the verified
+ * round-9 P1 leak). */
+function compoundGlueContext(text: string, start: number, end: number): boolean {
+  const span = hyphenCompoundSpan(text, start, end);
+  return (
+    FRACTION_RIGHT_GLUE_RE.test(text.slice(span.end)) || FRACTION_LEFT_GLUE_RE.test(text.slice(0, span.start))
+  );
+}
+
 /** Last `n` words immediately before `pos`, lowercased, not crossing a
  * clause boundary (the shared CUE_BOUNDARY set — round 6). Hyphenated words
  * split into their parts ('twenty-five' → 'twenty', 'five'). */
@@ -493,8 +548,15 @@ function scanWordNumberLiterals(text: string): Literal[] {
     const start = m.index;
     const end = start + m[0].length;
     // 'x-one': a number word hyphen-glued onto a preceding real word is a
-    // compound fragment, not a numeric token.
-    if (text[start - 1] === '-' && /[a-z]/i.test(text[start - 2] ?? '')) continue;
+    // compound fragment, not a numeric token — UNLESS (ROUND 9) the compound
+    // is list/range-glued to a numeric neighbour ('a sub-ten–95% range').
+    if (
+      text[start - 1] === '-' &&
+      /[a-z]/i.test(text[start - 2] ?? '') &&
+      !compoundGlueContext(text, start, end)
+    ) {
+      continue;
+    }
     const anchor = matchAnchorAfterWord(text, end);
     if (anchor === null) {
       // Fraction words are numeric tokens when %-adjacent — or (ROUND 8)
@@ -502,9 +564,17 @@ function scanWordNumberLiterals(text: string): Literal[] {
       // prose ('half the users') keeps the carve-out.
       const words = m[0].toLowerCase().split(/[^a-z]+/).filter(Boolean);
       if (words.every((w) => FRACTION_SET.has(w)) && !fractionGlueContext(text, start, end)) continue;
-      // Compound modifiers ('one-off', 'ten-fold') are not numeric tokens.
-      // (An anchored hyphen form — 'ninety-percent' — was caught above.)
-      if (text[end] === '-' && /[a-z]/i.test(text[end + 1] ?? '')) continue;
+      // Compound modifiers ('one-off', 'ten-fold') are not numeric tokens —
+      // UNLESS (ROUND 9) the compound is list/range-glued to a numeric
+      // neighbour ('between twenty-odd and 95%'). (An anchored hyphen form —
+      // 'ninety-percent' — was caught above.)
+      if (
+        text[end] === '-' &&
+        /[a-z]/i.test(text[end + 1] ?? '') &&
+        !compoundGlueContext(text, start, end)
+      ) {
+        continue;
+      }
     }
     out.push(unvaluableLiteral(start, end, anchor));
   }
