@@ -592,6 +592,7 @@ gap; shared mechanism, no new list) — plus the two P2 rows below.
 | `Good point about the 3 scenarios.` | `{[],1}` | r10 demote-backstop cost, kept — a stranded bare number beside a demoted `point` blocks |
 | `You make three good points.` | `{[],1}` | same demote-backstop class (r11.5 row): the word-number `three` strands beside the demoted plural — accepted cost, plausible coach prose |
 | `It all points to option 3.` | `{[],1}` | same demote-backstop class (r11.5 row): the option ordinal strands beside the demoted verb `points` — accepted cost; `Everything points to a 30% shortfall.` → `{[30],0}` (consumed figure, contrast pin) |
+| `It comes down to a single point of principle.` / `up to a single point` | `{[],1}` | adjective-interposed idiom (r11.5 orchestrator row): the closed-list adjective re-arms the movement-cue read past the bigram neutralisation — accepted cost (rare double-idiom shape), pinned |
 | `Option 3 gives a 40% win rate` | `{[40],1}` | round-7 bare-number cost, kept |
 
 **Known invisibles (accepted — the rulings' letter):**

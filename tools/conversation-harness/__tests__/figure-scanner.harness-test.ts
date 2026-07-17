@@ -1779,5 +1779,11 @@ describe('round 11.5: register rows — plausible-coach-prose members of the dem
     // The backstop only bites STRANDED tokens: the 30% values, nothing
     // strands — the r10 'Good point about the 40% figure' doctrine.
     expect(scanProseFigures('Everything points to a 30% shortfall.')).toEqual({ values: [30], unparseable: 0 });
+    // r11.5 register (orchestrator addition): the ADJECTIVE-interposed idiom
+    // shapes block — the article-window neutralisation was scoped to the bare
+    // idiom; a closed-list adjective ('single') re-arms the movement-cue read.
+    // Accepted cost (rare double-idiom shape), documented in the README register.
+    expect(scanProseFigures('It comes down to a single point of principle.')).toEqual({ values: [], unparseable: 1 });
+    expect(scanProseFigures('That is true, up to a single point.')).toEqual({ values: [], unparseable: 1 });
   });
 });
