@@ -470,6 +470,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5CoachingStatePersisted: "v5.coaching_state.persisted",
         V5GraphCasEvaluated: "v5.graph_cas.evaluated",
         V5GraphCasWriteBlocked: "v5.graph_cas.write_blocked",
+        V5GraphCasRpcConflict: "v5.graph_cas.rpc_conflict",
         // Lane 8 — Graph Management referee live wiring (CEE_GRAPH_MANAGEMENT_MODE)
         V5CandidateMutationWouldApply: "v5.candidate_mutation.would_apply",
         V5CandidateMutationHeld: "v5.candidate_mutation.held",
@@ -1165,6 +1166,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // append chokepoint — closed enums + hash prefixes only, no Datadog yet.
         TelemetryEvents.V5GraphCasEvaluated,
         TelemetryEvents.V5GraphCasWriteBlocked,
+        // ATOMIC graph CAS (CEE_V5_GRAPH_CAS_RPC=enforce): append_turn_atomic_v3
+        // in-transaction OLGC1 conflict — closed enums + hash prefixes + rpc_code
+        // only, no Datadog metric until activation dashboards exist.
+        TelemetryEvents.V5GraphCasRpcConflict,
         // Lane 8 — Graph Management referee verdict events + Model Management
         // version hook: diagnostic-only (structured logs are the operational
         // signal; no Datadog metric mapping until activation dashboards exist).
@@ -1831,6 +1836,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching_state.persisted",
         "v5.graph_cas.evaluated",
         "v5.graph_cas.write_blocked",
+        "v5.graph_cas.rpc_conflict",
         "v5.coaching_state.lifecycle_derived",
         "v5.coaching.signal_fired",
         "v5.coaching.output_postcheck",

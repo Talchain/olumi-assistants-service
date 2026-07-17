@@ -59,6 +59,10 @@ export function getSessionStore(): SessionStore {
     // config, which owns the off|observe|enforce parse + the prod
     // enforce→observe downgrade). Default 'off' — zero behavioural change.
     graphCasMode: appConfig.features.graphCasMode,
+    // ATOMIC graph CAS commit RPC (CEE_V5_GRAPH_CAS_RPC — off|shadow|enforce).
+    // Default 'off' → append_turn_atomic_v2 exactly as today. Requires
+    // migration 20260717120000 (Paul-gated) live before any non-'off' value.
+    graphCasRpc: appConfig.features.graphCasRpc,
   });
   return cachedInstance;
 }

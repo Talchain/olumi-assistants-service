@@ -892,6 +892,19 @@ export const TelemetryEvents = {
   // field set as V5GraphCasEvaluated.
   V5GraphCasWriteBlocked: "v5.graph_cas.write_blocked",
 
+  // V5 graph CAS — append_turn_atomic_v3 IN-TRANSACTION conflict
+  // (CEE_V5_GRAPH_CAS_RPC=enforce). Emitted when the v3 RPC rejects a
+  // graph write with SQLSTATE 'OLGC1' because the committed
+  // scenarios.graph_identity_hash diverged from the caller's expected
+  // server-read base — the ATOMIC, race-free counterpart to the
+  // observe-hook's V5GraphCasWriteBlocked (which is app-side, SELECT-then-
+  // write). The app surfaces it as GraphStaleWriteError (409-class
+  // refresh-reconfirm) and the whole turn rolls back — nothing clobbered.
+  // Content-free: scenario/turn ids, 16-hex-prefixed expected/incoming
+  // identity hashes, the closed-enum conflict_category, rpc_code only —
+  // never graph content or labels.
+  V5GraphCasRpcConflict: "v5.graph_cas.rpc_conflict",
+
   // Graph Management referee (CEE_GRAPH_MANAGEMENT_MODE != 'off'). One event
   // per refereed CandidateMutationEnvelope, name = the verdict (T4.0 §5
   // no-silent-outcome contract: every held/stale/rejected/clarify verdict
