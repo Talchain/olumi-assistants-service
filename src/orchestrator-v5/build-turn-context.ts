@@ -40,6 +40,7 @@ import {
 } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildFactorScaleMap,
+  extractNumericInterventionValue,
   projectInterventionsToRawScale,
   summariseConversions,
   summaryIsNoteworthy,
@@ -1366,6 +1367,11 @@ function projectOptionsToRawScale(
   return projected;
 }
 
+// P1-1 (one scale convention): the per-entry rule lives in
+// plot-intervention-scale.ts (`extractNumericInterventionValue`) — the
+// single home of both outbound wire conventions — so the D-ask-1 scaffold
+// derives its neutral wire numbers from the SAME function this loader
+// applies to the configured siblings, instead of mirroring it.
 function normaliseNumericInterventions(
   interventions: Record<string, unknown>,
 ): Record<string, number> {
@@ -1375,15 +1381,4 @@ function normaliseNumericInterventions(
     if (numeric !== null) entries.push([factorId, numeric]);
   }
   return Object.fromEntries(entries);
-}
-
-function extractNumericInterventionValue(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  const candidate = (value as Record<string, unknown>).value;
-  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
 }

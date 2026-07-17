@@ -50,6 +50,9 @@ import type { SuggestedAction } from './types.js';
 import type { HandlerValidationRegistry } from '../routing/validator.js';
 import { curatedHandlerChips } from './helpers.js';
 import type { ContextPackAnalysis } from '../context/context-pack-assembler.js';
+// D-ask-1 (2.11 P0-1): configure chip for scaffolded-placeholder runs —
+// derives from #487's single configure-chip copy source.
+import { buildScaffoldConfigureChip } from '../coaching/scaffold-disclosure.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
@@ -140,6 +143,18 @@ export interface ChipGeneratorInput {
    * and test is byte-identical).
    */
   readonly recentlyOfferedChipIds?: ReadonlySet<string>;
+  /**
+   * D-ask-1 (ROADMAP 2.11 P0-1) — options the CURRENT turn's run_analysis
+   * scaffolded with disclosed placeholder interventions (threaded from
+   * `HandlerOutcome.__scaffolded_options` by the turn-executor execute path
+   * and the chip-click dispatch). When non-empty on a run_analysis success
+   * turn, the configure chip for the scaffolded option is offered FIRST —
+   * claim-safety (get real values in) beats exploration follow-ups.
+   * Optional + additive: omitted/empty → byte-identical chips.
+   */
+  readonly scaffoldedOptions?: ReadonlyArray<
+    import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
+  >;
 }
 
 const MAX_CHIPS = 3;
@@ -507,7 +522,22 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // answered deterministically (0 LLM calls). `cap` caps at MAX_CHIPS
   // so the new chip is suppressed if the slot budget is already full.
   if (handlerJustRan === 'run_analysis') {
-    const chips: SuggestedAction[] = [
+    const chips: SuggestedAction[] = [];
+    // D-ask-1 (2.11 P0-1): a scaffolded run completed on PLACEHOLDER values
+    // for at least one option — the configure route is the honest first
+    // offer. Chip copy derives from #487's single configure-chip source
+    // (buildScaffoldConfigureChip), so message and deterministic route
+    // cannot drift apart. Prompt chip (no action_type): the message text
+    // routes through the configure-option gate.
+    if (input.scaffoldedOptions !== undefined && input.scaffoldedOptions.length > 0) {
+      const configureChip = buildScaffoldConfigureChip(input.scaffoldedOptions);
+      chips.push({
+        id: configureChip.id,
+        label: configureChip.label,
+        message: configureChip.message,
+      });
+    }
+    chips.push(
       {
         id: 'chip_action_explain_results',
         label: 'Explain the result',
@@ -520,7 +550,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         message: 'What could change the outcome of this analysis?',
         action_type: 'what_would_flip',
       },
-    ];
+    );
     if (currentTurnCarriesUsableValidationGuidance(input.handlerFacts)) {
       chips.push({
         id: 'chip_prompt_validate_decision',
