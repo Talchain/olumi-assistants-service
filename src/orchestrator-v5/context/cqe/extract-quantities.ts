@@ -28,6 +28,22 @@ export interface CqeExtractionSummary {
   readonly patterns_matched: readonly string[];
   readonly duration_ms: number;
   readonly timeout: boolean;
+  /**
+   * TRUE when at least one pattern rule did NOT run to completion, so the
+   * result set may be missing the highest-fidelity interpretation of some
+   * span and a lower-fidelity substitute may have taken its place.
+   *
+   * This is deliberately NARROWER than `timeout`. A rule that ran to
+   * completion but exceeded its wall-clock cap is SLOW, not degraded — its
+   * output is recorded and is exactly as correct as an in-budget run (a
+   * regex is deterministic; slowness does not change what it matches). Only
+   * a rule that never produced its matches can degrade the result set.
+   *
+   * Consumers that deterministically APPLY an extracted value (see
+   * `tryDeterministicValueUpdate`) must refuse to do so when this is true —
+   * a slower correct answer beats a fast wrong one.
+   */
+  readonly degraded: boolean;
   readonly message_too_long: boolean;
   readonly word_range_missed: boolean;
   readonly ambiguous_phrasing_detected: boolean;
@@ -94,6 +110,7 @@ function runExtractionInternal(
     patterns_matched: [],
     duration_ms: 0,
     timeout: false,
+    degraded: false,
     message_too_long: false,
     word_range_missed: false,
     ambiguous_phrasing_detected: false,
@@ -109,6 +126,7 @@ function runExtractionInternal(
     let maskedText = text;
     const matches: CqePatternMatch[] = [];
     let timedOut = false;
+    let degraded = false;
     const patternsMatched = new Set<string>();
     const budgetDeadline = startedAt + CQE_TOTAL_BUDGET_MS;
 
@@ -117,11 +135,20 @@ function runExtractionInternal(
 
     for (const rule of activeRules) {
       if (nowMs() > budgetDeadline) {
+        // The remaining rules never run, so the highest-fidelity reading of
+        // any span they would have claimed is missing from the result set.
+        // That IS degradation, and it is the one fork that used to exit
+        // here with NO telemetry at all — an unobservable branch on a path
+        // that writes values into the user's graph.
         timedOut = true;
+        degraded = true;
+        emitBudgetExhausted(rule.id, activeRules, nowMs() - startedAt);
         break;
       }
       if (forcedTimeouts.has(rule.id)) {
+        // apply() is skipped entirely, so this rule contributed nothing.
         timedOut = true;
+        degraded = true;
         emitPatternTimeout(rule.id, 'forced_for_test');
         continue;
       }
@@ -138,9 +165,33 @@ function runExtractionInternal(
       }
       const ruleDuration = nowMs() - ruleStart;
       if (ruleDuration > CQE_REGEX_TIMEOUT_MS) {
+        // SLOW, but NOT degraded — and deliberately NOT `continue`.
+        //
+        // This check runs AFTER rule.apply() has already returned. JS regex
+        // execution is synchronous and non-interruptible, so by the time we
+        // can observe `ruleDuration` the (possibly catastrophic) backtracking
+        // has already completed and been paid for in full. Discarding the
+        // result here therefore buys ZERO latency back — the cost is sunk —
+        // while throwing away a result that is exactly as correct as an
+        // in-budget one. That trade was strictly negative: it was the
+        // dominant source of silent value corruption on this path, because
+        // the unmasked span is then re-claimed by a lower-fidelity
+        // substitute (a lower-priority rule, or the compromise backstop)
+        // that yields a DIFFERENT NUMBER, not merely fewer numbers.
+        //
+        // `Docs/v5/cqe-design-v1_1.md` §5 is explicit that the 50ms cap is
+        // "defence-in-depth against pathological input, not a normal
+        // control-flow mechanism. If a regex regularly approaches the
+        // timeout, redesign the regex." Dropping the result made it exactly
+        // the control-flow mechanism the design forbids. We keep the
+        // measurement and the telemetry (that is the redesign signal the
+        // design doc asks for) and keep the work we already paid for.
+        //
+        // The cumulative-cost concern the cap existed to serve is still
+        // served — by the total-budget check at the top of this loop, which
+        // runs BEFORE the next rule and so can actually prevent work.
         timedOut = true;
         emitPatternTimeout(rule.id, 'wall_clock_exceeded', ruleDuration);
-        continue;
       }
       if (ruleMatches.length === 0) {
         tracePattern(rule.id, false, null, ruleDuration);
@@ -177,6 +228,7 @@ function runExtractionInternal(
       patterns_matched: Array.from(patternsMatched).sort(),
       duration_ms: nowMs() - startedAt,
       timeout: timedOut,
+      degraded,
       message_too_long: normalised.messageTooLong,
       word_range_missed: wordRangeMissed,
       ambiguous_phrasing_detected: ambiguousPhrasingDetected,
@@ -231,6 +283,36 @@ function emitPatternTimeout(
       timeout_cap_ms: CQE_REGEX_TIMEOUT_MS,
     },
     'CQE pattern exceeded wall-clock budget; no partial mask recorded',
+  );
+}
+
+/**
+ * Telemetry for the total-budget fork. Before this existed the loop could
+ * `break` here having run only some of the rules, emitting NOTHING — an
+ * unobservable branch on a path whose output is deterministically written
+ * into the user's graph. `skipped_pattern_ids` names exactly which rules
+ * never ran, so an operator can tell which fidelity was lost rather than
+ * only that something was.
+ */
+function emitBudgetExhausted(
+  firstSkippedId: string,
+  activeRules: readonly PatternRule[],
+  elapsedMs: number,
+): void {
+  const firstIdx = activeRules.findIndex((r) => r.id === firstSkippedId);
+  const skipped = firstIdx >= 0 ? activeRules.slice(firstIdx).map((r) => r.id) : [firstSkippedId];
+  log.warn(
+    {
+      event: 'cqe.budget_exhausted',
+      timeout: true,
+      degraded: true,
+      first_skipped_pattern_id: firstSkippedId,
+      skipped_pattern_ids: skipped,
+      skipped_count: skipped.length,
+      elapsed_ms: elapsedMs,
+      total_budget_ms: CQE_TOTAL_BUDGET_MS,
+    },
+    'CQE total wall-clock budget exhausted; remaining patterns skipped and extraction marked degraded',
   );
 }
 

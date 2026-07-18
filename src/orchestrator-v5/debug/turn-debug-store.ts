@@ -27,8 +27,16 @@ export interface TurnDebugCqeSection {
   readonly parsed_quantities: readonly QuantityExtractionResult[];
   /** Pattern IDs that produced at least one match. */
   readonly patterns_matched: readonly string[];
-  /** True if the total CQE budget (CQE_TOTAL_BUDGET_MS) was exceeded. */
+  /** True if any pattern rule exceeded its wall-clock cap, or the total
+   * CQE budget (CQE_TOTAL_BUDGET_MS) was exceeded. Indicates SLOWNESS. */
   readonly timeout: boolean;
+  /**
+   * True if at least one pattern rule did not run to completion, so the
+   * result set may contain a lower-fidelity substitute value. Strictly
+   * narrower than `timeout`; this is the signal that suppresses
+   * deterministic value application.
+   */
+  readonly degraded: boolean;
   /** Number of results produced by the compromise backstop. */
   readonly compromise_match_count: number;
   /** Wall-clock duration of the CQE run in milliseconds. */
@@ -180,6 +188,7 @@ class TurnDebugStore {
         parsed_quantities: [],
         patterns_matched: [],
         timeout: false,
+        degraded: false,
         compromise_match_count: 0,
         duration_ms: 0,
         message_too_long: false,
@@ -223,6 +232,7 @@ class TurnDebugStore {
         parsed_quantities: [],
         patterns_matched: [],
         timeout: false,
+        degraded: false,
         compromise_match_count: 0,
         duration_ms: 0,
         message_too_long: false,
