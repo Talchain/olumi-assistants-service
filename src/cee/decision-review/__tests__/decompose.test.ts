@@ -712,3 +712,119 @@ describe('CEE_DECISION_REVIEW_DECOMPOSE flag', () => {
     expect(config.cee.decisionReviewDecompose).toBe(true);
   });
 });
+
+// ============================================================================
+// Winner NAMING — inflection tolerance (measured false-positive, 2026-07-18)
+// ============================================================================
+//
+// Found by the R6 measurement rig (tools/b1-measure), not by review: over N=5
+// paired live runs against a realistic 4-option/5-factor/15-edge decision, the
+// composed review fell back to the monolith 5/5 times, and the DOMINANT
+// violation on every run was
+//   "narrative_summary does not name the winning option".
+//
+// The narratives were CORRECT. The authoritative winner label was
+// "Raise prices by 8 percent"; haiku wrote the grammatically natural gerund
+// "Raising prices by 8 percent leads narrowly, ...". The old check asked
+// `narrative.includes(label)` — an exact substring match — so a single letter
+// of verb inflection (Raise -> Raising) rejected a coherent, correctly-crowned,
+// fully-grounded review and burned a paid gpt-4.1 fallback on it.
+//
+// That is a FALSE POSITIVE in the R1 consistency check, and it is what made the
+// measured fallback rate 100% (vs the <10% the rerun criteria require). These
+// tests pin the tolerant behaviour. RED-first: every `toBe(true)` case below
+// fails against the exact-substring implementation.
+//
+// The tolerance is DERIVED from the label (stem-prefix on its own tokens), not
+// a hand-maintained synonym list — CLAUDE.md trap 12 (a mirror a human must
+// remember to sync WILL drift silently, and the drift reads as green).
+
+function inflectionInput(): DecisionReviewInvokeInput {
+  const base = baseInput();
+  return {
+    ...base,
+    isl_results: {
+      ...base.isl_results,
+      option_comparison: [
+        { option_id: 'opt-1', option_label: 'Raise prices by 8 percent', win_probability: 0.7, outcome: { mean: 100, p10: 80, p90: 120 } },
+        { option_id: 'opt-2', option_label: 'Raise prices by 15 percent', win_probability: 0.3, outcome: { mean: 90, p10: 70, p90: 110 } },
+      ],
+    },
+    winner: { id: 'opt-1', label: 'Raise prices by 8 percent', win_probability: 0.7, outcome_mean: 100 },
+    runner_up: { id: 'opt-2', label: 'Raise prices by 15 percent', win_probability: 0.3, outcome_mean: 90 },
+  } as DecisionReviewInvokeInput;
+}
+
+function inflectionComposition(narrative: string): Record<string, unknown> {
+  const r1 = goodR1();
+  r1.narrative_summary = narrative;
+  r1.story_headlines = { 'opt-1': 'Leads on demand strength', 'opt-2': 'Would lead if demand softened' };
+  return composeFragments(r1, goodR2(), goodR3(), goodR4());
+}
+
+describe('checkComposedConsistency — winner naming tolerates inflection (measured false-positive)', () => {
+  const ctx = () => buildSlices(inflectionInput()).ctx;
+
+  it('consistent: the VERBATIM narrative haiku produced in the live measurement (gerund form)', () => {
+    // Reproduced byte-for-byte from tools/b1-measure/diagnose.ts run 0.
+    const res = checkComposedConsistency(
+      inflectionComposition(
+        'Raising prices by 8 percent leads narrowly, with a 22 percentage point advantage over a 15 percent rise, driven primarily by how strongly customer demand responds to price changes.',
+      ),
+      ctx(),
+    );
+    expect(res.fatal.join(' ')).not.toMatch(/does not name the winning option/i);
+  });
+
+  it('consistent: other natural inflections of the same label still count as naming it', () => {
+    for (const narrative of [
+      'We raise prices by 8 percent — that option leads on the numbers.',
+      'The choice to raising prices by 8 percent is ahead.',
+      'Raised prices by 8 percent leads the field.',
+    ]) {
+      const res = checkComposedConsistency(inflectionComposition(narrative), ctx());
+      expect(res.fatal.join(' ')).not.toMatch(/does not name the winning option/i);
+    }
+  });
+
+  it('FATAL still fires when the narrative genuinely names NO option', () => {
+    const res = checkComposedConsistency(
+      inflectionComposition('The analysis is close and the result depends on assumptions that remain untested.'),
+      ctx(),
+    );
+    expect(res.consistent).toBe(false);
+    expect(res.fatal.join(' ')).toMatch(/does not name the winning option/i);
+  });
+
+  it('FATAL still fires when the narrative names only the OTHER option — numerals must match exactly', () => {
+    // "Raise prices by 15 percent" differs from the winner ONLY in the numeral.
+    // Stem-prefix tolerance must NOT collapse 8 and 15 into a match, or the
+    // wrong-winner net loses the very distinction it exists to draw.
+    const res = checkComposedConsistency(
+      inflectionComposition('Raising prices by 15 percent is the stronger route on these numbers.'),
+      ctx(),
+    );
+    expect(res.consistent).toBe(false);
+    expect(res.fatal.join(' ')).toMatch(/does not name the winning option|wrong-winner/i);
+  });
+
+  it('the WRONG-WINNER semantic check also sees through inflection (both sites share one predicate)', () => {
+    // Before the fix the semantic check ALSO matched labels by exact substring,
+    // so an inflected crowning of the runner-up was invisible to it. A tolerant
+    // presence check plus a strict semantic check would be worse than either:
+    // the review would ship, uncaught. Both sites must use the same predicate.
+    const res = checkComposedConsistency(
+      inflectionComposition(
+        'Raising prices by 8 percent is mentioned in passing. Raising prices by 15 percent is the clear leader and should be chosen.',
+      ),
+      ctx(),
+    );
+    expect(res.consistent).toBe(false);
+    // Assert on the SEMANTIC check's distinctive wording ("crowns X but the
+    // authoritative winner is Y"), not the generic /wrong-winner/ substring —
+    // the presence check's own message also contains "wrong-winner", so a loose
+    // matcher here would pass on the presence check alone and prove nothing
+    // about the semantic one.
+    expect(res.fatal.join(' ')).toMatch(/crowns "Raise prices by 15 percent"/i);
+  });
+});
