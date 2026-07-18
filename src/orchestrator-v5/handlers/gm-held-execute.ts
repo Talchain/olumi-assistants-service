@@ -41,6 +41,8 @@
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
+import { canonicaliseHeldValueOps } from './canonicalise-held-value-ops.js';
+import { config } from '../../config/index.js';
 import { parseEdgeTargetPath } from '../graph-management/adapters/edit-graph-producer.js';
 import {
   PatchOperationsArraySchema,
@@ -460,6 +462,21 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     return { status: 'referee_blocked', governing: decision.governing };
   }
 
+  // ── 2b. Canonicalise value-op field spellings (R1 residual, flag-gated) ─
+  // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op
+  // in the edit pipeline's non-canonical field spelling (`{ data: { value } }`,
+  // slash-keyed `data/value`, dotted `observed_state.value`) is Object.assign-
+  // written verbatim and then STRIPPED by the GraphV3 re-parse — the value
+  // silently no-ops while structural siblings land, which #509 refuses WHOLE.
+  // Translating those spellings to the one GraphV3 preserves (a merge onto
+  // observed_state) makes the value actually apply. Runs AFTER the re-referee
+  // (verdict + telemetry byte-identical) and BEFORE the apply. Flag OFF (the
+  // default) returns the operations unchanged by reference — byte-identical to
+  // #509. The atomicity guard below still backstops any op left untranslated.
+  const opsToApply: PatchOperation[] = config.cee.gmHeldValueCanonicalisationEnabled
+    ? canonicaliseHeldValueOps(operations, input.currentGraph).operations
+    : operations;
+
   // ── 3. Apply through the existing apply path ──────────────────────────
   let mutatedGraph: PersistedGraphV3T;
   // P1b — the applier's RAW candidate (before the GraphV3 re-parse strips
@@ -468,7 +485,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   let rawAppliedGraph: GraphV3T | null = null;
   try {
     const applied = applyAndValidateMutation(input.currentGraph, (clone) => {
-      const candidate = applyPatchOperations(clone, operations);
+      const candidate = applyPatchOperations(clone, opsToApply);
       rawAppliedGraph = candidate;
       clone.nodes = candidate.nodes;
       clone.edges = candidate.edges;
@@ -503,9 +520,12 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // A tunable value op whose field spelling GraphV3 strips applied without
   // throwing yet left the value unchanged — refuse the WHOLE batch rather
   // than persist a partial the "Confirmed" receipt would misrepresent.
+  // The guard checks the ops as APPLIED (canonicalised, if the flag translated
+  // any) — its per-op field survival must be measured against the spelling that
+  // actually went onto the node, not the pre-canonicalisation one.
   if (
     rawAppliedGraph === null ||
-    !heldBatchFullyLanded(operations, rawAppliedGraph, appliedGraph)
+    !heldBatchFullyLanded(opsToApply, rawAppliedGraph, appliedGraph)
   ) {
     log.warn(
       {
@@ -519,17 +539,20 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   }
 
   // ── 4. Receipt fact (rich → generic → refuse) ─────────────────────────
+  // Built from the ops as APPLIED (`opsToApply`): the receipt describes what
+  // actually landed on the graph. Flag-off, `opsToApply === operations`, so
+  // this is byte-identical to #509.
   const editResultForFact = {
     blocks: [],
     assistantText: null,
     latencyMs: 0,
     appliedGraph,
     wasRejected: false,
-    operations,
+    operations: opsToApply,
   } as EditGraphResult;
   try {
     editResultForFact.appliedChanges = buildAppliedChanges(
-      operations,
+      opsToApply,
       appliedGraph,
       input.hasExistingAnalysis,
       preEditGraph,
