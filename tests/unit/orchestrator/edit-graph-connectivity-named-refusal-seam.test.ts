@@ -80,7 +80,7 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
 
 import { dispatchEditGraph } from '../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { commitDirectAnswer } from '../../../src/orchestrator-v5/commit.js';
-import { config } from '../../../src/config/index.js';
+import { config, _resetConfigCache } from '../../../src/config/index.js';
 import { renderConnectivityNamedRefusal } from '../../../src/orchestrator/connectivity-named-refusal.js';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import {
@@ -168,6 +168,46 @@ beforeEach(() => {
 });
 
 afterEach(() => setFlag(originalFlag));
+
+// ────────────────────────────────────────────────────────────────────
+// DEFAULT-PATH PIN (P1, adversarial review of #511).
+//
+// Every test below force-sets the flag, so NONE of them can see the code
+// default: reverting `editConnectivityNamedRefusalEnabled: booleanString
+// .default(true)` back to `.default(false)` left the whole suite GREEN — the
+// 18 Jul flip could have silently reverted under green CI (CLAUDE.md trap
+// #11/#12: a guarantee that never executes, and a default with no reader).
+// These two tests read the REAL config with no override, so a reverted default
+// turns them RED.
+// ────────────────────────────────────────────────────────────────────
+
+describe('#5c connectivity named-refusal — the DEFAULT itself is pinned (no override)', () => {
+  beforeEach(() => {
+    delete process.env.CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL;
+    _resetConfigCache();
+  });
+  afterEach(() => {
+    _resetConfigCache();
+  });
+
+  it('config default is ON (revert default(true)→default(false) turns this RED)', () => {
+    expect(config.cee.editConnectivityNamedRefusalEnabled).toBe(true);
+  });
+
+  it('default path (no flag override): the dead-end turn produces the NAMED refusal, not the legacy generic copy', async () => {
+    const result = await runRejectionTurn(
+      'bbbbbbb9-0000-4000-8000-000000000009',
+      'Add team dynamics as a risk and connect it to churn',
+      TARGETED_ADD_RISK_OPS,
+    );
+    expect(llmChatMock).toHaveBeenCalled();
+    // Behavioural proof the default drives the real edit-graph.ts conditional.
+    expect(result.response.assistant_text).toBe(ON_TEAM_DYNAMICS);
+    expect(result.response.assistant_text).toContain('"Team dynamics"');
+    expect(result.response.assistant_text).not.toBe(OFF_NO_PATH);
+    expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
+  });
+});
 
 describe('#5c connectivity named-refusal flag seam — the real edit-graph.ts conditional', () => {
   it('flag ON + dead-end add-risk → wire copy NAMES the offending item', async () => {
