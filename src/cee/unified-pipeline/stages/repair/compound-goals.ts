@@ -68,19 +68,43 @@ export function runCompoundGoals(ctx: StageContext): void {
   // LLM constraints have richer metadata (source_quote, confidence,
   // provenance) and take precedence when both sources produce a
   // constraint for the same node_id + operator pair.
-  const llmConstraints = Array.isArray(ctx.llmGoalConstraints)
-    ? ctx.llmGoalConstraints.filter(
-        (c: any) => c && typeof c === "object" && typeof c.node_id === "string"
-          && existingNodeIds.has(c.node_id),
-      )
-    : [];
+  const llmEmitted = Array.isArray(ctx.llmGoalConstraints) ? ctx.llmGoalConstraints : [];
+  const llmConstraints = llmEmitted.filter(
+    (c: any) => c && typeof c === "object" && typeof c.node_id === "string"
+      && existingNodeIds.has(c.node_id),
+  );
+  const llmSkipped = llmEmitted.length - llmConstraints.length;
 
-  if (llmConstraints.length > 0) {
+  // Observability: the node-existence filter above is a SILENT drop. It was
+  // previously logged only when `llmConstraints.length > 0`, so a draft where
+  // EVERY LLM-emitted constraint failed the filter produced no telemetry at
+  // all — and the function then early-returns below, leaving
+  // `ctx.goalConstraints` undefined. That made two very different failures
+  // indistinguishable in staging logs:
+  //   (a) the model never emitted goal_constraints[]           -> prompt problem
+  //   (b) the model emitted them against unmatched node_ids    -> binding problem
+  // Both surface identically as an absent `draft_graph.goal_constraints`.
+  // Log unconditionally on emission, and WARN whenever anything was dropped,
+  // carrying the offending node_ids so (b) is diagnosable from logs alone.
+  if (llmSkipped > 0) {
+    log.warn({
+      event: "cee.compound_goal.llm_dropped",
+      request_id: ctx.requestId,
+      llm_emitted: llmEmitted.length,
+      llm_count: llmConstraints.length,
+      llm_skipped: llmSkipped,
+      skipped_node_ids: llmEmitted
+        .filter((c: any) => !llmConstraints.includes(c))
+        .map((c: any) => (c && typeof c === "object" ? (c.node_id ?? null) : null)),
+      graph_node_ids: existingNodeIdList,
+    }, `LLM emitted ${llmEmitted.length} constraint(s); ${llmSkipped} dropped — node_id does not match any graph node`);
+  } else if (llmConstraints.length > 0) {
     log.info({
       event: "cee.compound_goal.llm_emitted",
       request_id: ctx.requestId,
+      llm_emitted: llmEmitted.length,
       llm_count: llmConstraints.length,
-      llm_skipped: (ctx.llmGoalConstraints?.length ?? 0) - llmConstraints.length,
+      llm_skipped: 0,
     }, `LLM emitted ${llmConstraints.length} constraint(s) with valid node targets`);
   }
 
