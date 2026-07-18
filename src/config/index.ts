@@ -596,6 +596,21 @@ const ConfigSchema = z.object({
     // byte-identical (the routing call omits `thinking`, exactly as today).
     // See acceptance-evidence/latency-thinking-disable-2026-07-17/.
     coachThinkingDisabled: booleanString.default(false),
+    // CEE_CONSTRAINT_INFEASIBLE_GATE — trust-spine board item #1 (CEE half).
+    // When ON and the LEADING option violates a hard constraint (the winner's
+    // constraint satisfaction probability is effectively 0, or its joint-goal
+    // probability is far below its constraint satisfaction — see
+    // orchestrator/context/constraint-feasibility.ts), the CEE winner surfaces
+    // FLAG the winner infeasible (a typed field) and SUPPRESS the confident
+    // recommendation framing: analysis-compact marks winner.constraint_infeasible
+    // + recommendation_suppressed and adds an honest constraint note to the coach
+    // summary; the decision-review enricher marks the same on its winner; and the
+    // run_analysis headline withholds the "{X} currently leads" claim (falls back
+    // to the neutral template) rather than assert a lead an eligible option
+    // cannot back. Default OFF; flag-off is BYTE-IDENTICAL (no surface consults
+    // feasibility, exactly as today). Enablement is Paul-gated — the eligibility
+    // FILTER upstream is A3's (ISL/PLoT) half; this is the honest-surface half.
+    constraintInfeasibleGate: booleanString.default(false),
     // CEE_ANSWER_TEXT_REQUIRED — belt-and-braces hardening for the
     // coach/converse `answer_text` channel (PR #380 / ROADMAP 1.38). Default
     // OFF; sequenced BEHIND the prompt track's prompt-only fix for the same
@@ -1413,6 +1428,7 @@ function parseConfig(): Config {
       graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
       coachThinkingDisabled: env.CEE_COACH_THINKING_DISABLED,
+      constraintInfeasibleGate: env.CEE_CONSTRAINT_INFEASIBLE_GATE,
       answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
       answerShapeEnforced: env.CEE_ANSWER_SHAPE_ENFORCED,
       uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,

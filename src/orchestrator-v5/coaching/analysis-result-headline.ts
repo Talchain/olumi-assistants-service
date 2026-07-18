@@ -252,6 +252,18 @@ export interface AnalysisResultHeadlineInput {
    * structural `factor_id` only. Omitted / empty ⇒ no suppression.
    */
   readonly interventionControlledFactorIds?: ReadonlySet<string>;
+  /**
+   * Trust-spine board #1 (CEE half). True when the leading option violates a
+   * hard constraint (CEE_CONSTRAINT_INFEASIBLE_GATE ON — computed by the
+   * run_analysis handler via constraint-feasibility.ts). When true the headline
+   * WITHHOLDS the confident "{X} currently leads" claim (returns null → the
+   * handler falls back to the neutral template) rather than assert a lead an
+   * eligible option cannot back. Omitted / false ⇒ no change (byte-identical).
+   * The bespoke honest constraint copy is carried by the coach (compact summary
+   * note) + the decision-review winner flag, not by this claim-safety-caged
+   * grammar.
+   */
+  readonly constraint_infeasible?: boolean;
 }
 
 /**
@@ -296,6 +308,10 @@ export type HeadlineFallbackReason =
   | 'no_driver_no_fragility'
   | 'length_cap'
   | 'unsafe_label'
+  // Trust-spine board #1 (CEE half): the leading option violates a hard
+  // constraint, so the confident-lead headline is withheld (see
+  // AnalysisResultHeadlineInput.constraint_infeasible).
+  | 'constraint_infeasible'
   | 'unknown';
 
 export interface HeadlineDescriptor {
@@ -361,6 +377,28 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         reason: 'unsafe_label',
         has_leading_option: false,
         has_clean_label: false,
+        has_driver: false,
+        has_fragility: false,
+        margin_bucket: null,
+      },
+    };
+  }
+
+  // Trust-spine board #1 (CEE half): the leading option violates a hard
+  // constraint. WITHHOLD the confident "{X} currently leads" headline — fall
+  // back to the neutral template rather than assert a lead an eligible option
+  // cannot back. Placed AFTER resolveWinner (so the positive-control winner is
+  // still resolved for the descriptor) and BEFORE any "leads" case. Honest
+  // constraint copy lives in the coach compact-summary note + the
+  // decision-review winner flag, not this claim-safety-caged grammar.
+  if (input.constraint_infeasible === true) {
+    return {
+      text: null,
+      descriptor: {
+        case: null,
+        reason: 'constraint_infeasible',
+        has_leading_option: true,
+        has_clean_label: true,
         has_driver: false,
         has_fragility: false,
         margin_bucket: null,
