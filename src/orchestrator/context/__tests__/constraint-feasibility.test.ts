@@ -1,9 +1,10 @@
 /**
  * Trust-spine board #1 (CEE half) — GREEN tests for the constraint-infeasible
- * winner flag + recommendation suppression. Companion to the RED
- * `trust-spine-red-constraint-winner-surface.test.ts` (kept `it.fails` — the
- * DEFAULT/flag-off path is unchanged; enablement is Paul-gated). These prove the
- * criterion when the flag is ON.
+ * winner flag + recommendation suppression. Companion to
+ * `trust-spine-red-constraint-winner-surface.test.ts` (whose default-path pin was
+ * converted to a green `it()` when CEE_CONSTRAINT_INFEASIBLE_GATE went default-ON
+ * on 18 Jul, Paul-ratified). These prove the criterion via the explicit opts
+ * override, and the kill-switch case forces the gate OFF explicitly.
  *
  * POSITIVE CONTROL, BOTH WAYS (CLAUDE.md trap #13): the helper is exercised on
  *   (a) the LIVE doctrine-B wire shape — `option_comparison[]` with an OBJECT
@@ -148,12 +149,29 @@ describe('compactAnalysis — constraint-infeasible winner flag (gate ON via opt
     expect(s.constraint_infeasible_note!.toLowerCase()).not.toMatch(/recommend|winner|best/);
   });
 
-  it('flag OFF (no opts): byte-identical — winner unflagged, no note', () => {
-    const s = compactAnalysis(ARRAY_SHAPE_INFEASIBLE_LEADER)!;
+  // KILL-SWITCH: the gate defaults ON since 18 Jul (Paul-ratified), so "no opts"
+  // now takes the flag-ON path. This pins the env-override-OFF legacy behaviour
+  // via the EXPLICIT opts override (constraintInfeasibleGate: false), the same
+  // lever CEE_CONSTRAINT_INFEASIBLE_GATE=false feeds.
+  it('gate forced OFF (explicit override): byte-identical — winner unflagged, no note', () => {
+    const s = compactAnalysis(ARRAY_SHAPE_INFEASIBLE_LEADER, undefined, {
+      constraintInfeasibleGate: false,
+    })!;
     expect(s.winner.option_id).toBe('A');
     expect(s.winner.constraint_infeasible).toBeUndefined();
     expect(s.winner.recommendation_suppressed).toBeUndefined();
     expect(s.constraint_infeasible_note).toBeUndefined();
+  });
+
+  // DEFAULT PATH (no opts): the gate is ON by default now, so the ARRAY-shape
+  // infeasible leader is flagged + suppressed without any override — proving the
+  // real config default drives the surface (derive-from-source, not a mirror).
+  it('default path (no opts): gate ON by default — infeasible winner flagged + suppressed', () => {
+    const s = compactAnalysis(ARRAY_SHAPE_INFEASIBLE_LEADER)!;
+    expect(s.winner.option_id).toBe('A');
+    expect(s.winner.constraint_infeasible).toBe(true);
+    expect(s.winner.recommendation_suppressed).toBe(true);
+    expect(s.constraint_infeasible_note).toBeDefined();
   });
 
   it('flag ON but feasible winner: not flagged (no false positive)', () => {

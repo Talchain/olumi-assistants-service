@@ -21,10 +21,11 @@
  * GraphStaleWriteError type).
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { config, _resetConfigCache } from '../../../config/index.js';
 import { SessionLRUCache } from '../cache.js';
 import { SupabaseSessionStore } from '../supabase-store.js';
 import {
@@ -215,12 +216,18 @@ function captureEvents(): SunkEvent[] {
 }
 afterEach(() => setTestSink(null));
 
-// ── flag off (default): un-migrated-safe, byte-identical v2 ──────────
+// ── store defensive fallback (option omitted): un-migrated-safe v2 ────
+// NB: this is the STORE constructor's own `?? 'off'` fallback for an UNSPECIFIED
+// option — deliberately conservative so a bare/direct store construction is safe
+// against an un-migrated schema. It is NOT the live/config default: since 18 Jul
+// (Paul-ratified) the CONFIG default `config.features.graphCasRpc` is 'shadow',
+// and production wires it into the store via session/index.ts (proven by the
+// "config default" describe below). The two are intentionally distinct.
 
-describe('graph CAS RPC — flag off (default): calls v2, never v3', () => {
-  it('absent flag → append_turn_atomic_v2 with the canonical 15 args (no CAS params, no v3)', async () => {
+describe('graph CAS RPC — store fallback (option omitted): calls v2, never v3', () => {
+  it('absent option → append_turn_atomic_v2 with the canonical 15 args (no CAS params, no v3)', async () => {
     const { client, rpcCalls } = makePlainClient();
-    const store = makeStore(client); // option absent — today's construction shape
+    const store = makeStore(client); // option absent — store's un-migrated-safe fallback
     const result = await store.append(graphWrite({}));
     expect(result.id).toBe('row-id-v3');
     expect(rpcCalls).toHaveLength(1);
@@ -245,6 +252,59 @@ describe('graph CAS RPC — flag off (default): calls v2, never v3', () => {
     const store = makeStore(client, 'enforce');
     await store.append({ ...BASE_WRITE }); // no graph
     expect(rpcCalls[0]!.fn).toBe('append_turn_atomic_v2');
+  });
+});
+
+// ── config default: 'shadow' since 18 Jul (Paul-ratified); env = kill-switch ──
+// The store fallback above is deliberately 'off'; the LIVE default is the CONFIG
+// value production wires into the store (session/index.ts:
+// graphCasRpc: appConfig.features.graphCasRpc). This block pins that default at
+// the source (migration 20260717120000 executed + verified), and proves the env
+// var is the kill-switch — CEE_V5_GRAPH_CAS_RPC=off restores v2.
+
+describe('graph CAS RPC — config default (drives production wiring)', () => {
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    originalEnv = { ...process.env };
+    _resetConfigCache();
+  });
+  afterEach(() => {
+    process.env = originalEnv;
+    _resetConfigCache();
+  });
+
+  it("default (env unset): config.features.graphCasRpc is 'shadow'", () => {
+    delete process.env.CEE_V5_GRAPH_CAS_RPC;
+    _resetConfigCache();
+    expect(config.features.graphCasRpc).toBe('shadow');
+  });
+
+  it("shadow config value → the store routes graph writes to append_turn_atomic_v3 (enforce=false)", async () => {
+    // Mirrors the production wiring: feed the config default into the store.
+    delete process.env.CEE_V5_GRAPH_CAS_RPC;
+    _resetConfigCache();
+    const { client, rpcCalls } = makePlainClient();
+    const store = makeStore(client, config.features.graphCasRpc);
+    await store.append(graphWrite({}));
+    expect(rpcCalls[0]!.fn).toBe('append_turn_atomic_v3');
+    expect(rpcCalls[0]!.args.p_cas_enforce).toBe(false);
+  });
+
+  it("kill-switch: CEE_V5_GRAPH_CAS_RPC=off → 'off' (legacy v2 path restored)", async () => {
+    process.env.CEE_V5_GRAPH_CAS_RPC = 'off';
+    _resetConfigCache();
+    expect(config.features.graphCasRpc).toBe('off');
+    const { client, rpcCalls } = makePlainClient();
+    const store = makeStore(client, config.features.graphCasRpc);
+    await store.append(graphWrite({}));
+    expect(rpcCalls[0]!.fn).toBe('append_turn_atomic_v2');
+  });
+
+  it("env override to 'enforce' is still honoured (a later explicit step, not the default)", () => {
+    process.env.CEE_V5_GRAPH_CAS_RPC = 'enforce';
+    _resetConfigCache();
+    expect(config.features.graphCasRpc).toBe('enforce');
   });
 });
 

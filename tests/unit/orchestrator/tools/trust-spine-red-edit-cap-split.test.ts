@@ -12,12 +12,12 @@
  * user-facing copy is a static deflection that asks the USER to re-scope — a dead
  * end, not a bounded refusal that carries a concrete next step for THIS batch.
  *
- * it.fails semantics: the body asserts the HONEST-FUTURE behaviour (the over-cap
- * edit is NOT answered with the bare whole-batch MAX_OPERATIONS_EXCEEDED), which
- * THROWS today (the code IS exactly that) — so `it.fails` reports GREEN while the
- * defect stands. When board #6 lands (a split/continuation OR a distinct bounded
- * refusal), the body passes, `it.fails` fails loudly, and the fixer converts it to
- * `it()`.
+ * DEFAULT FLIPPED ON 18 Jul (Paul-ratified): CEE_EDIT_CAP_SPLIT now defaults ON,
+ * so an over-cap edit takes the split branch by default. The former default-path
+ * `it.fails` (which reported GREEN while the bare-dead-end defect stood) is
+ * converted to a real `it()` asserting the split behaviour on the default path;
+ * the mock DERIVES the default from the real config (no mirror to drift), and a
+ * kill-switch `it()` pins the env-override-OFF legacy dead end.
  *
  * In-process: the LLM adapter is a fake returning a fixed 20-op array; the config is
  * proxied (cap 15, retries 0, pre-validation/budget off). No network, no DB — runs
@@ -33,10 +33,12 @@ vi.mock('../../../../src/adapters/llm/prompt-loader.js', () => ({
 }));
 
 let mockMaxPatchOperations = 15;
-// POC-BOARD #6 fix (fix/6-edit-cap-split-path): mutable so the peer `it.fails`
-// runs with the flag OFF (default-path dead-end still pinned, Paul-gated) while
-// the added flag-ON `it()` below sets it true to prove the split path flips.
-let mockEditCapSplitEnabled = false;
+// POC-BOARD #6 (default flipped ON 18 Jul, Paul-ratified). `undefined` = DERIVE
+// from the real config default (no mirror to drift — CLAUDE.md trap #12): the
+// default-path test leaves this undefined so it exercises the actual shipped
+// default (now ON) and would fail loudly if that default were ever reverted; the
+// kill-switch test sets it `false` to pin the env-override-OFF legacy dead end.
+let mockEditCapSplitEnabled: boolean | undefined;
 
 vi.mock('../../../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../../src/config/index.js')>();
@@ -51,7 +53,9 @@ vi.mock('../../../../src/config/index.js', async (importOriginal) => {
               if (ceeProp === 'maxPatchOperations') return mockMaxPatchOperations;
               if (ceeProp === 'patchPreValidationEnabled') return false;
               if (ceeProp === 'patchBudgetEnabled') return false;
-              if (ceeProp === 'editCapSplitEnabled') return mockEditCapSplitEnabled;
+              // undefined → fall through to the REAL config default (derive, not mirror).
+              if (ceeProp === 'editCapSplitEnabled')
+                return mockEditCapSplitEnabled ?? Reflect.get(ceeTarget, ceeProp);
               return Reflect.get(ceeTarget, ceeProp);
             },
           });
@@ -116,7 +120,7 @@ describe('TRUST-SPINE T6 — over-cap edit gets a split/continuation, not a dead
   beforeEach(() => {
     vi.clearAllMocks();
     mockMaxPatchOperations = 15;
-    mockEditCapSplitEnabled = false;
+    mockEditCapSplitEnabled = undefined; // default path exercises the real config default
   });
 
   // POSITIVE CONTROL (regular it — GREEN today): a within-cap edit is accepted and
@@ -141,62 +145,34 @@ describe('TRUST-SPINE T6 — over-cap edit gets a split/continuation, not a dead
     expect(data.operations).toHaveLength(15);
   });
 
-  // TRUST-SPINE RED: flips to it() when board-item 6 lands.
-  // Honest future: a 20-op edit does NOT dead-end on the bare whole-batch
-  // MAX_OPERATIONS_EXCEEDED rejection — it splits/continues, or refuses with a
-  // concrete next step under a distinct signal. TODAY the rejection code IS exactly
-  // 'MAX_OPERATIONS_EXCEEDED' with nothing applied, so the assertion throws → RED.
-  it.fails(
-    'a 20-op edit is not answered with the bare whole-batch MAX_OPERATIONS_EXCEEDED',
-    async () => {
-      mockMaxPatchOperations = 15;
-      const result = await handleEditGraph(
-        makeContext(),
-        'Bulk edit',
-        makeAdapter(TWENTY_OPS),
-        'req-cap-split',
-        'turn-cap-split',
-        { maxRetries: 0 },
-      );
-      const data = result.blocks[0].data as GraphPatchBlockData;
-      expect(data.rejection?.code).not.toBe('MAX_OPERATIONS_EXCEEDED');
-      // Corollary: the diagnostics failure_code is set exclusively on this cap
-      // dead-end path; an honest split/continuation would not carry it.
-      expect(result.diagnostics?.failure_code).not.toBe('max_operations_exceeded');
-    },
-  );
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // POC-BOARD #6 FIX (fix/6-edit-cap-split-path): the flag-ON green proof.
-  //
-  // The peer `it.fails` above pins the DEFAULT-path dead end (flag OFF): with
-  // CEE_EDIT_CAP_SPLIT off the bare MAX_OPERATIONS_EXCEEDED still stands, so that
-  // gate stays red until Paul flips the flag — it is deliberately NOT converted to
-  // it(). This test drives the SAME 20-op edit with the flag ON and asserts the
-  // honest-future behaviour the peer's criterion demands: the over-cap edit gets a
-  // DISTINCT bounded refusal that carries a concrete split next-step, not the bare
-  // whole-batch dead end.
+  // DEFAULT PATH (cap-split ON by default since 18 Jul, Paul-ratified): converted
+  // from the former `it.fails`. With the flag left UNSET the mock derives the real
+  // config default (now ON), so the over-cap edit takes the split branch. The
+  // former RED criterion (NOT the bare whole-batch MAX_OPERATIONS_EXCEEDED dead
+  // end) now holds by default, and the body asserts the full honest-future shape:
+  // a DISTINCT bounded refusal carrying a concrete split next-step.
   //
   // Chosen mechanism = bounded refusal (not apply-first-N): a true "apply the first
   // N, continue with the rest" needs the remainder PERSISTED (a new pending-action
-  // kind + route-v2 resumer + DB constraint) — outside handleEditGraph and this
+  // kind + route-v2 resumer + DB constraint), outside handleEditGraph and this
   // lane's scope fence. An arbitrary index-15 truncation of an LLM op array also
   // risks an incoherent partial batch. The acceptance floor explicitly permits a
   // bounded refusal with a next step as the alternative.
-  it('flag ON: a 20-op edit gets a distinct bounded refusal with a concrete next step (not a dead end)', async () => {
+  it('default path: a 20-op edit gets a distinct bounded refusal with a concrete next step (not the bare dead end)', async () => {
     mockMaxPatchOperations = 15;
-    mockEditCapSplitEnabled = true;
+    // mockEditCapSplitEnabled left undefined → real config default (ON) drives.
     const result = await handleEditGraph(
       makeContext(),
       'Bulk edit',
       makeAdapter(TWENTY_OPS),
-      'req-cap-split-on',
-      'turn-cap-split-on',
+      'req-cap-split-default',
+      'turn-cap-split-default',
       { maxRetries: 0 },
     );
     const data = result.blocks[0].data as GraphPatchBlockData;
 
-    // The peer criterion — flipped: the bare dead-end code and failure_code are gone.
+    // The former RED criterion — now GREEN on the default path: the bare dead-end
+    // code and failure_code are gone.
     expect(data.rejection?.code).not.toBe('MAX_OPERATIONS_EXCEEDED');
     expect(result.diagnostics?.failure_code).not.toBe('max_operations_exceeded');
 
@@ -225,5 +201,27 @@ describe('TRUST-SPINE T6 — over-cap edit gets a split/continuation, not a dead
     expect(prose).not.toMatch(/\bpatch\b/i);
     expect(prose).not.toMatch(/\b\d+\s+(?:operation|edge|node)/i);
     expect(prose).not.toMatch(/\bmax(?:imum)?\s+(?:of\s+)?\d+/i);
+  });
+
+  // KILL-SWITCH (CEE_EDIT_CAP_SPLIT=false): the env-override OFF restores the
+  // byte-identical legacy path — the over-cap edit dead-ends on the bare
+  // whole-batch MAX_OPERATIONS_EXCEEDED rejection, exactly as before the flip.
+  it('kill-switch: with CEE_EDIT_CAP_SPLIT off, a 20-op edit falls back to the bare whole-batch MAX_OPERATIONS_EXCEEDED dead end', async () => {
+    mockMaxPatchOperations = 15;
+    mockEditCapSplitEnabled = false; // env-override OFF → legacy path
+    const result = await handleEditGraph(
+      makeContext(),
+      'Bulk edit',
+      makeAdapter(TWENTY_OPS),
+      'req-cap-legacy',
+      'turn-cap-legacy',
+      { maxRetries: 0 },
+    );
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    // Legacy bare dead end: the whole batch is refused under the cap code, and the
+    // distinct split signal is NOT taken.
+    expect(data.rejection?.code).toBe('MAX_OPERATIONS_EXCEEDED');
+    expect(result.diagnostics?.failure_code).toBe('max_operations_exceeded');
+    expect(result.diagnostics?.failure_branch).toBe('max_operations');
   });
 });

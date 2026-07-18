@@ -3,8 +3,12 @@
  *
  * Latency lever: when ON, the coach/routing turn sends
  * `thinking: { type: 'disabled' }` on its chatWithTools call to suppress
- * Sonnet-5 adaptive thinking on THAT CALL ONLY. Default OFF is byte-identical
- * to today (the routing call omits `thinking`, so adaptive thinking stays on).
+ * Sonnet-5 adaptive thinking on THAT CALL ONLY.
+ *
+ * DEFAULT FLIPPED ON 18 Jul (Paul-ratified): the flag defaults ON now, so the
+ * default path (env unset) SENDS thinking:disabled. The env var is the
+ * kill-switch — CEE_COACH_THINKING_DISABLED=false restores the byte-identical
+ * legacy path (the routing call omits `thinking`, so adaptive thinking stays on).
  *
  * Flag-toggle uses the env + _resetConfigCache pattern (the flag is read from
  * config.features.coachThinkingDisabled at call time, not import time), mirroring
@@ -67,7 +71,7 @@ function mkResult(
 
 let priorFlag: string | undefined;
 
-async function setFlag(value: 'true' | undefined) {
+async function setFlag(value: 'true' | 'false' | undefined) {
   priorFlag = process.env.CEE_COACH_THINKING_DISABLED;
   if (value === undefined) {
     delete process.env.CEE_COACH_THINKING_DISABLED;
@@ -89,12 +93,42 @@ async function restoreFlag() {
 }
 
 // -----------------------------------------------------------------------
-// Flag OFF (default) — byte-identical: no thinking field on the adapter call
+// DEFAULT (flag ON by default since 18 Jul, Paul-ratified) — env unset SENDS
+// thinking:disabled. Converted from the former "OFF (default)" byte-identical
+// assertion, which flipped when the config default went ON.
 // -----------------------------------------------------------------------
 
-describe('routeWithToolUse — CEE_COACH_THINKING_DISABLED OFF (default)', () => {
+describe('routeWithToolUse — CEE_COACH_THINKING_DISABLED default (ON)', () => {
   beforeEach(async () => {
     await setFlag(undefined);
+  });
+  afterEach(async () => {
+    await restoreFlag();
+  });
+
+  it('default path (env unset): sends thinking:{type:\'disabled\'} on the chatWithTools call', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([textBlock('Hello — how can I help?')])),
+    };
+
+    await routeWithToolUse(minimalContextPack(), 'hi', { requestId: 'req-default', adapter });
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const args = adapter.chatWithTools.mock.calls[0]![0];
+    expect(args.thinking).toEqual({ type: 'disabled' });
+  });
+});
+
+// -----------------------------------------------------------------------
+// KILL-SWITCH (CEE_COACH_THINKING_DISABLED=false) — env-override OFF restores the
+// byte-identical legacy path: no thinking field on the adapter call.
+// -----------------------------------------------------------------------
+
+describe('routeWithToolUse — CEE_COACH_THINKING_DISABLED override OFF (kill-switch)', () => {
+  beforeEach(async () => {
+    await setFlag('false');
   });
   afterEach(async () => {
     await restoreFlag();

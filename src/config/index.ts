@@ -546,19 +546,24 @@ const ConfigSchema = z.object({
     // (which is the app-side OBSERVE hook): this selects which commit RPC the
     // store calls for graph-bearing writes and closes the SELECT-then-write
     // TOCTOU window inside the DB transaction (FOR UPDATE + in-txn compare).
-    // Requires migration 20260717120000 (Paul-gated) to be LIVE before any
-    // non-'off' value is set — v3 does not exist pre-migration.
-    // 'off' (default): call append_turn_atomic_v2 exactly as today — zero
+    // Default 'shadow' since 18 Jul (Paul-ratified activation; migration
+    // 20260717120000 executed + verified on the shared staging DB — v3 is live,
+    // 18-arg SECURITY DEFINER, service_role-only grants identical to v2,
+    // scenarios.graph_identity_hash column added). Commits route via
+    // append_turn_atomic_v3 with CAS OBSERVED (mismatches logged, never
+    // rejected); 'enforce' remains a later explicit step; env var = kill-switch
+    // to 'off'.
+    // 'off' (kill-switch): call append_turn_atomic_v2 exactly as today — zero
     //   behavioural change, safe against the un-migrated schema.
-    // 'shadow': call v3 threading the CAS params with p_cas_enforce=FALSE, so
-    //   the UPDATE stays unconditional (v2-equivalent) but stamps
-    //   scenarios.graph_identity_hash; no write is ever rejected.
+    // 'shadow' (default): call v3 threading the CAS params with
+    //   p_cas_enforce=FALSE, so the UPDATE stays unconditional (v2-equivalent)
+    //   but stamps scenarios.graph_identity_hash; no write is ever rejected.
     // 'enforce': call v3 with p_cas_enforce=TRUE — a stale-base graph write is
     //   REJECTED atomically (SQLSTATE OLGC1 → GraphStaleWriteError, 409-class
     //   refresh-reconfirm), never clobbered. Unlike CEE_V5_GRAPH_CAS_MODE
     //   'enforce', this is a true atomicity guarantee, so it is NOT
-    //   auto-downgraded in prod — but it stays default-off and Paul-gated.
-    graphCasRpc: createGraphCasRpcMode("off", "CEE_V5_GRAPH_CAS_RPC"),
+    //   auto-downgraded in prod — it stays a later explicit, Paul-gated step.
+    graphCasRpc: createGraphCasRpcMode("shadow", "CEE_V5_GRAPH_CAS_RPC"),
     // CEE_GRAPH_MANAGEMENT_MODE — Graph Management referee live wiring
     // ('off' | 'shadow' | 'live'). Gates the edit_graph → CandidateMutation
     // Envelope → referee seam in edit-graph-dispatch.ts.
@@ -591,11 +596,11 @@ const ConfigSchema = z.object({
     // max_tokens retry + REPAIR_ONCE, via the firstCallArgs spread). The
     // measurement spike (real staging, N=5) put median coach wall time at
     // ~26s with adaptive thinking vs ~9s disabled, but output tokens dropped
-    // sharply — so enablement is Paul-gated behind a coaching-quality verdict
-    // (speed must not outrank correctness). Default OFF; flag-off is
-    // byte-identical (the routing call omits `thinking`, exactly as today).
-    // See acceptance-evidence/latency-thinking-disable-2026-07-17/.
-    coachThinkingDisabled: booleanString.default(false),
+    // sharply — quality A/B proven safe. Default ON since 18 Jul (Paul-ratified);
+    // env var = kill-switch: CEE_COACH_THINKING_DISABLED=false restores the
+    // byte-identical legacy path (the routing call omits `thinking`, exactly as
+    // before). See acceptance-evidence/latency-thinking-disable-2026-07-17/.
+    coachThinkingDisabled: booleanString.default(true),
     // CEE_CONSTRAINT_INFEASIBLE_GATE — trust-spine board item #1 (CEE half).
     // When ON and the LEADING option violates a hard constraint (the winner's
     // constraint satisfaction probability is effectively 0, or its joint-goal
@@ -607,10 +612,11 @@ const ConfigSchema = z.object({
     // summary; the decision-review enricher marks the same on its winner; and the
     // run_analysis headline withholds the "{X} currently leads" claim (falls back
     // to the neutral template) rather than assert a lead an eligible option
-    // cannot back. Default OFF; flag-off is BYTE-IDENTICAL (no surface consults
-    // feasibility, exactly as today). Enablement is Paul-gated — the eligibility
+    // cannot back. Default ON since 18 Jul (Paul-ratified); env var = kill-switch:
+    // CEE_CONSTRAINT_INFEASIBLE_GATE=false restores the BYTE-IDENTICAL legacy path
+    // (no surface consults feasibility, exactly as before). The eligibility
     // FILTER upstream is A3's (ISL/PLoT) half; this is the honest-surface half.
-    constraintInfeasibleGate: booleanString.default(false),
+    constraintInfeasibleGate: booleanString.default(true),
     // CEE_ANSWER_TEXT_REQUIRED — belt-and-braces hardening for the
     // coach/converse `answer_text` channel (PR #380 / ROADMAP 1.38). Default
     // OFF; sequenced BEHIND the prompt track's prompt-only fix for the same
@@ -925,9 +931,10 @@ const ConfigSchema = z.object({
     // BOUNDED refusal under a distinct signal (MAX_OPERATIONS_SPLIT_SUGGESTED) that
     // carries a concrete split next-step: recovery chips inviting the user to make
     // the change in smaller passes. The structured count/cap stay in the rejection
-    // reason; the user-facing prose stays banned-token clean. Default OFF — flag-off
-    // is byte-identical to today (bare rejection). Paul-gated before enablement.
-    editCapSplitEnabled: booleanString.default(false),
+    // reason; the user-facing prose stays banned-token clean. Default ON since
+    // 18 Jul (Paul-ratified); env var = kill-switch: CEE_EDIT_CAP_SPLIT=false
+    // restores the byte-identical legacy path (bare rejection).
+    editCapSplitEnabled: booleanString.default(true),
     // POC-BOARD #5c — connectivity/orphan named refusal (CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL).
     // When true, an edit whose FINAL post-batch state genuinely fails connectivity
     // (a newly-added/orphaned item has no path through to the goal) no longer
@@ -936,9 +943,10 @@ const ConfigSchema = z.object({
     // user knows exactly what to connect — within-turn atomicity is preserved
     // (nothing is partially applied; the whole edit is declined and left as-is).
     // Structured violation codes/counts stay in the rejection reason; the
-    // user-facing prose stays banned-token clean. Default OFF — flag-off is
-    // byte-identical to today (the generic/Cap-2A copy). Paul-gated before enablement.
-    editConnectivityNamedRefusalEnabled: booleanString.default(false),
+    // user-facing prose stays banned-token clean. Default ON since 18 Jul
+    // (Paul-ratified); env var = kill-switch: CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL=false
+    // restores the byte-identical legacy path (the generic/Cap-2A copy).
+    editConnectivityNamedRefusalEnabled: booleanString.default(true),
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)

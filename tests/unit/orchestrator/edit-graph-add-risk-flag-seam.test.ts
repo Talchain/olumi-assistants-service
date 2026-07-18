@@ -188,9 +188,22 @@ function setGuidanceFlag(on: boolean): void {
   (config.cee as { addRiskRejectionGuidanceEnabled: boolean }).addRiskRejectionGuidanceEnabled = on;
 }
 
+// CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL went DEFAULT-ON 18 Jul (Paul-ratified). The
+// named-refusal is a STRICTLY-MORE-SPECIFIC superseding layer that runs AFTER —
+// and overrides — the Cap-2A add-risk placeholder guidance this suite isolates.
+// Pin it OFF for these tests so the Cap-2A seam is what's exercised; the
+// named-refusal default-ON behaviour is covered by
+// edit-graph-connectivity-named-refusal-seam.test.ts.
+let originalNamedRefusalFlag = false;
+function setNamedRefusalFlag(on: boolean): void {
+  (config.cee as { editConnectivityNamedRefusalEnabled: boolean }).editConnectivityNamedRefusalEnabled = on;
+}
+
 beforeEach(() => {
   llmChatMock.mockReset();
   originalFlag = config.cee.addRiskRejectionGuidanceEnabled === true;
+  originalNamedRefusalFlag = config.cee.editConnectivityNamedRefusalEnabled === true;
+  setNamedRefusalFlag(false); // isolate the Cap-2A layer from the superseding named refusal
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockReset();
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
     .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
@@ -198,6 +211,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setGuidanceFlag(originalFlag);
+  setNamedRefusalFlag(originalNamedRefusalFlag);
 });
 
 // ────────────────────────────────────────────────────────────────────

@@ -15,11 +15,14 @@
  * is computed side-by-side (`deriveConstraintTensions`) but never reconciled with
  * the winner — a £65k-constraint-violating £80k option still ranks first.
  *
- * it.fails semantics: the body asserts the HONEST-FUTURE behaviour (the infeasible
- * leader is suppressed / not surfaced as the plain winner), which THROWS today
- * (the winner IS the infeasible option) — so `it.fails` reports GREEN while the
- * defect stands. When board #1 (CEE half) lands, the body passes, `it.fails` fails
- * loudly, and the fixer converts it to `it()`.
+ * DEFAULT FLIPPED ON 18 Jul (Paul-ratified): CEE_CONSTRAINT_INFEASIBLE_GATE now
+ * defaults ON, so `compactAnalysis` with NO opts consults the real config default
+ * and flags the infeasible leader. The former default-path `it.fails` (which
+ * reported GREEN while the defect stood) therefore passes its body now and would
+ * FAIL LOUDLY as an `it.fails`; it is converted to a real `it()` below asserting
+ * the honest-surface criterion holds on the default path. A kill-switch `it()`
+ * pins the env-override-OFF legacy path (winner unflagged), proving
+ * CEE_CONSTRAINT_INFEASIBLE_GATE=false still restores today's behaviour.
  *
  * POSITIVE CONTROL (CLAUDE.md trap #13 — an absence assertion must first prove it
  * can see a presence): the SAME envelope the winner is drawn from provably carries
@@ -74,23 +77,35 @@ describe('TRUST-SPINE T1-CEE — constraint-honest winner surface (board #1 CEE 
     expect(summary.winner!.option_id).toBe('A');
   });
 
-  // TRUST-SPINE RED: flips to it() when board-item 1 (CEE half) lands.
-  // Honest future: the constraint-infeasible option must NOT be surfaced as the
-  // plain leader — either the winner is the feasible option, or the surface carries
-  // an explicit unenforceable/infeasible flag. TODAY the winner is the infeasible
-  // 'A' with no flag, so `not.toBe('A')` throws → RED body.
-  it.fails(
-    'the constraint-infeasible option is not surfaced as the plain leader',
-    () => {
-      const summary = compactAnalysis(CONSTRAINT_INFEASIBLE_LEADER)!;
-      const winner = summary.winner!;
-      // Honest future (either half satisfies the property):
-      //  (a) the surfaced leader is not the infeasible option, OR
-      //  (b) the leader is flagged infeasible / recommendation-suppressed.
-      const flaggedInfeasible =
-        (winner as Record<string, unknown>).constraint_infeasible === true ||
-        (winner as Record<string, unknown>).recommendation_suppressed === true;
-      expect(winner.option_id !== 'A' || flaggedInfeasible).toBe(true);
-    },
-  );
+  // DEFAULT PATH (gate ON by default since 18 Jul, Paul-ratified): converted from
+  // the former `it.fails`. The honest-surface criterion now holds by default —
+  // `compactAnalysis` with NO opts consults the real config default (ON) and the
+  // leader carries the infeasible / recommendation-suppressed flag. The winner is
+  // still 'A' (selection is unchanged; the gate only ADDS the honest flag), so the
+  // criterion is satisfied by its `flaggedInfeasible` half.
+  it('default path: the constraint-infeasible leader is flagged (not surfaced as a plain winner)', () => {
+    const summary = compactAnalysis(CONSTRAINT_INFEASIBLE_LEADER)!;
+    const winner = summary.winner!;
+    const flaggedInfeasible =
+      (winner as Record<string, unknown>).constraint_infeasible === true ||
+      (winner as Record<string, unknown>).recommendation_suppressed === true;
+    expect(winner.option_id !== 'A' || flaggedInfeasible).toBe(true);
+    // Positive shape: on THIS envelope the leader stays 'A' but is now flagged.
+    expect(winner.option_id).toBe('A');
+    expect(flaggedInfeasible).toBe(true);
+  });
+
+  // KILL-SWITCH (env-override OFF): CEE_CONSTRAINT_INFEASIBLE_GATE=false restores
+  // the byte-identical legacy path — the leader is the infeasible 'A' with NO
+  // flag. Exercised via the explicit opts override (the same lever the env var
+  // feeds: opts?.constraintInfeasibleGate ?? config.features.constraintInfeasibleGate).
+  it('kill-switch: with the gate forced OFF the leader is the unflagged infeasible option (legacy path)', () => {
+    const summary = compactAnalysis(CONSTRAINT_INFEASIBLE_LEADER, undefined, {
+      constraintInfeasibleGate: false,
+    })!;
+    const winner = summary.winner!;
+    expect(winner.option_id).toBe('A');
+    expect((winner as Record<string, unknown>).constraint_infeasible).toBeUndefined();
+    expect((winner as Record<string, unknown>).recommendation_suppressed).toBeUndefined();
+  });
 });

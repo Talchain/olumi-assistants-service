@@ -24,7 +24,7 @@
  * non-connectivity rejection, and it never invents a rule or a concept name.
  *
  * Copy discipline (claim-safe): the prose is grounded ONLY in graph reachability
- * ("not connected through to your goal / no path through the model"), offers a
+ * ("isn't connected to your goal / has no path through to your goal"), offers a
  * factor as an EXAMPLE host, and carries NO held-science vocabulary
  * (sensitivity / fragile / driver / robustness / influence / causal / EVPI / …),
  * NO internal identifiers, and NO forbidden user-facing phrases. The only
@@ -111,10 +111,9 @@ export function renderConnectivityNamedRefusal(labels: readonly string[]): strin
 
   if (quoted.length === 1) {
     return (
-      `I wasn't able to make that change as one edit, because ${quoted[0]} isn't connected `
-      + `through to your goal yet — on its own it has no path through the model, so I've left `
-      + `everything as it was. Connect ${quoted[0]} through to your goal, for example by linking `
-      + `it to a factor that already feeds your goal, and I can make the whole change together. `
+      `I couldn't make that change in one edit, because ${quoted[0]} isn't connected to your goal `
+      + `yet. On its own it has no path through to your goal, so I've left everything as it was. `
+      + `To go ahead, connect ${quoted[0]} to a factor that already feeds your goal. `
       + `Which factor should it relate to?`
     );
   }
@@ -124,9 +123,8 @@ export function renderConnectivityNamedRefusal(labels: readonly string[]): strin
     : `${quoted.slice(0, -1).join(', ')}, and ${quoted[quoted.length - 1]}`;
 
   return (
-    `I wasn't able to make that change as one edit, because ${list} aren't connected through `
-    + `to your goal yet — on their own they have no path through the model, so I've left everything `
-    + `as it was. Connect each one through to your goal, for example by linking it to a factor that `
-    + `already feeds your goal, and I can make the whole change together.`
+    `I couldn't make that change in one edit, because ${list} aren't connected to your goal `
+    + `yet. On their own they have no path through to your goal, so I've left everything as it was. `
+    + `To go ahead, connect each one to a factor that already feeds your goal.`
   );
 }
