@@ -163,7 +163,7 @@ export interface DispatchDraftGraphResult {
  *     The response text here is never sent to the client; use the pipeline's
  *     own narration as a neutral fallback for server-side logging only.
  */
-function draftResultToOlumiResponse(
+export function draftResultToOlumiResponse(
   result: DraftGraphResult,
   payload: MessageTurnPayload,
   graphPersisted: boolean,
