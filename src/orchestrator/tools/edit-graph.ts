@@ -2153,7 +2153,8 @@ export async function handleEditGraph(
         "edit_graph rejected — too many operations",
       );
       if (attempt === totalAttempts) {
-        // POC-BOARD #6 — over-cap edit split path (CEE_EDIT_CAP_SPLIT, default OFF).
+        // POC-BOARD #6 — over-cap edit split path (CEE_EDIT_CAP_SPLIT, default ON
+        // since 18 Jul, Paul-ratified; env var = kill-switch).
         // Flag ON: instead of the bare whole-batch MAX_OPERATIONS_EXCEEDED refusal
         // (a dead end — a static deflection asking the USER to re-scope, carrying no
         // concrete next step for THIS batch), return a BOUNDED refusal under a
@@ -2503,8 +2504,9 @@ export async function handleEditGraph(
         // helper defers (returns null) on any non-connectivity/mixed failure, so
         // it can never broaden a rejection. Runs AFTER the Cap-2A block and
         // supersedes its generic placeholder when both flags are on (the named
-        // refusal is strictly more specific). Default OFF → this block no-ops and
-        // the copy above is byte-identical to today.
+        // refusal is strictly more specific). Default ON since 18 Jul
+        // (Paul-ratified); env var = kill-switch — CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL=false
+        // makes this block no-op and the copy above byte-identical to the legacy path.
         if (config.cee.editConnectivityNamedRefusalEnabled) {
           const namedRefusal = buildConnectivityNamedRefusal(candidateGraph, structResult.violations);
           if (namedRefusal) {

@@ -165,10 +165,20 @@ type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 let originalLoopFlag = false;
 let originalGuidanceFlag = false;
+let originalNamedRefusalFlag = false;
 
 function setFlags(loop: boolean, guidance: boolean): void {
   (config.cee as { postAnalysisLoopEnabled: boolean }).postAnalysisLoopEnabled = loop;
   (config.cee as { addRiskRejectionGuidanceEnabled: boolean }).addRiskRejectionGuidanceEnabled = guidance;
+}
+
+// CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL went DEFAULT-ON 18 Jul (Paul-ratified). It
+// is a strictly-more-specific superseding layer over the Cap-2A add-risk
+// placeholder guidance the Cap-2A leg asserts, so pin it OFF here to keep testing
+// the Cap-2A guidance in isolation (named-refusal default-ON is covered by
+// edit-graph-connectivity-named-refusal-seam.test.ts).
+function setNamedRefusalFlag(on: boolean): void {
+  (config.cee as { editConnectivityNamedRefusalEnabled: boolean }).editConnectivityNamedRefusalEnabled = on;
 }
 
 beforeEach(() => {
@@ -179,11 +189,14 @@ beforeEach(() => {
   mockState.persistedGraph = PARTIAL_GRAPH;
   originalLoopFlag = config.cee.postAnalysisLoopEnabled === true;
   originalGuidanceFlag = config.cee.addRiskRejectionGuidanceEnabled === true;
+  originalNamedRefusalFlag = config.cee.editConnectivityNamedRefusalEnabled === true;
+  setNamedRefusalFlag(false);
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
 });
 
 afterEach(() => {
   setFlags(originalLoopFlag, originalGuidanceFlag);
+  setNamedRefusalFlag(originalNamedRefusalFlag);
   vi.clearAllMocks();
   setTestSink(null);
 });
