@@ -234,7 +234,100 @@ describe('B5 — untranslatable spellings REFUSE VISIBLY (never strip-and-succee
   });
 });
 
-// ── 3. Controls ─────────────────────────────────────────────────────────────
+// ── 3. The parsed-vs-candidate promotion, pinned where it DISCRIMINATES ─────
+
+describe('B5 — the promoted graph is the PARSED one (intervention path)', () => {
+  /**
+   * This is the case that actually pins fix part 2, and it took a
+   * mutation-check to find it: for a plain value op the canonicaliser has
+   * already rewritten the payload into a DECLARED field, so raw and parsed
+   * agree and promoting either one passes. The intervention subtree is where
+   * they genuinely differ — `canonicaliseValueOps` deliberately leaves
+   * `data/interventions/<factor_id>` VERBATIM (its owner,
+   * `encodeOptionInterventionsForEdit`, reads that exact spelling off the
+   * applied graph), so the raw candidate still carries the slash key after the
+   * encoder has promoted it to canonical top-level `interventions`.
+   *
+   * Promote the raw candidate and that junk key is persisted; promote the
+   * parsed graph and it is not. Reverting `appliedGraph = canonicalApplied`
+   * to `appliedGraph = rawApplied` turns THIS test red — and nothing else.
+   */
+  const INTERVENTION_GRAPH = {
+    nodes: [
+      { id: 'dec_x', kind: 'decision', label: 'Platform Migration' },
+      { id: 'opt_a', kind: 'option', label: 'Migrate Now' },
+      {
+        id: 'fac_setup',
+        kind: 'factor',
+        label: 'Setup and Migration Complexity',
+        observed_state: { value: 0.2, raw_value: 500000, unit: '£', cap: 2500000 },
+      },
+      { id: 'goal_g', kind: 'goal', label: 'Total Cost' },
+    ],
+    edges: [
+      { from: 'dec_x', to: 'opt_a', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'opt_a', to: 'fac_setup', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'fac_setup', to: 'goal_g', strength: { mean: -0.4, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
+    ],
+  };
+
+  async function runInterventionEdit() {
+    const ctx = {
+      graph: INTERVENTION_GRAPH,
+      analysis_response: null,
+      framing: null,
+      messages: [],
+      scenario_id: 'scn-b5-int',
+    } as unknown as ConversationContext;
+
+    return handleEditGraph(
+      ctx,
+      'Configure the migrate-now option setup cost to 2000000',
+      makeAdapter(
+        editResponse([
+          {
+            op: 'update_node',
+            path: '/nodes/opt_a/data/interventions/fac_setup',
+            value: { value: 0.8, raw_value: 2000000, unit: '£', cap: 2500000 },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'Configure the setup cost intervention.',
+          },
+        ]),
+      ),
+      'req-b5-int',
+      'turn-b5-int',
+      // An option-configuration edit is classified `option_configuration` and
+      // routed to propose-and-confirm, which returns BEFORE the apply. The
+      // confirm is the live continuation of that flow and is the path that
+      // reaches `applyPatchOperations`, so that is what we drive here.
+      { invocationInput: { confirmation_mode: 'apply_pending_proposal' } } as Parameters<typeof handleEditGraph>[5],
+    );
+  }
+
+  it('lands the intervention canonically AND persists no slash-keyed residue', async () => {
+    const result = await runInterventionEdit();
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+
+    const nodes = (result.appliedGraph as unknown as { nodes: Array<Record<string, unknown>> }).nodes;
+    const option = nodes.find((n) => n.id === 'opt_a')!;
+
+    // The encoder did its job: canonical top-level interventions.
+    const interventions = option.interventions as Record<string, unknown> | undefined;
+    expect(interventions).toBeDefined();
+    expect(interventions).toHaveProperty('fac_setup');
+
+    // And the promoted graph is the PARSED one, so the slash key the encoder
+    // read from is NOT persisted. This is the assertion that discriminates
+    // fix part 2 — it fails if the raw candidate is promoted instead.
+    expect(option).not.toHaveProperty('data/interventions/fac_setup');
+    expect(Object.keys(option).some((k) => k.includes('/'))).toBe(false);
+  });
+});
+
+// ── 4. Controls ─────────────────────────────────────────────────────────────
 
 describe('B5 — controls: canonical spellings and flag-off are unaffected', () => {
   // NOT a control — this one surprised us. `/nodes/<id>/observed_state/value`
