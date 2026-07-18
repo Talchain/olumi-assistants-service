@@ -11,11 +11,20 @@
  * pointer — a prompt promoted only to staging would silently change
  * production behaviour.
  *
- * WHY `NODE_ENV` CANNOT BE THE DISCRIMINATOR: both `render.yaml` (prod) and
- * `render-staging.yaml` (staging) set `NODE_ENV=production`. The runtime SSOT
- * that DOES discriminate is `getRuntimeEnv()` (src/config/env-resolver.ts) —
- * OLUMI_ENV → RENDER_SERVICE_NAME → NODE_ENV. That is what the prompt
- * environment now derives from, and `DD_ENV` is out of the chain entirely.
+ * WHY `NODE_ENV` CANNOT BE THE DISCRIMINATOR — two independent reasons:
+ *   1. Both `render.yaml` (prod) and `render-staging.yaml` (staging) declare
+ *      `NODE_ENV=production`, so the blueprints alone cannot tell the services
+ *      apart.
+ *   2. Stronger: the blueprint and the LIVE dashboard env DISAGREE. Live
+ *      `cee-staging` actually runs `NODE_ENV=staging` while
+ *      `render-staging.yaml` declares `NODE_ENV=production`. NODE_ENV is not
+ *      merely non-discriminating — its declared and deployed values diverge,
+ *      so nothing safety-critical may be derived from it.
+ *
+ * The runtime SSOT that DOES discriminate is `getRuntimeEnv()`
+ * (src/config/env-resolver.ts) — OLUMI_ENV → RENDER_SERVICE_NAME → NODE_ENV.
+ * That is what the prompt environment now derives from, and `DD_ENV` is out of
+ * the chain entirely.
  *
  * MUTATION-CHECK: restore `?? env.DD_ENV` on the `prompts.environment` line
  * and the "production shape" test below goes RED.
@@ -28,6 +37,12 @@ import {
   shouldUseStagingPrompts,
   resolvePromptEnvironment,
 } from "../../src/config/index.js";
+import {
+  RENDER_PROD_SERVICE_NAME,
+  RENDER_STAGING_SERVICE_NAME,
+  BLUEPRINT_PROD_SERVICE_NAME,
+  BLUEPRINT_STAGING_SERVICE_NAME,
+} from "../helpers/render-service-names.js";
 
 /**
  * Env keys this suite manipulates; cleared before each case so no ambient
@@ -77,7 +92,7 @@ describe("prompt environment resolution (Gate 0: DD_ENV decoupling)", () => {
     function applyProductionShape(): void {
       process.env.NODE_ENV = "production";
       process.env.DD_ENV = "staging"; // Datadog tag — observability ONLY
-      process.env.RENDER_SERVICE_NAME = "olumi-assistants-service";
+      process.env.RENDER_SERVICE_NAME = RENDER_PROD_SERVICE_NAME;
       delete process.env.PROMPTS_ENVIRONMENT;
       delete process.env.PROMPTS_USE_STAGING;
       _resetConfigCache();
@@ -214,6 +229,61 @@ describe("prompt environment resolution (Gate 0: DD_ENV decoupling)", () => {
       expect(shouldUseStagingPrompts()).toBe(true);
     });
 
+    it("a BLANK PROMPTS_USE_STAGING means 'not set' and does NOT override PROMPTS_ENVIRONMENT", () => {
+      // P1 (found in adversarial review of #523). `booleanString` maps "" to
+      // FALSE, and useStaging sits at the top of the precedence chain, so a
+      // blank value used to silently force the PRODUCTION pointer on the
+      // STAGING service — defeating the whole fix, with no mismatch and no
+      // degraded reason, because staging-serving-production is the
+      // deliberately-unflagged safe direction.
+      //
+      // Not hypothetical: tools/conversation-harness/staging-parity.env.example:85
+      // ships `PROMPTS_USE_STAGING=`.
+      process.env.OLUMI_ENV = "staging";
+      process.env.PROMPTS_ENVIRONMENT = "staging";
+      process.env.PROMPTS_USE_STAGING = "";
+      _resetConfigCache();
+
+      const r = resolvePromptEnvironment();
+      expect(r.environment).toBe("staging");
+      // Must fall THROUGH to the explicit PROMPTS_ENVIRONMENT, not consume
+      // the blank as an explicit `false`.
+      expect(r.source).toBe("explicit_prompts_environment");
+      expect(shouldUseStagingPrompts()).toBe(true);
+    });
+
+    it("a WHITESPACE-ONLY PROMPTS_USE_STAGING is also treated as 'not set'", () => {
+      process.env.OLUMI_ENV = "staging";
+      process.env.PROMPTS_ENVIRONMENT = "staging";
+      process.env.PROMPTS_USE_STAGING = "   ";
+      _resetConfigCache();
+      expect(resolvePromptEnvironment().source).toBe("explicit_prompts_environment");
+      expect(shouldUseStagingPrompts()).toBe(true);
+    });
+
+    it("a blank PROMPTS_USE_STAGING on a prod runtime still derives production", () => {
+      process.env.OLUMI_ENV = "prod";
+      process.env.PROMPTS_USE_STAGING = "";
+      _resetConfigCache();
+      const r = resolvePromptEnvironment();
+      expect(r.environment).toBe("production");
+      expect(r.source).toBe("derived_runtime_env");
+    });
+
+    it("DISCRIMINATOR: an EXPLICIT 'false' still overrides PROMPTS_ENVIRONMENT=staging", () => {
+      // The blank-handling above must not blunt the real override. If this
+      // ever goes green with the blank case, the normalisation has swallowed
+      // legitimate explicit values too.
+      process.env.OLUMI_ENV = "staging";
+      process.env.PROMPTS_ENVIRONMENT = "staging";
+      process.env.PROMPTS_USE_STAGING = "false";
+      _resetConfigCache();
+      const r = resolvePromptEnvironment();
+      expect(r.environment).toBe("production");
+      expect(r.source).toBe("explicit_prompts_use_staging");
+      expect(shouldUseStagingPrompts()).toBe(false);
+    });
+
     it("PROMPTS_ENVIRONMENT is case- and whitespace-tolerant", () => {
       process.env.OLUMI_ENV = "prod";
       process.env.PROMPTS_ENVIRONMENT = "  STAGING  ";
@@ -262,7 +332,7 @@ describe("prompt environment resolution (Gate 0: DD_ENV decoupling)", () => {
 
     it("staging Render service → staging prompts (the promotion workflow keeps working)", () => {
       process.env.NODE_ENV = "production";
-      process.env.RENDER_SERVICE_NAME = "olumi-assistants-staging";
+      process.env.RENDER_SERVICE_NAME = RENDER_STAGING_SERVICE_NAME;
       _resetConfigCache();
       const r = resolvePromptEnvironment();
       expect(r.environment).toBe("staging");
@@ -303,7 +373,7 @@ describe("prompt environment resolution (Gate 0: DD_ENV decoupling)", () => {
 
     it("BLOCKS readiness when the prod verdict came from RENDER_SERVICE_NAME", () => {
       process.env.NODE_ENV = "production";
-      process.env.RENDER_SERVICE_NAME = "olumi-assistants-service";
+      process.env.RENDER_SERVICE_NAME = RENDER_PROD_SERVICE_NAME;
       process.env.PROMPTS_ENVIRONMENT = "staging";
       _resetConfigCache();
       const r = resolvePromptEnvironment();
@@ -383,6 +453,82 @@ describe("prompt environment resolution (Gate 0: DD_ENV decoupling)", () => {
           "prompt_env_unset_on_deployed_env",
         );
       }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // REAL Render service names.
+  //
+  // The blueprints declare `olumi-assistants-service` / `olumi-assistants-
+  // staging`, but Render injects the DEPLOYED names: `cee-production` /
+  // `cee-staging`. Both families classify identically today, which is exactly
+  // why testing only the blueprint names was invisible drift — green
+  // assertions over inputs that never occur. Both are pinned here so a rename
+  // in either direction still has coverage.
+  // -------------------------------------------------------------------------
+  describe("real Render service names (RENDER_SERVICE_NAME as actually injected)", () => {
+    it("live `cee-production` → prod runtime → PRODUCTION pointer, discriminating", () => {
+      process.env.NODE_ENV = "production";
+      process.env.DD_ENV = "staging";
+      process.env.RENDER_SERVICE_NAME = RENDER_PROD_SERVICE_NAME;
+      _resetConfigCache();
+
+      const r = resolvePromptEnvironment();
+      expect(r.runtimeEnv).toBe("prod");
+      expect(r.runtimeEnvSource).toBe("render_service_name");
+      expect(r.environment).toBe("production");
+      expect(r.mismatch).toBe(false);
+    });
+
+    it("live `cee-staging` → staging runtime → STAGING pointer", () => {
+      // Live cee-staging runs NODE_ENV=staging (which the blueprint does NOT
+      // declare); the service-name check must carry the verdict either way.
+      process.env.NODE_ENV = "staging";
+      process.env.DD_ENV = "staging";
+      process.env.RENDER_SERVICE_NAME = RENDER_STAGING_SERVICE_NAME;
+      _resetConfigCache();
+
+      const r = resolvePromptEnvironment();
+      expect(r.runtimeEnv).toBe("staging");
+      expect(r.runtimeEnvSource).toBe("render_service_name");
+      expect(r.environment).toBe("staging");
+    });
+
+    it("live `cee-production` with NO explicit prompt env is READY-SAFE (the first-deploy shape)", () => {
+      // Production today carries neither PROMPTS_ENVIRONMENT nor
+      // PROMPTS_USE_STAGING. It must derive `production` and must NOT block
+      // readiness, or the first July deploy would 503.
+      process.env.NODE_ENV = "production";
+      process.env.DD_ENV = "staging";
+      process.env.RENDER_SERVICE_NAME = RENDER_PROD_SERVICE_NAME;
+      _resetConfigCache();
+
+      const r = resolvePromptEnvironment();
+      expect(r.environment).toBe("production");
+      expect(r.blocksReadiness).toBe(false);
+      expect(r.reasons).toContain("prompt_env_unset_on_deployed_env");
+    });
+
+    it("blueprint names classify the same way (secondary fixtures)", () => {
+      process.env.RENDER_SERVICE_NAME = BLUEPRINT_PROD_SERVICE_NAME;
+      _resetConfigCache();
+      expect(resolvePromptEnvironment().runtimeEnv).toBe("prod");
+
+      process.env.RENDER_SERVICE_NAME = BLUEPRINT_STAGING_SERVICE_NAME;
+      _resetConfigCache();
+      expect(resolvePromptEnvironment().runtimeEnv).toBe("staging");
+    });
+
+    it("DISCRIMINATOR: the staging classifier keys on the 'staging' substring, not an exact name", () => {
+      // Guards the assumption that makes BOTH name families work. If the
+      // classifier were ever changed to an exact-match allowlist, this fails
+      // and the real names would silently start classifying as prod.
+      expect(RENDER_STAGING_SERVICE_NAME).toContain("staging");
+      expect(RENDER_PROD_SERVICE_NAME).not.toContain("staging");
+
+      process.env.RENDER_SERVICE_NAME = "some-unrelated-staging-box";
+      _resetConfigCache();
+      expect(resolvePromptEnvironment().runtimeEnv).toBe("staging");
     });
   });
 

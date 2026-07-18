@@ -18,9 +18,14 @@ services:
       #
       # OLUMI_ENV is deliberately NOT set here. It would change getRuntimeEnv()
       # — which also gates the graph-management live→shadow lockdown and the
-      # raw-IO policy — and that is out of scope for this change. Declaring
-      # PROMPTS_ENVIRONMENT is sufficient: it makes the prompt pointer
-      # deterministic on its own.
+      # raw-IO policy — and that is out of scope for this change.
+      #
+      # PROMPTS_ENVIRONMENT alone makes the prompt pointer deterministic here
+      # regardless of whether RENDER_SERVICE_NAME is injected, with ONE
+      # exception: PROMPTS_USE_STAGING outranks it. Leave PROMPTS_USE_STAGING
+      # unset on this service. (A BLANK PROMPTS_USE_STAGING= is now normalised
+      # to "not set" and is safe; an explicit `false` would still force the
+      # production pointer here.)
       - key: PROMPTS_ENVIRONMENT
         value: staging
       - key: LLM_PROVIDER

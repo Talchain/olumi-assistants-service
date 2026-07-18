@@ -1780,7 +1780,26 @@ function parseConfig(): Config {
       adminApiKeyRead: env.ADMIN_API_KEY_READ,
       adminAllowedIPs: env.ADMIN_ALLOWED_IPS,
       adminRoutesEnabled: env.ADMIN_ROUTES_ENABLED,
-      useStaging: env.PROMPTS_USE_STAGING,
+      // A BLANK value means "not set", not `false`.
+      //
+      // `booleanString` maps "" → false (see its transform above), and this
+      // field sits at the TOP of the resolvePromptEnvironment() precedence
+      // chain — anything `!== undefined` wins. So a blank
+      // `PROMPTS_USE_STAGING=` would silently force the PRODUCTION pointer and
+      // override an explicit `PROMPTS_ENVIRONMENT=staging`, with no mismatch
+      // and no degraded reason (the staging-serves-production direction is
+      // deliberately unflagged as the safe one). That is exactly the shape
+      // shipped in tools/conversation-harness/staging-parity.env.example:85.
+      //
+      // Normalising blank → undefined here is the ONLY place the distinction
+      // still exists; by the time the value reaches resolvePromptEnvironment()
+      // a blank is indistinguishable from an explicit `false`. Scoped to this
+      // key deliberately — changing `booleanString` itself would alter every
+      // boolean flag in the service.
+      useStaging:
+        typeof env.PROMPTS_USE_STAGING === "string" && env.PROMPTS_USE_STAGING.trim() === ""
+          ? undefined
+          : env.PROMPTS_USE_STAGING,
       // DD_ENV IS DELIBERATELY ABSENT. It is a Datadog OBSERVABILITY tag; it
       // must never select a functional prompt pointer. Production carries
       // DD_ENV=staging, so `PROMPTS_ENVIRONMENT ?? DD_ENV` (PR #513) made
