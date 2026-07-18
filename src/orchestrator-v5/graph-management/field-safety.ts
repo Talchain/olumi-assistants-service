@@ -97,8 +97,9 @@ const ALLOWED_NODE_FIELD_ROOTS: ReadonlySet<string> = new Set([
  * `observed_state.source`). `interventions` allows deeper paths
  * (data/interventions/<factor_id>).
  *
- * EXPORTED (R1 residual, follow-up to #509) so the held-confirm value
- * canonicaliser (`canonicalise-held-value-ops.ts`) DERIVES its translatable
+ * EXPORTED (R1 residual, follow-up to #509; generalised by B5) so the shared
+ * value-op canonicaliser (`src/orchestrator/canonicalise-value-ops.ts`, used
+ * by BOTH the held-confirm and normal edit paths) DERIVES its translatable
  * leaf set from this single owner instead of mirroring it — trap 12, a
  * hand-maintained second copy would drift silently and the drift would read
  * as green.

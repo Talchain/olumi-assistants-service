@@ -2566,6 +2566,18 @@ export async function handleEditGraph(
     // which is only a meaningful comparison for the locally-synthesised case
     // (a PLoT-supplied graph legitimately differs from the local apply).
     let appliedGraphSynthesisedLocally = false;
+    // V5 H5 narrowing, hoisted so BOTH the synthesis block and the B5 block
+    // below share ONE base-validity verdict. `context.graph` does not change
+    // within an attempt, so this is the same value the synthesis block used to
+    // compute locally.
+    //
+    // Load-bearing: when the BASE graph already fails strict GraphV3 (legacy
+    // persisted graph, migration window, or a `buildStructuralFallback` graph
+    // — which stamps `strength:{mean:0,std:0}` that `EdgeStrengthV3.std`
+    // rejects as non-positive), the patch is NOT the cause and strict-refusing
+    // here would make the scenario permanently uneditable while telling the
+    // user to rephrase. B5 must inherit that narrowing, not reverse it.
+    const baseValid = GraphV3.safeParse(context.graph as unknown).success;
     let plotWarnings: string[] | undefined;
     const allWarnings: string[] = [];
 
@@ -2876,7 +2888,6 @@ export async function handleEditGraph(
       // read of the base graph would have failed regardless. The narrow
       // conditional preserves the bug fix without scope-creeping into a
       // graph-wide canonicalisation gate.
-      const baseValid = GraphV3.safeParse(context.graph as unknown).success;
       const candidateParse = baseValid ? GraphV3.safeParse(candidateGraph) : { success: true as const };
       if (!candidateParse.success) {
         const firstIssue = candidateParse.error.issues[0];
@@ -3045,11 +3056,26 @@ export async function handleEditGraph(
     // The postcondition then requires every op to be verifiable as having
     // LANDED on that canonical graph. Unknown field spellings now normalise or
     // fail visibly — never strip-and-succeed.
-    if (config.cee.valueOpCanonicalisationEnabled && appliedGraph && appliedGraphSynthesisedLocally) {
+    // `baseValid` is REQUIRED here, not incidental. Without it this block
+    // re-parses a graph the synthesis block above deliberately DECLINED to
+    // parse, silently reversing the V5 H5 narrowing: with the flag ON, ANY
+    // edit — including a trivial rename — on a scenario whose base graph fails
+    // strict GraphV3 would return SYNTHESIZED_GRAPH_INVALID, leaving the
+    // scenario permanently uneditable behind copy that invites a rephrase that
+    // can never succeed. When the base is invalid we skip BOTH the re-parse
+    // and the postcondition and fall through to the legacy promotion — the
+    // pre-B5 behaviour exactly.
+    if (
+      config.cee.valueOpCanonicalisationEnabled &&
+      appliedGraph &&
+      appliedGraphSynthesisedLocally &&
+      baseValid
+    ) {
       const persistedParse = GraphV3.safeParse(appliedGraph);
       if (!persistedParse.success) {
-        // Unreachable in practice (the synthesis block already strict-parsed
-        // a V3-valid base), but fail closed rather than persist unparsed.
+        // Reachable: the synthesis block strict-parsed the CANDIDATE, but the
+        // intervention encoder has run since and rewrites node shapes. Fail
+        // closed rather than persist a graph we could not parse.
         log.error(
           { request_id: requestId, attempt, issues_count: persistedParse.error.issues.length },
           'edit_graph B5 — final appliedGraph failed GraphV3 parse; refusing to persist',

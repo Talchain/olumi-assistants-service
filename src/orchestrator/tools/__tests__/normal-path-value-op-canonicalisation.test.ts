@@ -34,7 +34,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { handleEditGraph } from '../edit-graph.js';
-import { config } from '../../../config/index.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { ConversationContext } from '../../types.js';
 import type { LLMAdapter } from '../../../adapters/llm/types.js';
 
@@ -128,17 +128,28 @@ function observedOf(graph: unknown): Record<string, unknown> {
 }
 
 // ── flag control ────────────────────────────────────────────────────────────
+//
+// Drive the REAL env var through the config parser (the held spec's pattern),
+// never `config.cee.<key> = …` directly. Mutating the parsed object bypasses
+// `config/index.ts` entirely, so a MISSPELLED `CEE_VALUE_OP_CANONICALISATION`
+// in the env→config mapping would leave every test in this file green and tsc
+// clean — mutation-proven. Going through the env var makes that typo fail loud.
 
-const FLAG = 'valueOpCanonicalisationEnabled' as const;
-let originalFlag: boolean;
+const FLAG = 'CEE_VALUE_OP_CANONICALISATION';
 
-beforeEach(() => {
-  originalFlag = config.cee[FLAG];
-  (config.cee as Record<string, unknown>)[FLAG] = true;
+async function setFlag(value: 'true' | 'false' | undefined): Promise<void> {
+  if (value === undefined) delete process.env[FLAG];
+  else process.env[FLAG] = value;
+  const { _resetConfigCache } = await import('../../../config/index.js');
+  _resetConfigCache();
+}
+
+beforeEach(async () => {
+  await setFlag('true');
 });
 
-afterEach(() => {
-  (config.cee as Record<string, unknown>)[FLAG] = originalFlag;
+afterEach(async () => {
+  await setFlag(undefined);
   vi.restoreAllMocks();
 });
 
@@ -236,21 +247,19 @@ describe('B5 — untranslatable spellings REFUSE VISIBLY (never strip-and-succee
 
 // ── 3. The parsed-vs-candidate promotion, pinned where it DISCRIMINATES ─────
 
-describe('B5 — the promoted graph is the PARSED one (intervention path)', () => {
+describe('B5 — the promoted graph is the PARSED one', () => {
   /**
-   * This is the case that actually pins fix part 2, and it took a
-   * mutation-check to find it: for a plain value op the canonicaliser has
-   * already rewritten the payload into a DECLARED field, so raw and parsed
-   * agree and promoting either one passes. The intervention subtree is where
-   * they genuinely differ — `canonicaliseValueOps` deliberately leaves
-   * `data/interventions/<factor_id>` VERBATIM (its owner,
-   * `encodeOptionInterventionsForEdit`, reads that exact spelling off the
-   * applied graph), so the raw candidate still carries the slash key after the
-   * encoder has promoted it to canonical top-level `interventions`.
+   * ⚠ CORRECTED. An earlier version of this comment claimed the intervention
+   * test below pins fix part 2. It does NOT, and the claim was refuted by
+   * mutation-check: `encodeOptionInterventionsForEdit` DELETES its own slash
+   * keys (`encode-option-interventions.ts:320-322`), so on the intervention
+   * path the raw and parsed graphs agree and promoting either one passes.
    *
-   * Promote the raw candidate and that junk key is persisted; promote the
-   * parsed graph and it is not. Reverting `appliedGraph = canonicalApplied`
-   * to `appliedGraph = rawApplied` turns THIS test red — and nothing else.
+   * The sole discriminator for hunk 2 is the `add_node` test further down
+   * (plus its flag-OFF positive control). The intervention test below is a
+   * genuine REGRESSION GUARD for the ordering — the parse must run AFTER the
+   * encoder, or the encoder loses the keys it reads — but it does not pin the
+   * promotion itself. Keeping both, labelled for what each actually does.
    */
   const INTERVENTION_GRAPH = {
     nodes: [
@@ -382,6 +391,78 @@ describe('B5 — the promoted graph is the PARSED one (intervention path)', () =
     expect(added).not.toHaveProperty('data');
   });
 
+  /**
+   * POSITIVE CONTROL for the assertion above (trap 13).
+   *
+   * The `not.toHaveProperty('data')` test is an ABSENCE assertion, and an
+   * absence assertion that cannot see a PRESENCE is vacuous. If `applyAddNode`
+   * were ever hardened to drop undeclared keys, the absence would hold for a
+   * reason that has nothing to do with the promotion, hunk 2 could be reverted,
+   * and the suite would stay green.
+   *
+   * This control proves the key IS there to be seen: with the flag OFF the
+   * legacy path promotes the raw candidate, and `data` is persisted. So the
+   * pair together says "the key exists, and hunk 2 is what removes it."
+   */
+  it('POSITIVE CONTROL — flag OFF, the undeclared `data` key IS persisted', async () => {
+    await setFlag('false');
+
+    const ctx = {
+      graph: INTERVENTION_GRAPH,
+      analysis_response: null,
+      framing: null,
+      messages: [],
+      scenario_id: 'scn-b5-add-ctl',
+    } as unknown as ConversationContext;
+
+    const result = await handleEditGraph(
+      ctx,
+      'Add a data quality risk that affects total cost',
+      makeAdapter(
+        editResponse([
+          {
+            op: 'add_node',
+            path: '/nodes/fac_risk',
+            value: {
+              id: 'fac_risk',
+              kind: 'factor',
+              label: 'Data Quality Risk',
+              data: { value: 0.4, unit: 'index' },
+            },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'Add the risk factor.',
+          },
+          {
+            op: 'add_edge',
+            path: '/edges/opt_a->fac_risk',
+            value: { from: 'opt_a', to: 'fac_risk', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'Wire the option to the risk.',
+          },
+          {
+            op: 'add_edge',
+            path: '/edges/fac_risk->goal_g',
+            value: { from: 'fac_risk', to: 'goal_g', strength: { mean: -0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'Wire the risk to the goal.',
+          },
+        ]),
+      ),
+      'req-b5-add-ctl',
+      'turn-b5-add-ctl',
+    );
+
+    expect(result.wasRejected).toBe(false);
+    const nodes = (result.appliedGraph as unknown as { nodes: Array<Record<string, unknown>> }).nodes;
+    const added = nodes.find((n) => n.id === 'fac_risk')!;
+
+    // The presence the absence assertion above must be capable of seeing.
+    expect(added).toHaveProperty('data');
+  });
+
   it('lands the intervention canonically AND persists no slash-keyed residue', async () => {
     const result = await runInterventionEdit();
 
@@ -396,15 +477,91 @@ describe('B5 — the promoted graph is the PARSED one (intervention path)', () =
     expect(interventions).toBeDefined();
     expect(interventions).toHaveProperty('fac_setup');
 
-    // And the promoted graph is the PARSED one, so the slash key the encoder
-    // read from is NOT persisted. This is the assertion that discriminates
-    // fix part 2 — it fails if the raw candidate is promoted instead.
+    // No slash-keyed residue survives. ⚠ This does NOT discriminate hunk 2 —
+    // the encoder deletes these keys itself (encode-option-interventions.ts:
+    // 320-322), so it holds with either graph promoted. What it DOES guard is
+    // the ORDERING: move the parse before the encoder and the encoder loses
+    // the keys it reads, and this test goes red.
     expect(option).not.toHaveProperty('data/interventions/fac_setup');
     expect(Object.keys(option).some((k) => k.includes('/'))).toBe(false);
   });
 });
 
-// ── 4. Controls ─────────────────────────────────────────────────────────────
+// ── 4. The V5 H5 narrowed-base contract, which B5 must INHERIT not reverse ──
+
+describe('B5 — a V3-INVALID base graph stays editable (H5 narrowing preserved)', () => {
+  /**
+   * The P1 an adversarial review caught, and the number nobody had measured.
+   *
+   * The synthesis block deliberately DECLINES to strict-parse when the BASE
+   * graph is already V3-invalid: "the patch is not the cause of the defect and
+   * refusing here would block legitimate edits". Without inheriting that
+   * `baseValid` narrowing, the B5 block re-parses exactly the graph H5 chose
+   * not to parse — so with the flag ON, ANY edit (even a rename) on such a
+   * scenario returns SYNTHESIZED_GRAPH_INVALID and the scenario becomes
+   * permanently uneditable, behind copy inviting a rephrase that can never work.
+   *
+   * This is NOT a hypothetical shape. CEE manufactures it: `buildStructuralFallback`
+   * stamps `strength: { mean: 0, std: 0 }`, and CEE's own `EdgeStrengthV3.std`
+   * rejects a non-positive std — so any fallback graph with ≥1 edge is a
+   * V3-invalid base.
+   */
+  const INVALID_BASE = {
+    nodes: [
+      { id: 'dec_x', kind: 'decision', label: 'Platform Migration' },
+      { id: 'opt_a', kind: 'option', label: 'Migrate Now' },
+      { id: 'fac_setup', kind: 'factor', label: 'Setup Complexity', observed_state: { value: 0.2, unit: 'index' } },
+      { id: 'goal_g', kind: 'goal', label: 'Total Cost' },
+    ],
+    edges: [
+      // `std: 0` — exactly what buildStructuralFallback stamps, and exactly
+      // what EdgeStrengthV3 rejects. This base does NOT strict-parse.
+      { from: 'dec_x', to: 'opt_a', strength: { mean: 0, std: 0 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'opt_a', to: 'fac_setup', strength: { mean: 0, std: 0 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'fac_setup', to: 'goal_g', strength: { mean: 0, std: 0 }, exists_probability: 1, effect_direction: 'negative' },
+    ],
+  };
+
+  it('the fixture really IS V3-invalid (guard against the test silently going vacuous)', () => {
+    expect(GraphV3.safeParse(INVALID_BASE).success).toBe(false);
+  });
+
+  it('flag ON — a benign rename still APPLIES on a V3-invalid base', async () => {
+    const ctx = {
+      graph: INVALID_BASE,
+      analysis_response: null,
+      framing: null,
+      messages: [],
+      scenario_id: 'scn-b5-invalid',
+    } as unknown as ConversationContext;
+
+    const result = await handleEditGraph(
+      ctx,
+      'Rename the setup factor',
+      makeAdapter(
+        editResponse([
+          {
+            op: 'update_node',
+            path: '/nodes/fac_setup/label',
+            value: 'Setup Complexity (revised)',
+            old_value: 'Setup Complexity',
+            impact: 'minor',
+            rationale: 'Rename.',
+          },
+        ]),
+      ),
+      'req-b5-invalid',
+      'turn-b5-invalid',
+    );
+
+    // Must NOT be SYNTHESIZED_GRAPH_INVALID. The scenario stays editable.
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+    expect(factorOf(result.appliedGraph).label).toBe('Setup Complexity (revised)');
+  });
+});
+
+// ── 5. Controls ─────────────────────────────────────────────────────────────
 
 describe('B5 — controls: canonical spellings and flag-off are unaffected', () => {
   // NOT a control — this one surprised us. `/nodes/<id>/observed_state/value`
@@ -453,7 +610,7 @@ describe('B5 — controls: canonical spellings and flag-off are unaffected', () 
   });
 
   it('FLAG OFF — reproduces the legacy silent no-op byte-for-byte', async () => {
-    (config.cee as Record<string, unknown>)[FLAG] = false;
+    await setFlag('false');
 
     const result = await runEdit(editResponse([promptTaughtValueOp(0.5)]));
 
