@@ -62,7 +62,9 @@ import type { CommitResult } from '../commit.js';
 import type {
   V5TurnTimings,
   DraftGraphTimings,
+  DraftGraphNumericTimingKey,
 } from '../telemetry/turn-timings.js';
+import { DRAFT_GRAPH_NUMERIC_TIMING_KEYS } from '../telemetry/turn-timings.js';
 import { config } from '../../config/index.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
@@ -82,8 +84,34 @@ export interface V5BenchmarkingTimings {
     persistence_ms?: number;
     finalisation_ms?: number;
     total_handler_duration_ms?: number;
+    // ── Full draft substage detail (CEE_DRAFT_SUBSTAGE_DETAIL, default OFF).
+    // Absent entirely when the flag is off, so the historical payload is
+    // byte-identical. See DRAFT_GRAPH_NUMERIC_TIMING_KEYS for why these
+    // exist: without them the draft's non-LLM time is an unattributable
+    // residual. Measured on staging 2026-07-18, these five sum to ~29 ms
+    // against a ~62,500 ms LLM call — the point of emitting them is to make
+    // that ratio VISIBLE rather than assumed.
+    total_ms?: number;
+    normalise_ms?: number;
+    enrich_ms?: number;
+    repair_llm_ms?: number;
+    repair_deterministic_ms?: number;
+    threshold_sweep_ms?: number;
+    package_ms?: number;
+    boundary_ms?: number;
   };
 }
+
+/**
+ * Trace-surface names for the pipeline's numeric timing keys. Only the two
+ * historically-renamed keys need an entry; everything else passes through
+ * under its own name. Keyed by `DraftGraphNumericTimingKey` so a new
+ * pipeline timing key cannot be added without TypeScript checking it here.
+ */
+const TRACE_KEY_RENAMES: Partial<Record<DraftGraphNumericTimingKey, string>> = {
+  parse_llm_ms: 'llm_call_ms',
+  validation_pipeline_ms: 'validation_ms',
+};
 
 export interface V5CorrelationIds {
   request_id: string;
@@ -532,13 +560,41 @@ function buildBenchmarkingForDraftGraph(
 ): V5BenchmarkingTimings {
   const totalDurationMs = Math.max(0, Date.now() - input.startedAt);
   const dgt = input.draftResult.draftGraphTimings;
+
+  // Flag OFF: the historical four-key subset, emitted exactly as before so
+  // the wire payload is byte-identical. Deliberately NOT derived — this
+  // branch is frozen legacy shape, and freezing it is what makes the
+  // flag-off guarantee checkable.
+  if (!config.features.draftSubstageDetail) {
+    return {
+      total_duration_ms: totalDurationMs,
+      substage_timings: {
+        llm_call_ms: dgt?.parse_llm_ms,
+        parse_ms: dgt?.parse_ms,
+        repair_ms: dgt?.repair_ms,
+        validation_ms: dgt?.validation_pipeline_ms,
+        persistence_ms: input.persistenceMs,
+        total_handler_duration_ms: input.draftResult.latencyMs,
+      },
+    };
+  }
+
+  // Flag ON: DERIVE the substage set from the pipeline's own key list, so a
+  // timing added to the pipeline cannot be silently dropped here. Undefined
+  // values are omitted rather than emitted as `undefined` so a stage that
+  // genuinely did not run is distinguishable from one that ran in 0 ms —
+  // an honesty property, not a cosmetic one.
+  const derived: Record<string, number> = {};
+  for (const key of DRAFT_GRAPH_NUMERIC_TIMING_KEYS) {
+    const value = dgt?.[key];
+    if (typeof value !== 'number') continue;
+    derived[TRACE_KEY_RENAMES[key] ?? key] = value;
+  }
+
   return {
     total_duration_ms: totalDurationMs,
     substage_timings: {
-      llm_call_ms: dgt?.parse_llm_ms,
-      parse_ms: dgt?.parse_ms,
-      repair_ms: dgt?.repair_ms,
-      validation_ms: dgt?.validation_pipeline_ms,
+      ...derived,
       persistence_ms: input.persistenceMs,
       total_handler_duration_ms: input.draftResult.latencyMs,
     },

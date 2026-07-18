@@ -480,6 +480,7 @@ const ConfigSchema = z.object({
     artefactAppendixEnabled: booleanString.default(false), // CEE_ARTEFACT_APPENDIX_ENABLED — inject artefact design appendix when artefact generation is likely
     artefactRenderingEnabled: booleanString.default(false), // CEE_ARTEFACT_RENDERING_ENABLED — when false, artefact blocks are suppressed with fallback commentary
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
+    draftSubstageDetail: booleanString.default(false), // CEE_DRAFT_SUBSTAGE_DETAIL — emit the COMPLETE draft substage timing set on _diagnostic_trace (ROADMAP 1.77 F1); OFF = the historical 4-key subset, byte-identical
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
     v6DualDraftEnabled: booleanString.default(false), // CEE_V6_DUAL_DRAFT_ENABLED — V6 dual-model draft: M2 review + deterministic merge after M1 draft, before commit (default OFF; producer-agnostic enrichment stage in draft-graph-dispatch)
     // CEE_PIPELINE_V4_ENABLED — V1 route-registration flag only.
@@ -1447,6 +1448,7 @@ function parseConfig(): Config {
       artefactAppendixEnabled: env.CEE_ARTEFACT_APPENDIX_ENABLED,
       artefactRenderingEnabled: env.CEE_ARTEFACT_RENDERING_ENABLED,
       diagnosticTraceEnabled: env.CEE_DIAGNOSTIC_TRACE_ENABLED,
+      draftSubstageDetail: env.CEE_DRAFT_SUBSTAGE_DETAIL,
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
       orchestratorV5: env.ENABLE_V5_ORCHESTRATOR,
