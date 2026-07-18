@@ -44,6 +44,15 @@ const LIVE_BRIEF =
   "Hard constraint: first-year budget cannot exceed £50,000 — " +
   "anything over is unaffordable, full stop.";
 
+/**
+ * Same decision, no hard constraint. Drives the omission case: the extractor
+ * finds nothing, so the projection must omit the key entirely rather than
+ * emit an empty array.
+ */
+const NO_CONSTRAINT_BRIEF =
+  "Should we launch the new product this year? " +
+  "We would like it to go well and are weighing the options.";
+
 function makeGraph() {
   return {
     nodes: [
@@ -73,10 +82,12 @@ function makeGraph() {
  *   schema-v3.transformResponseToV3   (V1 root -> V3 root)
  *   draft-graph.ts:300                (`body.graph ?? body`)
  */
-function buildLiveGraphOutput(): { graphOutput: any; constraintCount: number } {
+function buildLiveGraphOutput(
+  brief: string = LIVE_BRIEF,
+): { graphOutput: any; constraintCount: number } {
   const ctx: any = {
     requestId: "test-goal-constraints-wire",
-    effectiveBrief: LIVE_BRIEF,
+    effectiveBrief: brief,
     graph: makeGraph(),
     goalConstraints: undefined,
     // Live turns reported from_llm:0 — the model contributed nothing.
@@ -138,8 +149,8 @@ describe("draft goal_constraints — the chain UP TO the V5 projection (controls
   });
 });
 
-function composeWire() {
-  const { graphOutput } = buildLiveGraphOutput();
+function composeWire(brief: string = LIVE_BRIEF) {
+  const { graphOutput } = buildLiveGraphOutput(brief);
 
   const result: any = {
     graphOutput,
@@ -159,8 +170,8 @@ function composeWire() {
   return JSON.stringify(response);
 }
 
-describe("draft goal_constraints — THE STRIP (draft-graph-dispatch.ts:261-269)", () => {
-  it("characterises the strip: draft_graph is rebuilt to EXACTLY four keys, dropping every sibling", () => {
+describe("draft goal_constraints — THE PROJECTION (draft-graph-dispatch.ts:261-269)", () => {
+  it("draft_graph carries EXACTLY the four base keys PLUS goal_constraints", () => {
     const reparsed = JSON.parse(composeWire());
 
     // The graph itself rode onto the wire — so the assertion below is a
@@ -168,66 +179,176 @@ describe("draft goal_constraints — THE STRIP (draft-graph-dispatch.ts:261-269)
     expect(reparsed.draft_graph).toBeDefined();
     expect(reparsed.draft_graph.nodes.length).toBeGreaterThan(0);
 
-    // The rebuild is total: these four keys and nothing else. Written as an
-    // exact key-set so that ANY future change to the projection — including
-    // the fix — turns this red and forces the author here.
+    // Exact key-set, so ANY future change to the projection turns this red
+    // and forces the author here. Was the four base keys before the fix;
+    // goal_constraints is the fifth and the only addition.
+    expect(Object.keys(reparsed.draft_graph).sort()).toEqual([
+      "edge_count",
+      "edges",
+      "goal_constraints",
+      "node_count",
+      "nodes",
+    ]);
+  });
+
+  it("goal_constraints survives into the serialized V5 wire BYTES", () => {
+    // Promoted from the `it.fails` pin landed by PR #514, which characterised
+    // this exact assertion as known-open. It is asserted against the
+    // SERIALIZED bytes on purpose: `undefined` vanishes silently through JSON
+    // emission, so an object-level assertion can pass on a value the client
+    // never receives.
+    const wire = composeWire();
+    expect(wire).toContain('"goal_constraints"');
+
+    const reparsed = JSON.parse(wire);
+    const constraints = reparsed.draft_graph.goal_constraints;
+    expect(Array.isArray(constraints)).toBe(true);
+    expect(constraints.length).toBeGreaterThan(0);
+
+    // The payload is the real extracted constraint, not an empty husk: the
+    // budget cap from the brief, bound to a node that exists in the graph.
+    const c = constraints[0];
+    expect(typeof c.constraint_id).toBe("string");
+    expect(["<=", ">="]).toContain(c.operator);
+    expect(typeof c.value).toBe("number");
+    // node_id must resolve against the sibling nodes array — the contract
+    // states CEE drops any constraint that does not.
+    const nodeIds = reparsed.draft_graph.nodes.map((n: any) => n.id);
+    expect(nodeIds).toContain(c.node_id);
+  });
+
+  it("OMISSION: a brief with no constraint omits the key ENTIRELY (never `[]`)", () => {
+    // Byte-identity guarantee for the flag-off / no-constraint case: the
+    // pre-0.18.0 wire had four keys and no goal_constraints, and a brief that
+    // carries no hard constraint must still produce exactly that. Emitting an
+    // empty array instead would change every no-constraint response on the
+    // wire for no benefit.
+    const wire = composeWire(NO_CONSTRAINT_BRIEF);
+    const reparsed = JSON.parse(wire);
+
+    // Positive control: the graph still rode onto the wire, so this is a
+    // targeted absence claim and not a vacuous assertion about an empty body.
+    expect(reparsed.draft_graph.nodes.length).toBeGreaterThan(0);
+
     expect(Object.keys(reparsed.draft_graph).sort()).toEqual([
       "edge_count",
       "edges",
       "node_count",
       "nodes",
     ]);
+    expect(wire).not.toContain('"goal_constraints"');
   });
-
-  it.fails(
-    "DESIRED (known-open): goal_constraints survives into the serialized V5 wire bytes",
-    () => {
-      // `it.fails` pins the defect rather than asserting it away: this flips
-      // RED the moment goal_constraints reaches the wire, which is the signal
-      // to delete this wrapper and promote it to a normal expectation. It is
-      // deliberately NOT a passing "absence" test — an absence asserted as
-      // correct is how a defect becomes the spec.
-      //
-      // Blocked on a contract change, NOT on CEE alone — see the pin below.
-      expect(composeWire()).toContain('"goal_constraints"');
-    },
-  );
 });
 
-describe("draft goal_constraints — WHY the one-line fix is blocked (contract pin)", () => {
-  it("the pinned egress contract REJECTS goal_constraints inside draft_graph", async () => {
-    // Derived from the real pinned schema, never a hand-copied mirror: when
-    // @talchain/schemas is bumped to declare the field, this test goes RED and
-    // names the follow-up (thread it at draft-graph-dispatch.ts:261-269).
+describe("draft goal_constraints — the contract pin (now UNBLOCKED at 0.18.0)", () => {
+  /**
+   * The inverse of the pin PR #514 landed. That pin asserted the contract
+   * REJECTED the field and named the blocker; at @talchain/schemas 0.18.0 it
+   * is declared, so the pin is inverted rather than deleted — the seam keeps
+   * a live assertion in both directions.
+   */
+  const baseResponse = {
+    response_version: 2,
+    assistant_text: "x",
+    blocks: [],
+    suggested_actions: [],
+    insights: [],
+    stage_indicator: "analyse",
+  };
+
+  it("the pinned egress contract ACCEPTS goal_constraints inside draft_graph", async () => {
+    // Derived from the real pinned schema, never a hand-copied mirror. If the
+    // pin is ever rolled back below 0.18.0 this goes RED and names the cause.
     const { OlumiResponseSchema } = await import("@talchain/schemas/boundary");
 
     const parsed = OlumiResponseSchema.safeParse({
-      response_version: 2,
-      assistant_text: "x",
-      blocks: [],
-      suggested_actions: [],
-      insights: [],
-      stage_indicator: "analyse",
+      ...baseResponse,
       draft_graph: {
         nodes: [],
         edges: [],
         node_count: 0,
         edge_count: 0,
-        goal_constraints: [{ node_id: "out_budget_headroom", operator: "<=", value: 50000 }],
+        goal_constraints: [
+          {
+            constraint_id: "constraint_out_budget_headroom_max",
+            node_id: "out_budget_headroom",
+            operator: "<=",
+            value: 50000,
+          },
+        ],
       },
     });
 
-    // DraftGraphBlockSchema is `.strict()` with exactly
-    // { type, nodes, edges, node_count, edge_count }. Threading the field
-    // through the strip WITHOUT a schemas bump would therefore not ship the
-    // constraint — it would fail validateEgress and replace every draft
-    // response with the EGRESS_CONTRACT_VIOLATION fallback envelope.
+    expect(parsed.success).toBe(true);
+    // Survives the parse rather than merely passing it — a schema can accept
+    // a key and still strip it, which would be the same silent loss.
+    if (parsed.success) {
+      expect(parsed.data.draft_graph?.goal_constraints).toHaveLength(1);
+    }
+  });
+
+  it("STRICTNESS RETAINED: an unrecognised sibling key is still rejected", async () => {
+    // The fix for a dropped field at this seam is to DECLARE it, never to
+    // loosen the block to passthrough. Without this assertion the test above
+    // would also pass under a blanket `.passthrough()`, which would silently
+    // re-open every other dropped-sibling defect at this seam.
+    const { OlumiResponseSchema } = await import("@talchain/schemas/boundary");
+
+    const parsed = OlumiResponseSchema.safeParse({
+      ...baseResponse,
+      draft_graph: {
+        nodes: [],
+        edges: [],
+        node_count: 0,
+        edge_count: 0,
+        goal_constraints: [],
+        totally_undeclared_key: true,
+      },
+    });
+
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
       const issue = parsed.error.issues.find((i) => i.code === "unrecognized_keys");
       expect(issue).toBeDefined();
-      expect((issue as any).keys).toContain("goal_constraints");
+      expect((issue as any).keys).toContain("totally_undeclared_key");
       expect(issue!.path).toEqual(["draft_graph"]);
     }
+  });
+
+  it("the REAL validateEgress passes the composed response (no EGRESS_CONTRACT_VIOLATION)", async () => {
+    // The production egress validator, not a re-implementation. This is the
+    // gate that would have replaced the whole draft response with the
+    // EGRESS_CONTRACT_VIOLATION fallback envelope had the field been threaded
+    // without the contract bump — so it is the assertion that proves the fix
+    // actually ships rather than merely type-checks.
+    const { validateEgress } = await import("../../src/validators/b1.js");
+
+    const { graphOutput } = buildLiveGraphOutput();
+    const response = draftResultToOlumiResponse(
+      {
+        graphOutput,
+        assistantText: null,
+        analysisReady: null,
+        strengthenItems: [],
+        coachingSummary: null,
+        coachingBiasSignals: [],
+        coachingWideningLogObject: null,
+      } as any,
+      PAYLOAD,
+      true,
+      "req_egress",
+    );
+
+    const egress: any = validateEgress(response, "req_egress");
+
+    // Positive control: the response we are validating genuinely carries the
+    // field, so a pass here is a pass ON the constraint-bearing payload.
+    expect((response as any).draft_graph.goal_constraints.length).toBeGreaterThan(0);
+
+    expect(egress.ok).toBe(true);
+    const blocks = (egress.response ?? response).blocks ?? [];
+    expect(
+      blocks.some((b: any) => b?.error_code === "EGRESS_CONTRACT_VIOLATION"),
+    ).toBe(false);
   });
 });
