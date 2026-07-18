@@ -98,10 +98,10 @@ describe('V5 coach egress — the serialized routing prompt carries the flag + n
 
     // Raw handler-facing slot: the projected winner carries the typed flag.
     expect(pack.analysis?.leading_option?.constraint_infeasible).toBe(true);
-    // LLM-facing display slot: flag + verbatim note.
-    const display = pack.display_analysis as Record<string, unknown>;
-    expect((display.leading_option as Record<string, unknown>).constraint_infeasible).toBe(true);
-    expect(display.constraint_infeasible_note).toBe(summary.constraint_infeasible_note);
+    // LLM-facing display slot: flag + verbatim note (typed access — the
+    // DisplaySafeAnalysis interface carries both fields).
+    expect(pack.display_analysis?.leading_option?.constraint_infeasible).toBe(true);
+    expect(pack.display_analysis?.constraint_infeasible_note).toBe(summary.constraint_infeasible_note);
 
     // THE EGRESS BYTES: the exact prompt string the coach receives.
     const prompt = buildUserMessage(pack, 'Which option should I take?');
