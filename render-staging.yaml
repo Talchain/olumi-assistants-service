@@ -12,6 +12,17 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Staging serves the PMS `staging_version` pointer — this is where a
+      # promoted prompt is proven before it reaches production. Declared
+      # explicitly so it never depends on RENDER_SERVICE_NAME being injected.
+      #
+      # OLUMI_ENV is deliberately NOT set here. It would change getRuntimeEnv()
+      # — which also gates the graph-management live→shadow lockdown and the
+      # raw-IO policy — and that is out of scope for this change. Declaring
+      # PROMPTS_ENVIRONMENT is sufficient: it makes the prompt pointer
+      # deterministic on its own.
+      - key: PROMPTS_ENVIRONMENT
+        value: staging
       - key: LLM_PROVIDER
         value: fixtures
       - key: ENABLE_DOCUMENT_GROUNDING

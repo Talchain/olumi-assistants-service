@@ -11,6 +11,18 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Which PMS pointer this service serves. MUST be `production` here so
+      # production serves `active_version`. Never derived from DD_ENV — this
+      # service carries DD_ENV=staging as a Datadog tag, and reading it was
+      # what made production resolve the staging pointer.
+      - key: PROMPTS_ENVIRONMENT
+        value: production
+      # Positive identification of the runtime environment. Both this file and
+      # render-staging.yaml set NODE_ENV=production, so NODE_ENV alone cannot
+      # tell the two services apart; OLUMI_ENV makes the prod/staging verdict
+      # explicit and lets /healthz fail closed on a prompt-env mismatch.
+      - key: OLUMI_ENV
+        value: prod
       - key: LLM_PROVIDER
         value: fixtures
       - key: ANTHROPIC_API_KEY

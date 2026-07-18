@@ -13,7 +13,12 @@
  */
 
 import { z } from "zod";
-import { getRuntimeEnv } from "./env-resolver.js";
+import {
+  getRuntimeEnv,
+  getRuntimeEnvResolution,
+  type RuntimeEnv,
+  type RuntimeEnvSource,
+} from "./env-resolver.js";
 
 /**
  * Config override events to be emitted after telemetry is available
@@ -1360,7 +1365,7 @@ const ConfigSchema = z.object({
     adminAllowedIPs: z.string().optional(), // Comma-separated list of allowed IPs (empty = all allowed)
     adminRoutesEnabled: booleanString.default(true), // Enable admin routes (set to false in production)
     useStaging: booleanString.optional(), // Explicit override: true = use staging prompts, false = use production prompts
-    environment: z.string().optional(), // Environment name for prompt selection (e.g., "staging", "production"). Falls back to DD_ENV.
+    environment: z.string().optional(), // PROMPTS_ENVIRONMENT — "staging" | "production". NEVER falls back to DD_ENV (observability tag); unset derives from getRuntimeEnv().
     activationGuardEnabled: booleanString.default(true), // CEE_PROMPT_ACTIVATION_GUARD_ENABLED — prevents automated processes from setting stagingVersion/activeVersion
     autoMigrateEnabled: booleanString.default(false), // CEE_PROMPT_AUTO_MIGRATE — enables auto-migration of orchestrator prompt from registered default on startup (default: off)
   }),
@@ -1776,7 +1781,12 @@ function parseConfig(): Config {
       adminAllowedIPs: env.ADMIN_ALLOWED_IPS,
       adminRoutesEnabled: env.ADMIN_ROUTES_ENABLED,
       useStaging: env.PROMPTS_USE_STAGING,
-      environment: env.PROMPTS_ENVIRONMENT ?? env.DD_ENV, // PROMPTS_ENVIRONMENT takes precedence over DD_ENV
+      // DD_ENV IS DELIBERATELY ABSENT. It is a Datadog OBSERVABILITY tag; it
+      // must never select a functional prompt pointer. Production carries
+      // DD_ENV=staging, so `PROMPTS_ENVIRONMENT ?? DD_ENV` (PR #513) made
+      // production resolve the PMS staging_version pointer. See
+      // resolvePromptEnvironment() below for the replacement chain.
+      environment: env.PROMPTS_ENVIRONMENT,
       activationGuardEnabled: env.CEE_PROMPT_ACTIVATION_GUARD_ENABLED,
       autoMigrateEnabled: env.CEE_PROMPT_AUTO_MIGRATE,
     },
@@ -1972,32 +1982,131 @@ export function isTest(): boolean {
   return config.server.nodeEnv === "test" || config.testing.isVitest;
 }
 
+/** Which PMS pointer a deployment serves: `active_version` vs `staging_version`. */
+export type PromptEnvironment = "production" | "staging";
+
+/** How {@link resolvePromptEnvironment} arrived at its verdict. */
+export type PromptEnvironmentSource =
+  | "explicit_prompts_use_staging"
+  | "explicit_prompts_environment"
+  | "derived_runtime_env";
+
+/** Machine-readable misconfiguration signals for health/readiness surfaces. */
+export type PromptEnvironmentReason =
+  /** A deployed (staging/prod) service did not declare its prompt environment. */
+  | "prompt_env_unset_on_deployed_env"
+  /** A production runtime is resolving the STAGING pointer. */
+  | "prompt_env_conflicts_with_runtime";
+
+export interface PromptEnvironmentResolution {
+  environment: PromptEnvironment;
+  source: PromptEnvironmentSource;
+  runtimeEnv: RuntimeEnv;
+  runtimeEnvSource: RuntimeEnvSource;
+  /** True iff a production runtime resolved the staging pointer. */
+  mismatch: boolean;
+  /**
+   * True iff the mismatch is CERTAIN — i.e. the "prod" verdict came from a
+   * discriminating signal. Callers refuse readiness on this, never on
+   * `mismatch` alone. See {@link getRuntimeEnvResolution}.
+   */
+  blocksReadiness: boolean;
+  reasons: PromptEnvironmentReason[];
+}
+
+/**
+ * Resolve which PMS pointer this deployment serves, and whether that choice
+ * is consistent with the runtime environment.
+ *
+ * Resolution order (highest priority first):
+ * 1. `PROMPTS_USE_STAGING` — explicit boolean override.
+ * 2. `PROMPTS_ENVIRONMENT` — explicit "staging" | "production".
+ * 3. Derived from `getRuntimeEnv()`: prod → production; staging → staging;
+ *    local/test → staging.
+ *
+ * `DD_ENV` IS NOT IN THIS CHAIN, by design. It is a Datadog observability
+ * tag. Before this change the chain was `PROMPTS_ENVIRONMENT ?? DD_ENV`, and
+ * the production Render service carries `NODE_ENV=production`,
+ * `DD_ENV=staging` and no explicit prompt env — so production resolved
+ * `staging` and would have served the PMS `staging_version` pointer. A prompt
+ * promoted only to staging would silently have changed production behaviour.
+ *
+ * Why derive from `getRuntimeEnv()` rather than `NODE_ENV`: BOTH Render
+ * services set `NODE_ENV=production` (render.yaml and render-staging.yaml),
+ * so NODE_ENV cannot tell them apart. `getRuntimeEnv()` can, via
+ * `OLUMI_ENV` / `RENDER_SERVICE_NAME`. Note the derivation is safe even when
+ * `RENDER_SERVICE_NAME` is absent: the NODE_ENV fallback then yields `prod`,
+ * which maps to the PRODUCTION pointer — the safe direction.
+ */
+export function resolvePromptEnvironment(): PromptEnvironmentResolution {
+  const { env: runtimeEnv, source: runtimeEnvSource, discriminating } =
+    getRuntimeEnvResolution();
+
+  const explicitUseStaging = config.prompts?.useStaging;
+  const rawExplicitEnv = config.prompts?.environment?.toLowerCase().trim();
+
+  let environment: PromptEnvironment;
+  let source: PromptEnvironmentSource;
+
+  if (explicitUseStaging !== undefined) {
+    environment = explicitUseStaging ? "staging" : "production";
+    source = "explicit_prompts_use_staging";
+  } else if (rawExplicitEnv === "staging" || rawExplicitEnv === "production") {
+    environment = rawExplicitEnv;
+    source = "explicit_prompts_environment";
+  } else {
+    if (rawExplicitEnv) {
+      // Unrecognised value: warn and fall through to derivation. Never a boot
+      // failure — mirrors the graph-management / CAS mode flags.
+      console.warn(
+        `[CONFIG] PROMPTS_ENVIRONMENT: unrecognised value "${config.prompts?.environment}" — ` +
+          `ignoring and deriving from runtime env (valid values: staging | production)`,
+      );
+    }
+    // prod → production pointer; staging/local/test → staging pointer.
+    environment = runtimeEnv === "prod" ? "production" : "staging";
+    source = "derived_runtime_env";
+  }
+
+  const reasons: PromptEnvironmentReason[] = [];
+
+  const isDeployed = runtimeEnv === "prod" || runtimeEnv === "staging";
+  if (isDeployed && source === "derived_runtime_env") {
+    reasons.push("prompt_env_unset_on_deployed_env");
+  }
+
+  // The only dangerous direction. (A staging runtime serving the PRODUCTION
+  // pointer is merely conservative, not unsafe, so it is not flagged.)
+  const mismatch = runtimeEnv === "prod" && environment === "staging";
+  if (mismatch) {
+    reasons.push("prompt_env_conflicts_with_runtime");
+  }
+
+  return {
+    environment,
+    source,
+    runtimeEnv,
+    runtimeEnvSource,
+    mismatch,
+    // Refuse readiness ONLY when the prod verdict is a positive
+    // identification. A bare NODE_ENV 'prod' verdict is ambiguous on Render
+    // (both services set NODE_ENV=production), so blocking on it could brick
+    // the STAGING deploy. That case stays loud (mismatch + health) but not
+    // fatal.
+    blocksReadiness: mismatch && discriminating,
+    reasons,
+  };
+}
+
 /**
  * Determine if staging prompts should be used.
  *
- * Resolution order:
- * 1. PROMPTS_USE_STAGING env var (explicit override) - if set, use its value
- * 2. PROMPTS_ENVIRONMENT or DD_ENV - if "staging", use staging prompts
- * 3. NODE_ENV - if not "production", use staging prompts (legacy fallback)
- *
- * This separates the "prompt environment" from the "runtime environment" (NODE_ENV).
- * A staging server can run in production mode (NODE_ENV=production) while still
- * using staging prompts (DD_ENV=staging or PROMPTS_USE_STAGING=true).
+ * Thin wrapper over {@link resolvePromptEnvironment} — kept as the call site
+ * for the ~15 existing consumers so the resolution logic has exactly one
+ * home. Do not reintroduce an independent chain here.
  */
 export function shouldUseStagingPrompts(): boolean {
-  // 1. Explicit override takes precedence
-  if (config.prompts?.useStaging !== undefined) {
-    return config.prompts.useStaging;
-  }
-
-  // 2. Check prompt environment (PROMPTS_ENVIRONMENT or DD_ENV)
-  const promptEnv = config.prompts?.environment?.toLowerCase();
-  if (promptEnv) {
-    return promptEnv === 'staging';
-  }
-
-  // 3. Legacy fallback: use NODE_ENV (for backwards compatibility)
-  return !isProduction();
+  return resolvePromptEnvironment().environment === "staging";
 }
 
 /**

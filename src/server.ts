@@ -77,7 +77,7 @@ import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
-import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars, checkDeadEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
+import { config, shouldUseStagingPrompts, resolvePromptEnvironment, validateConfig, checkDeprecatedEnvVars, checkDeadEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
 import { TASK_MODEL_DEFAULTS } from "./config/model-routing.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
@@ -162,6 +162,44 @@ export async function build() {
   const deadVarWarnings = checkDeadEnvVars();
   for (const w of deadVarWarnings) {
     log.warn({ event: 'config.dead_env_var', key: w.key }, w.message);
+  }
+
+  // Prompt environment — always logged at startup so every boot records which
+  // PMS pointer this deployment serves and why. A production runtime resolving
+  // the STAGING pointer is logged at error level and (when the prod verdict is
+  // a positive identification) also fails /healthz, so Render will not route
+  // traffic to it.
+  const promptEnvAtBoot = resolvePromptEnvironment();
+  const promptEnvLogFields = {
+    event: 'config.prompt_environment',
+    prompt_environment: promptEnvAtBoot.environment,
+    source: promptEnvAtBoot.source,
+    runtime_env: promptEnvAtBoot.runtimeEnv,
+    runtime_env_source: promptEnvAtBoot.runtimeEnvSource,
+    mismatch: promptEnvAtBoot.mismatch,
+    blocks_readiness: promptEnvAtBoot.blocksReadiness,
+    reasons: promptEnvAtBoot.reasons,
+  };
+  if (promptEnvAtBoot.mismatch) {
+    log.error(
+      promptEnvLogFields,
+      `[AUDIT] Runtime env "${promptEnvAtBoot.runtimeEnv}" is serving the "${promptEnvAtBoot.environment}" prompt pointer. ` +
+        `Set PROMPTS_ENVIRONMENT=production on this service.`,
+    );
+  } else {
+    log.info(
+      promptEnvLogFields,
+      `Prompt environment: ${promptEnvAtBoot.environment} (${promptEnvAtBoot.source})`,
+    );
+  }
+  for (const reason of promptEnvAtBoot.reasons) {
+    if (reason === 'prompt_env_unset_on_deployed_env') {
+      log.warn(
+        { event: 'config.prompt_environment', reason },
+        `Deployed environment "${promptEnvAtBoot.runtimeEnv}" does not declare PROMPTS_ENVIRONMENT — ` +
+          `the prompt pointer is being DERIVED. Set PROMPTS_ENVIRONMENT explicitly.`,
+      );
+    }
   }
 
   // Fail-fast: Verify LLM provider and API key configuration
@@ -621,7 +659,39 @@ function buildCeeConfig() {
 // ---------------------------------------------------------------------------
 // /healthz — minimal public probe (load balancers, readiness checks, CI)
 // ---------------------------------------------------------------------------
-app.get("/healthz", async () => {
+app.get("/healthz", async (_request, reply) => {
+  // GATE 0 — a production runtime must never serve the PMS staging pointer.
+  // When the prod verdict is a POSITIVE identification (OLUMI_ENV=prod, or
+  // RENDER_SERVICE_NAME set and not containing "staging") and the resolved
+  // prompt environment is nonetheless `staging`, refuse readiness: Render's
+  // health check fails and the misconfigured deploy never takes traffic.
+  // That is strictly safer than silently serving staging prompts to
+  // production users.
+  //
+  // Deliberately NOT fatal when the prod verdict came only from the
+  // ambiguous NODE_ENV fallback — both Render services set
+  // NODE_ENV=production, so blocking there could brick the STAGING deploy.
+  // That case degrades loudly instead (see `degraded_reasons`).
+  const promptEnvironment = resolvePromptEnvironment();
+  if (promptEnvironment.blocksReadiness) {
+    return reply.code(503).send({
+      ok: false,
+      build: GIT_COMMIT_SHORT,
+      service: "assistants",
+      version: SERVICE_VERSION,
+      degraded: true,
+      degraded_reasons: promptEnvironment.reasons,
+      prompts_ready: false,
+      not_ready_reason: "prompt_env_conflicts_with_runtime",
+      message:
+        `Runtime environment is "${promptEnvironment.runtimeEnv}" (from ` +
+        `${promptEnvironment.runtimeEnvSource}) but the resolved prompt environment is ` +
+        `"${promptEnvironment.environment}" (from ${promptEnvironment.source}). ` +
+        `Refusing readiness rather than serving staging prompts in production. ` +
+        `Set PROMPTS_ENVIRONMENT=production (and clear PROMPTS_USE_STAGING) on this service.`,
+    });
+  }
+
   const { arePromptsReady, getCriticalPromptCoverage } = await import("./prompts/readiness.js");
   const prompts_ready = await arePromptsReady();
   // Additive honest signal: true iff every critical (tracked) prompt resolves
@@ -657,6 +727,11 @@ app.get("/healthz", async () => {
     degradationReasons.push('no_llm_key_configured');
   }
 
+  // Non-fatal prompt-environment misconfiguration (e.g. a deployed service
+  // that never declared PROMPTS_ENVIRONMENT) surfaces here without failing
+  // the health check.
+  degradationReasons.push(...promptEnvironment.reasons);
+
   const isDegraded = degradationReasons.length > 0;
 
   return {
@@ -668,6 +743,7 @@ app.get("/healthz", async () => {
     version: SERVICE_VERSION,
     prompts_ready,
     critical_prompts_pms,
+    prompt_environment: promptEnvironment.environment,
   };
 });
 
@@ -821,6 +897,7 @@ app.get("/healthz/detail", async (request, reply) => {
   const criticalPromptCoverage = await getCriticalPromptCoverage('status');
 
   // Determine degradation reasons
+  const promptEnvironment = resolvePromptEnvironment();
   const degradationReasons: string[] = [];
   if (promptStoreStatus.enabled && !promptStoreHealthy) {
     degradationReasons.push('prompt_store_unhealthy');
@@ -834,6 +911,7 @@ app.get("/healthz/detail", async (request, reply) => {
   if (!hasLlmKey) {
     degradationReasons.push('no_llm_key_configured');
   }
+  degradationReasons.push(...promptEnvironment.reasons);
 
   const isDegraded = degradationReasons.length > 0;
 
@@ -885,6 +963,18 @@ app.get("/healthz/detail", async (request, reply) => {
       enabled: promptStoreStatus.enabled,
       healthy: promptStoreHealthy,
       degraded_reason: (promptStoreStatus.enabled && !promptStoreHealthy) ? 'prompt_store_unhealthy' : undefined,
+      // Which PMS pointer this deployment serves, and WHY. A deploy check can
+      // assert `environment === "production"` on the production service.
+      // Contains no secrets — only env NAMES and the resolved verdict.
+      environment: {
+        environment: promptEnvironment.environment,
+        source: promptEnvironment.source,
+        runtime_env: promptEnvironment.runtimeEnv,
+        runtime_env_source: promptEnvironment.runtimeEnvSource,
+        mismatch: promptEnvironment.mismatch,
+        blocks_readiness: promptEnvironment.blocksReadiness,
+        reasons: promptEnvironment.reasons,
+      },
       store: promptStoreStatus,
       counts: promptCounts,
       cache_warming: {
