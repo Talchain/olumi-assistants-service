@@ -957,11 +957,37 @@ const ConfigSchema = z.object({
     // When true, the confirm-side canonicaliser translates those spellings to
     // the one GraphV3 preserves (a MERGE onto observed_state, PLoT's own
     // update_node semantics) so the value ACTUALLY applies while the atomicity
-    // guard (heldBatchFullyLanded) still backstops genuinely-unlandable ops.
+    // guard (batchFullyLanded) still backstops genuinely-unlandable ops.
     // Behaviour-visible (previously-refused batches now succeed) → default OFF;
     // env var = kill-switch: CEE_GM_HELD_VALUE_CANONICALISATION=false restores
     // the byte-identical #509 path.
     gmHeldValueCanonicalisationEnabled: booleanString.default(false),
+    // B5 (Codex deep review) — NORMAL-path value-op canonicalisation +
+    // landed-op postcondition (CEE_VALUE_OP_CANONICALISATION).
+    //
+    // The SAME strip #521 fixed on the held path is live on the primary
+    // edit_graph lane, and worse: `GraphV3.safeParse(candidate)` SUCCEEDS
+    // (Zod strips the unknown key instead of erroring) and the code then
+    // promoted the UNPARSED candidate — so the edit was reported APPLIED with
+    // `observed_state.value` unmoved. Reproduced on staging HEAD 1063394.
+    //
+    // When true: (a) the shared canonicaliser translates the prompt-taught
+    // spellings to the one GraphV3 preserves, (b) the PARSED canonical graph
+    // is promoted so validation validates what is actually persisted, and
+    // (c) `batchFullyLanded` refuses — visibly — any op that did not land.
+    //
+    // The postcondition is deliberately on THIS flag rather than its own: on
+    // its own it would start refusing edits that previously "succeeded"
+    // silently, without the canonicaliser that makes most of them succeed for
+    // real. Shipping the refusal without the repair is a strictly worse user
+    // outcome, and shipping the repair without the refusal leaves the
+    // strip-and-succeed class open for untranslatable spellings. They are one
+    // behaviour change and get one switch.
+    //
+    // Behaviour-visible on the live edit path → default OFF; env var =
+    // kill-switch: CEE_VALUE_OP_CANONICALISATION=false restores the
+    // byte-identical legacy path.
+    valueOpCanonicalisationEnabled: booleanString.default(false),
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
@@ -1577,6 +1603,9 @@ function parseConfig(): Config {
       editConnectivityNamedRefusalEnabled: env.CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL,
       // R1 residual — held-confirm value-op canonicalisation (default OFF)
       gmHeldValueCanonicalisationEnabled: env.CEE_GM_HELD_VALUE_CANONICALISATION,
+      // B5 — normal-path value-op canonicalisation + landed-op postcondition
+      // (default OFF)
+      valueOpCanonicalisationEnabled: env.CEE_VALUE_OP_CANONICALISATION,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs

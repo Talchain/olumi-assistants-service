@@ -63,6 +63,7 @@ import {
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
+import { canonicaliseValueOps, batchFullyLanded } from "../canonicalise-value-ops.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -2316,9 +2317,29 @@ export async function handleEditGraph(
     // failure (NODE_NOT_FOUND, EDGE_NOT_FOUND, etc.) and must be
     // surfaced regardless of validation config. The existing error
     // handler stays in place.
+    // B5 — canonicalise tunable value-op field spellings BEFORE the apply.
+    //
+    // `normalisePath` wraps a nested path into a LITERAL key
+    // (`/nodes/<id>/data/value` → `{ 'data/value': 0.5 }`, and the canonical
+    // `/nodes/<id>/observed_state/value` the same way). `applyUpdateNode` is a
+    // shallow Object.assign, so that key lands at the node ROOT and the
+    // GraphV3 parse strips it — the value silently no-ops. The shared
+    // canonicaliser (also used by the held/confirm path) translates those
+    // spellings into the one GraphV3 preserves: a MERGE onto observed_state.
+    //
+    // Only the SPELLING changes — never the number, order, or targets of ops.
+    // `operations` stays untouched for every downstream consumer (receipts,
+    // telemetry, `optionIdsTouchedByOperations`, `extractInterventionUpdates`),
+    // exactly as `executeGmHeldResume` does it. Ops the canonicaliser cannot
+    // translate are left VERBATIM so the landed-op postcondition below can
+    // refuse them honestly rather than strip-and-succeed.
+    const opsToApply: PatchOperation[] = config.cee.valueOpCanonicalisationEnabled
+      ? canonicaliseValueOps(operations, context.graph).operations
+      : operations;
+
     let candidateGraph: GraphV3T | undefined;
     try {
-      candidateGraph = applyPatchOperations(context.graph as GraphV3T, operations);
+      candidateGraph = applyPatchOperations(context.graph as GraphV3T, opsToApply);
     } catch (applyErr) {
       if (applyErr instanceof PatchApplyError) {
         if (intentCategory !== 'structural') {
@@ -2539,6 +2560,12 @@ export async function handleEditGraph(
     let repairsApplied: RepairEntry[] | undefined;
     let appliedGraph: GraphV3T | undefined;
     let appliedGraphHash: string | undefined;
+    // B5 — true when `appliedGraph` is the LOCAL `applyPatchOperations` result
+    // rather than a graph PLoT echoed back. The landed-op postcondition below
+    // compares the applier's raw writes against the persisted canonical graph,
+    // which is only a meaningful comparison for the locally-synthesised case
+    // (a PLoT-supplied graph legitimately differs from the local apply).
+    let appliedGraphSynthesisedLocally = false;
     let plotWarnings: string[] | undefined;
     const allWarnings: string[] = [];
 
@@ -2888,6 +2915,7 @@ export async function handleEditGraph(
 
       appliedGraph = candidateGraph;
       appliedGraphHash = computeGraphHash(candidateGraph);
+      appliedGraphSynthesisedLocally = true;
       log.info(
         {
           request_id: requestId,
@@ -2995,6 +3023,101 @@ export async function handleEditGraph(
         appliedGraph = encoded.graph as GraphV3T;
         appliedGraphHash = computeGraphHash(appliedGraph);
       }
+    }
+
+    // ── B5: promote the PARSED graph + landed-op postcondition ────────────
+    //
+    // ROOT CAUSE OF THE FALSE SUCCESS. `GraphV3.safeParse(candidate)` returns
+    // SUCCESS on a graph carrying an undeclared key — Zod STRIPS the unknown
+    // key rather than erroring — and the pre-B5 code then promoted the
+    // UNPARSED candidate. So the validation validated one graph and a
+    // different one was persisted, and the turn reported the edit applied
+    // while `observed_state.value` had not moved.
+    //
+    // The fix is to promote the PARSED output: validation must validate the
+    // thing that actually gets persisted. This runs AFTER
+    // `encodeOptionInterventionsForEdit` deliberately — that encoder READS the
+    // slash-keyed `data/interventions/<factor_id>` entries off the applied
+    // graph and promotes them to canonical top-level `interventions`. Parsing
+    // earlier would strip those keys before their owner could read them and
+    // would silently break the option-configure chain.
+    //
+    // The postcondition then requires every op to be verifiable as having
+    // LANDED on that canonical graph. Unknown field spellings now normalise or
+    // fail visibly — never strip-and-succeed.
+    if (config.cee.valueOpCanonicalisationEnabled && appliedGraph && appliedGraphSynthesisedLocally) {
+      const persistedParse = GraphV3.safeParse(appliedGraph);
+      if (!persistedParse.success) {
+        // Unreachable in practice (the synthesis block already strict-parsed
+        // a V3-valid base), but fail closed rather than persist unparsed.
+        log.error(
+          { request_id: requestId, attempt, issues_count: persistedParse.error.issues.length },
+          'edit_graph B5 — final appliedGraph failed GraphV3 parse; refusing to persist',
+        );
+        validationOutcome = 'synthesized_graph_invalid';
+        setViolationCodes(['synthesized_graph_invalid']);
+        recoveryPathChosen = 'rejection_block';
+        branchTaken = 'rejection';
+        branchReason = 'synthesized_graph_invalid';
+        failureBranch = 'synthesized_graph_invalid';
+        failureCode = 'SYNTHESIZED_GRAPH_INVALID';
+        failureMessage = 'Final appliedGraph failed GraphV3 strict parse; cannot persist';
+        return buildRejectionResult(
+          'The change was validated but the system could not capture the final applied state. Try the change again.',
+          operations,
+          baseGraphHash,
+          turnId,
+          startTime,
+          'SYNTHESIZED_GRAPH_INVALID',
+          undefined,
+          attempt,
+          diagnostics(),
+        );
+      }
+
+      const rawApplied = appliedGraph;
+      const canonicalApplied = persistedParse.data as GraphV3T;
+
+      // `preEdit` (the base graph) lets the postcondition recognise the ONE
+      // legitimate way a stripped key can still have landed: an
+      // intervention-subtree spelling that `encodeOptionInterventionsForEdit`
+      // translated into canonical `interventions`. Everything else that was
+      // stripped is refused.
+      if (!batchFullyLanded(opsToApply, rawApplied, canonicalApplied, context.graph as GraphV3T)) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: context.scenario_id ?? null,
+            attempt,
+            operations_count: operations.length,
+          },
+          'edit_graph B5 — an operation did not survive canonicalisation onto the persisted graph; refusing the WHOLE edit (no silent partial, no false success)',
+        );
+        validationOutcome = 'operation_did_not_land';
+        setViolationCodes(['operation_did_not_land']);
+        recoveryPathChosen = 'rejection_block';
+        branchTaken = 'rejection';
+        branchReason = 'operation_did_not_land';
+        failureBranch = 'operation_did_not_land';
+        failureCode = 'OPERATION_DID_NOT_LAND';
+        failureMessage = 'An operation did not survive canonicalisation onto the persisted graph';
+        return buildRejectionResult(
+          'That change could not be applied to the model. Try describing it a different way.',
+          operations,
+          baseGraphHash,
+          turnId,
+          startTime,
+          'OPERATION_DID_NOT_LAND',
+          undefined,
+          attempt,
+          diagnostics(),
+        );
+      }
+
+      // Promote the PARSED canonical graph — the graph that is persisted is now
+      // exactly the graph that was validated.
+      appliedGraph = canonicalApplied;
+      appliedGraphHash = computeGraphHash(appliedGraph);
     }
 
     // ---- Success: build block ----
