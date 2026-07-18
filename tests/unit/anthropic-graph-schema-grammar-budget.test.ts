@@ -58,6 +58,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   ANTHROPIC_DRAFT_GRAPH_SCHEMA,
+  ANTHROPIC_OPTIONAL_PARAM_LIMIT,
+  countOptionalParams,
   countUnionParams,
 } from "../../src/cee/draft/anthropic-graph-schema.js";
 
@@ -78,7 +80,15 @@ const SERIALIZED_BYTES_BUDGET = 3400;
 const UNION_PARAMS_BUDGET = 16; // Anthropic hard limit
 const UNION_PARAMS_TRIPWIRE = 10; // current 9 + 1 headroom
 const OPTIONAL_PARAMS_BUDGET = 24; // Anthropic hard limit
-const OPTIONAL_PARAMS_TRIPWIRE = 9; // v8 measured 7 + 2 headroom
+// v9 (2026-07-18, draft-latency lane) SPENDS this budget deliberately: the
+// kind-scoped node/data fields moved out of `required` so the model can omit
+// them instead of emitting sentinels the ingress normaliser throws away
+// (21% of a real 6,245-token draft response). Count went 7 → 23 of 24.
+// There is now exactly ONE slot left, so the tripwire and the hard limit have
+// converged: the next optional property added anywhere in this tree breaks
+// structured outputs in production (400 → silent prompt-only fallback on
+// every draft). To add one, you must take one back into a `required` list.
+const OPTIONAL_PARAMS_TRIPWIRE = 23; // v9 measured 23; 1 slot of headroom left
 const ENUM_VALUES_TRIPWIRE = 20; // v8 measured 17 + headroom
 // Object-schema count is pinned EXACTLY: the live bisect showed structural
 // surface is the dominant compile cost, and a 9-object variant of this
@@ -193,6 +203,78 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — grammar-size budget", () => {
     expect((ANTHROPIC_DRAFT_GRAPH_SCHEMA as { required: string[] }).required.slice().sort()).toEqual(
       ["causal_claims", "coaching", "edges", "goal_constraints", "nodes", "topology_plan"],
     );
+  });
+
+  it("v9: kind-scoped node + data fields are OPTIONAL, not required (output-token budget)", () => {
+    // WHY THIS PIN EXISTS
+    // -------------------
+    // A draft turn is ~99.8% one LLM call and latency is near-linear in
+    // OUTPUT tokens (~80 tok/s measured on claude-sonnet-4-6, 2026-07-18).
+    // Under v8 these fields were in `required`, so the grammar forced EVERY
+    // node to emit them whatever its kind — a decision node carried
+    // `"category":null,"data":null,"prior":null,"is_baseline":false,
+    // "intercept":null,"goal_threshold":null,...` even though PMS
+    // draft_graph v195 documents that node as exactly `{id, kind, label}`.
+    // The ingress normaliser coerces every one of those values straight back
+    // to `undefined` (adapters/llm/normalisation.ts §SENTINEL & NULL
+    // COERCION), so they are unreadable BY CONSTRUCTION — pure wall-clock.
+    // Measured on a real captured draft: 1,327 of 6,245 output tokens (21%).
+    //
+    // Putting any of these back into `required` re-introduces that cost
+    // silently — nothing else in the suite would notice, because the wire
+    // shape after normalisation is identical either way. Hence this pin.
+    const schema = ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as {
+      properties: {
+        nodes: { items: { required: string[]; properties: Record<string, { anyOf?: { required?: string[] }[] }> } };
+      };
+    };
+    const nodeItems = schema.properties.nodes.items;
+
+    expect(nodeItems.required.slice().sort()).toEqual(["id", "kind", "label"]);
+
+    const KIND_SCOPED_NODE_FIELDS = [
+      "category", "data", "prior", "is_baseline", "intercept",
+      "goal_threshold", "goal_threshold_raw", "goal_threshold_unit", "goal_threshold_cap",
+    ];
+    for (const field of KIND_SCOPED_NODE_FIELDS) {
+      expect(
+        nodeItems.required,
+        `"${field}" is kind-scoped: requiring it forces a discarded sentinel on every other node kind`,
+      ).not.toContain(field);
+    }
+
+    // `data`'s inner required list: only the three fields a data block always
+    // carries. The other eight were forced "" / 0 / [] / false on every node
+    // that had no use for them.
+    const dataObject = nodeItems.properties.data.anyOf?.[0];
+    expect(dataObject?.required?.slice().sort()).toEqual(["extractionType", "factor_type", "value"]);
+    for (const field of [
+      "uncertainty_drivers", "interventions", "raw_value", "unit", "cap",
+      "encoding_map", "is_baseline", "display_value",
+    ]) {
+      expect(
+        dataObject?.required ?? [],
+        `data.${field} is kind-scoped: requiring it forces a discarded sentinel`,
+      ).not.toContain(field);
+    }
+  });
+
+  it("v9: the optional-count guard is DERIVED from the schema and fails loud", () => {
+    // Trap #12 (hand-maintained mirror): the optional budget is one slot from
+    // the hard limit, so the number must never be a comment someone forgets
+    // to update. countOptionalParams walks the live object.
+    expect(countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA)).toBe(measure().optionalProps);
+    expect(ANTHROPIC_OPTIONAL_PARAM_LIMIT).toBe(OPTIONAL_PARAMS_BUDGET);
+
+    // Positive control: the guard must be able to SEE a violation, not just
+    // pass on today's shape (trap #13 — an absence assertion with no
+    // demonstrated presence is vacuous).
+    const overBudget = {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: [],
+    };
+    expect(countOptionalParams(overBudget)).toBe(2);
   });
 
   it("load-bearing enums are retained (kind, category, operator, effect_direction)", () => {

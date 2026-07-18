@@ -78,6 +78,28 @@
  *    scripts/probe-grammar-compile.mjs before merging.
  * Serialized size is pinned by tests/unit/anthropic-graph-schema-grammar-budget.test.ts;
  * see that file for how to verify grammar compilation against the live API.
+ *
+ * OUTPUT-TOKEN BUDGET (v9 — 2026-07-18, draft-latency lane):
+ * A draft turn is ~99.8% one LLM call and latency is near-linear in OUTPUT
+ * tokens, so every forced token is wall-clock. v8's `required` lists made the
+ * grammar demand eight kind-scoped node fields and eight `data` sub-fields on
+ * EVERY node, whatever its kind — a decision node was forced to emit
+ * `"category":null,"data":null,"prior":null,"is_baseline":false,
+ * "intercept":null,"goal_threshold":null,...` even though PMS draft_graph
+ * v195 documents that node as exactly `{id, kind, label}`. Every one of those
+ * values is coerced straight back to `undefined` by the ingress normaliser
+ * (adapters/llm/normalisation.ts §SENTINEL & NULL COERCION), so they are
+ * unreadable by construction: pure latency and cost.
+ * Measured on a real captured draft (claude-sonnet-4-6, v195, structured
+ * outputs on, 2026-07-18): 1,327 of 6,245 output tokens — 21% — were these
+ * sentinels. v9 demotes them to optional. It does NOT remove any property or
+ * narrow any type, so the accepted surface is a strict SUPERSET of v8 and a
+ * model that still emits explicit nulls remains valid. Downstream sees an
+ * identical post-normalisation object; no consumer changes.
+ * Cost: optional-parameter count rises 7 → 23 of Anthropic's 24 limit, so the
+ * budget is now TIGHT — countOptionalParams() below fails loud on the next
+ * addition rather than letting structured outputs 400 in production.
+ * Serialized size FALLS 3,194B → 2,974B (grammar budget improves).
  */
 
 // Helpers for nullable types (required field that can be null)
@@ -151,7 +173,13 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               // Empty string for non-applicable nodes; normaliser strips.
               display_value: { type: "string" },
             },
-            ["value", "extractionType", "factor_type", "uncertainty_drivers", "interventions", "raw_value", "unit", "cap", "encoding_map", "is_baseline", "display_value"],
+            // v9 (2026-07-18, latency lane): only the three fields a `data`
+            // block always carries stay required. The other eight were
+            // forced sentinels ("" / 0 / [] / false) on every node that had
+            // no use for them; normalisation.ts strips each one to
+            // `undefined` at ingress, so demoting them is downstream-neutral
+            // and removes ~0.3k output tokens per draft.
+            ["value", "extractionType", "factor_type"],
           ),
           // ── Prior (external factors) ───────────────────────────────────
           prior: nullableObject(
@@ -176,13 +204,20 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           // (goal_threshold_cap stays optional — 1 optional slot)
           goal_threshold_cap: { type: "number" },
         },
-        required: [
-          "id", "kind", "label",
-          // Required-nullable fields (don't count against optional limit)
-          "category", "data", "prior",
-          "is_baseline", "intercept",
-          "goal_threshold", "goal_threshold_raw", "goal_threshold_unit",
-        ],
+        // OUTPUT-TOKEN BUDGET (v9 — 2026-07-18, latency lane):
+        // Only the three fields every node genuinely carries stay required.
+        // The kind-scoped fields below are OPTIONAL so the model can omit
+        // them on nodes where they are inapplicable, instead of being forced
+        // by the grammar to emit `null` / `0` / `""` sentinels the ingress
+        // normaliser immediately coerces back to `undefined`
+        // (normalisation.ts §SENTINEL & NULL COERCION, lines ~258-312).
+        // Downstream sees an IDENTICAL object either way — the only
+        // difference is ~1.3k wasted output tokens per draft (measured:
+        // 21% of a real 6,245-token draft response, 2026-07-18).
+        // The nullable anyOf wrappers are retained: a model that still emits
+        // an explicit null stays valid, so this is a strict superset of the
+        // v8 accepted surface.
+        required: ["id", "kind", "label"],
         additionalProperties: false,
       },
     },
@@ -293,9 +328,46 @@ export function countUnionParams(obj: unknown): number {
 
 const UNION_PARAM_COUNT = countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
 if (UNION_PARAM_COUNT > 16) {
-   
+
   console.error(
     `[anthropic-graph-schema] UNION BUDGET EXCEEDED: ${UNION_PARAM_COUNT}/16 union-typed params. ` +
     `Anthropic structured outputs will fail. Reduce anyOf/nullable usage.`
+  );
+}
+
+// ── Optional-count guardrail ───────────────────────────────────────────
+// Anthropic limits schemas to 24 OPTIONAL parameters (properties absent from
+// their object's `required` list). v9 spends 23 of 24 buying the sentinel
+// token cut, so the next optional property added anywhere in this tree
+// breaks structured outputs in production — the call 400s and every draft
+// silently falls back to prompt-only JSON, which is exactly the failure the
+// v7/v8 grammar-budget notes above were written after.
+//
+// This is DERIVED from the schema, not a hand-maintained number: it walks the
+// live object and recomputes. Exported for test assertions; logged at module
+// load so a regression is visible without crashing the service.
+export function countOptionalParams(obj: unknown): number {
+  if (!obj || typeof obj !== 'object') return 0;
+  if (Array.isArray(obj)) return obj.reduce((n: number, v) => n + countOptionalParams(v), 0);
+  const rec = obj as Record<string, unknown>;
+  let count = 0;
+  if (rec.type === 'object' && rec.properties && typeof rec.properties === 'object') {
+    const props = Object.keys(rec.properties as Record<string, unknown>);
+    const required = new Set(Array.isArray(rec.required) ? (rec.required as string[]) : []);
+    count += props.filter((p) => !required.has(p)).length;
+  }
+  for (const v of Object.values(rec)) count += countOptionalParams(v);
+  return count;
+}
+
+export const ANTHROPIC_OPTIONAL_PARAM_LIMIT = 24;
+
+const OPTIONAL_PARAM_COUNT = countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
+if (OPTIONAL_PARAM_COUNT > ANTHROPIC_OPTIONAL_PARAM_LIMIT) {
+
+  console.error(
+    `[anthropic-graph-schema] OPTIONAL BUDGET EXCEEDED: ${OPTIONAL_PARAM_COUNT}/${ANTHROPIC_OPTIONAL_PARAM_LIMIT} optional params. ` +
+    `Anthropic structured outputs will 400 and every draft will fall back to prompt-only JSON. ` +
+    `Move a property back into a \`required\` list, or delete it.`
   );
 }
