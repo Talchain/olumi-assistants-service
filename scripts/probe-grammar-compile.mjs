@@ -30,7 +30,7 @@
 // Requires tsx (devDependency) because it imports the TS schema module
 // directly — this probes the EXACT object production attaches, not a copy.
 
-import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../src/cee/draft/anthropic-graph-schema.ts";
+import { buildDraftGraphSchema } from "../src/cee/draft/anthropic-graph-schema.ts";
 
 const key = process.env.ANTHROPIC_API_KEY;
 if (!key) {
@@ -46,8 +46,17 @@ for (let i = 0; i < args.length; i++) {
 // Default: the production draft model (anthropic.ts draftGraphWithAnthropic).
 if (models.length === 0) models.push("claude-sonnet-4-6");
 
-const schemaBytes = JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA).length;
-console.log(`schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA, serialized ${schemaBytes} bytes`);
+// v10 (2026-07-18): --omit-topology-plan probes the CEE_DRAFT_OMIT_TOPOLOGY_PLAN
+// variant. The flag changes the object handed to the API, so the flag-ON shape
+// needs its own live compile check before the flag is turned on anywhere —
+// the static budgets are proxies, this probe is the ground truth.
+const omitTopologyPlan = args.includes("--omit-topology-plan");
+const probeSchema = buildDraftGraphSchema({ omitTopologyPlan });
+const schemaLabel = omitTopologyPlan
+  ? "buildDraftGraphSchema({ omitTopologyPlan: true })  [v10 flag-ON]"
+  : "ANTHROPIC_DRAFT_GRAPH_SCHEMA  [v9 flag-OFF, current staging]";
+const schemaBytes = JSON.stringify(probeSchema).length;
+console.log(`schema: ${schemaLabel}, serialized ${schemaBytes} bytes`);
 
 let failed = false;
 for (const model of models) {
@@ -66,7 +75,7 @@ for (const model of models) {
         max_tokens: 16,
         messages: [{ role: "user", content: "Return a minimal draft." }],
         output_config: {
-          format: { type: "json_schema", schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA },
+          format: { type: "json_schema", schema: probeSchema },
         },
       }),
       signal: AbortSignal.timeout(120_000),

@@ -28,7 +28,7 @@ import {
   LLMExplainDiffResponse as AnthropicExplainDiffResponse,
 } from './shared-schemas.js';
 import { extractZodIssues } from '../../schemas/llmExtraction.js';
-import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from '../../cee/draft/anthropic-graph-schema.js';
+import { buildDraftGraphSchema } from '../../cee/draft/anthropic-graph-schema.js';
 
 export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
 import { resolveAnthropicModel } from "./model-fallback.js";
@@ -303,6 +303,20 @@ Emit "coaching", "causal_claims", and "topology_plan" as JSON-encoded STRINGS.
 Each must contain exactly the JSON value the schema instructions describe
 (coaching object, causal_claims array, topology_plan string array), serialised
 with correctly escaped quotes. Example: "topology_plan": "[\\"line 1\\",\\"line 2\\"]".`;
+
+// v10 (2026-07-18, latency lane round 2): variant used when
+// CEE_DRAFT_OMIT_TOPOLOGY_PLAN is on. The grammar no longer declares
+// `topology_plan`, and the top-level object is `additionalProperties: false`,
+// so the key is unemittable — instructing the model to emit it would be a
+// direct prompt/grammar contradiction (exactly the defect this flag fixes,
+// where v195 says "must NOT contain a topology_plan key" and the grammar
+// demanded one). Kept as a separate literal rather than a runtime
+// string-replace so the served text is greppable and diffable.
+const STRUCTURED_OUTPUTS_AUX_STRING_REMINDER_NO_TOPOLOGY = `\n\nOUTPUT FORMAT OVERRIDE (structured mode):
+Emit "coaching" and "causal_claims" as JSON-encoded STRINGS.
+Each must contain exactly the JSON value the schema instructions describe
+(coaching object, causal_claims array), serialised with correctly escaped
+quotes. Example: "causal_claims": "[{\\"type\\":\\"direct\\"}]".`;
 
 // Defense-in-depth cap on total document context chars (grounding module enforces 50k upstream)
 const MAX_DOC_CONTEXT_CHARS = 60_000;
@@ -596,6 +610,14 @@ export async function draftGraphWithAnthropic(
     );
   }
 
+  // v10 (2026-07-18, latency lane round 2) — FLAG-DARK, default false.
+  // Drops the zero-reader `topology_plan` key from the grammar (508 output
+  // tokens / 8.1% of a measured draft). Only meaningful on the structured
+  // path: the prompt-only fallback has no grammar to omit it from, and the
+  // served prompt v195 already instructs the model not to emit it there.
+  const omitTopologyPlan = config.cee.draftOmitTopologyPlan;
+  const draftGraphSchema = buildDraftGraphSchema({ omitTopologyPlan });
+
   if (draftThinkingEnabled && config.cee.anthropicStructuredOutputs) {
     log.info(
       { model, budget_tokens: draftThinkingBudget },
@@ -688,7 +710,9 @@ export async function draftGraphWithAnthropic(
         messages: [{
           role: "user",
           content: useStructuredOutputs
-            ? prompt.userContent + STRUCTURED_OUTPUTS_AUX_STRING_REMINDER
+            ? prompt.userContent + (omitTopologyPlan
+                ? STRUCTURED_OUTPUTS_AUX_STRING_REMINDER_NO_TOPOLOGY
+                : STRUCTURED_OUTPUTS_AUX_STRING_REMINDER)
             : prompt.userContent,
         }],
         ...(useStructuredOutputs
@@ -696,7 +720,7 @@ export async function draftGraphWithAnthropic(
               output_config: {
                 format: {
                   type: "json_schema",
-                  schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA as Record<string, unknown>,
+                  schema: draftGraphSchema as Record<string, unknown>,
                 },
               },
             }
@@ -735,7 +759,7 @@ export async function draftGraphWithAnthropic(
               operation: "draft_graph",
               model,
               error_snippet: ((callErr as Error).message ?? "unknown").slice(0, 200),
-              schema_bytes: JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA).length,
+              schema_bytes: JSON.stringify(draftGraphSchema).length,
             });
             useStructuredOutputs = false;
             const fallback = buildCallParams(false);
