@@ -313,6 +313,106 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
 
 export type AnthropicDraftGraphSchema = typeof ANTHROPIC_DRAFT_GRAPH_SCHEMA;
 
+// ── OUTPUT-TOKEN BUDGET (v10 — 2026-07-18, draft-latency lane round 2) ──
+// `topology_plan` is a zero-reader field that the grammar FORCES the model to
+// emit, in direct contradiction of the served prompt.
+//
+//  - PMS draft_graph v195 line 159: "Do this planning silently in your
+//    reasoning; the output JSON must NOT contain a topology_plan key."
+//  - The v8/v9 grammar lists it in `required` above. The grammar wins, so it
+//    is emitted anyway: measured 508 output tokens, 8.1% of a real draft.
+//
+// Nothing reads its CONTENT anywhere in the platform. In this repo the live
+// V5 path is pure passthrough — parse.ts:422 stashes it on ctx, package.ts:452
+// spreads it back, schema-v3.ts:1040 carries V1 → V3 — and no branch, render,
+// validation or aggregation inspects an element. Cross-repo it is ABSENT from
+// DecisionGuideAI and plot-lite-service (not even type-declared).
+//
+// It also cannot be chain-of-thought scaffolding for the graph: in a captured
+// response it is emitted at char 15,490, AFTER nodes (char 1) and edges
+// (char 8,920). A field emitted after the content it would scaffold cannot
+// have scaffolded it — it is post-hoc narration of an already-written graph.
+//
+// WHY REMOVE THE PROPERTY RATHER THAN DEMOTE IT (the v9 pattern):
+// v9 spent the optional-parameter budget down to 23 of Anthropic's hard 24.
+// Demoting `topology_plan` to optional would spend the LAST slot on a field we
+// want gone rather than permitted, leaving zero headroom. Deleting the property
+// costs NO optional slot and is deterministic: the top-level object is
+// `additionalProperties: false`, so the key becomes unemittable rather than
+// merely unrequired. Union count and every `required` list elsewhere are
+// untouched; serialized size falls further.
+//
+// Behaviour-visible, so it ships FLAG-DARK (`CEE_DRAFT_OMIT_TOPOLOGY_PLAN`,
+// default false). Flag OFF returns the v9 object by identity — byte-identical
+// wire schema, no revalidation needed.
+//
+// PERSISTENCE (`scenarios.graph`) — verified safe in both directions:
+//  - Both Zod declarations are `.optional()` (schemas/cee-v3.ts:521,
+//    schemas/assist.ts:266), so a response WITHOUT the key parses.
+//  - transforms/schema-v3.ts:1041 defaults a missing value to `[]`, so the V3
+//    boundary still always CARRIES the key. No consumer ever sees it missing;
+//    new graphs simply persist an empty array.
+//  - Stored graphs that already hold a populated array are untouched: the D1
+//    mutation merge (apply-graph-mutation.ts:127) is a key-agnostic spread of
+//    the full ingress shape, not a hand-listed allowlist, so re-load and
+//    re-parse of an existing `scenarios.graph` is unaffected.
+// The change is therefore forward-only and shape-preserving.
+
+/** Env-var name for the v10 flag-dark omission. */
+export const DRAFT_OMIT_TOPOLOGY_PLAN_ENV = 'CEE_DRAFT_OMIT_TOPOLOGY_PLAN';
+
+/**
+ * Structural type both schema variants satisfy. Deliberately widened at
+ * `properties` so the omit-variant (one key fewer) is assignable without a
+ * double cast — the object is handed to the API as `Record<string, unknown>`
+ * at the call site regardless.
+ */
+export type DraftGraphSchemaObject = {
+  type: 'object';
+  properties: Record<string, unknown>;
+  required: string[];
+  additionalProperties: boolean;
+};
+
+// Anchor assertion (trap-15: a tool that cannot fail is theatre). The builder
+// below removes a key BY NAME. If `topology_plan` is ever renamed or dropped
+// from the base object, a silent no-op would make the flag look enabled while
+// changing nothing — so fail loud at module load instead.
+const TOPOLOGY_PLAN_KEY = 'topology_plan';
+if (!(TOPOLOGY_PLAN_KEY in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
+
+  console.error(
+    `[anthropic-graph-schema] ANCHOR MISSING: '${TOPOLOGY_PLAN_KEY}' is not a property of ` +
+    `ANTHROPIC_DRAFT_GRAPH_SCHEMA. buildDraftGraphSchema({ omitTopologyPlan: true }) would ` +
+    `silently return an unchanged schema. Update the v10 builder.`
+  );
+}
+
+/**
+ * The draft-graph JSON schema actually sent to Anthropic.
+ *
+ * DERIVED from `ANTHROPIC_DRAFT_GRAPH_SCHEMA` rather than mirrored, so there is
+ * exactly one source of truth for every field the two variants share.
+ *
+ * @param opts.omitTopologyPlan when true, drops the zero-reader `topology_plan`
+ *   property and its `required` entry. Default false → returns the v9 object
+ *   BY IDENTITY (not a copy), so the flag-off path is provably unchanged.
+ */
+export function buildDraftGraphSchema(
+  opts?: { omitTopologyPlan?: boolean },
+): DraftGraphSchemaObject {
+  if (!opts?.omitTopologyPlan) return ANTHROPIC_DRAFT_GRAPH_SCHEMA;
+
+  const { [TOPOLOGY_PLAN_KEY]: _omitted, ...properties } =
+    ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties;
+
+  return {
+    ...ANTHROPIC_DRAFT_GRAPH_SCHEMA,
+    properties,
+    required: ANTHROPIC_DRAFT_GRAPH_SCHEMA.required.filter((k) => k !== TOPOLOGY_PLAN_KEY),
+  };
+}
+
 // ── Union-count guardrail ──────────────────────────────────────────────
 // Anthropic limits schemas to 16 parameters with union types (anyOf / type arrays).
 // Exported for test assertions; logged at module load to catch regressions

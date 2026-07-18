@@ -957,6 +957,13 @@ const ConfigSchema = z.object({
     // Default false — enable via CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true.
     retryOnDefaultStrengths: booleanString.default(false), // Retry LLM call once when ≥80% of edges have default strength signature (enable via CEE_RETRY_ON_DEFAULT_STRENGTHS=true in staging)
     anthropicStructuredOutputs: booleanString.default(false),
+    // v10 draft output-token reduction (CEE_DRAFT_OMIT_TOPOLOGY_PLAN)
+    // Drops the zero-reader `topology_plan` key from the draft grammar.
+    // The served prompt v195 already tells the model not to emit it; the
+    // grammar was overriding that and forcing 508 output tokens (8.1% of a
+    // measured draft). Behaviour-visible (the field rides the V3 /draft
+    // response and is persisted to `scenarios.graph`), so default false.
+    draftOmitTopologyPlan: booleanString.default(false),
     // Extended thinking configuration per operation (Anthropic claude-sonnet-4-6+ only)
     //
     // CEE_ORCHESTRATOR_THINKING — valid values: "true" | "enabled" | "false" | absent
@@ -1558,6 +1565,8 @@ function parseConfig(): Config {
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs
       anthropicStructuredOutputs: env.CEE_ANTHROPIC_STRUCTURED_OUTPUTS,
+      // v10 draft output-token reduction (default OFF)
+      draftOmitTopologyPlan: env.CEE_DRAFT_OMIT_TOPOLOGY_PLAN,
       // Extended thinking per operation
       thinking: {
         orchestratorEnabled: env.CEE_ORCHESTRATOR_THINKING,
