@@ -38,13 +38,61 @@ export type RuntimeEnv = "local" | "test" | "staging" | "prod";
  * getRuntimeEnv(); // → "prod"
  */
 export function getRuntimeEnv(): RuntimeEnv {
+  return getRuntimeEnvResolution().env;
+}
+
+/**
+ * Which input produced the {@link getRuntimeEnv} verdict.
+ *
+ * This matters because the signals are NOT equally trustworthy for telling
+ * the staging deployment apart from the production one:
+ *
+ * - `olumi_env` / `render_service_name` are DISCRIMINATING. They take
+ *   different values on the two Render services, so a "prod" verdict from
+ *   either is a positive identification of production.
+ * - `node_env` is AMBIGUOUS. Both `render.yaml` (production) and
+ *   `render-staging.yaml` (staging) set `NODE_ENV=production`, so a "prod"
+ *   verdict derived from NODE_ENV alone means only "not local/test" — it
+ *   cannot rule out that this is the staging service with
+ *   `RENDER_SERVICE_NAME` missing.
+ * - `default` is the no-signal case (local development).
+ *
+ * Callers that take a DESTRUCTIVE action on a "prod" verdict (e.g. refusing
+ * readiness) must require a discriminating source; callers that merely
+ * restrict behaviour (e.g. the graph-management live→shadow lockdown) can
+ * treat any "prod" verdict as prod, because over-restricting staging is
+ * harmless while under-restricting production is not.
+ */
+export type RuntimeEnvSource =
+  | "olumi_env"
+  | "render_service_name"
+  | "node_env"
+  | "default";
+
+export interface RuntimeEnvResolution {
+  env: RuntimeEnv;
+  source: RuntimeEnvSource;
+  /**
+   * True when `source` distinguishes the staging deployment from the
+   * production one. False for the `node_env` fallback and `default`.
+   */
+  discriminating: boolean;
+}
+
+/**
+ * {@link getRuntimeEnv} plus the provenance of the verdict.
+ *
+ * Additive: `getRuntimeEnv()` delegates here and its behaviour is unchanged
+ * (same order, same values, same defaults).
+ */
+export function getRuntimeEnvResolution(): RuntimeEnvResolution {
   // Use process.env directly for testability (allows runtime changes)
   const env = process.env;
 
   // 1. Explicit override takes precedence
   const olumiEnv = env.OLUMI_ENV?.toLowerCase().trim();
   if (olumiEnv === "local" || olumiEnv === "test" || olumiEnv === "staging" || olumiEnv === "prod") {
-    return olumiEnv;
+    return { env: olumiEnv, source: "olumi_env", discriminating: true };
   }
 
   // 2. Derive from Render service name (staging vs prod)
@@ -52,22 +100,22 @@ export function getRuntimeEnv(): RuntimeEnv {
   if (renderServiceName) {
     // If service name contains "staging", it's staging; otherwise it's prod
     if (renderServiceName.toLowerCase().includes("staging")) {
-      return "staging";
+      return { env: "staging", source: "render_service_name", discriminating: true };
     }
-    return "prod";
+    return { env: "prod", source: "render_service_name", discriminating: true };
   }
 
-  // 3. Fallback to NODE_ENV
+  // 3. Fallback to NODE_ENV — NOT discriminating on Render (see above).
   const nodeEnv = env.NODE_ENV?.toLowerCase().trim();
   if (nodeEnv === "test") {
-    return "test";
+    return { env: "test", source: "node_env", discriminating: false };
   }
   if (nodeEnv === "production") {
-    return "prod";
+    return { env: "prod", source: "node_env", discriminating: false };
   }
 
   // Default to local for development
-  return "local";
+  return { env: "local", source: "default", discriminating: false };
 }
 
 /**
