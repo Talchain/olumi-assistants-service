@@ -47,6 +47,7 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
+import { deriveWinnerConstraintInfeasibility } from '../../../orchestrator/context/constraint-feasibility.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
@@ -794,6 +795,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       enrichment: response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
       status_kind: headlineStatusKind,
+      // Trust-spine board #1 (CEE half): withhold the confident "{X} currently
+      // leads" headline when the leading option violates a hard constraint.
+      // Gate default OFF → always false → byte-identical headline path.
+      constraint_infeasible: config.features.constraintInfeasibleGate
+        ? deriveWinnerConstraintInfeasibility(
+            response as Record<string, unknown>,
+            leadingOptionId ?? '',
+          ).infeasible
+        : false,
       samples_reduced: samplesReduced,
       // Spine A backstop: the headline reads raw `factor_sensitivity` directly
       // (bypassing projectTopDrivers), so it must skip option-controlled levers.

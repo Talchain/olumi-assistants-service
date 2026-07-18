@@ -102,6 +102,15 @@ export interface DecisionReviewInvokeInput {
     readonly label: string;
     readonly win_probability: number;
     readonly outcome_mean?: number;
+    /**
+     * Trust-spine board #1 (CEE half). Set true when the leading option
+     * violates a hard constraint (CEE_CONSTRAINT_INFEASIBLE_GATE ON) so the
+     * decision-review prompt does not frame it as a clean recommendation.
+     * Absent when the gate is off or the winner is feasible.
+     */
+    readonly constraint_infeasible?: boolean;
+    /** Set alongside `constraint_infeasible`; recommendation framing suppressed. */
+    readonly recommendation_suppressed?: boolean;
     readonly [k: string]: unknown;
   };
   readonly runner_up: {

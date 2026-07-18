@@ -145,6 +145,16 @@ export interface ContextPackAnalysisOption {
    * reported no outcome distribution for this option.
    */
   readonly outcome_mean?: number;
+  /**
+   * Trust-spine board #1 (CEE half). Literal `true` when this option is the
+   * flagged constraint-infeasible WINNER (CEE_CONSTRAINT_INFEASIBLE_GATE ON;
+   * the flag is set upstream by `compactAnalysis` via
+   * constraint-feasibility.ts and threaded through here — adversarial-review
+   * P1: `projectOption` previously field-picked the flag away, so the coach
+   * egress never saw it). ABSENT otherwise (never `false`), matching the
+   * pack's key-absence style, so flag-off packs are byte-identical.
+   */
+  readonly constraint_infeasible?: true;
 }
 
 export interface ContextPackAnalysisDriver {
@@ -244,6 +254,14 @@ export interface ContextPackAnalysis {
    * none. Rendered as prose by the display formatter.
    */
   readonly confidence_tier?: string | null;
+  /**
+   * Trust-spine board #1 (CEE half). The honest constraint note produced by
+   * `compactAnalysis` when the leading option violates (or is in tension
+   * with) a hard constraint — threaded through verbatim so the display
+   * projection can surface it to the coach LLM. ABSENT when the gate is off
+   * or the winner is feasible (byte-identity by key absence).
+   */
+  readonly constraint_infeasible_note?: string;
   // V5 state-trust: `staleness_reason` removed from the prompt-visible
   // analysis section — freshness is now a deterministic verdict on the
   // wire (`analysis_ready.freshness`) and a telemetry signal
@@ -1218,6 +1236,19 @@ function projectAnalysis(
   // show a value in one slot and not the other.
   const goalFitFor = buildGoalFitResolver(analysis.option_goal_fits);
   const outcomeFor = buildOutcomeResolver(analysis.option_outcomes);
+  // Trust-spine board #1 (CEE half, adversarial-review P1): the upstream
+  // compactAnalysis winner flag was previously field-picked away here, so the
+  // coach egress never carried it. Thread it through: the flagged winner's
+  // structural option_id (never the label — labels collide) marks the same
+  // option wherever it appears (leading_option AND the ranked options list —
+  // the same option must never show the flag in one slot and not the other).
+  // No config re-check here: the upstream field is only ever set when
+  // CEE_CONSTRAINT_INFEASIBLE_GATE is ON, so flag-off packs carry no key and
+  // stay byte-identical (key-absence doctrine).
+  const flaggedInfeasibleWinnerId =
+    analysis.winner.constraint_infeasible === true && analysis.winner.option_id.length > 0
+      ? analysis.winner.option_id
+      : null;
   const projectOption = (o: OptionSummary): ContextPackAnalysisOption => {
     const goalFit = goalFitFor(o);
     const outcomeMean = outcomeFor(o);
@@ -1226,6 +1257,9 @@ function projectAnalysis(
       probability: o.win_probability,
       ...(goalFit !== undefined ? { goal_fit_probability: goalFit } : {}),
       ...(outcomeMean !== undefined ? { outcome_mean: outcomeMean } : {}),
+      ...(flaggedInfeasibleWinnerId !== null && o.option_id === flaggedInfeasibleWinnerId
+        ? { constraint_infeasible: true as const }
+        : {}),
     };
   };
 
@@ -1363,6 +1397,13 @@ function projectAnalysis(
     ...(evidenceGapsLeverSuppressed ? { evidence_gaps_lever_suppressed: true as const } : {}),
     goal_fit: goalFit,
     confidence_tier: confidenceTier,
+    // Trust-spine board #1 (CEE half): the honest constraint note, verbatim
+    // from compactAnalysis. Key absent when unset (flag off / feasible winner)
+    // → byte-identical projection.
+    ...(typeof analysis.constraint_infeasible_note === 'string' &&
+    analysis.constraint_infeasible_note.length > 0
+      ? { constraint_infeasible_note: analysis.constraint_infeasible_note }
+      : {}),
   };
 }
 

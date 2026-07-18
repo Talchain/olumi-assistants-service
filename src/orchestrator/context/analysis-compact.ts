@@ -10,9 +10,11 @@
 
 import type { V2RunResponseEnvelope } from "../types.js";
 import { log } from "../../utils/telemetry.js";
+import { config } from "../../config/index.js";
 import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
 import { readDriverInfluenceScore } from "./driver-influence.js";
 import { winnerOptionResultSource } from "./option-result-source.js";
+import { deriveWinnerConstraintInfeasibility } from "./constraint-feasibility.js";
 
 // ============================================================================
 // Output Types
@@ -89,7 +91,24 @@ export interface FragileEdge {
 }
 
 export interface AnalysisResponseSummary {
-  winner: { option_id: string; option_label: string; win_probability: number };
+  winner: {
+    option_id: string;
+    option_label: string;
+    win_probability: number;
+    /**
+     * Trust-spine board #1 (CEE half). Set true when the leading option
+     * violates a hard constraint (CEE_CONSTRAINT_INFEASIBLE_GATE ON). A typed
+     * field — the coach reads it to avoid recommending an infeasible leader.
+     * Absent when the gate is off or the winner is feasible (byte-identical).
+     */
+    constraint_infeasible?: boolean;
+    /**
+     * Set alongside `constraint_infeasible` — the confident recommendation
+     * framing is suppressed for this winner. Kept distinct so a future doctrine
+     * can flag-without-suppress (or vice versa) without a shape change.
+     */
+    recommendation_suppressed?: boolean;
+  };
   options: OptionSummary[];          // all options, sorted by win_probability descending
   /** Dedicated comparison array for prompt serialisation (Brief B contract).
    *  Sorted by win_probability descending. Only populated when p10/p90 are available
@@ -109,6 +128,14 @@ export interface AnalysisResponseSummary {
    *  Pre-computed here so the V5 ContextPack assembler can stay free of
    *  semantic transforms (F.6 passthrough). */
   margin_pp: number | null;
+  /**
+   * Trust-spine board #1 (CEE half). Honest one-line note for the coach context
+   * when the leading option violates a hard constraint
+   * (CEE_CONSTRAINT_INFEASIBLE_GATE ON) — swaps the recommendation framing for
+   * "leads on outcome but does not satisfy a hard constraint". Absent when the
+   * gate is off or the winner is feasible.
+   */
+  constraint_infeasible_note?: string;
   analysis_status: string;
 }
 
@@ -622,6 +649,39 @@ function deriveTopDrivers(
 }
 
 // ============================================================================
+// Constraint-infeasible winner copy (trust-spine board #1, CEE half)
+// ============================================================================
+
+/**
+ * Honest note for a C1 HARD violation (the winner's constraint satisfaction
+ * probability is at/below the hard floor — "does not satisfy" is
+ * definitionally supported). SINGLE SOURCE of this copy — the V5 display
+ * projection and the V4 prompt serializer both render the note verbatim from
+ * the summary; neither re-derives wording. No banned recommendation
+ * vocabulary, no digits, no structural-claim verbs.
+ */
+export function buildConstraintViolationNote(optionLabel: string): string {
+  return (
+    `${optionLabel} leads on outcome but does not satisfy a hard constraint of this decision — ` +
+    'say the constraint conflict plainly and do not present this option as the choice to take.'
+  );
+}
+
+/**
+ * Honest note for a C2 JOINT-GOAL tension (the winner's joint-goal probability
+ * is well below its constraint satisfaction). A TENSION, not a proven
+ * violation — the copy says "may not satisfy", never "does not satisfy"
+ * (adversarial-review P2: reusing the violation copy here overstates the
+ * claim).
+ */
+export function buildConstraintTensionNote(optionLabel: string): string {
+  return (
+    `${optionLabel} leads on outcome but may not satisfy a hard constraint of this decision — ` +
+    'flag this tension and do not present the lead as settled.'
+  );
+}
+
+// ============================================================================
 // Main Export
 // ============================================================================
 
@@ -639,6 +699,7 @@ function deriveTopDrivers(
 export function compactAnalysis(
   response: V2RunResponseEnvelope | null | undefined,
   graphNodeLabels?: Map<string, string>,
+  opts?: { constraintInfeasibleGate?: boolean },
 ): AnalysisResponseSummary | null {
   if (!response) return null;
 
@@ -772,6 +833,35 @@ export function compactAnalysis(
     }
     if (topFragileEdges !== undefined) {
       summary.top_fragile_edges = topFragileEdges;
+    }
+
+    // Trust-spine board #1 (CEE half): flag the WINNER infeasible + suppress the
+    // recommendation framing when the leading option violates a hard constraint.
+    // Gate: explicit opts override (tests / callers) else the CEE flag. Default
+    // OFF → this whole block is skipped → byte-identical to pre-flag behaviour.
+    // Detection is single-sourced in constraint-feasibility.ts (both wire shapes).
+    const constraintInfeasibleGate =
+      opts?.constraintInfeasibleGate ?? config.features.constraintInfeasibleGate;
+    if (constraintInfeasibleGate && winner && winner.option_id.length > 0) {
+      const feasibility = deriveWinnerConstraintInfeasibility(
+        response as Record<string, unknown>,
+        winner.option_id,
+      );
+      if (feasibility.infeasible) {
+        summary.winner.constraint_infeasible = true;
+        summary.winner.recommendation_suppressed = true;
+        // Copy is split by criterion (adversarial-review P2): a hard violation
+        // ("does not satisfy") and a joint-goal tension ("may not satisfy") are
+        // different claims and must not share wording. Both state only what the
+        // detection supports about THE WINNER — never a claim about the other
+        // options' feasibility (the round-1 "no eligible option currently meets
+        // it" clause was false on the live capture, where the runner-up DID
+        // satisfy the constraint).
+        summary.constraint_infeasible_note =
+          feasibility.kind === 'hard_violation'
+            ? buildConstraintViolationNote(summary.winner.option_label)
+            : buildConstraintTensionNote(summary.winner.option_label);
+      }
     }
 
     return summary;

@@ -33,6 +33,7 @@ import {
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
+import { deriveWinnerConstraintInfeasibility } from '../../orchestrator/context/constraint-feasibility.js';
 import { config } from '../../config/index.js';
 import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 // Graph-label readers relocated to a lean, dependency-free context module so
@@ -490,6 +491,18 @@ function buildInvokeInput(
 
   if (winner === null || chosenSource === null) return null;
   const runnerUp = selectRunnerUp(chosenSource, winner);
+
+  // Trust-spine board #1 (CEE half): when the leading option violates a hard
+  // constraint, flag the winner infeasible + suppress the recommendation
+  // framing so the decision-review prompt does not present it as a clean pick.
+  // Gate default OFF → byte-identical. Detection single-sourced (both wire
+  // shapes) in constraint-feasibility.ts, keyed on the SAME winner id.
+  if (config.features.constraintInfeasibleGate) {
+    const feasibility = deriveWinnerConstraintInfeasibility(enrichment, winner.id);
+    if (feasibility.infeasible) {
+      winner = { ...winner, constraint_infeasible: true, recommendation_suppressed: true };
+    }
+  }
 
   // Build label/unit lookups from enrichment.graph.nodes[]. The graph is
   // opaque (Record<string, unknown>) on this path, so reads are defensive.

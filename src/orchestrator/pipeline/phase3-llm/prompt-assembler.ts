@@ -90,11 +90,31 @@ function serialiseCompactGraph(g: GraphV3Compact): string {
  * Serialise a compact analysis summary into structured text for the LLM.
  * Input arrays are pre-sorted deterministically by compactAnalysis() (options by
  * win_probability desc, drivers by sensitivity desc). No additional sort applied here.
+ *
+ * Exported for contract testing (trust-spine #1 egress test) — the runtime
+ * caller is `assembleV2SystemPrompt` (zone 2, analysis_response section).
  */
-function serialiseCompactAnalysis(a: AnalysisResponseSummary): string {
+export function serialiseCompactAnalysis(a: AnalysisResponseSummary): string {
   const lines: string[] = ['Analysis:'];
 
   lines.push(`  Winner: ${a.winner.option_label} (${a.winner.option_id}) at ${Math.round(a.winner.win_probability * 100)}% win probability`);
+  // Trust-spine board #1 (CEE half, adversarial-review P1): when compactAnalysis
+  // flagged the winner constraint-infeasible (CEE_CONSTRAINT_INFEASIBLE_GATE ON),
+  // surface the flag + the honest note (verbatim — single-sourced in
+  // analysis-compact.ts) immediately under the Winner line so this V4 prompt
+  // path cannot frame the winner as a clean lead. This serializer is NOT dead
+  // on the live estate: CEE_PIPELINE_V4_ENABLED is false on staging (V1 routes
+  // 410) but PROD inherits the code default `true` (FLAG-INVENTORY 2026-07-16),
+  // so it must be threaded, not skipped. Fields absent (flag off / feasible
+  // winner) → these lines are skipped → byte-identical output.
+  if (a.winner.constraint_infeasible === true) {
+    // Claim-neutral status line (P2 discipline: the violation-vs-tension claim
+    // lives ONLY in the note, which is criterion-accurate by construction).
+    lines.push('  Winner constraint status: flagged constraint-infeasible — do not present this lead as settled');
+    if (typeof a.constraint_infeasible_note === 'string' && a.constraint_infeasible_note.length > 0) {
+      lines.push(`  Constraint note: ${a.constraint_infeasible_note}`);
+    }
+  }
   lines.push(`  Robustness: ${a.robustness_level}`);
   if (a.margin !== null && Number.isFinite(a.margin)) {
     lines.push(`  Margin: ${Math.round(a.margin * 100)} percentage points`);
