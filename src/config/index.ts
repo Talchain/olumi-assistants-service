@@ -904,6 +904,15 @@ const ConfigSchema = z.object({
     deterministicEnforcementEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ENFORCEMENT_ENABLED — budget rescale + bridge chain repair (Stage 4 substep 9b)
     editNormalisationEnabled: booleanString.default(true), // CEE_EDIT_NORMALISATION_ENABLED — normalise non-canonical LLM field names before Zod validation
     editInterventionRoutingEnabled: booleanString.default(true), // CEE_EDIT_INTERVENTION_ROUTING_ENABLED — read interventions from data.interventions + slash-keyed entries
+    // POC-BOARD #6 — over-cap edit split path (CEE_EDIT_CAP_SPLIT). When true, an
+    // edit whose operation array exceeds maxPatchOperations no longer dead-ends on
+    // the bare whole-batch MAX_OPERATIONS_EXCEEDED refusal. Instead it returns a
+    // BOUNDED refusal under a distinct signal (MAX_OPERATIONS_SPLIT_SUGGESTED) that
+    // carries a concrete split next-step: recovery chips inviting the user to make
+    // the change in smaller passes. The structured count/cap stay in the rejection
+    // reason; the user-facing prose stays banned-token clean. Default OFF — flag-off
+    // is byte-identical to today (bare rejection). Paul-gated before enablement.
+    editCapSplitEnabled: booleanString.default(false),
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
@@ -1504,6 +1513,8 @@ function parseConfig(): Config {
       deterministicEnforcementEnabled: env.CEE_DETERMINISTIC_ENFORCEMENT_ENABLED,
       editNormalisationEnabled: env.CEE_EDIT_NORMALISATION_ENABLED,
       editInterventionRoutingEnabled: env.CEE_EDIT_INTERVENTION_ROUTING_ENABLED,
+      // POC-BOARD #6 — over-cap edit split path (default OFF)
+      editCapSplitEnabled: env.CEE_EDIT_CAP_SPLIT,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs

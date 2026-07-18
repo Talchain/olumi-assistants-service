@@ -2152,6 +2152,28 @@ export async function handleEditGraph(
         "edit_graph rejected — too many operations",
       );
       if (attempt === totalAttempts) {
+        // POC-BOARD #6 — over-cap edit split path (CEE_EDIT_CAP_SPLIT, default OFF).
+        // Flag ON: instead of the bare whole-batch MAX_OPERATIONS_EXCEEDED refusal
+        // (a dead end — a static deflection asking the USER to re-scope, carrying no
+        // concrete next step for THIS batch), return a BOUNDED refusal under a
+        // distinct signal that carries a concrete split next-step: recovery chips
+        // inviting the user to make the change in smaller passes. Nothing is applied
+        // (an arbitrary index-15 truncation of an LLM op array risks an incoherent
+        // partial batch — add_node before its add_edge, etc. — so we do NOT auto-apply
+        // a partial; the honest bounded refusal is the safe in-scope fix), but the
+        // user is no longer dead-ended. The raw count/cap stay in rejection.reason
+        // (msg); the user-facing prose stays banned-token clean.
+        if (config.cee.editCapSplitEnabled) {
+          validationOutcome = 'max_operations_split_suggested';
+          setViolationCodes(['max_operations_split_suggested']);
+          recoveryPathChosen = 'rejection_block';
+          branchTaken = 'rejection';
+          branchReason = 'max_operations_split_suggested';
+          failureBranch = 'max_operations_split';
+          failureCode = 'max_operations_split_suggested';
+          failureMessage = msg;
+          return buildOverCapSplitResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, attempt, diagnostics());
+        }
         validationOutcome = 'max_operations_exceeded';
         setViolationCodes(['max_operations_exceeded']);
         recoveryPathChosen = 'rejection_block';
@@ -3306,6 +3328,87 @@ function mapCodeToRejectionReason(code?: string): EditRejectionReason {
     default:
       return 'structural_validation';
   }
+}
+
+/**
+ * POC-BOARD #6 — bounded refusal for an over-cap edit (CEE_EDIT_CAP_SPLIT ON).
+ *
+ * Distinct from {@link buildRejectionResult}'s `MAX_OPERATIONS_EXCEEDED` dead end
+ * in three ways, so a >15-op edit is never a bare dead end:
+ *   1. a DISTINCT rejection code (`MAX_OPERATIONS_SPLIT_SUGGESTED`) — downstream
+ *      consumers can tell a bounded split-suggestion apart from the old hard cap;
+ *   2. user-facing copy that offers a CONCRETE next step (make the change in a
+ *      couple of smaller passes) plus recovery chips the user can act on now —
+ *      not a static "reduce the scope" deflection;
+ *   3. the structured count/cap preserved in `rejection.reason` (the raw `msg`,
+ *      never surfaced to the user) so the turn trace still records exactly how far
+ *      over the cap the batch was.
+ *
+ * Nothing is applied: an arbitrary index-`maxOps` truncation of an LLM op array
+ * risks an incoherent partial batch (an `add_edge` whose `add_node` fell past the
+ * cut), so the honest, in-scope fix is the bounded refusal — the acceptance floor
+ * explicitly permits "a bounded refusal with a next step" as the alternative to a
+ * true split/continuation. The user-facing prose stays banned-token clean
+ * (no operation counts / schema language — see edit-rejection-text.test.ts).
+ */
+function buildOverCapSplitResult(
+  reason: string,
+  operations: PatchOperation[],
+  baseGraphHash: string,
+  turnId: string,
+  startTime: number,
+  attempts: number,
+  diagnostics: EditGraphTraceDiagnostics,
+): EditGraphResult {
+  const patchData: GraphPatchBlockData = {
+    patch_type: 'edit',
+    operations,
+    status: 'rejected',
+    base_graph_hash: baseGraphHash,
+    rejection: {
+      // Raw reason carries the count/cap for the turn trace; never user-surfaced.
+      reason,
+      code: 'MAX_OPERATIONS_SPLIT_SUGGESTED',
+      attempts,
+    },
+  };
+
+  const block = createGraphPatchBlock(patchData, turnId, undefined, undefined, 'tool:edit_graph');
+  const latencyMs = Date.now() - startTime;
+
+  log.warn(
+    { elapsed_ms: latencyMs, reason, code: 'MAX_OPERATIONS_SPLIT_SUGGESTED' },
+    'edit_graph over-cap — bounded split-suggestion refusal (no dead end)',
+  );
+
+  // Concrete next step for THIS batch: make the change in a couple of smaller
+  // passes. The chips route through the message-replay path (no action_type),
+  // matching the sibling rejection chips. Prose is banned-token clean.
+  const assistantText =
+    "That's more than I can change in a single step. Let's do it in a couple of " +
+    'smaller passes — tell me the change that matters most and we can take it from there.';
+  const suggestedActions: SuggestedAction[] = [
+    {
+      label: 'Start with the key change',
+      prompt: "Let's start with the single most important change.",
+      role: 'facilitator',
+    },
+    {
+      label: 'Split into smaller edits',
+      prompt: 'Help me break this into a few smaller edits.',
+      role: 'challenger',
+    },
+  ];
+
+  return {
+    blocks: [block],
+    assistantText,
+    latencyMs,
+    appliedGraph: null,
+    wasRejected: true,
+    suggestedActions,
+    diagnostics,
+  };
 }
 
 // ============================================================================
