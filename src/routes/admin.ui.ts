@@ -21,10 +21,16 @@ import { ADMIN_TOAST_DURATION_MS } from '../config/timeouts.js';
 import { config } from '../config/index.js';
 
 /**
- * Generate HTML options for task dropdown from canonical PROMPT_TASKS registry.
- * This ensures admin UI stays in sync with all registered prompt tasks.
+ * Generate HTML options for task dropdown from the canonical PROMPT_TASKS
+ * registry, which is itself derived from `CeeTaskIdSchema`. This is the ONLY
+ * production consumer of PROMPT_TASKS, so it is the surface where registry
+ * drift became user-visible: a task absent here cannot be selected when
+ * creating a prompt, even though the API would accept it.
+ *
+ * Exported for tests/unit/prompt-tasks-registry.test.ts, which asserts the
+ * rendered dropdown covers every task the create endpoint accepts.
  */
-function generateTaskOptions(): string {
+export function generateTaskOptions(): string {
   return PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
 }
 
