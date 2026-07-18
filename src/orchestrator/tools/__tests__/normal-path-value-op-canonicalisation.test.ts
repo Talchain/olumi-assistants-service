@@ -305,6 +305,83 @@ describe('B5 — the promoted graph is the PARSED one (intervention path)', () =
     );
   }
 
+  /**
+   * The case that DOES discriminate promotion. `add_node` spreads the op value
+   * onto the new node, and `NodeV3` declares no `data` field — so a node added
+   * with `data: {...}` (the shape `normaliseEditOpsForPlot` itself produces by
+   * renaming `observed_state` → `data`) carries that key on the raw candidate
+   * and loses it to the parse. The postcondition's `add_node` arm checks
+   * PRESENCE only, so it passes either way.
+   *
+   * Promote the raw candidate and the junk `data` key is persisted onto the
+   * graph the UI and analysis read; promote the parsed graph and it is not.
+   *
+   * (Separately: the value inside that `data` is LOST on both sides — a real
+   * add_node defect this lane found but deliberately did not widen scope to
+   * fix, because the postcondition arm that would catch it would begin
+   * refusing every add-node-with-initial-value edit. Reported, not silently
+   * absorbed.)
+   */
+  it('persists NO undeclared `data` key from an add_node (pins the parsed promotion)', async () => {
+    const ctx = {
+      graph: INTERVENTION_GRAPH,
+      analysis_response: null,
+      framing: null,
+      messages: [],
+      scenario_id: 'scn-b5-add',
+    } as unknown as ConversationContext;
+
+    const result = await handleEditGraph(
+      ctx,
+      'Add a data quality risk that affects total cost',
+      makeAdapter(
+        editResponse([
+          {
+            op: 'add_node',
+            path: '/nodes/fac_risk',
+            value: {
+              id: 'fac_risk',
+              kind: 'factor',
+              label: 'Data Quality Risk',
+              data: { value: 0.4, unit: 'index' },
+            },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'Add the risk factor.',
+          },
+          {
+            op: 'add_edge',
+            path: '/edges/opt_a->fac_risk',
+            value: { from: 'opt_a', to: 'fac_risk', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'Wire the option to the risk.',
+          },
+          {
+            op: 'add_edge',
+            path: '/edges/fac_risk->goal_g',
+            value: { from: 'fac_risk', to: 'goal_g', strength: { mean: -0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'Wire the risk to the goal.',
+          },
+        ]),
+      ),
+      'req-b5-add',
+      'turn-b5-add',
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+
+    const nodes = (result.appliedGraph as unknown as { nodes: Array<Record<string, unknown>> }).nodes;
+    const added = nodes.find((n) => n.id === 'fac_risk')!;
+    expect(added).toBeDefined();
+
+    // THE DISCRIMINATOR: fails if `appliedGraph = rawApplied` is promoted.
+    expect(added).not.toHaveProperty('data');
+  });
+
   it('lands the intervention canonically AND persists no slash-keyed residue', async () => {
     const result = await runInterventionEdit();
 
