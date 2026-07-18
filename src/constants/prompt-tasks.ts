@@ -38,8 +38,11 @@
  *   - Model routing — src/config/model-routing.ts declares its own `CeeTask`
  *     union with a deliberately different vocabulary (it carries the legacy
  *     `clarification` and `options` aliases, which are not prompt tasks).
- *   - "Drift prevention tests" — they existed but were entirely skipped, so
- *     nothing was prevented. Re-enabled and made discriminating in this commit.
+ *   - "Drift prevention tests" — they existed, but the registry-SYNC block
+ *     (3 of 10 tests) was `describe.skip`-ed with a comment naming
+ *     `validate_graph` as the known failure, so the drift this file's docblock
+ *     claimed to prevent was precisely what went unchecked. The other 7 tests
+ *     ran. Re-enabled and made discriminating in this commit.
  *
  * To add a new prompt task:
  *   1. Add it to `CeeTaskIdSchema` in src/prompts/schema.ts (that is the SSOT;
