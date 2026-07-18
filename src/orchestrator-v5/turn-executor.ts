@@ -6912,14 +6912,23 @@ export async function runTurnExecutor(
             : n === 1
               ? 'your other request'
               : 'your other requests';
+        // P2 (5b review): the disclosure copy must not itself read as a
+        // first-person edit. An earlier draft ended "…and I'll make that
+        // change too" — the verb "make" is in BROAD_STRUCTURAL_CLAIM_PATTERNS
+        // (mutation-language.ts), so when block[0] is a NON-mutating execute
+        // handler (run_analysis / what_would_flip / explain — handlerEmitted-
+        // MutatedGraph is false, so STEP 6.6 does not short-circuit to `pass`),
+        // classifyStructuralClaim scored the composed text `broad_no_intent`
+        // and emitted a spurious `V5StructuralSuccessClaimCandidateMiss`. The
+        // wording below carries NO verb from STRUCT_EDIT_VERB_BASE /
+        // MUTATION_PATTERNS / the broad list, so the disclosure is inert to
+        // every mutation-language detector while staying honest and natural.
         const disclosure =
           n === 1
             ? `I've done the first part of your request, but haven't applied the ` +
-              `other change yet (${subject}). Tell me to go ahead and I'll make ` +
-              `that change too.`
+              `other change yet (${subject}). Tell me if you'd like that too.`
             : `I've done the first part of your request, but haven't applied the ` +
-              `other ${n} changes yet (${subject}). Tell me to go ahead and I'll ` +
-              `make those changes too.`;
+              `other ${n} changes yet (${subject}). Tell me if you'd like those too.`;
         const base = composedOk.assistant_text ? `${composedOk.assistant_text} ` : '';
         composedOk = { ...composedOk, assistant_text: `${base}${disclosure}` };
       }
