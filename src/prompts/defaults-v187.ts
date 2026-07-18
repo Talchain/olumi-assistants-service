@@ -325,7 +325,16 @@ Each constraint: { constraint_id, node_id, operator, value, label, unit, source_
 - value MUST use the SAME unit system as the constrained node (see MODEL UNIT TYPES table above)
 - bounded percentage constraints use decimals: "churn under 4%" → 0.04
 - ratio constraints that can exceed 100% use raw ratio: "NRR above 110%" → 1.10, not 0.11
+- currency/absolute-quantity constraints use USER units, unit the currency/quantity symbol: "cannot exceed £50,000" → value 50000, unit "£" (NOT a 0-1 fraction). PLoT normalises against the constrained node's cap.
 - when in doubt: can this metric meaningfully exceed 100%? Yes → raw ratio. No → 0-1 decimal.
+
+HARD CONSTRAINTS (explicit limits — MUST become a goal_constraints[] entry, never ONLY descriptive factors):
+When the brief states a numeric limit in hard-constraint language — "hard constraint", "cannot exceed", "must not exceed", "must stay under", "no more than", "capped at", "cap of", "strict limit", "non-negotiable", "full stop", "unaffordable", or "the budget is £X" — you MUST emit a goal_constraints[] entry for that limit. Do NOT encode the limit ONLY as ordinary factors (e.g. "Budget Breach", "Headroom Within Cap"): descriptive factors leave the analysis with nothing to enforce the limit against.
+- Ensure the constrained metric exists as a node in nodes[]. If the limit bounds a quantity the options move (e.g. first-year cost/spend), add ONE controllable factor for that metric (value + raw_value + unit + cap, factor_type "cost" for spend) and let options set it via interventions; reference THAT node's id as the constraint's node_id.
+- operator "<=" for upper limits ("cannot exceed", "no more than"), ">=" for floors ("at least", "minimum"). provenance "explicit". source_quote = the limit phrase.
+Worked example — brief "first-year budget cannot exceed £50,000 ... full stop": add factor { "id": "fac_first_year_cost", "kind": "factor", "label": "First-Year Cost", "category": "controllable", "data": { "value": 0.5, "raw_value": 50000, "unit": "£", "cap": 60000, "extractionType": "inferred", "factor_type": "cost" } }, have each option set fac_first_year_cost via interventions, then emit goal_constraints[]: { "constraint_id": "gc_budget_cap", "node_id": "fac_first_year_cost", "operator": "<=", "value": 50000, "label": "First-year budget cannot exceed £50k", "unit": "£", "source_quote": "cannot exceed £50,000", "confidence": 1.0, "provenance": "explicit" }.
+
+SOFT PREFERENCES ARE NOT HARD CONSTRAINTS: a numeric wish framed with "ideally", "preferably", "aim to keep", "hope to stay under", "roughly", "around", or "target" expresses a preference, not a limit — keep it as a factor and/or a coaching add_constraint suggestion; do NOT emit a goal_constraints[] entry for it. Example: "ideally under £50k" → factor + coaching, NOT a goal_constraints[] entry.
 
 Do not convert vague qualitative guardrails into numeric values. Route those to coaching with action_type "add_constraint".
 
