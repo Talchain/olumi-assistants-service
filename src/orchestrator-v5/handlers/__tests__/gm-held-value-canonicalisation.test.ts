@@ -2,7 +2,7 @@
  * R1 residual (follow-up to PR #509) — the held-confirm value op must ACTUALLY
  * APPLY, not merely refuse honestly.
  *
- * #509 made the held-batch apply ATOMIC + HONEST: `heldBatchFullyLanded()`
+ * #509 made the held-batch apply ATOMIC + HONEST: `batchFullyLanded()`
  * verifies every confirmed op had an observable effect on the canonical
  * persisted graph and refuses the WHOLE batch when one did not. That closed the
  * silent-partial defect but left the capability gap open — a mixed compound
@@ -21,13 +21,13 @@
  * pipeline emits.
  *
  * THE FIX (flag `CEE_GM_HELD_VALUE_CANONICALISATION`, default OFF):
- * `canonicaliseHeldValueOps` translates those spellings to the one GraphV3
+ * `canonicaliseValueOps` translates those spellings to the one GraphV3
  * preserves — a MERGE onto the node's existing `observed_state` (PLoT's own
  * `update_node` semantics are `deepMerge`, so siblings like `unit` / `cap` /
  * `raw_value` survive) — immediately before the local apply, AFTER the
  * re-referee (so the confirm-time verdict and its telemetry stay byte-identical).
  *
- * ATOMICITY IS PRESERVED: `heldBatchFullyLanded()` remains the backstop. The
+ * ATOMICITY IS PRESERVED: `batchFullyLanded()` remains the backstop. The
  * fix makes the guard stop firing for LEGITIMATE batches; it never bypasses it.
  * An op the canonicaliser cannot translate is left verbatim and the guard
  * still refuses the whole batch (pinned below).
@@ -316,7 +316,7 @@ describe('R1 — blast radius: the currently-working cases are unchanged', () =>
 
 // ── the guard must still bite ───────────────────────────────────────────────
 
-describe('R1 — atomicity doctrine: heldBatchFullyLanded still refuses what it cannot land', () => {
+describe('R1 — atomicity doctrine: batchFullyLanded still refuses what it cannot land', () => {
   it('flag ON: an op in a spelling the canonicaliser does NOT translate still refuses the WHOLE batch', async () => {
     await setFlag('true');
     // `goal_constraints` is a SANCTIONED referee root (so the batch really

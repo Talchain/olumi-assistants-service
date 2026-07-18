@@ -41,9 +41,11 @@
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
-import { canonicaliseHeldValueOps } from './canonicalise-held-value-ops.js';
+import {
+  canonicaliseValueOps,
+  batchFullyLanded,
+} from '../../orchestrator/canonicalise-value-ops.js';
 import { config } from '../../config/index.js';
-import { parseEdgeTargetPath } from '../graph-management/adapters/edit-graph-producer.js';
 import {
   PatchOperationsArraySchema,
   type ValidatedPatchOperation,
@@ -286,153 +288,15 @@ export type GmHeldExecuteOutcome =
 // ---------------------------------------------------------------------------
 // P1b atomicity guard (real-user run 2026-07-17, scenario c510030e).
 //
-// The confirm-side apply re-runs the batch LOCALLY through
-// `applyPatchOperations` — it does NOT round-trip PLoT, whose canonical
-// field mapping the initial edit relied on. A tunable value op that arrives
-// in the edit pipeline's own field spelling (`{ data: { value } }`, or the
-// slash-keyed `{ 'observed_state/value': 0.5 }`) is written verbatim onto the
-// node and then STRIPPED by the GraphV3 re-parse, so the value silently
-// no-ops while the structural siblings land — a partial apply under a
-// wholesale "Confirmed" receipt (the D2 partial-apply class living inside the
-// held-batch executor, distinct from the router capture and the edit-graph
-// batch applier).
-//
-// The guard makes the held-batch apply ATOMIC + HONEST: every operation must
-// have an OBSERVABLE effect on the CANONICAL (persisted-shape) applied graph.
-// For update ops that means every field the applier actually wrote must
-// survive canonicalisation with the same value on the target entity; for
-// add/remove ops it means the entity's presence/absence flipped as asked. If
-// ANY op did not land, the caller refuses the WHOLE batch — nothing persists,
-// never a silent partial. Total + fail-closed: a target the op cannot resolve
-// or any thrown comparison reports NOT-landed (refuse), never a false OK.
+// The guard itself now lives in `../../orchestrator/canonicalise-value-ops.js`
+// as `batchFullyLanded`, alongside the canonicaliser it backstops — B5
+// reproduced the SAME strip on the normal edit path, and two copies of this
+// check is precisely the hand-maintained-twin defect this codebase keeps
+// paying for. Called here WITHOUT the optional `preEdit` argument, which is
+// the strict #509 semantics byte-for-byte: every field the applier wrote must
+// survive canonicalisation on the persisted entity, or the WHOLE confirmed
+// batch is refused.
 // ---------------------------------------------------------------------------
-
-const NODE_IDENTITY_KEYS: readonly string[] = ['id'];
-const EDGE_IDENTITY_KEYS: readonly string[] = ['from', 'to', 'id'];
-
-/** Order-insensitive deep equality over JSON-serialisable values. */
-function deepEqualJson(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
-    return a === b;
-  }
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((x, i) => deepEqualJson(x, b[i]));
-  }
-  const ao = a as Record<string, unknown>;
-  const bo = b as Record<string, unknown>;
-  const ak = Object.keys(ao);
-  if (ak.length !== Object.keys(bo).length) return false;
-  return ak.every(
-    (k) => Object.prototype.hasOwnProperty.call(bo, k) && deepEqualJson(ao[k], bo[k]),
-  );
-}
-
-/**
- * Every non-identity field an update op's applier wrote (`rawEntity`) must
- * survive canonicalisation byte-for-byte on the persisted entity
- * (`canonEntity`). A missing/altered field means the write did not land (it
- * was stripped, e.g. a `data`/slash-keyed value spelling). Fail-closed: a
- * missing entity reports NOT-survived.
- */
-function updateWritesSurvived(
-  value: unknown,
-  identityKeys: readonly string[],
-  rawEntity: Record<string, unknown> | undefined,
-  canonEntity: Record<string, unknown> | undefined,
-): boolean {
-  if (rawEntity === undefined || canonEntity === undefined) return false;
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return true;
-  for (const key of Object.keys(value as Record<string, unknown>)) {
-    if (identityKeys.includes(key)) continue;
-    if (!deepEqualJson(rawEntity[key], canonEntity[key])) return false;
-  }
-  return true;
-}
-
-/**
- * True iff EVERY operation in the confirmed batch has an observable effect on
- * the canonical applied graph. `rawApplied` is the pre-canonicalisation
- * candidate (the applier's raw writes); `canonical` is the GraphV3-parsed
- * persisted-shape graph the commit will store and the UI/analysis will read.
- */
-export function heldBatchFullyLanded(
-  operations: readonly PatchOperation[],
-  rawApplied: GraphV3T,
-  canonical: GraphV3T,
-): boolean {
-  const rawNodes = rawApplied.nodes as ReadonlyArray<Record<string, unknown>>;
-  const rawEdges = rawApplied.edges as ReadonlyArray<Record<string, unknown>>;
-  const canonNodes = canonical.nodes as ReadonlyArray<Record<string, unknown>>;
-  const canonEdges = canonical.edges as ReadonlyArray<Record<string, unknown>>;
-  const findNode = (
-    arr: ReadonlyArray<Record<string, unknown>>,
-    id: unknown,
-  ): Record<string, unknown> | undefined => arr.find((n) => n.id === id);
-  const findEdge = (
-    arr: ReadonlyArray<Record<string, unknown>>,
-    from: unknown,
-    to: unknown,
-  ): Record<string, unknown> | undefined => arr.find((e) => e.from === from && e.to === to);
-
-  for (const op of operations) {
-    try {
-      switch (op.op) {
-        case 'add_node':
-          if (findNode(canonNodes, op.path) === undefined) return false;
-          break;
-        case 'remove_node':
-          if (findNode(canonNodes, op.path) !== undefined) return false;
-          break;
-        case 'add_edge': {
-          const v = op.value as Record<string, unknown>;
-          if (findEdge(canonEdges, v?.from, v?.to) === undefined) return false;
-          break;
-        }
-        case 'remove_edge': {
-          const ep = parseEdgeTargetPath(op.path);
-          if (ep === null) return false;
-          if (findEdge(canonEdges, ep.from, ep.to) !== undefined) return false;
-          break;
-        }
-        case 'update_node':
-          if (
-            !updateWritesSurvived(
-              op.value,
-              NODE_IDENTITY_KEYS,
-              findNode(rawNodes, op.path),
-              findNode(canonNodes, op.path),
-            )
-          ) {
-            return false;
-          }
-          break;
-        case 'update_edge': {
-          const ep = parseEdgeTargetPath(op.path);
-          if (ep === null) return false;
-          if (
-            !updateWritesSurvived(
-              op.value,
-              EDGE_IDENTITY_KEYS,
-              findEdge(rawEdges, ep.from, ep.to),
-              findEdge(canonEdges, ep.from, ep.to),
-            )
-          ) {
-            return false;
-          }
-          break;
-        }
-        default:
-          // Unknown op kind — cannot verify its effect, so fail closed.
-          return false;
-      }
-    } catch {
-      return false;
-    }
-  }
-  return true;
-}
 
 /**
  * Re-referee + apply + receipt for a confirmed hold. Pure with respect to
@@ -474,7 +338,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // default) returns the operations unchanged by reference — byte-identical to
   // #509. The atomicity guard below still backstops any op left untranslated.
   const opsToApply: PatchOperation[] = config.cee.gmHeldValueCanonicalisationEnabled
-    ? canonicaliseHeldValueOps(operations, input.currentGraph).operations
+    ? canonicaliseValueOps(operations, input.currentGraph).operations
     : operations;
 
   // ── 3. Apply through the existing apply path ──────────────────────────
@@ -525,7 +389,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // actually went onto the node, not the pre-canonicalisation one.
   if (
     rawAppliedGraph === null ||
-    !heldBatchFullyLanded(opsToApply, rawAppliedGraph, appliedGraph)
+    !batchFullyLanded(opsToApply, rawAppliedGraph, appliedGraph)
   ) {
     log.warn(
       {
