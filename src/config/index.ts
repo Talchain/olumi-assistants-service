@@ -948,6 +948,20 @@ const ConfigSchema = z.object({
     // (Paul-ratified); env var = kill-switch: CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL=false
     // restores the byte-identical legacy path (the generic/Cap-2A copy).
     editConnectivityNamedRefusalEnabled: booleanString.default(true),
+    // R1 residual (follow-up to #509) — held-confirm value-op canonicalisation
+    // (CEE_GM_HELD_VALUE_CANONICALISATION). A mixed compound edit ("set X to
+    // 0.5, and add a risk about Y") is HELD, and on confirm the batch is
+    // re-applied LOCALLY. The tunable value op arrives in a field spelling the
+    // GraphV3 re-parse strips (the prompt-taught `data/value`), so #509
+    // honestly refuses the WHOLE batch — the value cannot apply on this path.
+    // When true, the confirm-side canonicaliser translates those spellings to
+    // the one GraphV3 preserves (a MERGE onto observed_state, PLoT's own
+    // update_node semantics) so the value ACTUALLY applies while the atomicity
+    // guard (heldBatchFullyLanded) still backstops genuinely-unlandable ops.
+    // Behaviour-visible (previously-refused batches now succeed) → default OFF;
+    // env var = kill-switch: CEE_GM_HELD_VALUE_CANONICALISATION=false restores
+    // the byte-identical #509 path.
+    gmHeldValueCanonicalisationEnabled: booleanString.default(false),
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
@@ -1554,6 +1568,8 @@ function parseConfig(): Config {
       editCapSplitEnabled: env.CEE_EDIT_CAP_SPLIT,
       // POC-BOARD #5c — connectivity/orphan named refusal (default OFF)
       editConnectivityNamedRefusalEnabled: env.CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL,
+      // R1 residual — held-confirm value-op canonicalisation (default OFF)
+      gmHeldValueCanonicalisationEnabled: env.CEE_GM_HELD_VALUE_CANONICALISATION,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs

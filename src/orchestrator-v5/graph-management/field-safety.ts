@@ -96,8 +96,14 @@ const ALLOWED_NODE_FIELD_ROOTS: ReadonlySet<string> = new Set([
  * relaxation was found to sanction provenance-class sub-fields like
  * `observed_state.source`). `interventions` allows deeper paths
  * (data/interventions/<factor_id>).
+ *
+ * EXPORTED (R1 residual, follow-up to #509) so the held-confirm value
+ * canonicaliser (`canonicalise-held-value-ops.ts`) DERIVES its translatable
+ * leaf set from this single owner instead of mirroring it — trap 12, a
+ * hand-maintained second copy would drift silently and the drift would read
+ * as green.
  */
-const ALLOWED_OBSERVED_SUBKEYS: ReadonlySet<string> = new Set([
+export const ALLOWED_OBSERVED_SUBKEYS: ReadonlySet<string> = new Set([
   'value',
   'baseline',
   'unit',
