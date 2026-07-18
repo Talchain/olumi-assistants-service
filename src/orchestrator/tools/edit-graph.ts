@@ -69,6 +69,7 @@ import {
   classifyAddRiskToOptionRejection,
   ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER,
 } from "../add-risk-rejection-guidance.js";
+import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
@@ -2491,6 +2492,23 @@ export async function handleEditGraph(
           );
           if (addRiskMatch) {
             rejectionCtx.structural_guidance = ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER;
+          }
+        }
+        // POC-BOARD #5c (flag-gated): honest, BOUNDED refusal that NAMES the
+        // specific offending item(s) when the FINAL post-batch state genuinely
+        // fails connectivity (orphan / no-path-to-goal) — instead of the generic
+        // wholesale error that names nothing (the live Step-0 s1-05 dead-end).
+        // Within-turn atomicity is preserved: nothing is partially applied, the
+        // whole edit is still declined (`appliedGraph: null`, wasRejected). The
+        // helper defers (returns null) on any non-connectivity/mixed failure, so
+        // it can never broaden a rejection. Runs AFTER the Cap-2A block and
+        // supersedes its generic placeholder when both flags are on (the named
+        // refusal is strictly more specific). Default OFF → this block no-ops and
+        // the copy above is byte-identical to today.
+        if (config.cee.editConnectivityNamedRefusalEnabled) {
+          const namedRefusal = buildConnectivityNamedRefusal(candidateGraph, structResult.violations);
+          if (namedRefusal) {
+            rejectionCtx.structural_guidance = namedRefusal;
           }
         }
         const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
