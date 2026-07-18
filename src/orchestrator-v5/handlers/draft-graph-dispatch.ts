@@ -163,7 +163,7 @@ export interface DispatchDraftGraphResult {
  *     The response text here is never sent to the client; use the pipeline's
  *     own narration as a neutral fallback for server-side logging only.
  */
-function draftResultToOlumiResponse(
+export function draftResultToOlumiResponse(
   result: DraftGraphResult,
   payload: MessageTurnPayload,
   graphPersisted: boolean,
@@ -255,6 +255,28 @@ function draftResultToOlumiResponse(
   // frame stays visible and the operator can investigate the persistence log.
   const stageIndicator = graphPersisted ? 'analyse' : payload.stage;
 
+  // Hard constraints extracted from the brief. These ride on `graphOutput` as
+  // a SIBLING of nodes/edges (package.ts:406 emits them alongside `graph`;
+  // transformResponseToV3 lifts them to the V3 root; draft-graph.ts:300's
+  // `body.graph ?? body` then makes that root the graphOutput). Before
+  // @talchain/schemas 0.18.0 the rebuild below dropped them, because
+  // DraftGraphBlockSchema was `.strict()` over exactly four keys — so
+  // threading the field WITHOUT the contract bump would have failed
+  // validateEgress and replaced every draft response with the
+  // EGRESS_CONTRACT_VIOLATION envelope. 0.18.0 declares it optional.
+  //
+  // Emitted ONLY when a non-empty array is actually present. An absent or
+  // empty extraction omits the key entirely rather than emitting `[]`, so
+  // no-constraint responses stay byte-identical to the pre-0.18.0 wire and
+  // the contract's "consumers must treat absence and [] as equivalent" note
+  // is never exercised by us.
+  const rawGoalConstraints = (result.graphOutput as { goal_constraints?: unknown } | undefined)
+    ?.goal_constraints;
+  const goalConstraints =
+    Array.isArray(rawGoalConstraints) && rawGoalConstraints.length > 0
+      ? (rawGoalConstraints as unknown[])
+      : undefined;
+
   // Include the FINAL graph inline so the UI can apply it directly without a
   // Supabase re-fetch. Only present when graphOutput is available and
   // persistence succeeded — on failure the client never sees this response.
@@ -265,6 +287,7 @@ function draftResultToOlumiResponse(
           edges: (result.graphOutput.edges ?? []) as unknown[],
           node_count: finalNodeCount,
           edge_count: finalEdgeCount,
+          ...(goalConstraints ? { goal_constraints: goalConstraints } : {}),
         }
       : undefined;
 

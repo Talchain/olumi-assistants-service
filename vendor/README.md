@@ -7,54 +7,64 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.16.0.tgz`
+### `talchain-schemas-0.18.0.tgz`
 
-**Purpose:** consumption of `@talchain/schemas` v0.16.0 (the 0.16.0
-decision-record additive wave, olumi-schemas PR #8 — Paul-approved and
-merged; CEE-first pin bump per the established rollout mechanics: CEE
-adopts before any consumer starts emitting/depending on the new shapes).
-0.16.0 is a superset of 0.15.0; the whole delta is strictly additive and
-confined to the standalone `DecisionRecordSchema` family
-(`src/boundary/decision-record.ts`) — zero fields removed, renamed, or
-tightened; every object schema stays `.strict()`:
+**⚠ PRE-RELEASE — NOT A PUBLISHED ARTEFACT.** This tarball was built from
+the head of olumi-schemas **PR #10** (`claude-schemas/draft-goal-constraints`
+@ `8291ca03d2702a80b0cbd6629857ed92c34a6b26`), which is **open, unmerged and
+Paul-gated**. There is no `v0.18.0` tag and no published 0.18.0 package.
+**This vendored tarball MUST be replaced with the published artefact before
+this branch merges.** Merging olumi-schemas PR #10 to `main` auto-publishes,
+so the publish is Paul's to sequence.
 
-- `prediction.probability_of_goal?` + `prediction.probability_of_joint_goal?`
-  (`z.number().min(0).max(1).optional()`, both) — D-N Option-B scoring
-  derisk: both candidate goal-attainment probabilities captured from day
-  one so a Neil overrule is a recompute, never lost data.
-- `prediction.confidence_source?` — new closed enum
-  `DecisionRecordConfidenceSource` (`'model_derived' | 'user_stated'`),
-  the calibration pack's binding honesty constraint (the two populations
-  are never blended); absent ⇒ `model_derived` (disclosed inference).
-- `decision.committed_by_user?` (boolean) — explicit "log this decision"
-  commits vs ambient auto-capture (calibration pack lane 3a).
+**Purpose:** consumption of `@talchain/schemas` v0.18.0, which declares an
+optional `goal_constraints` array on `DraftGraphBlockSchema` plus a new
+`DraftGoalConstraintSchema` element type. This is the contract change that
+unblocks CEE emitting the user's extracted hard constraints on the
+`/orchestrate/v2/turn` draft wire: the block is `.strict()`, so before 0.18.0
+an undeclared `goal_constraints` key produced `unrecognized_keys` →
+`validateEgress` failure → an `EGRESS_CONTRACT_VIOLATION` envelope replacing
+every draft response.
 
-No CEE import breaks: 0.16.0 only adds new optional fields plus one new
-exported enum. `DecisionRecordSchema` is standalone (not wired into
-`OlumiResponseSchema` or any other producer schema), so no wire-surface
-pin, block allowlist, or sanitiser bolt is affected by this bump. Compat
-was proven both directions in the schemas PR against built dists: base
-0.15.0 hard-rejects the new fields ("Unrecognized key(s)"); a maximal
-0.15.0-shaped payload round-trips byte-identically under 0.16.0
-(761/761 package tests green).
+0.16.0 → 0.18.0 is strictly additive (verified against built dists at both
+refs, 24/24 differential checks incl. positive controls):
 
-Source: `olumi-schemas` `main` @ `45b8bcae3f66a43c849eab16c157323092f43cee`
-(v0.16.0; the publish workflow's "Publish to GitHub Packages" step
-succeeded — only its post-publish "Trigger propagation" step failed on a
-missing token); built via `npm ci && npm run prepublishOnly && npm pack`
-from a fresh clone at that commit (761/761 package tests passed at build
-time).
+- **0.17.0** — new `./fixtures` subpath export only (100 new exports, all
+  behind that subpath; no existing entry point rewired).
+- **0.18.0** — `DraftGraphBlockSchema.goal_constraints?` +
+  `DraftGoalConstraintSchema` / `DraftGoalConstraint` exported from
+  `/boundary`. `.strict()` is RETAINED on the block — the fix for a dropped
+  field at this seam is to DECLARE it, never to loosen the block.
 
-**Checksum verification:** `vendor/talchain-schemas-0.16.0.tgz.sha256`
+Zero exports removed or renamed across the whole 0.16.0 → 0.18.0 range; no
+pre-existing validator tightened; no schema gained or lost strictness. The
+`OlumiResponseSchema.draft_graph` projection is
+`DraftGraphBlockSchema.omit({ type: true })`, so it inherits the new field
+automatically — that projection is the wire location the UI reads.
+
+Note the new element schema is deliberately NOT the existing
+`boundary/run.ts` `GoalConstraintSchema`: that is a different payload at a
+different seam (V2 run-request; `id` + `bound`, no `node_id`). They are kept
+distinct and differently named on purpose — a same-named twin is a defect
+class this programme has already paid for.
+
+Source: olumi-schemas PR #10 head `8291ca03d2702a80b0cbd6629857ed92c34a6b26`;
+built via `npm ci && npm run build && npm pack` from a fresh blobless clone at
+that commit (918/918 package tests green at that head).
+
+**Checksum verification:** `vendor/talchain-schemas-0.18.0.tgz.sha256`
 holds the canonical sha256 hash
-(`65adade472d57f94e86c5f5199a1aa37b133dcbab9519e68d4a1106b206219d6`).
+(`86c44b042d5423fcc87041941925beec53a726a439915562195c040f8c97ce7d`).
 The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
-tarball bytes against this manifest on every push.
+tarball bytes against this manifest on every push. The byte-identical
+tarball is vendored into DecisionGuideAI on branch
+`fix/goal-constraints-ui-surface` — same hash, so the two consumers are
+provably on the same contract.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
-restores the prior `vendor/talchain-schemas-0.15.0.tgz`, its
+restores the prior `vendor/talchain-schemas-0.16.0.tgz`, its
 `.sha256` manifest, the prior `package.json` `file:` reference, and
-this README's prior state — i.e. the entire pin returns to v0.15.0 in
+this README's prior state — i.e. the entire pin returns to v0.16.0 in
 one commit. Re-run `pnpm install` after the revert to repopulate
 `node_modules` from the restored tarball.
 
@@ -62,7 +72,8 @@ Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
 0.11.0 at coaching-amendment, 0.12.0 at DL-7 edit-graph fact,
 0.13.0 at V5 Phase 3A block types, 0.14.0 at enrichment-v1 CEE-first
-adoption, 0.15.0 at the reasoning/held_proposal/ui_directive wave) are
+adoption, 0.15.0 at the reasoning/held_proposal/ui_directive wave,
+0.16.0 at the decision-record additive wave) are
 removed on each bump — only the currently-pinned version lives in
 `vendor/`.
 
