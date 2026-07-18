@@ -531,6 +531,84 @@ function isNonCrowningWinSentence(sentence: string): boolean {
   );
 }
 
+/**
+ * Minimum stem length for inflection-tolerant token matching. 4 absorbs the
+ * common English verb/noun inflections a narrative applies to an option label
+ * ("Raise" -> "Raising"/"Raised", "price" -> "prices"/"pricing") while keeping
+ * enough characters to discriminate between distinct words.
+ */
+const LABEL_STEM_MIN = 4;
+
+function normaliseTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Does a narrative token satisfy a label token?
+ *
+ *  - NUMERALS must match EXACTLY. "Raise prices by 8 percent" and "Raise prices
+ *    by 15 percent" differ only in the numeral, so collapsing 8/15 (or 8/80)
+ *    under a prefix rule would destroy the exact distinction the wrong-winner
+ *    net exists to draw.
+ *  - SHORT tokens (< LABEL_STEM_MIN) match exactly — they are function words
+ *    ("by", "of") where a prefix rule buys nothing and costs precision.
+ *  - Everything else matches on a shared leading stem, which is what absorbs
+ *    inflection.
+ */
+function labelTokenMatches(narrativeTok: string, labelTok: string): boolean {
+  if (/[0-9]/.test(labelTok)) return narrativeTok === labelTok;
+  if (labelTok.length < LABEL_STEM_MIN) return narrativeTok === labelTok;
+  return narrativeTok.startsWith(labelTok.slice(0, LABEL_STEM_MIN));
+}
+
+/**
+ * True when `narrative` names `label` as a contiguous run of tokens, tolerating
+ * inflection (see {@link labelTokenMatches}).
+ *
+ * WHY THIS EXISTS (measured, 2026-07-18). The previous rule was
+ * `narrative.toLowerCase().includes(label.toLowerCase())` — an exact substring
+ * match. Over N=5 live paired runs on a realistic decision the composed review
+ * fell back to the monolith 5/5 times, and the dominant violation every time was
+ * "narrative_summary does not name the winning option" against a narrative that
+ * named it perfectly well: the label was "Raise prices by 8 percent" and haiku
+ * wrote the natural gerund "Raising prices by 8 percent leads narrowly, ...".
+ * One letter of inflection rejected a coherent, correctly-crowned, fully-
+ * grounded review and burned a paid gpt-4.1 fallback on it — a false positive
+ * that alone put the fallback rate at 100% against a <10% promotion criterion.
+ *
+ * Used by BOTH the presence check and the wrong-winner semantic check. They
+ * must share one predicate: a tolerant presence check paired with a strict
+ * semantic check would be strictly worse than either alone — an inflected
+ * crowning of the runner-up would pass presence AND be invisible to semantics,
+ * so a genuinely contradictory review would ship.
+ *
+ * Deliberately NOT a synonym/inflection lookup table: CLAUDE.md trap 12 — a
+ * list a human must remember to sync with reality drifts silently and the drift
+ * reads as green. The tolerance is derived from the label's own tokens.
+ */
+export function narrativeNamesOption(narrative: string, label: string): boolean {
+  const labelToks = normaliseTokens(label);
+  if (labelToks.length === 0) return false;
+  const narrToks = normaliseTokens(narrative);
+  if (narrToks.length < labelToks.length) return false;
+  for (let i = 0; i <= narrToks.length - labelToks.length; i += 1) {
+    let all = true;
+    for (let j = 0; j < labelToks.length; j += 1) {
+      if (!labelTokenMatches(narrToks[i + j]!, labelToks[j]!)) {
+        all = false;
+        break;
+      }
+    }
+    if (all) return true;
+  }
+  return false;
+}
+
 function sentenceList(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+|\n+/)
@@ -558,8 +636,7 @@ function claimedNonWinnerLeaders(
     // Only OVERALL crownings are wrong-winner candidates; a per-dimension /
     // historical / attention sentence that merely names the runner-up is not.
     if (isNonCrowningWinSentence(sentence)) continue;
-    const lower = sentence.toLowerCase();
-    const named = optionLabels.filter((l) => l.length > 2 && lower.includes(l.toLowerCase()));
+    const named = optionLabels.filter((l) => l.length > 2 && narrativeNamesOption(sentence, l));
     if (named.length === 1 && named[0]!.toLowerCase() !== winnerLabel.toLowerCase()) {
       wrong.push(named[0]!);
     }
@@ -663,7 +740,7 @@ export function checkComposedConsistency(
     }
   }
   const narrative = typeof out.narrative_summary === 'string' ? out.narrative_summary : '';
-  if (ctx.winnerLabel.length > 0 && !narrative.toLowerCase().includes(ctx.winnerLabel.toLowerCase())) {
+  if (ctx.winnerLabel.length > 0 && !narrativeNamesOption(narrative, ctx.winnerLabel)) {
     fatal.push('narrative_summary does not name the winning option (possible wrong-winner headline)');
   }
   // Winner SEMANTICS (Codex r2): substring presence is not enough — a
