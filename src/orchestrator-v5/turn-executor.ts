@@ -2447,6 +2447,8 @@ export async function runTurnExecutor(
             latencyMs: 0,
           },
           llmCallCount: 0,
+          // Deterministic routes synthesise exactly one action — nothing dropped.
+          droppedActions: [],
         };
         routingResult = synthesisedRouting;
         llmCallsUsed = 0;
@@ -2786,6 +2788,8 @@ export async function runTurnExecutor(
                   latencyMs: 0,
                 },
                 llmCallCount: 0,
+                // Deterministic ordinal resolution — single action, nothing dropped.
+                droppedActions: [],
               };
               llmCallsUsed = 0;
               sonnetTextForLog = '';
@@ -3151,6 +3155,8 @@ export async function runTurnExecutor(
                   latencyMs: 0,
                 },
                 llmCallCount: 0,
+                // Deterministic label resolution — single action, nothing dropped.
+                droppedActions: [],
               };
               llmCallsUsed = 0;
               sonnetTextForLog = '';
@@ -3441,6 +3447,8 @@ export async function runTurnExecutor(
               latencyMs: 0,
             },
             llmCallCount: 0,
+            // Deterministic clarification resume — single action, nothing dropped.
+            droppedActions: [],
           };
           routingResult = synthesisedRouting;
           llmCallsUsed = 0;
@@ -4048,6 +4056,8 @@ export async function runTurnExecutor(
               latencyMs: 0,
             },
             llmCallCount: 0,
+            // Deterministic value update — single action, nothing dropped.
+            droppedActions: [],
           };
           routingResult = synthesisedRouting;
           llmCallsUsed = 0;
@@ -6874,6 +6884,53 @@ export async function runTurnExecutor(
           ...composedOk,
           assistant_text: `Applying: ${echoLabel}.${rest}`,
         };
+      }
+      // POC-BOARD 5b — honest compound-edit disclosure. The router applies only
+      // the FIRST olumi_action the model emits; any additional actions in the
+      // same response (e.g. "set X to 70% AND set Y to 80%") were previously
+      // dropped SILENTLY (tryInterpret's .find picked block[0]). We still apply
+      // ONE op per turn — a multi-apply would need the commit/atomic path owned
+      // elsewhere — so instead of leaving the user believing their whole request
+      // landed, we DISCLOSE the un-applied action(s) here, naming them. This is a
+      // tunable disclosure (no structural-mutation claim), so the STEP 6.6
+      // structural-claim gate and the detect-only mutation-language guard below
+      // are unaffected; and it fires only on the execute-success compose path
+      // (a real op WAS applied), never on clarify / decline branches.
+      // `?? []` is defensive for TEST mocks of routeWithToolUse that return a
+      // hand-built RoutingToolCallResult without the field; every PRODUCTION
+      // construction site sets it (tsc-enforced — the field is required).
+      const droppedActions =
+        routingResult.type === 'tool_call' ? (routingResult.droppedActions ?? []) : [];
+      if (composedOk !== null && droppedActions.length > 0) {
+        const droppedLabels = droppedActions
+          .map((d) => d.label)
+          .filter((l): l is string => typeof l === 'string' && l.trim().length > 0);
+        const n = droppedActions.length;
+        const subject =
+          droppedLabels.length > 0
+            ? droppedLabels.map((l) => `'${l}'`).join(', ')
+            : n === 1
+              ? 'your other request'
+              : 'your other requests';
+        // P2 (5b review): the disclosure copy must not itself read as a
+        // first-person edit. An earlier draft ended "…and I'll make that
+        // change too" — the verb "make" is in BROAD_STRUCTURAL_CLAIM_PATTERNS
+        // (mutation-language.ts), so when block[0] is a NON-mutating execute
+        // handler (run_analysis / what_would_flip / explain — handlerEmitted-
+        // MutatedGraph is false, so STEP 6.6 does not short-circuit to `pass`),
+        // classifyStructuralClaim scored the composed text `broad_no_intent`
+        // and emitted a spurious `V5StructuralSuccessClaimCandidateMiss`. The
+        // wording below carries NO verb from STRUCT_EDIT_VERB_BASE /
+        // MUTATION_PATTERNS / the broad list, so the disclosure is inert to
+        // every mutation-language detector while staying honest and natural.
+        const disclosure =
+          n === 1
+            ? `I've done the first part of your request, but haven't applied the ` +
+              `other change yet (${subject}). Tell me if you'd like that too.`
+            : `I've done the first part of your request, but haven't applied the ` +
+              `other ${n} changes yet (${subject}). Tell me if you'd like those too.`;
+        const base = composedOk.assistant_text ? `${composedOk.assistant_text} ` : '';
+        composedOk = { ...composedOk, assistant_text: `${base}${disclosure}` };
       }
       stagesCompleted.push('compose');
     } else if (

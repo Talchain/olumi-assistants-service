@@ -140,6 +140,25 @@ import { log } from '../../utils/telemetry.js';
 // Result + error types
 // -----------------------------------------------------------------------
 
+/**
+ * POC-BOARD 5b — a render-safe summary of an `olumi_action` the model emitted
+ * BEYOND the first in a single routing response (a compound / parallel tool
+ * call, e.g. "set X to 70% AND set Y to 80%"). The downstream execute path can
+ * apply only ONE action per turn (`proposal`), so these are the extra actions
+ * it did NOT apply. Carried on the result so the turn can DISCLOSE the
+ * un-applied ops honestly instead of `.find()`-dropping them silently.
+ *
+ * Best-effort: `handler_id`/`label` are populated when the extra tool_use block
+ * parses as a valid execute proposal; an extra block that fails to parse still
+ * counts (both fields null) so the disclosure never under-reports the drop.
+ */
+export interface DroppedRoutingAction {
+  /** Handler id of the un-applied action, or null if it did not parse. */
+  readonly handler_id: string | null;
+  /** Entity label of the un-applied action, or null if absent / unparsed. */
+  readonly label: string | null;
+}
+
 export interface RoutingToolCallResult {
   readonly type: 'tool_call';
   readonly proposal: ToolCallResponse;
@@ -150,6 +169,14 @@ export interface RoutingToolCallResult {
    * 1 on a successful first attempt; 2 when REPAIR_ONCE was used.
    */
   readonly llmCallCount: number;
+  /**
+   * POC-BOARD 5b — additional `olumi_action` tool_use blocks the model emitted
+   * in the SAME response beyond the applied `proposal`. Empty on the
+   * overwhelming majority of turns (single action). Non-empty only when the
+   * model returned a compound/parallel tool call; the turn executor reads this
+   * to disclose the un-applied actions rather than dropping them silently.
+   */
+  readonly droppedActions: readonly DroppedRoutingAction[];
 }
 
 export interface RoutingTextOnlyResult {
@@ -814,6 +841,33 @@ type Interpretation =
   | { kind: 'parse_failed'; detail: string }
   | { kind: 'non_repairable'; error: RoutingError };
 
+/**
+ * POC-BOARD 5b — render-safe summary of an EXTRA `olumi_action` tool_use block
+ * (one the model emitted beyond the applied first action). Best-effort: a block
+ * that parses as an execute proposal yields its handler_id + entity label; a
+ * block with the wrong tool name or malformed input still returns an entry
+ * (both fields null) so the count of dropped actions is never under-reported.
+ */
+function summariseDroppedAction(
+  block: Extract<ToolResponseBlock, { type: 'tool_use' }>,
+): DroppedRoutingAction {
+  if (block.name === OLUMI_ACTION_TOOL_NAME) {
+    try {
+      const parsed = parseToolCallResponse(block.input);
+      if (parsed.intent_class === 'execute') {
+        return {
+          handler_id: parsed.action.handler_id,
+          label: parsed.action.entity.label ?? null,
+        };
+      }
+    } catch {
+      // Best-effort — an unparseable extra block still COUNTS as a dropped
+      // action (both fields null); it must never be silently omitted.
+    }
+  }
+  return { handler_id: null, label: null };
+}
+
 function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interpretation {
   if (result.stop_reason === 'max_tokens') {
     return {
@@ -826,11 +880,21 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
     };
   }
 
-  const toolUse = result.content.find((b) => b.type === 'tool_use');
+  // POC-BOARD 5b — capture ALL tool_use blocks, not just the first. The
+  // downstream execute path applies exactly one action per turn (`proposal`),
+  // so `toolUse` (block[0]) stays the applied action — but any extra blocks the
+  // model emitted in the SAME response (a compound/parallel tool call, e.g.
+  // "set X to 70% AND set Y to 80%") are surfaced on `droppedActions` for
+  // honest disclosure. Previously `result.content.find(...)` picked block[0]
+  // and the rest were dropped SILENTLY (the CONFIRMED-LIVE honesty defect).
+  const toolUseBlocks = result.content.filter(
+    (b): b is Extract<ToolResponseBlock, { type: 'tool_use' }> => b.type === 'tool_use',
+  );
+  const toolUse = toolUseBlocks[0];
   const textBlocks = result.content.filter((b): b is { type: 'text'; text: string } => b.type === 'text');
   const joinedText = textBlocks.map((b) => b.text).join('\n').trim();
 
-  if (toolUse && toolUse.type === 'tool_use') {
+  if (toolUse) {
     if (toolUse.name !== OLUMI_ACTION_TOOL_NAME) {
       return {
         kind: 'non_repairable',
@@ -851,6 +915,7 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
           orientationText: joinedText,
           rawResult: result,
           llmCallCount,
+          droppedActions: toolUseBlocks.slice(1).map(summariseDroppedAction),
         },
       };
     } catch (err) {
