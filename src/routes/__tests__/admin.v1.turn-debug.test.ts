@@ -45,6 +45,7 @@ const BASE_ENTRY = {
     parsed_quantities: [],
     patterns_matched: ['P1'],
     timeout: false,
+    degraded: false,
     compromise_match_count: 0,
     duration_ms: 12,
     message_too_long: false,

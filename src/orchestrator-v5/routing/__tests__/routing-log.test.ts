@@ -47,6 +47,7 @@ function baseInput(overrides: Partial<RoutingLogInput> = {}): RoutingLogInput {
     cqe_patterns_matched: overrides.cqe_patterns_matched ?? [],
     cqe_duration_ms: overrides.cqe_duration_ms ?? 0,
     cqe_timeout: overrides.cqe_timeout ?? false,
+    cqe_degraded: overrides.cqe_degraded ?? false,
     cqe_message_too_long: overrides.cqe_message_too_long ?? false,
     cqe_word_range_missed: overrides.cqe_word_range_missed ?? false,
     cqe_ambiguous_phrasing_detected:
