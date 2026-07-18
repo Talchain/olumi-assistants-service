@@ -52,9 +52,22 @@ import {
  * "apply it", "go ahead", and chip-click equivalents. The pattern
  * extends those bases with common politeness suffixes ("please",
  * "now", "thanks") and natural variants ("yes do", "yeah ok").
+ *
+ * P1a (real-user run 2026-07-17, scenario c510030e): the GM held ask
+ * copy invites "Reply yes to continue", and a real user naturally
+ * OVER-answers with a DOUBLED confirmation ("Yes, go ahead" / "yeah
+ * go ahead" / "ok proceed") — the exact P1a repro. The pre-fix pattern
+ * recognised a SINGLE confirmation token only, so those fell to the LLM
+ * router, which role-played agreement while nothing applied. The
+ * OPTIONAL leading-affirmative prefix below (`yes|yeah|yep|sure|ok`
+ * plus a comma/whitespace/"and" separator) lets one affirmative precede
+ * a second confirmation phrase, so a doubled confirmation resolves the
+ * lone live hold. It stays anchored start-to-end and carries NO edit
+ * verb / quantity, so the negative gate still owns fresh requests that
+ * merely start with "yes" ("yes change the timeframe", "yes option 2").
  */
 export const SHORT_CONFIRM_PATTERN =
-  /^\s*(?:yes|yep|yeah|sure|ok(?:ay)?|do(?:\s+(?:it|that))?|go(?:\s+ahead)?|apply(?:\s+(?:it|them|these))?|confirm(?:ed)?|please\s+do|yeah\s+ok|yes\s+do(?:\s+it)?)(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:(?:yes|yep|yeah|sure|ok(?:ay)?)[,\s]+(?:and\s+)?)?(?:yes|yep|yeah|sure|ok(?:ay)?|do(?:\s+(?:it|that))?|go(?:\s+ahead)?|apply(?:\s+(?:it|them|these))?|confirm(?:ed)?|please\s+do|proceed|yeah\s+ok|yes\s+do(?:\s+it)?)(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * Negative gate. If any of these appear in the message, the user is
