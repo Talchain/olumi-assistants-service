@@ -108,6 +108,57 @@ describe('tryShortConfirmResume — apply_proposed_change resumable', () => {
     });
     expect(out.matched).toBe(false);
   });
+
+  // ── P1a (real-user run 2026-07-17, scenario c510030e) ────────────────────
+  // The GM held ask copy invites "Reply yes to continue"; a real user
+  // naturally OVER-answers with a doubled confirmation ("Yes, go ahead" —
+  // the exact P1a repro). The pre-fix SHORT_CONFIRM_PATTERN recognised a
+  // SINGLE confirmation token only, so "yes" + a second confirmation phrase
+  // fell to the LLM router, which role-played agreement while NOTHING
+  // applied. These compound affirmatives carry no edit verb / quantity, so
+  // the negative gate must not block them — the single live hold resumes.
+  it.each([
+    'Yes, go ahead',
+    'yes go ahead',
+    'yes, go ahead.',
+    'yeah go ahead',
+    'ok go ahead',
+    'yes proceed',
+    'yes, do it',
+    'sure go ahead',
+    'yes and do it',
+    'Yes go ahead please',
+  ])(
+    'compound confirmation %j with one live GM hold returns pending_action (P1a)',
+    (msg) => {
+      const out = tryShortConfirmResume({
+        message: msg,
+        pendingActions: [applyProposed()],
+        currentTurnIndex: 0,
+        nowMs: NOW_MS,
+      });
+      expect(out.matched).toBe(true);
+      if (!out.matched) return;
+      expect(out.dispatch).toBe('pending_action');
+    },
+  );
+
+  // Negative guard for the widened pattern: a leading "yes" followed by a
+  // FRESH request (not a confirmation phrase) must still fall through.
+  it.each([
+    'yes I think so',
+    'yes change the timeframe',
+    'yes option 2 is best',
+    'yes but lower the bar',
+  ])('widened pattern still falls through on non-confirmation %j', (msg) => {
+    const out = tryShortConfirmResume({
+      message: msg,
+      pendingActions: [applyProposed()],
+      currentTurnIndex: 0,
+      nowMs: NOW_MS,
+    });
+    expect(out.matched).toBe(false);
+  });
 });
 
 describe('tryShortConfirmResume — PROPOSAL_CONFIRM phrases (P0-2)', () => {

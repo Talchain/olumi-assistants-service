@@ -283,6 +283,78 @@ describe('executeGmHeldResume', () => {
     expect(outcome.fact.noop).toBe(false);
   });
 
+  // ── P1b (real-user run 2026-07-17, scenario c510030e) ─────────────────────
+  // A confirmed mixed batch must be ATOMIC: if a tunable value op's write
+  // does not survive canonicalisation onto the persisted graph (the live
+  // repro: the edit pipeline's canonical `data` field spelling — and the
+  // slash-keyed `observed_state/value` — are STRIPPED by GraphV3, so
+  // `applyPatchOperations` silently no-ops the value while the structural
+  // siblings land), the WHOLE batch must refuse rather than persist a
+  // partial under a wholesale "Confirmed" receipt.
+  const VALUE_GRAPH = {
+    goal_node_id: 'g-profit',
+    schema_version: 'v3',
+    nodes: [
+      { id: 'g-profit', kind: 'goal', label: 'Profit' },
+      { id: 'fac_setup', kind: 'factor', label: 'Setup Complexity', observed_state: { value: 0.1 } },
+    ],
+    edges: [
+      { from: 'fac_setup', to: 'g-profit', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    ],
+  };
+  const RISK_ADD = {
+    op: 'add_node',
+    path: 'risk_dq',
+    value: { id: 'risk_dq', kind: 'risk', label: 'Data quality' },
+  };
+  const RISK_LINK = {
+    op: 'add_edge',
+    path: 'risk_dq::g-profit',
+    value: { from: 'risk_dq', to: 'g-profit', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' },
+  };
+
+  it.each([
+    ['data spelling', { op: 'update_node', path: 'fac_setup', value: { data: { value: 0.5 } } }],
+    ['slash-keyed spelling', { op: 'update_node', path: 'fac_setup', value: { 'observed_state/value': 0.5 } }],
+  ])(
+    'P1b: mixed batch whose tunable value op (%s) is stripped by canonicalisation refuses the WHOLE batch (no partial apply)',
+    (_label, tunable) => {
+      const outcome = executeGmHeldResume(
+        executeInput({
+          operations: [tunable, RISK_ADD, RISK_LINK] as never,
+          currentGraph: VALUE_GRAPH,
+          currentGraphHash: hashOf(VALUE_GRAPH),
+        }),
+      );
+      // Must NOT execute a partial: the structural ops landing while the
+      // value silently drops is exactly the trust-spine defect.
+      expect(outcome.status).not.toBe('executed');
+    },
+  );
+
+  it('P1b control: a tunable value op that DOES survive (observed_state) still executes the mixed batch and sets the value', () => {
+    const outcome = executeGmHeldResume(
+      executeInput({
+        operations: [
+          { op: 'update_node', path: 'fac_setup', value: { observed_state: { value: 0.5 } } },
+          RISK_ADD,
+          RISK_LINK,
+        ] as never,
+        currentGraph: VALUE_GRAPH,
+        currentGraphHash: hashOf(VALUE_GRAPH),
+      }),
+    );
+    expect(outcome.status).toBe('executed');
+    if (outcome.status !== 'executed') return;
+    const fac = (outcome.mutatedGraph.nodes as Array<Record<string, unknown>>).find(
+      (n) => n.id === 'fac_setup',
+    );
+    expect((fac?.observed_state as Record<string, unknown>).value).toBe(0.5);
+    expect(
+      (outcome.mutatedGraph.nodes as Array<Record<string, unknown>>).some((n) => n.id === 'risk_dq'),
+    ).toBe(true);
+  });
+
   it('a "yes" never overrides integrity: unknown op kind re-referees rejected → referee_blocked', () => {
     // Bypass the read-side Zod (defence-in-depth pin on the referee layer).
     const outcome = executeGmHeldResume(
