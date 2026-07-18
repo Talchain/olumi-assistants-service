@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { type CeeTaskId, interpolatePrompt } from './schema.js';
 import { getPromptStore, isDbBackedStoreHealthy } from './store.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
-import { config } from '../config/index.js';
+import { config, shouldUseStagingPrompts } from '../config/index.js';
 import {
   isTrackedKey,
   mapSource,
@@ -67,7 +67,15 @@ export interface LoadPromptOptions {
   variables?: Record<string, string | number>;
   /** Force use of default prompt (bypass store) */
   forceDefault?: boolean;
-  /** Use staging version instead of production */
+  /**
+   * Use the PMS `staging_version` pointer instead of `active_version`.
+   *
+   * DERIVED, NOT DEFAULTED-TO-FALSE. When omitted this resolves from
+   * `shouldUseStagingPrompts()` — i.e. the deployment's own prompt
+   * environment — so a caller that forgets to pass it cannot silently
+   * serve/report the PRODUCTION pointer on a staging deployment. Pass an
+   * explicit boolean only to override that (e.g. A/B experiment variants).
+   */
   useStaging?: boolean;
   /** Specific version to load */
   version?: number;
@@ -155,7 +163,16 @@ export async function loadPrompt(
   const {
     variables = {},
     forceDefault = false,
-    useStaging = false,
+    // DERIVE, DON'T MIRROR. This used to default to `false`, which silently
+    // meant "serve the PRODUCTION pointer" for every caller that omitted it.
+    // On a staging deployment that produced a per-task divergence: the
+    // routing snapshot (which passes useStaging explicitly, see
+    // src/orchestrator-v5/routing/prompt-loader.ts) honoured its
+    // `staging_version` pin while the readiness probe
+    // (src/prompts/readiness.ts) reported `active_version` for every other
+    // tracked key — so /admin/prompts/status, /admin/prompts/reload and
+    // /healthz all MISREPORTED which prompt version was live.
+    useStaging = shouldUseStagingPrompts(),
     version,
     correlationId,
     trigger = 'runtime',
