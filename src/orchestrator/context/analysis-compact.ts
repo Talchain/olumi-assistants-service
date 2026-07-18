@@ -649,6 +649,39 @@ function deriveTopDrivers(
 }
 
 // ============================================================================
+// Constraint-infeasible winner copy (trust-spine board #1, CEE half)
+// ============================================================================
+
+/**
+ * Honest note for a C1 HARD violation (the winner's constraint satisfaction
+ * probability is at/below the hard floor — "does not satisfy" is
+ * definitionally supported). SINGLE SOURCE of this copy — the V5 display
+ * projection and the V4 prompt serializer both render the note verbatim from
+ * the summary; neither re-derives wording. No banned recommendation
+ * vocabulary, no digits, no structural-claim verbs.
+ */
+export function buildConstraintViolationNote(optionLabel: string): string {
+  return (
+    `${optionLabel} leads on outcome but does not satisfy a hard constraint of this decision — ` +
+    'say the constraint conflict plainly and do not present this option as the choice to take.'
+  );
+}
+
+/**
+ * Honest note for a C2 JOINT-GOAL tension (the winner's joint-goal probability
+ * is well below its constraint satisfaction). A TENSION, not a proven
+ * violation — the copy says "may not satisfy", never "does not satisfy"
+ * (adversarial-review P2: reusing the violation copy here overstates the
+ * claim).
+ */
+export function buildConstraintTensionNote(optionLabel: string): string {
+  return (
+    `${optionLabel} leads on outcome but may not satisfy a hard constraint of this decision — ` +
+    'flag this tension and do not present the lead as settled.'
+  );
+}
+
+// ============================================================================
 // Main Export
 // ============================================================================
 
@@ -817,8 +850,17 @@ export function compactAnalysis(
       if (feasibility.infeasible) {
         summary.winner.constraint_infeasible = true;
         summary.winner.recommendation_suppressed = true;
+        // Copy is split by criterion (adversarial-review P2): a hard violation
+        // ("does not satisfy") and a joint-goal tension ("may not satisfy") are
+        // different claims and must not share wording. Both state only what the
+        // detection supports about THE WINNER — never a claim about the other
+        // options' feasibility (the round-1 "no eligible option currently meets
+        // it" clause was false on the live capture, where the runner-up DID
+        // satisfy the constraint).
         summary.constraint_infeasible_note =
-          `${summary.winner.option_label} leads on outcome but does not satisfy a hard constraint; no eligible option currently meets it.`;
+          feasibility.kind === 'hard_violation'
+            ? buildConstraintViolationNote(summary.winner.option_label)
+            : buildConstraintTensionNote(summary.winner.option_label);
       }
     }
 

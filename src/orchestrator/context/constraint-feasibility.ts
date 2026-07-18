@@ -38,6 +38,18 @@ export interface WinnerConstraintFeasibility {
   infeasible: boolean;
   /** The violated constraint id (for honest copy / telemetry), or null. */
   constraintId: string | null;
+  /**
+   * WHICH criterion fired (adversarial-review P2 — the two are different
+   * claims and must carry different copy):
+   *   'hard_violation' — C1: the winner's constraint satisfaction probability
+   *     is at/below the hard floor. "Does not satisfy the constraint" is
+   *     definitionally supported.
+   *   'joint_tension' — C2: the winner's joint-goal probability is well below
+   *     its constraint satisfaction. A TENSION, not a proven violation —
+   *     copy must say "in tension with", never "does not satisfy".
+   * Null when `infeasible` is false.
+   */
+  kind: 'hard_violation' | 'joint_tension' | null;
 }
 
 /**
@@ -139,20 +151,20 @@ export function deriveWinnerConstraintInfeasibility(
   winnerOptionId: string | null | undefined,
 ): WinnerConstraintFeasibility {
   if (typeof winnerOptionId !== "string" || winnerOptionId.length === 0) {
-    return { infeasible: false, constraintId: null };
+    return { infeasible: false, constraintId: null, kind: null };
   }
 
   const entry = findWinnerEntry(envelope, winnerOptionId);
-  if (entry === null) return { infeasible: false, constraintId: null };
+  if (entry === null) return { infeasible: false, constraintId: null, kind: null };
 
   const probs = readConstraintSatisfactionProbs(entry);
-  if (probs.length === 0) return { infeasible: false, constraintId: null };
+  if (probs.length === 0) return { infeasible: false, constraintId: null, kind: null };
 
   const min = probs.reduce((lowest, cur) => (cur.probability < lowest.probability ? cur : lowest));
 
   // C1 — hard violation (live-proven).
   if (min.probability <= HARD_VIOLATION_FLOOR) {
-    return { infeasible: true, constraintId: min.id };
+    return { infeasible: true, constraintId: min.id, kind: 'hard_violation' };
   }
 
   // C2 — joint-goal tension (the array-shape / red-test discriminator).
@@ -160,8 +172,8 @@ export function deriveWinnerConstraintInfeasibility(
     ? entry.probability_of_joint_goal
     : null;
   if (joint !== null && joint < min.probability * JOINT_TENSION_THRESHOLD) {
-    return { infeasible: true, constraintId: min.id };
+    return { infeasible: true, constraintId: min.id, kind: 'joint_tension' };
   }
 
-  return { infeasible: false, constraintId: null };
+  return { infeasible: false, constraintId: null, kind: null };
 }

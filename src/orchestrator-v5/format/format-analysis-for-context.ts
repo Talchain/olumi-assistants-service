@@ -64,6 +64,15 @@ export interface DisplaySafeAnalysisOption {
    * Display prose only: the `win_probability` string is untouched.
    */
   readonly win_probability_note?: string;
+  /**
+   * Trust-spine board #1 (CEE half). Literal `true` when this option is the
+   * flagged constraint-infeasible winner (CEE_CONSTRAINT_INFEASIBLE_GATE ON) —
+   * passed through from the raw projection so the coach LLM sees the flag on
+   * the option itself, next to the probability it would otherwise narrate as
+   * a clean lead. ABSENT otherwise (key-absence byte-identity). The paired
+   * honest wording lives in {@link DisplaySafeAnalysis.constraint_infeasible_note}.
+   */
+  readonly constraint_infeasible?: true;
 }
 
 /**
@@ -82,6 +91,8 @@ export interface DisplaySafeRankedOption {
   readonly outcome_band?: string;
   /** ROADMAP 2.54 (a) — see {@link DisplaySafeAnalysisOption.win_probability_note}. */
   readonly win_probability_note?: string;
+  /** Trust-spine #1 — see {@link DisplaySafeAnalysisOption.constraint_infeasible}. */
+  readonly constraint_infeasible?: true;
 }
 
 /** Lane 21 — banded tipping-risk entry. `risk` is decision-language prose. */
@@ -212,6 +223,15 @@ export interface DisplaySafeAnalysis {
    * infers "no tipping points exist" from a truncated section).
    */
   readonly truncation_note?: string;
+  /**
+   * Trust-spine board #1 (CEE half) — the honest constraint note, verbatim
+   * from `compactAnalysis` (via the raw projection). Present exactly when
+   * the leading option is flagged constraint-infeasible
+   * (CEE_CONSTRAINT_INFEASIBLE_GATE ON); ABSENT otherwise. NEVER dropped by
+   * the char-budget guard (it is not in {@link DISPLAY_ANALYSIS_TRUNCATION_ORDER})
+   * — constraint truthfulness outranks breadth, same doctrine as `goal_fit`.
+   */
+  readonly constraint_infeasible_note?: string;
 }
 
 /**
@@ -309,7 +329,7 @@ function isNearZeroWinProbability(probability: number): boolean {
 function formatOption(
   option: Pick<
     ContextPackAnalysisOption,
-    'label' | 'probability' | 'goal_fit_probability' | 'outcome_mean'
+    'label' | 'probability' | 'goal_fit_probability' | 'outcome_mean' | 'constraint_infeasible'
   >,
 ): DisplaySafeAnalysisOption {
   const outcomeBand =
@@ -330,6 +350,9 @@ function formatOption(
       : {}),
     // Lane 30 fix 3 — banded modelled outcome (never the raw mean).
     ...(outcomeBand !== null ? { outcome_band: outcomeBand } : {}),
+    // Trust-spine #1 (CEE half) — pass the constraint-infeasible winner flag
+    // through to the LLM-facing option. Key absent when unset (byte-identity).
+    ...(option.constraint_infeasible === true ? { constraint_infeasible: true as const } : {}),
   };
 }
 
@@ -768,6 +791,17 @@ export function formatAnalysisForContext(
   // when the producer reported no tier (no fabricated confidence claim).
   if (typeof raw.confidence_tier === 'string' && raw.confidence_tier.trim().length > 0) {
     out.confidence_tier = confidenceTierPhrase(raw.confidence_tier.trim());
+  }
+
+  // Trust-spine #1 (CEE half) — the honest constraint note, verbatim. Set
+  // BEFORE the budget guard but never droppable by it (not in the truncation
+  // order): constraint truthfulness outranks breadth, like goal_fit. Key
+  // absent when unset (flag off / feasible winner) → byte-identity.
+  if (
+    typeof raw.constraint_infeasible_note === 'string' &&
+    raw.constraint_infeasible_note.length > 0
+  ) {
+    out.constraint_infeasible_note = raw.constraint_infeasible_note;
   }
 
   // Lane 30 fix 4 — runtime char-budget guard (graceful, disclosed).

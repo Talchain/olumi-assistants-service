@@ -73,13 +73,14 @@ const ARRAY_SHAPE_INFEASIBLE_LEADER = {
 } as unknown as V2RunResponseEnvelope;
 
 describe('deriveWinnerConstraintInfeasibility — single-source detection (both wire shapes)', () => {
-  it('LIVE object shape: flags the over-budget winner (constraint prob 0)', () => {
+  it('LIVE object shape: flags the over-budget winner (constraint prob 0) as a HARD violation', () => {
     const r = deriveWinnerConstraintInfeasibility(
       LIVE_WIRE_INFEASIBLE_LEADER as unknown as Record<string, unknown>,
       'opt_premium',
     );
     expect(r.infeasible).toBe(true);
     expect(r.constraintId).toBe('c_budget');
+    expect(r.kind).toBe('hard_violation');
   });
 
   it('LIVE object shape: does NOT flag the feasible option (constraint prob 1)', () => {
@@ -97,6 +98,7 @@ describe('deriveWinnerConstraintInfeasibility — single-source detection (both 
     );
     expect(r.infeasible).toBe(true);
     expect(r.constraintId).toBe('budget');
+    expect(r.kind).toBe('joint_tension');
   });
 
   it('ARRAY shape: does NOT flag the feasible option (joint 0.85 ≥ 0.9×0.7)', () => {
@@ -115,7 +117,7 @@ describe('deriveWinnerConstraintInfeasibility — single-source detection (both 
 });
 
 describe('compactAnalysis — constraint-infeasible winner flag (gate ON via opts)', () => {
-  it('flag ON: marks the ARRAY-shape winner infeasible + suppressed + honest note', () => {
+  it('flag ON: marks the ARRAY-shape winner infeasible + suppressed + TENSION copy (P2: a joint-goal tension is not a proven violation)', () => {
     const s = compactAnalysis(ARRAY_SHAPE_INFEASIBLE_LEADER, undefined, {
       constraintInfeasibleGate: true,
     })!;
@@ -123,18 +125,27 @@ describe('compactAnalysis — constraint-infeasible winner flag (gate ON via opt
     expect(s.winner.constraint_infeasible).toBe(true);
     expect(s.winner.recommendation_suppressed).toBe(true);
     expect(s.constraint_infeasible_note).toBeDefined();
-    expect(s.constraint_infeasible_note).toContain('does not satisfy a hard constraint');
+    // C2 fired (constraint prob 0.9 is above the hard floor; joint 0.02 «
+    // 0.63) → tension-accurate copy, NEVER the violation copy.
+    expect(s.constraint_infeasible_note).toContain('may not satisfy a hard constraint');
+    expect(s.constraint_infeasible_note).not.toContain('does not satisfy');
     // No banned recommendation vocabulary leaks into the coach note.
     expect(s.constraint_infeasible_note!.toLowerCase()).not.toMatch(/recommend|winner|best/);
   });
 
-  it('flag ON on the LIVE object wire shape: marks the over-budget winner infeasible', () => {
+  it('flag ON on the LIVE object wire shape: hard-violation copy for the over-budget winner', () => {
     const s = compactAnalysis(LIVE_WIRE_INFEASIBLE_LEADER, undefined, {
       constraintInfeasibleGate: true,
     })!;
     expect(s.winner.option_id).toBe('opt_premium');
     expect(s.winner.constraint_infeasible).toBe(true);
     expect(s.winner.recommendation_suppressed).toBe(true);
+    // C1 fired (constraint prob 0) → the violation claim is supported.
+    expect(s.constraint_infeasible_note).toContain('does not satisfy a hard constraint');
+    // P2 corollary: the note claims nothing about OTHER options' feasibility
+    // (the runner-up DOES satisfy the constraint on the live capture).
+    expect(s.constraint_infeasible_note!.toLowerCase()).not.toContain('no eligible option');
+    expect(s.constraint_infeasible_note!.toLowerCase()).not.toMatch(/recommend|winner|best/);
   });
 
   it('flag OFF (no opts): byte-identical — winner unflagged, no note', () => {

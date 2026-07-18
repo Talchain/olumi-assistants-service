@@ -118,6 +118,13 @@ const ContextPackAnalysisOptionSchema = z
      * outcome distribution for the option.
      */
     outcome_mean: z.number().finite().optional(),
+    /**
+     * Trust-spine board #1 (CEE half) — literal `true` when this option is
+     * the flagged constraint-infeasible winner
+     * (CEE_CONSTRAINT_INFEASIBLE_GATE ON). ABSENT otherwise (never `false`),
+     * matching the pack's key-absence style.
+     */
+    constraint_infeasible: z.literal(true).optional(),
   })
   .strict();
 
@@ -204,6 +211,12 @@ const ContextPackAnalysisSchema = z
      * none; optional so the chip-click narrow projection stays valid.
      */
     confidence_tier: z.string().nullable().optional(),
+    /**
+     * Trust-spine board #1 (CEE half) — the honest constraint note from
+     * `compactAnalysis`, threaded verbatim. Absent when the gate is off or
+     * the winner is feasible.
+     */
+    constraint_infeasible_note: z.string().optional(),
   })
   .strict();
 
