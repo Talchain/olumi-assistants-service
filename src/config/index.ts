@@ -913,6 +913,17 @@ const ConfigSchema = z.object({
     // reason; the user-facing prose stays banned-token clean. Default OFF — flag-off
     // is byte-identical to today (bare rejection). Paul-gated before enablement.
     editCapSplitEnabled: booleanString.default(false),
+    // POC-BOARD #5c — connectivity/orphan named refusal (CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL).
+    // When true, an edit whose FINAL post-batch state genuinely fails connectivity
+    // (a newly-added/orphaned item has no path through to the goal) no longer
+    // dead-ends on a GENERIC wholesale error that names nothing. Instead it returns
+    // an honest, BOUNDED refusal that NAMES the specific offending item(s) so the
+    // user knows exactly what to connect — within-turn atomicity is preserved
+    // (nothing is partially applied; the whole edit is declined and left as-is).
+    // Structured violation codes/counts stay in the rejection reason; the
+    // user-facing prose stays banned-token clean. Default OFF — flag-off is
+    // byte-identical to today (the generic/Cap-2A copy). Paul-gated before enablement.
+    editConnectivityNamedRefusalEnabled: booleanString.default(false),
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
@@ -1515,6 +1526,8 @@ function parseConfig(): Config {
       editInterventionRoutingEnabled: env.CEE_EDIT_INTERVENTION_ROUTING_ENABLED,
       // POC-BOARD #6 — over-cap edit split path (default OFF)
       editCapSplitEnabled: env.CEE_EDIT_CAP_SPLIT,
+      // POC-BOARD #5c — connectivity/orphan named refusal (default OFF)
+      editConnectivityNamedRefusalEnabled: env.CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs
