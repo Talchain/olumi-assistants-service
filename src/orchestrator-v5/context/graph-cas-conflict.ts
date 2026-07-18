@@ -70,6 +70,36 @@ import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
  */
 export type GraphCasMode = 'off' | 'observe' | 'enforce';
 
+/**
+ * Runtime mode for the ATOMIC graph CAS commit RPC (env
+ * `CEE_V5_GRAPH_CAS_RPC`). Distinct from `GraphCasMode` (the app-side observe
+ * hook above): this selects which commit RPC `SupabaseSessionStore.append()`
+ * calls for graph-bearing writes, closing the SELECT-then-write TOCTOU window
+ * inside the DB transaction (append_turn_atomic_v3, FOR UPDATE + in-txn
+ * compare).
+ *  - 'off'     — call append_turn_atomic_v2 exactly as today (default; safe
+ *                against the un-migrated schema — v3 need not exist).
+ *  - 'shadow'  — call v3 threading the CAS params with p_cas_enforce=false:
+ *                the UPDATE stays unconditional (v2-equivalent) but stamps
+ *                scenarios.graph_identity_hash. No write is ever rejected.
+ *  - 'enforce' — call v3 with p_cas_enforce=true: a stale-base graph write is
+ *                REJECTED atomically (SQLSTATE OLGC1 → GraphStaleWriteError),
+ *                never clobbered.
+ * Requires migration 20260717120000 (Paul-gated) live before any non-'off'
+ * value is used.
+ */
+export type GraphCasRpcMode = 'off' | 'shadow' | 'enforce';
+
+/**
+ * Custom PostgreSQL SQLSTATE raised by append_turn_atomic_v3 when an
+ * enforced in-transaction CAS detects a stale-base graph write. PostgREST
+ * surfaces it verbatim in the Supabase error `code` field, exactly as the
+ * Model Management RPCs surface MV001/MV404/MV409 (store-adapter.ts). The
+ * store keys on this to raise a typed 409-class GraphStaleWriteError rather
+ * than a generic commit failure.
+ */
+export const GRAPH_CAS_RPC_CONFLICT_SQLSTATE = 'OLGC1';
+
 export type GraphCasConflictCategory =
   | 'unavailable'
   | 'first_write'

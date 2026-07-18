@@ -222,6 +222,46 @@ function createEnvEnforcedMode(
 }
 
 /**
+ * Three-state mode for the ATOMIC graph CAS commit RPC
+ * (CEE_V5_GRAPH_CAS_RPC). Values: 'off' | 'shadow' | 'enforce'
+ * (lowercased + trimmed).
+ *
+ * Policy:
+ * - Invalid or empty values fall back to the code default ('off') with a
+ *   console warning — NEVER a boot failure (a typo must not take the service
+ *   down, and must not accidentally cut over to a migration that may not be
+ *   live yet).
+ * - NO prod auto-downgrade (deliberately unlike `createEnvEnforcedMode`): v3's
+ *   compare is in-transaction under FOR UPDATE, so 'enforce' is a genuine
+ *   atomicity guarantee rather than the app-side best-effort A3 check. It is
+ *   still default-off and Paul-gated, and requires migration 20260717120000 to
+ *   be live before it is set to any non-'off' value.
+ *
+ * @param defaultValue - Code default ('off').
+ * @param settingName  - Env var name for logging.
+ */
+function createGraphCasRpcMode(
+  defaultValue: "off" | "shadow" | "enforce",
+  settingName: string,
+) {
+  return z
+    .union([z.string(), z.undefined()])
+    .transform((val): "off" | "shadow" | "enforce" => {
+      if (val === undefined) return defaultValue;
+      const lower = val.toLowerCase().trim();
+      if (lower === "off" || lower === "shadow" || lower === "enforce") {
+        return lower;
+      }
+      if (lower === "") return defaultValue;
+      console.warn(
+        `[CONFIG] ${settingName}: invalid value "${val}" — falling back to "${defaultValue}" ` +
+          `(valid values: off | shadow | enforce)`,
+      );
+      return defaultValue;
+    });
+}
+
+/**
  * Environment-enforced three-state mode for the Graph Management live wiring
  * (CEE_GRAPH_MANAGEMENT_MODE). Values: 'off' | 'shadow' | 'live'
  * (lowercased + trimmed). Mirrors `createEnvEnforcedMode` (the A3 CAS flag)
@@ -501,6 +541,24 @@ const ConfigSchema = z.object({
     // writes pre-RPC via GraphStaleWriteError (rides the existing
     // StateCommitFailedError handling; no wire-shape change).
     graphCasMode: createEnvEnforcedMode("off", "CEE_V5_GRAPH_CAS_MODE"),
+    // CEE_V5_GRAPH_CAS_RPC — ATOMIC graph CAS via append_turn_atomic_v3
+    // ('off' | 'shadow' | 'enforce'). Distinct from CEE_V5_GRAPH_CAS_MODE
+    // (which is the app-side OBSERVE hook): this selects which commit RPC the
+    // store calls for graph-bearing writes and closes the SELECT-then-write
+    // TOCTOU window inside the DB transaction (FOR UPDATE + in-txn compare).
+    // Requires migration 20260717120000 (Paul-gated) to be LIVE before any
+    // non-'off' value is set — v3 does not exist pre-migration.
+    // 'off' (default): call append_turn_atomic_v2 exactly as today — zero
+    //   behavioural change, safe against the un-migrated schema.
+    // 'shadow': call v3 threading the CAS params with p_cas_enforce=FALSE, so
+    //   the UPDATE stays unconditional (v2-equivalent) but stamps
+    //   scenarios.graph_identity_hash; no write is ever rejected.
+    // 'enforce': call v3 with p_cas_enforce=TRUE — a stale-base graph write is
+    //   REJECTED atomically (SQLSTATE OLGC1 → GraphStaleWriteError, 409-class
+    //   refresh-reconfirm), never clobbered. Unlike CEE_V5_GRAPH_CAS_MODE
+    //   'enforce', this is a true atomicity guarantee, so it is NOT
+    //   auto-downgraded in prod — but it stays default-off and Paul-gated.
+    graphCasRpc: createGraphCasRpcMode("off", "CEE_V5_GRAPH_CAS_RPC"),
     // CEE_GRAPH_MANAGEMENT_MODE — Graph Management referee live wiring
     // ('off' | 'shadow' | 'live'). Gates the edit_graph → CandidateMutation
     // Envelope → referee seam in edit-graph-dispatch.ts.
@@ -526,6 +584,18 @@ const ConfigSchema = z.object({
     // containment argument (VERBATIM reasoning bypasses the egress
     // claim-safety/forbidden-phrase cage by ruling).
     reasoningCaptureEnabled: booleanString.default(false),
+    // CEE_COACH_THINKING_DISABLED — latency lever (POC-BOARD item 9). When ON,
+    // the V5 coach/routing turn (orchestrator-v5/routing/route-with-tool-use)
+    // sends `thinking: { type: 'disabled' }` on its chatWithTools call to
+    // suppress Sonnet-5 ADAPTIVE thinking on THAT CALL ONLY (initial +
+    // max_tokens retry + REPAIR_ONCE, via the firstCallArgs spread). The
+    // measurement spike (real staging, N=5) put median coach wall time at
+    // ~26s with adaptive thinking vs ~9s disabled, but output tokens dropped
+    // sharply — so enablement is Paul-gated behind a coaching-quality verdict
+    // (speed must not outrank correctness). Default OFF; flag-off is
+    // byte-identical (the routing call omits `thinking`, exactly as today).
+    // See acceptance-evidence/latency-thinking-disable-2026-07-17/.
+    coachThinkingDisabled: booleanString.default(false),
     // CEE_ANSWER_TEXT_REQUIRED — belt-and-braces hardening for the
     // coach/converse `answer_text` channel (PR #380 / ROADMAP 1.38). Default
     // OFF; sequenced BEHIND the prompt track's prompt-only fix for the same
@@ -1339,8 +1409,10 @@ function parseConfig(): Config {
       orchestratorV5: env.ENABLE_V5_ORCHESTRATOR,
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
       graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
+      graphCasRpc: env.CEE_V5_GRAPH_CAS_RPC,
       graphManagementMode: env.CEE_GRAPH_MANAGEMENT_MODE,
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
+      coachThinkingDisabled: env.CEE_COACH_THINKING_DISABLED,
       answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
       answerShapeEnforced: env.CEE_ANSWER_SHAPE_ENFORCED,
       uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,

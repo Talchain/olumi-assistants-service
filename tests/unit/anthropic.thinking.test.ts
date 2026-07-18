@@ -116,7 +116,12 @@ describe("chatWithToolsAnthropic — thinking", () => {
     expect(body.temperature).toBe(1);
   });
 
-  it("does not include thinking block when thinking is disabled", async () => {
+  // POC-BOARD item 9 (CEE_COACH_THINKING_DISABLED): an EXPLICIT {type:'disabled'}
+  // must be TRANSMITTED to the API, not dropped. Sonnet 5 runs adaptive thinking
+  // when the request omits `thinking`, so transmitting the disable is the only
+  // way to suppress it on the coach/routing turn. (Before this change the tools
+  // path silently swallowed a disable — the chat path already transmitted it.)
+  it("transmits thinking:{type:'disabled'} to the API when thinking is disabled", async () => {
     const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
     await chatWithToolsAnthropic({
       system: "sys",
@@ -127,8 +132,25 @@ describe("chatWithToolsAnthropic — thinking", () => {
     });
 
     const [body] = mockCreate.mock.calls[0];
-    expect(body.thinking).toBeUndefined();
+    expect(body.thinking).toEqual({ type: "disabled" });
+    // Temperature must stay caller-controlled (0 here) — disabling thinking does
+    // NOT force temperature=1 (only enabled thinking does).
     expect(body.temperature).toBe(0);
+  });
+
+  it("omits the thinking field entirely when thinking is absent (byte-identical default path)", async () => {
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-4-6",
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    // No thinking field at all — adaptive thinking stays on (today's behaviour).
+    expect(body.thinking).toBeUndefined();
+    expect("thinking" in body).toBe(false);
   });
 
   it("auto-raises max_tokens to budget + 1024 when no override is set", async () => {

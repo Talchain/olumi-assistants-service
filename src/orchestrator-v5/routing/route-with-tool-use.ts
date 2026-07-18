@@ -587,6 +587,16 @@ export async function routeWithToolUse(
     tool_choice: { type: 'auto' },
     temperature: 0,
     maxTokens: V5_ROUTING_MAX_OUTPUT_TOKENS,
+    // CEE_COACH_THINKING_DISABLED (POC-BOARD item 9) — latency lever. Flag OFF
+    // OMITS `thinking` entirely (byte-identical to today: Sonnet 5 runs adaptive
+    // thinking on this call, ~26s median). Flag ON sends {type:'disabled'} to
+    // suppress adaptive thinking on the coach/routing turn ONLY (~9s median in
+    // the N=5 staging spike). This spread propagates to the max_tokens-retry and
+    // REPAIR_ONCE calls, which reuse firstCallArgs. Enablement is Paul-gated
+    // behind the coaching-quality verdict — see the flag's config/index.ts note.
+    ...(config.features.coachThinkingDisabled
+      ? { thinking: { type: 'disabled' as const } }
+      : {}),
   };
 
   assertAnthropicMessageProtocol(firstCallArgs.messages);
