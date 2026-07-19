@@ -345,13 +345,16 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     });
     const body = res.json();
 
-    // draft_graph defaults to gpt-4.1 (openai) — should be skipped when provider=anthropic
-    const draftRow = body.tasks.find((t: { task: string }) => t.task === "draft_graph");
-    expect(draftRow).toBeDefined();
-    expect(draftRow.source).toBe("provider_mismatch");
-    expect(draftRow.model).toBeNull();
-    expect(typeof draftRow.resolution_note).toBe("string");
-    expect(draftRow.resolution_note.length).toBeGreaterThan(0);
+    // options defaults to gpt-5.2 (openai) and has no CEE_MODEL_* override key,
+    // so it stays an OpenAI default — should be skipped when provider=anthropic.
+    // (draft_graph is no longer a valid probe here: its default is now the
+    // anthropic model claude-sonnet-4-6, reconciled to live staging.)
+    const optionsRow = body.tasks.find((t: { task: string }) => t.task === "options");
+    expect(optionsRow).toBeDefined();
+    expect(optionsRow.source).toBe("provider_mismatch");
+    expect(optionsRow.model).toBeNull();
+    expect(typeof optionsRow.resolution_note).toBe("string");
+    expect(optionsRow.resolution_note.length).toBeGreaterThan(0);
   });
 
   it("bias_check (anthropic default) is still resolved when provider=anthropic", async () => {

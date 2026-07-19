@@ -107,5 +107,27 @@ export function logResolvedTaskModels(): void {
       { event: 'model.task_resolved', task, model, source },
       'Task model resolved',
     );
+
+    // Loud fallback (no throw, no flag): a task that supports a CEE_MODEL_*
+    // override (it has a legacy config key) but has NONE set is running on the
+    // checked-in TASK_MODEL_DEFAULTS value. Surface it at WARN so a dropped or
+    // never-set env var is VISIBLE in startup logs rather than silently landing
+    // on a checked-in (possibly stale) default. Tasks with no CEE_MODEL_*
+    // mechanism (info-only above) do not warn — they have no var to drop.
+    const legacyKey = TASK_TO_LEGACY_MODEL_KEY[task];
+    if (source === 'code_default' && legacyKey) {
+      log.warn(
+        {
+          event: 'model.default_fallback',
+          task,
+          model,
+          config_key: legacyKey,
+        },
+        `No CEE_MODEL_* override set for task "${task}"; serving checked-in ` +
+          `default "${model}". If a Render env var was dropped this is the ` +
+          `silent-regression signal; otherwise confirm TASK_MODEL_DEFAULTS is ` +
+          `current for this task.`,
+      );
+    }
   }
 }

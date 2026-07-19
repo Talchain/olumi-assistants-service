@@ -78,20 +78,46 @@ export type CeeTask =
   | "routing";
 
 /**
- * Default model assignments per task
+ * Default model assignments per task — THE authoritative checked-in map.
  *
- * Default models are OpenAI. Anthropic models (claude-sonnet-4-6) require
- * explicit CEE_MODEL_* env var overrides:
- *   CEE_MODEL_ORCHESTRATOR=claude-sonnet-4-6
- *   CEE_MODEL_DRAFT=claude-sonnet-4-6
- *   CEE_MODEL_EDIT_GRAPH=claude-sonnet-4-6
- * repair_graph and decision_review remain on gpt-4.1.
+ * ─────────────────────────────────────────────────────────────────
+ * Source of truth
+ * ─────────────────────────────────────────────────────────────────
+ * These values are reconciled to the models that actually SERVE on
+ * staging (cee-staging, Render srv-d4slpaili9vc73eiq4og). Render's
+ * `CEE_MODEL_*` env vars are OVERRIDE-ONLY: when one is set it wins over
+ * the default here (router precedence step 3 > step 4); when one is
+ * dropped, the task lands on THIS map. Keeping the two in sync is what
+ * makes a dropped env var safe rather than a silent model regression.
+ *
+ * Runtime truth is the PER-REQUEST log ("model.resolution" /
+ * GET /admin/v1/turn-debug/:turn_id) — that reflects prompt-store
+ * model_config overrides applied per turn, which are invisible here and
+ * at startup. This map + the startup "model.task_resolved" log are
+ * advisory; the per-request log is authoritative for any given call.
+ *
+ * Last reconciled to live staging env: 2026-07-19.
+ *   Live CEE_MODEL_* on Render (override-only):
+ *     CEE_MODEL_DRAFT_GRAPH   = claude-sonnet-4-6  (→ draft_graph)
+ *     CEE_MODEL_EDIT_GRAPH    = claude-sonnet-4-6
+ *     CEE_MODEL_ORCHESTRATOR  = claude-sonnet-5
+ *     CEE_MODEL_REPAIR        = gpt-4.1  (registered pin: gpt-4.1-2025-04-14)
+ *     CEE_MODEL_DECISION_REVIEW = gpt-4.1  (registered pin: gpt-4.1-2025-04-14)
+ *   Not set on Render → these tasks serve the default below directly.
+ *
+ * ⚠ Provider-mismatch caveat: when LLM_PROVIDER is unset/openai (as on
+ * staging), the router SKIPS an anthropic-provider task default rather
+ * than switching providers (router.ts task_default branch). So if an
+ * anthropic-model env var (draft/edit/orchestrator) is dropped, the task
+ * falls through to the GLOBAL model, not the anthropic default listed
+ * here. The startup WARN in model-resolution-logger.ts surfaces exactly
+ * that "running on checked-in default" condition so the drop is visible.
  *
  * Model selection by task type:
  * - Fast tier (gpt-4.1): Simple, speed-sensitive tasks (gpt-5-mini deprecated - empty response issues)
- * - Quality tier (gpt-4o): Primary drafting - reliable JSON output
+ * - Quality tier (claude-sonnet): Drafting / editing / orchestration (live on staging)
  * - Quality tier (claude-sonnet-4): Bias detection - excellent reasoning
- * - Premium tier (gpt-5.2): Advanced reasoning for critique/repair
+ * - Premium tier (gpt-5.2): Advanced reasoning for options/critique
  */
 export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   // Fast tier - simple generation, low latency
@@ -101,18 +127,17 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   explainer: "gpt-4.1-2025-04-14",
   evidence_helper: "gpt-4.1-2025-04-14",
   sensitivity_coach: "gpt-4.1-2025-04-14",
-  // Quality tier - optimized for specific tasks
-  // Override for Anthropic benchmarking: set CEE_MODEL_DRAFT=claude-sonnet-4-6
-  draft_graph: "gpt-4.1-2025-04-14",  // Reverted to gpt-4.1 (2026-03-18)
-  edit_graph: "gpt-4o",  // Quality tier - graph editing (override via CEE_MODEL_EDIT_GRAPH)
+  // Quality tier - reconciled to live staging CEE_MODEL_* (2026-07-19)
+  draft_graph: "claude-sonnet-4-6",  // live CEE_MODEL_DRAFT_GRAPH (was gpt-4.1-2025-04-14)
+  edit_graph: "claude-sonnet-4-6",  // live CEE_MODEL_EDIT_GRAPH (was gpt-4o)
   bias_check: "claude-sonnet-4-20250514",  // Excellent reasoning for bias detection
-  orchestrator: "gpt-4o",  // Orchestrator Phase 3 + tool-calling (override via CEE_MODEL_ORCHESTRATOR)
-  repair_graph: "gpt-4.1-2025-04-14",  // Reverted to gpt-4.1 (2026-03-18)
+  orchestrator: "claude-sonnet-5",  // live CEE_MODEL_ORCHESTRATOR (was gpt-4o)
+  repair_graph: "gpt-4.1-2025-04-14",  // registered pin of live CEE_MODEL_REPAIR=gpt-4.1
   // Premium tier - advanced reasoning for complex tasks
   options: "gpt-5.2",
   suggest_options: "gpt-5.2",  // Alias for options task
   critique_graph: "gpt-5.2",
-  decision_review: "gpt-4.1-2025-04-14",  // Fast tier - narrative synthesis from ISL results
+  decision_review: "gpt-4.1-2025-04-14",  // registered pin of live CEE_MODEL_DECISION_REVIEW=gpt-4.1
   // V6 dual-draft M2 review — display default only (D3 recommendation).
   // NEVER governs a live call: the dual-draft gate requires the explicit
   // CEE_MODEL_M2_REVIEW env override to match the resolved model.

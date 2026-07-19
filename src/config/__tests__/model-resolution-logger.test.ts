@@ -11,9 +11,13 @@ const mockConfig = {
 };
 
 const logInfoCalls: Array<{ obj: Record<string, unknown>; msg: string }> = [];
+const logWarnCalls: Array<{ obj: Record<string, unknown>; msg: string }> = [];
 const mockLog = {
   info: vi.fn((obj: Record<string, unknown>, msg: string) => {
     logInfoCalls.push({ obj, msg });
+  }),
+  warn: vi.fn((obj: Record<string, unknown>, msg: string) => {
+    logWarnCalls.push({ obj, msg });
   }),
 };
 
@@ -33,7 +37,9 @@ const ALL_TASKS = [
 describe('logResolvedTaskModels', () => {
   beforeEach(() => {
     logInfoCalls.length = 0;
+    logWarnCalls.length = 0;
     mockLog.info.mockClear();
+    mockLog.warn.mockClear();
     mockConfig.cee.models = {};
     mockConfig.cee.modelSelection.taskModels = {};
   });
@@ -109,5 +115,54 @@ describe('logResolvedTaskModels', () => {
     );
     expect(draftLine?.obj['source']).toBe('env_task_tier');
     expect(draftLine?.obj['model']).toBe('gpt-task-tier');
+  });
+
+  describe('loud fallback WARN (dropped/unset CEE_MODEL_* visibility)', () => {
+    it('WARNs for a legacy-mapped task running on the checked-in default', () => {
+      // No env overrides set → orchestrator (legacy key 'orchestrator') falls to
+      // its code default. That is the dropped-var signal.
+      logResolvedTaskModels();
+      const warn = logWarnCalls.find(
+        (c) => c.obj['event'] === 'model.default_fallback' && c.obj['task'] === 'orchestrator',
+      );
+      expect(warn).toBeDefined();
+      expect(warn?.obj['config_key']).toBe('orchestrator');
+      expect(typeof warn?.obj['model']).toBe('string');
+      // The task_resolved INFO line is still emitted alongside the WARN.
+      const info = logInfoCalls.find(
+        (c) => c.obj['event'] === 'model.task_resolved' && c.obj['task'] === 'orchestrator',
+      );
+      expect(info?.obj['source']).toBe('code_default');
+    });
+
+    it('does NOT WARN when the legacy CEE_MODEL_* override IS set', () => {
+      mockConfig.cee.models = { orchestrator: 'claude-sonnet-5' };
+      logResolvedTaskModels();
+      const warn = logWarnCalls.find(
+        (c) => c.obj['event'] === 'model.default_fallback' && c.obj['task'] === 'orchestrator',
+      );
+      expect(warn).toBeUndefined();
+    });
+
+    it('does NOT WARN for tasks with no CEE_MODEL_* mechanism (nothing to drop)', () => {
+      // preflight has only a task-tier key and no legacy CEE_MODEL_* var — it
+      // always serves its default by design, so it must not cry wolf.
+      logResolvedTaskModels();
+      const warn = logWarnCalls.find(
+        (c) => c.obj['event'] === 'model.default_fallback' && c.obj['task'] === 'preflight',
+      );
+      expect(warn).toBeUndefined();
+    });
+
+    it('names task and model in every fallback WARN', () => {
+      logResolvedTaskModels();
+      const warns = logWarnCalls.filter((c) => c.obj['event'] === 'model.default_fallback');
+      expect(warns.length).toBeGreaterThan(0);
+      for (const w of warns) {
+        expect(typeof w.obj['task']).toBe('string');
+        expect(typeof w.obj['model']).toBe('string');
+        expect(w.msg).toContain('CEE_MODEL_');
+      }
+    });
   });
 });
