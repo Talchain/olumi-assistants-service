@@ -179,7 +179,7 @@ describe('PR #196 regression — honest copy on fragile + near-tie', () => {
     }
   });
 
-  it('composeImprovement on near-tie result emits the fragile-aware caveat', () => {
+  it('composeImprovement on near-tie result emits the closeness caveat, not a fragility claim', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we improve?',
       analysis: { ...FIXTURE_ANALYSIS_NEAR_TIE, robustness_band: 'wide' },
@@ -189,7 +189,19 @@ describe('PR #196 regression — honest copy on fragile + near-tie', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text.toLowerCase()).toMatch(/fragile/);
+      // The PR #196 guarantee this test exists to protect — no false stability
+      // reassurance on a near-tie — is unchanged and still asserted below.
+      //
+      // S4 ROUND 4: what changed is the WORD. This fixture is a near-tie whose
+      // band is 'wide' (an unknown band, i.e. NO fragility evidence at all),
+      // and raw robustness is null. Asserting /fragile/ here required inferring
+      // instability from the margin, which is what made this composer contradict
+      // the deterministic fallback on the same run. The caveat is now the true
+      // one: the result is close. The sibling test directly above — same
+      // composer, genuinely raw-fragile input — still requires /fragile/, so
+      // the fragility claim was relocated onto the stability axis, not dropped.
+      expect(out.assistant_text.toLowerCase()).toMatch(/effectively tied/);
+      expect(out.assistant_text.toLowerCase()).not.toMatch(/fragile/);
       expect(out.assistant_text.toLowerCase()).not.toMatch(
         /smaller\s+adjustments\s+may\s+not\s+move/,
       );

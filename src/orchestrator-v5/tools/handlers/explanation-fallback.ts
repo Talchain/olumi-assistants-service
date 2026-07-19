@@ -77,7 +77,7 @@ const CANONICAL_FRAGILE_BAND = 'fragile';
  * `analysisStateSource !== 'request'`), so the argument is genuinely identical.
  */
 function classifyNearTie(
-  projection: AnalysisProjectionSummary,
+  projection: RobustnessVerdictInput,
   rawRobustness: RawRobustnessSignals | null,
 ): boolean {
   return isNearTieByMargin(projection.margin_pp, rawRobustness);
@@ -100,7 +100,7 @@ export type RobustnessVerdictMode = 'explain' | 'flip';
  * (a finite, above-threshold lead), or `indeterminate` (no finite margin and
  * not a near-tie).
  */
-type RobustnessMarginCategory = 'near_tie' | 'clear' | 'indeterminate';
+export type RobustnessMarginCategory = 'near_tie' | 'clear' | 'indeterminate';
 
 /**
  * The stability axis: how steady each option's OWN score is under variation.
@@ -110,7 +110,24 @@ type RobustnessMarginCategory = 'near_tie' | 'clear' | 'indeterminate';
  * "should hold under reasonable variation" (stability) as if they were the
  * same claim.
  */
-type RobustnessStabilityCategory = 'fragile' | 'stable' | 'moderate' | 'unknown';
+export type RobustnessStabilityCategory = 'fragile' | 'stable' | 'moderate' | 'unknown';
+
+/**
+ * The minimal analysis shape {@link composeRobustnessVerdict} reads.
+ *
+ * Declared structurally (rather than as `AnalysisProjectionSummary`) so EVERY
+ * surface that composes robustness prose can route through the one composer
+ * without first assembling a full projection. `AnalysisProjectionSummary`
+ * satisfies it as-is; the free-text advice gate adapts its own
+ * `AdviceGateAnalysis` onto it. This is what makes "one verdict, many voices"
+ * mechanically enforceable instead of a convention.
+ */
+export interface RobustnessVerdictInput {
+  readonly leading_option: { readonly label: string } | null;
+  readonly runner_up: { readonly label: string; readonly probability?: number } | null;
+  readonly margin_pp: number | null | undefined;
+  readonly robustness_band: string | null | undefined;
+}
 
 /**
  * The SINGLE joint margin+stability verdict for one post-analysis turn.
@@ -125,6 +142,20 @@ type RobustnessStabilityCategory = 'fragile' | 'stable' | 'moderate' | 'unknown'
  */
 export interface RobustnessVerdict {
   readonly headline: `${RobustnessMarginCategory}:${RobustnessStabilityCategory}`;
+  /**
+   * The margin axis as a first-class value. Surfaces that need their OWN
+   * wording (the free-text advice gate's sentences are longer and differently
+   * voiced than the fallbacks') branch on THIS instead of re-deriving the
+   * near-tie themselves. Round 4: re-derivation is exactly how the live advice
+   * gate drifted from the fallbacks.
+   */
+  readonly margin_category: RobustnessMarginCategory;
+  /**
+   * The stability axis as a first-class value. Note it is ORTHOGONAL to the
+   * margin: a near-tie does NOT make a result fragile. Reading fragility off
+   * the margin axis was the round-3 defect in the advice-gate composers.
+   */
+  readonly stability_category: RobustnessStabilityCategory;
   readonly margin_clause: string | null;
   readonly stability_clause: string | null;
   readonly stability_implies_flippability: boolean;
@@ -149,7 +180,7 @@ export interface RobustnessVerdict {
  * robustness signal; it never computes a new metric.
  */
 export function composeRobustnessVerdict(
-  projection: AnalysisProjectionSummary,
+  projection: RobustnessVerdictInput,
   rawRobustness: RawRobustnessSignals | null,
   mode: RobustnessVerdictMode,
 ): RobustnessVerdict {
@@ -205,10 +236,19 @@ export function composeRobustnessVerdict(
           ? `That is ahead of ${runner.label} by ${formatPercentagePoints(finiteMargin)}, so the lead is meaningful rather than marginal.`
           : `For ${quoteLabel(runner.label)} to overtake it, the lead of ${formatPercentagePoints(finiteMargin)} would need to close.`;
     } else {
-      // indeterminate: no finite margin and not a near-tie.
+      // indeterminate: no finite margin and not a near-tie. The probability
+      // fragment is guarded because `RobustnessVerdictInput` admits surfaces
+      // (the advice gate) whose option shape carries no probability — omit the
+      // fragment rather than render "Not available". Output is byte-identical
+      // for any caller that does supply a finite probability.
+      const runnerP = runner.probability;
+      const runnerPFragment =
+        typeof runnerP === 'number' && Number.isFinite(runnerP)
+          ? `, with a probability of ${formatProbability(runnerP)}`
+          : '';
       margin_clause =
         mode === 'explain'
-          ? `${runner.label} sits in second place, with a probability of ${formatProbability(runner.probability)}.`
+          ? `${runner.label} sits in second place${runnerPFragment}.`
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
     }
   }
@@ -256,7 +296,14 @@ export function composeRobustnessVerdict(
     // moderate, unknown, or indeterminate-stable → omit (no overclaim).
   }
 
-  return { headline, margin_clause, stability_clause, stability_implies_flippability };
+  return {
+    headline,
+    margin_category: marginCat,
+    stability_category: stabilityCat,
+    margin_clause,
+    stability_clause,
+    stability_implies_flippability,
+  };
 }
 
 function formatDriver(d: AnalysisProjectionDriver): string {
