@@ -19,21 +19,34 @@
  * This is ADDITIVE. The prose-bullet path (buildPostDraftNarrative) is
  * unchanged — these blocks ride alongside it, they do not replace it.
  *
- * Grounding rules (mirror the UI bridge exactly, fail-closed per entry):
- *   - not an array / empty / no graph to ground against → []
+ * Node-grounding is OPTIONAL (verdict B, 2026-07-19). The deployed
+ * BiasSignalSchema (@talchain/schemas 0.18.0) is
+ * `z.object({type, detail}).strict()` — the real draft engine emits signals
+ * carrying NO `target`, and `.strict()` would reject one. Requiring a
+ * resolvable target therefore skipped EVERY real signal and emitted nothing
+ * on the wire (the merged+green #537 contract test passed only because its
+ * fixture supplied a target the wire never has). So a signal that names a
+ * resolvable target now gets a grounded `target_ref`; a signal that does not
+ * still emits a card with `target_refs: []`. That is schema-legal:
+ * CoachingBlockSchema.target_refs is `z.array(TargetRefSchema)` — no
+ * `.min(1)`, so `[]` validates.
+ *
+ * Grounding rules (fail-closed on the REAL gates; grounding is best-effort):
+ *   - not an array / empty → []
  *   - malformed entry (non-object, blank/non-string type or detail) → skipped
  *   - unknown bias code (not on the shared registry allowlist) → skipped —
  *     the wire `type` is machine vocabulary, never visible copy, so an
  *     unmapped code has no honest human title (mirrors resolveBiasSignal)
- *   - ungrounded (missing / unresolvable / blank-label target, or a target
- *     node whose kind is not a boundary TargetRefKind) → skipped
- *   - identical (canonical title, target id) pairs collapse BEFORE the cap,
- *     first occurrence wins, so a duplicate can never displace a distinct
- *     third signal
+ *   - target absent / unresolvable / blank-label / non-boundary-TargetRefKind
+ *     → card STILL emits, ungrounded (`target_refs: []`); a bad kind never
+ *     reaches the wire because we only attach a resolved, valid ref
+ *   - identical canonical titles collapse BEFORE the cap, first occurrence
+ *     wins, so a duplicate can never displace a distinct third signal
  *   - at most DRAFT_BIAS_SIGNAL_CARD_CAP (2) blocks, in engine order
  *
  * NEVER synthesises: every emitted block is backed by a signal the engine
- * actually produced, grounded on a node the draft graph actually contains.
+ * actually produced; when present, the grounded ref points at a node the
+ * draft graph actually contains.
  *
  * Copy: `title` is the canonical humanised bias name (same names as the
  * DGAI bias registry — one bias, one name everywhere); `body` is the
@@ -128,6 +141,29 @@ interface GraphNodeShape {
   readonly label?: unknown;
 }
 
+/**
+ * Best-effort grounding. Returns a single resolved target_ref when `rawTarget`
+ * names a real graph node with a non-blank label AND a boundary-valid
+ * TargetRefKind; otherwise returns [] (the card still emits ungrounded). A ref
+ * with a non-boundary kind (e.g. a `decision` node) NEVER reaches the wire —
+ * the strict egress schema would reject it — so unresolvable/invalid grounding
+ * degrades to an empty array rather than an invalid ref.
+ */
+function resolveTargetRef(
+  rawTarget: unknown,
+  nodesById: ReadonlyMap<string, GraphNodeShape>,
+): CoachingBlock['target_refs'] {
+  if (typeof rawTarget !== 'string' || rawTarget.trim().length === 0) return [];
+  const targetId = rawTarget.trim();
+  const node = nodesById.get(targetId);
+  if (node === undefined) return [];
+  const label = typeof node.label === 'string' ? node.label.trim() : '';
+  if (label.length === 0) return [];
+  const kind = toTargetRefKind(node.kind);
+  if (kind === null) return [];
+  return [{ id: targetId, label, kind }];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -139,9 +175,16 @@ function truncateBody(detail: string): string {
 }
 
 export interface BuildDraftBiasSignalBlocksParams {
-  /** The engine's raw `coachingBiasSignals` (shape: {type, detail, target?}). */
+  /**
+   * The engine's raw `coachingBiasSignals`. The real wire shape is
+   * `{type, detail}` (BiasSignalSchema is `.strict()`, no target); a `target`
+   * is honoured for best-effort grounding when present but is not required.
+   */
   readonly biasSignals: ReadonlyArray<unknown> | null | undefined;
-  /** The persisted draft graph — target refs are grounded against its nodes. */
+  /**
+   * The draft graph — grounding is best-effort against its nodes. OPTIONAL:
+   * a missing graph yields ungrounded cards (`target_refs: []`), not zero.
+   */
   readonly graph: GraphV3T | null | undefined;
   /** ISO-8601 timestamp with offset, stamped on every emitted block. */
   readonly createdAt: string;
@@ -157,19 +200,22 @@ export function buildDraftBiasSignalBlocks(
   const { biasSignals, graph, createdAt } = params;
   if (!Array.isArray(biasSignals) || biasSignals.length === 0) return [];
 
+  // One lookup for best-effort grounding. The graph is OPTIONAL now — a real
+  // draft signal carries no target, so a missing/empty graph does not gate
+  // emission; it just means every card is ungrounded (`target_refs: []`).
   const rawNodes = graph?.nodes;
-  if (!Array.isArray(rawNodes) || rawNodes.length === 0) return [];
-
-  // One lookup for the whole signal loop.
   const nodesById = new Map<string, GraphNodeShape>();
-  for (const n of rawNodes as GraphNodeShape[]) {
-    if (n && typeof n.id === 'string' && n.id.length > 0) nodesById.set(n.id, n);
+  if (Array.isArray(rawNodes)) {
+    for (const n of rawNodes as GraphNodeShape[]) {
+      if (n && typeof n.id === 'string' && n.id.length > 0) nodesById.set(n.id, n);
+    }
   }
 
   const out: CoachingBlock[] = [];
-  // Identity = canonical title + resolved target id. Alias codes
-  // (anchoring / anchoring_bias) share a title, so they dedupe. First
-  // occurrence wins, BEFORE the cap.
+  // Identity = canonical title. Grounding is optional, so two signals that
+  // share a title collapse regardless of target. Alias codes (anchoring /
+  // anchoring_bias) share a title, so they dedupe too. First occurrence wins,
+  // BEFORE the cap, so a duplicate can never displace a distinct third signal.
   const seen = new Set<string>();
 
   for (const raw of biasSignals) {
@@ -182,22 +228,17 @@ export function buildDraftBiasSignalBlocks(
     const detail = typeof raw.detail === 'string' ? raw.detail.trim() : '';
     if (detail.length === 0) continue;
 
-    // Ground the signal on a real graph node with a non-blank label and a
-    // boundary-valid TargetRefKind.
-    if (typeof raw.target !== 'string' || raw.target.trim().length === 0) continue;
-    const targetId = raw.target.trim();
-    const node = nodesById.get(targetId);
-    if (node === undefined) continue;
-    const label = typeof node.label === 'string' ? node.label.trim() : '';
-    if (label.length === 0) continue;
-    const kind = toTargetRefKind(node.kind);
-    if (kind === null) continue;
+    if (seen.has(title)) continue;
+    seen.add(title);
 
-    const identity = `${title}|${targetId}`;
-    if (seen.has(identity)) continue;
-    seen.add(identity);
+    // Best-effort grounding: attach a resolved target_ref when the signal
+    // names one, else emit ungrounded. Real wire signals carry no target.
+    const targetRefs = resolveTargetRef(raw.target, nodesById);
+    const groundedId = targetRefs.length > 0 ? targetRefs[0]!.id : null;
 
-    const signalId = `draft_bias_signal:${targetId}:${title}`;
+    const signalId = groundedId !== null
+      ? `draft_bias_signal:${groundedId}:${title}`
+      : `draft_bias_signal:${title}`;
     out.push({
       block_id: deterministicBlockId(signalId),
       signal_id: signalId,
@@ -209,7 +250,7 @@ export function buildDraftBiasSignalBlocks(
       title,
       body: truncateBody(detail),
       source: 'draft_graph',
-      target_refs: [{ id: targetId, label, kind }],
+      target_refs: targetRefs,
       // Priority order IS engine order — the signals carry no rank of their
       // own. 1-based so the value is never a falsy 0.
       priority_rank: out.length + 1,
