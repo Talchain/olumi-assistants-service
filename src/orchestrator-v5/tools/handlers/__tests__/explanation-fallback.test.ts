@@ -19,6 +19,7 @@ import type {
 } from '../../../context/projection-summaries.js';
 import type { RawRobustnessSignals } from '../../../coaching/pick-raw-robustness.js';
 import type { FlipSummary } from '../../../compose/flip-proposal.js';
+import { NEAR_TIE_PP_THRESHOLD } from '../../../coaching/robustness-honesty.js';
 import {
   composeExplainFromStructureFallback,
   composeExplainResultsFallback,
@@ -190,6 +191,52 @@ describe('composeExplainResultsFallback', () => {
     });
     expect(text.toLowerCase()).not.toContain('directional');
     expect(text.toLowerCase()).not.toContain('prior run');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-composer near-tie threshold agreement (S4 mechanism-level guard).
+//
+// The explain and flip fallbacks must never contradict each other about
+// whether a result is a near-tie: that contradiction (explain said "the lead
+// is meaningful", flip said "effectively tied") is the exact S4 defect PR #270
+// fixes. Rather than trust the two composers to stay in sync by hand, this
+// pins that BOTH derive the near-tie verdict from the same SSOT threshold
+// (`NEAR_TIE_PP_THRESHOLD` via `isNearTieByMargin`). The boundary value is
+// DERIVED from the exported constant, not hardcoded, so if the threshold ever
+// moves the test moves with it — it cannot silently mirror a stale 1.0.
+//
+// At the boundary (margin == threshold, still `<=` so a near-tie): both say
+// "effectively tied". Just above it: neither does. If one composer ever
+// diverged from the shared predicate, one side of this pair would flip.
+// ---------------------------------------------------------------------------
+describe('explain/flip near-tie agreement at the SSOT threshold boundary', () => {
+  const EPS = 0.1;
+
+  it('BOTH composers say "effectively tied" at exactly NEAR_TIE_PP_THRESHOLD', () => {
+    const atBoundary: AnalysisProjectionSummary = {
+      ...ANALYSIS,
+      margin_pp: NEAR_TIE_PP_THRESHOLD,
+      robustness_band: 'fragile',
+    };
+    const explain = composeExplainResultsFallback(atBoundary);
+    const flip = composeWhatWouldFlipFallback(atBoundary);
+    expect(explain).toContain('effectively tied');
+    expect(explain).not.toContain('meaningful rather than marginal');
+    expect(flip).toContain('effectively tied');
+  });
+
+  it('NEITHER composer says "effectively tied" just above NEAR_TIE_PP_THRESHOLD', () => {
+    const justAbove: AnalysisProjectionSummary = {
+      ...ANALYSIS,
+      margin_pp: NEAR_TIE_PP_THRESHOLD + EPS,
+      robustness_band: 'stable',
+    };
+    const explain = composeExplainResultsFallback(justAbove);
+    const flip = composeWhatWouldFlipFallback(justAbove);
+    expect(explain).not.toContain('effectively tied');
+    expect(explain).toContain('meaningful rather than marginal');
+    expect(flip).not.toContain('effectively tied');
   });
 });
 
