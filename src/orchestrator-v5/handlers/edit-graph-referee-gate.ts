@@ -86,6 +86,13 @@ export interface EditGmChip {
   readonly label: string;
   readonly message: string;
   readonly action_type?: 'run_analysis';
+  /**
+   * Wave-2 ask #20 (@talchain/schemas 0.19.0 `Action.detail`): the FULL
+   * producer text behind a clamped `label` — present exactly when the label
+   * was shortened, so a consumer can always show the complete sentence the
+   * chip stands for. Never derived consumer-side.
+   */
+  readonly detail?: string;
 }
 
 export interface EditGmEvaluationInput {
@@ -424,12 +431,19 @@ export function buildHeldSupersessionNotice(
 export function buildGmHeldPublicCopy(subject: string | null): {
   label: string;
   message: string;
+  detail?: string;
 } {
   if (subject === null || !subjectIsSafe(subject)) {
     return { label: GM_HELD_CHIP_LABEL, message: GM_HELD_CHIP_MESSAGE };
   }
-  const label = clampLabel(subject.charAt(0).toUpperCase() + subject.slice(1));
-  return { label, message: `Yes, ${subject}.` };
+  const capitalised = subject.charAt(0).toUpperCase() + subject.slice(1);
+  const label = clampLabel(capitalised);
+  // Wave-2 ask #20: when clamping shortened the label, the chip carries the
+  // FULL sentence in `detail` (0.19.0 Action.detail) — absent when the
+  // label already says everything.
+  return label === capitalised
+    ? { label, message: `Yes, ${subject}.` }
+    : { label, message: `Yes, ${subject}.`, detail: capitalised };
 }
 
 // ---------------------------------------------------------------------------
@@ -684,6 +698,9 @@ function buildHeldPending(
     id: proposalRef,
     label: heldPublicCopy.label,
     message: heldPublicCopy.message,
+    // Wave-2 ask #20: full sentence behind a clamped label (0.19.0
+    // Action.detail); absent when the label already says everything.
+    ...(heldPublicCopy.detail !== undefined ? { detail: heldPublicCopy.detail } : {}),
   };
   return { pending, chip, targetKey };
 }

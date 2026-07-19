@@ -2046,6 +2046,9 @@ export async function dispatchEditGraph(
         label: c.label,
         message: c.message,
         ...(c.action_type !== undefined ? { action_type: c.action_type } : {}),
+        // Wave-2 ask #20 (0.19.0 Action.detail): full sentence behind a
+        // clamped held-confirm label.
+        ...(c.detail !== undefined ? { detail: c.detail } : {}),
       })),
       ...(gmDecision.publicReason !== null
         ? {

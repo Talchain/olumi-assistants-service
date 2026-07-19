@@ -189,3 +189,14 @@ describe('buildDraftBiasSignalBlocks — DGAI #356 producer contract', () => {
     expect(CoachingBlockSchema.safeParse(block).success).toBe(true);
   });
 });
+
+describe('wave-2 ask 1 (0.19.0) — bias blocks carry the producer guidance signals', () => {
+  it('every emitted bias block is should_fix with the 1:1 derived priority', () => {
+    const blocks = build([STATUS_QUO, ANCHORING]);
+    expect(blocks.length).toBe(2); // positive control
+    for (const b of blocks) {
+      expect(b.category).toBe('should_fix');
+      expect(b.priority).toBe(70);
+    }
+  });
+});
