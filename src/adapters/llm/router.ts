@@ -45,10 +45,16 @@ import { isValidCeeTask, getDefaultModelForTask } from "../../config/model-routi
 import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
 
 /**
- * Map task names to CEE model config keys.
- * Used to look up per-operation model from config.cee.models.* and config.cee.maxTokens.*
+ * Map task names to CEE model config keys — the router's env-override table.
+ * Used to look up per-operation model from config.cee.models.* (CEE_MODEL_*)
+ * and config.cee.maxTokens.*
+ *
+ * Exported so the model-map drift tripwire (tests/unit/model-map-drift.test.ts)
+ * can DERIVE the set of tasks the router routes an override for, rather than
+ * re-listing it — every such task must have a checked-in default in
+ * TASK_MODEL_DEFAULTS (or be declared in ROUTER_ENV_ONLY_TASKS below).
  */
-const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
+export const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
   'draft_graph': 'draft',
   'suggest_options': 'options',
   'repair_graph': 'repair',
@@ -61,6 +67,32 @@ const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> = {
   'edit_graph': 'edit_graph',
   'm2_graph_review': 'm2_review', // V6 dual-draft M2 review (CEE_MODEL_M2_REVIEW)
 };
+
+/**
+ * Router tasks that route a CEE_MODEL_* override (they appear in
+ * TASK_TO_CONFIG_KEY) but intentionally carry NO entry in TASK_MODEL_DEFAULTS.
+ * These are NOT first-class CeeTasks — isValidCeeTask() is false for them — so
+ * the router never applies a code default; with the env var unset they fall
+ * through to canonical handling / the global LLM_MODEL.
+ *
+ *   - 'validate' / 'validate_graph': the Pass-2 validation pipeline is inert on
+ *     staging (CEE_VALIDATION_PIPELINE_ENABLED=false), so no live call reaches
+ *     them; their intended model (o4-mini) is env-only via CEE_MODEL_VALIDATION.
+ *   - 'clarify_brief': the standalone POST /assist/clarify-brief route. With
+ *     CEE_MODEL_CLARIFICATION unset it currently resolves to the global model
+ *     (a known pre-existing gap, distinct from the 'clarification' CeeTask which
+ *     DOES have a checked-in default). Not fixed here — see PR notes.
+ *
+ * This list is the ONE hand-maintained exception to "every router task has a
+ * default". The drift tripwire asserts it stays EXACT (disjoint from the
+ * defaults map, every entry still present in TASK_TO_CONFIG_KEY) so it fails
+ * loud if it drifts — it never silently absorbs a new task.
+ */
+export const ROUTER_ENV_ONLY_TASKS: readonly string[] = [
+  'validate',
+  'validate_graph',
+  'clarify_brief',
+];
 
 /**
  * Get the model for a given task from CEE config.
