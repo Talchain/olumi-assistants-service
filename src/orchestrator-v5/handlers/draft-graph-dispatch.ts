@@ -20,9 +20,19 @@
  * graphOutput is available. The graph is also persisted atomically via
  * CommitMetadata.graph → append_turn_atomic → scenarios.graph for session
  * resume. The inline graph is the primary render path; Supabase is the
- * fallback for session resume. We still drop V4's GraphPatchBlock,
- * strengthen_items, draft warnings, and telemetry — those remain V4-only
- * surface not yet in the V5+UI contract.
+ * fallback for session resume. We still drop V4's GraphPatchBlock, the
+ * STRUCTURED `strengthen_items` wire field / guidance chips, draft warnings,
+ * and telemetry — those structured surfaces remain V4-only, not yet in the
+ * V5+UI contract.
+ *
+ * NOTE (corrected 2026-06-14, landed 2026-07-19): the raw object-shaped
+ * `strengthen_items` are NOT discarded on V5 — they are consumed by
+ * `buildPostDraftNarrative` (imported at the top of this file, called in the
+ * dispatch body below) to source the post-draft "assumption to check" bullet
+ * and one additional "worth a look" line in `assistant_text`. The earlier
+ * wording here ("we drop strengthen_items") referred only to the structured
+ * wire field, and was read by a later audit as a total coaching loss. It is
+ * not. Object-shaped items survive into the served narrative.
  *
  * V4 column audit (2026-04-22): V4's handleDraftGraph does not write to the
  * scenarios table directly — it returns graphOutput in its result and the

@@ -1183,6 +1183,119 @@ end-to-end pre-push on push.
 
 ---
 
+<!--
+DL-12 and DL-14 salvaged 2026-07-19 from PR #159
+(`claude/dl7-acceptance-doc`, commit `1a1aac9f`), which was closed unmerged.
+The DL-13 entry above already anticipated this: it records that DL-12 and DL-14
+were drafted on that same unmerged branch. Both were referenced from this file
+and from `staging` but defined nowhere. Text below is verbatim from #159; only
+this note is new. DL-13 was NOT re-imported — the closure-noted version above
+supersedes #159's open-status draft.
+-->
+
+## DL-12 — Auto-merge before first CI pass on V5 contract / new-file PRs
+
+**Status:** open process gate — captured 2026-05-10 during DL-7 PR B
+acceptance.
+
+**Symptom.** PR #157 (DL-7 PR B) was opened and queued with
+`gh pr merge --auto --merge`. The repo's branch protection does not
+enforce required CI status, so the PR merged 14 seconds after open
+— BEFORE the `Lint, TypeCheck, Unit Tests` job had time to start.
+CI subsequently failed on five ESLint errors that the local
+pre-push `lint-changed` hook had reported as "no changed src files"
+(see DL-13). Staging therefore briefly carried the lint errors,
+requiring follow-up PR #158 to clear them. No production impact —
+Render auto-deploy succeeded for both commits — but the gap is
+real: a PR with new source files can land on staging before any
+CI signal exists for that commit.
+
+**Lesson.** *Auto-merge MUST NOT be enabled before the first CI
+pass on PRs that introduce V5 contract surfaces or new files.* The
+risk is highest on:
+- new `src/orchestrator-v5/**` files (V5 contract),
+- new `src/orchestrator-v5/handlers/**` files,
+- new `tests/integration/**` files,
+- any change to `src/orchestrator-v5/build-turn-context.ts`,
+  `recent-changes.ts`, `freshness.ts`, or
+  `context-pack-{assembler,schema}.ts`.
+
+For these PRs, the workflow is:
+
+1. Open the PR.
+2. **Wait for the first CI run to complete.** Do NOT call
+   `gh pr merge --auto --merge` until at least
+   `Lint, TypeCheck, Unit Tests` has reported.
+3. If CI is green, then merge — auto-merge is fine from this point.
+4. If CI is red, fix on the same branch and re-run before merging.
+
+The pre-push hook is a fast feedback loop, not a replacement for
+CI. It runs locally on the laptop's view of changed files only;
+CI runs against the integrated merge commit on a clean tree, and
+catches different errors (cross-file lint, full-tree
+typecheck-with-tests, etc.).
+
+**Owner.** _unassigned_ — V5 platform / DX.
+
+**Trigger to close.** Either:
+- branch protection on `staging` is updated to require
+  `Lint, TypeCheck, Unit Tests` to pass before merge (preferred —
+  enforces the rule mechanically), OR
+- a documented checklist item is added to the V5 PR template that
+  reviewers must tick before approving auto-merge on contract /
+  new-file PRs.
+
+---
+
+---
+
+## DL-14 — Render check-suite lags actual deploy state
+
+**Status:** open process note — observed 2026-05-10 during DL-7 PR
+B deploy verification.
+
+**Symptom.** After PR #158 merged to staging at `812dbb4a`, the
+Render check-suite on the merge commit reported `queued:null` for
+several minutes. Polling for `completed:*` to confirm deploy would
+have stalled the verification indefinitely. In reality, Render's
+auto-deploy had already succeeded — confirmed via the live HTTP
+response header `x-olumi-service-build: 812dbb4` on
+`cee-staging.onrender.com`. The Render → GitHub check-reporting
+webhook updates its status independently of (and after) the
+actual deploy completion.
+
+**Lesson.** *The `x-olumi-service-build` HTTP header is the
+authoritative truth source for which commit is currently serving
+on staging.* The GitHub check-suite reported state for Render is a
+secondary indicator and can lag the deploy by minutes. Workflow
+implications:
+
+1. To confirm a deploy has landed, prefer:
+   ```
+   curl -sS -I https://cee-staging.onrender.com/ | grep -i x-olumi-service-build
+   ```
+   The 7-character SHA in the header value matches the staging
+   `git rev-parse origin/staging | head -c 7` when the deploy is
+   live.
+2. The GitHub Render check-suite is fine for retrospective audit
+   (did Render eventually report success?) but should NOT be used
+   as a synchronous "is it deployed yet?" gate.
+3. If the build header SHA matches the staging HEAD SHA, the
+   deploy is live regardless of what the check-suite says.
+
+**Owner.** _unassigned_ — DX / observability.
+
+**Trigger to close.** Either:
+- file an issue with Render about the check-suite lag (low
+  priority — the workaround above is reliable), OR
+- document the `x-olumi-service-build` header as the canonical
+  staging-deploy verification path in `Docs/CLAUDE.md` so future
+  sessions don't waste time waiting on the check-suite.
+
+---
+
+---
+
 ## How to add a new DL entry
 
 1. Number sequentially (DL-N).
