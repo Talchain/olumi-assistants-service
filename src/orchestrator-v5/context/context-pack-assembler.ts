@@ -37,6 +37,7 @@ import type {
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
+import { sha8 } from '../../utils/logger-config.js';
 import { emitContextTruncation } from './context-budget-telemetry.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
@@ -908,13 +909,23 @@ function isProbabilityValid(
   context: { call_site: string; option_label?: string | null; option_id?: string | null },
 ): value is number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+    // PII rule (14-Jul ruling): option labels are user decision content
+    // and option ids are label-derived slugs; the raw `value` is analysis
+    // output. The log carries a correlation digest of the id plus a
+    // bounded violation enum only — never the label or the raw value.
+    const violation =
+      typeof value !== 'number'
+        ? 'not_a_number'
+        : !Number.isFinite(value)
+          ? 'not_finite'
+          : 'out_of_range';
     log.warn(
       {
         event: 'analysis_projection_invalid_probability',
         call_site: context.call_site,
-        option_label: context.option_label ?? null,
-        option_id: context.option_id ?? null,
-        value: typeof value === 'number' ? value : String(value),
+        option_id_digest:
+          context.option_id != null ? sha8(context.option_id) : null,
+        violation,
       },
       'context-pack-assembler: dropping option with invalid win_probability',
     );

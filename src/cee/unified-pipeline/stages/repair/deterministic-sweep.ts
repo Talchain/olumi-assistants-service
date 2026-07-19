@@ -24,6 +24,7 @@ import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 import { log } from "../../../../utils/telemetry.js";
+import { sha8 } from "../../../../utils/logger-config.js";
 import { config } from "../../../../config/index.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { fieldDeletion, recordFieldDeletions, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
@@ -1582,13 +1583,17 @@ export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; 
         path: `nodes[${node.id}]`,
         action: `Removed ${node.category} factor "${node.label ?? node.id}" with zero edges`,
       });
-      // Per-node structured log (brief contract)
+      // Per-node structured log (brief contract). PII rule (14-Jul
+      // ruling): node ids are label-derived slugs and labels are user
+      // decision content — the log carries a correlation digest and the
+      // bounded category enum only; the raw id/label never reaches the
+      // message string (path-based redaction cannot clean interpolated
+      // prose, so the call site must not interpolate it).
       log.info({
         event: "cee.deterministic_sweep.observable_pruned",
-        node_id: node.id,
-        label: node.label ?? node.id,
+        node_id_digest: sha8(node.id),
         category: node.category,
-      }, `Pruned disconnected ${node.category} factor "${node.label ?? node.id}"`);
+      }, `Pruned disconnected ${node.category} factor with zero edges`);
     } else {
       keptNodes.push(node);
     }

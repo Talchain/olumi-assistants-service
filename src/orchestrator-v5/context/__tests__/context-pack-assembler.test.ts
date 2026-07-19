@@ -34,6 +34,7 @@ import type { HandlerFact, SessionTurn } from '@talchain/schemas/orchestrator';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 import { log } from '../../../utils/telemetry.js';
+import { sha8 } from '../../../utils/logger-config.js';
 
 import type { AnalysisResponseSummary } from '../../../orchestrator/context/analysis-compact.js';
 import { buildAnalysisFromPriorFacts } from '../analysis-fallback.js';
@@ -870,18 +871,24 @@ describe('projectAnalysis — enriched projection', () => {
       expect(pack.analysis?.leading_option).toEqual({ label: 'PromotedA', probability: 0.6 });
       expect(pack.analysis?.runner_up).toEqual({ label: 'PromotedB', probability: 0.4 });
 
-      // Telemetry contract: at least one warn carrying the dropped option's
-      // label and the offending value.
+      // Telemetry contract (14-Jul PII ruling): at least one warn
+      // correlating to the dropped option via DIGEST, with a bounded
+      // violation enum — never the raw label or the raw value.
       const matchingCalls = warnSpy.mock.calls.filter((call) => {
         const payload = call[0] as Record<string, unknown> | undefined;
         return (
           payload != null &&
           payload.event === 'analysis_projection_invalid_probability' &&
-          payload.option_label === 'OutOfScale' &&
-          payload.value === 1.5
+          payload.option_id_digest === sha8('opt-bad') &&
+          payload.violation === 'out_of_range'
         );
       });
       expect(matchingCalls.length).toBeGreaterThan(0);
+      // The raw label and raw value must NOT appear in any warn call.
+      const allWarns = JSON.stringify(warnSpy.mock.calls);
+      expect(allWarns).not.toContain('OutOfScale');
+      expect(allWarns).not.toContain('"option_label"');
+      expect(allWarns).not.toContain('1.5');
     } finally {
       warnSpy.mockRestore();
     }

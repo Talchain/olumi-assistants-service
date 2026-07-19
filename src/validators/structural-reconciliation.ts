@@ -17,6 +17,7 @@
  */
 
 import { log } from "../utils/telemetry.js";
+import { sha8 } from "../utils/logger-config.js";
 import { fieldDeletion, type FieldDeletionEvent } from "../cee/unified-pipeline/utils/field-deletion-audit.js";
 import type { GraphT, NodeT, EdgeT, FactorDataT } from "../schemas/graph.js";
 import {
@@ -571,17 +572,24 @@ export function normaliseConstraintTargets(
         dropReason = "below_threshold";
       }
 
-      // Log enhanced diagnostics (no PII — only node IDs and structural info)
+      // Log enhanced diagnostics. PII rule (14-Jul ruling): node ids are
+      // label-derived slugs and constraint labels are user decision
+      // content — the old claim here that ids are "no PII" was wrong.
+      // The log carries correlation DIGESTS, bounded enums, and counts
+      // only; nothing user-authored is interpolated into the message.
       log.info({
         event: "CONSTRAINT_DROPPED",
-        constraint_target_id: originalNodeId,
-        constraint_target_label: (constraint.label as string | undefined) ?? null,
+        constraint_target_id_digest: sha8(originalNodeId),
         exact_match_found: false,
-        fuzzy_candidates_top3: fuzzyCandidates.slice(0, 3),
+        fuzzy_candidates_top3: fuzzyCandidates.slice(0, 3).map((c) => ({
+          id_digest: sha8(c.id),
+          score: c.score,
+          prefix_match: c.prefix_match,
+        })),
         drop_reason: dropReason,
-        available_node_ids: nodeIds,
+        available_node_count: nodeIds.length,
         stage: requestId?.startsWith("unified") ? "unified" : "legacy",
-      }, `Constraint dropped: ${originalNodeId} — ${dropReason}`);
+      }, `Constraint dropped — ${dropReason}`);
 
       issues.push({
         code: "CONSTRAINT_DROPPED_NO_TARGET",
