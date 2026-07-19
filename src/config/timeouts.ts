@@ -252,6 +252,57 @@ export const PLOT_VALIDATE_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("PLOT_VALIDATE_TIMEOUT_MS", 5_000),
 );
 
+// ---------------------------------------------------------------------------
+// PLoT retry accounting
+//
+// These live HERE, alongside every other timing constant, rather than beside
+// their only consumer in plot-client.ts — because they are not private to that
+// client. `DEFAULT_LLM_HANDLER_BUDGET_MS` (orchestrator-v5/budgets.ts) is
+// DERIVED from them, and `validateTimeoutRelationships()` below asserts the
+// relationship at boot. A constant that two other modules must agree with is a
+// ladder rung, not an implementation detail.
+// ---------------------------------------------------------------------------
+
+/** Backoff delay before a PLoT retry attempt (ms) */
+export const RETRY_BACKOFF_MS = 2_000;
+
+/** Minimum remaining budget required to attempt a PLoT retry (ms) */
+export const MIN_RETRY_BUDGET_MS = 2_000;
+
+/**
+ * Safety margin subtracted from the retry's clamped timeout (ms).
+ *
+ * The retry attempt must finish, and its typed error must propagate back
+ * through the handler, BEFORE the caller's remaining budget is exhausted.
+ * Without this margin a retry sized at exactly `remaining - backoff` would
+ * return its error at the instant the budget expires, so the turn would be
+ * classified by the outer wall-clock abort rather than by this client's
+ * typed PLoTTimeoutError.
+ */
+export const RETRY_SAFETY_MARGIN_MS = 1_000;
+
+/**
+ * Headroom reserved between the V5 turn budget and the browser-proxy deadline.
+ *
+ * The turn must not merely ABORT before the proxy gives up — CEE must still
+ * have time to map the abort to a typed error, compose the OlumiResponse,
+ * serialise it, and get the bytes onto the wire. 10s is generous for that
+ * work (it is response assembly, not compute) while costing little.
+ *
+ * SIBLING of `LLM_POST_PROCESSING_HEADROOM_MS`: both reserve tail time inside
+ * an outer deadline so the layer below can turn its result into a response.
+ * `LLM_POST_PROCESSING_HEADROOM_MS` does it for the DRAFT pipeline inside
+ * `DRAFT_REQUEST_BUDGET_MS`; this one does it for the V5 TURN pipeline inside
+ * `config.proxy.browserProxyTimeoutMs`. They are independent knobs — the draft
+ * and turn pipelines have different tails — but if you are changing one, check
+ * whether the other wants the same treatment.
+ *
+ * Applied by `clampTurnBudgetToProxyDeadline` in `orchestrator-v5/budgets.ts`.
+ * That function stays there deliberately: it reads `config.proxy.*`, and this
+ * module is kept import-light (`node:process` only).
+ */
+export const TURN_RESPONSE_HEADROOM_MS = 10_000;
+
 /** Extraction utility default LLM call timeout (default: 30s, clamped 5s–5m) */
 export const EXTRACTION_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("EXTRACTION_TIMEOUT_MS", 30_000),
@@ -297,7 +348,15 @@ export const VALIDATION_PIPELINE_TIMEOUT_MS = clampTimeout(
 export const DRAFT_REQUEST_BUDGET_MS = parseTimeoutEnv("DRAFT_REQUEST_BUDGET_MS", 120_000);
 
 /** Headroom reserved for post-LLM processing (validation, repair, enrichment).
- *  The effective LLM timeout = DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS */
+ *  The effective LLM timeout = DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS
+ *
+ *  SIBLING of `TURN_RESPONSE_HEADROOM_MS`: both reserve tail time inside an
+ *  outer deadline so the layer below can turn its result into a response. This
+ *  one guards the DRAFT pipeline inside `DRAFT_REQUEST_BUDGET_MS`;
+ *  `TURN_RESPONSE_HEADROOM_MS` guards the V5 TURN pipeline inside
+ *  `config.proxy.browserProxyTimeoutMs`. Independent knobs (different tails),
+ *  but if you are changing one, check whether the other wants the same
+ *  treatment. */
 export const LLM_POST_PROCESSING_HEADROOM_MS = parseTimeoutEnv("LLM_POST_PROCESSING_HEADROOM_MS", 15_000);
 
 /** Derived: maximum time the LLM draft call may run before being aborted.
@@ -359,10 +418,35 @@ export const ADMIN_TOAST_DURATION_MS = parseDelayEnv("ADMIN_TOAST_DURATION_MS", 
 // ---------------------------------------------------------------------------
 
 /**
+ * Budget-layer values this module cannot import.
+ *
+ * The V5 budget layer (`orchestrator-v5/budgets.ts`) depends on this module,
+ * and `clampTurnBudgetToProxyDeadline` reads `config.proxy.*` — so importing
+ * either here would create a cycle and drag config loading into a module that
+ * is deliberately import-light (`node:process` only). They are INJECTED
+ * instead, and the parameter is REQUIRED: a caller cannot omit it and silently
+ * skip the rungs below. That "assume-good on absence" is the mirror hazard
+ * these checks exist to close.
+ */
+export interface BudgetLadderInputs {
+  /** Resolved per-handler inner budget — `getHandlerBudgetMs()`. */
+  handlerBudgetMs: number;
+  /** Resolved V5 turn budget — `getTurnExecutorBudgets().turn_ms`. */
+  turnBudgetMs: number;
+  /** Browser-proxy deadline — `config.proxy.browserProxyTimeoutMs`. */
+  browserProxyTimeoutMs: number;
+}
+
+/**
  * Validate timeout relationships that must hold for correct behaviour.
  * Returns an array of warning strings (empty = all good).
+ *
+ * Runs at BOOT (`server.ts`) against the RESOLVED, env-applied values. That
+ * placement is the point: a unit test only ever exercises repo defaults, so a
+ * relationship pinned solely in CI stays green while an operator's env
+ * override breaks it silently on the deployed instance.
  */
-export function validateTimeoutRelationships(): string[] {
+export function validateTimeoutRelationships(ladder: BudgetLadderInputs): string[] {
   const warnings: string[] = [];
 
   if (ROUTE_TIMEOUT_MS < HTTP_CLIENT_TIMEOUT_MS) {
@@ -434,6 +518,56 @@ export function validateTimeoutRelationships(): string[] {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // V5 budget ladder (injected — see BudgetLadderInputs)
+  //
+  // BOTH ENDS OF EACH RELATIONSHIP BELOW ARE ENV-OVERRIDABLE. That is why they
+  // are asserted here and not only in a unit test: `PLOT_RUN_TIMEOUT_MS=120000`
+  // on Render satisfies every CI assertion (which runs at repo defaults) while
+  // disabling the PLoT retry by arithmetic on the live instance.
+  // -------------------------------------------------------------------------
+
+  const minHandlerBudgetMs = PLOT_RUN_TIMEOUT_MS + RETRY_BACKOFF_MS + MIN_RETRY_BUDGET_MS;
+  if (ladder.handlerBudgetMs < minHandlerBudgetMs) {
+    warnings.push(
+      `LLM_BUDGET_HANDLER_MS (${ladder.handlerBudgetMs}ms) < PLOT_RUN_TIMEOUT_MS (${PLOT_RUN_TIMEOUT_MS}ms) + ` +
+      `RETRY_BACKOFF_MS (${RETRY_BACKOFF_MS}ms) + MIN_RETRY_BUDGET_MS (${MIN_RETRY_BUDGET_MS}ms) = ${minHandlerBudgetMs}ms — ` +
+      `after one full-length PLoT attempt the remaining budget floors at 0 and the PLoT retry becomes UNREACHABLE, ` +
+      `disabled by an accounting accident rather than by policy`,
+    );
+  }
+
+  if (ladder.handlerBudgetMs >= ladder.turnBudgetMs) {
+    warnings.push(
+      `LLM_BUDGET_HANDLER_MS (${ladder.handlerBudgetMs}ms) >= resolved V5 turn budget (${ladder.turnBudgetMs}ms) — ` +
+      `the per-handler inner budget is not nested inside the outer turn budget, so the turn's wall-clock abort ` +
+      `will fire before a handler can return its own typed error`,
+    );
+  }
+
+  if (ladder.turnBudgetMs >= ladder.browserProxyTimeoutMs) {
+    warnings.push(
+      `resolved V5 turn budget (${ladder.turnBudgetMs}ms) >= BROWSER_PROXY_TIMEOUT_MS (${ladder.browserProxyTimeoutMs}ms) — ` +
+      `the browser proxy will answer before CEE does, so users get a generic PROXY_UPSTREAM_TIMEOUT instead of ` +
+      `CEE's typed, analysis-specific error`,
+    );
+  }
+
+  if (ladder.browserProxyTimeoutMs - ladder.turnBudgetMs < TURN_RESPONSE_HEADROOM_MS) {
+    warnings.push(
+      `BROWSER_PROXY_TIMEOUT_MS (${ladder.browserProxyTimeoutMs}ms) - resolved V5 turn budget (${ladder.turnBudgetMs}ms) < ` +
+      `TURN_RESPONSE_HEADROOM_MS (${TURN_RESPONSE_HEADROOM_MS}ms) — ` +
+      `CEE may abort in time but still not finish composing and serialising its typed error before the proxy gives up`,
+    );
+  }
+
+  if (ladder.browserProxyTimeoutMs >= ROUTE_TIMEOUT_MS) {
+    warnings.push(
+      `BROWSER_PROXY_TIMEOUT_MS (${ladder.browserProxyTimeoutMs}ms) >= ROUTE_TIMEOUT_MS (${ROUTE_TIMEOUT_MS}ms) — ` +
+      `Fastify will kill the request before the proxy deadline, so the ladder is no longer strictly nested`,
+    );
+  }
+
   return warnings;
 }
 
@@ -473,6 +607,10 @@ export function getResolvedTimeouts(): Record<string, number> {
     DRAFT_REQUEST_BUDGET_MS,
     LLM_POST_PROCESSING_HEADROOM_MS,
     DRAFT_LLM_TIMEOUT_MS,
+    RETRY_BACKOFF_MS,
+    MIN_RETRY_BUDGET_MS,
+    RETRY_SAFETY_MARGIN_MS,
+    TURN_RESPONSE_HEADROOM_MS,
     SSE_HEARTBEAT_INTERVAL_MS,
     SSE_RESUME_LIVE_TIMEOUT_MS,
     SSE_RESUME_POLL_INTERVAL_MS,

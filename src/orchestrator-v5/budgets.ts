@@ -32,13 +32,19 @@
 import type { Budgets } from '@talchain/schemas/orchestrator';
 
 import { config } from '../config/index.js';
+import {
+  PLOT_RUN_TIMEOUT_MS,
+  RETRY_BACKOFF_MS,
+  MIN_RETRY_BUDGET_MS,
+  TURN_RESPONSE_HEADROOM_MS,
+} from '../config/timeouts.js';
 
 const DEFAULT_TURN_BUDGET_MS = 180_000; // 3 minutes — outer bound (see clampTurnBudgetToProxyDeadline)
 const DEFAULT_LLM_NARRATE_BUDGET_MS = 60_000; // 1 minute — per-LLM-call inner bound
 
 /**
- * Per-handler inner bound (C1+). Raised 45_000 → 85_000 (2026-07-19) in
- * LOCKSTEP with PLOT_RUN_TIMEOUT_MS 30_000 → 75_000.
+ * Per-handler inner bound (C1+). DERIVED from the PLoT retry accounting, not
+ * hand-set in lockstep with it.
  *
  * The lockstep is not cosmetic. `run_analysis` passes this value to
  * plotClient.run as `turnBudgetMs`, and the client derives "remaining budget"
@@ -49,23 +55,25 @@ const DEFAULT_LLM_NARRATE_BUDGET_MS = 60_000; // 1 minute — per-LLM-call inner
  * policy anyone chose or could find. That failure mode is silent and reads as
  * green, which is exactly the class of defect this estate keeps paying for.
  *
- * The required relationship is pinned by `budgets.invariants.test.ts`:
- *   DEFAULT_LLM_HANDLER_BUDGET_MS >= PLOT_RUN_TIMEOUT_MS
- *                                    + RETRY_BACKOFF_MS (2s)
- *                                    + MIN_RETRY_BUDGET_MS (2s)
- * 75 + 2 + 2 = 79s, so 85s clears it with 6s of headroom.
- */
-const DEFAULT_LLM_HANDLER_BUDGET_MS = 85_000;
-
-/**
- * Headroom reserved between the V5 turn budget and the browser-proxy deadline.
+ * A hand-maintained "keep this above PLOT_RUN_TIMEOUT_MS + backoff + minimum"
+ * comment is the mirror that drifts. So the requirement is COMPUTED from the
+ * very constants it depends on — including `PLOT_RUN_TIMEOUT_MS`, which is
+ * itself env-overridable, so an operator raising the PLoT cap on Render
+ * raises this floor with it instead of silently disabling the retry.
  *
- * The turn must not merely ABORT before the proxy gives up — CEE must still
- * have time to map the abort to a typed error, compose the OlumiResponse,
- * serialise it, and get the bytes onto the wire. 10s is generous for that
- * work (it is response assembly, not compute) while costing little.
+ * The 85s literal survives only as a FLOOR (`Math.max`): it preserves the
+ * measured default while the derived term dominates whenever the PLoT cap is
+ * raised. At repo defaults the derived term is 75 + 2 + 2 = 79s, so the floor
+ * wins with 6s of headroom.
+ *
+ * `validateTimeoutRelationships()` asserts the same relationship at BOOT, so
+ * an env override that breaks it is loud on the deployed instance rather than
+ * only in CI at repo defaults.
  */
-const TURN_RESPONSE_HEADROOM_MS = 10_000;
+const DEFAULT_LLM_HANDLER_BUDGET_MS = Math.max(
+  85_000,
+  PLOT_RUN_TIMEOUT_MS + RETRY_BACKOFF_MS + MIN_RETRY_BUDGET_MS,
+);
 
 /**
  * Bound the V5 turn budget by the browser-proxy deadline.

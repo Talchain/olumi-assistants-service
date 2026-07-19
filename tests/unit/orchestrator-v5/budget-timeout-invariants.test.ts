@@ -21,16 +21,20 @@ import {
   PLOT_RUN_TIMEOUT_MS,
   PLOT_RUN_BRIEF_TIMEOUT_MS,
   ROUTE_TIMEOUT_MS,
+  // IMPORTED, not hand-copied. A local `const RETRY_BACKOFF_MS = 2_000` here
+  // could not do what its comment claimed: raise the client's backoff to 10s
+  // and the real requirement becomes 87s > the 85s budget, yet a test carrying
+  // its own stale 2_000 still passes. Importing the source is what makes this
+  // suite track the product instead of a snapshot of it.
+  RETRY_BACKOFF_MS,
+  MIN_RETRY_BUDGET_MS,
+  RETRY_SAFETY_MARGIN_MS,
+  TURN_RESPONSE_HEADROOM_MS,
+  validateTimeoutRelationships,
+  getResolvedTimeouts,
 } from "../../../src/config/timeouts.js";
 import { getTurnExecutorBudgets, getHandlerBudgetMs } from "../../../src/orchestrator-v5/budgets.js";
 import { config } from "../../../src/config/index.js";
-
-// Mirrors the private constants in plot-client.ts. Kept here as explicit
-// numbers ON PURPOSE: if someone changes the backoff or the minimum retry
-// budget in the client, this test should FAIL and make them re-derive the
-// handler budget, rather than silently tracking the new value.
-const RETRY_BACKOFF_MS = 2_000;
-const MIN_RETRY_BUDGET_MS = 2_000;
 
 describe("PLOT_RUN_TIMEOUT_MS ↔ handler budget lockstep", () => {
   it("leaves enough handler budget for a clamped retry after a full-length PLoT attempt", () => {
@@ -89,6 +93,88 @@ describe("V5 turn budget is nested inside the browser-proxy deadline", () => {
   });
 });
 
+/**
+ * The rungs above run at REPO DEFAULTS only — that is all a unit test can do.
+ * Every relationship they pin has BOTH ends env-overridable, so the deployed
+ * instance is the only place the real values exist. `validateTimeoutRelationships()`
+ * is where they are checked against those values, at boot.
+ *
+ * These tests are the CI-side POSITIVE CONTROL for that boot check: they prove
+ * the rung can SEE a break. Without them the boot validator is an assertion
+ * nobody has ever watched fail.
+ */
+describe("boot validator carries the ladder rungs (positive control)", () => {
+  const healthyLadder = () => ({
+    handlerBudgetMs: getHandlerBudgetMs(),
+    turnBudgetMs: getTurnExecutorBudgets().turn_ms,
+    browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+  });
+
+  it("is silent on the resolved default ladder", () => {
+    const warnings = validateTimeoutRelationships(healthyLadder());
+    const ladderWarnings = warnings.filter(
+      (w) => w.includes("LLM_BUDGET_HANDLER_MS") || w.includes("V5 turn budget") || w.includes("BROWSER_PROXY_TIMEOUT_MS"),
+    );
+    expect(ladderWarnings).toEqual([]);
+  });
+
+  it("FIRES when the handler budget can no longer afford a clamped retry", () => {
+    // This is the exact accounting accident the lane exists to prevent, and
+    // the exact case the CI-only assertion could not see: an operator raises
+    // PLOT_RUN_TIMEOUT_MS on Render without raising the handler budget.
+    const warnings = validateTimeoutRelationships({
+      ...healthyLadder(),
+      handlerBudgetMs: PLOT_RUN_TIMEOUT_MS + RETRY_BACKOFF_MS + MIN_RETRY_BUDGET_MS - 1,
+    });
+    expect(warnings.some((w) => w.includes("UNREACHABLE"))).toBe(true);
+  });
+
+  it("FIRES when the handler budget escapes the turn budget", () => {
+    const { turn_ms } = getTurnExecutorBudgets();
+    const warnings = validateTimeoutRelationships({
+      ...healthyLadder(),
+      handlerBudgetMs: turn_ms,
+    });
+    expect(warnings.some((w) => w.includes("not nested inside the outer turn budget"))).toBe(true);
+  });
+
+  it("FIRES when the turn budget reaches the proxy deadline", () => {
+    const warnings = validateTimeoutRelationships({
+      ...healthyLadder(),
+      turnBudgetMs: config.proxy.browserProxyTimeoutMs,
+    });
+    expect(warnings.some((w) => w.includes("browser proxy will answer before CEE does"))).toBe(true);
+  });
+
+  it("FIRES when too little headroom remains to serialise the typed error", () => {
+    const warnings = validateTimeoutRelationships({
+      ...healthyLadder(),
+      turnBudgetMs: config.proxy.browserProxyTimeoutMs - (TURN_RESPONSE_HEADROOM_MS - 1),
+    });
+    expect(warnings.some((w) => w.includes("TURN_RESPONSE_HEADROOM_MS"))).toBe(true);
+  });
+
+  it("FIRES when the proxy deadline escapes the Fastify route timeout", () => {
+    const warnings = validateTimeoutRelationships({
+      ...healthyLadder(),
+      browserProxyTimeoutMs: ROUTE_TIMEOUT_MS,
+    });
+    expect(warnings.some((w) => w.includes("no longer strictly nested"))).toBe(true);
+  });
+});
+
+describe("the ladder rung is registered in the diagnostic snapshot", () => {
+  it("exposes TURN_RESPONSE_HEADROOM_MS and the PLoT retry constants", () => {
+    // getResolvedTimeouts() is the estate's single view of the ladder. A rung
+    // absent from it is a rung nobody can see when diagnosing a live instance.
+    const resolved = getResolvedTimeouts();
+    expect(resolved.TURN_RESPONSE_HEADROOM_MS).toBe(TURN_RESPONSE_HEADROOM_MS);
+    expect(resolved.RETRY_BACKOFF_MS).toBe(RETRY_BACKOFF_MS);
+    expect(resolved.MIN_RETRY_BUDGET_MS).toBe(MIN_RETRY_BUDGET_MS);
+    expect(resolved.RETRY_SAFETY_MARGIN_MS).toBe(RETRY_SAFETY_MARGIN_MS);
+  });
+});
+
 describe("worst-case analysis path fits inside the turn budget", () => {
   it("bounds PLoT attempt + backoff + clamped retry within the handler budget", () => {
     // Worst case after this lane's fix: one full-length attempt that fails
@@ -99,7 +185,7 @@ describe("worst-case analysis path fits inside the turn budget", () => {
     const worstCaseFirstAttempt = PLOT_RUN_TIMEOUT_MS;
     const clampedRetry = Math.min(
       PLOT_RUN_TIMEOUT_MS,
-      handlerBudget - worstCaseFirstAttempt - RETRY_BACKOFF_MS - 1_000,
+      handlerBudget - worstCaseFirstAttempt - RETRY_BACKOFF_MS - RETRY_SAFETY_MARGIN_MS,
     );
     const total = worstCaseFirstAttempt + RETRY_BACKOFF_MS + Math.max(0, clampedRetry);
     expect(total).toBeLessThanOrEqual(handlerBudget);
