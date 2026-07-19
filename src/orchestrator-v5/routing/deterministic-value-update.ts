@@ -278,6 +278,36 @@ export type ValueUpdateDispatch =
     };
 
 export type SkipReason =
+  /**
+   * CQE reported `degraded: true` — at least one pattern rule did not run
+   * to completion, so a span's highest-fidelity reading may be missing and
+   * a lower-fidelity substitute may have taken its place.
+   *
+   * The headline failure is a DIFFERENT NUMBER arriving with full
+   * confidence — e.g. "increase by about 10%" yielding 10 instead of 0.1
+   * when the percentage rule (P6) is skipped and the absolute-quantity
+   * rule (P6b) claims the span, or "USD 1.2bn" yielding 1.2 instead of
+   * 1200000000 when the suffix rule (P8) is skipped and the compromise
+   * backstop claims it.
+   *
+   * The class is WIDER than those two cases: adversarial review found it
+   * spans 6-9 rules and at least four distinct corruption modes, and the
+   * modes are mutually inconsistent in what they perturb —
+   *
+   *   - magnitude change, count UNCHANGED (the two cases above);
+   *   - RANGE COLLAPSE, which DOES change the quantity count;
+   *   - OPERATOR FLIP (`set 42` -> `increment 42`) where the numeric value
+   *     is byte-identical and only the semantics move.
+   *
+   * So no guard on arity works (some modes hold count constant, others
+   * change it), no magnitude heuristic works (the operator flip changes no
+   * number at all), and `source` is unreliable (it stays `cqe` whenever a
+   * lower-priority rule, rather than the backstop, claims the span). The
+   * only signal that covers every mode is PROVENANCE: did every rule run?
+   * That is what this guard keys on. Falling through to LLM routing costs
+   * a round trip; applying a silently-wrong value costs the user's graph.
+   */
+  | 'degraded_extraction'
   | 'no_edit_verb'
   | 'no_quantity'
   | 'no_graph'
@@ -376,7 +406,22 @@ export function tryDeterministicValueUpdate(
    * declining the turn — see the candidatesPool site below for why.
    */
   factorNodeIds?: ReadonlySet<string>,
+  /**
+   * `CqeExtractionSummary.degraded` for the extraction that produced
+   * `parsedQuantities`. Defaults to `false` so existing callers and
+   * fixtures are unchanged; the production caller (turn-executor.ts)
+   * always threads the real value.
+   */
+  extractionDegraded: boolean = false,
 ): ValueUpdateDispatch {
+  // Refuse to deterministically apply a value the extractor could not
+  // vouch for. Placed FIRST — ahead of every other gate — because the
+  // corruption is in `parsedQuantities` itself, so no downstream check
+  // (edit-verb, label match, quantity arity) can distinguish a degraded
+  // value from a sound one: they all see a well-formed number.
+  if (extractionDegraded) {
+    return { matched: false, skip_reason: 'degraded_extraction' };
+  }
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
   }
@@ -702,6 +747,12 @@ export function tryDeterministicValueUpdate(
  * right fallback (it can clarify or route to another handler).
  */
 export type DeicticDispatch =
+  // Degraded-extraction refusal — see the SkipReason doc above. The
+  // deictic path forks on the same `parsedQuantities` and dispatches
+  // `set_factor_value` just as the label path does, so it needs the same
+  // guard; fixing only the label path would leave the identical defect
+  // reachable via "set that factor to ...".
+  | { readonly matched: false; readonly skip_reason: 'degraded_extraction' }
   | { readonly matched: false; readonly skip_reason: 'no_deictic' }
   | { readonly matched: false; readonly skip_reason: 'no_edit_verb' }
   | { readonly matched: false; readonly skip_reason: 'no_quantity' }
@@ -745,7 +796,13 @@ export function tryDeicticValueUpdate(
   graphLookup: GraphLookup | undefined,
   selectedFactorIds: SelectedFactorIds,
   resolveFactorLabel: (id: string) => string | null,
+  /** See `tryDeterministicValueUpdate`'s parameter of the same name. */
+  extractionDegraded: boolean = false,
 ): DeicticDispatch {
+  // Same refusal as the label path, for the same reason — first gate.
+  if (extractionDegraded) {
+    return { matched: false, skip_reason: 'degraded_extraction' };
+  }
   if (!DEICTIC_REFERENCE_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_deictic' };
   }

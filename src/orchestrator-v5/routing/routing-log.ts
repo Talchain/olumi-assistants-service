@@ -84,6 +84,10 @@ export interface RoutingLogInput {
   readonly cqe_patterns_matched: readonly string[];
   readonly cqe_duration_ms: number;
   readonly cqe_timeout: boolean;
+  /** True when a CQE pattern rule did not run to completion (see
+   * CqeExtractionSummary.degraded) — the result set may hold a
+   * lower-fidelity substitute value. Suppresses deterministic apply. */
+  readonly cqe_degraded: boolean;
   readonly cqe_message_too_long: boolean;
   readonly cqe_word_range_missed: boolean;
   readonly cqe_ambiguous_phrasing_detected: boolean;
@@ -155,6 +159,10 @@ export interface RoutingLog {
   readonly cqe_patterns_matched: readonly string[];
   readonly cqe_duration_ms: number;
   readonly cqe_timeout: boolean;
+  /** True when a CQE pattern rule did not run to completion (see
+   * CqeExtractionSummary.degraded) — the result set may hold a
+   * lower-fidelity substitute value. Suppresses deterministic apply. */
+  readonly cqe_degraded: boolean;
   readonly cqe_message_too_long: boolean;
   readonly cqe_word_range_missed: boolean;
   readonly cqe_ambiguous_phrasing_detected: boolean;
@@ -204,6 +212,7 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
       cqe_patterns_matched: input.cqe_patterns_matched,
       cqe_duration_ms: input.cqe_duration_ms,
       cqe_timeout: input.cqe_timeout,
+      cqe_degraded: input.cqe_degraded,
       cqe_message_too_long: input.cqe_message_too_long,
       cqe_word_range_missed: input.cqe_word_range_missed,
       cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
@@ -245,6 +254,7 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
     cqe_patterns_matched: input.cqe_patterns_matched,
     cqe_duration_ms: input.cqe_duration_ms,
     cqe_timeout: input.cqe_timeout,
+    cqe_degraded: input.cqe_degraded,
     cqe_message_too_long: input.cqe_message_too_long,
     cqe_word_range_missed: input.cqe_word_range_missed,
     cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,

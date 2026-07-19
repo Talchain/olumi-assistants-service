@@ -1719,6 +1719,7 @@ export async function runTurnExecutor(
           parsed_quantities: contextPack.parsed_quantities,
           patterns_matched: cqeSummary.patterns_matched,
           timeout: cqeSummary.timeout,
+          degraded: cqeSummary.degraded,
           compromise_match_count: cqeSummary.compromise_match_count,
           duration_ms: cqeSummary.duration_ms,
           message_too_long: cqeSummary.message_too_long,
@@ -3830,6 +3831,11 @@ export async function runTurnExecutor(
         graphLookupForValidate,
         selectedFactorIds,
         graphStateForTurn !== null ? factorIdSet : undefined,
+        // Refuse deterministic application when CQE could not vouch for
+        // the numbers it returned — a degraded extraction can carry a
+        // silently-substituted value (right shape, wrong magnitude), so
+        // the turn falls through to LLM/clarify routing instead.
+        cqeSummary.degraded,
       );
 
       // P0 V5 golden-path repair (Wave 2, Path B — selected-deictic):
@@ -3846,6 +3852,7 @@ export async function runTurnExecutor(
             graphLookupForValidate,
             selectedFactorIds,
             (id) => factorLabelById.get(id) ?? null,
+            cqeSummary.degraded,
           )
         : { matched: false as const, skip_reason: 'no_deictic' as const };
       if (deicticDispatch.matched && deicticDispatch.dispatch === 'set_factor_value') {
@@ -7966,6 +7973,7 @@ export async function runTurnExecutor(
       cqe_patterns_matched: cqeSummaryForLog?.patterns_matched ?? [],
       cqe_duration_ms: cqeSummaryForLog?.duration_ms ?? 0,
       cqe_timeout: cqeSummaryForLog?.timeout ?? false,
+      cqe_degraded: cqeSummaryForLog?.degraded ?? false,
       cqe_message_too_long: cqeSummaryForLog?.message_too_long ?? false,
       cqe_word_range_missed: cqeSummaryForLog?.word_range_missed ?? false,
       cqe_ambiguous_phrasing_detected:

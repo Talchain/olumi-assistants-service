@@ -215,7 +215,22 @@ function extractQuantities(rawMessage: string): QuantityExtractionResult[]
 - Deterministic — same input always produces same output
 - Target latency: <5ms for messages <500 chars
 - Hard cap: 2000 chars (longer messages truncated, `cqe_message_too_long` flag)
-- Regex timeout: 50ms per pattern execution. On timeout: fail closed to `[]` plus telemetry. **No partial-result fallback** — risky without semantic guarantees
+- Regex timeout: 50ms per pattern execution — see **Timeout behaviour** below (amended 2026-07-19; the original "fail closed to `[]`" clause is RETIRED and was never what the code did)
+
+**Timeout behaviour (amended 2026-07-19 — supersedes the retired clause above):**
+
+The original bullet read: *"On timeout: fail closed to `[]` plus telemetry. **No partial-result fallback** — risky without semantic guarantees."* It is retired for two reasons, and the deviation is recorded here rather than left implicit, because code and contract silently contradicting each other is how a future reader "fixes" this straight back into the P0.
+
+1. **The shipped code never implemented it.** From the original CQE commit through 2026-07-19 the per-rule branch did `continue` — it neither returned `[]` nor failed closed. It dropped ONE rule's result and let later rules and the compromise backstop re-claim the now-unmasked span. That is precisely the "partial-result fallback" this clause forbade, and it was the mechanism of the P0: a skipped rule's span silently re-claimed by a lower-fidelity substitute emitting a **different number** (`"increase by about 10%"` → `10` instead of `0.1`, claimed by P6b with `source` still `cqe`; `"USD 1.2bn"` → `1.2` instead of `1200000000`, claimed by the backstop).
+
+2. **The semantic guarantee the clause said was missing now exists.** `PatternRule.apply()` is all-or-nothing across all 15 rules — it returns a complete match set or nothing, never a partial one — and extraction output is timing-invariant (300/300 identical pairs at HEAD vs 18 divergences before the fix, same harness). Given that guarantee, a rule that ran to completion but slowly has produced a result exactly as correct as an in-budget one: a deterministic regex's slowness does not change what it matches.
+
+**Behaviour as built:**
+
+- **Per-rule cap exceeded, rule COMPLETED** → keep the result; emit `cqe.pattern_timeout`. This is a SLOW signal, not a correctness signal, and is the regex-redesign trigger the *Regex quality* note below asks for. The check runs *after* `apply()` returns, and JS regex is synchronous and non-interruptible, so discarding the result reclaims **zero** latency — the cost is already sunk — while destroying a correct answer. `summary.degraded` stays `false`; routing may apply the value.
+- **Total budget exhausted, rules NEVER RAN** → those rules are genuinely missing, so `summary.degraded = true` and `cqe.budget_exhausted` is emitted naming exactly which pattern ids were skipped. Consumers that deterministically APPLY a value must refuse on `degraded` and fall through to LLM/clarify (`tryDeterministicValueUpdate` / `tryDeicticValueUpdate` return `skip_reason: 'degraded_extraction'`).
+
+The invariant this preserves is the one the retired clause was reaching for: **a degraded extraction must never silently yield a value that gets deterministically applied.** It is enforced on provenance (did every rule run?), never on quantity count — the count is unchanged in the two demo corruption modes, and the corrupting rule may still report `source: 'cqe'`.
 
 **Regex quality (for CC):** patterns must be designed to avoid catastrophic backtracking by construction — no unbounded nested quantifiers, no overlapping alternations without anchors, bounded repetition where possible. The 50ms timeout is defence-in-depth against pathological input, not a normal control-flow mechanism. If a regex regularly approaches the timeout, redesign the regex.
 
