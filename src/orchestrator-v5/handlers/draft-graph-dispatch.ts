@@ -84,6 +84,7 @@ import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
+import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -331,10 +332,28 @@ export function draftResultToOlumiResponse(
     ? { draft_graph: result.draftGraphTimings }
     : undefined;
 
+  // Bias-signal visibility (a1/bias-signal-blocks): project the draft LLM's
+  // already-emitted `coachingBiasSignals` into UP TO 2 structured
+  // `coaching_kind:'bias_signal'` blocks so DGAI #356's merged renderer can
+  // surface them as bias cards. Additive — the prose-bullet path
+  // (buildPostDraftNarrative above) is unchanged; these ride alongside it.
+  // Only on the persisted path (a non-persisted draft has no canvas graph to
+  // ground the target refs against, and the response is discarded anyway).
+  // Entity-id leaks in title/body are scrubbed downstream by the central
+  // egress chokepoint (sanitiseOlumiResponseForEgress → sanitiseBlock
+  // 'coaching'), exactly as for every other coaching block.
+  const blocks: OlumiResponse['blocks'] = graphPersisted
+    ? buildDraftBiasSignalBlocks({
+        biasSignals: result.coachingBiasSignals,
+        graph: result.graphOutput,
+        createdAt: new Date().toISOString(),
+      })
+    : [];
+
   return {
     response_version: 2,
     assistant_text: assistantText,
-    blocks: [],
+    blocks,
     suggested_actions: [...suggestedActions],
     insights: [],
     stage_indicator: stageIndicator,
