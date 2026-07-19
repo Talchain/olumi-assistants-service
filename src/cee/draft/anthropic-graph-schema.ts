@@ -149,6 +149,39 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               uncertainty_drivers: { type: "array", items: { type: "string" } },
               interventions: {
                 type: "array",
+                // P0 GUARD (2026-07-19) — `minItems: 1` makes the EMPTY array
+                // ungrammatical. Without it every draft turn 500s.
+                //
+                // The served prompt (draft_graph v195) teaches interventions
+                // as an OBJECT — every example reads
+                // `"data": { "interventions": { "fac_id": 0.6 } }` — while
+                // this grammar demands an ARRAY of {factor_id, value}. Under
+                // structured outputs the GRAMMAR wins, so the model has to
+                // translate shape on the fly; under v195's heavier
+                // OPTION_RULES it stops translating and satisfies the grammar
+                // with `[]` instead. That is legal and content-free, and it
+                // is fatal: normalisation converts array->object so `[]`
+                // becomes `{}`, buildInterventionSignature({}) returns "",
+                // every option collides on the empty signature, and the
+                // validator raises OPTIONS_IDENTICAL with
+                // `intervention_signature: ""` — unrepairable by the LLM
+                // repair stage, so the turn 500s.
+                //
+                // `required` DOES NOT FIX THIS: it forces the KEY, never the
+                // CONTENT, and `[]` satisfies it. Measured against the served
+                // v195 prompt (claude-sonnet-4-6, temp 0, n=3/arm):
+                //   optional (the shape that shipped) -> OPTIONS_IDENTICAL 3/3
+                //   required (the naive fix)          -> OPTIONS_IDENTICAL 3/3
+                //   optional + minItems: 1 (this)     -> OPTIONS_IDENTICAL 0/3
+                //   no grammar at all                 -> OPTIONS_IDENTICAL 0/3
+                //
+                // The field must stay OPTIONAL for this to be safe: a factor
+                // node has no interventions and omits the key entirely
+                // (measured: 0 non-option nodes emit it). Requiring it AND
+                // bounding it would make every factor node ungrammatical.
+                // Costs no optional-parameter slot and 13 bytes.
+                // Guard: tests/unit/draft-grammar-option-interventions.test.ts
+                minItems: 1,
                 items: {
                   type: "object",
                   properties: {
