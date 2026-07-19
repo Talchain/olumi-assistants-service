@@ -240,6 +240,77 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
   });
 });
 
+// ---------------------------------------------------------------------------
+// Cross-composer near-tie AGREEMENT on the raw `near_tie.is_tie` OVERRIDE path
+// (S4 finisher — PR #270 round 2).
+//
+// Round 1 unified the THRESHOLD but left the CALLS divergent: explain passed a
+// hard-coded `null` raw signal to `isNearTieByMargin` while flip passed the
+// real `rawRobustness`. So on a WIDER-than-threshold margin whose raw signal
+// carries `near_tie.is_tie === true`, flip said "effectively tied" while
+// explain said "the lead is meaningful rather than marginal" — the exact
+// contradiction PR #270 exists to kill, still live on the override path.
+//
+// These pin that BOTH composers, given the SAME projection + SAME raw signal,
+// reach the SAME near-tie verdict via the shared classifier. The wide margin
+// is DERIVED from the exported threshold so ONLY the override can flip it.
+// ---------------------------------------------------------------------------
+describe('explain/flip near-tie agreement on the raw near_tie override path', () => {
+  const WIDE_MARGIN = NEAR_TIE_PP_THRESHOLD + 9;
+  const OVERRIDE_TIE: RawRobustnessSignals = { level: 'moderate', near_tie_is_tie: true };
+
+  const WIDE_OVERRIDE: AnalysisProjectionSummary = {
+    ...ANALYSIS,
+    margin_pp: WIDE_MARGIN,
+    robustness_band: 'stable',
+  };
+
+  it('BOTH composers say "effectively tied" when the raw override fires on a wide margin', () => {
+    const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, OVERRIDE_TIE);
+    const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, OVERRIDE_TIE);
+    expect(flip).toContain('effectively tied');
+    expect(explain).toContain('effectively tied');
+    // The exact overclaim the divergence produced must be gone.
+    expect(explain).not.toContain('meaningful rather than marginal');
+  });
+
+  it('WITHOUT the raw override, the same wide margin is NOT a near-tie in either composer', () => {
+    // Positive control: the wide margin alone must NOT read as tied, so the
+    // agreement above is driven by the override, not by a blanket "always tied".
+    const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, null);
+    const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, null);
+    expect(explain).not.toContain('effectively tied');
+    expect(explain).toContain('meaningful rather than marginal');
+    expect(flip).not.toContain('effectively tied');
+  });
+
+  it('override agreement holds when the margin is ABSENT (null) too', () => {
+    // Override fires with no margin at all: flip reframes to tied; explain must
+    // match rather than fall through to "sits in second place".
+    const nullMargin: AnalysisProjectionSummary = {
+      ...ANALYSIS,
+      margin_pp: null,
+      robustness_band: 'stable',
+    };
+    const explain = composeExplainResultsFallback(nullMargin, null, OVERRIDE_TIE);
+    const flip = composeWhatWouldFlipFallback(nullMargin, OVERRIDE_TIE);
+    expect(explain).toContain('effectively tied');
+    expect(explain).not.toContain('sits in second place');
+    expect(flip).toContain('effectively tied');
+  });
+
+  it('legacy explain callers (no raw arg) keep margin-only near-tie behaviour', () => {
+    // Backward-compat: the third param is optional; omitting it must reduce to
+    // the pre-existing margin-only verdict so existing 2-arg call sites and the
+    // request/routed paths (which pass no raw signal) are unchanged.
+    const legacy = composeExplainResultsFallback(WIDE_OVERRIDE, null);
+    expect(legacy).not.toContain('effectively tied');
+    expect(legacy).toContain('meaningful rather than marginal');
+    expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, undefined)).toBe(legacy);
+    expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, null)).toBe(legacy);
+  });
+});
+
 describe('composeWhatWouldFlipFallback', () => {
   it('cites leading option, margin in percentage points, and top drivers WITH sensitivity values — no mutation language', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS);

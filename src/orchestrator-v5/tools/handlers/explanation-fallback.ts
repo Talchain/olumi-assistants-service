@@ -71,6 +71,33 @@ const STABLE_ROBUSTNESS_BANDS: ReadonlySet<string> = new Set([
  */
 const CANONICAL_FRAGILE_BAND = 'fragile';
 
+/**
+ * SINGLE near-tie derivation shared by BOTH deterministic post-analysis
+ * composers (`composeExplainResultsFallback` and `composeWhatWouldFlipFallback`).
+ *
+ * The two fallbacks narrate the SAME analysis on the SAME turn, so they must
+ * never disagree about whether the result is a near-tie — the S4 defect PR #270
+ * fixes is exactly that contradiction (explain: "the lead is meaningful"; flip:
+ * "effectively tied"). Round 1 unified the THRESHOLD (`isNearTieByMargin`) but
+ * left the CALLS divergent: explain passed a hard-coded `null` raw signal while
+ * flip passed the real `rawRobustness`, so the `near_tie.is_tie` override
+ * (which fires even on a wider-than-threshold margin) flipped flip to "tied"
+ * while explain still claimed a meaningful lead.
+ *
+ * Routing BOTH composers through this one helper, with the SAME
+ * `(projection.margin_pp, rawRobustness)` pair, makes that class of drift
+ * unrepresentable: there is one derivation, not two hand-synced call sites.
+ * Both handlers receive `invocation.rawRobustness` from the same prior-fact
+ * source under the same same-run guard (turn-executor: only when
+ * `analysisStateSource !== 'request'`), so the argument is genuinely identical.
+ */
+function classifyNearTie(
+  projection: AnalysisProjectionSummary,
+  rawRobustness: RawRobustnessSignals | null,
+): boolean {
+  return isNearTieByMargin(projection.margin_pp, rawRobustness);
+}
+
 function formatDriver(d: AnalysisProjectionDriver): string {
   return d.factor_label;
 }
@@ -120,6 +147,7 @@ export function formatEdgeStrengthMagnitude(value: number): string {
 export function composeExplainResultsFallback(
   projection: AnalysisProjectionSummary | undefined,
   validationBeatText?: string | null,
+  rawRobustness?: RawRobustnessSignals | null,
 ): string {
   if (!projection || !projection.leading_option) {
     // Defensive — the handler should not reach this branch without a
@@ -132,6 +160,14 @@ export function composeExplainResultsFallback(
   const leading = projection.leading_option;
   const sentences: string[] = [];
 
+  // Near-tie is derived from the SHARED classifier (classifyNearTie) so this
+  // composer and the what_would_flip composer can never disagree on the
+  // `near_tie.is_tie` override path. `rawRobustness` is threaded from the same
+  // source flip receives (`invocation.rawRobustness`, prior-fact-sourced and
+  // same-run-guarded); routed/request callers pass null and both composers
+  // fall back to the margin-only verdict in lockstep.
+  const nearTie = classifyNearTie(projection, rawRobustness ?? null);
+
   // Staleness caveat is no longer composed here. The handler's
   // `applyStalenessPrefix` helper prepends it to the final assistant_text
   // (whether this fallback or Sonnet's answer_text) when the analysis
@@ -143,33 +179,32 @@ export function composeExplainResultsFallback(
     `${leading.label} performs best, with a probability of ${formatProbability(leading.probability)}.`,
   );
 
-  if (projection.runner_up && projection.margin_pp !== null) {
-    if (isNearTieByMargin(projection.margin_pp, null)) {
-      // Near-tie honesty: a near-zero / sub-threshold margin is NOT a
-      // meaningful lead. Mirror composeWhatWouldFlipFallback's
-      // "effectively tied" framing so the explain and flip fallbacks never
-      // contradict — the S4 case where flip correctly said "effectively
-      // tied" while explain said "ahead by 0 percentage points, so the lead
-      // is meaningful rather than marginal." The margin number is
-      // deliberately not cited here: "0 percentage points" reads as a non
-      // sequitur beside a closeness statement. Margin-only on purpose (no
-      // rawRobustness param) to keep this fix isolated to the deterministic
-      // composer; the wider raw-signal near-tie override stays the flip
-      // composer's concern.
+  if (projection.runner_up) {
+    if (nearTie) {
+      // Near-tie honesty: a sub-threshold margin OR a raw `near_tie.is_tie`
+      // override means this is NOT a meaningful lead. Mirror
+      // composeWhatWouldFlipFallback's "effectively tied" framing so the
+      // explain and flip fallbacks never contradict — the S4 case where flip
+      // correctly said "effectively tied" while explain said "ahead by N
+      // percentage points, so the lead is meaningful rather than marginal."
+      // The margin number is deliberately not cited here: a closeness
+      // statement beside a percentage-point lead reads as a non sequitur.
+      // The near-tie verdict now flows from the SHARED classifyNearTie, so the
+      // wider raw-signal override is honoured identically in both composers.
       sentences.push(
         `${quoteLabel(leading.label)} and ${quoteLabel(projection.runner_up.label)} are effectively tied, so the lead is too close to call without firming up the key assumptions.`,
       );
-    } else {
+    } else if (projection.margin_pp !== null) {
       sentences.push(
         `That is ahead of ${projection.runner_up.label} by ${formatPercentagePoints(
           projection.margin_pp,
         )}, so the lead is meaningful rather than marginal.`,
       );
+    } else {
+      sentences.push(
+        `${projection.runner_up.label} sits in second place, with a probability of ${formatProbability(projection.runner_up.probability)}.`,
+      );
     }
-  } else if (projection.runner_up) {
-    sentences.push(
-      `${projection.runner_up.label} sits in second place, with a probability of ${formatProbability(projection.runner_up.probability)}.`,
-    );
   }
 
   // DGAI #341: only materially-influential drivers may carry the "driven
@@ -274,7 +309,10 @@ export function composeWhatWouldFlipFallback(
   const leading = projection.leading_option;
   const sentences: string[] = [];
   const raw = rawRobustness ?? null;
-  const nearTie = isNearTieByMargin(projection.margin_pp, raw);
+  // Shared derivation — identical helper + identical inputs as
+  // composeExplainResultsFallback, so the two composers cannot diverge on the
+  // near-tie (including the raw `near_tie.is_tie` override) verdict.
+  const nearTie = classifyNearTie(projection, raw);
   const rawFragile = isRawFragile(raw);
   // Treat the canonical `'fragile'` band as fragility evidence even when
   // raw signals are absent — older run_analysis facts may not carry the
