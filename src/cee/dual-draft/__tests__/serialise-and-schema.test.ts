@@ -111,8 +111,9 @@ describe('PROPOSALS_JSON_SCHEMA — structural agreement with the contract', () 
   });
 
   it('proposal-list cap is NOT expressed as maxItems (API-rejected keyword) — G5 owns it', () => {
-    // The Anthropic structured-outputs compiler 400s on `maxItems`
-    // (live-probed 2026-07-14; see structured-outputs-compliance.test.ts).
+    // The Anthropic structured-outputs compiler 400s on `maxItems` (live-probed
+    // 2026-07-14; evidence in UNSUPPORTED_KEYWORDS / ACCEPTED_KEYWORDS,
+    // src/adapters/llm/anthropic-schema-compliance.ts).
     // The cap is enforced deterministically by the merge (G5, index >=
     // PROPOSAL_CAP -> proposal_cap_exceeded) and taught by the prompt.
     expect(proposals.maxItems).toBeUndefined();
@@ -143,7 +144,7 @@ describe('PROPOSALS_JSON_SCHEMA — structural agreement with the contract', () 
     expect(node.label.maxLength).toBe(PROPOSAL_FIELD_CAPS.label);
     expect(node.description.maxLength).toBe(PROPOSAL_FIELD_CAPS.description);
     // uncertainty_drivers item-count cap: `maxItems` is API-rejected (see
-    // structured-outputs-compliance.test.ts) — findOversizedProposalField
+    // UNSUPPORTED_KEYWORDS, anthropic-schema-compliance.ts) — findOversizedProposalField
     // enforces PROPOSAL_FIELD_CAPS.uncertainty_drivers_items in the merge.
     expect(node.uncertainty_drivers.maxItems).toBeUndefined();
     expect(node.uncertainty_drivers.items!.maxLength).toBe(PROPOSAL_FIELD_CAPS.uncertainty_driver_length);

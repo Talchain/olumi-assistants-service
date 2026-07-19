@@ -32,8 +32,9 @@
  * JSON-Schema `required` forces the KEY to be present, never the CONTENT. An
  * empty array satisfies `required` perfectly. Live A/B against the served v195
  * prompt, claude-sonnet-4-6, temperature 0, n=3/arm
- * (scripts/measure-interventions-required-ab.mjs and
- * scripts/measure-interventions-minitems-ab.mjs):
+ * (scripts/measure-interventions-ab.mjs, arms `required` and `minitems`;
+ * the two single-arm harnesses that produced these numbers were unified into
+ * it — see that file's header for why the split was actively dangerous):
  *   interventions OPTIONAL (the live v9 shape) -> OPTIONS_IDENTICAL 3/3
  *   interventions REQUIRED (the naive fix)     -> OPTIONS_IDENTICAL 3/3
  *   interventions optional + minItems: 1       -> OPTIONS_IDENTICAL 0/3

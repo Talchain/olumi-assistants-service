@@ -14,7 +14,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { enforceAnthropicSchemaCompliance } from "../../src/adapters/llm/anthropic-schema-compliance.js";
+import {
+  enforceAnthropicSchemaCompliance,
+  UNSUPPORTED_KEYWORDS,
+  MIN_ITEMS_ALLOWED_VALUES,
+} from "../../src/adapters/llm/anthropic-schema-compliance.js";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
 import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "../../src/orchestrator/tools/anthropic-edit-graph-schema.js";
 
@@ -91,20 +95,18 @@ function assertNoUnsupportedKeywords(
   // See MIN_ITEMS_ALLOWED_VALUES in src/adapters/llm/anthropic-schema-compliance.ts.
   // The old blanket ban is what left the draft grammar unable to require a
   // non-empty interventions array — the 2026-07-19 OPTIONS_IDENTICAL outage.
-  const unsupported = [
-    "minLength", "maxLength", "minimum", "maximum", "maxItems",
-    "pattern", "format", "minProperties", "maxProperties", "uniqueItems",
-    "exclusiveMinimum", "exclusiveMaximum", "default",
-  ];
-
-  for (const keyword of unsupported) {
+  // IMPORTED from the normaliser — see UNSUPPORTED_KEYWORDS there. A local copy
+  // of this list is a hand-maintained mirror: it reads green while diverging.
+  for (const keyword of UNSUPPORTED_KEYWORDS) {
     expect(node, `${path}: must not contain "${keyword}"`).not.toHaveProperty(keyword);
   }
 
   // minItems is allowed through, but only with an API-accepted value.
   if ("minItems" in node) {
-    expect([0, 1], `${path}.minItems = ${String(node.minItems)} — API accepts only 0 or 1`)
-      .toContain(node.minItems);
+    expect(
+      [...MIN_ITEMS_ALLOWED_VALUES],
+      `${path}.minItems = ${String(node.minItems)} — API accepts only 0 or 1`,
+    ).toContain(node.minItems);
   }
 
   // Recurse

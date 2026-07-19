@@ -18,7 +18,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { enforceAnthropicSchemaCompliance } from "../../src/adapters/llm/anthropic-schema-compliance.js";
+import {
+  enforceAnthropicSchemaCompliance,
+  UNSUPPORTED_KEYWORDS,
+} from "../../src/adapters/llm/anthropic-schema-compliance.js";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA, countUnionParams } from "../../src/cee/draft/anthropic-graph-schema.js";
 import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "../../src/orchestrator/tools/anthropic-edit-graph-schema.js";
 import { NodeKind, FactorCategory } from "../../src/schemas/graph.js";
@@ -107,11 +110,11 @@ function findRefs(node: SchemaNode, path: string = "root", results: string[] = [
 // stop an empty array — the exact defect behind the 2026-07-19 OPTIONS_IDENTICAL
 // outage (see tests/unit/draft-grammar-option-interventions.test.ts).
 // `maxItems` stays banned: not probed, no use case.
-const UNSUPPORTED_KEYWORDS = [
-  "minLength", "maxLength", "minimum", "maximum", "maxItems",
-  "pattern", "format", "minProperties", "maxProperties", "uniqueItems",
-  "exclusiveMinimum", "exclusiveMaximum", "default", "oneOf",
-];
+// IMPORTED from the normaliser, plus `oneOf`. `oneOf` is NOT in the shared
+// strip list because the normaliser CONVERTS it to `anyOf` rather than
+// dropping it — but the converted OUTPUT must still contain none, so it
+// belongs in this assertion and not in the policy.
+const ASSERTED_ABSENT_KEYWORDS = [...UNSUPPORTED_KEYWORDS, "oneOf"];
 
 /** Collect every `minItems` value in the tree with its path. */
 function findMinItems(
@@ -146,7 +149,7 @@ function findUnsupportedKeywords(
   results: string[] = [],
 ): string[] {
   if (!node || typeof node !== "object" || Array.isArray(node)) return results;
-  for (const keyword of UNSUPPORTED_KEYWORDS) {
+  for (const keyword of ASSERTED_ABSENT_KEYWORDS) {
     if (keyword in node) results.push(`${path}.${keyword}`);
   }
   if (node.properties && typeof node.properties === "object") {
