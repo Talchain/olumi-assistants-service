@@ -3252,6 +3252,14 @@ components:
             example:
               type: string
               description: Optional example brief or graph description
+        recovery_suggestion:
+          type: string
+          description: >-
+            Flat mirror of recovery.suggestion — the PINNED producer field
+            name consumers read first (wave-2 ask 7, @talchain/schemas
+            0.19.0 CeeTypedErrorSchema; routed from DGAI #383, which was
+            passthrough-sniffing three fallback names because no flat name
+            was typed). Present exactly when recovery.suggestion is.
         node_count:
           type: integer
           description: Graph node count when relevant to the error

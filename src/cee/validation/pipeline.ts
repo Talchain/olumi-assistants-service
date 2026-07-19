@@ -161,6 +161,11 @@ export function buildCeeErrorResponse(
     // Additional domain-level hints
     reason: options.reason,
     recovery: options.recovery,
+    // Wave-2 ask 7 (@talchain/schemas 0.19.0, routed from DGAI #383): the
+    // PINNED flat field name for the recovery sentence. Mirrors
+    // recovery.suggestion so consumers stop passthrough-sniffing fallback
+    // names; present exactly when the structured suggestion is.
+    recovery_suggestion: options.recovery?.suggestion,
     node_count: options.nodeCount,
     edge_count: options.edgeCount,
     missing_kinds: options.missingKinds,

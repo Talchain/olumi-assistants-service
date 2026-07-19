@@ -104,3 +104,42 @@ describe('buildHeldProposalBlock', () => {
     expect(block!.reason_code).toBe('STRUCTURAL_APPLY_HELD');
   });
 });
+
+describe('wave-2 ask #20 — the card body carries the FULL changeset description', () => {
+  const DESCRIPTION =
+    "remove the link from 'Price' to 'Demand', remove the link from 'Supply' to 'Cost' and add option 'Go Direct'";
+
+  it('a safe changeset description becomes the summary verbatim', () => {
+    const block = buildHeldProposalBlock({
+      ...baseInput(),
+      changesetDescription: DESCRIPTION,
+    });
+    expect(block).not.toBeNull();
+    expect(block!.summary).toBe(`Held for your confirmation: ${DESCRIPTION}.`);
+    expect(HeldProposalBlockSchema.safeParse(block).success).toBe(true);
+  });
+
+  it('null / absent description falls back to the pre-#20 single-target template', () => {
+    expect(buildHeldProposalBlock({ ...baseInput(), changesetDescription: null })!.summary).toBe(
+      "A change to 'Price' is held for your confirmation.",
+    );
+    expect(buildHeldProposalBlock(baseInput())!.summary).toBe(
+      "A change to 'Price' is held for your confirmation.",
+    );
+  });
+
+  it('an unsafe description (em dash) falls back — never rendered verbatim', () => {
+    const block = buildHeldProposalBlock({
+      ...baseInput(),
+      changesetDescription: "remove the link — internal doctrine wording",
+    });
+    expect(block!.summary).toBe("A change to 'Price' is held for your confirmation.");
+    expect(block!.summary).not.toContain('—');
+  });
+
+  it('a blank description falls back (absence is omission, never an empty sentence)', () => {
+    expect(buildHeldProposalBlock({ ...baseInput(), changesetDescription: '   ' })!.summary).toBe(
+      "A change to 'Price' is held for your confirmation.",
+    );
+  });
+});

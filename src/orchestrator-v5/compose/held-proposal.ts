@@ -27,6 +27,7 @@ import {
 } from '@talchain/schemas/boundary';
 
 import { resolveLabel, type LabelResolverContext } from './resolve-label.js';
+import { sanitisePublicCopyOrFallback } from './proposed-change.js';
 
 /**
  * The `held`-reachable subset of the referee's MutationReasonCode vocabulary
@@ -65,10 +66,44 @@ export interface HeldProposalBlockInput {
   readonly targetKey: string;
   /** Frame-authority PRE-edit graph for label resolution (may be null). */
   readonly graph: LabelResolverContext['graph'];
+  /**
+   * Wave-2 ask #20 — the FULL changeset description from
+   * `describeHeldOperationsSubject` (1.134 changeset-honesty seam: one
+   * specific clause per operation). When present and render-safe it becomes
+   * the card-body `summary`, so the user can read exactly what a confirm
+   * applies even though the chip label is now clamped short. Null / unsafe
+   * falls back to the pre-#20 single-target template.
+   */
+  readonly changesetDescription?: string | null;
 }
 
-/** Fixed summary templates — display-safe by construction, no doctrine prose. */
-function heldSummary(targetKey: string, graph: LabelResolverContext['graph']): string {
+/** True iff `text` survives the render-safety sweep verbatim (same
+ *  predicate as the referee gate's `subjectIsSafe`). */
+function descriptionIsSafe(text: string): boolean {
+  return sanitisePublicCopyOrFallback(text, ' ') === text.trim();
+}
+
+/**
+ * Summary — display-safe by construction, no doctrine prose.
+ *
+ * Wave-2 ask #20: when the full changeset description is available and
+ * render-safe, the card body carries it VERBATIM (the chip label is now
+ * clamped short, so this summary is where the user reads exactly what a
+ * confirm applies — the safety property the UI deliberately refused to
+ * solve with truncation). Otherwise the pre-#20 fixed templates.
+ */
+function heldSummary(
+  targetKey: string,
+  graph: LabelResolverContext['graph'],
+  changesetDescription: string | null | undefined,
+): string {
+  if (
+    typeof changesetDescription === 'string' &&
+    changesetDescription.trim().length > 0 &&
+    descriptionIsSafe(changesetDescription)
+  ) {
+    return `Held for your confirmation: ${changesetDescription.trim()}.`;
+  }
   if (targetKey.startsWith('node:')) {
     const id = targetKey.slice('node:'.length);
     const label = resolveLabel(id, { graph });
@@ -93,7 +128,7 @@ export function buildHeldProposalBlock(
   const candidate = {
     type: 'held_proposal' as const,
     proposal_id: input.proposalId,
-    summary: heldSummary(input.targetKey, input.graph),
+    summary: heldSummary(input.targetKey, input.graph, input.changesetDescription),
     mutation_class: input.mutationClass,
     reason_code: input.blockerCode,
     confirm_action_id: input.confirmActionId,
