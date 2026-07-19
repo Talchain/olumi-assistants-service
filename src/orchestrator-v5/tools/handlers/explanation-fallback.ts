@@ -48,21 +48,6 @@ import type { FlipSummary } from '../../compose/flip-proposal.js';
 export { formatSensitivityDirection };
 
 /**
- * Canonical robustness bands considered "stable" enough that the softened
- * "smaller changes are less likely to flip the outcome" sentence reads as
- * honest, provided the result is not also a near-tie. Mirrors the
- * canonical labels produced by `mapRobustnessToCanonical` in
- * `analysis-compact.ts`. The chip-click path receives the same canonical
- * band via the projection summary, so a Set is enough — no extra mapping
- * needed here. `'moderate'` is deliberately excluded so moderate-band
- * results get balanced copy that does not overclaim stability.
- */
-const STABLE_ROBUSTNESS_BANDS: ReadonlySet<string> = new Set([
-  'stable',
-  'highly_stable',
-]);
-
-/**
  * Canonical `'fragile'` band — when the projection already canonicalises
  * the upstream verdict to fragile, treat that as a fragility signal even
  * when raw `enrichment.robustness` is unavailable (older facts, dropped
@@ -96,6 +81,182 @@ function classifyNearTie(
   rawRobustness: RawRobustnessSignals | null,
 ): boolean {
   return isNearTieByMargin(projection.margin_pp, rawRobustness);
+}
+
+/**
+ * Mode selector for the shared robustness-verdict composer. The two
+ * post-analysis fallbacks narrate the SAME verdict in two voices: `explain`
+ * describes the standing result, `flip` frames what could change it. The
+ * VERDICT itself (the near-tie classification, the stability band, and — the
+ * round-3 fix — their JOINT resolution) is computed ONCE; `mode` only selects
+ * the surface phrasing of an already-decided category. It never re-derives the
+ * verdict, so the two composers cannot drift on it.
+ */
+export type RobustnessVerdictMode = 'explain' | 'flip';
+
+/**
+ * The margin axis: how big the gap between the leading option and the
+ * runner-up is. `near_tie` (gap within noise, or the raw override), `clear`
+ * (a finite, above-threshold lead), or `indeterminate` (no finite margin and
+ * not a near-tie).
+ */
+type RobustnessMarginCategory = 'near_tie' | 'clear' | 'indeterminate';
+
+/**
+ * The stability axis: how steady each option's OWN score is under variation.
+ * Deliberately ORTHOGONAL to the margin axis — a result can be a near-tie
+ * (tiny gap) AND stable (each score individually steady). Conflating the two
+ * is exactly the S4 defect: "too close to call" (margin) was stitched to
+ * "should hold under reasonable variation" (stability) as if they were the
+ * same claim.
+ */
+type RobustnessStabilityCategory = 'fragile' | 'stable' | 'moderate' | 'unknown';
+
+/**
+ * The SINGLE joint margin+stability verdict for one post-analysis turn.
+ *
+ * `headline` is the categorical identity of the matrix cell
+ * (`<margin>:<stability>`) — the proof that `margin_clause` and
+ * `stability_clause` were built from the SAME category, so they cannot
+ * contradict. `stability_implies_flippability` lets the flip composer gate a
+ * "could shift / could change" stability claim on its own
+ * `margin_supports_flip` evidence; a stable "less likely to flip" line makes
+ * no flippability claim and is never gated.
+ */
+export interface RobustnessVerdict {
+  readonly headline: `${RobustnessMarginCategory}:${RobustnessStabilityCategory}`;
+  readonly margin_clause: string | null;
+  readonly stability_clause: string | null;
+  readonly stability_implies_flippability: boolean;
+}
+
+/**
+ * The ONE composer for the margin verdict and the stability verdict. They are
+ * not two independent sentences — they are one claim about how robust the
+ * result is, so they are built TOGETHER here and both post-analysis fallbacks
+ * route their margin/stability sentences through this function.
+ *
+ * The joint rule that kills the S4 contradiction: on a NEAR-TIE the confident
+ * "should hold under reasonable variation" reassurance is NEVER emitted, even
+ * when the band is stable — a near-tie means the leading option itself is in
+ * doubt. Instead a stable near-tie earns honest dual-axis copy ("each option's
+ * own score is individually stable, so this is a genuine dead heat rather than
+ * noise"): the GAP is within noise while each SCORE is steady. Both truths, no
+ * contradiction.
+ *
+ * F.6 invariant: format only. This reads `projection.margin_pp`,
+ * `projection.robustness_band`, the option labels/probabilities, and the raw
+ * robustness signal; it never computes a new metric.
+ */
+export function composeRobustnessVerdict(
+  projection: AnalysisProjectionSummary,
+  rawRobustness: RawRobustnessSignals | null,
+  mode: RobustnessVerdictMode,
+): RobustnessVerdict {
+  const leading = projection.leading_option;
+  const runner = projection.runner_up;
+  const band = projection.robustness_band;
+
+  // Margin must be a finite number for any quantitative-leaning clause; null /
+  // NaN / Infinity fall through to the neutral "second place / contender"
+  // framing so we never anchor copy on a phantom lead (`formatPercentagePoints`
+  // renders a non-finite value as "Not available").
+  const finiteMargin: number | null =
+    typeof projection.margin_pp === 'number' && Number.isFinite(projection.margin_pp)
+      ? projection.margin_pp
+      : null;
+
+  // ONE near-tie derivation (round-2 SSOT): shared inputs, shared threshold,
+  // shared raw `near_tie.is_tie` override — via the same classifyNearTie both
+  // composers used before this refactor centralised the copy too.
+  const nearTie = classifyNearTie(projection, rawRobustness);
+  const marginCat: RobustnessMarginCategory = nearTie
+    ? 'near_tie'
+    : finiteMargin !== null
+      ? 'clear'
+      : 'indeterminate';
+
+  // Stability axis, computed independently of the margin. Fragile wins on
+  // either the raw level OR the canonical band (older facts may carry only the
+  // canonicalised verdict).
+  const fragile = isRawFragile(rawRobustness) || band === CANONICAL_FRAGILE_BAND;
+  const stabilityCat: RobustnessStabilityCategory = fragile
+    ? 'fragile'
+    : band === 'stable' || band === 'highly_stable'
+      ? 'stable'
+      : band === 'moderate'
+        ? 'moderate'
+        : 'unknown';
+
+  const headline = `${marginCat}:${stabilityCat}` as RobustnessVerdict['headline'];
+  const stabilityPhrase = describeRobustnessBand(band);
+
+  // ---- margin_clause (mode-specific voice; needs a runner-up label) ----
+  let margin_clause: string | null = null;
+  if (leading && runner) {
+    if (marginCat === 'near_tie') {
+      margin_clause =
+        mode === 'explain'
+          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so the lead is too close to call without firming up the key assumptions.`
+          : `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied.`;
+    } else if (marginCat === 'clear' && finiteMargin !== null) {
+      margin_clause =
+        mode === 'explain'
+          ? `That is ahead of ${runner.label} by ${formatPercentagePoints(finiteMargin)}, so the lead is meaningful rather than marginal.`
+          : `For ${quoteLabel(runner.label)} to overtake it, the lead of ${formatPercentagePoints(finiteMargin)} would need to close.`;
+    } else {
+      // indeterminate: no finite margin and not a near-tie.
+      margin_clause =
+        mode === 'explain'
+          ? `${runner.label} sits in second place, with a probability of ${formatProbability(runner.probability)}.`
+          : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
+    }
+  }
+
+  // ---- stability_clause (JOINTLY resolved with the margin verdict) ----
+  let stability_clause: string | null = null;
+  let stability_implies_flippability = false;
+
+  if (mode === 'explain') {
+    if (marginCat === 'near_tie') {
+      // ROUND-3 FIX: never the confident "should hold" line on a near-tie. A
+      // stable near-tie earns the honest dual-axis reading; moderate / fragile
+      // / unknown near-ties rely on the margin clause's "too close to call,
+      // firm up the key assumptions" caveat and add no stability sentence.
+      if (stabilityCat === 'stable') {
+        stability_clause =
+          "Each option's own score is individually stable, so this is a genuine dead heat rather than noise in the estimates.";
+      }
+    } else if (stabilityCat === 'stable' && stabilityPhrase !== null) {
+      // Clear / indeterminate lead: the "should hold" reassurance is honest
+      // only because the lead is NOT a near-tie.
+      stability_clause = `This result looks ${stabilityPhrase}, so it should hold under reasonable variation.`;
+    } else if (stabilityCat === 'moderate' && stabilityPhrase !== null) {
+      stability_clause = `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`;
+    }
+  } else {
+    // flip mode. Fragility is the most specific warning, so it outranks the
+    // near-tie closeness line; the stable-band line comes last and only on a
+    // finite (clear) margin.
+    if (stabilityCat === 'fragile') {
+      stability_clause =
+        'The picture appears fragile, so even small adjustments to the strongest drivers could shift which option leads.';
+      stability_implies_flippability = true;
+    } else if (marginCat === 'near_tie') {
+      stability_clause =
+        'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.';
+      stability_implies_flippability = true;
+    } else if (
+      marginCat === 'clear'
+      && stabilityCat === 'stable'
+      && stabilityPhrase !== null
+    ) {
+      stability_clause = `This result looks ${stabilityPhrase}, so smaller changes are less likely to flip the outcome on their own.`;
+    }
+    // moderate, unknown, or indeterminate-stable → omit (no overclaim).
+  }
+
+  return { headline, margin_clause, stability_clause, stability_implies_flippability };
 }
 
 function formatDriver(d: AnalysisProjectionDriver): string {
@@ -160,13 +321,14 @@ export function composeExplainResultsFallback(
   const leading = projection.leading_option;
   const sentences: string[] = [];
 
-  // Near-tie is derived from the SHARED classifier (classifyNearTie) so this
-  // composer and the what_would_flip composer can never disagree on the
-  // `near_tie.is_tie` override path. `rawRobustness` is threaded from the same
-  // source flip receives (`invocation.rawRobustness`, prior-fact-sourced and
-  // same-run-guarded); routed/request callers pass null and both composers
-  // fall back to the margin-only verdict in lockstep.
-  const nearTie = classifyNearTie(projection, rawRobustness ?? null);
+  // The margin verdict and the stability verdict are ONE claim about result
+  // robustness, composed together by composeRobustnessVerdict so they can
+  // never contradict (the S4 defect: "too close to call" beside "should hold").
+  // `rawRobustness` is threaded from the same source flip receives
+  // (`invocation.rawRobustness`, prior-fact-sourced and same-run-guarded);
+  // routed/request callers pass null and both composers fall back to the
+  // margin-only verdict in lockstep.
+  const verdict = composeRobustnessVerdict(projection, rawRobustness ?? null, 'explain');
 
   // Staleness caveat is no longer composed here. The handler's
   // `applyStalenessPrefix` helper prepends it to the final assistant_text
@@ -179,32 +341,8 @@ export function composeExplainResultsFallback(
     `${leading.label} performs best, with a probability of ${formatProbability(leading.probability)}.`,
   );
 
-  if (projection.runner_up) {
-    if (nearTie) {
-      // Near-tie honesty: a sub-threshold margin OR a raw `near_tie.is_tie`
-      // override means this is NOT a meaningful lead. Mirror
-      // composeWhatWouldFlipFallback's "effectively tied" framing so the
-      // explain and flip fallbacks never contradict — the S4 case where flip
-      // correctly said "effectively tied" while explain said "ahead by N
-      // percentage points, so the lead is meaningful rather than marginal."
-      // The margin number is deliberately not cited here: a closeness
-      // statement beside a percentage-point lead reads as a non sequitur.
-      // The near-tie verdict now flows from the SHARED classifyNearTie, so the
-      // wider raw-signal override is honoured identically in both composers.
-      sentences.push(
-        `${quoteLabel(leading.label)} and ${quoteLabel(projection.runner_up.label)} are effectively tied, so the lead is too close to call without firming up the key assumptions.`,
-      );
-    } else if (projection.margin_pp !== null) {
-      sentences.push(
-        `That is ahead of ${projection.runner_up.label} by ${formatPercentagePoints(
-          projection.margin_pp,
-        )}, so the lead is meaningful rather than marginal.`,
-      );
-    } else {
-      sentences.push(
-        `${projection.runner_up.label} sits in second place, with a probability of ${formatProbability(projection.runner_up.probability)}.`,
-      );
-    }
+  if (verdict.margin_clause !== null) {
+    sentences.push(verdict.margin_clause);
   }
 
   // DGAI #341: only materially-influential drivers may carry the "driven
@@ -228,27 +366,14 @@ export function composeExplainResultsFallback(
     }
   }
 
-  // Stability sentence — plain language only (never the raw band token or the
-  // phrase "robustness band"). The phrase is bound once from the SSOT
-  // describeRobustnessBand and the sentence is omitted if it is unexpectedly
-  // null (so an SSOT regression surfaces rather than being masked by a
-  // hardcoded fallback). The confident "should hold" reassurance is honest only
-  // for genuinely stable bands; a moderate band gets a softer worth-checking
-  // line; fragile / unknown bands produce no sentence here.
-  const stabilityPhrase = describeRobustnessBand(projection.robustness_band);
-  if (stabilityPhrase !== null) {
-    if (
-      projection.robustness_band === 'stable'
-      || projection.robustness_band === 'highly_stable'
-    ) {
-      sentences.push(
-        `This result looks ${stabilityPhrase}, so it should hold under reasonable variation.`,
-      );
-    } else if (projection.robustness_band === 'moderate') {
-      sentences.push(
-        `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
-      );
-    }
+  // Stability sentence — routed through the SAME verdict as the margin clause
+  // above, so the confident "should hold" reassurance can never sit beside a
+  // near-tie's "too close to call". On a near-tie + stable band the verdict
+  // yields the honest dual-axis line instead; moderate gets a softer
+  // worth-checking line; fragile / unknown bands (and near-tie moderate /
+  // fragile / unknown) produce no sentence here.
+  if (verdict.stability_clause !== null) {
+    sentences.push(verdict.stability_clause);
   }
 
   if (typeof validationBeatText === 'string' && validationBeatText.length > 0) {
@@ -270,32 +395,20 @@ export function composeExplainResultsFallback(
  * because canonicalisation can flatten a `very_low`/`low` raw level into
  * a moderate-sounding label. The chip-click path threads the raw signal
  * through (`dispatchChipClickNoopExplanation` → handler → here); routed
- * callers may pass `null` and the composer falls back to projected-band
- * copy, gated on `STABLE_ROBUSTNESS_BANDS`.
+ * callers may pass `null` and the composer falls back to the projected band.
  *
- * Copy ladder for the closing robustness sentence (post round-1 review):
- *   - **Fragile signal** (raw fragile OR canonical `'fragile'` band) →
- *     "the picture appears fragile, so even small adjustments to the
- *     strongest drivers could shift which option leads". This is the
- *     only branch that names *fragility* — invoking the robustness band
- *     itself.
- *   - **Near-tie WITHOUT a fragile signal** (raw band is stable/highly
- *     stable/moderate/unknown/null AND not raw-fragile) → "the result is
- *     sensitive to small movements in the strongest drivers". Closeness
- *     framing only; never implies the robustness band is fragile when it
- *     is not.
- *   - **Stable / highly stable AND not near-tie AND finite margin** →
- *     softened "smaller changes are less likely to flip" (dropping
- *     "unlikely" to avoid overclaim; gated on `Number.isFinite(margin_pp)`
- *     so we never claim stability when the margin itself is unknown).
- *   - **Everything else** (moderate, unknown, null band; stable band
- *     with null margin) → omit the closing robustness sentence entirely.
+ * The margin sentence AND the closing robustness sentence both come from the
+ * shared {@link composeRobustnessVerdict} (`flip` mode), so they resolve
+ * together and cannot contradict — the S4 defect this PR closes. That verdict
+ * produces the `flip`-voice ladder: fragility (the only branch that names the
+ * robustness band) → near-tie closeness → stable-band "less likely to flip"
+ * (finite margin only) → omit for moderate / unknown.
  *
- * The "ahead of by Npp, so the lead is meaningful" framing is reused
- * from the explain-results fallback; here we keep neutral "the lead of
- * Npp would need to close" wording. We additionally swap that to the
- * effectively-tied phrasing when `isNearTieByMargin` fires, so we never
- * say "the lead would need to close" about a near-zero gap.
+ * `enrichment.flip_thresholds[]` still OWNS the closing sentence when present
+ * (`flipSummary` not `'none'`): a direct flip verdict outranks the robustness
+ * heuristic, and the verdict's flippability-implying clauses (fragile /
+ * near-tie) are additionally gated on `flip.margin_supports_flip` via
+ * `verdict.stability_implies_flippability`.
  */
 export function composeWhatWouldFlipFallback(
   projection: AnalysisProjectionSummary | undefined,
@@ -309,26 +422,12 @@ export function composeWhatWouldFlipFallback(
   const leading = projection.leading_option;
   const sentences: string[] = [];
   const raw = rawRobustness ?? null;
-  // Shared derivation — identical helper + identical inputs as
+  // ONE joint verdict — identical function + identical inputs as
   // composeExplainResultsFallback, so the two composers cannot diverge on the
-  // near-tie (including the raw `near_tie.is_tie` override) verdict.
-  const nearTie = classifyNearTie(projection, raw);
-  const rawFragile = isRawFragile(raw);
-  // Treat the canonical `'fragile'` band as fragility evidence even when
-  // raw signals are absent — older run_analysis facts may not carry the
-  // raw `enrichment.robustness` block, but a canonicalised `'fragile'`
-  // band is itself the upstream's verdict.
-  const projectedFragile = projection.robustness_band === CANONICAL_FRAGILE_BAND;
-  const fragileSignal = rawFragile || projectedFragile;
-  // Margin must be finite for any quantitative-leaning closing sentence
-  // (stable-band stability claim, runner-up "would need to close" reframe).
-  // `null` / NaN / Infinity → omit so we never anchor copy on a phantom lead.
-  // Holding the narrowed value (not a parallel boolean) lets call sites
-  // use TypeScript's `!== null` narrowing — no `as number` cast needed.
-  const finiteMargin: number | null =
-    typeof projection.margin_pp === 'number' && Number.isFinite(projection.margin_pp)
-      ? projection.margin_pp
-      : null;
+  // near-tie (including the raw `near_tie.is_tie` override) OR on how the
+  // margin verdict and stability verdict resolve together. `flip` mode selects
+  // the "what could change it" voice.
+  const verdict = composeRobustnessVerdict(projection, raw, 'flip');
 
   // Staleness caveat is no longer composed here — see the parallel note in
   // composeExplainResultsFallback. The handler's applyStalenessPrefix
@@ -339,31 +438,11 @@ export function composeWhatWouldFlipFallback(
     `${quoteLabel(leading.label)} currently leads, with a probability of ${formatProbability(leading.probability)}.`,
   );
 
-  if (nearTie && projection.runner_up) {
-    // Near-tie: never describe a near-zero gap as "the lead would need to
-    // close". Option labels are quoted so "and"-containing labels stay
-    // readable. The caveat is consolidated into the single robustness/near-tie
-    // sentence below — this lead carries no trailing "could shift" hedge.
-    sentences.push(
-      `${quoteLabel(leading.label)} and ${quoteLabel(projection.runner_up.label)} are effectively tied.`,
-    );
-  } else if (projection.runner_up && finiteMargin !== null) {
-    // Reuse the finite-margin guard: a `!== null` check on `margin_pp`
-    // was previously insufficient because `NaN !== null` and
-    // `Infinity !== null` both slip past, and `formatPercentagePoints(NaN)`
-    // renders as "Not available" — producing "the lead of Not available
-    // would need to close". `finiteMargin` is the narrowed value (only
-    // ever a finite number when non-null), so TypeScript narrows
-    // cleanly here without a cast.
-    sentences.push(
-      `For ${quoteLabel(projection.runner_up.label)} to overtake it, the lead of ${formatPercentagePoints(
-        finiteMargin,
-      )} would need to close.`,
-    );
-  } else if (projection.runner_up) {
-    sentences.push(
-      `${quoteLabel(projection.runner_up.label)} is the most likely contender to overtake it.`,
-    );
+  // Margin sentence (near-tie "effectively tied" / clear "would need to close"
+  // / neutral contender) — routed through the shared verdict so a near-zero gap
+  // is never described as "the lead would need to close".
+  if (verdict.margin_clause !== null) {
+    sentences.push(verdict.margin_clause);
   }
 
   // DGAI #341: only materially-influential drivers may carry the "would
@@ -440,37 +519,21 @@ export function composeWhatWouldFlipFallback(
     sentences.push(
       'The analysis did not isolate a single-factor tipping point here, so it is not clear that any one change on its own would change which option leads.',
     );
-  } else if (fragileSignal && flippabilityClaimAllowed) {
-    // Fragility claim — only when there is an actual fragile signal AND no
-    // flip evidence contradicts easy flippability. Naming fragility here is
-    // honest because the robustness band itself is fragile.
-    sentences.push(
-      'The picture appears fragile, so even small adjustments to the strongest drivers could shift which option leads.',
-    );
-  } else if (nearTie && flippabilityClaimAllowed) {
-    // Near-tie WITHOUT a fragile signal — say the result is close /
-    // sensitive without invoking the robustness band. Avoids the
-    // overclaim where a stable + near-tie result was previously told
-    // "the picture appears fragile" (the band is stable).
-    sentences.push(
-      'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.',
-    );
   } else if (
-    finiteMargin !== null
-    && projection.robustness_band !== null
-    && STABLE_ROBUSTNESS_BANDS.has(projection.robustness_band)
+    verdict.stability_clause !== null
+    && (!verdict.stability_implies_flippability || flippabilityClaimAllowed)
   ) {
-    // Phrase from the SSOT describeRobustnessBand; omit if unexpectedly null
-    // rather than masking an SSOT regression with a hardcoded fallback.
-    const stabilityPhrase = describeRobustnessBand(projection.robustness_band);
-    if (stabilityPhrase !== null) {
-      sentences.push(
-        `This result looks ${stabilityPhrase}, so smaller changes are less likely to flip the outcome on their own.`,
-      );
-    }
+    // No flip-threshold evidence owns the sentence, so the shared verdict's
+    // stability clause closes it: fragility (most specific), then near-tie
+    // closeness, then the stable-band "less likely to flip" line. The
+    // flippability-implying clauses (fragile / near-tie) are gated on
+    // `flip.margin_supports_flip` — a `margin_sensitivity` reporting
+    // `movement: 'none'` is NOT evidence that small changes could flip. The
+    // stable-band line makes no flippability claim, so it is never gated.
+    // Moderate / unknown / indeterminate-stable verdicts yield a null clause
+    // and this branch simply does not fire — no overclaim.
+    sentences.push(verdict.stability_clause);
   }
-  // Moderate, unknown, or null band, or stable with non-finite margin →
-  // omit the closing stability sentence so we never overclaim.
 
   sentences.push('Which of those would you like to explore changing?');
 
