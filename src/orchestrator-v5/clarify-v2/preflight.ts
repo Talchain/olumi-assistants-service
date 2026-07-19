@@ -283,8 +283,29 @@ export type ClarifyV2Round1Decision = Extract<
   { kind: 'proceed' | 'ask' }
 >;
 
-/** Round 1: assess the brief at draft preflight. */
-export function decideClarifyV2Round1(brief: string): ClarifyV2Round1Decision {
+/**
+ * Round 1: assess the brief at draft preflight.
+ *
+ * `isExplicitGenerate` — this turn arrived with the explicit-generate wire
+ * flag (the Generate action / `generate_model`). That is an EXPLICIT user
+ * instruction to draft NOW; clarifying over it is a dead-end class (the
+ * user pressed Generate and got a question list instead of a graph — the
+ * verified worst-first-impression bug, 19 Jul journey probe). So we RESPECT
+ * it unconditionally and PROCEED, exactly as the resume path already does
+ * (reason `explicit_generate`), regardless of what the rubric would say
+ * about brief completeness. The rubric still governs every NON-generate
+ * draft-shaped turn, so genuinely thin briefs typed normally are never
+ * lobotomised — they still get their clarifying questions.
+ *
+ * Optional with a `false` default so the many single-arg call sites (unit
+ * fixtures, the eval-floor harness) keep the pre-flag rubric path, and so
+ * an omitted argument fails toward "not a generate turn" — the same
+ * fail-safe direction as `decideClarifyV2Resume`'s `?? null`.
+ */
+export function decideClarifyV2Round1(
+  brief: string,
+  isExplicitGenerate = false,
+): ClarifyV2Round1Decision {
   // PRODUCER/READER CONTRACT — cap at the WRITE. The round state persists
   // on a `clarify_v2_round` pending whose reader (`parsePendingAction`)
   // REFUSES briefs over DRAFT_GRAPH_MAX_BRIEF_LENGTH fail-closed; an
@@ -295,6 +316,11 @@ export function decideClarifyV2Round1(brief: string): ClarifyV2Round1Decision {
   // `incorporateAnswerIntoBrief` and the resume draft-shaped-replacement
   // branch: trim + hard slice at the draft pipeline's Zod max.
   const workingBrief = brief.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+  // RESPECT the explicit generate instruction before touching the rubric —
+  // never clarify over a user who has told us to draft.
+  if (isExplicitGenerate) {
+    return { kind: 'proceed', brief: workingBrief, reason: 'explicit_generate' };
+  }
   const assessment = assessBriefCompleteness(workingBrief);
   if (assessment.complete) {
     return { kind: 'proceed', brief: workingBrief, reason: 'complete' };

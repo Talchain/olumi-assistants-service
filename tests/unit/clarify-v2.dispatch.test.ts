@@ -181,6 +181,45 @@ describe('clarify v2 dispatch — #497 mechanical-fix behavioural pins', () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 const DEFLECTED = TelemetryEvents.V5ClarifyV2Deflected;
+const PROCEEDED = TelemetryEvents.V5ClarifyV2Proceeded;
+
+// ─────────────────────────────────────────────────────────────────────────
+// a1/first-message-drafts (19 Jul journey probe) — round 1 respects an
+// explicit generate instruction: it PROCEEDS silently (returns null so the
+// route's own explicit-generate draft dispatch runs), commits NOTHING, and
+// emits a 'proceeded' event with reason explicit_generate — never questions.
+// RED-first at head: the dispatch asked clarifying questions here.
+// ─────────────────────────────────────────────────────────────────────────
+describe('clarify v2 dispatch — explicit generate respected at round 1 (first-message-drafts)', () => {
+  beforeEach(async () => {
+    await resetClarifyV2Harness();
+  });
+
+  it('round 1 with an explicit-generate brief PROCEEDS silently (null), commits nothing, emits proceeded(explicit_generate), never QUESTIONS', async () => {
+    const PROBE_BRIEF =
+      'Should we hire a senior engineer now or wait until after our next funding round? Budget around £120k, current runway 14 months.';
+    const { outcome, appends, events } = await runClarifyV2Turn({
+      message: PROBE_BRIEF,
+      explicitGenerateBrief: PROBE_BRIEF,
+    });
+    // Proceed silently: the route's explicit-generate path owns the draft.
+    expect(outcome).toBeNull();
+    // Round-1 proceed commits nothing (no clarify pending persisted).
+    expect(appends).toHaveLength(0);
+    expect(eventNames(events)).not.toContain(QUESTIONS_EMITTED);
+    const proceeded = events.filter((e) => e.name === PROCEEDED);
+    expect(proceeded).toHaveLength(1);
+    expect(proceeded[0]!.data).toMatchObject({ reason: 'explicit_generate', resumed: false });
+  });
+
+  it('control: the SAME thin brief WITHOUT an explicit-generate brief still asks (clarify not lobotomised)', async () => {
+    const { outcome, events } = await runClarifyV2Turn({
+      message: 'Should we expand into the German market?',
+    });
+    expect(outcome?.kind).toBe('respond');
+    expect(eventNames(events)).toContain(QUESTIONS_EMITTED);
+  });
+});
 
 describe('clarify v2 dispatch — 1.152 design fixes (A1 / A4 / A9)', () => {
   beforeEach(async () => {

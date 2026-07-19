@@ -93,6 +93,27 @@ describe("clarify_v2 rubric — completeness table", () => {
       "Should we double the sales team or invest in automation? The target is £2m ARR by Q4.",
       [],
     ],
+    // ── a1/first-message-drafts (19 Jul journey probe) — a bare stated
+    // duration / runway ("14 months") is a timeframe signal. Direction:
+    // credit already-given horizon content so a brief that carries budget +
+    // runway is not asked for a timeframe it already states. The probe brief
+    // still misses GOAL (genuinely absent — asking it is legitimate); only
+    // timeframe flips from missing → satisfied.
+    [
+      "runway credit: the journey probe (budget + 14-month runway) misses ONLY goal, not timeframe",
+      "Should we hire a senior engineer now or wait until after our next funding round? Budget around £120k, current runway 14 months.",
+      ["goal"],
+    ],
+    [
+      "runway credit: a bare runway is the ONLY timeframe token and completes the brief",
+      "Should we hire a senior engineer or wait, in order to extend our runway? The budget is around £120k and we have 14 months of cash left.",
+      [],
+    ],
+    [
+      "runway credit precision: the WORD compound 'four-day week' is NOT a timeframe (digit-anchored), so this thin brief still misses it",
+      "Should we introduce a four-day week at the company?",
+      ["goal", "options", "timeframe"],
+    ],
   ];
 
   it.each(TABLE)("%s", (_name, brief, expectedMissing) => {

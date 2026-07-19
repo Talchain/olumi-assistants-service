@@ -107,6 +107,40 @@ describe("clarify_v2 round 1 (draft preflight)", () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// a1/first-message-drafts (19 Jul journey probe) — round 1 RESPECTS an
+// explicit generate instruction. RED-first: on base decideClarifyV2Round1
+// ignores the second argument and runs the rubric, so the probe brief asks
+// goal (+ timeframe pre-rubric-fix) instead of proceeding. Mutation-check:
+// reverting the isExplicitGenerate branch turns every pin below RED.
+// ─────────────────────────────────────────────────────────────────────────
+describe("clarify_v2 round 1 — explicit generate is respected (first-message-drafts)", () => {
+  const PROBE_BRIEF =
+    "Should we hire a senior engineer now or wait until after our next funding round? Budget around £120k, current runway 14 months.";
+
+  it("the journey probe brief + explicit generate PROCEEDS on turn 1 (reason explicit_generate), never asks", () => {
+    const d = decideClarifyV2Round1(PROBE_BRIEF, true);
+    expect(d).toEqual({
+      kind: "proceed",
+      brief: PROBE_BRIEF,
+      reason: "explicit_generate",
+    });
+  });
+
+  it("explicit generate is respected even on a GENUINELY THIN brief (clarifying over Generate is a dead-end class)", () => {
+    const d = decideClarifyV2Round1(THIN_BRIEF, true);
+    expect(d).toEqual({ kind: "proceed", brief: THIN_BRIEF, reason: "explicit_generate" });
+  });
+
+  it("NOT lobotomised: the SAME thin brief with NO generate flag still asks (clarify still fires when the user did not press Generate)", () => {
+    const d = decideClarifyV2Round1(THIN_BRIEF);
+    expect(d.kind).toBe("ask");
+    // The default second argument is 'not a generate turn' — behaviour is
+    // bit-identical to the single-arg call the rest of the suite uses.
+    expect(decideClarifyV2Round1(THIN_BRIEF, false).kind).toBe("ask");
+  });
+});
+
 describe("clarify_v2 resume — answers incorporate via the normal turn flow", () => {
   const round1 = decideClarifyV2Round1(THIN_BRIEF);
   if (round1.kind !== "ask") throw new Error("fixture: round 1 must ask");

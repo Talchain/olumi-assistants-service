@@ -424,7 +424,16 @@ export async function tryClarifyV2Turn(
   if (!params.draftShaped && params.explicitGenerateBrief === null) {
     return null;
   }
-  const decision = decideClarifyV2Round1(effectiveBrief);
+  // An explicit-generate turn (Generate action / generate_model) is an
+  // explicit instruction to draft — clarify never fires over it (dead-end
+  // class). The pure decision core respects it and PROCEEDS; here that
+  // means returning null so the route's own explicit-generate draft
+  // dispatch runs bit-identically to the flag-off path (its briefOverride
+  // is already `explicitGenerateBrief.brief`).
+  const decision = decideClarifyV2Round1(
+    effectiveBrief,
+    params.explicitGenerateBrief !== null,
+  );
   if (decision.kind === 'proceed') {
     // Complete brief: proceed SILENTLY — return null so the route's draft
     // dispatch runs bit-identically to the flag-off path.
