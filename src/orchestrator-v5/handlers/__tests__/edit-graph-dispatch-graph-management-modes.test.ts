@@ -539,9 +539,14 @@ describe('mode=live — held supersession honesty (P0 DGAI #340 req 4)', () => {
   });
 });
 
-// ── R8: held_proposal block emission (CEE_HELD_PROPOSAL_EMIT, ships dark) ──
+// ── R8: held_proposal block emission (UNCONDITIONAL — flag deleted) ──
+// The CEE_HELD_PROPOSAL_EMIT gate was deleted per Paul's NO-DARK-LAUNCHES
+// ruling once the DGAI card (#382) went live on staging. A live-mode GM
+// referee HOLD now emits the typed held_proposal block on every response,
+// with no flag to toggle. Mutation-check: re-introducing the gate at the
+// dispatch append site turns the unconditional-emit pin below RED.
 
-describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
+describe('mode=live — held_proposal block (unconditional emit)', () => {
   // Ops switched FIELD_OPS → STRUCT_OPS per D-S (tunables no longer hold, so
   // only structural changes mint held_proposal blocks). The added node's id
   // is not in the PRE-edit graph, so the label-resolving summary falls back
@@ -553,16 +558,8 @@ describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
     return blocks.filter((b) => b.type === 'held_proposal');
   }
 
-  it('flag OFF (default): held response carries NO held_proposal block (dormancy baseline)', async () => {
+  it('held response carries exactly ONE schema-valid held_proposal block (unconditional — no flag)', async () => {
     setMode('live');
-    const { response } = await runDispatch(STRUCT_OPS);
-    expect(heldProposalBlocksOf(response)).toHaveLength(0);
-  });
-
-  it('flag ON: exactly ONE schema-valid held_proposal block, additive next to the existing blocks', async () => {
-    setMode('live');
-    vi.stubEnv('CEE_HELD_PROPOSAL_EMIT', 'true');
-    _resetConfigCache();
     const { response } = await runDispatch(STRUCT_OPS);
 
     const heldBlocks = heldProposalBlocksOf(response);
@@ -571,7 +568,9 @@ describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
 
     // Strict boundary schema — a malformed KNOWN kind strict-fails the whole
     // envelope UI-side (R4 hazard class), so the emitter must produce a
-    // fully valid block or nothing.
+    // fully valid block or nothing. This is the SAME 0.18.0
+    // HeldProposalBlockSchema the merged DGAI card (#382) parses, so
+    // safeParse success IS the producer↔consumer contract match.
     const { HeldProposalBlockSchema } = await import('@talchain/schemas/boundary');
     const parsed = HeldProposalBlockSchema.safeParse(block);
     expect(parsed.success, JSON.stringify(parsed.success ? {} : parsed.error.issues)).toBe(true);
@@ -581,29 +580,32 @@ describe('mode=live — held_proposal block (CEE_HELD_PROPOSAL_EMIT)', () => {
     expect(block.reason_code).toBe('STRUCTURAL_APPLY_HELD');
     expect(block.summary).toBe(HELD_SUMMARY);
 
-    // confirm_action_id must reference the REAL confirm chip on THIS response.
+    // Referenced by proposal_id / confirm_action_id into the response's own
+    // suggested_actions[] — the chip seam the UI card resolves confirm
+    // through (source:'chip'); there is NO target_refs on this block.
     const chips = (response as { suggested_actions: Array<{ id: string }> }).suggested_actions;
     expect(chips).toHaveLength(1);
     expect(block.confirm_action_id).toBe(chips[0]!.id);
     expect(block.proposal_id).toBe(chips[0]!.id);
     expect(block.decline_action_id).toBeUndefined();
+    expect(block.target_refs).toBeUndefined();
   });
 
-  it('flag ON is ADDITIVE: response minus the held_proposal block matches flag-off (same block types, same copy)', async () => {
+  it('the held_proposal block is ADDITIVE: filtering it out leaves the pre-slice block set (the redacted public-reason error block) and does not disturb assistant_text or suggested_actions', async () => {
     setMode('live');
-    const { response: offResponse } = await runDispatch(STRUCT_OPS);
+    const { response } = await runDispatch(STRUCT_OPS);
 
-    vi.clearAllMocks(); // runDispatch pins exactly one commit call per run
-    vi.stubEnv('CEE_HELD_PROPOSAL_EMIT', 'true');
-    _resetConfigCache();
-    const { response: onResponse } = await runDispatch(STRUCT_OPS);
-
-    const off = offResponse as { assistant_text: string; suggested_actions: unknown[]; blocks: Array<{ type: string }> };
-    const on = onResponse as { assistant_text: string; suggested_actions: unknown[]; blocks: Array<{ type: string }> };
-    expect(on.assistant_text).toBe(off.assistant_text);
-    expect(JSON.stringify(on.suggested_actions)).toBe(JSON.stringify(off.suggested_actions));
-    expect(on.blocks.filter((b) => b.type !== 'held_proposal').map((b) => b.type)).toEqual(
-      off.blocks.map((b) => b.type),
-    );
+    const r = response as {
+      assistant_text: string;
+      suggested_actions: Array<{ id: string }>;
+      blocks: Array<{ type: string }>;
+    };
+    // Exactly one held_proposal, purely additive next to the pre-slice
+    // redacted public-reason error block (order-preserved: error first).
+    expect(r.blocks.filter((b) => b.type === 'held_proposal')).toHaveLength(1);
+    expect(r.blocks.filter((b) => b.type !== 'held_proposal').map((b) => b.type)).toEqual(['error']);
+    // The consent ask copy and the confirm chip are unchanged by the append.
+    expect(r.assistant_text).toContain('Nothing in the model moves until you confirm');
+    expect(r.suggested_actions).toHaveLength(1);
   });
 });
