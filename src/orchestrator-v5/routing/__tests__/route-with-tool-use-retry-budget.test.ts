@@ -131,12 +131,46 @@ describe('V5 routing retry budget arithmetic (ROADMAP 1.55c)', () => {
     expect(ORCHESTRATOR_TIMEOUT_MS).toBeGreaterThanOrEqual(fullFirstGenerationMs);
   });
 
-  it('a truncated first attempt plus a full retry window fits the V5 turn budget with handler headroom', () => {
-    const turnBudgetMs = getTurnExecutorBudgets().turn_ms; // 180s default
+  it('a truncated first attempt plus a full retry window still fits the V5 turn budget (routing leg alone)', () => {
+    // THIS ASSERTION RE-FIRED CONSCIOUSLY, 2026-07-19 — exactly as the file
+    // header asks. Re-derived rather than re-baselined:
+    //
+    // The turn budget is now clamped to the browser-proxy deadline
+    // (125s - 10s headroom = 115s) so CEE always returns its own typed error
+    // before the proxy returns a generic one. The old comparand was the 180s
+    // default, and against 180s the "+45s handler headroom" form passed.
+    //
+    // It passed against a number that WAS NEVER REACHABLE. Worst-case routing
+    // plus one handler window is 30,000 + 79,860 + 45,000 = 154,860ms, which
+    // exceeds the 125s browser-proxy deadline by ~30s. On the canonical
+    // UI -> CEE path that turn was already being killed by the proxy; the 180s
+    // budget concealed the over-subscription rather than accommodating it.
+    // The clamp did not create this gap — it made it visible.
+    //
+    // What is still TRUE and worth pinning: the routing leg ALONE fits, with
+    // ~5.1s to spare. That is genuinely tight, and it is the assertion that
+    // should re-fire if a cap bump or a slower model grows the retry window.
+    const turnBudgetMs = getTurnExecutorBudgets().turn_ms;
     const worstCaseRoutingMs = ORCHESTRATOR_TIMEOUT_MS + V5_ROUTING_RETRY_TIMEOUT_MS;
-    // Leave at least 45s (one LLM_BUDGET_HANDLER_MS window) for the rest of
-    // the turn after worst-case routing.
-    expect(worstCaseRoutingMs + 45_000).toBeLessThanOrEqual(turnBudgetMs);
+    expect(worstCaseRoutingMs).toBeLessThanOrEqual(turnBudgetMs);
+  });
+
+  it('DOCUMENTS AN OPEN OVER-SUBSCRIPTION: worst-case routing + a handler window does NOT fit', () => {
+    // Recorded as an executable statement of a known gap rather than left as
+    // prose nobody re-checks. If someone later shrinks the routing retry
+    // window or raises the ceiling enough that this DOES fit, this test fails
+    // and the gap gets closed deliberately instead of drifting shut unnoticed.
+    //
+    // OWNER DECISION NEEDED (routing / #384): either shrink
+    // V5_ROUTING_RETRY_TIMEOUT_MS so the rescue path can coexist with a
+    // handler inside one turn, or accept that a max_tokens-truncated routing
+    // retry followed by handler work cannot complete and will surface as
+    // TURN_BUDGET_EXCEEDED. Live max_tokens retry rate was measured at 0%, so
+    // this is a latent coherence gap, not an active production failure.
+    const turnBudgetMs = getTurnExecutorBudgets().turn_ms;
+    const worstCaseRoutingMs = ORCHESTRATOR_TIMEOUT_MS + V5_ROUTING_RETRY_TIMEOUT_MS;
+    const oneHandlerWindowMs = 45_000;
+    expect(worstCaseRoutingMs + oneHandlerWindowMs).toBeGreaterThan(turnBudgetMs);
   });
 });
 

@@ -179,9 +179,55 @@ export const DRAFT_GRAPH_TURN_BUDGET_MS = clampTimeout(
   parseTimeoutEnv("DRAFT_GRAPH_TURN_BUDGET_MS", 90_000),
 );
 
-/** PLoT /v2/run call timeout (default: 30s, clamped 5s–5m) */
+/**
+ * PLoT /v2/run call timeout (default: 75s, clamped 5s–5m).
+ *
+ * Raised 30_000 → 75_000 (2026-07-19). A3 raised ISL to 50s and PLoT's
+ * request budget to 70s; at a 30s cap CEE threw almost all of that headroom
+ * away and cut off analyses PLoT would have completed.
+ *
+ * SIZED AGAINST MEASUREMENT, not against a feeling. Real POST /v2/run against
+ * staging PLoT (build 9700d8b) with every expensive feature on
+ * (include_thresholds / e_values / voi / path_decomposition, n_samples=10000,
+ * detail_level=deep), tail := processing_time_ms - meta.isl_ms:
+ *
+ *   nodes/edges/opts | wall    | processing | isl_ms | TAIL  | network
+ *   8  / 13  / 2     |  2.12s  |  1922ms    |  1835  |  87ms |  196ms
+ *   15 / 41  / 3     |  4.57s  |  4222ms    |  4138  |  84ms |  344ms
+ *   26 / 101 / 4     | 12.54s  | 12115ms    | 12017  |  98ms |  422ms
+ *   42 / 211 / 5     | fast-fail — typed `failed`, compute-admission reject
+ *
+ * The un-budgeted post-compute tail is FLAT at ~84–98ms across a 6.5x span of
+ * ISL compute time — it does not scale with graph size. Oversized graphs are
+ * REJECTED FAST with a typed failure rather than run slowly, so there is no
+ * slow-tail-under-load case hiding at the top end either.
+ *
+ * WHY 75s AND NOT 85s. The scoping note proposed 85s = PLoT's 70s budget + a
+ * 15s allowance for that tail. Measurement puts the tail at ~0.1s, so 15s is
+ * ~150x the observed value. 75s = PLoT's 70s REQUEST_BUDGET_MS + ~5s, which
+ * is still ~50x the measured tail and absorbs network variance (~0.2–0.45s
+ * measured) and clock skew. Spending the other 10s buys nothing measurable
+ * and costs 10s of margin against the browser-proxy deadline — the single
+ * scarcest quantity in this ladder. See the turn-budget derivation in
+ * orchestrator-v5/budgets.ts.
+ *
+ * ON "PLoT DOESN'T ENFORCE ITS 70s BUDGET". Not a hard abort, true — but it
+ * is enforced by pervasive clamping: the base ISL call, the flip search, and
+ * threshold analysis are each clamped to the REMAINING request budget
+ * (`base_isl_call_budget_clamped`, `flip_thresholds_budget_clamped`,
+ * `threshold_analysis_skipped_budget`), so no internal leg can outlive the
+ * caller. Structural worst case ≈ 60s base ISL (starts early) + ≤9s
+ * thresholds-within-remaining + ~0.1s tail ≈ 70s.
+ *
+ * NOTE: this now EQUALS PLOT_RUN_BRIEF_TIMEOUT_MS. That is correct, not a
+ * collision — both calls are bounded by the SAME PLoT-side REQUEST_BUDGET_MS,
+ * which covers the decision-review callback too. The brief carve-out's live
+ * function is now the RETRY policy (`skipRetryEntirely`), not the timeout.
+ * `timeouts.invariants.test.ts` pins BRIEF >= base so a future raise of this
+ * value cannot silently overtake the brief window.
+ */
 export const PLOT_RUN_TIMEOUT_MS = clampTimeout(
-  parseTimeoutEnv("PLOT_RUN_TIMEOUT_MS", 30_000),
+  parseTimeoutEnv("PLOT_RUN_TIMEOUT_MS", 75_000),
 );
 
 /**

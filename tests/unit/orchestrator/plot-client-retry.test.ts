@@ -392,11 +392,20 @@ describe("PLoT Client Retry Logic (H.4)", () => {
     });
   });
 
-  describe("run — timeout retry with remaining budget", () => {
-    it("retries once on PLoT timeout", async () => {
-      const _controller = new AbortController();
-
-      // First call: abort (simulating timeout)
+  describe("run — timeout is NOT retried (policy change 2026-07-19)", () => {
+    // DELIBERATE INVERSION. This test previously asserted the opposite
+    // ("retries once on PLoT timeout"). That behaviour was correct when CEE's
+    // cap (30s) sat BELOW PLoT's own REQUEST_BUDGET_MS (70s): a timeout then
+    // meant CEE cut PLoT off early, and a second attempt could genuinely
+    // succeed. Now that the cap is 75s — ABOVE PLoT's budget — a timeout means
+    // PLoT failed to finish within its OWN budget, i.e. an internal failure. A
+    // retry near-certainly reproduces it at double the PLoT+ISL compute cost,
+    // on a request the user is already waiting on.
+    //
+    // The premise is pinned separately, so this inversion cannot outlive it:
+    // `budget-timeout-invariants.test.ts` fails if PLOT_RUN_TIMEOUT_MS ever
+    // drops back below PLoT's request budget.
+    it("does NOT retry on PLoT timeout, even with ample remaining budget", async () => {
       fetchSpy
         .mockImplementationOnce(() => {
           return Promise.reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
@@ -407,13 +416,12 @@ describe("PLoT Client Retry Logic (H.4)", () => {
         });
 
       const client = createPLoTClient()!;
-      const result = await client.run(
-        VALID_RUN,
-        "req-1",
-      );
 
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-      expect(result.meta.seed_used).toBe(42);
+      await expect(client.run(VALID_RUN, "req-1")).rejects.toThrow(PLoTTimeoutError);
+
+      // The second mock was primed with a SUCCESS: if a retry fired, this call
+      // would have resolved instead of rejecting. It rejects, so no retry.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -477,10 +485,23 @@ describe("PLoT Client Retry Logic (H.4)", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("a non-brief run still retries on timeout as before (existing behaviour unchanged)", async () => {
+    // REPLACES "a non-brief run still retries on timeout as before".
+    //
+    // That test was the brief-vs-non-brief DISCRIMINATOR: brief skips the
+    // timeout retry, non-brief takes it. The 2026-07-19 policy change disables
+    // the timeout retry for BOTH, which would have left the brief carve-out
+    // tests unable to distinguish a working carve-out from a removed one —
+    // they would pass either way, which is no evidence at all.
+    //
+    // The 5xx class restores the discrimination: a brief-bearing 5xx must NOT
+    // retry (asserted below), while a non-brief 5xx MUST. Keep BOTH sides, or
+    // `skipRetryEntirely` could be deleted outright with the suite still green.
+    it("DISCRIMINATOR: a non-brief run DOES still retry on a fast 5xx (the brief carve-out is what suppresses it)", async () => {
       fetchSpy
-        .mockImplementationOnce(() => {
-          return Promise.reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ message: "Service Unavailable" }),
         })
         .mockResolvedValueOnce({
           ok: true,
