@@ -423,6 +423,28 @@ const ContextPackConversationSummarySchema = z
   })
   .strict();
 
+/**
+ * O-3 — context-size budget disclosure (`ContextPack.context_budget`).
+ * One record per section the budget module trimmed at assembly. `.strict()`
+ * so no field can silently join the prompt-facing marker without review
+ * (same posture as CoachingStatePackSchema); `min(1)` because the assembler
+ * OMITS the key entirely when nothing was trimmed — an empty marker would
+ * be a disclosure that discloses nothing.
+ */
+const ContextBudgetTrimRecordSchema = z
+  .object({
+    section: z.enum(['graph', 'analysis']),
+    original_chars: z.number().int().nonnegative(),
+    kept_chars: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const ContextBudgetDisclosureSchema = z
+  .object({
+    truncations: z.array(ContextBudgetTrimRecordSchema).min(1).readonly(),
+  })
+  .strict();
+
 export const ContextPackSchema = z
   .object({
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
@@ -481,6 +503,12 @@ export const ContextPackSchema = z
      * the only canonical-state surface allowed to reach the LLM.
      */
     coaching_context: CoachingStatePackSchema.optional(),
+    /**
+     * O-3 — context-size budget disclosure. Present ONLY when the budget
+     * module trimmed the graph and/or analysis at assembly; the assembler
+     * omits the key entirely otherwise (key-absence byte-identity).
+     */
+    context_budget: ContextBudgetDisclosureSchema.optional(),
   })
   // Allow additive fields without immediate schema bumps — tighten later
   // by switching to `.strict()` once the contract is fully fixed.

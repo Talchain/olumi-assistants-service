@@ -38,6 +38,10 @@ import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { sha8 } from '../../utils/logger-config.js';
+import {
+  applyContextBudgetToAssemblyInputs,
+  type ContextBudgetDisclosure,
+} from './context-budget-enforcement.js';
 import { emitContextTruncation } from './context-budget-telemetry.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
@@ -478,6 +482,19 @@ export interface ContextPack {
    * so it is the ONLY canonical-state surface allowed to reach the prompt.
    */
   readonly coaching_context?: CoachingStatePack;
+  /**
+   * O-3 — context-size budget disclosure. Present ONLY when the budget
+   * module (`enforceContextBudget`) trimmed the compacted graph and/or the
+   * analysis summary at assembly; ABSENT otherwise (key-absence doctrine —
+   * an under-budget pack is byte-identical to an unbudgeted one). Carries
+   * one `{section, original_chars, kept_chars}` record per trimmed
+   * section. Serialised into the routing prompt by `buildUserMessage`
+   * (rides the `...rest` spread), so the LLM SEES that detail was reduced
+   * — the same in-band mechanism as `conversation.window` ("N of M turns
+   * included", #536). The turn-executor's routing `v5.context_budget`
+   * event derives its `truncations` records from this marker.
+   */
+  readonly context_budget?: ContextBudgetDisclosure;
 }
 
 export interface AssembleContextPackInput {
@@ -729,17 +746,32 @@ export function assembleContextPackWithSummary(
 ): AssembleContextPackResult {
   const compound = detectCompound(input.payload.message);
   const extraction = runExtraction(input.payload.message);
+  // O-3 — context-size budget (graceful degradation). Applied BEFORE
+  // projection so both the handler-facing slots and the LLM-facing
+  // display projections are built from the budgeted objects. Under
+  // budget this returns the inputs by reference (byte-identity, pinned
+  // by test); over budget it degrades per the budget module's own
+  // policy and returns the `context_budget` disclosure stamped onto the
+  // pack below. The conversation window is NOT budgeted here (O-2's
+  // surface). The raw-graph fallback path (`input.graph`) is outside
+  // the budget module's compact-shape domain and passes through
+  // unbudgeted, as before.
+  const budgeted = applyContextBudgetToAssemblyInputs({
+    compactedGraph: input.compactedGraph ?? null,
+    analysis: input.analysis ?? null,
+    scenarioId: input.payload.scenario_id ?? null,
+  });
   // Compute the raw analysis projection ONCE — it is shared between the
   // handler-facing `analysis` slot and the LLM-facing `display_analysis`
   // wrapper. Calling projectAnalysis twice would double-emit
   // analysis_projection_invalid_probability telemetry on bad inputs.
   const rawAnalysis = projectAnalysis(
-    input.analysis ?? null,
+    budgeted.analysis,
     input.analysisStalenessReason ?? null,
     input.interventionControlledFactorIds,
   );
-  const projectedGraph: ContextPackGraph = input.compactedGraph
-    ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
+  const projectedGraph: ContextPackGraph = budgeted.compactedGraph
+    ? projectCompactGraph(budgeted.compactedGraph, input.compactedConstraints ?? null)
     : projectGraph(input.graph ?? null);
   const analysisStateSummary = deriveContextPackAnalysisState(input);
   // Lane 28 — the persisted decision brief (size-bounded, disclosed
@@ -782,6 +814,13 @@ export function assembleContextPackWithSummary(
     parsed_quantities: extraction.results,
     system_event: input.systemEvent ?? null,
     analysis_state: analysisStateSummary,
+    // O-3 — in-band budget disclosure. Key ABSENT when nothing was
+    // trimmed (never `context_budget: null`), so under-budget packs stay
+    // byte-identical; when present the LLM sees the reduction via
+    // buildUserMessage's `...rest` spread (#536 marker pattern).
+    ...(budgeted.disclosure !== null
+      ? { context_budget: budgeted.disclosure }
+      : {}),
   };
   const withSegments =
     compound.detected && compound.segments
