@@ -157,10 +157,16 @@ describe('value/unit fail-closed containment via runTurnExecutor', () => {
   });
 
   it('COMPOUND turn: an LLM-proposed £-factor edit is judged on ITS value (5 agents), not the unrelated 0.5 — refused, graph unchanged', async () => {
-    // "Set Marketing budget to 5 agents and set Product quality to 0.5" is
-    // multi-quantity, so the deterministic pre-route bails and the LLM proposes.
-    // The mocked proposal targets f-budget (£) with a bare 5 (unit dropped). The
-    // guard must bind to that value (5 → "5 agents"), NOT the last number (0.5).
+    // Multi-quantity message → the single-edit pre-route bails and the LLM
+    // proposes. The second clause names a factor NOT in the graph ("team
+    // morale"), so the O-1 deterministic COMPOUND batch cannot claim the turn
+    // either (fewer than two matched labels) — the original driver ("…and set
+    // Product quality to 0.5") now routes through the batch preflight, which
+    // refuses the £ part by name and applies the valid part
+    // (DISCLOSED-PARTIAL; covered by turn-executor-compound-batch-lifecycle
+    // .test.ts). THIS test pins the LLM-proposal seam: the mocked proposal
+    // targets f-budget (£) with a bare 5 (unit dropped). The guard must bind
+    // to that value (5 → "5 agents"), NOT the last number (0.5).
     const COMPOUND_TOOL_CALL = {
       intent_class: 'execute',
       action: {
@@ -177,7 +183,7 @@ describe('value/unit fail-closed containment via runTurnExecutor', () => {
     const payload = makeMessagePayload({
       turn_id: 'a2a2a2a2-aaaa-4aaa-8aaa-a2a2a2a2a2a2',
       scenario_id: TEST_SCENARIO_ID,
-      message: 'Set Marketing budget to 5 agents and set Product quality to 0.5',
+      message: 'Set Marketing budget to 5 agents and set team morale to 0.5',
     });
 
     const { response, telemetry } = await runTurnExecutor(payload, 'req-vu-compound', {
