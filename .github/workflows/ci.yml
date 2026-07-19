@@ -54,6 +54,23 @@ jobs:
         # this job; it only blocks MERGE once `staging` branch protection
         # requires the `CI / Lint, TypeCheck, Unit Tests` status check.
         run: bash scripts/check-forbidden-boundary-patterns.sh
+      - name: Prompt regression gate (orchestrator-eval)
+        # REQUIRED, hermetic check. `pnpm eval:orchestrator:test`
+        # (vitest run tools/orchestrator-eval) is the durable regression gate for
+        # the CEE orchestrator prompt. It is deterministic and recorded-fixture
+        # based: the suite installs a fetch-counter that throws on any network call
+        # (with a positive-control probe) and stubs a dummy ANTHROPIC_API_KEY, so it
+        # needs NO secrets and makes ZERO paid/live calls. Runs in this required job
+        # so a prompt-behaviour regression blocks merge rather than being advisory.
+        #
+        # Placed BEFORE `test:required` on purpose: vitest.required.config.ts sets
+        # no `include` and does not exclude tools/orchestrator-eval, so test:required
+        # already sweeps these same *.test.ts files. If this focused step ran after
+        # it, a prompt-fixture regression would redden test:required first and this
+        # step would be skipped — a shadowed gate that could never independently go
+        # RED. Running it first makes it the attributable signal for prompt drift.
+        run: pnpm eval:orchestrator:test
+
       - name: Run required test subset
         # Deterministic, in-process suite that is currently green (see
         # vitest.required.config.ts). The full suite + coverage and the
